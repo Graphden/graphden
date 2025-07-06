@@ -1,0 +1,6 @@
+{:rules
+  {:eof-newline {:enabled? true
+                 :trailing-blanks? false}
+   :indentation {:list-indent 1}
+   :blank-lines {:max-consecutive 1
+                 :padding-lines 1}}}

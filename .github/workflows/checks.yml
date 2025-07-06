@@ -1,0 +1,173 @@
+name: checks
+on:
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  cljstyle-check:
+          runs-on: ubuntu-latest
+          steps:
+            - name: Prepare java
+              uses: actions/setup-java@v3
+              with:
+                distribution: 'zulu'
+                java-version: '21'
+      
+            - name: Checkout repo
+              uses: actions/checkout@v3
+      
+            - name: Install clojure tools
+              uses: DeLaGuardo/setup-clojure@12.3
+              with:
+                # Install just one or all simultaneously
+                # The value must indicate a particular version of the tool, or use 'latest'
+                # to always provision the latest version
+                cli: latest
+                cljstyle: latest
+                zprint: latest
+      
+            - name: Cache jars
+              uses: actions/cache@v3
+              with:
+                path: |
+                  ~/.m2
+                  ~/.gitlibs
+                  ~/.deps.clj
+                key: maven-${{ hashFiles('deps.edn') }}
+                restore-keys: clj-deps-
+              
+            - name: cljstyle-check
+              run: make cljstyle-check
+
+  kondo:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install clojure tools
+        uses: DeLaGuardo/setup-clojure@12.3
+        with:
+          # Install just one or all simultaneously
+          # The value must indicate a particular version of the tool, or use 'latest'
+          # to always provision the latest version
+          cli: latest
+          clj-kondo: latest
+          zprint: latest
+
+      - name: Cache jars
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.m2
+            ~/.gitlibs
+            ~/.deps.clj
+          key: maven-${{ hashFiles('deps.edn') }}
+          restore-keys: clj-deps-
+
+      - name: kondo
+        run: make kondo
+
+  kibit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install clojure tools
+        uses: DeLaGuardo/setup-clojure@12.3
+        with:
+          # Install just one or all simultaneously
+          # The value must indicate a particular version of the tool, or use 'latest'
+          # to always provision the latest version
+          cli: latest
+          zprint: latest
+
+      - name: Cache jars
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.m2
+            ~/.gitlibs
+            ~/.deps.clj
+          key: maven-${{ hashFiles('deps.edn') }}
+          restore-keys: clj-deps-
+        
+      - name: kibit
+        run: make kibit
+
+  eastwood:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+        
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install clojure tools
+        uses: DeLaGuardo/setup-clojure@12.3
+        with:
+          # Install just one or all simultaneously
+          # The value must indicate a particular version of the tool, or use 'latest'
+          # to always provision the latest version
+          cli: latest
+          zprint: latest
+
+      - name: Cache jars
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.m2
+            ~/.gitlibs
+            ~/.deps.clj
+          key: maven-${{ hashFiles('deps.edn') }}
+          restore-keys: clj-deps-
+        
+      - name: eastwood
+        run: make eastwood
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Prepare java
+        uses: actions/setup-java@v3
+        with:
+          distribution: 'zulu'
+          java-version: '21'
+      
+      - name: Checkout repo
+        uses: actions/checkout@v3
+
+      - name: Install clojure tools
+        uses: DeLaGuardo/setup-clojure@12.3
+        with:
+          # Install just one or all simultaneously
+          # The value must indicate a particular version of the tool, or use 'latest'
+          # to always provision the latest version
+          cli: latest
+          zprint: latest
+
+      - name: Cache jars
+        uses: actions/cache@v3
+        with:
+          path: |
+            ~/.m2
+            ~/.gitlibs
+            ~/.deps.clj
+          key: maven-${{ hashFiles('deps.edn') }}
+          restore-keys: clj-deps-
+        
+      - name: test
+        run: make test
+ 

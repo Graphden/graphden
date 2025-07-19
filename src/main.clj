@@ -13,7 +13,7 @@
 
 (defrecord NodeMeta [children-back-refs args-back-refs base-node-name full-args])
 
-(defrecord Arg [parent-arg-name parent-node-name val])
+(defrecord Arg [arg-name parent-node-name val])
 
 (defprotocol NodeProtocol
   (set-parent-node [this parent-name])
@@ -24,10 +24,12 @@
   (delete-child-back-ref [this child-name])
   (rename-child-back-ref [this child-name new-child-name])
   (rename-arg-back-ref-node [this old-name new-name])
+  (change-arg-val [this arg-name arg-val])
+  (rename-arg-val [this arg-name arg-val])
   (rename [this new-name]))
 
-(defn init-arg [{:keys [parent-arg-name parent-node-name val]}]
-  (->Arg parent-arg-name parent-node-name val))
+(defn init-arg [{:keys [arg-name parent-node-name arg-val]}]
+  (->Arg arg-name parent-node-name arg-val))
 
 (defn init-node-meta []
   (->NodeMeta #{} {} nil []))
@@ -38,19 +40,19 @@
    (->Node node-name
            parent-name
            (if parent-name
-             (reduce #(assoc %1 (:parent-arg-name %2) (init-arg %2)) {} args)
+             (reduce #(assoc %1 (:arg-name %2) (init-arg %2)) {} args)
              (mapv init-arg args))
            (init-node-meta))))
 
 (extend Node NodeProtocol
         {:add-args-back-ref
-         (fn [this arg-node-name parent-arg-name]
+         (fn [this node-name arg-name]
            (update-in this
                       [:node-meta
                        :args-back-refs
-                       arg-node-name]
+                       node-name]
                       (fnil conj #{})
-                      parent-arg-name))
+                      arg-name))
 
          :set-parent-node
          (fn [this parent-name]
@@ -71,23 +73,23 @@
                      [:node-meta
                       :full-args]
                      (if parent-name
-                       (reduce (fn [args {:keys [parent-arg-name]
+                       (reduce (fn [args {:keys [arg-name]
                                           :as arg}]
-                                 (if (filter #(= (:parent-arg-name %) parent-arg-name)
+                                 (if (filter #(= (:arg-name %) arg-name)
                                              args)
-                                   (mapv #(if (= (:parent-arg-name %)
-                                                 parent-arg-name)
-                                            (if (-> % :val keyword?)
-                                              (throw (Exception. (str "Arg " parent-arg-name
+                                   (mapv #(if (= (:arg-name %)
+                                                 arg-name)
+                                            (if (-> % :arg-val keyword?)
+                                              (throw (Exception. (str "Arg " arg-name
                                                                       " already set in parents for node " node-name)))
                                               arg)
                                             %) args)
-                                   (throw (Exception. (str "Unexisted arg " parent-arg-name
+                                   (throw (Exception. (str "Unexisted arg " arg-name
                                                            " in base for node " node-name)))))
                                parent-full-args
                                args)
                        (if-let [duplicates (->> args
-                                                (map :parent-arg-name)
+                                                (map :arg-name)
                                                 frequencies
                                                 (filter (fn [[_ n]] (> n 1)))
                                                 (map first)
@@ -127,7 +129,25 @@
                       clojure-set/rename-keys
                       {old-name new-name}))
 
-         :rename-arg-
+         :change-arg-val
+         (fn [this arg-name arg-val]
+           (if (nil? (:parent-name this))
+             (throw (Exception. (str "Can't change arg in base node "
+                                     (:node-name this))))
+             (assoc-in this
+                       [:args
+                        arg-name]
+                       arg-val)))
+
+         :rename-arg-val
+         (fn [this arg-name arg-val]
+           (if (and (keyword? arg-val)
+                    (keyword? (-> this :args arg-name)))
+             (change-arg-val this arg-name arg-val)
+             (throw (Exception. (str "Can't rename not node arg " arg-name
+                                     " in node " (:node-name this)
+                                     ": old val - " (-> this :args arg-name)
+                                     ", new val - " arg-val)))))
 
          :rename
          (fn [this new-name]
@@ -140,11 +160,11 @@
              (throw (Exception. (str "Node " node-name " already exists (on add)")))
              (if-let [{{:keys [base-node-name full-args]} :node-meta}
                       (or (nil? parent-name) (node-name->node this parent-name))]
-               (->Tree (reduce (fn [nodes {:keys [parent-arg-name parent-node-name]}]
-                                 (if-let [parent-node (node-name->node this parent-node-name)]
-                                   (assoc nodes parent-node-name (add-args-back-ref parent-node node-name parent-node-name))
-                                   (throw (Exception. (str "Unexisted arg-parent-node " parent-node-name
-                                                           " for arg " parent-arg-name
+               (->Tree (reduce (fn [nodes {:keys [arg-name val]}]
+                                 (if (and (keyword? val)(node-name->node this val))
+                                   (update nodes val add-args-back-ref node-name arg-name)
+                                   (throw (Exception. (str "Unexisted val-node " val
+                                                           " for arg " arg-name
                                                            " for node " node-name
                                                            " when add node")))))
                                (-> this
@@ -173,7 +193,7 @@
                                  (update old-name rename new-name)
                                  (clojure-set/rename-keys {old-name new-name})
                                  (update parent-name rename-child-back-ref old-name new-name))
-                       nodes (reduce (fn [nodes {:keys [parent-arg-name parent-node-name]}]
+                       nodes (reduce (fn [nodes {:keys [arg-name parent-node-name]}]
                                        (if (node-name->node this parent-node-name)
                                          (update nodes
                                                  parent-node-name
@@ -181,7 +201,7 @@
                                                  old-name
                                                  new-name)
                                          (throw (Exception. (str "Unexisted arg-parent-node " parent-node-name
-                                                                 " for arg " parent-arg-name
+                                                                 " for arg " arg-name
                                                                  " for node " old-name
                                                                  " when rename node")))))
                                      nodes
@@ -194,18 +214,16 @@
                                                  new-name)))
                                      nodes
                                      children-back-refs)
-                       nodes (reduce (fn [nodes [parent-node-name parent-arg-names]]
+                       nodes (reduce (fn [nodes [parent-node-name arg-names]]
                                        (if (node-name->node this parent-node-name)
                                          (throw (Exception. (str "Unexisted arg-backref-node " parent-node-name
                                                                  "when rename node " old-name)))
-                                         (reduce #(update-in %1
-                                                             [parent-node-name
-                                                              args
-                                                              %2
-                                                              :parent-node-name]
-                                                             new-name)
+                                         (reduce #(update %1
+                                                          rename-arg-val
+                                                          %2
+                                                          new-name)
                                                  nodes
-                                                 parent-arg-names)))
+                                                 arg-names)))
                                      nodes
                                      args-back-refs)]
                    (->Tree nodes))

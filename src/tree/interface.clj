@@ -4,7 +4,7 @@
    [node.interface :as node]))
 
 (defrecord Tree
-  [nodes])
+           [nodes])
 
 (defprotocol TreeProtocol
 
@@ -61,7 +61,7 @@
 
 (extend Tree TreeProtocol
         {:add-node
-         (fn [this {[node-name parent-name args] :keys}]
+         (fn [this {:keys [node-name parent-name args]}]
            (if (node-name->node this node-name)
              (throw (Exception. (str "Node " node-name " already exists (on add)")))
              (if-let [{{:keys [base-node-name full-args]} :node-meta}
@@ -99,7 +99,7 @@
 
          :rename-args-back-ref-node
          (fn [this args old-name new-name]
-           (reduce (fn [nodes {:keys [arg-name parent-node-name]}]
+           (reduce (fn [{:keys [nodes]} {:keys [arg-name parent-node-name]}]
                      (if (node-name->node this parent-node-name)
                        (update nodes
                                parent-node-name
@@ -114,12 +114,10 @@
 
          :children->rename-parent-node
          (fn [this children-names new-name]
-           (reduce (fn [nodes child-name]
-                     (when (node-name->node this child-name)
-                       (update nodes
-                               child-name
-                               node/set-parent-node
-                               new-name)))
+           (reduce (fn [{:keys [nodes]} child-name]
+                     (if (node-name->node this child-name)
+                       (update nodes child-name node/set-parent-node new-name)
+                       nodes))
                    this
                    children-names))
 
@@ -127,14 +125,14 @@
          (fn [this node-names new-name]
            (reduce (fn [nodes [parent-node-name arg-names]]
                      (if (node-name->node this parent-node-name)
-                       (thrw "Unexisted arg-backref-node"
-                             {:parent-node-name parent-node-name})
                        (reduce #(update %1
                                         node/rename-arg-val
                                         %2
                                         new-name)
                                nodes
-                               arg-names)))
+                               arg-names)
+                       (thrw "Unexisted arg-backref-node"
+                             {:parent-node-name parent-node-name})))
                    this
                    node-names))
 

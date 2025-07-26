@@ -3,31 +3,44 @@
    [clojure.set :as clojure-set]
    [node.interface :as node]))
 
-(defrecord Tree [nodes])
+(defrecord Tree
+  [nodes])
 
 (defprotocol TreeProtocol
+
   (add-node [this node])
+
   (add-nodes [this nodes])
+
   (delete-node [this node-name])
+
   (node-name->node [this node-name])
+
   (rename-args-back-ref-node [this args old-name new-name])
+
   (children->rename-parent-node [this children new-name])
+
   (rename-args-val [this node-names new-name])
+
   (disj-child-back-ref [this node])
+
   (disj-arg-back-ref [this args disj-name]))
 
-(defn thrw [ex-str meta-data]
+(defn thrw
+  [ex-str meta-data]
   (throw (ex-info ex-str
                   {:type ::exception
                    :meta meta-data})))
 
-(defn nodes->refs [nodes]
+(defn nodes->refs
+  [nodes]
   (->> nodes
        (map (fn [{:keys [node-name parent-name args]}]
               [node-name
-               (into #{}
-                     (conj (map :arg-val args)
-                           parent-name))]))
+               (-> :arg-val
+                   (map args)
+                   (conj parent-name)
+                   set)]))
        (reduce #(assoc %1 (first %2) (second %2)) {})))
 
 (defn nodes->ref-layers

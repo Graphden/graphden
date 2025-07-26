@@ -5,8 +5,9 @@
 
 (def test-parent-node-name :test-parent-node-name)
 
-(def test-arg-map {:arg-name :test-arg-name
-                   :arg-val "test-arg-val"})
+(def test-arg-map
+  {:arg-name :test-arg-name
+   :arg-val "test-arg-val"})
 
 (def test-arg-map-with-parent-node-name
   (assoc test-arg-map

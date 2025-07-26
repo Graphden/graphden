@@ -2,36 +2,56 @@
   (:require
    [clojure.set :as clojure-set]))
 
-(defrecord Tree [nodes])
+(defrecord Tree
+  [nodes])
 
 (defprotocol TreeProtocol
+
   (add-node [this node])
+
   (delete-node [this node-name])
+
   (node-name->node [this node-name]))
 
-(defrecord Node [node-name parent-name args node-meta])
+(defrecord Node
+  [node-name parent-name args node-meta])
 
-(defrecord NodeMeta [children-back-refs args-back-refs base-node-name full-args])
+(defrecord NodeMeta
+  [children-back-refs args-back-refs base-node-name full-args])
 
-(defrecord Arg [arg-name parent-node-name val])
+(defrecord Arg
+  [arg-name parent-node-name val])
 
 (defprotocol NodeProtocol
+
   (set-parent-node [this parent-name])
+
   (add-args-back-ref [this arg-node-name paren-arg-name])
+
   (set-base-node-name [this parent-node-name])
+
   (set-full-args [this parent-full-args])
+
   (add-child-back-ref [this child-name])
+
   (delete-child-back-ref [this child-name])
+
   (rename-child-back-ref [this child-name new-child-name])
+
   (rename-arg-back-ref-node [this old-name new-name])
+
   (change-arg-val [this arg-name arg-val])
+
   (rename-arg-val [this arg-name arg-val])
+
   (rename [this new-name]))
 
-(defn init-arg [{:keys [arg-name parent-node-name arg-val]}]
+(defn init-arg
+  [{:keys [arg-name parent-node-name arg-val]}]
   (->Arg arg-name parent-node-name arg-val))
 
-(defn init-node-meta []
+(defn init-node-meta
+  []
   (->NodeMeta #{} {} nil []))
 
 (defn init-node
@@ -161,7 +181,7 @@
              (if-let [{{:keys [base-node-name full-args]} :node-meta}
                       (or (nil? parent-name) (node-name->node this parent-name))]
                (->Tree (reduce (fn [nodes {:keys [arg-name val]}]
-                                 (if (and (keyword? val)(node-name->node this val))
+                                 (if (and (keyword? val) (node-name->node this val))
                                    (update nodes val add-args-back-ref node-name arg-name)
                                    (throw (Exception. (str "Unexisted val-node " val
                                                            " for arg " arg-name

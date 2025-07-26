@@ -1,31 +1,46 @@
 (ns node.interface
   (:require
-   [clojure.set :as clojure-set]
-   [arg.interface :as arg]))
+   [arg.interface :as arg]
+   [clojure.set :as clojure-set]))
 
-(defn thrw [ex-str meta-data]
+(defn thrw
+  [ex-str meta-data]
   (throw (ex-info ex-str
                   {:type ::exception
                    :meta meta-data})))
 
-(defrecord Node [node-name parent-name args node-meta])
+(defrecord Node
+  [node-name parent-name args node-meta])
 
-(defrecord NodeMeta [children-back-refs args-back-refs base-node-name full-args])
+(defrecord NodeMeta
+  [children-back-refs args-back-refs base-node-name full-args])
 
 (defprotocol NodeProtocol
+
   (set-parent-node [this parent-name])
+
   (add-args-back-ref [this arg-node-name paren-arg-name])
+
   (set-base-node-name [this parent-node-name])
+
   (set-full-args [this parent-full-args])
+
   (add-child-back-ref [this child-name])
+
   (delete-child-back-ref [this child-name])
+
   (rename-child-back-ref [this child-name new-child-name])
+
   (rename-arg-back-ref-node [this old-name new-name])
+
   (change-arg-val [this arg-name arg-val])
+
   (rename-arg-val [this arg-name arg-val])
+
   (rename-node [this new-name]))
 
-(defn init-node-meta []
+(defn init-node-meta
+  []
   (->NodeMeta #{} {} nil []))
 
 (defn init-node
@@ -74,10 +89,15 @@
                      [:node-meta
                       :full-args]
                      (if parent-name
-                       (reduce (fn [args {:keys [arg-name]
-                                          :as arg}]
-                                 (if (filter #(= (:arg-name %) arg-name)
-                                             args)
+                       (reduce (fn [parent-full-args [_ {:keys [arg-name]
+                                                         :as arg}]]
+                                 (if (empty? (filter #(= (:arg-name %) arg-name)
+                                                     parent-full-args))
+                                   (thrw "Unexisted arg in base for node"
+                                         {:arg-name arg-name
+                                          :arg arg
+                                          :args args
+                                          :node-name node-name})
                                    (mapv #(if (= (:arg-name %)
                                                  arg-name)
                                             (if (-> % :arg-val keyword?)
@@ -85,10 +105,7 @@
                                                     {:arg-name arg-name
                                                      :node-name node-name})
                                               arg)
-                                            %) args)
-                                   (thrw "Unexisted arg in base for node"
-                                         {:arg-name arg-name
-                                                     :node-name node-name})))
+                                            %) parent-full-args)))
                                parent-full-args
                                args)
                        (if-let [duplicates (->> args
@@ -145,14 +162,15 @@
 
          :rename-arg-val
          (fn [this arg-name arg-val]
-           (if (and (keyword? arg-val)
-                    (keyword? (-> this :args arg-name)))
-             (change-arg-val this arg-name arg-val)
-             (thrw "Can't rename not node arg"
-                   {:arg-name arg-name
-                    :node-name (:node-name this)
-                    :new-val arg-val
-                    :old-val (-> this :args arg-name)})))
+           (let [old-val (-> this :args arg-name :arg-val)]
+             (if (and (keyword? arg-val)
+                      (keyword? old-val))
+               (change-arg-val this arg-name arg-val)
+               (thrw "Can't rename not node arg"
+                     {:arg-name arg-name
+                      :node-name (:node-name this)
+                      :new-val arg-val
+                      :old-val old-val}))))
 
          :rename-node
          (fn [this new-name]

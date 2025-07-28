@@ -1,7 +1,7 @@
-(ns node.interface-test
+(ns node.impl-test
   (:require
    [clojure.test :refer [deftest is testing]]
-   [node.interface :as sut]))
+   [node.impl :as sut]))
 
 (defn record->map
   [r]

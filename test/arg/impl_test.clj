@@ -1,8 +1,8 @@
 (ns arg.impl-test
   (:require
-   [clojure.test :refer [deftest is]]
    [arg.impl :as impl]
-   [arg.interface :as iface]))
+   [arg.interface :as iface]
+   [clojure.test :refer [deftest is]]))
 
 (deftest test-init
   (let [arg (impl/init {:arg-name :a
@@ -20,7 +20,7 @@
     (is (= :a (:arg-name result)))
     (is (= :v (:arg-val result)))
     (is (= "parent-node" (:parent-node-name result)))
-    (is (instance? arg.impl.Arg result))))
+    (is (= (type result) (type (impl/init {}))))))
 
 (deftest test-set-val
   (let [original (impl/init {:arg-name :a
@@ -32,4 +32,3 @@
     (is (= :nv (:arg-val updated)))
     (is (= (type updated) (type original)))
     (is (not= original updated))))
-

@@ -3,7 +3,7 @@
    [arg.interface :as arg]))
 
 (defrecord Arg
-           [arg-name parent-node-name arg-val])
+  [arg-name parent-node-name arg-val])
 
 (defn init
   [{:keys [arg-name parent-node-name arg-val]}]
@@ -15,7 +15,8 @@
       (assoc :parent-node-name node-name)
       init))
 
-(defn set-val [this arg-val]
+(defn set-val
+  [this arg-val]
   (init (assoc this :arg-val
                arg-val)))
 

@@ -14,9 +14,8 @@
 
   (children->rename-parent-node [this children new-name])
 
-  (rename-args-val [this node-names new-name])
+  (change-args-val [this node-names new-name])
 
   (disj-child-back-ref [this node])
 
   (disj-arg-back-ref [this args disj-name]))
-

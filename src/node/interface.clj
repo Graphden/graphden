@@ -18,6 +18,8 @@
 
   (rename-arg-back-ref-node [this old-name new-name])
 
+  (delete-arg-back-ref-node [this node-name arg-name])
+
   (change-arg-val [this arg-name arg-val])
 
   (rename-node [this new-name]))

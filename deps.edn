@@ -1,6 +1,6 @@
 {:paths []
 
- :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
+ :deps {org.clojure/clojure {:mvn/version "1.12.3"}}
 
  :aliases
  {;; === DEVELOPMENT ===
@@ -29,9 +29,9 @@
     "bases/dev/resources"]
 
    :extra-deps
-   {integrant/integrant {:mvn/version "0.13.1"}
-    metosin/malli {:mvn/version "0.18.0"}
-    com.taoensso/timbre {:mvn/version "6.6.2"}
+   {integrant/integrant {:mvn/version "1.0.1"}
+    metosin/malli {:mvn/version "0.20.0"}
+    com.taoensso/timbre {:mvn/version "6.8.0"}
     org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}}
 
   ;; === TESTING ===
@@ -59,8 +59,8 @@
     "bases/dev/resources"]
 
    :extra-deps
-   {integrant/integrant {:mvn/version "0.13.1"}
-    metosin/malli {:mvn/version "0.18.0"}
+   {integrant/integrant {:mvn/version "1.0.1"}
+    metosin/malli {:mvn/version "0.20.0"}
     lambdaisland/kaocha {:mvn/version "1.91.1392"}}}
 
   ;; === POLYLITH ===
@@ -73,17 +73,17 @@
 
   ;; clj-kondo: Static analysis
   :kondo
-  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
+  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.10.23"}}
    :main-opts ["-m" "clj-kondo.main"]}
 
   ;; cljstyle: Code formatting
   :cljstyle
-  {:extra-deps {mvxcvi/cljstyle {:mvn/version "0.16.630"}}
+  {:extra-deps {mvxcvi/cljstyle {:mvn/version "0.17.642"}}
    :main-opts ["-m" "cljstyle.main"]}
 
   ;; splint: Modern linter (covers kibit functionality)
   :splint
-  {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.18.0"}}
+  {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}
    :main-opts ["-m" "noahtheduke.splint"]}
 
   ;; cloverage: Test coverage
@@ -99,15 +99,15 @@
 
   ;; antq: Outdated dependencies
   :outdated
-  {:extra-deps {com.github.liquidz/antq {:mvn/version "2.10.1241"}}
+  {:extra-deps {com.github.liquidz/antq {:mvn/version "2.11.1276"}}
    :main-opts ["-m" "antq.core"]}
 
   ;; === REPL ===
 
   :nrepl
   {:extra-deps
-   {nrepl/nrepl {:mvn/version "1.3.1"}
-    cider/cider-nrepl {:mvn/version "0.55.7"}
+   {nrepl/nrepl {:mvn/version "1.5.1"}
+    cider/cider-nrepl {:mvn/version "0.58.0"}
     refactor-nrepl/refactor-nrepl {:mvn/version "3.11.0"}}
    :main-opts
    ["-m" "nrepl.cmdline"

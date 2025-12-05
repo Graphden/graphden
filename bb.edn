@@ -87,7 +87,7 @@
 
   security
   {:doc "Scan for CVE vulnerabilities"
-   :task (clojure "-M:watson")}
+   :task (clojure "-M:watson -p deps.edn")}
 
   clean
   {:doc "Clean generated files"

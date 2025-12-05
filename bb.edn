@@ -11,40 +11,11 @@
           (def cyan "\u001b[36m")
           (def reset "\u001b[0m")
 
-          (defn run-sequential
-            "Run shell commands sequentially. Stop on first failure."
-            [cmds]
-            (doseq [cmd cmds]
-              (let [ret (p/shell {:continue true} cmd)]
-                (when (not= 0 (:exit ret))
-                  (println (str red "✗ Check failed" reset))
-                  (System/exit 1)))))
-
           (defn run-parallel
-            "Run shell commands in parallel. Exit immediately if any fails."
+            "Run shell commands in parallel. Wait for all, fail if any fails."
             [cmds]
             (let [procs (mapv (fn [cmd] (p/process cmd {:out :inherit :err :inherit})) cmds)]
-              (loop []
-                (let [finished (filter (fn [proc] (not (.isAlive (:proc proc)))) procs)
-                      failed (filter (fn [proc] (not= 0 (.exitValue (:proc proc)))) finished)]
-                  (cond
-                    (seq failed)
-                    (do (doseq [proc procs] (p/destroy-tree proc))
-                        (println (str red "✗ Check failed" reset))
-                        (System/exit 1))
-
-                    (= (count finished) (count procs))
-                    true
-
-                    :else
-                    (do (Thread/sleep 100) (recur)))))))
-
-          (defn run-cmds
-            "Run commands. Parallel by default, sequential with --seq flag."
-            [cmds args]
-            (if (some (fn [a] (= a "--seq")) args)
-              (run-sequential cmds)
-              (run-parallel cmds))))
+              (doseq [proc procs] (p/check proc)))))
 
   :enter (println (str cyan "▶ " (:name (current-task)) reset))
 
@@ -55,12 +26,11 @@
    :override-builtin true
    :task (clojure "-A:dev -A:nrepl")}
 
-  ;; === LINTERS (each can take optional path) ===
+  ;; === LINTERS (each takes optional path) ===
 
   kondo
   {:doc "Run clj-kondo [path]"
    :task (let [path (or (first *command-line-args*) all-paths)
-               ;; Use native binary if available, otherwise JVM
                native? (= 0 (:exit (p/shell {:out :string :err :string :continue true} "which clj-kondo")))]
            (if native?
              (p/shell (str "clj-kondo --lint " path))
@@ -74,52 +44,35 @@
   {:doc "Check formatting [path]"
    :task (clojure (str "-M:cljstyle check " (or (first *command-line-args*) all-paths)))}
 
-  lint
-  {:doc "Run ALL linters [path] [--seq]"
-   :task (let [args *command-line-args*
-               path (or (first (remove (fn [a] (clojure.string/starts-with? a "--")) args)) all-paths)
-               ;; Use native binaries if available
-               kondo-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which clj-kondo")))
-                           (str "clj-kondo --lint " path)
-                           (str "clojure -M:kondo --lint " path))
-               cljstyle-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which cljstyle")))
-                              (str "cljstyle check " path)
-                              (str "clojure -M:cljstyle check " path))]
-           (run-cmds [kondo-cmd
-                      (str "clojure -M:splint " path)
-                      cljstyle-cmd]
-                     args)
-           (println (str green "✓ All linters passed" reset)))}
-
   ;; === TESTS ===
 
   test
   {:doc "Run all tests"
-   :task (clojure "-M:poly test :dev")}
+   :task (clojure "-M:dev -e \"(require '[clojure.test :refer [run-tests]] '[graphden.graph.core-test] '[graphden.schema-malli.core-test] '[graphden.storage-memory.core-test] '[graphden.cache-eager.core-test]) (let [results (map #(run-tests %) ['graphden.graph.core-test 'graphden.schema-malli.core-test 'graphden.storage-memory.core-test 'graphden.cache-eager.core-test])] (System/exit (if (every? #(and (zero? (:fail %)) (zero? (:error %))) results) 0 1)))\"")}
 
   coverage
-  {:doc "Run tests with coverage report"
+  {:doc "Run tests with coverage"
    :task (clojure (str "-M:dev:cloverage "
                        "--ns-regex 'graphden\\..*' "
                        "--test-ns-regex 'graphden\\..*-test' "
                        "--ns-exclude-regex 'graphden\\.dev\\..*|graphden\\..*\\.interface|graphden\\..*-test'"))}
 
-  ;; === FULL CHECK ===
+  ;; === FULL CHECK (everything in parallel) ===
 
   check
-  {:doc "Run EVERYTHING: all linters + all tests [--seq]"
-   :task (let [;; Use native binaries if available
-               kondo-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which clj-kondo")))
+  {:doc "Run EVERYTHING: linters + tests + coverage"
+   :task (let [kondo-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which clj-kondo")))
                            (str "clj-kondo --lint " all-paths)
                            (str "clojure -M:kondo --lint " all-paths))
                cljstyle-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which cljstyle")))
                               (str "cljstyle check " all-paths)
-                              (str "clojure -M:cljstyle check " all-paths))]
-           (run-cmds [kondo-cmd
-                      (str "clojure -M:splint " all-paths)
-                      cljstyle-cmd
-                      "clojure -M:poly test :dev"]
-                     *command-line-args*)
+                              (str "clojure -M:cljstyle check " all-paths))
+               splint-cmd (str "clojure -M:splint " all-paths)
+               coverage-cmd (str "clojure -M:dev:cloverage "
+                                 "--ns-regex 'graphden\\..*' "
+                                 "--test-ns-regex 'graphden\\..*-test' "
+                                 "--ns-exclude-regex 'graphden\\.dev\\..*|graphden\\..*\\.interface|graphden\\..*-test'")]
+           (run-parallel [kondo-cmd splint-cmd cljstyle-cmd coverage-cmd])
            (println (str green "✓ All checks passed" reset)))}
 
   ;; === HELPERS ===
@@ -129,7 +82,7 @@
    :task (clojure (str "-M:cljstyle fix " (or (first *command-line-args*) all-paths)))}
 
   outdated
-  {:doc "Check for outdated dependencies"
+  {:doc "Check outdated dependencies"
    :task (clojure "-M:outdated")}
 
   security

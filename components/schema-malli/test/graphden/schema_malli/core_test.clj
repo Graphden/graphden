@@ -2,7 +2,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.schema-malli.core :as sut]
-    [graphden.schema.interface :as schema]))
+    [graphden.schema.interface :as schema]
+    [integrant.core :as ig]))
 
 
 (def test-schemas
@@ -18,10 +19,15 @@
                 [:value [:maybe :string]]]
    :with-vector [:map
                  [:items [:vector :string]]]
+   :with-sequential [:map
+                     [:items [:sequential :string]]]
    :with-double [:map
                  [:score :double]]
+   :with-any [:map
+              [:data :any]]
    :nested-map [:map
-                [:data :map]]})
+                [:data :map]]
+   :non-map-schema :string})
 
 
 (defn- create-test-provider
@@ -177,3 +183,40 @@
     (let [provider (sut/create-provider {:schemas {:test [:map]}})]
       (is (= {} (schema/get-relations* provider)))
       (is (= #{} (schema/get-derived-queries* provider))))))
+
+
+;; === Additional type coverage ===
+
+(deftest get-fields-sequential
+  (let [provider (create-test-provider)]
+    (testing "Sequential type maps to vector"
+      (let [fields (schema/get-fields* provider :with-sequential)
+            items-field (first fields)]
+        (is (= :vector (:type items-field)))))))
+
+
+(deftest get-fields-any
+  (let [provider (create-test-provider)]
+    (testing "Any type detection"
+      (let [fields (schema/get-fields* provider :with-any)
+            data-field (first fields)]
+        (is (= :any (:type data-field)))))))
+
+
+(deftest get-fields-non-map-schema
+  (let [provider (create-test-provider)]
+    (testing "Non-map schema returns nil"
+      (is (nil? (schema/get-fields* provider :non-map-schema))))))
+
+
+;; === Integrant ===
+
+(deftest integrant-init-creates-provider
+  (testing "ig/init-key creates provider"
+    (let [provider (ig/init-key ::sut/provider
+                                {:schemas {:test [:map [:id :keyword]]}
+                                 :relations {:a :b}
+                                 :derived-queries #{:q1}})]
+      (is (instance? graphden.schema_malli.core.MalliSchemaProvider provider))
+      (is (= {:a :b} (schema/get-relations* provider)))
+      (is (= #{:q1} (schema/get-derived-queries* provider))))))

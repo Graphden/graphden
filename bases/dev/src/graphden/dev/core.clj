@@ -1,103 +1,89 @@
 (ns graphden.dev.core
-  "Development entry point - REPL utilities and system management"
+  "Development entry point - REPL utilities for graph manipulation"
   (:require
-    [clojure.java.io :as io]
-    [graphden.graph.interface :as graph]
-    [integrant.core :as ig]))
+    [graphden.graph.interface :as graph]))
 
 
-(defonce ^:private system (atom nil))
+;; Graph state - stored in atom for REPL convenience
+(defonce ^:private graph-state (atom (graph/create-graph)))
 
 
-(defn read-config
-  "Read and prepare integrant config from file"
-  ([]
-   (read-config "config.edn"))
-  ([path]
-   (-> path
-       io/resource
-       slurp
-       ig/read-string)))
-
-
-(defn start!
-  "Start the system"
-  ([]
-   (start! (read-config)))
-  ([config]
-   (when @system
-     (throw (ex-info "System already running" {})))
-   (reset! system (ig/init config))
-   :started))
-
-
-(defn stop!
-  "Stop the system"
+(defn reset-graph!
+  "Reset graph to empty state"
   []
-  (when @system
-    (ig/halt! @system)
-    (reset! system nil)
-    :stopped))
-
-
-(defn restart!
-  "Restart the system"
-  []
-  (stop!)
-  (start!))
-
-
-(defn get-system
-  "Get the current system"
-  []
-  @system)
+  (reset! graph-state (graph/create-graph))
+  :reset)
 
 
 (defn get-graph
-  "Get graph from system"
+  "Get current graph state"
   []
-  (when-let [sys @system]
-    (:graphden.graph.core/graph sys)))
+  @graph-state)
 
 
-;; Convenience functions for REPL
+;; Convenience functions for REPL (mutate atom)
 (defn add-node!
   "Add a node to the graph"
   [node-data]
-  (if-let [g (get-graph)]
-    (do
-      (graph/add-node* g node-data)
-      :added)
-    (throw (ex-info "System not started" {}))))
-
-
-(defn get-node
-  "Get a node from the graph"
-  [node-name]
-  (when-let [g (get-graph)]
-    (graph/get-node* g node-name)))
+  (swap! graph-state graph/add-node node-data)
+  :added)
 
 
 (defn delete-node!
   "Delete a node from the graph"
   [node-name]
-  (if-let [g (get-graph)]
-    (do
-      (graph/delete-node* g node-name)
-      :deleted)
-    (throw (ex-info "System not started" {}))))
+  (swap! graph-state graph/delete-node node-name)
+  :deleted)
+
+
+(defn rename-node!
+  "Rename a node"
+  [old-name new-name]
+  (swap! graph-state graph/rename-node old-name new-name)
+  :renamed)
+
+
+(defn set-arg!
+  "Set arg value in a node"
+  [node-name arg-name value]
+  (swap! graph-state graph/set-arg-value node-name arg-name value)
+  :updated)
+
+
+;; Query functions (pure, no side effects)
+(defn get-node
+  "Get a node from the graph"
+  [node-name]
+  (graph/get-node @graph-state node-name))
 
 
 (defn all-nodes
   "Get all nodes"
   []
-  (when-let [g (get-graph)]
-    (graph/get-all-nodes* g)))
+  (graph/get-all-nodes @graph-state))
+
+
+(defn children
+  "Get children of a node"
+  [node-name]
+  (graph/get-children @graph-state node-name))
+
+
+(defn root-ancestor
+  "Get root ancestor of a node"
+  [node-name]
+  (graph/get-root-ancestor @graph-state node-name))
+
+
+(defn full-args
+  "Get full args of a node (merged from ancestors)"
+  [node-name]
+  (graph/get-full-args @graph-state node-name))
 
 
 (comment
   ;; REPL workflow:
-  (start!)
+  (reset-graph!)
 
   ;; Add some nodes
   (add-node! {:node-name :sum
@@ -115,8 +101,18 @@
   (all-nodes)
 
   ;; Get derived data
-  (graph/get-root-ancestor* (get-graph) :print-sum)
-  (graph/get-full-args* (get-graph) :print-sum)
-  (graph/get-children* (get-graph) :print)
+  (root-ancestor :print-sum)
+  (full-args :print-sum)
+  (children :print)
 
-  (stop!))
+  ;; Modify
+  (set-arg! :print-sum :val 42)
+  (rename-node! :print-sum :my-print)
+
+  ;; Delete
+  (delete-node! :my-print)
+
+  ;; Pure function usage (without atom)
+  (-> (graph/create-graph)
+      (graph/add-node {:node-name :foo :args []})
+      (graph/add-node {:node-name :bar :parent-name :foo :args []})))

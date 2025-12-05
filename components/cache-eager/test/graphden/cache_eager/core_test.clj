@@ -2,7 +2,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.cache-eager.core :as sut]
-    [graphden.cache.interface :as cache]))
+    [graphden.cache.interface :as cache]
+    [integrant.core :as ig]))
 
 
 ;; === on-node-added ===
@@ -226,3 +227,13 @@
       (is (map? (sut/get-full-args c :child)))
       (is (= #{:child} (sut/get-children c :parent)))
       (is (= #{[:child :val]} (sut/get-arg-refs c :parent))))))
+
+
+;; === Integrant ===
+
+(deftest integrant-init-creates-cache
+  (testing "ig/init-key creates cache"
+    (let [c (ig/init-key ::sut/cache {})]
+      (is (instance? graphden.cache_eager.core.EagerCache c))
+      (cache/on-node-added* c {:node-name :test :args []})
+      (is (some? (sut/get-full-args c :test))))))

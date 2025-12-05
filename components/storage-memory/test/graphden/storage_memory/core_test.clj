@@ -2,7 +2,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage-memory.core :as sut]
-    [graphden.storage.interface :as storage]))
+    [graphden.storage.interface :as storage]
+    [integrant.core :as ig]))
 
 
 ;; === StorageInfo ===
@@ -185,3 +186,30 @@
       (is (= s (storage/delete* s :user :u1)))
       (storage/put* s :user :u1 {:name "Alice"})
       (is (= s (storage/update-entity* s :user :u1 identity))))))
+
+
+;; === Integrant ===
+
+(deftest integrant-init-creates-storage
+  (testing "ig/init-key creates storage"
+    (let [s (ig/init-key ::sut/storage {})]
+      (is (instance? graphden.storage_memory.core.MemoryStorage s))
+      (is (= :memory (storage/storage-type s))))))
+
+
+(deftest integrant-init-with-initial-data
+  (testing "ig/init-key accepts initial-data"
+    (let [s (ig/init-key ::sut/storage {:initial-data {:user {:u1 {:name "Alice"}}}})]
+      (is (= {:name "Alice"} (storage/get-by-id* s :user :u1))))))
+
+
+(deftest integrant-halt-clears-watchers
+  (testing "ig/halt-key! clears watchers"
+    (let [s (ig/init-key ::sut/storage {})
+          events (atom [])]
+      (sut/add-watcher s (fn [e] (swap! events conj e)))
+      (storage/put* s :user :u1 {:name "Alice"})
+      (is (= 1 (count @events)))
+      (ig/halt-key! ::sut/storage s)
+      (storage/put* s :user :u2 {:name "Bob"})
+      (is (= 1 (count @events))))))

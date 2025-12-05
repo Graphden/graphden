@@ -7,19 +7,22 @@
 
 
 ;; Re-export dev functions for convenience
-(def start! dev/start!)
-(def stop! dev/stop!)
-(def restart! dev/restart!)
+(def reset-graph! dev/reset-graph!)
 (def get-graph dev/get-graph)
 (def add-node! dev/add-node!)
-(def get-node dev/get-node)
 (def delete-node! dev/delete-node!)
+(def rename-node! dev/rename-node!)
+(def set-arg! dev/set-arg!)
+(def get-node dev/get-node)
 (def all-nodes dev/all-nodes)
+(def children dev/children)
+(def root-ancestor dev/root-ancestor)
+(def full-args dev/full-args)
 
 
 (comment
   ;; Quick start:
-  (start!)
+  (reset-graph!)
 
   ;; Create base functions
   (add-node! {:node-name :sum
@@ -47,8 +50,11 @@
   (get-node :print-sum)
 
   ;; Derived queries
-  (graph/get-root-ancestor* (get-graph) :print-sum)  ;; => :print
-  (graph/get-full-args* (get-graph) :print-sum)      ;; merged args
-  (graph/get-children* (get-graph) :print)           ;; => #{:print-sum :print-product}
+  (root-ancestor :print-sum)   ;; => :print
+  (full-args :print-sum)       ;; merged args
+  (children :print)            ;; => #{:print-sum :print-product}
 
-  (stop!))
+  ;; Pure functional usage
+  (-> (graph/create-graph)
+      (graph/add-node {:node-name :foo :args []})
+      (graph/add-node {:node-name :bar :parent-name :foo :args []})))

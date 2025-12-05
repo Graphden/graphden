@@ -237,3 +237,13 @@
       (is (instance? graphden.cache_eager.core.EagerCache c))
       (cache/on-node-added* c {:node-name :test :args []})
       (is (some? (sut/get-full-args c :test))))))
+
+
+(deftest map-constructor-works
+  (testing "map->EagerCache creates valid cache"
+    (let [c (sut/map->EagerCache
+              {:data-atom (atom {:root-ancestor {}
+                                 :full-args {:test {:x {:arg-name :x :arg-val 1}}}
+                                 :children {}
+                                 :arg-refs {}})})]
+      (is (= {:x {:arg-name :x :arg-val 1}} (sut/get-full-args c :test))))))

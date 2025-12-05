@@ -220,3 +220,13 @@
       (is (instance? graphden.schema_malli.core.MalliSchemaProvider provider))
       (is (= {:a :b} (schema/get-relations* provider)))
       (is (= #{:q1} (schema/get-derived-queries* provider))))))
+
+
+(deftest map-constructor-works
+  (testing "map->MalliSchemaProvider creates valid provider"
+    (let [provider (sut/map->MalliSchemaProvider
+                     {:schemas {:test [:map [:id :keyword]]}
+                      :relations {:x :y}
+                      :derived-queries #{:q}})]
+      (is (= {:x :y} (schema/get-relations* provider)))
+      (is (= #{:q} (schema/get-derived-queries* provider))))))

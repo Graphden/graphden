@@ -213,3 +213,33 @@
       (ig/halt-key! ::sut/storage s)
       (storage/put* s :user :u2 {:name "Bob"})
       (is (= 1 (count @events))))))
+
+
+(deftest integrant-init-nil-initial-data
+  (testing "ig/init-key with nil initial-data uses empty map"
+    (let [s (ig/init-key ::sut/storage {:initial-data nil})]
+      (is (= {} (sut/get-snapshot s))))))
+
+
+;; === map->MemoryStorage ===
+
+(deftest map-constructor-works
+  (testing "map->MemoryStorage creates valid storage"
+    (let [s (sut/map->MemoryStorage
+              {:data-atom (atom {:user {:u1 {:name "Test"}}})
+               :watchers-atom (atom {})})]
+      (is (= {:name "Test"} (storage/get-by-id* s :user :u1))))))
+
+
+;; === Edge cases ===
+
+(deftest get-all-empty-type
+  (let [s (sut/create-storage)]
+    (testing "get-all on empty type returns empty"
+      (is (empty? (storage/get-all* s :nonexistent))))))
+
+
+(deftest find-by-empty-type
+  (let [s (sut/create-storage)]
+    (testing "find-by on empty type returns empty"
+      (is (empty? (storage/find-by* s :nonexistent :field :value))))))

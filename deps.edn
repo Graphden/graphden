@@ -1,52 +1,65 @@
-{:paths
- ["src"]
- 
- :deps
- {org.clojure/clojure {:mvn/version "1.12.0"}
-  com.taoensso/timbre {:mvn/version "6.6.2"} ; log
-  metosin/malli {:mvn/version "0.18.0"} ; schema 
-  org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}
+{:aliases
+ {:dev
+  {:extra-paths
+   [;; Development
+    "development/src"
+    ;; Components
+    "components/schema/src"
+    "components/schema-malli/src"
+    "components/storage/src"
+    "components/storage-memory/src"
+    "components/cache/src"
+    "components/cache-eager/src"
+    "components/graph/src"
+    ;; Base
+    "bases/dev/src"
+    "bases/dev/resources"]
 
- :aliases
- {:nrepl
-  {:extra-deps {refactor-nrepl/refactor-nrepl {:mvn/version "3.11.0"}
-                nrepl/nrepl {:mvn/version "1.3.1"}
-                cider/cider-nrepl {:mvn/version "0.55.7"}}
-   :main-opts ["-m" "nrepl.cmdline" "--middleware"
-               "[cider.nrepl/cider-middleware refactor-nrepl.middleware/wrap-refactor]"]}
-
-  :cljstyle
-  {:extra-deps {mvxcvi/cljstyle {:mvn/version "0.17.642"}}}
-
-  :kondo
-  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.04.07"}}
-   :main-opts ["-m" "clj-kondo.main" "--lint" "--cache false"]}
-
-  :kibit
-  {:extra-deps {tvaughan/kibit-runner {:mvn/version "1.0.1"}}
-   :main-opts ["-m" "kibit-runner.cmdline"]}
-
-  :eastwood
-  {:extra-deps {jonase/eastwood {:mvn/version "1.4.3"}}
-   :main-opts ["-m" "eastwood.lint" {:source-paths ["src"]
-                                     :test-paths ["test/common"
-                                                  "test/unit"
-                                                  "test/integration"
-                                                  "test/e2e"]
-                                     :exclude-namespaces [view.hello
-                                                          middleware]}]}
+   :extra-deps
+   {org.clojure/clojure {:mvn/version "1.12.0"}
+    integrant/integrant {:mvn/version "0.13.1"}
+    metosin/malli {:mvn/version "0.18.0"}
+    com.taoensso/timbre {:mvn/version "6.6.2"}
+    org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}}
 
   :test
-  {:extra-deps {lambdaisland/kaocha {:mvn/version "1.91.1392"}
-                lambdaisland/kaocha-cloverage {:mvn/version "1.1.89"}}
-   :extra-path ["test"]
-   :main-opts ["-m" "kaocha.runner"
-               "--plugin" "cloverage"]}
+  {:extra-paths
+   ["development/src"
+    ;; Components src
+    "components/schema/src"
+    "components/schema-malli/src"
+    "components/storage/src"
+    "components/storage-memory/src"
+    "components/cache/src"
+    "components/cache-eager/src"
+    "components/graph/src"
+    ;; Base
+    "bases/dev/src"
+    "bases/dev/resources"
+    ;; Test paths
+    "components/schema/test"
+    "components/schema-malli/test"
+    "components/storage/test"
+    "components/storage-memory/test"
+    "components/cache/test"
+    "components/cache-eager/test"
+    "components/graph/test"]
 
-  :dev
+   :extra-deps
+   {org.clojure/clojure {:mvn/version "1.12.0"}
+    integrant/integrant {:mvn/version "0.13.1"}
+    metosin/malli {:mvn/version "0.18.0"}
+    lambdaisland/kaocha {:mvn/version "1.91.1392"}}}
+
+  :poly
+  {:extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}
+   :main-opts ["-m" "polylith.clj.core.poly-cli.core"]}
+
+  :nrepl
   {:extra-deps
-   {binaryage/devtools {:mvn/version "1.0.6"}
-    com.clojure-goes-fast/clj-async-profiler {:mvn/version "1.1.1"}
-    com.gfredericks/test.chuck {:mvn/version "0.2.13"}}
-   :extra-paths ["dev"]
-   :exec-args {}}}}
+   {nrepl/nrepl {:mvn/version "1.3.1"}
+    cider/cider-nrepl {:mvn/version "0.55.7"}
+    refactor-nrepl/refactor-nrepl {:mvn/version "3.11.0"}}
+   :main-opts
+   ["-m" "nrepl.cmdline"
+    "--middleware" "[cider.nrepl/cider-middleware,refactor-nrepl.middleware/wrap-refactor]"]}}}

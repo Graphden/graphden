@@ -1,0 +1,46 @@
+{:paths []
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
+
+ :aliases
+ {:dev
+  {:extra-paths
+   [;; Components
+    "../../components/schema/src"
+    "../../components/schema-malli/src"
+    "../../components/storage/src"
+    "../../components/storage-memory/src"
+    "../../components/cache/src"
+    "../../components/cache-eager/src"
+    "../../components/graph/src"
+    ;; Base
+    "../../bases/dev/src"
+    "../../bases/dev/resources"]
+
+   :extra-deps
+   {integrant/integrant {:mvn/version "0.13.1"}
+    metosin/malli {:mvn/version "0.18.0"}
+    com.taoensso/timbre {:mvn/version "6.6.2"}
+    org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}}
+
+  :test
+  {:extra-paths
+   [;; Test paths
+    "../../components/schema/test"
+    "../../components/schema-malli/test"
+    "../../components/storage/test"
+    "../../components/storage-memory/test"
+    "../../components/cache/test"
+    "../../components/cache-eager/test"
+    "../../components/graph/test"]
+
+   :extra-deps
+   {lambdaisland/kaocha {:mvn/version "1.91.1392"}}}
+
+  :nrepl
+  {:extra-deps
+   {nrepl/nrepl {:mvn/version "1.3.1"}
+    cider/cider-nrepl {:mvn/version "0.55.7"}
+    refactor-nrepl/refactor-nrepl {:mvn/version "3.11.0"}}
+   :main-opts
+   ["-m" "nrepl.cmdline"
+    "--middleware" "[cider.nrepl/cider-middleware,refactor-nrepl.middleware/wrap-refactor]"]}}}

@@ -1,5 +1,10 @@
 # Graphden
 
+[![Clojure](https://img.shields.io/badge/Clojure-1.12-blue.svg)](https://clojure.org/)
+[![Polylith](https://img.shields.io/badge/architecture-Polylith-purple.svg)](https://polylith.gitbook.io/)
+[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)](#testing)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
+
 A functional, extensible low-code graph platform built with Clojure.
 
 Graphden provides a graph-based data structure for modeling function composition with inheritance. Nodes can inherit arguments from parent nodes, and the system efficiently tracks relationships and derived data through an eager caching strategy.
@@ -192,4 +197,13 @@ The system is configured via Integrant. Example configuration:
 
 ## License
 
-Copyright © 2024
+Graphden is available under the GNU Affero General Public License v3.0 (AGPL-3.0).  
+See [LICENSE](LICENSE) for the full text.
+
+In short, you are free to use, study, modify, and run Graphden, including in commercial environments, as long as:
+
+- any modified version that you deploy to users over a network also makes its source code available to those users;
+- your derivative works remain under AGPL-3.0.
+
+If you want to use Graphden in a closed-source product or SaaS without the obligations of AGPL-3.0, commercial licenses are available.  
+For commercial licensing, please contact: licensing@graphden.dev

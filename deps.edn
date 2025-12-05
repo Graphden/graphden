@@ -76,22 +76,12 @@
   {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
    :main-opts ["-m" "clj-kondo.main"]}
 
-  ;; eastwood: Additional lint checks
-  :eastwood
-  {:extra-deps {jonase/eastwood {:mvn/version "1.4.3"}}
-   :main-opts ["-m" "eastwood.lint"]}
-
-  ;; kibit: Idiomatic suggestions
-  :kibit
-  {:extra-deps {tvaughan/kibit-runner {:mvn/version "1.0.1"}}
-   :main-opts ["-m" "kibit-runner.cmdline"]}
-
   ;; cljstyle: Code formatting
   :cljstyle
   {:extra-deps {mvxcvi/cljstyle {:mvn/version "0.16.630"}}
    :main-opts ["-m" "cljstyle.main"]}
 
-  ;; splint: Modern linter
+  ;; splint: Modern linter (covers kibit functionality)
   :splint
   {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.18.0"}}
    :main-opts ["-m" "noahtheduke.splint"]}
@@ -103,13 +93,9 @@
 
   ;; clj-watson: Security CVE scanner
   :watson
-  {:extra-deps {io.github.clj-holmes/clj-watson {:mvn/version "6.0.0"}}
+  {:extra-deps {io.github.clj-holmes/clj-watson
+                {:git/tag "v6.0.1" :git/sha "b520351"}}
    :main-opts ["-m" "clj-watson.cli" "scan"]}
-
-  ;; nvd-clojure: Alternative CVE scanner
-  :nvd
-  {:extra-deps {nvd-clojure/nvd-clojure {:mvn/version "4.0.0"}}
-   :main-opts ["-m" "nvd.task.check" "deps.edn"]}
 
   ;; antq: Outdated dependencies
   :outdated

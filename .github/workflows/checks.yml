@@ -1,173 +1,93 @@
-name: checks
+name: CI
+
 on:
+  push:
+    branches: [main]
   pull_request:
-    branches:
-      - main
+    branches: [main]
+
+env:
+  JAVA_VERSION: '21'
 
 jobs:
-  cljstyle-check:
-          runs-on: ubuntu-latest
-          steps:
-            - name: Prepare java
-              uses: actions/setup-java@v3
-              with:
-                distribution: 'zulu'
-                java-version: '21'
-      
-            - name: Checkout repo
-              uses: actions/checkout@v3
-      
-            - name: Install clojure tools
-              uses: DeLaGuardo/setup-clojure@12.3
-              with:
-                # Install just one or all simultaneously
-                # The value must indicate a particular version of the tool, or use 'latest'
-                # to always provision the latest version
-                cli: latest
-                cljstyle: latest
-                zprint: latest
-      
-            - name: Cache jars
-              uses: actions/cache@v3
-              with:
-                path: |
-                  ~/.m2
-                  ~/.gitlibs
-                  ~/.deps.clj
-                key: maven-${{ hashFiles('deps.edn') }}
-                restore-keys: clj-deps-
-              
-            - name: cljstyle-check
-              run: make cljstyle-check
-
   kondo:
+    name: clj-kondo
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Install clojure tools
-        uses: DeLaGuardo/setup-clojure@12.3
+      - uses: DeLaGuardo/setup-clojure@13.4
         with:
-          # Install just one or all simultaneously
-          # The value must indicate a particular version of the tool, or use 'latest'
-          # to always provision the latest version
-          cli: latest
           clj-kondo: latest
-          zprint: latest
 
-      - name: Cache jars
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.m2
-            ~/.gitlibs
-            ~/.deps.clj
-          key: maven-${{ hashFiles('deps.edn') }}
-          restore-keys: clj-deps-
+      - name: Run clj-kondo
+        run: clj-kondo --lint components bases development
 
-      - name: kondo
-        run: make kondo
-
-  kibit:
+  splint:
+    name: splint
     runs-on: ubuntu-latest
     steps:
-      - name: Prepare java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'zulu'
-          java-version: '21'
+      - uses: actions/checkout@v4
 
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Install clojure tools
-        uses: DeLaGuardo/setup-clojure@12.3
+      - uses: actions/setup-java@v4
         with:
-          # Install just one or all simultaneously
-          # The value must indicate a particular version of the tool, or use 'latest'
-          # to always provision the latest version
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
           cli: latest
-          zprint: latest
+          bb: latest
 
-      - name: Cache jars
-        uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
-            ~/.m2
+            ~/.m2/repository
             ~/.gitlibs
             ~/.deps.clj
-          key: maven-${{ hashFiles('deps.edn') }}
-          restore-keys: clj-deps-
-        
-      - name: kibit
-        run: make kibit
+          key: deps-${{ hashFiles('deps.edn') }}
+          restore-keys: deps-
 
-  eastwood:
+      - name: Run splint
+        run: bb splint
+
+  cljstyle:
+    name: cljstyle
     runs-on: ubuntu-latest
     steps:
-      - name: Prepare java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-        
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Install clojure tools
-        uses: DeLaGuardo/setup-clojure@12.3
+      - uses: DeLaGuardo/setup-clojure@13.4
         with:
-          # Install just one or all simultaneously
-          # The value must indicate a particular version of the tool, or use 'latest'
-          # to always provision the latest version
-          cli: latest
-          zprint: latest
+          cljstyle: latest
 
-      - name: Cache jars
-        uses: actions/cache@v3
-        with:
-          path: |
-            ~/.m2
-            ~/.gitlibs
-            ~/.deps.clj
-          key: maven-${{ hashFiles('deps.edn') }}
-          restore-keys: clj-deps-
-        
-      - name: eastwood
-        run: make eastwood
+      - name: Check formatting
+        run: cljstyle check components bases development
 
   test:
+    name: tests
     runs-on: ubuntu-latest
     steps:
-      - name: Prepare java
-        uses: actions/setup-java@v3
-        with:
-          distribution: 'zulu'
-          java-version: '21'
-      
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - uses: actions/checkout@v4
 
-      - name: Install clojure tools
-        uses: DeLaGuardo/setup-clojure@12.3
+      - uses: actions/setup-java@v4
         with:
-          # Install just one or all simultaneously
-          # The value must indicate a particular version of the tool, or use 'latest'
-          # to always provision the latest version
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
           cli: latest
-          zprint: latest
+          bb: latest
 
-      - name: Cache jars
-        uses: actions/cache@v3
+      - uses: actions/cache@v4
         with:
           path: |
-            ~/.m2
+            ~/.m2/repository
             ~/.gitlibs
             ~/.deps.clj
-          key: maven-${{ hashFiles('deps.edn') }}
-          restore-keys: clj-deps-
-        
-      - name: test
-        run: make test
- 
+          key: deps-${{ hashFiles('deps.edn') }}
+          restore-keys: deps-
+
+      - name: Run tests
+        run: bb test

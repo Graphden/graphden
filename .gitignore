@@ -1,18 +1,31 @@
-pom.xml
-pom.xml.asc
+# Build artifacts
+/target/
 *.jar
 *.class
+
+# Clojure caches
+.cpcache/
+.clj-kondo/.cache/
+/.lsp/
+
+# Leiningen (legacy)
 /lib/
 /classes/
-/target/
 /checkouts/
-.lein-deps-sum
-.lein-repl-history
-.lein-plugins/
-.lein-failures
+pom.xml
+pom.xml.asc
+.lein-*
+
+# REPL
 .nrepl-port
-.cpcache/
-.lsp
-.eastwood
-.clj-kondo
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# OS
+.DS_Store
+
+# Tools
 .aider*

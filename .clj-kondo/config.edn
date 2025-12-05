@@ -1,0 +1,44 @@
+{;; clj-kondo configuration
+ ;; https://github.com/clj-kondo/clj-kondo/blob/master/doc/config.md
+
+ :linters
+ {;; Enable all useful linters
+  :unused-binding {:level :warning}
+  :unused-import {:level :warning}
+  :unused-namespace {:level :warning}
+  :unused-private-var {:level :warning}
+  :unused-referred-var {:level :warning}
+  :redundant-do {:level :warning}
+  :redundant-let {:level :warning}
+  :redundant-fn-wrapper {:level :warning}
+  :inline-def {:level :warning}
+  :shadowed-var {:level :warning}
+  :single-key-in {:level :warning}
+  :missing-else-branch {:level :warning}
+  :unsorted-required-namespaces {:level :warning}
+  :refer-all {:level :warning}
+  :cond-else {:level :warning}
+
+  ;; Performance hints
+  :single-logical-operand {:level :warning}
+  :reduce-without-init {:level :warning}
+
+  ;; Type hints
+  :unresolved-symbol {:level :error}
+  :unresolved-namespace {:level :error}
+  :unresolved-var {:level :error}
+  :type-mismatch {:level :error}
+
+  ;; Docstrings (optional, enable if you want to enforce docs)
+  :missing-docstring {:level :off}
+
+  ;; Consistent naming
+  :non-arg-vec-return-type-hint {:level :warning}}
+
+ :lint-as
+ {integrant.core/init-key clojure.core/defmethod
+  integrant.core/halt-key! clojure.core/defmethod}
+
+ :output
+ {:progress true
+  :canonical-paths true}}

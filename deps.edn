@@ -1,28 +1,11 @@
-{:aliases
- {:dev
-  {:extra-paths
-   [;; Development
-    "development/src"
-    ;; Components
-    "components/schema/src"
-    "components/schema-malli/src"
-    "components/storage/src"
-    "components/storage-memory/src"
-    "components/cache/src"
-    "components/cache-eager/src"
-    "components/graph/src"
-    ;; Base
-    "bases/dev/src"
-    "bases/dev/resources"]
+{:paths []
 
-   :extra-deps
-   {org.clojure/clojure {:mvn/version "1.12.0"}
-    integrant/integrant {:mvn/version "0.13.1"}
-    metosin/malli {:mvn/version "0.18.0"}
-    com.taoensso/timbre {:mvn/version "6.6.2"}
-    org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}}
+ :deps {org.clojure/clojure {:mvn/version "1.12.0"}}
 
-  :test
+ :aliases
+ {;; === DEVELOPMENT ===
+
+  :dev
   {:extra-paths
    ["development/src"
     ;; Components src
@@ -33,27 +16,107 @@
     "components/cache/src"
     "components/cache-eager/src"
     "components/graph/src"
-    ;; Base
-    "bases/dev/src"
-    "bases/dev/resources"
-    ;; Test paths
+    ;; Components test
     "components/schema/test"
     "components/schema-malli/test"
     "components/storage/test"
     "components/storage-memory/test"
     "components/cache/test"
     "components/cache-eager/test"
-    "components/graph/test"]
+    "components/graph/test"
+    ;; Base
+    "bases/dev/src"
+    "bases/dev/resources"]
 
    :extra-deps
-   {org.clojure/clojure {:mvn/version "1.12.0"}
-    integrant/integrant {:mvn/version "0.13.1"}
+   {integrant/integrant {:mvn/version "0.13.1"}
+    metosin/malli {:mvn/version "0.18.0"}
+    com.taoensso/timbre {:mvn/version "6.6.2"}
+    org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}}
+
+  ;; === TESTING ===
+
+  :test
+  {:extra-paths
+   [;; Components src
+    "components/schema/src"
+    "components/schema-malli/src"
+    "components/storage/src"
+    "components/storage-memory/src"
+    "components/cache/src"
+    "components/cache-eager/src"
+    "components/graph/src"
+    ;; Components test
+    "components/schema/test"
+    "components/schema-malli/test"
+    "components/storage/test"
+    "components/storage-memory/test"
+    "components/cache/test"
+    "components/cache-eager/test"
+    "components/graph/test"
+    ;; Base
+    "bases/dev/src"
+    "bases/dev/resources"]
+
+   :extra-deps
+   {integrant/integrant {:mvn/version "0.13.1"}
     metosin/malli {:mvn/version "0.18.0"}
     lambdaisland/kaocha {:mvn/version "1.91.1392"}}}
+
+  ;; === POLYLITH ===
 
   :poly
   {:extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}
    :main-opts ["-m" "polylith.clj.core.poly-cli.core"]}
+
+  ;; === LINTERS ===
+
+  ;; clj-kondo: Static analysis
+  :kondo
+  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2024.11.14"}}
+   :main-opts ["-m" "clj-kondo.main"]}
+
+  ;; eastwood: Additional lint checks
+  :eastwood
+  {:extra-deps {jonase/eastwood {:mvn/version "1.4.3"}}
+   :main-opts ["-m" "eastwood.lint"]}
+
+  ;; kibit: Idiomatic suggestions
+  :kibit
+  {:extra-deps {tvaughan/kibit-runner {:mvn/version "1.0.1"}}
+   :main-opts ["-m" "kibit-runner.cmdline"]}
+
+  ;; cljstyle: Code formatting
+  :cljstyle
+  {:extra-deps {mvxcvi/cljstyle {:mvn/version "0.16.630"}}
+   :main-opts ["-m" "cljstyle.main"]}
+
+  ;; splint: Modern linter
+  :splint
+  {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.18.0"}}
+   :main-opts ["-m" "noahtheduke.splint"]}
+
+  ;; cloverage: Test coverage
+  :cloverage
+  {:extra-deps {cloverage/cloverage {:mvn/version "1.2.4"}}
+   :main-opts ["-m" "cloverage.coverage"]}
+
+  ;; clj-watson: Security CVE scanner
+  :watson
+  {:extra-deps {io.github.clj-holmes/clj-watson {:mvn/version "6.0.0"}}
+   :main-opts ["-m" "clj-watson.cli" "scan"]}
+
+  ;; nvd-clojure: Alternative CVE scanner
+  :nvd
+  {:extra-deps {nvd-clojure/nvd-clojure {:mvn/version "4.0.0"}}
+   :main-opts ["-m" "nvd.task.check" "deps.edn"]}
+
+  ;; antq: Outdated dependencies
+  :outdated
+  {:extra-deps {com.github.liquidz/antq {:mvn/version "2.10.1241"}}
+   :main-opts ["-m" "antq.core"]}
+
+  ;; === REPL ===
 
   :nrepl
   {:extra-deps

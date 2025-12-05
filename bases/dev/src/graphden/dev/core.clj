@@ -1,10 +1,9 @@
 (ns graphden.dev.core
   "Development entry point - REPL utilities and system management"
   (:require
-   [integrant.core :as ig]
-   [graphden.graph.interface :as graph]
    [clojure.java.io :as io]
-   [clojure.edn :as edn]))
+   [graphden.graph.interface :as graph]
+   [integrant.core :as ig]))
 
 (defonce ^:private system (atom nil))
 

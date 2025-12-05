@@ -1,0 +1,141 @@
+{:paths ["scripts"]
+
+ :tasks
+ {:requires ([babashka.fs :as fs])
+
+  :init (do
+          (def src-paths "components bases development")
+          (def green "\u001b[32m")
+          (def cyan "\u001b[36m")
+          (def reset "\u001b[0m"))
+
+  :enter (println (str cyan "▶ " (:name (current-task)) reset))
+
+  ;; === DEVELOPMENT ===
+
+  repl
+  {:doc "Start REPL with nREPL"
+   :override-builtin true
+   :task (clojure "-A:dev -A:nrepl")}
+
+  ;; === TESTING ===
+
+  test
+  {:doc "Run tests for changed bricks"
+   :task (clojure "-M:poly test")}
+
+  test-dev
+  {:doc "Run all tests for dev project"
+   :task (clojure "-M:poly test :dev")}
+
+  test-all
+  {:doc "Run all tests (all projects)"
+   :task (clojure "-M:poly test :all")}
+
+  coverage
+  {:doc "Run tests with coverage report"
+   :task (clojure "-M:test:cloverage")}
+
+  ;; === LINTING ===
+
+  kondo
+  {:doc "Run clj-kondo (static analysis)"
+   :task (clojure (str "-M:kondo --lint " src-paths))}
+
+  eastwood
+  {:doc "Run eastwood (additional checks, slower)"
+   :task (clojure "-M:dev -M:eastwood")}
+
+  kibit
+  {:doc "Run kibit (idiomatic suggestions)"
+   :task (clojure (str "-M:dev -M:kibit -- " src-paths))}
+
+  splint
+  {:doc "Run splint (modern linter)"
+   :task (clojure (str "-M:splint " src-paths))}
+
+  lint
+  {:doc "Run quick linters (kondo + splint)"
+   :depends [kondo splint]
+   :task (println (str green "✓ Quick lint passed" reset))}
+
+  lint-all
+  {:doc "Run ALL linters"
+   :depends [kondo eastwood kibit splint cljstyle-check]
+   :task (println (str green "✓ All linters passed" reset))}
+
+  ;; === CODE STYLE ===
+
+  cljstyle-check
+  {:doc "Check code formatting"
+   :task (clojure (str "-M:cljstyle check " src-paths))}
+
+  cljstyle-fix
+  {:doc "Fix code formatting"
+   :task (clojure (str "-M:cljstyle fix " src-paths))}
+
+  ;; === SECURITY ===
+
+  watson
+  {:doc "Run clj-watson (CVE scanner)"
+   :task (clojure "-M:watson")}
+
+  nvd
+  {:doc "Run nvd-clojure (alternative CVE scanner)"
+   :task (clojure "-M:nvd")}
+
+  security
+  {:doc "Run security vulnerability scanner"
+   :depends [watson]
+   :task (println (str green "✓ Security check passed" reset))}
+
+  ;; === DEPENDENCIES ===
+
+  outdated
+  {:doc "Check for outdated dependencies"
+   :task (clojure "-M:outdated")}
+
+  ;; === POLYLITH ===
+
+  poly-info
+  {:doc "Show Polylith workspace info"
+   :task (clojure "-M:poly info")}
+
+  poly-check
+  {:doc "Check Polylith workspace structure"
+   :task (clojure "-M:poly check")}
+
+  poly-libs
+  {:doc "Show Polylith library dependencies"
+   :task (clojure "-M:poly libs")}
+
+  poly-deps
+  {:doc "Show Polylith component dependencies"
+   :task (clojure "-M:poly deps")}
+
+  poly-diff
+  {:doc "Show what changed since last stable"
+   :task (clojure "-M:poly diff")}
+
+  ;; === CI ===
+
+  ci
+  {:doc "Run full CI pipeline"
+   :depends [poly-check lint-all test-all security]
+   :task (println (str green "✓ CI pipeline passed" reset))}
+
+  ci-quick
+  {:doc "Run quick CI (check + lint + changed tests)"
+   :depends [poly-check lint test]
+   :task (println (str green "✓ Quick CI passed" reset))}
+
+  ;; === CLEANUP ===
+
+  clean
+  {:doc "Clean generated files"
+   :task (do
+           (fs/delete-tree "target")
+           (fs/delete-tree ".cpcache")
+           (fs/delete-tree ".clj-kondo/.cache")
+           (fs/delete-tree "coverage")
+           (println (str green "✓ Cleaned" reset)))}}}

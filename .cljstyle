@@ -1,6 +1,61 @@
-{:rules
-  {:eof-newline {:enabled? true
-                 :trailing-blanks? false}
-   :indentation {:list-indent 1}
-   :blank-lines {:max-consecutive 1
-                 :padding-lines 1}}}
+{;; cljstyle configuration
+ ;; https://github.com/greglook/cljstyle
+
+ :files
+ {:extensions #{"clj" "cljc" "cljs" "cljx" "edn"}
+  :ignore #{".git" ".clj-kondo" "target" "node_modules" ".aider*"}}
+
+ :rules
+ {;; Indentation
+  :indentation
+  {:enabled? true
+   :list-indent 2
+   :indents {}}
+
+  ;; Whitespace
+  :whitespace
+  {:enabled? true
+   :remove-surrounding? true
+   :remove-trailing? true
+   :insert-missing? true}
+
+  ;; Blank lines
+  :blank-lines
+  {:enabled? true
+   :trim-consecutive? true
+   :max-consecutive 2
+   :insert-padding? true
+   :padding-lines 2}
+
+  ;; EOF newline
+  :eof-newline
+  {:enabled? true}
+
+  ;; Comments
+  :comments
+  {:enabled? true
+   :inline-prefix " "
+   :leading-prefix "; "}
+
+  ;; Namespaces
+  :namespaces
+  {:enabled? true
+   :indent-size 1
+   :break-libs? true
+   :import-break-width 60}
+
+  ;; Vars
+  :vars
+  {:enabled? true}
+
+  ;; Functions
+  :functions
+  {:enabled? true}
+
+  ;; Types
+  :types
+  {:enabled? true
+   :types? true
+   :protocols? true
+   :reifies? true
+   :proxies? true}}}

@@ -1,0 +1,14 @@
+;; Splint configuration
+;; https://github.com/NoahTheDuke/splint
+
+{;; Enable all rules by default
+ :rules {}
+
+ ;; Paths to lint
+ :paths ["components" "bases" "development"]
+
+ ;; Output format
+ :output "full"
+
+ ;; Parallel processing
+ :parallel true}

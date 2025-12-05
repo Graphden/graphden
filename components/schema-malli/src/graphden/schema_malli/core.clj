@@ -24,19 +24,19 @@
   "Extract field definitions from Malli map schema"
   [schema]
   (when (= :map (m/type schema))
-    (->> (m/children schema)
-         (map (fn [child]
-                (let [[field-name props field-schema] (if (= 3 (count child))
-                                                        child
-                                                        [(first child) {} (second child)])
-                      field-type (m/type field-schema)
-                      optional? (or (:optional props)
-                                    (= :maybe field-type))]
-                  {:name field-name
-                   :type (if (= :maybe field-type)
-                           (malli-type->generic (m/type (first (m/children field-schema))))
-                           (malli-type->generic field-type))
-                   :optional? optional?}))))))
+    (map (fn [child]
+           (let [[field-name props field-schema] (if (= 3 (count child))
+                                                   child
+                                                   [(first child) {} (second child)])
+                 field-type (m/type field-schema)
+                 optional? (or (:optional props)
+                               (= :maybe field-type))]
+             {:name field-name
+              :type (if (= :maybe field-type)
+                      (malli-type->generic (m/type (first (m/children field-schema))))
+                      (malli-type->generic field-type))
+              :optional? optional?}))
+         (m/children schema))))
 
 (defrecord MalliSchemaProvider [schemas relations derived-queries]
   schema/SchemaProvider
@@ -61,10 +61,10 @@
     (when-let [s (get schemas schema-key)]
       (extract-fields s)))
 
-  (get-relations [this]
+  (get-relations [_]
     relations)
 
-  (get-derived-queries [this]
+  (get-derived-queries [_]
     derived-queries))
 
 (defn create-provider

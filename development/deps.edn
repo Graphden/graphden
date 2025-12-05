@@ -1,0 +1,29 @@
+{:paths ["development/src"
+         "development/resources"
+         ;; Components src
+         "components/schema/src"
+         "components/schema-malli/src"
+         "components/storage/src"
+         "components/storage-memory/src"
+         "components/cache/src"
+         "components/cache-eager/src"
+         "components/graph/src"
+         ;; Bases src
+         "bases/dev/src"
+         "bases/dev/resources"]
+
+ :deps {integrant/integrant {:mvn/version "0.13.1"}
+        metosin/malli {:mvn/version "0.18.0"}
+        com.taoensso/timbre {:mvn/version "6.6.2"}
+        org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}
+
+ :aliases
+ {:test {:extra-paths [;; Components test
+                       "components/schema/test"
+                       "components/schema-malli/test"
+                       "components/storage/test"
+                       "components/storage-memory/test"
+                       "components/cache/test"
+                       "components/cache-eager/test"
+                       "components/graph/test"]
+         :extra-deps {}}}}

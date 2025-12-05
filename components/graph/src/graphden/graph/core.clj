@@ -68,11 +68,10 @@
   "Compute root ancestor by walking up the tree"
   [storage node-name]
   (loop [current node-name]
-    (if-let [node (storage/get-by-id* storage :node current)]
+    (when-let [node (storage/get-by-id* storage :node current)]
       (if-let [parent (:parent-name node)]
         (recur parent)
-        current)
-      nil)))
+        current))))
 
 (defn- compute-full-args
   "Compute full args by merging from ancestors"

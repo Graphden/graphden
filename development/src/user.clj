@@ -2,8 +2,9 @@
   "REPL entry point for development.
    Start REPL from project root with: clj -A:dev"
   (:require
-   [graphden.dev.core :as dev]
-   [graphden.graph.interface :as graph]))
+    [graphden.dev.core :as dev]
+    [graphden.graph.interface :as graph]))
+
 
 ;; Re-export dev functions for convenience
 (def start! dev/start!)
@@ -14,6 +15,7 @@
 (def get-node dev/get-node)
 (def delete-node! dev/delete-node!)
 (def all-nodes dev/all-nodes)
+
 
 (comment
   ;; Quick start:

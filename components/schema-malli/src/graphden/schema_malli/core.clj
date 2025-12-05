@@ -1,11 +1,12 @@
 (ns graphden.schema-malli.core
   "Malli implementation of SchemaProvider protocol"
   (:require
-   [graphden.schema.interface :as schema]
-   [integrant.core :as ig]
-   [malli.core :as m]
-   [malli.error :as me]
-   [malli.transform :as mt]))
+    [graphden.schema.interface :as schema]
+    [integrant.core :as ig]
+    [malli.core :as m]
+    [malli.error :as me]
+    [malli.transform :as mt]))
+
 
 (defn- malli-type->generic
   "Convert Malli type to generic type keyword"
@@ -19,6 +20,7 @@
     (:vector :sequential) :vector
     :map :map
     :any))
+
 
 (defn- extract-fields
   "Extract field definitions from Malli map schema"
@@ -38,10 +40,14 @@
               :optional? optional?}))
          (m/children schema))))
 
-(defrecord MalliSchemaProvider [schemas relations derived-queries]
+
+(defrecord MalliSchemaProvider
+  [schemas relations derived-queries]
+
   schema/SchemaProvider
 
-  (validate [_ schema-key data]
+  (validate
+    [_ schema-key data]
     (if-let [s (get schemas schema-key)]
       (if (m/validate s data)
         {:valid? true}
@@ -50,22 +56,31 @@
       {:valid? false
        :errors [(str "Unknown schema: " schema-key)]}))
 
-  (coerce [_ schema-key data]
+
+  (coerce
+    [_ schema-key data]
     (if-let [s (get schemas schema-key)]
       (m/coerce s data (mt/transformer
-                        mt/string-transformer
-                        mt/strip-extra-keys-transformer))
+                         mt/string-transformer
+                         mt/strip-extra-keys-transformer))
       data))
 
-  (get-fields [_ schema-key]
+
+  (get-fields
+    [_ schema-key]
     (when-let [s (get schemas schema-key)]
       (extract-fields s)))
 
-  (get-relations [_]
+
+  (get-relations
+    [_]
     relations)
 
-  (get-derived-queries [_]
+
+  (get-derived-queries
+    [_]
     derived-queries))
+
 
 (defn create-provider
   "Create MalliSchemaProvider from config map"
@@ -73,6 +88,7 @@
   (->MalliSchemaProvider schemas
                          (or relations {})
                          (or derived-queries #{})))
+
 
 ;; Integrant integration
 (defmethod ig/init-key ::provider

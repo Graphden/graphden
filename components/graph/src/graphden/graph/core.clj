@@ -1,11 +1,12 @@
 (ns graphden.graph.core
   "Graph implementation - coordinates storage, schema, and cache"
   (:require
-   [graphden.cache.interface :as cache]
-   [graphden.graph.interface :as graph]
-   [graphden.schema.interface :as schema]
-   [graphden.storage.interface :as storage]
-   [integrant.core :as ig]))
+    [graphden.cache.interface :as cache]
+    [graphden.graph.interface :as graph]
+    [graphden.schema.interface :as schema]
+    [graphden.storage.interface :as storage]
+    [integrant.core :as ig]))
+
 
 (defn- validate-node!
   "Validate node data, throw if invalid"
@@ -16,10 +17,12 @@
                       {:errors (:errors result)
                        :node-data node-data})))))
 
+
 (defn- node-exists?
   "Check if node exists in storage"
   [storage node-name]
   (storage/exists?* storage :node node-name))
+
 
 (defn- validate-parent-exists!
   "Validate that parent node exists"
@@ -28,6 +31,7 @@
     (throw (ex-info "Parent node does not exist"
                     {:parent-name parent-name
                      :node-name node-name}))))
+
 
 (defn- validate-arg-refs!
   "Validate that all arg values that are keywords reference existing nodes"
@@ -39,12 +43,14 @@
                        :arg-name arg-name
                        :arg-val arg-val})))))
 
+
 (defn- validate-node-not-exists!
   "Validate that node does not already exist"
   [storage node-name]
   (when (node-exists? storage node-name)
     (throw (ex-info "Node already exists"
                     {:node-name node-name}))))
+
 
 (defn- validate-no-children!
   "Validate that node has no children before deletion"
@@ -55,6 +61,7 @@
                       {:node-name node-name
                        :children children})))))
 
+
 (defn- validate-no-arg-refs!
   "Validate that no other nodes reference this node as arg value"
   [cache node-name]
@@ -64,6 +71,7 @@
                       {:node-name node-name
                        :arg-refs refs})))))
 
+
 (defn- compute-root-ancestor
   "Compute root ancestor by walking up the tree"
   [storage node-name]
@@ -72,6 +80,7 @@
       (if-let [parent (:parent-name node)]
         (recur parent)
         current))))
+
 
 (defn- compute-full-args
   "Compute full args by merging from ancestors"
@@ -90,10 +99,14 @@
             {}
             (reverse chain))))
 
-(defrecord GraphImpl [storage schema-provider cache]
+
+(defrecord GraphImpl
+  [storage schema-provider cache]
+
   graph/Graph
 
-  (add-node [this {:keys [node-name parent-name args] :as node-data}]
+  (add-node
+    [this {:keys [node-name parent-name args] :as node-data}]
     ;; Validations
     (validate-node! schema-provider node-data)
     (validate-node-not-exists! storage node-name)
@@ -108,7 +121,9 @@
 
     this)
 
-  (delete-node [this node-name]
+
+  (delete-node
+    [this node-name]
     (when-not (node-exists? storage node-name)
       (throw (ex-info "Node does not exist" {:node-name node-name})))
 
@@ -124,7 +139,9 @@
 
     this)
 
-  (rename-node [this old-name new-name]
+
+  (rename-node
+    [this old-name new-name]
     (when-not (node-exists? storage old-name)
       (throw (ex-info "Node does not exist" {:node-name old-name})))
     (validate-node-not-exists! storage new-name)
@@ -158,13 +175,19 @@
 
     this)
 
-  (get-node [_ node-name]
+
+  (get-node
+    [_ node-name]
     (storage/get-by-id* storage :node node-name))
 
-  (get-all-nodes [_]
+
+  (get-all-nodes
+    [_]
     (storage/get-all* storage :node))
 
-  (set-arg-value [this node-name arg-name value]
+
+  (set-arg-value
+    [this node-name arg-name value]
     (let [node (storage/get-by-id* storage :node node-name)]
       (when-not node
         (throw (ex-info "Node does not exist" {:node-name node-name})))
@@ -194,28 +217,38 @@
 
     this)
 
-  (get-root-ancestor [_ node-name]
+
+  (get-root-ancestor
+    [_ node-name]
     (cache/compute-if-absent* cache
                               (cache/root-ancestor-key node-name)
                               #(compute-root-ancestor storage node-name)))
 
-  (get-full-args [_ node-name]
+
+  (get-full-args
+    [_ node-name]
     (cache/compute-if-absent* cache
                               (cache/full-args-key node-name)
                               #(compute-full-args storage node-name)))
 
-  (get-children [_ node-name]
+
+  (get-children
+    [_ node-name]
     (or (cache/get-cached* cache (cache/children-key node-name))
         #{}))
 
-  (get-arg-refs [_ node-name]
+
+  (get-arg-refs
+    [_ node-name]
     (or (cache/get-cached* cache (cache/arg-refs-key node-name))
         #{})))
+
 
 (defn create-graph
   "Create new Graph instance"
   [storage schema-provider cache]
   (->GraphImpl storage schema-provider cache))
+
 
 ;; Integrant integration
 (defmethod ig/init-key ::graph

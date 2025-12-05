@@ -1,11 +1,13 @@
 (ns graphden.dev.core
   "Development entry point - REPL utilities and system management"
   (:require
-   [clojure.java.io :as io]
-   [graphden.graph.interface :as graph]
-   [integrant.core :as ig]))
+    [clojure.java.io :as io]
+    [graphden.graph.interface :as graph]
+    [integrant.core :as ig]))
+
 
 (defonce ^:private system (atom nil))
+
 
 (defn read-config
   "Read and prepare integrant config from file"
@@ -17,6 +19,7 @@
        slurp
        ig/read-string)))
 
+
 (defn start!
   "Start the system"
   ([]
@@ -27,6 +30,7 @@
    (reset! system (ig/init config))
    :started))
 
+
 (defn stop!
   "Stop the system"
   []
@@ -35,22 +39,26 @@
     (reset! system nil)
     :stopped))
 
+
 (defn restart!
   "Restart the system"
   []
   (stop!)
   (start!))
 
+
 (defn get-system
   "Get the current system"
   []
   @system)
+
 
 (defn get-graph
   "Get graph from system"
   []
   (when-let [sys @system]
     (:graphden.graph.core/graph sys)))
+
 
 ;; Convenience functions for REPL
 (defn add-node!
@@ -62,11 +70,13 @@
       :added)
     (throw (ex-info "System not started" {}))))
 
+
 (defn get-node
   "Get a node from the graph"
   [node-name]
   (when-let [g (get-graph)]
     (graph/get-node* g node-name)))
+
 
 (defn delete-node!
   "Delete a node from the graph"
@@ -77,11 +87,13 @@
       :deleted)
     (throw (ex-info "System not started" {}))))
 
+
 (defn all-nodes
   "Get all nodes"
   []
   (when-let [g (get-graph)]
     (graph/get-all-nodes* g)))
+
 
 (comment
   ;; REPL workflow:

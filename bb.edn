@@ -4,7 +4,7 @@
  {:requires ([babashka.fs :as fs])
 
   :init (do
-          (def src-paths "components bases development")
+          (def all-paths "components bases development")
           (def green "\u001b[32m")
           (def cyan "\u001b[36m")
           (def reset "\u001b[0m"))
@@ -14,122 +14,77 @@
   ;; === DEVELOPMENT ===
 
   repl
-  {:doc "Start REPL with nREPL"
+  {:doc "Start REPL"
    :override-builtin true
    :task (clojure "-A:dev -A:nrepl")}
 
-  ;; === TESTING ===
+  ;; === LINTERS (each can take optional path) ===
+
+  kondo
+  {:doc "Run clj-kondo [path]"
+   :task (clojure (str "-M:kondo --lint " (or (first *command-line-args*) all-paths)))}
+
+  splint
+  {:doc "Run splint [path]"
+   :task (clojure (str "-M:splint " (or (first *command-line-args*) all-paths)))}
+
+  kibit
+  {:doc "Run kibit [path]"
+   :task (clojure (str "-M:kibit " (or (first *command-line-args*) all-paths)))}
+
+  cljstyle
+  {:doc "Check formatting [path]"
+   :task (clojure (str "-M:cljstyle check " (or (first *command-line-args*) all-paths)))}
+
+  lint
+  {:doc "Run ALL linters [path]"
+   :task (let [path (or (first *command-line-args*) all-paths)]
+           (clojure (str "-M:kondo --lint " path))
+           (clojure (str "-M:splint " path))
+           (clojure (str "-M:kibit " path))
+           (clojure (str "-M:cljstyle check " path))
+           (println (str green "✓ All linters passed" reset)))}
+
+  ;; === TESTS ===
 
   test
-  {:doc "Run tests for changed bricks"
-   :task (clojure "-M:poly test")}
-
-  test-dev
-  {:doc "Run all tests for dev project"
+  {:doc "Run all tests"
    :task (clojure "-M:poly test :dev")}
-
-  test-all
-  {:doc "Run all tests (all projects)"
-   :task (clojure "-M:poly test :all")}
 
   coverage
   {:doc "Run tests with coverage report"
-   :task (clojure "-M:test:cloverage")}
+   :task (clojure (str "-M:dev:cloverage "
+                       "--ns-regex 'graphden\\..*' "
+                       "--test-ns-regex 'graphden\\..*-test' "
+                       "--ns-exclude-regex 'graphden\\.dev\\..*|graphden\\..*\\.interface|graphden\\..*-test'"))}
 
-  ;; === LINTING ===
+  ;; === FULL CHECK ===
 
-  kondo
-  {:doc "Run clj-kondo (static analysis)"
-   :task (clojure (str "-M:kondo --lint " src-paths))}
+  check
+  {:doc "Run EVERYTHING: all linters + all tests"
+   :task (do
+           ;; Linters
+           (clojure (str "-M:kondo --lint " all-paths))
+           (clojure (str "-M:splint " all-paths))
+           (clojure (str "-M:kibit " all-paths))
+           (clojure (str "-M:cljstyle check " all-paths))
+           ;; Tests
+           (clojure "-M:poly test :dev")
+           (println (str green "✓ All checks passed" reset)))}
 
-  eastwood
-  {:doc "Run eastwood (additional checks, slower)"
-   :task (clojure "-M:dev -M:eastwood")}
+  ;; === HELPERS ===
 
-  kibit
-  {:doc "Run kibit (idiomatic suggestions)"
-   :task (clojure (str "-M:dev -M:kibit -- " src-paths))}
-
-  splint
-  {:doc "Run splint (modern linter)"
-   :task (clojure (str "-M:splint " src-paths))}
-
-  lint
-  {:doc "Run quick linters (kondo + splint)"
-   :depends [kondo splint]
-   :task (println (str green "✓ Quick lint passed" reset))}
-
-  lint-all
-  {:doc "Run ALL linters"
-   :depends [kondo eastwood kibit splint cljstyle-check]
-   :task (println (str green "✓ All linters passed" reset))}
-
-  ;; === CODE STYLE ===
-
-  cljstyle-check
-  {:doc "Check code formatting"
-   :task (clojure (str "-M:cljstyle check " src-paths))}
-
-  cljstyle-fix
-  {:doc "Fix code formatting"
-   :task (clojure (str "-M:cljstyle fix " src-paths))}
-
-  ;; === SECURITY ===
-
-  watson
-  {:doc "Run clj-watson (CVE scanner)"
-   :task (clojure "-M:watson")}
-
-  nvd
-  {:doc "Run nvd-clojure (alternative CVE scanner)"
-   :task (clojure "-M:nvd")}
-
-  security
-  {:doc "Run security vulnerability scanner"
-   :depends [watson]
-   :task (println (str green "✓ Security check passed" reset))}
-
-  ;; === DEPENDENCIES ===
+  fix
+  {:doc "Auto-fix formatting [path]"
+   :task (clojure (str "-M:cljstyle fix " (or (first *command-line-args*) all-paths)))}
 
   outdated
   {:doc "Check for outdated dependencies"
    :task (clojure "-M:outdated")}
 
-  ;; === POLYLITH ===
-
-  poly-info
-  {:doc "Show Polylith workspace info"
-   :task (clojure "-M:poly info")}
-
-  poly-check
-  {:doc "Check Polylith workspace structure"
-   :task (clojure "-M:poly check")}
-
-  poly-libs
-  {:doc "Show Polylith library dependencies"
-   :task (clojure "-M:poly libs")}
-
-  poly-deps
-  {:doc "Show Polylith component dependencies"
-   :task (clojure "-M:poly deps")}
-
-  poly-diff
-  {:doc "Show what changed since last stable"
-   :task (clojure "-M:poly diff")}
-
-  ;; === CI ===
-
-  ci
-  {:doc "Run full CI pipeline"
-   :depends [poly-check lint-all test-all security]
-   :task (println (str green "✓ CI pipeline passed" reset))}
-
-  ci-quick
-  {:doc "Run quick CI (check + lint + changed tests)"
-   :depends [poly-check lint test]
-   :task (println (str green "✓ Quick CI passed" reset))}
-
-  ;; === CLEANUP ===
+  security
+  {:doc "Scan for CVE vulnerabilities"
+   :task (clojure "-M:watson")}
 
   clean
   {:doc "Clean generated files"
@@ -137,5 +92,14 @@
            (fs/delete-tree "target")
            (fs/delete-tree ".cpcache")
            (fs/delete-tree ".clj-kondo/.cache")
-           (fs/delete-tree "coverage")
-           (println (str green "✓ Cleaned" reset)))}}}
+           (println (str green "✓ Cleaned" reset)))}
+
+  ;; === POLYLITH ===
+
+  info
+  {:doc "Show workspace info"
+   :task (clojure "-M:poly info")}
+
+  deps
+  {:doc "Show component dependencies"
+   :task (clojure "-M:poly deps")}}}

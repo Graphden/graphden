@@ -48,31 +48,20 @@
 
   test
   {:doc "Run all tests"
-   :task (clojure "-M:dev -e \"(require '[clojure.test :refer [run-tests]] '[graphden.graph.core-test] '[graphden.schema-malli.core-test] '[graphden.storage-memory.core-test] '[graphden.cache-eager.core-test]) (let [results (map #(run-tests %) ['graphden.graph.core-test 'graphden.schema-malli.core-test 'graphden.storage-memory.core-test 'graphden.cache-eager.core-test])] (System/exit (if (every? #(and (zero? (:fail %)) (zero? (:error %))) results) 0 1)))\"")}
+   :task (clojure "-M:test -m kaocha.runner")}
 
-  coverage
-  {:doc "Run tests with coverage"
-   :task (clojure (str "-M:dev:cloverage "
-                       "--ns-regex 'graphden\\..*' "
-                       "--test-ns-regex 'graphden\\..*-test' "
-                       "--ns-exclude-regex 'graphden\\.dev\\..*|graphden\\..*\\.interface|graphden\\..*-test'"))}
-
-  ;; === FULL CHECK (everything in parallel) ===
+  ;; === FULL CHECK (linters in parallel) ===
 
   check
-  {:doc "Run EVERYTHING: linters + tests + coverage"
+  {:doc "Run linters in parallel"
    :task (let [kondo-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which clj-kondo")))
                            (str "clj-kondo --lint " all-paths)
                            (str "clojure -M:kondo --lint " all-paths))
                cljstyle-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which cljstyle")))
                               (str "cljstyle check " all-paths)
                               (str "clojure -M:cljstyle check " all-paths))
-               splint-cmd (str "clojure -M:splint " all-paths)
-               coverage-cmd (str "clojure -M:dev:cloverage "
-                                 "--ns-regex 'graphden\\..*' "
-                                 "--test-ns-regex 'graphden\\..*-test' "
-                                 "--ns-exclude-regex 'graphden\\.dev\\..*|graphden\\..*\\.interface|graphden\\..*-test'")]
-           (run-parallel [kondo-cmd splint-cmd cljstyle-cmd coverage-cmd])
+               splint-cmd (str "clojure -M:splint " all-paths)]
+           (run-parallel [kondo-cmd splint-cmd cljstyle-cmd])
            (println (str green "✓ All checks passed" reset)))}
 
   ;; === HELPERS ===
@@ -105,4 +94,28 @@
 
   deps
   {:doc "Show component dependencies"
-   :task (clojure "-M:poly deps")}}}
+   :task (clojure "-M:poly deps")}
+
+  sync
+  {:doc "Sync paths to deps.edn and tests.edn"
+   :task (load-file "scripts/sync_paths.clj")}
+
+  create-component
+  {:doc "Create component and sync paths"
+   :task (let [name (first *command-line-args*)]
+           (when-not name
+             (println (str red "Usage: bb create-component <name>" reset))
+             (System/exit 1))
+           (clojure (str "-M:poly create component name:" name))
+           (load-file "scripts/sync_paths.clj")
+           (println (str green "✓ Component '" name "' created and paths synced" reset)))}
+
+  create-base
+  {:doc "Create base and sync paths"
+   :task (let [name (first *command-line-args*)]
+           (when-not name
+             (println (str red "Usage: bb create-base <name>" reset))
+             (System/exit 1))
+           (clojure (str "-M:poly create base name:" name))
+           (load-file "scripts/sync_paths.clj")
+           (println (str green "✓ Base '" name "' created and paths synced" reset)))}}}

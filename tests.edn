@@ -1,7 +1,5 @@
 #kaocha/v1
 {:tests [{:id :unit
-          :test-paths ["components/graph/test"
-                       "components/storage-memory/test"
-                       "components/schema-malli/test"
-                       "components/cache-eager/test"]}]
+          :test-paths ["components/data-schema-protocol/test"
+                       "components/malli-data-schema/test"]}]
  :plugins [:kaocha.plugin/profiling]}

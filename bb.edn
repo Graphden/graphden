@@ -48,7 +48,7 @@
 
   test
   {:doc "Run all tests"
-   :task (clojure "-M:test -m kaocha.runner")}
+   :task (clojure "-M:dev:test -m kaocha.runner")}
 
   ;; === FULL CHECK (linters in parallel) ===
 

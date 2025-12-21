@@ -1,9 +1,9 @@
 (ns graphden.malli-data-schema.core
   "Malli-based implementation of DataSchema protocol."
   (:require
-   [graphden.data-schema-protocol.interface :as ds]
-   [malli.core :as m]
-   [malli.error :as me]))
+    [graphden.data-schema-protocol.interface :as ds]
+    [malli.core :as m]
+    [malli.error :as me]))
 
 
 (def base-types
@@ -30,8 +30,9 @@
 (defn- make-field-schema
   "Creates a malli schema for a field based on its specification."
   [field-spec enums]
-  (let [{:keys [type nullable? enum-name variants]} field-spec
-        base-schema (case type
+  (let [{:keys [nullable? enum-name variants]
+         field-type :type} field-spec
+        base-schema (case field-type
                       :ref
                       :uuid
 
@@ -43,7 +44,7 @@
                       (into [:or] (map #(make-variant-schema % enums) variants))
 
                       ;; default
-                      (get base-types type type))]
+                      (get base-types field-type field-type))]
     (if nullable?
       [:maybe base-schema]
       base-schema)))
@@ -58,35 +59,51 @@
     (into [:map {:closed true}] field-schemas)))
 
 
-(defrecord MalliDataSchema [enums-map entities-map compiled-schemas]
+(defrecord MalliDataSchema
+  [enums-map entities-map compiled-schemas]
+
   ds/DataSchema
 
-  (entities [_this]
+  (entities
+    [_this]
     (keys entities-map))
 
-  (entity-fields [_this entity-name]
+
+  (entity-fields
+    [_this entity-name]
     (get entities-map entity-name))
 
-  (enums [_this]
+
+  (enums
+    [_this]
     enums-map)
 
-  (validate-entity [_this entity-name data]
+
+  (validate-entity
+    [_this entity-name data]
     (if-let [schema (get compiled-schemas entity-name)]
       (when-not (m/validate schema data)
         {:errors (me/humanize (m/explain schema data))})
       {:errors {:entity [(str "Unknown entity: " entity-name)]}})))
 
 
-(defrecord MalliDataSchemaBuilder [enums-map entities-map]
+(defrecord MalliDataSchemaBuilder
+  [enums-map entities-map]
+
   ds/DataSchemaBuilder
 
-  (add-enum [this enum-name values]
+  (add-enum
+    [this enum-name values]
     (assoc-in this [:enums-map enum-name] {:values (set values)}))
 
-  (add-entity [this entity-name fields]
+
+  (add-entity
+    [this entity-name fields]
     (assoc-in this [:entities-map entity-name] fields))
 
-  (build [_this]
+
+  (build
+    [_this]
     (let [compiled (into {}
                          (for [[entity-name fields] entities-map]
                            [entity-name (make-entity-schema fields enums-map)]))]

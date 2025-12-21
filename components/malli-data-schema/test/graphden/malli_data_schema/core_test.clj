@@ -1,8 +1,8 @@
 (ns graphden.malli-data-schema.core-test
   (:require
-   [clojure.test :refer [deftest is testing]]
-   [graphden.data-schema-protocol.interface :as ds]
-   [graphden.malli-data-schema.interface :as mds]))
+    [clojure.test :refer [deftest is testing]]
+    [graphden.data-schema-protocol.interface :as ds]
+    [graphden.malli-data-schema.interface :as mds]))
 
 
 (def example-schema
@@ -77,8 +77,8 @@
   (testing "fn-schema has expected fields"
     (let [fields (ds/entity-fields example-schema :fn-schema)]
       (is (= :text (get-in fields [:name :type])))
-      (is (= false (get-in fields [:name :nullable?])))
-      (is (= true (get-in fields [:name :unique?])))
+      (is (false? (get-in fields [:name :nullable?])))
+      (is (true? (get-in fields [:name :unique?])))
       (is (= :enum (get-in fields [:returned-type :type])))
       (is (= :value-kind (get-in fields [:returned-type :enum-name])))))
 
@@ -90,7 +90,7 @@
   (testing "arg-value has union type for value"
     (let [fields (ds/entity-fields example-schema :arg-value)]
       (is (= :ref (get-in fields [:owner-fn-id :type])))
-      (is (= false (get-in fields [:owner-fn-id :nullable?])))
+      (is (false? (get-in fields [:owner-fn-id :nullable?])))
       (is (= :union (get-in fields [:value :type])))
       (is (= 9 (count (get-in fields [:value :variants])))))))
 

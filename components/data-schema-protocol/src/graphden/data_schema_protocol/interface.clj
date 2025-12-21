@@ -17,10 +17,12 @@
 (defprotocol DataSchema
   "Protocol for working with data schema definitions."
 
-  (entities [this]
+  (entities
+    [this]
     "Returns a sequence of entity names defined in this schema.")
 
-  (entity-fields [this entity-name]
+  (entity-fields
+    [this entity-name]
     "Returns a map of field definitions for the given entity.
      Each field is a map with :type and optional attributes like:
      - :nullable? - whether the field can be null (default: false)
@@ -34,12 +36,14 @@
                                   {:type :int}
                                   {:type :text}]}}")
 
-  (enums [this]
+  (enums
+    [this]
     "Returns a map of enum definitions.
      Each enum is a map with :values containing allowed values.
      Example: {:value-kind {:values #{:null :bool :int :text}}}")
 
-  (validate-entity [this entity-name data]
+  (validate-entity
+    [this entity-name data]
     "Validates data against the entity schema.
      Returns nil if valid, or a map with :errors if invalid."))
 
@@ -47,13 +51,16 @@
 (defprotocol DataSchemaBuilder
   "Protocol for building data schemas programmatically."
 
-  (add-enum [this enum-name values]
+  (add-enum
+    [this enum-name values]
     "Adds an enum type definition. Returns updated schema builder.")
 
-  (add-entity [this entity-name fields]
+  (add-entity
+    [this entity-name fields]
     "Adds an entity definition. Returns updated schema builder.
      Fields should be a map of field-name to field-spec.
      The :id field is automatically added.")
 
-  (build [this]
+  (build
+    [this]
     "Builds and returns the final DataSchema."))

@@ -1,7 +1,7 @@
 (ns graphden.malli-data-schema.interface
   "Public interface for malli-based data schema implementation."
   (:require
-   [graphden.malli-data-schema.core :as core]))
+    [graphden.malli-data-schema.core :as core]))
 
 
 (defn create-builder

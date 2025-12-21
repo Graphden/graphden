@@ -52,7 +52,7 @@
 
   coverage
   {:doc "Run tests with coverage report"
-   :task (clojure "-M:dev:test:cloverage --src-ns-path components --test-ns-path components --ns-regex \"graphden\\..*\"")}
+   :task (clojure "-M:dev:test:cloverage --src-ns-path components --test-ns-path components --ns-regex \"graphden\\..*\" --ns-exclude-regex \".*-test\" --fail-threshold 100")}
 
   ;; === FULL CHECK ===
 
@@ -65,7 +65,7 @@
                               (str "cljstyle check " all-paths)
                               (str "clojure -M:cljstyle check " all-paths))
                splint-cmd (str "clojure -M:splint " all-paths)
-               test-cmd "clojure -M:dev:test:cloverage --src-ns-path components --test-ns-path components --ns-regex graphden\\..* --fail-threshold 80"
+               test-cmd "clojure -M:dev:test:cloverage --src-ns-path components --test-ns-path components --ns-regex graphden\\..* --ns-exclude-regex .*-test --fail-threshold 100"
                checks [{:name "kondo" :cmd kondo-cmd}
                        {:name "splint" :cmd splint-cmd}
                        {:name "cljstyle" :cmd cljstyle-cmd}

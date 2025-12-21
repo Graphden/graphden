@@ -170,6 +170,34 @@
         (is (contains? (:errors result) :entity))))))
 
 
+(deftest nullable-fields-test
+  (let [schema (-> (mds/create-builder)
+                   (ds/add-entity :with-nullable
+                                  {:required-field {:type :text :nullable? false}
+                                   :optional-field {:type :text :nullable? true}})
+                   (ds/build))]
+
+    (testing "valid entity with nullable field as nil"
+      (is (nil? (ds/validate-entity schema :with-nullable
+                                    {:id (random-uuid)
+                                     :required-field "value"
+                                     :optional-field nil}))))
+
+    (testing "valid entity with nullable field having value"
+      (is (nil? (ds/validate-entity schema :with-nullable
+                                    {:id (random-uuid)
+                                     :required-field "value"
+                                     :optional-field "optional"}))))
+
+    (testing "invalid - required field cannot be nil"
+      (let [result (ds/validate-entity schema :with-nullable
+                                       {:id (random-uuid)
+                                        :required-field nil
+                                        :optional-field "value"})]
+        (is (some? result))
+        (is (contains? (:errors result) :required-field))))))
+
+
 (deftest malli-schema-access-test
   (testing "can access underlying malli schema"
     (let [malli-schema (mds/schema->malli example-schema :fn-schema)]

@@ -244,3 +244,35 @@
                      (ds/add-entity :b {:a-id {:type :ref :ref-entity :a :nullable? true}})
                      (ds/build))]
       (is (some? schema)))))
+
+
+(deftest jsonb-validation-test
+  (let [schema (-> (mds/create-builder)
+                   (ds/add-entity :doc {:data {:type :jsonb}})
+                   (ds/build))]
+
+    (testing "jsonb accepts nil"
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid) :data nil}))))
+
+    (testing "jsonb accepts primitives"
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid) :data true})))
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid) :data 42})))
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid) :data 3.14})))
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid) :data "text"}))))
+
+    (testing "jsonb accepts arrays"
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid) :data [1 2 3]})))
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid) :data ["a" "b"]}))))
+
+    (testing "jsonb accepts objects with string keys"
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid) :data {"key" "value"}})))
+      (is (nil? (ds/validate-entity schema :doc {:id (random-uuid)
+                                                 :data {"nested" {"deep" [1 2 3]}}}))))
+
+    (testing "jsonb rejects keyword keys in maps"
+      (let [result (ds/validate-entity schema :doc {:id (random-uuid) :data {:key "value"}})]
+        (is (some? result))))
+
+    (testing "jsonb rejects functions"
+      (let [result (ds/validate-entity schema :doc {:id (random-uuid) :data inc})]
+        (is (some? result))))))

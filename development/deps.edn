@@ -1,29 +1,16 @@
 {:paths ["development/src"
          "development/resources"
          ;; Components src
-         "components/schema/src"
-         "components/schema-malli/src"
-         "components/storage/src"
-         "components/storage-memory/src"
-         "components/cache/src"
-         "components/cache-eager/src"
-         "components/graph/src"
-         ;; Bases src
-         "bases/dev/src"
-         "bases/dev/resources"]
+         "components/data-schema-protocol/src"
+         "components/field-types/src"
+         "components/malli-data-schema/src"
+         "components/graph-data-schema/src"]
 
- :deps {integrant/integrant {:mvn/version "0.13.1"}
-        metosin/malli {:mvn/version "0.18.0"}
-        com.taoensso/timbre {:mvn/version "6.6.2"}
-        org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}
+ :deps {metosin/malli {:mvn/version "0.20.0"}}
 
  :aliases
- {:test {:extra-paths [;; Components test
-                       "components/schema/test"
-                       "components/schema-malli/test"
-                       "components/storage/test"
-                       "components/storage-memory/test"
-                       "components/cache/test"
-                       "components/cache-eager/test"
-                       "components/graph/test"]
+ {:test {:extra-paths ["components/data-schema-protocol/test"
+                       "components/field-types/test"
+                       "components/malli-data-schema/test"
+                       "components/graph-data-schema/test"]
          :extra-deps {}}}}

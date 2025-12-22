@@ -25,7 +25,12 @@
   (testing "empty enum values throws"
     (is (thrown-with-msg?
           clojure.lang.ExceptionInfo #"empty"
-          (ds/add-enum (mds/create-builder) :empty [])))))
+          (ds/add-enum (mds/create-builder) :empty []))))
+
+  (testing "enum with duplicate values throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"duplicate"
+          (ds/add-enum (mds/create-builder) :status [:a :b :a])))))
 
 
 (deftest add-entity-test
@@ -39,7 +44,22 @@
           clojure.lang.ExceptionInfo #"Duplicate entity"
           (-> (mds/create-builder)
               (ds/add-entity :user {:name {:type :text}})
-              (ds/add-entity :user {:id {:type :uuid}}))))))
+              (ds/add-entity :user {:email {:type :text}})))))
+
+  (testing "entity name must be keyword"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must be a keyword"
+          (ds/add-entity (mds/create-builder) "user" {:name {:type :text}}))))
+
+  (testing "field name must be keyword"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must be a keyword"
+          (ds/add-entity (mds/create-builder) :user {"name" {:type :text}}))))
+
+  (testing "field name :id is reserved"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"reserved"
+          (ds/add-entity (mds/create-builder) :user {:id {:type :text}})))))
 
 
 (deftest build-validation-test
@@ -72,6 +92,26 @@
                                             :variants [{:type :int}
                                                        {:type :int}]}})
               (ds/build)))))
+
+  (testing "union with duplicate :ref to same entity throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"duplicate"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:name {:type :text}})
+              (ds/add-entity :item {:value {:type :union
+                                            :variants [{:type :ref :ref-entity :user}
+                                                       {:type :ref :ref-entity :user}]}})
+              (ds/build)))))
+
+  (testing "union with :ref to different entities is valid"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :user {:name {:type :text}})
+                     (ds/add-entity :role {:name {:type :text}})
+                     (ds/add-entity :item {:value {:type :union
+                                                   :variants [{:type :ref :ref-entity :user}
+                                                              {:type :ref :ref-entity :role}]}})
+                     (ds/build))]
+      (is (some? schema))))
 
   (testing "field missing :type throws"
     (is (thrown-with-msg?
@@ -214,7 +254,28 @@
                      (ds/add-entity :user {:name {:type :text}})
                      (ds/add-constraint :user {:type :unique :fields [:id :name]})
                      (ds/build))]
-      (is (some? schema)))))
+      (is (some? schema))))
+
+  (testing "constraint missing :type throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"missing :type"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:email {:type :text}})
+              (ds/add-constraint :user {:fields [:email]})))))
+
+  (testing "unknown constraint type throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Unknown constraint type"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:email {:type :text}})
+              (ds/add-constraint :user {:type :unknown :fields [:email]})))))
+
+  (testing "constraint missing :fields throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"missing :fields"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:email {:type :text}})
+              (ds/add-constraint :user {:type :unique}))))))
 
 
 (deftest entity-constraints-test

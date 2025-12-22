@@ -6,6 +6,19 @@
     [malli.error :as me]))
 
 
+(def ^:private jsonb-schema
+  "Schema for JSON-compatible values (recursive)."
+  [:schema {:registry {::json [:or
+                               :nil
+                               :boolean
+                               :int
+                               :double
+                               :string
+                               [:vector [:ref ::json]]
+                               [:map-of :string [:ref ::json]]]}}
+   [:ref ::json]])
+
+
 (def malli-type-mapping
   "Mapping of field-types to malli schemas."
   {:uuid        :uuid
@@ -14,7 +27,7 @@
    :bool        :boolean
    :numeric     [:or :int :double]
    :timestamptz inst?
-   :jsonb       any?
+   :jsonb       jsonb-schema
    :bytes       bytes?})
 
 
@@ -23,7 +36,35 @@
   (into #{:ref :enum :union} (keys malli-type-mapping)))
 
 
+(def ^:private known-constraint-types
+  "All valid constraint types."
+  #{:unique})
+
+
 ;; === Validation helpers ===
+
+(defn- validate-entity-name
+  "Validates entity name is a valid keyword."
+  [entity-name]
+  (when-not (keyword? entity-name)
+    (throw (ex-info "Entity name must be a keyword"
+                    {:entity-name entity-name
+                     :type (type entity-name)}))))
+
+
+(defn- validate-field-names
+  "Validates field names in an entity definition."
+  [entity-name fields]
+  (doseq [field-name (keys fields)]
+    (when-not (keyword? field-name)
+      (throw (ex-info "Field name must be a keyword"
+                      {:entity entity-name
+                       :field-name field-name
+                       :type (type field-name)})))
+    (when (= field-name :id)
+      (throw (ex-info "Field name :id is reserved (implicit primary key)"
+                      {:entity entity-name})))))
+
 
 (defn- validate-field-spec
   "Validates a single field spec structure. Throws if invalid."
@@ -106,6 +147,16 @@
                            :available-enums (keys enums-map)})))))))
 
 
+(defn- variant-identity
+  "Returns a normalized identity for a variant to detect duplicates.
+   For :ref includes :ref-entity, for :enum includes :enum-name."
+  [variant]
+  (case (:type variant)
+    :ref (select-keys variant [:type :ref-entity])
+    :enum (select-keys variant [:type :enum-name])
+    (select-keys variant [:type])))
+
+
 (defn- validate-union-variants
   "Validates union variants are not empty and have no duplicates."
   [entities-map]
@@ -116,10 +167,10 @@
     (when (empty? variants)
       (throw (ex-info "Union variants cannot be empty"
                       {:entity entity-name :field field-name})))
-    (let [variant-types (map :type variants)
-          duplicates (for [[t freq] (frequencies variant-types) :when (> freq 1)] t)]
+    (let [variant-ids (map variant-identity variants)
+          duplicates (for [[v freq] (frequencies variant-ids) :when (> freq 1)] v)]
       (when (seq duplicates)
-        (throw (ex-info "Union has duplicate variant types"
+        (throw (ex-info "Union has duplicate variants"
                         {:entity entity-name
                          :field field-name
                          :duplicates (vec duplicates)}))))))
@@ -232,11 +283,18 @@
     (when (empty? values)
       (throw (ex-info "Enum values cannot be empty"
                       {:enum-name enum-name})))
+    (let [duplicates (for [[v freq] (frequencies values) :when (> freq 1)] v)]
+      (when (seq duplicates)
+        (throw (ex-info "Enum has duplicate values"
+                        {:enum-name enum-name
+                         :duplicates (vec duplicates)}))))
     (assoc-in this [:enums-map enum-name] {:values (set values)}))
 
 
   (add-entity
     [this entity-name fields]
+    (validate-entity-name entity-name)
+    (validate-field-names entity-name fields)
     (when (contains? entities-map entity-name)
       (throw (ex-info (str "Duplicate entity name: " entity-name)
                       {:entity-name entity-name
@@ -246,6 +304,18 @@
 
   (add-constraint
     [this entity-name constraint]
+    (let [constraint-type (:type constraint)]
+      (when-not constraint-type
+        (throw (ex-info "Constraint missing :type"
+                        {:entity entity-name :constraint constraint})))
+      (when-not (contains? known-constraint-types constraint-type)
+        (throw (ex-info (str "Unknown constraint type: " constraint-type)
+                        {:entity entity-name
+                         :constraint constraint
+                         :known-types known-constraint-types})))
+      (when-not (seq (:fields constraint))
+        (throw (ex-info "Constraint missing :fields"
+                        {:entity entity-name :constraint constraint}))))
     (update-in this [:constraints-map entity-name] (fnil conj []) constraint))
 
 

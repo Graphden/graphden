@@ -209,3 +209,38 @@
 (deftest type-mapping-completeness-test
   (testing "malli-type-mapping covers all supported field types"
     (is (= ft/supported-types (set (keys core/malli-type-mapping))))))
+
+
+(deftest validation-at-build-time-test
+  (testing "unknown enum reference in union variant throws at build"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Unknown enum"
+          (-> (mds/create-builder)
+              (ds/add-entity :item
+                             {:value {:type :union
+                                      :variants [{:type :enum :enum-name :undefined}]}})
+              (ds/build)))))
+
+  (testing "unknown entity reference in union variant throws at build"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Unknown entity"
+          (-> (mds/create-builder)
+              (ds/add-entity :item
+                             {:value {:type :union
+                                      :variants [{:type :ref :ref-entity :undefined}]}})
+              (ds/build)))))
+
+  (testing "self-referencing entity is allowed"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :node {:parent-id {:type :ref
+                                                       :ref-entity :node
+                                                       :nullable? true}})
+                     (ds/build))]
+      (is (some? schema))))
+
+  (testing "circular references between entities are allowed"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :a {:b-id {:type :ref :ref-entity :b :nullable? true}})
+                     (ds/add-entity :b {:a-id {:type :ref :ref-entity :a :nullable? true}})
+                     (ds/build))]
+      (is (some? schema)))))

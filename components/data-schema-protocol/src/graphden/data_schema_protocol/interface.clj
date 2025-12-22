@@ -45,7 +45,14 @@
   (validate-entity
     [this entity-name data]
     "Validates data against the entity schema.
-     Returns nil if valid, or a map with :errors if invalid."))
+     Returns nil if valid, or a map with :errors if invalid.")
+
+  (entity-constraints
+    [this entity-name]
+    "Returns a vector of constraints for the given entity.
+     Each constraint is a map with :type and :fields.
+     Example: [{:type :unique :fields [:email]}
+               {:type :unique :fields [:tenant-id :name]}]"))
 
 
 (defprotocol DataSchemaBuilder
@@ -60,6 +67,12 @@
     "Adds an entity definition. Returns updated schema builder.
      Fields should be a map of field-name to field-spec.
      The :id field is automatically added.")
+
+  (add-constraint
+    [this entity-name constraint]
+    "Adds a constraint to an entity. Returns updated schema builder.
+     Constraint is a map with :type and :fields.
+     Example: {:type :unique :fields [:tenant-id :name]}")
 
   (build
     [this]

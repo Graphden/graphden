@@ -4,6 +4,7 @@
     [clojure.string :as str]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.storage-protocol.interface :as sp]
+    [honey.sql :as sql]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs])
   (:import
@@ -87,20 +88,22 @@
   "Creates metadata table if it doesn't exist."
   [ds]
   (jdbc/execute! ds
-                 [(str "CREATE TABLE IF NOT EXISTS " metadata-table-name " ("
-                       "uuid UUID PRIMARY KEY, "
-                       "kind TEXT NOT NULL, "
-                       "name TEXT NOT NULL, "
-                       "parent_uuid UUID, "
-                       "extra JSONB"
-                       ")")]))
+                 (sql/format {:create-table [(keyword metadata-table-name) :if-not-exists]
+                              :with-columns [[:uuid :uuid [:primary-key]]
+                                             [:kind :text [:not nil]]
+                                             [:name :text [:not nil]]
+                                             [:parent_uuid :uuid]
+                                             [:extra :jsonb]]}
+                             {:quoted true})))
 
 
 (defn- read-metadata-rows
   "Reads raw metadata rows for processing."
   [ds]
   (jdbc/execute! ds
-                 [(str "SELECT uuid, kind, name, parent_uuid, extra FROM " metadata-table-name)]
+                 (sql/format {:select [:uuid :kind :name :parent_uuid :extra]
+                              :from [(keyword metadata-table-name)]}
+                             {:quoted true})
                  {:builder-fn rs/as-unqualified-lower-maps}))
 
 
@@ -199,17 +202,22 @@
    (upsert-metadata! ds uuid kind meta-name parent-uuid nil))
   ([ds uuid kind meta-name parent-uuid extra]
    (jdbc/execute! ds
-                  [(str "INSERT INTO " metadata-table-name " (uuid, kind, name, parent_uuid, extra) "
-                        "VALUES (?, ?, ?, ?, ?::jsonb) "
-                        "ON CONFLICT (uuid) DO UPDATE SET name = EXCLUDED.name, parent_uuid = EXCLUDED.parent_uuid, extra = EXCLUDED.extra")
-                   uuid (name kind) (name meta-name) parent-uuid
-                   (extra->json extra)])))
+                  (sql/format {:insert-into (keyword metadata-table-name)
+                               :values [{:uuid uuid
+                                         :kind (name kind)
+                                         :name (name meta-name)
+                                         :parent_uuid parent-uuid
+                                         :extra [:cast (extra->json extra) :jsonb]}]
+                               :on-conflict [:uuid]
+                               :do-update-set [:name :parent_uuid :extra]}
+                              {:quoted true}))))
 
 
 (defn- save-metadata!
   "Saves complete metadata to table (truncate + insert all)."
   [ds schema]
-  (jdbc/execute! ds [(str "TRUNCATE TABLE " metadata-table-name)])
+  (jdbc/execute! ds (sql/format {:truncate (keyword metadata-table-name)}
+                                {:quoted true}))
   (doseq [entity-name (ds/entities schema)]
     (let [entity-uuid (ds/entity-uuid schema entity-name)]
       (upsert-metadata! ds entity-uuid :entity entity-name nil)
@@ -229,8 +237,12 @@
   "Returns set of table names in public schema (excluding metadata table)."
   [ds]
   (let [rows (jdbc/execute! ds
-                            ["SELECT table_name FROM information_schema.tables
-                              WHERE table_schema = 'public' AND table_type = 'BASE TABLE'"]
+                            (sql/format {:select [:table_name]
+                                         :from [:information_schema.tables]
+                                         :where [:and
+                                                 [:= :table_schema "public"]
+                                                 [:= :table_type "BASE TABLE"]]}
+                                        {:quoted true})
                             {:builder-fn rs/as-unqualified-lower-maps})]
     (set (remove #(= % metadata-table-name)
                  (map :table_name rows)))))
@@ -240,11 +252,13 @@
   "Returns map of column definitions for a table."
   [ds table-name]
   (let [rows (jdbc/execute! ds
-                            ["SELECT column_name, data_type, udt_name, is_nullable
-                              FROM information_schema.columns
-                              WHERE table_schema = 'public' AND table_name = ?
-                              AND column_name != 'id'"
-                             table-name]
+                            (sql/format {:select [:column_name :data_type :udt_name :is_nullable]
+                                         :from [:information_schema.columns]
+                                         :where [:and
+                                                 [:= :table_schema "public"]
+                                                 [:= :table_name table-name]
+                                                 [:<> :column_name "id"]]}
+                                        {:quoted true})
                             {:builder-fn rs/as-unqualified-lower-maps})]
     (into {}
           (map (fn [row]
@@ -276,10 +290,14 @@
   "Returns set of enum type names in public schema."
   [ds]
   (let [rows (jdbc/execute! ds
-                            ["SELECT t.typname
-                              FROM pg_type t
-                              JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
-                              WHERE n.nspname = 'public' AND t.typtype = 'e'"]
+                            (sql/format {:select [:t.typname]
+                                         :from [[:pg_type :t]]
+                                         :join [[:pg_catalog.pg_namespace :n]
+                                                [:= :n.oid :t.typnamespace]]
+                                         :where [:and
+                                                 [:= :n.nspname "public"]
+                                                 [:= :t.typtype "e"]]}
+                                        {:quoted true})
                             {:builder-fn rs/as-unqualified-lower-maps})]
     (set (map :typname rows))))
 
@@ -288,12 +306,16 @@
   "Returns set of values for a PostgreSQL enum type."
   [ds enum-name]
   (let [rows (jdbc/execute! ds
-                            ["SELECT e.enumlabel
-                              FROM pg_type t
-                              JOIN pg_catalog.pg_namespace n ON n.oid = t.typnamespace
-                              JOIN pg_enum e ON e.enumtypid = t.oid
-                              WHERE n.nspname = 'public' AND t.typname = ?"
-                             enum-name]
+                            (sql/format {:select [:e.enumlabel]
+                                         :from [[:pg_type :t]]
+                                         :join [[:pg_catalog.pg_namespace :n]
+                                                [:= :n.oid :t.typnamespace]
+                                                [:pg_enum :e]
+                                                [:= :e.enumtypid :t.oid]]
+                                         :where [:and
+                                                 [:= :n.nspname "public"]
+                                                 [:= :t.typname enum-name]]}
+                                        {:quoted true})
                             {:builder-fn rs/as-unqualified-lower-maps})]
     (set (map (comp keyword :enumlabel) rows))))
 
@@ -328,49 +350,63 @@
                           " RENAME TO " (ident->sql new-name))]))
 
 
-(defn- column-def
-  "Generates column definition SQL."
+(defn- build-column-spec
+  "Builds HoneySQL column specification for CREATE TABLE."
   [field-name field-spec]
-  (let [pg-type (field-type->pg field-spec)
-        nullable (if (:nullable? field-spec) "" " NOT NULL")]
-    (str (ident->sql field-name) " " pg-type nullable)))
+  (let [col-name (keyword (kw->snake-case field-name))
+        pg-type-str (field-type->pg field-spec)
+        ;; Handle enum types specially - they're quoted identifiers
+        col-type (if (str/starts-with? pg-type-str "\"")
+                   [:raw pg-type-str]
+                   (keyword (str/lower-case pg-type-str)))]
+    (if (:nullable? field-spec)
+      [col-name col-type]
+      [col-name col-type [:not nil]])))
 
 
 (defn- create-table!
   "Creates a PostgreSQL table with id as primary key."
   [ds table-name fields]
-  (let [cols (str/join ", "
-                       (cons "id UUID PRIMARY KEY DEFAULT gen_random_uuid()"
-                             (map (fn [[fname fspec]] (column-def fname fspec))
-                                  fields)))]
-    (jdbc/execute! ds [(str "CREATE TABLE " (ident->sql table-name) " (" cols ")")])))
+  (let [columns (into [[:id :uuid [:primary-key] [:default [:raw "gen_random_uuid()"]]]]
+                      (map (fn [[fname fspec]] (build-column-spec fname fspec)) fields))]
+    (jdbc/execute! ds
+                   (sql/format {:create-table (keyword (kw->snake-case table-name))
+                                :with-columns columns}
+                               {:quoted true}))))
 
 
 (defn- add-column!
   "Adds a column to an existing table."
   [ds table-name field-name field-spec]
-  (jdbc/execute! ds [(str "ALTER TABLE " (ident->sql table-name)
-                          " ADD COLUMN " (column-def field-name field-spec))]))
+  (jdbc/execute! ds
+                 (sql/format {:alter-table (keyword (kw->snake-case table-name))
+                              :add-column (build-column-spec field-name field-spec)}
+                             {:quoted true})))
 
 
 (defn- rename-table!
   "Renames a PostgreSQL table."
   [ds old-name new-name]
-  (jdbc/execute! ds [(str "ALTER TABLE " (ident->sql old-name)
-                          " RENAME TO " (ident->sql new-name))]))
+  (jdbc/execute! ds
+                 (sql/format {:alter-table (keyword (kw->snake-case old-name))
+                              :rename-table (keyword (kw->snake-case new-name))}
+                             {:quoted true})))
 
 
 (defn- rename-column!
   "Renames a column in a table."
   [ds table-name old-col-name new-col-name]
-  (jdbc/execute! ds [(str "ALTER TABLE " (ident->sql table-name)
-                          " RENAME COLUMN " (ident->sql old-col-name)
-                          " TO " (ident->sql new-col-name))]))
+  (jdbc/execute! ds
+                 (sql/format {:alter-table (keyword (kw->snake-case table-name))
+                              :rename-column [(keyword (kw->snake-case old-col-name))
+                                              (keyword (kw->snake-case new-col-name))]}
+                             {:quoted true})))
 
 
 (defn- alter-column-type!
   "Changes column type (for safe widening)."
   [ds table-name col-name new-type-sql]
+  ;; ALTER COLUMN with USING clause needs raw SQL for complex expressions
   (jdbc/execute! ds [(str "ALTER TABLE " (ident->sql table-name)
                           " ALTER COLUMN " (ident->sql col-name)
                           " TYPE " new-type-sql " USING " (ident->sql col-name)

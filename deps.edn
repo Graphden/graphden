@@ -65,6 +65,7 @@
    :extra-deps
    {lambdaisland/kaocha #:mvn{:version "1.91.1392"},
     com.github.seancorfield/next.jdbc #:mvn{:version "1.3.939"},
+    com.github.seancorfield/honeysql #:mvn{:version "2.6.1203"},
     com.zaxxer/HikariCP #:mvn{:version "6.2.1"},
     org.postgresql/postgresql #:mvn{:version "42.7.4"},
     org.testcontainers/postgresql #:mvn{:version "1.21.3"},
@@ -108,5 +109,6 @@
     metosin/malli #:mvn{:version "0.20.0"},
     ch.qos.logback/logback-classic #:mvn{:version "1.5.15"},
     com.github.seancorfield/next.jdbc #:mvn{:version "1.3.939"},
+    com.github.seancorfield/honeysql #:mvn{:version "2.6.1203"},
     org.testcontainers/postgresql #:mvn{:version "1.21.3"},
     com.datomic/local #:mvn{:version "1.0.291"}}}}}

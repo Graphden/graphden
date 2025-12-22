@@ -2,6 +2,7 @@
  :deps {graphden/storage-protocol {:local/root "../storage-protocol"}
         graphden/data-schema-protocol {:local/root "../data-schema-protocol"}
         com.github.seancorfield/next.jdbc {:mvn/version "1.3.939"}
+        com.github.seancorfield/honeysql {:mvn/version "2.6.1203"}
         com.zaxxer/HikariCP {:mvn/version "6.2.1"}
         org.postgresql/postgresql {:mvn/version "42.7.4"}}
  :aliases {:test {:extra-paths ["test"]

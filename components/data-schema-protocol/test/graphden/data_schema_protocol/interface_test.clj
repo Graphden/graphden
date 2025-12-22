@@ -152,6 +152,32 @@
                                                 :ref-field :name}})
               (ds/build)))))
 
+  (testing ":enum with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-enum :status [:active :inactive])
+              (ds/add-entity :user {:status {:type :enum
+                                             :enum-name :status
+                                             :ref-entity :foo}})
+              (ds/build)))))
+
+  (testing ":union with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:value {:type :union
+                                            :variants [{:type :int}]
+                                            :enum-name :foo}})
+              (ds/build)))))
+
+  (testing "base type with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:name {:type :text :ref-entity :foo}})
+              (ds/build)))))
+
   (testing ":enum without :enum-name throws"
     (is (thrown-with-msg?
           clojure.lang.ExceptionInfo #"requires :enum-name"

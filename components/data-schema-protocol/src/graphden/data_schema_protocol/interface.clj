@@ -31,11 +31,27 @@
     "Returns a map of field definitions for the given entity.
      Returns nil if entity is not found.
 
-     Each field is a map with :type and optional attributes:
-     - :nullable? - whether the field can be null (default: false)
-     - :ref-entity - for :ref type, the name of referenced entity
-     - :enum-name - for :enum type, the name of the enum
-     - :variants - for :union type, a vector of variant type specs
+     Each field is a map with :type (required) and type-specific attributes.
+     Allowed attributes per field type:
+
+     Base types (:uuid, :text, :int, :bool, :numeric, :timestamptz, :jsonb, :bytes):
+       - :type (required)
+       - :nullable? (optional, default false)
+
+     :ref (reference to another entity, always points to :id):
+       - :type (required, must be :ref)
+       - :ref-entity (required, keyword naming the referenced entity)
+       - :nullable? (optional, default false)
+
+     :enum (enumeration with predefined keyword values):
+       - :type (required, must be :enum)
+       - :enum-name (required, keyword naming the enum)
+       - :nullable? (optional, default false)
+
+     :union (value can be one of several types):
+       - :type (required, must be :union)
+       - :variants (required, vector of field specs without :nullable?)
+       - :nullable? (optional, default false)
 
      Example: {:name {:type :text}
                :bio {:type :text :nullable? true}

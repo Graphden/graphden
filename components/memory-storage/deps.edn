@@ -1,0 +1,5 @@
+{:paths ["src" "resources"]
+ :deps {graphden/storage-protocol {:local/root "../storage-protocol"}
+        graphden/data-schema-protocol {:local/root "../data-schema-protocol"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

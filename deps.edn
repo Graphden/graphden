@@ -1,82 +1,101 @@
-{:paths []
-
- :deps {org.clojure/clojure {:mvn/version "1.12.3"}}
-
+{:paths [],
+ :deps #:org.clojure{clojure #:mvn{:version "1.12.3"}},
  :aliases
- {;; === DEVELOPMENT ===
-
-  :dev
-  {:extra-paths ["development/src"
-                 "components/data-schema-protocol/src"
-                 "components/data-schema-protocol/resources"
-                 "components/field-types/src"
-                 "components/field-types/resources"
-                 "components/graph-data-schema/src"
-                 "components/graph-data-schema/resources"
-                 "components/malli-data-schema/src"
-                 "components/malli-data-schema/resources"]
-   :extra-deps
-   {integrant/integrant {:mvn/version "1.0.1"}
-    metosin/malli {:mvn/version "0.20.0"}
-    com.taoensso/timbre {:mvn/version "6.8.0"}
-    org.slf4j/slf4j-nop {:mvn/version "2.0.17"}}}
-
-  ;; === TESTING ===
-
-  :test
-  {:extra-paths ["components/data-schema-protocol/test"
-                 "components/field-types/test"
-                 "components/graph-data-schema/test"
-                 "components/malli-data-schema/test"]
-   :extra-deps
-   {lambdaisland/kaocha {:mvn/version "1.91.1392"}}}
-
-  ;; === POLYLITH ===
-
-  :poly
-  {:extra-deps {polylith/clj-poly {:mvn/version "0.2.21"}}
-   :main-opts ["-m" "polylith.clj.core.poly-cli.core"]}
-
-  ;; === LINTERS ===
-
-  ;; clj-kondo: Static analysis
-  :kondo
-  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2025.10.23"}}
-   :main-opts ["-m" "clj-kondo.main"]}
-
-  ;; cljstyle: Code formatting
-  :cljstyle
-  {:extra-deps {mvxcvi/cljstyle {:mvn/version "0.17.642"}}
-   :main-opts ["-m" "cljstyle.main"]}
-
-  ;; splint: Modern linter (covers kibit functionality)
-  :splint
-  {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}
-   :main-opts ["-m" "noahtheduke.splint"]}
-
-  ;; cloverage: Test coverage
-  :cloverage
-  {:extra-deps {cloverage/cloverage {:mvn/version "1.2.4"}}
-   :main-opts ["-m" "cloverage.coverage"]}
-
-  ;; clj-watson: Security CVE scanner
-  :watson
-  {:extra-deps {io.github.clj-holmes/clj-watson
-                {:git/tag "v6.0.1" :git/sha "b520351"}}
-   :main-opts ["-m" "clj-watson.cli" "scan"]}
-
-  ;; antq: Outdated dependencies
+ {:poly
+  {:extra-deps #:polylith{clj-poly #:mvn{:version "0.2.21"}},
+   :main-opts ["-m" "polylith.clj.core.poly-cli.core"]},
   :outdated
-  {:extra-deps {com.github.liquidz/antq {:mvn/version "2.11.1276"}}
-   :main-opts ["-m" "antq.core"]}
-
-  ;; === REPL ===
-
+  {:extra-deps #:com.github.liquidz{antq #:mvn{:version "2.11.1276"}},
+   :main-opts ["-m" "antq.core"]},
+  :watson
+  {:extra-deps
+   #:io.github.clj-holmes{clj-watson
+                          #:git{:tag "v6.0.1", :sha "b520351"}},
+   :main-opts ["-m" "clj-watson.cli" "scan"]},
+  :kondo
+  {:extra-deps #:clj-kondo{clj-kondo #:mvn{:version "2025.10.23"}},
+   :main-opts ["-m" "clj-kondo.main"]},
+  :cljstyle
+  {:extra-deps #:mvxcvi{cljstyle #:mvn{:version "0.17.642"}},
+   :main-opts ["-m" "cljstyle.main"]},
+  :cloverage
+  {:extra-deps #:cloverage{cloverage #:mvn{:version "1.2.4"}},
+   :main-opts ["-m" "cloverage.coverage"]},
   :nrepl
   {:extra-deps
-   {nrepl/nrepl {:mvn/version "1.5.1"}
-    cider/cider-nrepl {:mvn/version "0.58.0"}
-    refactor-nrepl/refactor-nrepl {:mvn/version "3.11.0"}}
+   {nrepl/nrepl #:mvn{:version "1.5.1"},
+    cider/cider-nrepl #:mvn{:version "0.58.0"},
+    refactor-nrepl/refactor-nrepl #:mvn{:version "3.11.0"}},
    :main-opts
-   ["-m" "nrepl.cmdline"
-    "--middleware" "[cider.nrepl/cider-middleware,refactor-nrepl.middleware/wrap-refactor]"]}}}
+   ["-m"
+    "nrepl.cmdline"
+    "--middleware"
+    "[cider.nrepl/cider-middleware,refactor-nrepl.middleware/wrap-refactor]"]},
+  :splint
+  {:extra-deps
+   #:io.github.noahtheduke{splint #:mvn{:version "1.22.0"}},
+   :main-opts ["-m" "noahtheduke.splint"]},
+  :test
+  {:extra-paths
+   ["development/resources"
+    "components/data-schema-protocol/src"
+    "components/data-schema-protocol/test"
+    "components/field-types/src"
+    "components/field-types/test"
+    "components/graph-data-schema/src"
+    "components/graph-data-schema/test"
+    "components/graph-storage-memory/src"
+    "components/graph-storage-memory/test"
+    "components/graph-storage-postgres/src"
+    "components/graph-storage-postgres/test"
+    "components/malli-data-schema/src"
+    "components/malli-data-schema/test"
+    "components/memory-storage/src"
+    "components/memory-storage/test"
+    "components/postgres-storage/src"
+    "components/postgres-storage/test"
+    "components/storage-protocol/src"
+    "components/storage-protocol/test"
+    "bases/.gitkeep/src"
+    "bases/.gitkeep/resources"],
+   :extra-deps
+   {lambdaisland/kaocha #:mvn{:version "1.91.1392"},
+    com.github.seancorfield/next.jdbc #:mvn{:version "1.3.939"},
+    com.zaxxer/HikariCP #:mvn{:version "6.2.1"},
+    org.postgresql/postgresql #:mvn{:version "42.7.4"},
+    org.testcontainers/postgresql #:mvn{:version "1.21.3"},
+    org.testcontainers/testcontainers #:mvn{:version "1.21.3"},
+    ch.qos.logback/logback-classic #:mvn{:version "1.5.15"}}},
+  :dev
+  {:extra-paths
+   ["development/src"
+    "components/data-schema-protocol/src"
+    "components/data-schema-protocol/test"
+    "components/field-types/src"
+    "components/field-types/test"
+    "components/graph-data-schema/src"
+    "components/graph-data-schema/test"
+    "components/graph-storage-memory/src"
+    "components/graph-storage-memory/test"
+    "components/graph-storage-postgres/src"
+    "components/graph-storage-postgres/test"
+    "components/malli-data-schema/src"
+    "components/malli-data-schema/test"
+    "components/memory-storage/src"
+    "components/memory-storage/test"
+    "components/postgres-storage/src"
+    "components/postgres-storage/test"
+    "components/storage-protocol/src"
+    "components/storage-protocol/test"
+    "bases/.gitkeep/src"
+    "bases/.gitkeep/resources"],
+   :extra-deps
+   {com.zaxxer/HikariCP #:mvn{:version "6.2.1"},
+    org.testcontainers/testcontainers #:mvn{:version "1.21.3"},
+    org.postgresql/postgresql #:mvn{:version "42.7.4"},
+    integrant/integrant #:mvn{:version "1.0.1"},
+    com.taoensso/timbre #:mvn{:version "6.8.0"},
+    metosin/malli #:mvn{:version "0.20.0"},
+    ch.qos.logback/logback-classic #:mvn{:version "1.5.15"},
+    com.github.seancorfield/next.jdbc #:mvn{:version "1.3.939"},
+    org.testcontainers/postgresql #:mvn{:version "1.21.3"}}}}}

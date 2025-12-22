@@ -1,0 +1,8 @@
+{:paths ["src" "resources"]
+ :deps {graphden/postgres-storage {:local/root "../postgres-storage"}
+        graphden/graph-data-schema {:local/root "../graph-data-schema"}
+        graphden/malli-data-schema {:local/root "../malli-data-schema"}
+        graphden/storage-protocol {:local/root "../storage-protocol"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {org.testcontainers/postgresql {:mvn/version "1.20.4"}
+                               org.testcontainers/testcontainers {:mvn/version "1.20.4"}}}}}

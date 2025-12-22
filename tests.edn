@@ -1,7 +1,14 @@
 #kaocha/v1
-{:tests [{:id :unit
-          :test-paths ["components/data-schema-protocol/test"
-                       "components/field-types/test"
-                       "components/graph-data-schema/test"
-                       "components/malli-data-schema/test"]}]
+{:tests
+ [{:id :unit
+   :test-paths
+   ["components/data-schema-protocol/test"
+    "components/field-types/test"
+    "components/graph-data-schema/test"
+    "components/graph-storage-memory/test"
+    "components/graph-storage-postgres/test"
+    "components/malli-data-schema/test"
+    "components/memory-storage/test"
+    "components/postgres-storage/test"
+    "components/storage-protocol/test"]}]
  :plugins [:kaocha.plugin/profiling]}

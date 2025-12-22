@@ -22,8 +22,9 @@
   (testing "schema contains value-kind enum with null + all field types"
     (let [enums (ds/enums schema)]
       (is (contains? enums :value-kind))
+      ;; :values is now a map of value->uuid
       (is (= (conj ft/supported-types :null)
-             (:values (get enums :value-kind)))))))
+             (set (keys (:values (get enums :value-kind)))))))))
 
 
 (deftest entity-fields-test

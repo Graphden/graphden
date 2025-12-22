@@ -68,13 +68,14 @@
 
 (defn- validate-field-spec
   "Validates a single field spec structure. Throws if invalid.
-   When in-variant? is true, :nullable? is not allowed (variants cannot be nullable)."
+   When in-variant? is true, :nullable? and :uuid are not allowed (variants cannot have them)."
   ([entity-name field-name field-spec]
    (validate-field-spec entity-name field-name field-spec false))
   ([entity-name field-name field-spec in-variant?]
    (let [field-type (:type field-spec)
          ;; Allowed keys depend on whether we're in a variant context
-         base-allowed-keys (if in-variant? #{:type} #{:type :nullable?})]
+         ;; Variants don't have :uuid or :nullable?
+         base-allowed-keys (if in-variant? #{:type} #{:type :nullable? :uuid})]
      ;; Check :type is present
      (when-not field-type
        (throw (ex-info "Field spec missing :type"
@@ -246,7 +247,8 @@
 
                       :enum
                       (let [enum-def (get enums (:enum-name field-spec))]
-                        (into [:enum] (:values enum-def)))
+                        ;; :values is a map of value->uuid, use keys for enum schema
+                        (into [:enum] (keys (:values enum-def))))
 
                       :union
                       (into [:or] (map #(make-variant-schema % enums)
@@ -269,13 +271,18 @@
 
 
 (defrecord MalliDataSchema
-  [enums-map entities-map constraints-map compiled-schemas]
+  [enums-map entities-map entity-uuids-map constraints-map compiled-schemas]
 
   ds/DataSchema
 
   (entities
     [_this]
     (keys entities-map))
+
+
+  (entity-uuid
+    [_this entity-name]
+    (get entity-uuids-map entity-name))
 
 
   (entity-fields
@@ -286,6 +293,11 @@
   (enums
     [_this]
     enums-map)
+
+
+  (enum-uuid
+    [_this enum-name]
+    (get-in enums-map [enum-name :uuid]))
 
 
   (validate-entity
@@ -320,42 +332,153 @@
                          :available-fields (conj (set (keys entity-fields)) :id)}))))))
 
 
+(defn- validate-uuid
+  "Validates that a value is a UUID. Throws if not."
+  [context value]
+  (when-not (uuid? value)
+    (throw (ex-info "UUID required"
+                    (merge context {:value value :type (type value)})))))
+
+
+(defn- collect-all-uuids
+  "Collects all UUIDs from a builder for duplicate detection.
+   Returns a sequence of {:uuid uuid :location description} maps."
+  [{:keys [enums-map entities-map entity-uuids-map]}]
+  (concat
+    ;; Entity UUIDs
+    (for [[entity-name entity-uuid] entity-uuids-map]
+      {:uuid entity-uuid :location (str "entity " entity-name)})
+    ;; Field UUIDs
+    (for [[entity-name fields] entities-map
+          [field-name field-spec] fields]
+      {:uuid (:uuid field-spec) :location (str "field " entity-name "/" field-name)})
+    ;; Enum UUIDs
+    (for [[enum-name enum-def] enums-map]
+      {:uuid (:uuid enum-def) :location (str "enum " enum-name)})
+    ;; Enum value UUIDs
+    (for [[enum-name enum-def] enums-map
+          [value value-uuid] (:values enum-def)]
+      {:uuid value-uuid :location (str "enum value " enum-name "/" value)})))
+
+
+(defn- check-uuid-uniqueness
+  "Checks that a new UUID doesn't conflict with existing ones.
+   Throws if duplicate found."
+  [builder new-uuid new-location]
+  (doseq [{:keys [uuid location]} (collect-all-uuids builder)]
+    (when (= uuid new-uuid)
+      (throw (ex-info "Duplicate UUID"
+                      {:uuid new-uuid
+                       :new-location new-location
+                       :existing-location location})))))
+
+
 (defrecord MalliDataSchemaBuilder
-  [enums-map entities-map constraints-map]
+  [enums-map entities-map entity-uuids-map constraints-map]
 
   ds/DataSchemaBuilder
 
   (add-enum
-    [this enum-name values]
+    [this enum-name enum-uuid values]
+    ;; Validate enum-name
+    (when-not (keyword? enum-name)
+      (throw (ex-info "Enum name must be a keyword"
+                      {:enum-name enum-name :type (type enum-name)})))
+    ;; Check for duplicate enum name
     (when (contains? enums-map enum-name)
       (throw (ex-info (str "Duplicate enum name: " enum-name)
                       {:enum-name enum-name
-                       :existing-values (:values (get enums-map enum-name))})))
+                       :existing-values (keys (:values (get enums-map enum-name)))})))
+    ;; Validate enum-uuid
+    (validate-uuid {:context "enum" :enum-name enum-name} enum-uuid)
+    ;; Check UUID uniqueness
+    (check-uuid-uniqueness this enum-uuid (str "enum " enum-name))
+    ;; Validate values format
     (when (empty? values)
       (throw (ex-info "Enum values cannot be empty"
                       {:enum-name enum-name})))
-    (let [non-keywords (remove keyword? values)]
-      (when (seq non-keywords)
-        (throw (ex-info "Enum values must be keywords"
-                        {:enum-name enum-name
-                         :invalid-values (vec non-keywords)}))))
-    (let [duplicates (for [[v freq] (frequencies values) :when (> freq 1)] v)]
+    (when-not (vector? values)
+      (throw (ex-info "Enum values must be a vector"
+                      {:enum-name enum-name :values values})))
+    ;; Validate each value entry
+    (doseq [entry values]
+      (when-not (map? entry)
+        (throw (ex-info "Each enum value must be a map with :uuid and :value"
+                        {:enum-name enum-name :entry entry})))
+      (when-not (contains? entry :uuid)
+        (throw (ex-info "Enum value missing :uuid"
+                        {:enum-name enum-name :entry entry})))
+      (when-not (contains? entry :value)
+        (throw (ex-info "Enum value missing :value"
+                        {:enum-name enum-name :entry entry})))
+      (validate-uuid {:context "enum value" :enum-name enum-name :value (:value entry)}
+                     (:uuid entry))
+      (when-not (keyword? (:value entry))
+        (throw (ex-info "Enum value :value must be a keyword"
+                        {:enum-name enum-name :entry entry})))
+      ;; Check value UUID uniqueness
+      (check-uuid-uniqueness this (:uuid entry)
+                             (str "enum value " enum-name "/" (:value entry))))
+    ;; Check for duplicate values
+    (let [value-keywords (map :value values)
+          duplicates (for [[v freq] (frequencies value-keywords) :when (> freq 1)] v)]
       (when (seq duplicates)
         (throw (ex-info "Enum has duplicate values"
                         {:enum-name enum-name
                          :duplicates (vec duplicates)}))))
-    (assoc-in this [:enums-map enum-name] {:values (set values)}))
+    ;; Check for duplicate UUIDs within values
+    (let [value-uuids (map :uuid values)
+          duplicates (for [[u freq] (frequencies value-uuids) :when (> freq 1)] u)]
+      (when (seq duplicates)
+        (throw (ex-info "Enum has duplicate value UUIDs"
+                        {:enum-name enum-name
+                         :duplicates (vec duplicates)}))))
+    ;; Store as {:uuid enum-uuid :values {value-keyword value-uuid ...}}
+    (let [values-map (into {} (map (fn [{:keys [uuid value]}] [value uuid]) values))]
+      (assoc-in this [:enums-map enum-name] {:uuid enum-uuid :values values-map})))
 
 
   (add-entity
-    [this entity-name fields]
+    [this entity-name entity-uuid fields]
     (validate-entity-name entity-name)
     (validate-field-names entity-name fields)
+    ;; Check for duplicate entity name
     (when (contains? entities-map entity-name)
       (throw (ex-info (str "Duplicate entity name: " entity-name)
                       {:entity-name entity-name
                        :existing-fields (keys (get entities-map entity-name))})))
-    (assoc-in this [:entities-map entity-name] fields))
+    ;; Validate entity-uuid
+    (validate-uuid {:context "entity" :entity-name entity-name} entity-uuid)
+    ;; Check entity UUID uniqueness against existing UUIDs
+    (check-uuid-uniqueness this entity-uuid (str "entity " entity-name))
+    ;; Validate each field has :uuid and collect them for duplicate check
+    (let [field-uuids (atom #{})]
+      (doseq [[field-name field-spec] fields]
+        (when-not (contains? field-spec :uuid)
+          (throw (ex-info "Field missing :uuid"
+                          {:entity entity-name :field field-name :spec field-spec})))
+        (let [field-uuid (:uuid field-spec)]
+          (validate-uuid {:context "field" :entity entity-name :field field-name}
+                         field-uuid)
+          ;; Check field UUID against entity UUID
+          (when (= field-uuid entity-uuid)
+            (throw (ex-info "Duplicate UUID"
+                            {:uuid field-uuid
+                             :new-location (str "field " entity-name "/" field-name)
+                             :existing-location (str "entity " entity-name)})))
+          ;; Check field UUID against other fields in this entity
+          (when (contains? @field-uuids field-uuid)
+            (throw (ex-info "Duplicate UUID within entity"
+                            {:entity entity-name
+                             :field field-name
+                             :uuid field-uuid})))
+          (swap! field-uuids conj field-uuid)
+          ;; Check field UUID uniqueness against existing UUIDs in builder
+          (check-uuid-uniqueness this field-uuid
+                                 (str "field " entity-name "/" field-name)))))
+    (-> this
+        (assoc-in [:entities-map entity-name] fields)
+        (assoc-in [:entity-uuids-map entity-name] entity-uuid)))
 
 
   (add-constraint
@@ -409,13 +532,13 @@
     (let [compiled (into {}
                          (for [[entity-name fields] entities-map]
                            [entity-name (make-entity-schema fields enums-map)]))]
-      (->MalliDataSchema enums-map entities-map constraints-map compiled))))
+      (->MalliDataSchema enums-map entities-map entity-uuids-map constraints-map compiled))))
 
 
 (defn create-builder
   "Creates a new MalliDataSchemaBuilder."
   []
-  (->MalliDataSchemaBuilder {} {} {}))
+  (->MalliDataSchemaBuilder {} {} {} {}))
 
 
 (defn schema->malli

@@ -7,6 +7,12 @@
     [graphden.malli-data-schema.interface :as mds]))
 
 
+;; Helper to generate UUIDs for tests
+(defn- uuid
+  []
+  (random-uuid))
+
+
 (def example-schema
   "Example schema representing a function definition system.
    Based on the following structure:
@@ -23,33 +29,41 @@
   (-> (mds/create-builder)
 
       ;; Define the value_kind enum
-      (ds/add-enum :value-kind
-                   [:null :bool :int :numeric :text :uuid :timestamptz :jsonb :bytes])
+      (ds/add-enum :value-kind (uuid)
+                   [{:uuid (uuid) :value :null}
+                    {:uuid (uuid) :value :bool}
+                    {:uuid (uuid) :value :int}
+                    {:uuid (uuid) :value :numeric}
+                    {:uuid (uuid) :value :text}
+                    {:uuid (uuid) :value :uuid}
+                    {:uuid (uuid) :value :timestamptz}
+                    {:uuid (uuid) :value :jsonb}
+                    {:uuid (uuid) :value :bytes}])
 
       ;; fn_schema: defines function signatures
-      (ds/add-entity :fn-schema
-                     {:name {:type :text}
-                      :returned-type {:type :enum :enum-name :value-kind}})
+      (ds/add-entity :fn-schema (uuid)
+                     {:name {:uuid (uuid) :type :text}
+                      :returned-type {:uuid (uuid) :type :enum :enum-name :value-kind}})
       (ds/add-constraint :fn-schema {:type :unique :fields [:name]})
 
       ;; arg_schema: defines function arguments
-      (ds/add-entity :arg-schema
-                     {:fn-schema-id {:type :ref :ref-entity :fn-schema}
-                      :name {:type :text}
-                      :type {:type :enum :enum-name :value-kind}})
+      (ds/add-entity :arg-schema (uuid)
+                     {:fn-schema-id {:uuid (uuid) :type :ref :ref-entity :fn-schema}
+                      :name {:uuid (uuid) :type :text}
+                      :type {:uuid (uuid) :type :enum :enum-name :value-kind}})
 
       ;; fn: actual function instances
-      (ds/add-entity :fn
-                     {:name {:type :text}
-                      :fn-schema-id {:type :ref :ref-entity :fn-schema}})
+      (ds/add-entity :fn (uuid)
+                     {:name {:uuid (uuid) :type :text}
+                      :fn-schema-id {:uuid (uuid) :type :ref :ref-entity :fn-schema}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
       ;; arg_value: argument values for function instances
       ;; value is a union: either a reference to another fn, or a literal value
-      (ds/add-entity :arg-value
-                     {:owner-fn-id {:type :ref :ref-entity :fn}
-                      :arg-schema-id {:type :ref :ref-entity :arg-schema}
-                      :value {:type :union
+      (ds/add-entity :arg-value (uuid)
+                     {:owner-fn-id {:uuid (uuid) :type :ref :ref-entity :fn}
+                      :arg-schema-id {:uuid (uuid) :type :ref :ref-entity :arg-schema}
+                      :value {:uuid (uuid) :type :union
                               :variants [{:type :ref :ref-entity :fn}
                                          {:type :bool}
                                          {:type :int}
@@ -73,8 +87,9 @@
   (testing "schema contains value-kind enum"
     (let [enums (ds/enums example-schema)]
       (is (contains? enums :value-kind))
+      ;; :values is now a map of value->uuid
       (is (= #{:null :bool :int :numeric :text :uuid :timestamptz :jsonb :bytes}
-             (:values (get enums :value-kind)))))))
+             (set (keys (:values (get enums :value-kind)))))))))
 
 
 (deftest entity-fields-test
@@ -179,9 +194,9 @@
 
 (deftest nullable-fields-test
   (let [schema (-> (mds/create-builder)
-                   (ds/add-entity :with-nullable
-                                  {:required-field {:type :text :nullable? false}
-                                   :optional-field {:type :text :nullable? true}})
+                   (ds/add-entity :with-nullable (uuid)
+                                  {:required-field {:uuid (uuid) :type :text :nullable? false}
+                                   :optional-field {:uuid (uuid) :type :text :nullable? true}})
                    (ds/build))]
 
     (testing "valid entity with nullable field as nil"
@@ -221,8 +236,8 @@
     (is (thrown-with-msg?
           clojure.lang.ExceptionInfo #"Unknown enum"
           (-> (mds/create-builder)
-              (ds/add-entity :item
-                             {:value {:type :union
+              (ds/add-entity :item (uuid)
+                             {:value {:uuid (uuid) :type :union
                                       :variants [{:type :enum :enum-name :undefined}]}})
               (ds/build)))))
 
@@ -230,30 +245,33 @@
     (is (thrown-with-msg?
           clojure.lang.ExceptionInfo #"Unknown entity"
           (-> (mds/create-builder)
-              (ds/add-entity :item
-                             {:value {:type :union
+              (ds/add-entity :item (uuid)
+                             {:value {:uuid (uuid) :type :union
                                       :variants [{:type :ref :ref-entity :undefined}]}})
               (ds/build)))))
 
   (testing "self-referencing entity is allowed"
     (let [schema (-> (mds/create-builder)
-                     (ds/add-entity :node {:parent-id {:type :ref
-                                                       :ref-entity :node
-                                                       :nullable? true}})
+                     (ds/add-entity :node (uuid)
+                                    {:parent-id {:uuid (uuid) :type :ref
+                                                 :ref-entity :node
+                                                 :nullable? true}})
                      (ds/build))]
       (is (some? schema))))
 
   (testing "circular references between entities are allowed"
     (let [schema (-> (mds/create-builder)
-                     (ds/add-entity :a {:b-id {:type :ref :ref-entity :b :nullable? true}})
-                     (ds/add-entity :b {:a-id {:type :ref :ref-entity :a :nullable? true}})
+                     (ds/add-entity :a (uuid)
+                                    {:b-id {:uuid (uuid) :type :ref :ref-entity :b :nullable? true}})
+                     (ds/add-entity :b (uuid)
+                                    {:a-id {:uuid (uuid) :type :ref :ref-entity :a :nullable? true}})
                      (ds/build))]
       (is (some? schema)))))
 
 
 (deftest jsonb-validation-test
   (let [schema (-> (mds/create-builder)
-                   (ds/add-entity :doc {:data {:type :jsonb}})
+                   (ds/add-entity :doc (uuid) {:data {:uuid (uuid) :type :jsonb}})
                    (ds/build))]
 
     (testing "jsonb accepts nil"

@@ -4,9 +4,14 @@
    Data schema describes entities that can be stored in various storage backends
    (PostgreSQL, Datomic, in-memory, etc.). Each entity has:
    - A unique name (keyword)
-   - A set of fields with types
+   - A stable UUID (for tracking identity across renames)
+   - A set of fields with types (each field has its own UUID)
    - An implicit :id field of type :uuid (primary key)
    - Optional constraints (e.g., unique indexes)
+
+   UUIDs are used by storage implementations to track identity during migrations.
+   When an entity/field/enum is renamed, the UUID stays the same, allowing
+   storage to detect renames vs add/delete operations.
 
    Supported field types:
    - :uuid, :text, :int, :bool, :numeric, :timestamptz, :jsonb, :bytes
@@ -26,38 +31,47 @@
     [this]
     "Returns a sequence of entity names defined in this schema.")
 
+  (entity-uuid
+    [this entity-name]
+    "Returns the UUID of the given entity, or nil if entity not found.")
+
   (entity-fields
     [this entity-name]
     "Returns a map of field definitions for the given entity.
      Returns nil if entity is not found.
 
-     Each field is a map with :type (required) and type-specific attributes.
-     Allowed attributes per field type:
+     Each field is a map with :uuid (required), :type (required), and
+     type-specific attributes. Allowed attributes per field type:
 
      Base types (:uuid, :text, :int, :bool, :numeric, :timestamptz, :jsonb, :bytes):
+       - :uuid (required, stable identifier)
        - :type (required)
        - :nullable? (optional, default false)
 
      :ref (reference to another entity, always points to :id):
+       - :uuid (required, stable identifier)
        - :type (required, must be :ref)
        - :ref-entity (required, keyword naming the referenced entity)
        - :nullable? (optional, default false)
 
      :enum (enumeration with predefined keyword values):
+       - :uuid (required, stable identifier)
        - :type (required, must be :enum)
        - :enum-name (required, keyword naming the enum)
        - :nullable? (optional, default false)
 
      :union (value can be one of several types):
+       - :uuid (required, stable identifier)
        - :type (required, must be :union)
-       - :variants (required, vector of field specs without :nullable?)
+       - :variants (required, vector of field specs without :nullable? or :uuid)
        - :nullable? (optional, default false)
 
-     Example: {:name {:type :text}
-               :bio {:type :text :nullable? true}
-               :role {:type :enum :enum-name :user-role}
-               :manager-id {:type :ref :ref-entity :user}
-               :value {:type :union
+     Example: {:name {:uuid #uuid \"...\" :type :text}
+               :bio {:uuid #uuid \"...\" :type :text :nullable? true}
+               :role {:uuid #uuid \"...\" :type :enum :enum-name :user-role}
+               :manager-id {:uuid #uuid \"...\" :type :ref :ref-entity :user}
+               :value {:uuid #uuid \"...\"
+                       :type :union
                        :variants [{:type :ref :ref-entity :fn}
                                   {:type :int}
                                   {:type :text}]}}")
@@ -65,8 +79,18 @@
   (enums
     [this]
     "Returns a map of enum definitions.
-     Each enum is a map with :values containing a set of allowed keyword values.
-     Example: {:user-role {:values #{:admin :user :guest}}}")
+     Each enum is a map with:
+       - :uuid - stable identifier for the enum
+       - :values - map of value keyword to value UUID
+
+     Example: {:user-role {:uuid #uuid \"...\"
+                           :values {:admin #uuid \"...\"
+                                    :user #uuid \"...\"
+                                    :guest #uuid \"...\"}}}")
+
+  (enum-uuid
+    [this enum-name]
+    "Returns the UUID of the given enum, or nil if enum not found.")
 
   (validate-entity
     [this entity-name data]
@@ -93,16 +117,28 @@
   "Protocol for building data schemas programmatically."
 
   (add-enum
-    [this enum-name values]
+    [this enum-name enum-uuid values]
     "Adds an enum type definition. Returns updated schema builder.
-     Values must be a non-empty collection of unique keyword values.")
+     - enum-name: keyword naming the enum
+     - enum-uuid: UUID for the enum (stable across renames)
+     - values: vector of {:uuid ... :value ...} maps
+
+     Example: (add-enum builder :status #uuid \"...\"
+                [{:uuid #uuid \"...\" :value :active}
+                 {:uuid #uuid \"...\" :value :inactive}])")
 
   (add-entity
-    [this entity-name fields]
+    [this entity-name entity-uuid fields]
     "Adds an entity definition. Returns updated schema builder.
-     Entity name must be a keyword.
-     Fields should be a map of field-name (keyword) to field-spec.
-     Field name :id is reserved (implicit primary key).")
+     - entity-name: keyword (must not conflict with existing)
+     - entity-uuid: UUID for the entity (stable across renames)
+     - fields: map of field-name to field-spec (each spec must include :uuid)
+
+     Field name :id is reserved (implicit primary key).
+
+     Example: (add-entity builder :user #uuid \"...\"
+                {:name {:uuid #uuid \"...\" :type :text}
+                 :email {:uuid #uuid \"...\" :type :text :nullable? true}})")
 
   (add-constraint
     [this entity-name constraint]
@@ -113,5 +149,5 @@
   (build
     [this]
     "Builds and returns the final DataSchema.
-     Validates all references and constraints before building.
+     Validates all references, constraints, and UUID uniqueness before building.
      Throws ExceptionInfo if schema is invalid."))

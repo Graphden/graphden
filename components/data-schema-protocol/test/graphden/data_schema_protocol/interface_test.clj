@@ -30,7 +30,15 @@
   (testing "enum with duplicate values throws"
     (is (thrown-with-msg?
           clojure.lang.ExceptionInfo #"duplicate"
-          (ds/add-enum (mds/create-builder) :status [:a :b :a])))))
+          (ds/add-enum (mds/create-builder) :status [:a :b :a]))))
+
+  (testing "enum values must be keywords"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must be keywords"
+          (ds/add-enum (mds/create-builder) :status ["active" "inactive"])))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must be keywords"
+          (ds/add-enum (mds/create-builder) :status [1 2 3])))))
 
 
 (deftest add-entity-test
@@ -134,6 +142,16 @@
               (ds/add-entity :user {:other-id {:type :ref}})
               (ds/build)))))
 
+  (testing ":ref with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-entity :target {:name {:type :text}})
+              (ds/add-entity :user {:target-id {:type :ref
+                                                :ref-entity :target
+                                                :ref-field :name}})
+              (ds/build)))))
+
   (testing ":enum without :enum-name throws"
     (is (thrown-with-msg?
           clojure.lang.ExceptionInfo #"requires :enum-name"
@@ -154,6 +172,18 @@
           (-> (mds/create-builder)
               (ds/add-entity :user {:value {:type :union
                                             :variants [{:type :ref}]}})
+              (ds/build)))))
+
+  (testing ":nullable? must be boolean"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must be a boolean"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:name {:type :text :nullable? "true"}})
+              (ds/build))))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must be a boolean"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:name {:type :text :nullable? 1}})
               (ds/build)))))
 
   (testing "build with valid schema succeeds"
@@ -270,12 +300,46 @@
               (ds/add-entity :user {:email {:type :text}})
               (ds/add-constraint :user {:type :unknown :fields [:email]})))))
 
-  (testing "constraint missing :fields throws"
+  (testing "constraint :fields must be a vector"
     (is (thrown-with-msg?
-          clojure.lang.ExceptionInfo #"missing :fields"
+          clojure.lang.ExceptionInfo #"must be a vector"
           (-> (mds/create-builder)
               (ds/add-entity :user {:email {:type :text}})
-              (ds/add-constraint :user {:type :unique}))))))
+              (ds/add-constraint :user {:type :unique :fields :email}))))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must be a vector"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:email {:type :text}})
+              (ds/add-constraint :user {:type :unique})))))
+
+  (testing "constraint :fields cannot be empty"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"cannot be empty"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:email {:type :text}})
+              (ds/add-constraint :user {:type :unique :fields []})))))
+
+  (testing "constraint :fields must contain keywords"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"must contain only keywords"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:email {:type :text}})
+              (ds/add-constraint :user {:type :unique :fields ["email"]})))))
+
+  (testing "duplicate constraint throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Duplicate constraint"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:email {:type :text}})
+              (ds/add-constraint :user {:type :unique :fields [:email]})
+              (ds/add-constraint :user {:type :unique :fields [:email]})))))
+
+  (testing "constraint with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:email {:type :text}})
+              (ds/add-constraint :user {:type :unique :fields [:email] :foo :bar}))))))
 
 
 (deftest entity-constraints-test

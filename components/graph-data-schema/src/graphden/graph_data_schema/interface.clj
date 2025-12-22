@@ -29,25 +29,29 @@
 
       ;; fn_schema: defines function signatures
       (ds/add-entity :fn-schema
-                     {:name {:type :text :nullable? false :unique? true}
-                      :returned-type {:type :enum :enum-name :value-kind :nullable? false}})
+                     {:name {:type :text}
+                      :returned-type {:type :enum :enum-name :value-kind}})
+      (ds/add-constraint :fn-schema {:type :unique :fields [:name]})
 
       ;; arg_schema: defines function arguments
       (ds/add-entity :arg-schema
-                     {:fn-schema-id {:type :ref :ref-entity :fn-schema :nullable? false}
-                      :name {:type :text :nullable? false}
-                      :type {:type :enum :enum-name :value-kind :nullable? false}})
+                     {:fn-schema-id {:type :ref :ref-entity :fn-schema}
+                      :name {:type :text}
+                      :type {:type :enum :enum-name :value-kind}})
+      (ds/add-constraint :arg-schema {:type :unique :fields [:fn-schema-id :name]})
 
       ;; fn: actual function instances
       (ds/add-entity :fn
-                     {:name {:type :text :nullable? false :unique? true}
-                      :fn-schema-id {:type :ref :ref-entity :fn-schema :nullable? false}})
+                     {:name {:type :text}
+                      :fn-schema-id {:type :ref :ref-entity :fn-schema}})
+      (ds/add-constraint :fn {:type :unique :fields [:name]})
 
       ;; arg_value: argument values for function instances
       ;; value is a union: either a reference to another fn, or a literal value
       (ds/add-entity :arg-value
-                     {:owner-fn-id {:type :ref :ref-entity :fn :nullable? false}
-                      :arg-schema-id {:type :ref :ref-entity :arg-schema :nullable? false}
+                     {:owner-fn-id {:type :ref :ref-entity :fn}
+                      :arg-schema-id {:type :ref :ref-entity :arg-schema}
                       :value {:type :union :variants (value-variants)}})
+      (ds/add-constraint :arg-value {:type :unique :fields [:owner-fn-id :arg-schema-id]})
 
       (ds/build)))

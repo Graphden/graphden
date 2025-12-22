@@ -81,12 +81,29 @@
                        :field field-name
                        :type field-type
                        :known-types known-field-types})))
+    ;; Check :nullable? is boolean if present
+    (when (contains? field-spec :nullable?)
+      (let [nullable-val (:nullable? field-spec)]
+        (when-not (boolean? nullable-val)
+          (throw (ex-info "Field :nullable? must be a boolean"
+                          {:entity entity-name
+                           :field field-name
+                           :nullable? nullable-val
+                           :type (type nullable-val)})))))
     ;; Type-specific validation
     (case field-type
       :ref
-      (when-not (:ref-entity field-spec)
-        (throw (ex-info "Field type :ref requires :ref-entity"
-                        {:entity entity-name :field field-name :spec field-spec})))
+      (do
+        (when-not (:ref-entity field-spec)
+          (throw (ex-info "Field type :ref requires :ref-entity"
+                          {:entity entity-name :field field-name :spec field-spec})))
+        ;; :ref always points to :id, no other attributes allowed
+        (let [extra-keys (disj (set (keys field-spec)) :type :ref-entity :nullable?)]
+          (when (seq extra-keys)
+            (throw (ex-info "Field type :ref has unsupported attributes (refs always point to :id)"
+                            {:entity entity-name
+                             :field field-name
+                             :unsupported-keys extra-keys})))))
       :enum
       (when-not (:enum-name field-spec)
         (throw (ex-info "Field type :enum requires :enum-name"
@@ -188,18 +205,19 @@
 (defn- make-field-schema
   "Creates a malli schema for a field based on its specification."
   [field-spec enums]
-  (let [{:keys [nullable? enum-name variants]
-         field-type :type} field-spec
+  (let [field-type (:type field-spec)
+        nullable? (get field-spec :nullable? false)
         base-schema (case field-type
                       :ref
                       :uuid
 
                       :enum
-                      (let [enum-def (get enums enum-name)]
+                      (let [enum-def (get enums (:enum-name field-spec))]
                         (into [:enum] (:values enum-def)))
 
                       :union
-                      (into [:or] (map #(make-variant-schema % enums) variants))
+                      (into [:or] (map #(make-variant-schema % enums)
+                                       (:variants field-spec)))
 
                       ;; default: lookup in malli-type-mapping
                       (get malli-type-mapping field-type field-type))]
@@ -283,6 +301,11 @@
     (when (empty? values)
       (throw (ex-info "Enum values cannot be empty"
                       {:enum-name enum-name})))
+    (let [non-keywords (remove keyword? values)]
+      (when (seq non-keywords)
+        (throw (ex-info "Enum values must be keywords"
+                        {:enum-name enum-name
+                         :invalid-values (vec non-keywords)}))))
     (let [duplicates (for [[v freq] (frequencies values) :when (> freq 1)] v)]
       (when (seq duplicates)
         (throw (ex-info "Enum has duplicate values"
@@ -304,7 +327,9 @@
 
   (add-constraint
     [this entity-name constraint]
-    (let [constraint-type (:type constraint)]
+    (let [constraint-type (:type constraint)
+          fields (:fields constraint)]
+      ;; Validate :type
       (when-not constraint-type
         (throw (ex-info "Constraint missing :type"
                         {:entity entity-name :constraint constraint})))
@@ -313,9 +338,32 @@
                         {:entity entity-name
                          :constraint constraint
                          :known-types known-constraint-types})))
-      (when-not (seq (:fields constraint))
-        (throw (ex-info "Constraint missing :fields"
-                        {:entity entity-name :constraint constraint}))))
+      ;; Validate :fields is a non-empty vector of keywords
+      (when-not (vector? fields)
+        (throw (ex-info "Constraint :fields must be a vector"
+                        {:entity entity-name :constraint constraint})))
+      (when (empty? fields)
+        (throw (ex-info "Constraint :fields cannot be empty"
+                        {:entity entity-name :constraint constraint})))
+      (let [non-keywords (remove keyword? fields)]
+        (when (seq non-keywords)
+          (throw (ex-info "Constraint :fields must contain only keywords"
+                          {:entity entity-name
+                           :constraint constraint
+                           :invalid-fields (vec non-keywords)}))))
+      ;; Reject extra attributes
+      (let [extra-keys (disj (set (keys constraint)) :type :fields)]
+        (when (seq extra-keys)
+          (throw (ex-info "Constraint has unsupported attributes"
+                          {:entity entity-name
+                           :constraint constraint
+                           :unsupported-keys extra-keys}))))
+      ;; Check for duplicate constraint
+      (let [existing (get constraints-map entity-name [])
+            normalized {:type constraint-type :fields fields}]
+        (when (some #(= normalized (select-keys % [:type :fields])) existing)
+          (throw (ex-info "Duplicate constraint"
+                          {:entity entity-name :constraint constraint})))))
     (update-in this [:constraints-map entity-name] (fnil conj []) constraint))
 
 

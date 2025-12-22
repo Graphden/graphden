@@ -28,25 +28,27 @@
 
       ;; fn_schema: defines function signatures
       (ds/add-entity :fn-schema
-                     {:name {:type :text :nullable? false :unique? true}
-                      :returned-type {:type :enum :enum-name :value-kind :nullable? false}})
+                     {:name {:type :text}
+                      :returned-type {:type :enum :enum-name :value-kind}})
+      (ds/add-constraint :fn-schema {:type :unique :fields [:name]})
 
       ;; arg_schema: defines function arguments
       (ds/add-entity :arg-schema
-                     {:fn-schema-id {:type :ref :ref-entity :fn-schema :nullable? false}
-                      :name {:type :text :nullable? false}
-                      :type {:type :enum :enum-name :value-kind :nullable? false}})
+                     {:fn-schema-id {:type :ref :ref-entity :fn-schema}
+                      :name {:type :text}
+                      :type {:type :enum :enum-name :value-kind}})
 
       ;; fn: actual function instances
       (ds/add-entity :fn
-                     {:name {:type :text :nullable? false :unique? true}
-                      :fn-schema-id {:type :ref :ref-entity :fn-schema :nullable? false}})
+                     {:name {:type :text}
+                      :fn-schema-id {:type :ref :ref-entity :fn-schema}})
+      (ds/add-constraint :fn {:type :unique :fields [:name]})
 
       ;; arg_value: argument values for function instances
       ;; value is a union: either a reference to another fn, or a literal value
       (ds/add-entity :arg-value
-                     {:owner-fn-id {:type :ref :ref-entity :fn :nullable? false}
-                      :arg-schema-id {:type :ref :ref-entity :arg-schema :nullable? false}
+                     {:owner-fn-id {:type :ref :ref-entity :fn}
+                      :arg-schema-id {:type :ref :ref-entity :arg-schema}
                       :value {:type :union
                               :variants [{:type :ref :ref-entity :fn}
                                          {:type :bool}
@@ -79,8 +81,6 @@
   (testing "fn-schema has expected fields"
     (let [fields (ds/entity-fields example-schema :fn-schema)]
       (is (= :text (get-in fields [:name :type])))
-      (is (false? (get-in fields [:name :nullable?])))
-      (is (true? (get-in fields [:name :unique?])))
       (is (= :enum (get-in fields [:returned-type :type])))
       (is (= :value-kind (get-in fields [:returned-type :enum-name])))))
 
@@ -92,9 +92,14 @@
   (testing "arg-value has union type for value"
     (let [fields (ds/entity-fields example-schema :arg-value)]
       (is (= :ref (get-in fields [:owner-fn-id :type])))
-      (is (false? (get-in fields [:owner-fn-id :nullable?])))
       (is (= :union (get-in fields [:value :type])))
-      (is (= 9 (count (get-in fields [:value :variants])))))))
+      (is (= 9 (count (get-in fields [:value :variants]))))))
+
+  (testing "constraints are accessible"
+    (is (= [{:type :unique :fields [:name]}]
+           (ds/entity-constraints example-schema :fn-schema)))
+    (is (= [{:type :unique :fields [:name]}]
+           (ds/entity-constraints example-schema :fn)))))
 
 
 (deftest validate-entity-test

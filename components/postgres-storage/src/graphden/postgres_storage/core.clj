@@ -180,9 +180,12 @@
     (into {}
           (map (fn [row]
                  (let [col-name (keyword (str/replace (:column_name row) "_" "-"))
-                       pg-type (if (= (:data_type row) "USER-DEFINED")
-                                 :enum
-                                 (keyword (str/lower-case (:data_type row))))
+                       data-type (:data_type row)
+                       pg-type (cond
+                                 (= data-type "USER-DEFINED") :enum
+                                 (= data-type "timestamp with time zone") :timestamptz
+                                 (= data-type "timestamp without time zone") :timestamp
+                                 :else (keyword (str/lower-case data-type)))
                        nullable? (= (:is_nullable row) "YES")]
                    [col-name {:type (case pg-type
                                       :bigint :int
@@ -192,7 +195,8 @@
                                       :uuid :uuid ; Note: :ref also maps to UUID
                                       :bytea :bytes
                                       :jsonb :jsonb
-                                      (:timestamp :timestamptz) :timestamptz
+                                      :timestamptz :timestamptz
+                                      :timestamp :timestamptz
                                       :enum :enum
                                       pg-type)
                               :nullable? nullable?}]))

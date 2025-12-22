@@ -3,8 +3,10 @@
  [{:id :unit
    :test-paths
    ["components/data-schema-protocol/test"
+    "components/datomic-storage/test"
     "components/field-types/test"
     "components/graph-data-schema/test"
+    "components/graph-storage-datomic/test"
     "components/graph-storage-memory/test"
     "components/graph-storage-postgres/test"
     "components/malli-data-schema/test"

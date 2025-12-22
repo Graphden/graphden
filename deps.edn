@@ -40,10 +40,14 @@
    ["development/resources"
     "components/data-schema-protocol/src"
     "components/data-schema-protocol/test"
+    "components/datomic-storage/src"
+    "components/datomic-storage/test"
     "components/field-types/src"
     "components/field-types/test"
     "components/graph-data-schema/src"
     "components/graph-data-schema/test"
+    "components/graph-storage-datomic/src"
+    "components/graph-storage-datomic/test"
     "components/graph-storage-memory/src"
     "components/graph-storage-memory/test"
     "components/graph-storage-postgres/src"
@@ -65,16 +69,22 @@
     org.postgresql/postgresql #:mvn{:version "42.7.4"},
     org.testcontainers/postgresql #:mvn{:version "1.21.3"},
     org.testcontainers/testcontainers #:mvn{:version "1.21.3"},
-    ch.qos.logback/logback-classic #:mvn{:version "1.5.15"}}},
+    ch.qos.logback/logback-classic #:mvn{:version "1.5.15"},
+    com.datomic/local #:mvn{:version "1.0.291"},
+    metosin/malli #:mvn{:version "0.20.0"}}},
   :dev
   {:extra-paths
    ["development/src"
     "components/data-schema-protocol/src"
     "components/data-schema-protocol/test"
+    "components/datomic-storage/src"
+    "components/datomic-storage/test"
     "components/field-types/src"
     "components/field-types/test"
     "components/graph-data-schema/src"
     "components/graph-data-schema/test"
+    "components/graph-storage-datomic/src"
+    "components/graph-storage-datomic/test"
     "components/graph-storage-memory/src"
     "components/graph-storage-memory/test"
     "components/graph-storage-postgres/src"
@@ -98,4 +108,5 @@
     metosin/malli #:mvn{:version "0.20.0"},
     ch.qos.logback/logback-classic #:mvn{:version "1.5.15"},
     com.github.seancorfield/next.jdbc #:mvn{:version "1.3.939"},
-    org.testcontainers/postgresql #:mvn{:version "1.21.3"}}}}}
+    org.testcontainers/postgresql #:mvn{:version "1.21.3"},
+    com.datomic/local #:mvn{:version "1.0.291"}}}}}

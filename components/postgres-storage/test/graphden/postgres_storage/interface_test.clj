@@ -186,7 +186,8 @@
         (sp/initialize storage schema)
         (let [metadata (sp/schema-metadata storage)]
           (is (= :account (get (:entities metadata) entity-uuid)))
-          (is (= {:entity :account :field :name} (get (:fields metadata) field-uuid))))
+          (is (= {:entity :account :field :name :type :text :nullable? false}
+                 (get (:fields metadata) field-uuid))))
         (finally
           (sp/close storage))))))
 
@@ -596,8 +597,8 @@
       (try
         (sp/initialize storage schema)
         (let [fields (sp/current-fields storage :child)]
-          ;; ref is stored as UUID in PostgreSQL
-          (is (= :uuid (:type (get fields :parent-id)))))
+          ;; ref is stored as UUID in PostgreSQL, but returns logical type
+          (is (= :ref (:type (get fields :parent-id)))))
         (finally
           (sp/close storage)))))
 
@@ -633,8 +634,8 @@
       (try
         (sp/initialize storage schema)
         (let [fields (sp/current-fields storage :container)]
-          ;; union is stored as JSONB in PostgreSQL
-          (is (= :jsonb (:type (get fields :value)))))
+          ;; union is stored as JSONB in PostgreSQL, but returns logical type
+          (is (= :union (:type (get fields :value)))))
         (finally
           (sp/close storage))))))
 

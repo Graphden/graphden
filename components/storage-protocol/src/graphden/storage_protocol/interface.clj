@@ -14,7 +14,9 @@
    1. Create storage instance (implementation-specific)
    2. Call (initialize storage schema) to sync with DataSchema
    3. Use storage for CRUD operations (future protocol methods)
-   4. Call (close storage) when done")
+   4. Call (close storage) when done"
+  (:require
+    [clojure.set :as set]))
 
 
 (defprotocol Storage
@@ -119,3 +121,78 @@
   (or (= old-type new-type)
       (types-equivalent? old-type new-type)
       (contains? (get type-widening old-type #{}) new-type)))
+
+
+(defn safe-nullable-change?
+  "Returns true if changing nullable is safe.
+   Safe changes:
+   - Same value (no change)
+   - false→true (allowing nulls is safe)
+   Unsafe changes:
+   - true→false (existing nulls would become invalid)"
+  [old-nullable? new-nullable?]
+  (or (= old-nullable? new-nullable?)
+      (and (false? old-nullable?) (true? new-nullable?))))
+
+
+;; === Destructive change detection utilities ===
+
+(defn check-removed!
+  "Checks for items removed from schema and throws if any found.
+
+   Arguments:
+   - item-type: string describing the type (e.g., \"entities\", \"fields\")
+   - old-uuids: set of UUIDs from existing metadata
+   - new-uuids: set of UUIDs from new schema
+   - get-name-fn: function that takes UUID and returns human-readable name/info
+
+   Throws ExceptionInfo with :type :destructive-change if items were removed."
+  [item-type old-uuids new-uuids get-name-fn]
+  (let [removed (set/difference old-uuids new-uuids)]
+    (when (seq removed)
+      (throw (ex-info (str "Destructive change: " item-type " removed")
+                      {:type :destructive-change
+                       :removed (vec (map get-name-fn removed))})))))
+
+
+(defn check-type-change!
+  "Checks that a field type change is safe and throws if not.
+
+   Arguments:
+   - entity-name: keyword name of the entity
+   - field-name: keyword name of the field
+   - old-type: the current type in storage
+   - new-type: the new type in schema
+
+   Throws ExceptionInfo with :type :destructive-change if type change is unsafe."
+  [entity-name field-name old-type new-type]
+  (when (and old-type
+             (not (safe-type-change? old-type new-type)))
+    (throw (ex-info "Destructive change: incompatible type change"
+                    {:type :destructive-change
+                     :entity entity-name
+                     :field field-name
+                     :old-type old-type
+                     :new-type new-type}))))
+
+
+(defn check-nullable-change!
+  "Checks that a nullable change is safe and throws if not.
+
+   Arguments:
+   - entity-name: keyword name of the entity
+   - field-name: keyword name of the field
+   - old-nullable?: the current nullable value in storage
+   - new-nullable?: the new nullable value in schema
+
+   Throws ExceptionInfo with :type :destructive-change if nullable change is unsafe
+   (i.e., changing from nullable to non-nullable)."
+  [entity-name field-name old-nullable? new-nullable?]
+  (when (and (some? old-nullable?)
+             (not (safe-nullable-change? old-nullable? new-nullable?)))
+    (throw (ex-info "Destructive change: field changed from nullable to non-nullable"
+                    {:type :destructive-change
+                     :entity entity-name
+                     :field field-name
+                     :old-nullable? old-nullable?
+                     :new-nullable? new-nullable?}))))

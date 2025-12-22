@@ -29,7 +29,7 @@
           fields (sp/current-fields storage :fn-schema)]
       (try
         (is (= :text (:type (get fields :name))))
-        (is (= :ref (:type (get fields :returned-type))))
+        (is (= :enum (:type (get fields :returned-type))))
         (finally
           (sp/close storage)))))
 
@@ -39,7 +39,7 @@
       (try
         (is (= :ref (:type (get fields :fn-schema-id))))
         (is (= :text (:type (get fields :name))))
-        (is (= :ref (:type (get fields :type))))
+        (is (= :enum (:type (get fields :type))))
         (finally
           (sp/close storage)))))
 
@@ -58,7 +58,7 @@
       (try
         (is (= :ref (:type (get fields :owner-fn-id))))
         (is (= :ref (:type (get fields :arg-schema-id))))
-        (is (= :text (:type (get fields :value))))
+        (is (= :union (:type (get fields :value))))
         (finally
           (sp/close storage)))))
 

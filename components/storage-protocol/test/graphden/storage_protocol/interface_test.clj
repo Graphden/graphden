@@ -66,6 +66,43 @@
 ;; === Protocol existence tests ===
 ;; These just verify the protocols are defined correctly
 
+;; === Nullable change tests ===
+
+(deftest safe-nullable-change?-test
+  (testing "same value is safe"
+    (is (storage/safe-nullable-change? true true))
+    (is (storage/safe-nullable-change? false false)))
+
+  (testing "false→true is safe (allowing more)"
+    (is (storage/safe-nullable-change? false true)))
+
+  (testing "true→false is unsafe (restricting)"
+    (is (not (storage/safe-nullable-change? true false)))))
+
+
+(deftest check-nullable-change!-test
+  (testing "safe changes don't throw"
+    (is (nil? (storage/check-nullable-change! :user :name true true)))
+    (is (nil? (storage/check-nullable-change! :user :name false false)))
+    (is (nil? (storage/check-nullable-change! :user :name false true))))
+
+  (testing "unsafe change throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"nullable to non-nullable"
+          (storage/check-nullable-change! :user :name true false))))
+
+  (testing "exception contains correct data"
+    (try
+      (storage/check-nullable-change! :user :email true false)
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :destructive-change (:type (ex-data e))))
+        (is (= :user (:entity (ex-data e))))
+        (is (= :email (:field (ex-data e))))
+        (is (true? (:old-nullable? (ex-data e))))
+        (is (false? (:new-nullable? (ex-data e))))))))
+
+
 (deftest protocols-defined-test
   (testing "Storage protocol is defined"
     (is (some? storage/Storage))

@@ -97,7 +97,7 @@
     (let [storage (create-test-storage)
           fields (sp/current-fields storage :arg-schema)]
       (try
-        (is (= :uuid (:type (get fields :fn-schema-id))))
+        (is (= :ref (:type (get fields :fn-schema-id))))
         (is (= :text (:type (get fields :name))))
         (is (= :enum (:type (get fields :type))))
         (finally
@@ -108,7 +108,7 @@
           fields (sp/current-fields storage :fn)]
       (try
         (is (= :text (:type (get fields :name))))
-        (is (= :uuid (:type (get fields :fn-schema-id))))
+        (is (= :ref (:type (get fields :fn-schema-id))))
         (finally
           (sp/close storage)))))
 
@@ -116,9 +116,9 @@
     (let [storage (create-test-storage)
           fields (sp/current-fields storage :arg-value)]
       (try
-        (is (= :uuid (:type (get fields :owner-fn-id))))
-        (is (= :uuid (:type (get fields :arg-schema-id))))
-        (is (= :jsonb (:type (get fields :value))))
+        (is (= :ref (:type (get fields :owner-fn-id))))
+        (is (= :ref (:type (get fields :arg-schema-id))))
+        (is (= :union (:type (get fields :value))))
         (finally
           (sp/close storage)))))
 

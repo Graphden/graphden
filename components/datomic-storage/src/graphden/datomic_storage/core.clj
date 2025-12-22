@@ -1,7 +1,6 @@
 (ns graphden.datomic-storage.core
   "Datomic Local implementation of Storage protocol."
   (:require
-    [clojure.set :as set]
     [clojure.string :as str]
     [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
@@ -109,6 +108,12 @@
     :db/cardinality :db.cardinality/one}
    {:db/ident (metadata-attr :parent-uuid)
     :db/valueType :db.type/uuid
+    :db/cardinality :db.cardinality/one}
+   {:db/ident (metadata-attr :field-type)
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident (metadata-attr :field-nullable)
+    :db/valueType :db.type/boolean
     :db/cardinality :db.cardinality/one}])
 
 
@@ -162,41 +167,55 @@
   "Reads metadata entities from the database."
   [db]
   (when (metadata-schema-exists? db)
-    (let [;; Query entities that have parent-uuid
-          with-parent (d/q '[:find ?uuid ?kind ?name ?parent-uuid
+    (let [;; Query entities (no parent-uuid)
+          entities (d/q '[:find ?uuid ?name
+                          :where
+                          [?e :graphden.metadata/uuid ?uuid]
+                          [?e :graphden.metadata/kind :entity]
+                          [?e :graphden.metadata/name ?name]]
+                        db)
+          ;; Query fields (with parent-uuid, field-type, field-nullable)
+          fields (d/q '[:find ?uuid ?name ?parent-uuid ?field-type ?field-nullable
+                        :where
+                        [?e :graphden.metadata/uuid ?uuid]
+                        [?e :graphden.metadata/kind :field]
+                        [?e :graphden.metadata/name ?name]
+                        [?e :graphden.metadata/parent-uuid ?parent-uuid]
+                        [?e :graphden.metadata/field-type ?field-type]
+                        [?e :graphden.metadata/field-nullable ?field-nullable]]
+                      db)
+          ;; Query enums (no parent-uuid)
+          enums (d/q '[:find ?uuid ?name
+                       :where
+                       [?e :graphden.metadata/uuid ?uuid]
+                       [?e :graphden.metadata/kind :enum]
+                       [?e :graphden.metadata/name ?name]]
+                     db)
+          ;; Query enum-values (with parent-uuid)
+          enum-values (d/q '[:find ?uuid ?name ?parent-uuid
                              :where
                              [?e :graphden.metadata/uuid ?uuid]
-                             [?e :graphden.metadata/kind ?kind]
+                             [?e :graphden.metadata/kind :enum-value]
                              [?e :graphden.metadata/name ?name]
                              [?e :graphden.metadata/parent-uuid ?parent-uuid]]
-                           db)
-          ;; Query entities without parent-uuid
-          without-parent (d/q '[:find ?uuid ?kind ?name
-                                :where
-                                [?e :graphden.metadata/uuid ?uuid]
-                                [?e :graphden.metadata/kind ?kind]
-                                [?e :graphden.metadata/name ?name]
-                                (not [?e :graphden.metadata/parent-uuid _])]
-                              db)
-          ;; Combine: add nil as parent-uuid for those without
-          rows (concat with-parent
-                       (map (fn [[uuid kind n]] [uuid kind n nil]) without-parent))]
-      (when (seq rows)
-        (let [uuid->row (into {} (map (fn [[uuid kind n parent]]
-                                        [uuid {:kind kind :name n :parent-uuid parent}])
-                                      rows))]
-          (reduce
-            (fn [acc [uuid {:keys [kind name parent-uuid]}]]
-              (case kind
-                :entity (assoc-in acc [:entities uuid] name)
-                :field (let [parent-name (:name (get uuid->row parent-uuid))]
-                         (assoc-in acc [:fields uuid] {:entity parent-name :field name}))
-                :enum (assoc-in acc [:enums uuid] name)
-                :enum-value (let [parent-name (:name (get uuid->row parent-uuid))]
-                              (assoc-in acc [:enum-values uuid] {:enum parent-name :value name}))
-                acc))
-            {:entities {} :fields {} :enums {} :enum-values {}}
-            uuid->row))))))
+                           db)]
+      (when (or (seq entities) (seq fields) (seq enums) (seq enum-values))
+        (let [;; Build entity uuid->name map
+              entity-uuid->name (into {} entities)
+              ;; Build enum uuid->name map
+              enum-uuid->name (into {} enums)]
+          {:entities entity-uuid->name
+           :fields (into {}
+                         (for [[uuid field-name parent-uuid field-type field-nullable] fields]
+                           [uuid {:entity (get entity-uuid->name parent-uuid)
+                                  :field field-name
+                                  :type field-type
+                                  :nullable? field-nullable}]))
+           :enums enum-uuid->name
+           :enum-values (into {}
+                              (for [[uuid value-name parent-uuid] enum-values]
+                                [uuid {:enum (get enum-uuid->name parent-uuid)
+                                       :value value-name}]))})))))
 
 
 (defn- save-metadata!
@@ -224,14 +243,16 @@
             {:graphden.metadata/uuid (:uuid field-spec)
              :graphden.metadata/kind :field
              :graphden.metadata/name field-name
-             :graphden.metadata/parent-uuid (ds/entity-uuid schema entity-name)})
+             :graphden.metadata/parent-uuid (ds/entity-uuid schema entity-name)
+             :graphden.metadata/field-type (:type field-spec)
+             :graphden.metadata/field-nullable (get field-spec :nullable? false)})
           ;; Enums
           (for [[enum-name {:keys [uuid]}] (ds/enums schema)]
             {:graphden.metadata/uuid uuid
              :graphden.metadata/kind :enum
              :graphden.metadata/name enum-name})
           ;; Enum values
-          (for [[enum-name {:keys [uuid values]}] (ds/enums schema)
+          (for [[_enum-name {:keys [uuid values]}] (ds/enums schema)
                 [value-kw value-uuid] values]
             {:graphden.metadata/uuid value-uuid
              :graphden.metadata/kind :enum-value
@@ -242,28 +263,7 @@
 
 
 ;; === Destructive change checks ===
-
-(defn- check-removed!
-  "Checks for removed items and throws if any found."
-  [item-type old-uuids new-uuids get-name-fn]
-  (let [removed (set/difference old-uuids new-uuids)]
-    (when (seq removed)
-      (throw (ex-info (str "Destructive change: " item-type " removed")
-                      {:type :destructive-change
-                       :removed (vec (map get-name-fn removed))})))))
-
-
-(defn- check-type-change!
-  "Checks that a field type change is safe."
-  [entity-name field-name old-type new-type]
-  (when (and old-type
-             (not (sp/safe-type-change? old-type new-type)))
-    (throw (ex-info "Destructive change: incompatible type change"
-                    {:type :destructive-change
-                     :entity entity-name
-                     :field field-name
-                     :old-type old-type
-                     :new-type new-type}))))
+;; Using shared utilities from sp/check-removed! and sp/check-type-change!
 
 
 ;; === Initialize ===
@@ -311,27 +311,27 @@
         ;; Check for destructive changes
         (let [old-entity-uuids (set (keys (:entities old-metadata)))
               new-entity-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))]
-          (check-removed! "entities" old-entity-uuids new-entity-uuids
-                          #(get (:entities old-metadata) %)))
+          (sp/check-removed! "entities" old-entity-uuids new-entity-uuids
+                             #(get (:entities old-metadata) %)))
 
         (let [old-field-uuids (set (keys (:fields old-metadata)))
               new-field-uuids (set (for [e (ds/entities schema)
                                          [_ spec] (ds/entity-fields schema e)]
                                      (:uuid spec)))]
-          (check-removed! "fields" old-field-uuids new-field-uuids
-                          #(get (:fields old-metadata) %)))
+          (sp/check-removed! "fields" old-field-uuids new-field-uuids
+                             #(get (:fields old-metadata) %)))
 
         (let [old-enum-uuids (set (keys (:enums old-metadata)))
               new-enum-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) (ds/enums schema)))]
-          (check-removed! "enums" old-enum-uuids new-enum-uuids
-                          #(get (:enums old-metadata) %)))
+          (sp/check-removed! "enums" old-enum-uuids new-enum-uuids
+                             #(get (:enums old-metadata) %)))
 
         (let [old-value-uuids (set (keys (:enum-values old-metadata)))
               new-value-uuids (set (for [[_ {:keys [values]}] (ds/enums schema)
                                          [_ uuid] values]
                                      uuid))]
-          (check-removed! "enum values" old-value-uuids new-value-uuids
-                          #(get (:enum-values old-metadata) %)))
+          (sp/check-removed! "enum values" old-value-uuids new-value-uuids
+                             #(get (:enum-values old-metadata) %)))
 
         ;; Check type changes
         (doseq [entity-name (ds/entities schema)]
@@ -351,8 +351,11 @@
                                                    [?vt :db/ident ?type]]
                                                  db old-attr))
                           old-type (get datomic->type attr-info)
-                          new-type (:type field-spec)]
-                      (check-type-change! entity-name field-name old-type new-type))))))))
+                          new-type (:type field-spec)
+                          old-nullable? (:nullable? old-field-info)
+                          new-nullable? (get field-spec :nullable? false)]
+                      (sp/check-type-change! entity-name field-name old-type new-type)
+                      (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?))))))))
 
         ;; Compute changes and apply new schema
         (let [;; Compute entity changes
@@ -475,17 +478,15 @@
     [_this entity-name]
     (when-let [conn @conn-atom]
       (let [db (d/db conn)
-            attrs (current-attrs db)
-            entity-ns (name entity-name)
-            entity-attrs (filter (fn [[k _]] (= (namespace k) entity-ns)) attrs)]
-        (when (seq entity-attrs)
+            metadata (read-metadata db)
+            entity-fields (->> (:fields metadata)
+                               (vals)
+                               (filter #(= (:entity %) entity-name)))]
+        (when (seq entity-fields)
           (into {}
-                (map (fn [[attr datomic-type]]
-                       (let [field-name (keyword (name attr))
-                             our-type (get datomic->type datomic-type :text)]
-                         [field-name {:type our-type
-                                      :nullable? true}]))  ; Datomic doesn't have NOT NULL
-                     entity-attrs))))))
+                (map (fn [{:keys [field nullable?] field-type :type}]
+                       [field {:type field-type :nullable? nullable?}])
+                     entity-fields))))))
 
 
   (current-enums
@@ -503,12 +504,12 @@
     (when-let [conn @conn-atom]
       (let [db (d/db conn)
             enum-values (current-enum-values-db db)
-            enum-ns (str (name enum-name) ".value")]
-        (let [values (->> enum-values
-                          (filter #(= (namespace %) enum-ns))
-                          (map #(keyword (name %)))
-                          (set))]
-          (when (seq values) values)))))
+            enum-ns (str (name enum-name) ".value")
+            values (->> enum-values
+                        (filter #(= (namespace %) enum-ns))
+                        (map #(keyword (name %)))
+                        (set))]
+        (when (seq values) values))))
 
 
   (schema-metadata

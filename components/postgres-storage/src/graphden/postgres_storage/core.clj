@@ -1,7 +1,6 @@
 (ns graphden.postgres-storage.core
   "PostgreSQL implementation of Storage protocol."
   (:require
-    [clojure.set :as set]
     [clojure.string :as str]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.storage-protocol.interface :as sp]
@@ -10,7 +9,9 @@
   (:import
     (com.zaxxer.hikari
       HikariConfig
-      HikariDataSource)))
+      HikariDataSource)
+    (org.postgresql.util
+      PGobject)))
 
 
 ;; === Type mapping ===
@@ -99,8 +100,67 @@
   "Reads raw metadata rows for processing."
   [ds]
   (jdbc/execute! ds
-                 [(str "SELECT uuid, kind, name, parent_uuid FROM " metadata-table-name)]
+                 [(str "SELECT uuid, kind, name, parent_uuid, extra FROM " metadata-table-name)]
                  {:builder-fn rs/as-unqualified-lower-maps}))
+
+
+(defn- value->json
+  "Converts a value to JSON representation."
+  [v]
+  (cond
+    (nil? v) "null"
+    (boolean? v) (str v)
+    (keyword? v) (str "\"" (name v) "\"")
+    (string? v) (str "\"" v "\"")
+    :else (str v)))
+
+
+(defn- extra->json
+  "Converts extra map to JSON string for PostgreSQL JSONB."
+  [extra]
+  (when extra
+    (str "{"
+         (->> extra
+              (map (fn [[k v]]
+                     (str "\"" (name k) "\":" (value->json v))))
+              (str/join ","))
+         "}")))
+
+
+(defn- parse-json-value
+  "Parse a JSON value string into Clojure value."
+  [v]
+  (let [v (str/trim v)]
+    (cond
+      (= v "null") nil
+      (= v "true") true
+      (= v "false") false
+      (str/starts-with? v "\"")
+      (let [inner (subs v 1 (dec (count v)))]
+        (keyword inner))
+      :else v)))
+
+
+(defn- parse-extra
+  "Parses the extra JSONB column. Handles both string and PGobject formats."
+  [extra]
+  (when extra
+    (let [s (cond
+              (string? extra) extra
+              (instance? PGobject extra) (PGobject/.getValue ^PGobject extra)
+              :else (str extra))]
+      (when (and (seq s) (not= s "null") (not= s "{}"))
+        ;; Parse JSON object manually
+        (let [inner (-> s
+                        (str/replace #"^\{" "")
+                        (str/replace #"\}$" "")
+                        str/trim)]
+          (when (seq inner)
+            ;; Split by comma, but handle quoted strings
+            (let [pairs (re-seq #"\"([^\"]+)\":([^,}]+)" s)]
+              (into {}
+                    (for [[_ k v] pairs]
+                      [(keyword k) (parse-json-value v)])))))))))
 
 
 (defn- parse-metadata
@@ -114,12 +174,16 @@
                 kind (keyword (:kind row))
                 n (keyword (:name row))
                 parent-uuid (:parent_uuid row)
-                parent-row (get uuid->row parent-uuid)]
+                parent-row (get uuid->row parent-uuid)
+                extra (parse-extra (:extra row))]
             (case kind
               :entity (assoc-in acc [:entities uuid] n)
               :field (assoc-in acc [:fields uuid]
-                               {:entity (keyword (:name parent-row))
-                                :field n})
+                               (merge {:entity (keyword (:name parent-row))
+                                       :field n}
+                                      (when extra
+                                        {:type (:type extra)
+                                         :nullable? (:nullable? extra)})))
               :enum (assoc-in acc [:enums uuid] n)
               :enum-value (assoc-in acc [:enum-values uuid]
                                     {:enum (keyword (:name parent-row))
@@ -131,12 +195,15 @@
 
 (defn- upsert-metadata!
   "Inserts or updates a metadata row."
-  [ds uuid kind meta-name parent-uuid]
-  (jdbc/execute! ds
-                 [(str "INSERT INTO " metadata-table-name " (uuid, kind, name, parent_uuid) "
-                       "VALUES (?, ?, ?, ?) "
-                       "ON CONFLICT (uuid) DO UPDATE SET name = EXCLUDED.name, parent_uuid = EXCLUDED.parent_uuid")
-                  uuid (name kind) (name meta-name) parent-uuid]))
+  ([ds uuid kind meta-name parent-uuid]
+   (upsert-metadata! ds uuid kind meta-name parent-uuid nil))
+  ([ds uuid kind meta-name parent-uuid extra]
+   (jdbc/execute! ds
+                  [(str "INSERT INTO " metadata-table-name " (uuid, kind, name, parent_uuid, extra) "
+                        "VALUES (?, ?, ?, ?, ?::jsonb) "
+                        "ON CONFLICT (uuid) DO UPDATE SET name = EXCLUDED.name, parent_uuid = EXCLUDED.parent_uuid, extra = EXCLUDED.extra")
+                   uuid (name kind) (name meta-name) parent-uuid
+                   (extra->json extra)])))
 
 
 (defn- save-metadata!
@@ -147,7 +214,9 @@
     (let [entity-uuid (ds/entity-uuid schema entity-name)]
       (upsert-metadata! ds entity-uuid :entity entity-name nil)
       (doseq [[field-name field-spec] (ds/entity-fields schema entity-name)]
-        (upsert-metadata! ds (:uuid field-spec) :field field-name entity-uuid))))
+        (upsert-metadata! ds (:uuid field-spec) :field field-name entity-uuid
+                          {:type (:type field-spec)
+                           :nullable? (get field-spec :nullable? false)}))))
   (doseq [[enum-name {:keys [uuid values]}] (ds/enums schema)]
     (upsert-metadata! ds uuid :enum enum-name nil)
     (doseq [[value-kw value-uuid] values]
@@ -310,16 +379,6 @@
 
 ;; === Migration logic ===
 
-(defn- check-removed!
-  "Throws if any items in old-set are missing from new-set."
-  [old-set new-set item-type get-name]
-  (let [removed (set/difference old-set new-set)]
-    (when (seq removed)
-      (throw (ex-info (str "Destructive change: " item-type " removed")
-                      {:type :destructive-change
-                       (keyword (str "removed-" item-type))
-                       (vec (map get-name removed))})))))
-
 
 (defn- do-initialize
   "Performs schema initialization/migration."
@@ -363,14 +422,14 @@
                                             [_ v] values] v))]
 
         ;; Check for destructive changes
-        (check-removed! old-entity-uuids new-entity-uuids "entities"
-                        #(get (:entities old-metadata) %))
-        (check-removed! old-field-uuids new-field-uuids "fields"
-                        #(get (:fields old-metadata) %))
-        (check-removed! old-enum-uuids new-enum-uuids "enums"
-                        #(get (:enums old-metadata) %))
-        (check-removed! old-enum-value-uuids new-enum-value-uuids "enum values"
-                        #(get (:enum-values old-metadata) %))
+        (sp/check-removed! "entities" old-entity-uuids new-entity-uuids
+                           #(get (:entities old-metadata) %))
+        (sp/check-removed! "fields" old-field-uuids new-field-uuids
+                           #(get (:fields old-metadata) %))
+        (sp/check-removed! "enums" old-enum-uuids new-enum-uuids
+                           #(get (:enums old-metadata) %))
+        (sp/check-removed! "enum values" old-enum-value-uuids new-enum-value-uuids
+                           #(get (:enum-values old-metadata) %))
 
         ;; Check type compatibility
         (doseq [entity-name (ds/entities schema)]
@@ -384,15 +443,13 @@
                       old-field-info (get (:fields old-metadata) field-uuid)]
                   (when old-field-info
                     (let [old-field-name (:field old-field-info)
-                          old-type (:type (get old-fields old-field-name))
-                          new-type (:type field-spec)]
-                      (when (and old-type (not (sp/safe-type-change? old-type new-type)))
-                        (throw (ex-info "Destructive change: incompatible type change"
-                                        {:type :destructive-change
-                                         :entity entity-name
-                                         :field field-name
-                                         :old-type old-type
-                                         :new-type new-type}))))))))))
+                          old-field (get old-fields old-field-name)
+                          old-type (:type old-field)
+                          new-type (:type field-spec)
+                          old-nullable? (:nullable? old-field)
+                          new-nullable? (get field-spec :nullable? false)]
+                      (sp/check-type-change! entity-name field-name old-type new-type)
+                      (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?))))))))
 
         ;; Apply enum changes
         (let [created-enums (atom [])
@@ -501,8 +558,15 @@
 
   (current-fields
     [_this entity-name]
-    (let [cols (current-columns pool (kw->snake-case entity-name))]
-      (when (seq cols) cols)))
+    (let [metadata (parse-metadata (read-metadata-rows pool))
+          entity-fields (->> (:fields metadata)
+                             (vals)
+                             (filter #(= (:entity %) entity-name)))]
+      (when (seq entity-fields)
+        (into {}
+              (map (fn [{:keys [field nullable?] field-type :type}]
+                     [field {:type field-type :nullable? nullable?}])
+                   entity-fields)))))
 
 
   (current-enums

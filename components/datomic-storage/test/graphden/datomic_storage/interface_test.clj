@@ -159,7 +159,8 @@
         (sp/initialize storage schema)
         (let [metadata (sp/schema-metadata storage)]
           (is (= :user (get (:entities metadata) entity-uuid)))
-          (is (= {:entity :user :field :name} (get (:fields metadata) field-uuid))))
+          (is (= {:entity :user :field :name :type :text :nullable? false}
+                 (get (:fields metadata) field-uuid))))
         (finally
           (sp/close storage))))))
 

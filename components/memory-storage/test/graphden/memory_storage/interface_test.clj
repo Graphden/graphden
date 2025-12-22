@@ -347,6 +347,38 @@
             (sp/initialize storage schema2))))))
 
 
+;; === Nullable change tests ===
+
+(deftest nullable-change-test
+  (testing "nullable->nullable is allowed"
+    (let [storage (mem/create-storage)
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (make-schema :fields {:email {:uuid field-uuid :type :text :nullable? true}})
+          _ (sp/initialize storage schema1)
+          schema2 (make-schema :fields {:email {:uuid field-uuid :type :text :nullable? true}})]
+      (sp/initialize storage schema2)
+      (is (true? (:nullable? (get (sp/current-fields storage :user) :email))))))
+
+  (testing "non-nullable->nullable is allowed (allowing more)"
+    (let [storage (mem/create-storage)
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (make-schema :fields {:email {:uuid field-uuid :type :text :nullable? false}})
+          _ (sp/initialize storage schema1)
+          schema2 (make-schema :fields {:email {:uuid field-uuid :type :text :nullable? true}})]
+      (sp/initialize storage schema2)
+      (is (true? (:nullable? (get (sp/current-fields storage :user) :email))))))
+
+  (testing "nullable->non-nullable throws (restricting)"
+    (let [storage (mem/create-storage)
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (make-schema :fields {:email {:uuid field-uuid :type :text :nullable? true}})
+          _ (sp/initialize storage schema1)
+          schema2 (make-schema :fields {:email {:uuid field-uuid :type :text :nullable? false}})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"nullable to non-nullable"
+            (sp/initialize storage schema2))))))
+
+
 ;; === Close tests ===
 
 (deftest close-test

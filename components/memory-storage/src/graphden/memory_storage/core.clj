@@ -1,7 +1,6 @@
 (ns graphden.memory-storage.core
   "In-memory implementation of Storage protocol."
   (:require
-    [clojure.set :as set]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -56,59 +55,41 @@
 (defn- check-removed-entities
   "Checks for entities that exist in metadata but not in schema. Throws on removal."
   [old-metadata schema]
-  (let [old-entity-uuids (set (keys (:entities old-metadata)))
-        new-entity-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))
-        removed-uuids (set/difference old-entity-uuids new-entity-uuids)]
-    (when (seq removed-uuids)
-      (let [removed-names (map #(get (:entities old-metadata) %) removed-uuids)]
-        (throw (ex-info "Destructive change: entities removed"
-                        {:type :destructive-change
-                         :removed-entities (vec removed-names)}))))))
+  (let [old-uuids (set (keys (:entities old-metadata)))
+        new-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))]
+    (sp/check-removed! "entities" old-uuids new-uuids
+                       #(get (:entities old-metadata) %))))
 
 
 (defn- check-removed-fields
   "Checks for fields that exist in metadata but not in schema. Throws on removal."
   [old-metadata schema]
-  (let [old-field-uuids (set (keys (:fields old-metadata)))
-        new-field-uuids (set (for [entity-name (ds/entities schema)
-                                   [_ field-spec] (ds/entity-fields schema entity-name)]
-                               (:uuid field-spec)))
-        removed-uuids (set/difference old-field-uuids new-field-uuids)]
-    (when (seq removed-uuids)
-      (let [removed-fields (map #(get (:fields old-metadata) %) removed-uuids)]
-        (throw (ex-info "Destructive change: fields removed"
-                        {:type :destructive-change
-                         :removed-fields (vec removed-fields)}))))))
+  (let [old-uuids (set (keys (:fields old-metadata)))
+        new-uuids (set (for [entity-name (ds/entities schema)
+                             [_ field-spec] (ds/entity-fields schema entity-name)]
+                         (:uuid field-spec)))]
+    (sp/check-removed! "fields" old-uuids new-uuids
+                       #(get (:fields old-metadata) %))))
 
 
 (defn- check-removed-enums
   "Checks for enums that exist in metadata but not in schema. Throws on removal."
   [old-metadata schema]
-  (let [old-enum-uuids (set (keys (:enums old-metadata)))
-        new-enums (ds/enums schema)
-        new-enum-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) new-enums))
-        removed-uuids (set/difference old-enum-uuids new-enum-uuids)]
-    (when (seq removed-uuids)
-      (let [removed-names (map #(get (:enums old-metadata) %) removed-uuids)]
-        (throw (ex-info "Destructive change: enums removed"
-                        {:type :destructive-change
-                         :removed-enums (vec removed-names)}))))))
+  (let [old-uuids (set (keys (:enums old-metadata)))
+        new-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) (ds/enums schema)))]
+    (sp/check-removed! "enums" old-uuids new-uuids
+                       #(get (:enums old-metadata) %))))
 
 
 (defn- check-removed-enum-values
   "Checks for enum values that exist in metadata but not in schema. Throws on removal."
   [old-metadata schema]
-  (let [old-value-uuids (set (keys (:enum-values old-metadata)))
-        new-enums (ds/enums schema)
-        new-value-uuids (set (for [[_ {:keys [values]}] new-enums
-                                   [_ value-uuid] values]
-                               value-uuid))
-        removed-uuids (set/difference old-value-uuids new-value-uuids)]
-    (when (seq removed-uuids)
-      (let [removed-values (map #(get (:enum-values old-metadata) %) removed-uuids)]
-        (throw (ex-info "Destructive change: enum values removed"
-                        {:type :destructive-change
-                         :removed-enum-values (vec removed-values)}))))))
+  (let [old-uuids (set (keys (:enum-values old-metadata)))
+        new-uuids (set (for [[_ {:keys [values]}] (ds/enums schema)
+                             [_ value-uuid] values]
+                         value-uuid))]
+    (sp/check-removed! "enum values" old-uuids new-uuids
+                       #(get (:enum-values old-metadata) %))))
 
 
 (defn- check-type-changes
@@ -125,14 +106,11 @@
             (when old-field-info
               (let [old-field-name (:field old-field-info)
                     old-type (get-in old-fields [old-field-name :type])
-                    new-type (:type field-spec)]
-                (when (and old-type (not (sp/safe-type-change? old-type new-type)))
-                  (throw (ex-info "Destructive change: incompatible type change"
-                                  {:type :destructive-change
-                                   :entity entity-name
-                                   :field field-name
-                                   :old-type old-type
-                                   :new-type new-type})))))))))))
+                    new-type (:type field-spec)
+                    old-nullable? (get-in old-fields [old-field-name :nullable?])
+                    new-nullable? (get field-spec :nullable? false)]
+                (sp/check-type-change! entity-name field-name old-type new-type)
+                (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?)))))))))
 
 
 (defn- compute-entity-changes

@@ -9,6 +9,10 @@
   {:extra-paths ["development/src"
                  "components/data-schema-protocol/src"
                  "components/data-schema-protocol/resources"
+                 "components/field-types/src"
+                 "components/field-types/resources"
+                 "components/graph-data-schema/src"
+                 "components/graph-data-schema/resources"
                  "components/malli-data-schema/src"
                  "components/malli-data-schema/resources"]
    :extra-deps
@@ -21,6 +25,8 @@
 
   :test
   {:extra-paths ["components/data-schema-protocol/test"
+                 "components/field-types/test"
+                 "components/graph-data-schema/test"
                  "components/malli-data-schema/test"]
    :extra-deps
    {lambdaisland/kaocha {:mvn/version "1.91.1392"}}}

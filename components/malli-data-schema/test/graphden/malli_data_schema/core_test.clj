@@ -2,6 +2,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.data-schema-protocol.interface :as ds]
+    [graphden.field-types.interface :as ft]
+    [graphden.malli-data-schema.core :as core]
     [graphden.malli-data-schema.interface :as mds]))
 
 
@@ -202,3 +204,8 @@
   (testing "can access underlying malli schema"
     (let [malli-schema (mds/schema->malli example-schema :fn-schema)]
       (is (some? malli-schema)))))
+
+
+(deftest type-mapping-completeness-test
+  (testing "malli-type-mapping covers all supported field types"
+    (is (= ft/supported-types (set (keys core/malli-type-mapping))))))

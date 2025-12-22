@@ -6,16 +6,16 @@
     [malli.error :as me]))
 
 
-(def base-types
-  "Mapping of schema types to malli schemas."
-  {:uuid :uuid
-   :text :string
-   :int :int
-   :bool :boolean
-   :numeric [:or :int :double]
+(def malli-type-mapping
+  "Mapping of field-types to malli schemas."
+  {:uuid        :uuid
+   :text        :string
+   :int         :int
+   :bool        :boolean
+   :numeric     [:or :int :double]
    :timestamptz inst?
-   :jsonb any?
-   :bytes bytes?})
+   :jsonb       any?
+   :bytes       bytes?})
 
 
 (declare make-field-schema)
@@ -43,8 +43,8 @@
                       :union
                       (into [:or] (map #(make-variant-schema % enums) variants))
 
-                      ;; default
-                      (get base-types field-type field-type))]
+                      ;; default: lookup in malli-type-mapping
+                      (get malli-type-mapping field-type field-type))]
     (if nullable?
       [:maybe base-schema]
       base-schema)))

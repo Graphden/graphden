@@ -200,6 +200,14 @@
                                             :variants [{:type :ref}]}})
               (ds/build)))))
 
+  (testing "union variant cannot have :nullable?"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"cannot have :nullable"
+          (-> (mds/create-builder)
+              (ds/add-entity :user {:value {:type :union
+                                            :variants [{:type :int :nullable? true}]}})
+              (ds/build)))))
+
   (testing ":nullable? must be boolean"
     (is (thrown-with-msg?
           clojure.lang.ExceptionInfo #"must be a boolean"

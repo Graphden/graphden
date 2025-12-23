@@ -1,6 +1,7 @@
 (ns graphden.datomic-storage.interface-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.datomic-storage.core :as core]
     [graphden.datomic-storage.interface :as dat]
@@ -511,3 +512,27 @@
 
     (testing "returns false for non-unique constraint type"
       (is (false? (single-field-unique-constraint? {:type :other :fields [:field]}))))))
+
+
+(deftest initialize-error-handling-test
+  (testing "initialize re-throws non-'already exists' exceptions from create-database"
+    (let [storage (dat/create-storage {:db-name (unique-db-name)})
+          schema (make-schema)
+          ;; Store original create-database
+          original-create-db d/create-database
+          call-count (atom 0)]
+      (try
+        ;; Mock create-database to throw a different error
+        (with-redefs [d/create-database
+                      (fn [& args]
+                        (swap! call-count inc)
+                        (if (= 1 @call-count)
+                          ;; First call - throw a non-"already exists" error
+                          (throw (ex-info "Connection refused" {:error :connection-refused}))
+                          ;; Subsequent calls - use original
+                          (apply original-create-db args)))]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Connection refused"
+                (sp/initialize storage schema))))
+        (finally
+          (sp/close storage))))))

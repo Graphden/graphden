@@ -8,6 +8,8 @@
     [graphden.storage-protocol.interface :as sp]
     [next.jdbc :as jdbc])
   (:import
+    (java.sql
+      SQLException)
     (org.testcontainers.containers
       PostgreSQLContainer)))
 
@@ -1041,5 +1043,35 @@
             (is (thrown-with-msg? clojure.lang.ExceptionInfo
                                   #"Metadata/DB inconsistency"
                   (sp/initialize storage schema2)))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest table-not-found-error-handling-test
+  (testing "table-not-found? returns true for SQLState 42P01"
+    (let [e (SQLException. "relation does not exist" "42P01")]
+      (is (true? (#'core/table-not-found? e)))))
+
+  (testing "table-not-found? returns false for other SQLState"
+    (let [e (SQLException. "connection failed" "08001")]
+      (is (false? (#'core/table-not-found? e)))))
+
+  (testing "current-fields re-throws non-42P01 SQLException"
+    (let [storage (create-test-storage)]
+      (try
+        ;; Mock read-metadata-rows to throw a non-42P01 SQLException
+        (let [connection-error (SQLException. "connection failed" "08001")]
+          (with-redefs [core/read-metadata-rows (fn [_] (throw connection-error))]
+            (is (thrown? SQLException (sp/current-fields storage :any-entity)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "schema-metadata re-throws non-42P01 SQLException"
+    (let [storage (create-test-storage)]
+      (try
+        ;; Mock read-metadata-rows to throw a non-42P01 SQLException
+        (let [connection-error (SQLException. "connection failed" "08001")]
+          (with-redefs [core/read-metadata-rows (fn [_] (throw connection-error))]
+            (is (thrown? SQLException (sp/schema-metadata storage)))))
         (finally
           (sp/close storage))))))

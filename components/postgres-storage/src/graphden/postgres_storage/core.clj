@@ -12,8 +12,18 @@
     (com.zaxxer.hikari
       HikariConfig
       HikariDataSource)
+    (java.sql
+      SQLException)
     (org.postgresql.util
       PGobject)))
+
+
+;; === Error handling ===
+
+(defn- table-not-found?
+  "Returns true if the SQLException indicates a missing table (PostgreSQL 42P01)."
+  [^SQLException e]
+  (= "42P01" (SQLException/.getSQLState e)))
 
 
 ;; === Type mapping ===
@@ -39,16 +49,22 @@
 (defn- check-snake-case-collisions!
   "Checks that converting keywords to snake_case doesn't create collisions.
    E.g., :foo-bar and :foo_bar would both become 'foo_bar'.
-   Throws if collisions detected."
+   Throws if collisions detected. Runs in O(n) time."
   [context keywords]
-  (let [snake-names (map kw->snake-case keywords)
-        collisions (for [[snake freq] (frequencies snake-names)
-                         :when (> freq 1)
-                         :let [originals (filter #(= (kw->snake-case %) snake) keywords)]]
-                     {:snake-case snake :originals (vec originals)})]
+  (let [;; Group keywords by their snake_case form in single pass - O(n)
+        snake->originals (reduce (fn [acc kw]
+                                   (update acc (kw->snake-case kw) (fnil conj []) kw))
+                                 {}
+                                 keywords)
+        ;; Find groups with more than one original - O(n)
+        collisions (into []
+                         (comp (filter #(> (count (val %)) 1))
+                               (map (fn [[snake originals]]
+                                      {:snake-case snake :originals originals})))
+                         snake->originals)]
     (when (seq collisions)
       (throw (ex-info "Snake_case naming collision detected"
-                      (merge context {:collisions (vec collisions)}))))))
+                      (merge context {:collisions collisions}))))))
 
 
 (defn- ident->sql
@@ -455,7 +471,7 @@
   [ds entity-name constraint]
   (let [table-name (ident->sql entity-name)
         index-name (constraint-index-name entity-name constraint)
-        columns-sql (str/join ", " (map #(ident->sql %) (:fields constraint)))]
+        columns-sql (str/join ", " (map ident->sql (:fields constraint)))]
     (jdbc/execute! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
                             " (" columns-sql ")")])))
 
@@ -726,9 +742,9 @@
   (let [metadata-rows (read-metadata-rows ds)
         old-metadata (parse-metadata metadata-rows)]
     (jdbc/with-transaction [tx ds]
-      (if (nil? old-metadata)
-        (do-first-init! tx schema)
-        (do-migration! tx schema old-metadata)))))
+                           (if (nil? old-metadata)
+                             (do-first-init! tx schema)
+                             (do-migration! tx schema old-metadata)))))
 
 
 ;; === Storage record ===
@@ -761,7 +777,10 @@
     [_this entity-name]
     (let [metadata (try
                      (parse-metadata-lenient (read-metadata-rows pool))
-                     (catch Exception _ nil))
+                     (catch SQLException e
+                       ;; Only swallow "table not found" - re-throw other errors
+                       (when-not (table-not-found? e) (throw e))
+                       nil))
           ;; Check if entity exists in metadata
           entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
       (when entity-exists?
@@ -790,8 +809,9 @@
     [_this]
     (try
       (parse-metadata-lenient (read-metadata-rows pool))
-      (catch Exception _
-        ;; Table doesn't exist or other error - storage not initialized
+      (catch SQLException e
+        ;; Only swallow "table not found" - re-throw other errors
+        (when-not (table-not-found? e) (throw e))
         nil))))
 
 

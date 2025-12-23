@@ -594,7 +594,13 @@
     (locking lock
       (let [client (d/client client-config)]
         (reset! client-atom client)
-        (d/create-database client {:db-name db-name})
+        ;; Create database if it doesn't exist (idempotent)
+        (try
+          (d/create-database client {:db-name db-name})
+          (catch Exception e
+            ;; Ignore "already exists" errors for idempotency
+            (when-not (str/includes? (ex-message e) "already exists")
+              (throw e))))
         (let [conn (d/connect client {:db-name db-name})]
           (reset! conn-atom conn)
           (do-initialize conn schema)))))

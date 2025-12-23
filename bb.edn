@@ -44,6 +44,10 @@
   {:doc "Check formatting [path]"
    :task (clojure (str "-M:cljstyle check " (or (first *command-line-args*) all-paths)))}
 
+  eastwood
+  {:doc "Run Eastwood static analysis"
+   :task (clojure "-M:dev:eastwood")}
+
   ;; === TESTS ===
 
   test
@@ -57,40 +61,8 @@
   ;; === FULL CHECK ===
 
   ci
-  {:doc "Run ALL checks (linters + tests + coverage) in parallel"
-   :task (let [kondo-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which clj-kondo")))
-                           (str "clj-kondo --lint " all-paths)
-                           (str "clojure -M:kondo --lint " all-paths))
-               cljstyle-cmd (if (= 0 (:exit (p/shell {:out :string :continue true} "which cljstyle")))
-                              (str "cljstyle check " all-paths)
-                              (str "clojure -M:cljstyle check " all-paths))
-               splint-cmd (str "clojure -M:splint " all-paths)
-               test-cmd "clojure -M:dev:test:cloverage --src-ns-path components --test-ns-path components --ns-regex graphden\\..* --ns-exclude-regex .*-test"
-               checks [{:name "kondo" :cmd kondo-cmd}
-                       {:name "splint" :cmd splint-cmd}
-                       {:name "cljstyle" :cmd cljstyle-cmd}
-                       {:name "tests+coverage" :cmd test-cmd}]
-               procs (mapv (fn [{:keys [name cmd]}]
-                             {:name name
-                              :proc (p/process {:cmd cmd :out :string :err :string})})
-                           checks)
-               results (mapv (fn [{:keys [name proc]}]
-                               (let [result (deref proc)]
-                                 {:name name
-                                  :exit (:exit result)
-                                  :out (:out result)
-                                  :err (:err result)}))
-                             procs)
-               failed (filter (fn [r] (not= 0 (:exit r))) results)]
-           (if (empty? failed)
-             (println (str green "✓ All checks passed (kondo, splint, cljstyle, tests, coverage)" reset))
-             (do
-               (doseq [{:keys [name out err]} failed]
-                 (println (str red "✗ " name " failed:" reset))
-                 (when (seq out) (println out))
-                 (when (seq err) (println err))
-                 (println))
-               (System/exit 1))))}
+  {:doc "Run ALL checks with live progress display"
+   :task (load-file "scripts/ci.clj")}
 
   check
   {:doc "Run linters only (parallel)"

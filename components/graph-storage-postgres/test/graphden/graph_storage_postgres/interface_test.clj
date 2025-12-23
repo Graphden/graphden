@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.graph-storage-postgres.interface :as gsp]
+    [graphden.postgres-storage.interface :as pg]
     [graphden.storage-protocol.interface :as sp]
     [next.jdbc :as jdbc])
   (:import
@@ -131,4 +132,42 @@
         (is (some? (:enums metadata)))
         (is (some? (:enum-values metadata)))
         (finally
-          (sp/close storage))))))
+          (sp/close storage)))))
+
+  (testing "cleans up storage on initialization error"
+    (let [closed? (atom false)
+          original-create pg/create-storage]
+      ;; Mock pg/create-storage to return a wrapped storage that tracks close
+      ;; and throws on initialize
+      (with-redefs [pg/create-storage
+                    (fn [opts]
+                      (let [storage (original-create opts)]
+                        (reify
+                          graphden.storage_protocol.interface.Storage
+                          (initialize
+                            [_ _schema]
+                            (throw (ex-info "Init error" {:test true})))
+
+                          (close
+                            [_]
+                            (reset! closed? true)
+                            (sp/close storage))
+
+
+                          graphden.storage_protocol.interface.StorageIntrospection
+
+                          (current-entities [_] (sp/current-entities storage))
+
+                          (current-fields [_ e] (sp/current-fields storage e))
+
+                          (current-enums [_] (sp/current-enums storage))
+
+                          (current-enum-values [_ e] (sp/current-enum-values storage e))
+
+                          (schema-metadata [_] (sp/schema-metadata storage)))))]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Init error"
+              (gsp/create-storage {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
+                                   :username (PostgreSQLContainer/.getUsername *container*)
+                                   :password (PostgreSQLContainer/.getPassword *container*)
+                                   :pool-size 2})))
+        (is @closed? "Storage should be closed on init failure")))))

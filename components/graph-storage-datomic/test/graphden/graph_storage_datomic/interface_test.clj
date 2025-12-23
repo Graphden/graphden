@@ -1,6 +1,7 @@
 (ns graphden.graph-storage-datomic.interface-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.datomic-storage.interface :as dat]
     [graphden.graph-storage-datomic.interface :as gsd]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -79,4 +80,39 @@
         (is (some? (:enums metadata)))
         (is (some? (:enum-values metadata)))
         (finally
-          (sp/close storage))))))
+          (sp/close storage)))))
+
+  (testing "cleans up storage on initialization error"
+    (let [closed? (atom false)
+          original-create dat/create-storage]
+      ;; Mock dat/create-storage to return a wrapped storage that tracks close
+      ;; and throws on initialize
+      (with-redefs [dat/create-storage
+                    (fn [opts]
+                      (let [storage (original-create opts)]
+                        (reify
+                          graphden.storage_protocol.interface.Storage
+                          (initialize
+                            [_ _schema]
+                            (throw (ex-info "Init error" {:test true})))
+
+                          (close
+                            [_]
+                            (reset! closed? true)
+                            (sp/close storage))
+
+
+                          graphden.storage_protocol.interface.StorageIntrospection
+
+                          (current-entities [_] (sp/current-entities storage))
+
+                          (current-fields [_ e] (sp/current-fields storage e))
+
+                          (current-enums [_] (sp/current-enums storage))
+
+                          (current-enum-values [_ e] (sp/current-enum-values storage e))
+
+                          (schema-metadata [_] (sp/schema-metadata storage)))))]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Init error"
+              (gsd/create-storage)))
+        (is @closed? "Storage should be closed on init failure")))))

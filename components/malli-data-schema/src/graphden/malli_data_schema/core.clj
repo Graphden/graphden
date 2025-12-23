@@ -52,18 +52,23 @@
                      :type (type entity-name)}))))
 
 
+(defn- validate-single-field-name
+  "Validates a single field name. Throws if invalid."
+  [entity-name field-name]
+  (when-not (keyword? field-name)
+    (throw (ex-info "Field name must be a keyword"
+                    {:entity entity-name
+                     :field-name field-name
+                     :type (type field-name)})))
+  (when (= field-name :id)
+    (throw (ex-info "Field name :id is reserved (implicit primary key)"
+                    {:entity entity-name}))))
+
+
 (defn- validate-field-names
   "Validates field names in an entity definition."
   [entity-name fields]
-  (doseq [field-name (keys fields)]
-    (when-not (keyword? field-name)
-      (throw (ex-info "Field name must be a keyword"
-                      {:entity entity-name
-                       :field-name field-name
-                       :type (type field-name)})))
-    (when (= field-name :id)
-      (throw (ex-info "Field name :id is reserved (implicit primary key)"
-                      {:entity entity-name})))))
+  (run! #(validate-single-field-name entity-name %) (keys fields)))
 
 
 (defn- validate-field-spec
@@ -134,8 +139,9 @@
              (throw (ex-info "Field type :union requires :variants vector"
                              {:entity entity-name :field field-name :spec field-spec})))
            ;; Recursively validate each variant (with in-variant? = true)
-           (doseq [[idx variant] (map-indexed vector variants)]
-             (validate-field-spec entity-name (str field-name "[" idx "]") variant true)))
+           (run! (fn [[idx variant]]
+                   (validate-field-spec entity-name (str field-name "[" idx "]") variant true))
+                 (map-indexed vector variants)))
          (let [allowed-keys (conj base-allowed-keys :variants)
                extra-keys (apply disj (set (keys field-spec)) allowed-keys)]
            (when (seq extra-keys)
@@ -154,12 +160,20 @@
                             :allowed-keys base-allowed-keys}))))))))
 
 
+(defn- validate-entity-field-specs
+  "Validates all field specs for a single entity."
+  [entity-name fields]
+  (run! (fn [[field-name field-spec]]
+          (validate-field-spec entity-name field-name field-spec))
+        fields))
+
+
 (defn- validate-field-specs
   "Validates all field specs in all entities."
   [entities-map]
-  (doseq [[entity-name fields] entities-map
-          [field-name field-spec] fields]
-    (validate-field-spec entity-name field-name field-spec)))
+  (run! (fn [[entity-name fields]]
+          (validate-entity-field-specs entity-name fields))
+        entities-map))
 
 
 (defn- collect-field-refs
@@ -174,28 +188,59 @@
       [])))
 
 
+(defn- validate-entity-ref
+  "Validates an entity reference. Throws if invalid."
+  [entity-name field-name ref-name entities-map]
+  (when-not (contains? entities-map ref-name)
+    (throw (ex-info (str "Unknown entity reference: " ref-name)
+                    {:entity entity-name
+                     :field field-name
+                     :ref-entity ref-name
+                     :available-entities (keys entities-map)}))))
+
+
+(defn- validate-enum-ref
+  "Validates an enum reference. Throws if invalid."
+  [entity-name field-name ref-name enums-map]
+  (when-not (contains? enums-map ref-name)
+    (throw (ex-info (str "Unknown enum reference: " ref-name)
+                    {:entity entity-name
+                     :field field-name
+                     :enum-name ref-name
+                     :available-enums (keys enums-map)}))))
+
+
+(defn- validate-single-ref
+  "Validates a single reference. Throws if invalid."
+  [entity-name field-name ref-type ref-name entities-map enums-map]
+  (case ref-type
+    :entity (validate-entity-ref entity-name field-name ref-name entities-map)
+    :enum (validate-enum-ref entity-name field-name ref-name enums-map)))
+
+
+(defn- validate-field-refs
+  "Validates all references in a single field. Throws if any invalid."
+  [entity-name field-name field-spec entities-map enums-map]
+  (run! (fn [{:keys [ref-type ref-name]}]
+          (validate-single-ref entity-name field-name ref-type ref-name entities-map enums-map))
+        (collect-field-refs field-spec)))
+
+
+(defn- validate-entity-refs
+  "Validates all references in a single entity's fields."
+  [entity-name fields entities-map enums-map]
+  (run! (fn [[field-name field-spec]]
+          (validate-field-refs entity-name field-name field-spec entities-map enums-map))
+        fields))
+
+
 (defn- validate-refs
   "Validates that all references in entities point to existing enums/entities.
    Returns nil if valid, or throws with details."
   [entities-map enums-map]
-  (doseq [[entity-name fields] entities-map
-          [field-name field-spec] fields]
-    (doseq [{:keys [ref-type ref-name]} (collect-field-refs field-spec)]
-      (case ref-type
-        :entity
-        (when-not (contains? entities-map ref-name)
-          (throw (ex-info (str "Unknown entity reference: " ref-name)
-                          {:entity entity-name
-                           :field field-name
-                           :ref-entity ref-name
-                           :available-entities (keys entities-map)})))
-        :enum
-        (when-not (contains? enums-map ref-name)
-          (throw (ex-info (str "Unknown enum reference: " ref-name)
-                          {:entity entity-name
-                           :field field-name
-                           :enum-name ref-name
-                           :available-enums (keys enums-map)})))))))
+  (run! (fn [[entity-name fields]]
+          (validate-entity-refs entity-name fields entities-map enums-map))
+        entities-map))
 
 
 (defn- variant-identity
@@ -208,23 +253,36 @@
     (select-keys variant [:type])))
 
 
+(defn- validate-single-union-field
+  "Validates a single union field's variants. Throws if invalid."
+  [entity-name field-name variants]
+  (when (empty? variants)
+    (throw (ex-info "Union variants cannot be empty"
+                    {:entity entity-name :field field-name})))
+  (let [variant-ids (map variant-identity variants)
+        duplicates (for [[v freq] (frequencies variant-ids) :when (> freq 1)] v)]
+    (when (seq duplicates)
+      (throw (ex-info "Union has duplicate variants"
+                      {:entity entity-name
+                       :field field-name
+                       :duplicates (vec duplicates)})))))
+
+
+(defn- validate-entity-union-variants
+  "Validates union variants for a single entity's fields."
+  [entity-name fields]
+  (run! (fn [[field-name field-spec]]
+          (when (= (:type field-spec) :union)
+            (validate-single-union-field entity-name field-name (:variants field-spec))))
+        fields))
+
+
 (defn- validate-union-variants
   "Validates union variants are not empty and have no duplicates."
   [entities-map]
-  (doseq [[entity-name fields] entities-map
-          [field-name field-spec] fields
-          :when (= (:type field-spec) :union)
-          :let [variants (:variants field-spec)]]
-    (when (empty? variants)
-      (throw (ex-info "Union variants cannot be empty"
-                      {:entity entity-name :field field-name})))
-    (let [variant-ids (map variant-identity variants)
-          duplicates (for [[v freq] (frequencies variant-ids) :when (> freq 1)] v)]
-      (when (seq duplicates)
-        (throw (ex-info "Union has duplicate variants"
-                        {:entity entity-name
-                         :field field-name
-                         :duplicates (vec duplicates)}))))))
+  (run! (fn [[entity-name fields]]
+          (validate-entity-union-variants entity-name fields))
+        entities-map))
 
 
 (declare make-field-schema)
@@ -313,23 +371,40 @@
     (get constraints-map entity-name [])))
 
 
+(defn- validate-constraint-field
+  "Validates a single constraint field exists. Throws if invalid."
+  [entity-name entity-fields constraint field]
+  (when-not (or (= field :id) (contains? entity-fields field))
+    (throw (ex-info (str "Constraint references unknown field: " field)
+                    {:entity entity-name
+                     :field field
+                     :constraint constraint
+                     :available-fields (conj (set (keys entity-fields)) :id)}))))
+
+
+(defn- validate-single-constraint
+  "Validates a single constraint. Throws if invalid."
+  [entity-name entity-fields constraint]
+  (when-not entity-fields
+    (throw (ex-info (str "Constraint references unknown entity: " entity-name)
+                    {:entity entity-name :constraint constraint})))
+  (run! #(validate-constraint-field entity-name entity-fields constraint %)
+        (:fields constraint)))
+
+
+(defn- validate-entity-constraints
+  "Validates all constraints for a single entity."
+  [entities-map entity-name constraints]
+  (let [entity-fields (get entities-map entity-name)]
+    (run! #(validate-single-constraint entity-name entity-fields %) constraints)))
+
+
 (defn- validate-constraints
   "Validates that all constraint fields exist in their entities."
   [entities-map constraints-map]
-  (doseq [[entity-name constraints] constraints-map
-          constraint constraints
-          :let [fields (:fields constraint)
-                entity-fields (get entities-map entity-name)]]
-    (when-not entity-fields
-      (throw (ex-info (str "Constraint references unknown entity: " entity-name)
-                      {:entity entity-name :constraint constraint})))
-    (doseq [field fields]
-      (when-not (or (= field :id) (contains? entity-fields field))
-        (throw (ex-info (str "Constraint references unknown field: " field)
-                        {:entity entity-name
-                         :field field
-                         :constraint constraint
-                         :available-fields (conj (set (keys entity-fields)) :id)}))))))
+  (run! (fn [[entity-name constraints]]
+          (validate-entity-constraints entities-map entity-name constraints))
+        constraints-map))
 
 
 (defn- validate-uuid
@@ -350,6 +425,27 @@
                     {:uuid new-uuid
                      :new-location new-location
                      :existing-location existing-location}))))
+
+
+(defn- validate-single-enum-value
+  "Validates a single enum value entry. Throws if invalid."
+  [builder enum-name entry]
+  (when-not (map? entry)
+    (throw (ex-info "Each enum value must be a map with :uuid and :value"
+                    {:enum-name enum-name :entry entry})))
+  (when-not (contains? entry :uuid)
+    (throw (ex-info "Enum value missing :uuid"
+                    {:enum-name enum-name :entry entry})))
+  (when-not (contains? entry :value)
+    (throw (ex-info "Enum value missing :value"
+                    {:enum-name enum-name :entry entry})))
+  (validate-uuid {:context "enum value" :enum-name enum-name :value (:value entry)}
+                 (:uuid entry))
+  (when-not (keyword? (:value entry))
+    (throw (ex-info "Enum value :value must be a keyword"
+                    {:enum-name enum-name :entry entry})))
+  (check-uuid-uniqueness builder (:uuid entry)
+                         (str "enum value " enum-name "/" (:value entry))))
 
 
 (defrecord MalliDataSchemaBuilder
@@ -380,24 +476,7 @@
       (throw (ex-info "Enum values must be a vector"
                       {:enum-name enum-name :values values})))
     ;; Validate each value entry
-    (doseq [entry values]
-      (when-not (map? entry)
-        (throw (ex-info "Each enum value must be a map with :uuid and :value"
-                        {:enum-name enum-name :entry entry})))
-      (when-not (contains? entry :uuid)
-        (throw (ex-info "Enum value missing :uuid"
-                        {:enum-name enum-name :entry entry})))
-      (when-not (contains? entry :value)
-        (throw (ex-info "Enum value missing :value"
-                        {:enum-name enum-name :entry entry})))
-      (validate-uuid {:context "enum value" :enum-name enum-name :value (:value entry)}
-                     (:uuid entry))
-      (when-not (keyword? (:value entry))
-        (throw (ex-info "Enum value :value must be a keyword"
-                        {:enum-name enum-name :entry entry})))
-      ;; Check value UUID uniqueness
-      (check-uuid-uniqueness this (:uuid entry)
-                             (str "enum value " enum-name "/" (:value entry))))
+    (run! #(validate-single-enum-value this enum-name %) values)
     ;; Check for duplicate values
     (let [value-keywords (map :value values)
           duplicates (for [[v freq] (frequencies value-keywords) :when (> freq 1)] v)]
@@ -438,7 +517,7 @@
     ;; Check entity UUID uniqueness against existing UUIDs
     (check-uuid-uniqueness this entity-uuid (str "entity " entity-name))
     ;; Validate each field has :uuid and check for duplicates using reduce
-    (let [field-uuids-in-entity
+    (let [_field-uuids-in-entity
           (reduce
             (fn [seen [field-name field-spec]]
               (when-not (contains? field-spec :uuid)
@@ -472,8 +551,6 @@
                                      (str "field " entity-name "/" field-name)))
                             (assoc known-uuids entity-uuid (str "entity " entity-name))
                             fields)]
-      ;; Use field-uuids-in-entity to avoid unused binding warning
-      (when (nil? field-uuids-in-entity) nil)
       (-> this
           (assoc-in [:entities-map entity-name] fields)
           (assoc-in [:entity-uuids-map entity-name] entity-uuid)

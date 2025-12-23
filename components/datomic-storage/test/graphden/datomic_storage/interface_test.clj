@@ -2,6 +2,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.data-schema-protocol.interface :as ds]
+    [graphden.datomic-storage.core :as core]
     [graphden.datomic-storage.interface :as dat]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.storage-protocol.interface :as sp]))
@@ -395,3 +396,73 @@
       (sp/initialize storage schema)
       (is (nil? (sp/close storage)))
       (is (nil? (sp/close storage))))))
+
+
+;; === Edge case tests with mocks ===
+
+(deftest uninitialized-storage-test
+  (testing "current-entities returns empty set when storage not connected"
+    (let [storage (create-test-storage)]
+      ;; Don't initialize - just close immediately to disconnect
+      (sp/close storage)
+      ;; Should return empty set, not throw
+      (is (= #{} (sp/current-entities storage)))))
+
+  (testing "current-enums returns empty set when storage not connected"
+    (let [storage (create-test-storage)]
+      (sp/close storage)
+      (is (= #{} (sp/current-enums storage))))))
+
+
+(deftest metadata-db-inconsistency-test
+  (testing "detects when metadata says field exists but DB attribute is missing"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (make-schema :entity-uuid entity-uuid
+                               :fields {:name {:uuid field-uuid :type :text}})]
+      (try
+        ;; First initialize normally
+        (sp/initialize storage schema1)
+        ;; Now mock read-metadata to return metadata claiming a non-existent field
+        (let [fake-metadata {:entities {entity-uuid :user}
+                             :fields {field-uuid {:entity :user
+                                                  :field :name
+                                                  :type :text
+                                                  :nullable? false}
+                                      ;; This field doesn't exist in DB!
+                                      #uuid "00000000-0000-0000-0000-000000000099"
+                                      {:entity :user
+                                       :field :ghost-field
+                                       :type :text
+                                       :nullable? false}}
+                             :enums {}
+                             :enum-values {}}
+              ;; Schema that references the ghost field by UUID
+              schema2 (-> (mds/create-builder)
+                          (ds/add-entity :user entity-uuid
+                                         {:name {:uuid field-uuid :type :text}
+                                          :ghost-field {:uuid #uuid "00000000-0000-0000-0000-000000000099"
+                                                        :type :text}})
+                          ds/build)]
+          (with-redefs [core/read-metadata (constantly fake-metadata)]
+            (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                  #"Metadata/DB inconsistency"
+                  (sp/initialize storage schema2)))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest metadata-schema-missing-test
+  (testing "metadata-schema-exists? returns false when metadata schema not installed"
+    ;; This exercises the try/catch path in metadata-schema-exists?
+    ;; On a fresh database, the metadata attributes don't exist
+    (let [storage (create-test-storage)]
+      (try
+        ;; Don't initialize - directly check if metadata schema exists
+        (let [metadata-exists-fn #'core/metadata-schema-exists?
+              conn (:conn storage)]
+          ;; Should return false without throwing
+          (is (false? (metadata-exists-fn conn))))
+        (finally
+          (sp/close storage))))))

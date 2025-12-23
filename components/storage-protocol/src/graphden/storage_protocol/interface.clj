@@ -218,6 +218,65 @@
 ;; These functions compute changes between old metadata and new schema.
 ;; They are shared across all storage implementations.
 
+
+(defn- collect-fields-meta
+  "Collects field metadata for all entities."
+  [schema]
+  (into {}
+        (mapcat (fn [entity-name]
+                  (map (fn [[field-name field-spec]]
+                         [(:uuid field-spec)
+                          {:entity entity-name :field field-name}])
+                       (ds/entity-fields schema entity-name)))
+                (ds/entities schema))))
+
+
+(defn- collect-enum-values-meta
+  "Collects enum value metadata for all enums."
+  [enums-data]
+  (into {}
+        (mapcat (fn [[enum-name {:keys [values]}]]
+                  (map (fn [[value-kw value-uuid]]
+                         [value-uuid {:enum enum-name :value value-kw}])
+                       values))
+                enums-data)))
+
+
+(defn- collect-created-fields
+  "Collects created fields info for changes report."
+  [schema]
+  (vec (mapcat (fn [e]
+                 (map (fn [[f _]] {:entity e :field f})
+                      (ds/entity-fields schema e)))
+               (ds/entities schema))))
+
+
+(defn- collect-created-enum-values
+  "Collects created enum values info for changes report."
+  [schema]
+  (vec (mapcat (fn [[enum-name {:keys [values]}]]
+                 (map (fn [[v _]] {:enum enum-name :value v})
+                      values))
+               (ds/enums schema))))
+
+
+(defn- collect-field-uuids
+  "Collects all field UUIDs from schema."
+  [schema]
+  (set (mapcat (fn [e]
+                 (map (fn [[_ spec]] (:uuid spec))
+                      (ds/entity-fields schema e)))
+               (ds/entities schema))))
+
+
+(defn- collect-enum-value-uuids
+  "Collects all enum value UUIDs from schema."
+  [schema]
+  (set (mapcat (fn [[_ {:keys [values]}]]
+                 (map second values))
+               (ds/enums schema))))
+
+
 (defn build-metadata-from-schema
   "Builds metadata structure from DataSchema for first-time initialization.
    Returns: {:entities {uuid->name}
@@ -226,21 +285,16 @@
              :enum-values {uuid->{:enum name :value kw}}}"
   [schema]
   (let [entities-meta (into {}
-                            (for [entity-name (ds/entities schema)]
-                              [(ds/entity-uuid schema entity-name) entity-name]))
-        fields-meta (into {}
-                          (for [entity-name (ds/entities schema)
-                                [field-name field-spec] (ds/entity-fields schema entity-name)]
-                            [(:uuid field-spec)
-                             {:entity entity-name :field field-name}]))
+                            (map (fn [entity-name]
+                                   [(ds/entity-uuid schema entity-name) entity-name])
+                                 (ds/entities schema)))
+        fields-meta (collect-fields-meta schema)
         enums-data (ds/enums schema)
         enums-meta (into {}
-                         (for [[enum-name {:keys [uuid]}] enums-data]
-                           [uuid enum-name]))
-        enum-values-meta (into {}
-                               (for [[enum-name {:keys [values]}] enums-data
-                                     [value-kw value-uuid] values]
-                                 [value-uuid {:enum enum-name :value value-kw}]))]
+                         (map (fn [[enum-name {:keys [uuid]}]]
+                                [uuid enum-name])
+                              enums-data))
+        enum-values-meta (collect-enum-values-meta enums-data)]
     {:entities entities-meta
      :fields fields-meta
      :enums enums-meta
@@ -252,14 +306,9 @@
    All entities, fields, enums, and enum-values are marked as created."
   [schema]
   {:entities {:created (vec (ds/entities schema)) :renamed {}}
-   :fields {:created (vec (for [e (ds/entities schema)
-                                [f _] (ds/entity-fields schema e)]
-                            {:entity e :field f}))
-            :renamed []}
+   :fields {:created (collect-created-fields schema) :renamed []}
    :enums {:created (vec (keys (ds/enums schema))) :renamed {}}
-   :enum-values {:created (vec (for [[enum-name {:keys [values]}] (ds/enums schema)
-                                     [v _] values]
-                                 {:enum enum-name :value v}))}})
+   :enum-values {:created (collect-created-enum-values schema)}})
 
 
 (defn check-all-removals!
@@ -273,9 +322,7 @@
                     #(get (:entities old-metadata) %)))
   ;; Check fields
   (let [old-field-uuids (set (keys (:fields old-metadata)))
-        new-field-uuids (set (for [e (ds/entities schema)
-                                   [_ spec] (ds/entity-fields schema e)]
-                               (:uuid spec)))]
+        new-field-uuids (collect-field-uuids schema)]
     (check-removed! "fields" old-field-uuids new-field-uuids
                     #(get (:fields old-metadata) %)))
   ;; Check enums
@@ -285,9 +332,7 @@
                     #(get (:enums old-metadata) %)))
   ;; Check enum values
   (let [old-value-uuids (set (keys (:enum-values old-metadata)))
-        new-value-uuids (set (for [[_ {:keys [values]}] (ds/enums schema)
-                                   [_ uuid] values]
-                               uuid))]
+        new-value-uuids (collect-enum-value-uuids schema)]
     (check-removed! "enum values" old-value-uuids new-value-uuids
                     #(get (:enum-values old-metadata) %))))
 

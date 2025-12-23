@@ -218,6 +218,42 @@
                                        :value value-name}]))})))))
 
 
+(defn- build-entity-metadata-tx
+  "Builds transaction data for a single entity's metadata."
+  [schema entity-name]
+  {:graphden.metadata/uuid (ds/entity-uuid schema entity-name)
+   :graphden.metadata/kind :entity
+   :graphden.metadata/name entity-name})
+
+
+(defn- build-field-metadata-tx
+  "Builds transaction data for a single field's metadata."
+  [schema entity-name field-name field-spec]
+  {:graphden.metadata/uuid (:uuid field-spec)
+   :graphden.metadata/kind :field
+   :graphden.metadata/name field-name
+   :graphden.metadata/parent-uuid (ds/entity-uuid schema entity-name)
+   :graphden.metadata/field-type (:type field-spec)
+   :graphden.metadata/field-nullable (get field-spec :nullable? false)})
+
+
+(defn- build-enum-metadata-tx
+  "Builds transaction data for a single enum's metadata."
+  [enum-name {:keys [uuid]}]
+  {:graphden.metadata/uuid uuid
+   :graphden.metadata/kind :enum
+   :graphden.metadata/name enum-name})
+
+
+(defn- build-enum-value-metadata-tx
+  "Builds transaction data for a single enum value's metadata."
+  [parent-uuid value-kw value-uuid]
+  {:graphden.metadata/uuid value-uuid
+   :graphden.metadata/kind :enum-value
+   :graphden.metadata/name value-kw
+   :graphden.metadata/parent-uuid parent-uuid})
+
+
 (defn- save-metadata!
   "Saves metadata to the database (retract old, assert new)."
   [conn schema]
@@ -233,37 +269,203 @@
   (let [tx-data
         (concat
           ;; Entities
-          (for [entity-name (ds/entities schema)]
-            {:graphden.metadata/uuid (ds/entity-uuid schema entity-name)
-             :graphden.metadata/kind :entity
-             :graphden.metadata/name entity-name})
+          (map #(build-entity-metadata-tx schema %) (ds/entities schema))
           ;; Fields
-          (for [entity-name (ds/entities schema)
-                [field-name field-spec] (ds/entity-fields schema entity-name)]
-            {:graphden.metadata/uuid (:uuid field-spec)
-             :graphden.metadata/kind :field
-             :graphden.metadata/name field-name
-             :graphden.metadata/parent-uuid (ds/entity-uuid schema entity-name)
-             :graphden.metadata/field-type (:type field-spec)
-             :graphden.metadata/field-nullable (get field-spec :nullable? false)})
+          (mapcat (fn [entity-name]
+                    (map (fn [[field-name field-spec]]
+                           (build-field-metadata-tx schema entity-name field-name field-spec))
+                         (ds/entity-fields schema entity-name)))
+                  (ds/entities schema))
           ;; Enums
-          (for [[enum-name {:keys [uuid]}] (ds/enums schema)]
-            {:graphden.metadata/uuid uuid
-             :graphden.metadata/kind :enum
-             :graphden.metadata/name enum-name})
+          (map (fn [[enum-name enum-def]] (build-enum-metadata-tx enum-name enum-def))
+               (ds/enums schema))
           ;; Enum values
-          (for [[_enum-name {:keys [uuid values]}] (ds/enums schema)
-                [value-kw value-uuid] values]
-            {:graphden.metadata/uuid value-uuid
-             :graphden.metadata/kind :enum-value
-             :graphden.metadata/name value-kw
-             :graphden.metadata/parent-uuid uuid}))]
+          (mapcat (fn [[_enum-name {:keys [uuid values]}]]
+                    (map (fn [[value-kw value-uuid]]
+                           (build-enum-value-metadata-tx uuid value-kw value-uuid))
+                         values))
+                  (ds/enums schema)))]
     (when (seq tx-data)
       (d/transact conn {:tx-data (vec tx-data)}))))
 
 
 ;; === Destructive change checks ===
 ;; Using shared utilities from sp/check-removed! and sp/check-type-change!
+
+
+;; === Migration helpers ===
+
+(defn- check-single-field-type!
+  "Checks type compatibility for a single field during migration."
+  [db old-metadata old-entity-name field-name field-spec]
+  (let [field-uuid (:uuid field-spec)
+        old-field-info (get (:fields old-metadata) field-uuid)]
+    (when old-field-info
+      (let [old-attr (entity-attr old-entity-name (:field old-field-info))
+            attr-exists? (seq (d/q '[:find ?e
+                                     :in $ ?attr
+                                     :where [?e :db/ident ?attr]]
+                                   db old-attr))]
+        ;; Check for metadata/DB inconsistency
+        (when-not attr-exists?
+          (throw (ex-info "Metadata/DB inconsistency: field exists in metadata but not in database"
+                          {:type :metadata-inconsistency
+                           :entity (keyword (namespace old-attr))
+                           :field field-name
+                           :expected-attr old-attr})))
+        ;; Use type from metadata (preserves JSONB/Union correctly)
+        (let [old-type (:type old-field-info)
+              new-type (:type field-spec)
+              old-nullable? (:nullable? old-field-info)
+              new-nullable? (get field-spec :nullable? false)]
+          (sp/check-type-change! (keyword (namespace old-attr)) field-name old-type new-type)
+          (sp/check-nullable-change! (keyword (namespace old-attr)) field-name old-nullable? new-nullable?))))))
+
+
+(defn- check-entity-fields-type!
+  "Checks type compatibility for all fields of a single entity."
+  [db old-metadata schema entity-name]
+  (let [entity-uuid (ds/entity-uuid schema entity-name)
+        old-entity-name (get (:entities old-metadata) entity-uuid)]
+    (when old-entity-name
+      (run! (fn [[field-name field-spec]]
+              (check-single-field-type! db old-metadata old-entity-name field-name field-spec))
+            (ds/entity-fields schema entity-name)))))
+
+
+(defn- process-existing-enum-value!
+  "Processes a single enum value during migration (add if new)."
+  [old-metadata enum-name value-kw value-uuid new-schema created-enum-values]
+  (when-not (get (:enum-values old-metadata) value-uuid)
+    (swap! new-schema conj (build-enum-value-schema enum-name value-kw))
+    (swap! created-enum-values conj {:enum enum-name :value value-kw})))
+
+
+(defn- process-single-enum!
+  "Processes a single enum during migration."
+  [old-metadata enum-name {:keys [uuid values]} created-enums renamed-enums new-schema created-enum-values]
+  (if-let [old-enum-name (get (:enums old-metadata) uuid)]
+    (do
+      (when (not= old-enum-name enum-name)
+        (swap! renamed-enums assoc old-enum-name enum-name))
+      ;; Check for new values
+      (run! (fn [[value-kw value-uuid]]
+              (process-existing-enum-value! old-metadata enum-name value-kw value-uuid
+                                            new-schema created-enum-values))
+            values))
+    (do
+      (swap! created-enums conj enum-name)
+      (run! (fn [[value-kw _]]
+              (swap! new-schema conj (build-enum-value-schema enum-name value-kw))
+              (swap! created-enum-values conj {:enum enum-name :value value-kw}))
+            values))))
+
+
+(defn- process-existing-field!
+  "Processes an existing field during migration."
+  [old-field-info entity-name field-name renamed-fields]
+  (when (not= (:field old-field-info) field-name)
+    (swap! renamed-fields conj {:entity entity-name
+                                :old-field (:field old-field-info)
+                                :new-field field-name})))
+
+
+(defn- process-single-field!
+  "Processes a single field during migration."
+  [old-metadata entity-name field-name field-spec new-schema created-fields renamed-fields]
+  (let [field-uuid (:uuid field-spec)
+        old-field-info (get (:fields old-metadata) field-uuid)]
+    (if old-field-info
+      (process-existing-field! old-field-info entity-name field-name renamed-fields)
+      (do
+        (swap! new-schema conj (build-field-schema entity-name field-name field-spec))
+        (swap! created-fields conj {:entity entity-name :field field-name})))))
+
+
+(defn- process-existing-entity!
+  "Processes an existing entity during migration."
+  [schema old-metadata entity-name old-entity-name renamed-entities
+   new-schema created-fields renamed-fields]
+  (when (not= old-entity-name entity-name)
+    (swap! renamed-entities assoc old-entity-name entity-name))
+  ;; Process fields
+  (run! (fn [[field-name field-spec]]
+          (process-single-field! old-metadata entity-name field-name field-spec
+                                 new-schema created-fields renamed-fields))
+        (ds/entity-fields schema entity-name)))
+
+
+(defn- process-single-entity!
+  "Processes a single entity during migration."
+  [schema old-metadata entity-name created-entities renamed-entities
+   new-schema created-fields renamed-fields]
+  (let [entity-uuid (ds/entity-uuid schema entity-name)
+        old-entity-name (get (:entities old-metadata) entity-uuid)]
+    (if old-entity-name
+      (process-existing-entity! schema old-metadata entity-name old-entity-name
+                                renamed-entities new-schema created-fields renamed-fields)
+      (do
+        (swap! created-entities conj entity-name)
+        (run! (fn [[field-name field-spec]]
+                (swap! new-schema conj (build-field-schema entity-name field-name field-spec))
+                (swap! created-fields conj {:entity entity-name :field field-name}))
+              (ds/entity-fields schema entity-name))))))
+
+
+;; === Schema builders for initialization ===
+
+(defn- build-enum-schemas
+  "Builds all enum value schemas for initialization."
+  [schema]
+  (mapcat (fn [[enum-name {:keys [values]}]]
+            (map (fn [[value-kw _]] (build-enum-value-schema enum-name value-kw))
+                 values))
+          (ds/enums schema)))
+
+
+(defn- build-field-schemas
+  "Builds all field schemas for initialization."
+  [schema]
+  (mapcat (fn [entity-name]
+            (map (fn [[field-name field-spec]]
+                   (build-field-schema entity-name field-name field-spec))
+                 (ds/entity-fields schema entity-name)))
+          (ds/entities schema)))
+
+
+(defn- collect-created-fields
+  "Collects all field creation info for changes report."
+  [schema]
+  (vec (mapcat (fn [e]
+                 (map (fn [[f _]] {:entity e :field f})
+                      (ds/entity-fields schema e)))
+               (ds/entities schema))))
+
+
+(defn- collect-created-enum-values
+  "Collects all enum value creation info for changes report."
+  [schema]
+  (vec (mapcat (fn [[enum-name {:keys [values]}]]
+                 (map (fn [[v _]] {:enum enum-name :value v})
+                      values))
+               (ds/enums schema))))
+
+
+(defn- collect-field-uuids
+  "Collects all field UUIDs from schema."
+  [schema]
+  (set (mapcat (fn [e]
+                 (map (fn [[_ spec]] (:uuid spec))
+                      (ds/entity-fields schema e)))
+               (ds/entities schema))))
+
+
+(defn- collect-enum-value-uuids
+  "Collects all enum value UUIDs from schema."
+  [schema]
+  (set (mapcat (fn [[_ {:keys [values]}]]
+                 (map second values))
+               (ds/enums schema))))
 
 
 ;; === Initialize ===
@@ -276,16 +478,9 @@
 
     (if (nil? old-metadata)
       ;; First-time initialization
-      (let [;; Build schema for metadata attributes
-            metadata-schema (build-metadata-schema)
-            ;; Build schema for enum values (as ident entities)
-            enum-schema (for [[enum-name {:keys [values]}] (ds/enums schema)
-                              [value-kw _] values]
-                          (build-enum-value-schema enum-name value-kw))
-            ;; Build schema for entity attributes
-            field-schema (for [entity-name (ds/entities schema)
-                               [field-name field-spec] (ds/entity-fields schema entity-name)]
-                           (build-field-schema entity-name field-name field-spec))
+      (let [metadata-schema (build-metadata-schema)
+            enum-schema (build-enum-schemas schema)
+            field-schema (build-field-schemas schema)
             all-schema (concat metadata-schema enum-schema field-schema)]
 
         ;; Transact all schema
@@ -297,14 +492,9 @@
 
         ;; Return changes
         {:entities {:created (vec (ds/entities schema)) :renamed {}}
-         :fields {:created (vec (for [e (ds/entities schema)
-                                      [f _] (ds/entity-fields schema e)]
-                                  {:entity e :field f}))
-                  :renamed []}
+         :fields {:created (collect-created-fields schema) :renamed []}
          :enums {:created (vec (keys (ds/enums schema))) :renamed {}}
-         :enum-values {:created (vec (for [[enum-name {:keys [values]}] (ds/enums schema)
-                                           [v _] values]
-                                       {:enum enum-name :value v}))}})
+         :enum-values {:created (collect-created-enum-values schema)}})
 
       ;; Migration
       (do
@@ -315,9 +505,7 @@
                              #(get (:entities old-metadata) %)))
 
         (let [old-field-uuids (set (keys (:fields old-metadata)))
-              new-field-uuids (set (for [e (ds/entities schema)
-                                         [_ spec] (ds/entity-fields schema e)]
-                                     (:uuid spec)))]
+              new-field-uuids (collect-field-uuids schema)]
           (sp/check-removed! "fields" old-field-uuids new-field-uuids
                              #(get (:fields old-metadata) %)))
 
@@ -327,102 +515,35 @@
                              #(get (:enums old-metadata) %)))
 
         (let [old-value-uuids (set (keys (:enum-values old-metadata)))
-              new-value-uuids (set (for [[_ {:keys [values]}] (ds/enums schema)
-                                         [_ uuid] values]
-                                     uuid))]
+              new-value-uuids (collect-enum-value-uuids schema)]
           (sp/check-removed! "enum values" old-value-uuids new-value-uuids
                              #(get (:enum-values old-metadata) %)))
 
         ;; Check type changes
-        (doseq [entity-name (ds/entities schema)]
-          (let [entity-uuid (ds/entity-uuid schema entity-name)
-                old-entity-name (get (:entities old-metadata) entity-uuid)]
-            (when old-entity-name
-              (doseq [[field-name field-spec] (ds/entity-fields schema entity-name)]
-                (let [field-uuid (:uuid field-spec)
-                      old-field-info (get (:fields old-metadata) field-uuid)]
-                  (when old-field-info
-                    (let [old-attr (entity-attr old-entity-name (:field old-field-info))
-                          attr-exists? (seq (d/q '[:find ?e
-                                                   :in $ ?attr
-                                                   :where [?e :db/ident ?attr]]
-                                                 db old-attr))]
-                      ;; Check for metadata/DB inconsistency
-                      (when-not attr-exists?
-                        (throw (ex-info "Metadata/DB inconsistency: field exists in metadata but not in database"
-                                        {:type :metadata-inconsistency
-                                         :entity entity-name
-                                         :field field-name
-                                         :expected-attr old-attr})))
-                      ;; Use type from metadata (preserves JSONB/Union correctly)
-                      (let [old-type (:type old-field-info)
-                            new-type (:type field-spec)
-                            old-nullable? (:nullable? old-field-info)
-                            new-nullable? (get field-spec :nullable? false)]
-                        (sp/check-type-change! entity-name field-name old-type new-type)
-                        (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?)))))))))
+        (run! #(check-entity-fields-type! db old-metadata schema %) (ds/entities schema))
 
         ;; Compute changes and apply new schema
-        (let [;; Compute entity changes
-              created-entities (atom [])
+        (let [created-entities (atom [])
               renamed-entities (atom {})
-
-              ;; Compute field changes
               created-fields (atom [])
               renamed-fields (atom [])
-
-              ;; Compute enum changes
               created-enums (atom [])
               renamed-enums (atom {})
-
-              ;; Compute enum value changes
               created-enum-values (atom [])
-
-              ;; Schema to transact
               new-schema (atom [])]
 
           ;; Process enums
-          (doseq [[enum-name {:keys [uuid values]}] (ds/enums schema)]
-            (if-let [old-enum-name (get (:enums old-metadata) uuid)]
-              (do
-                (when (not= old-enum-name enum-name)
-                  (swap! renamed-enums assoc old-enum-name enum-name))
-                ;; Check for new values
-                (doseq [[value-kw value-uuid] values]
-                  (when-not (get (:enum-values old-metadata) value-uuid)
-                    (swap! new-schema conj (build-enum-value-schema enum-name value-kw))
-                    (swap! created-enum-values conj {:enum enum-name :value value-kw}))))
-              (do
-                (swap! created-enums conj enum-name)
-                (doseq [[value-kw _] values]
-                  (swap! new-schema conj (build-enum-value-schema enum-name value-kw))
-                  (swap! created-enum-values conj {:enum enum-name :value value-kw})))))
+          (run! (fn [[enum-name enum-def]]
+                  (process-single-enum! old-metadata enum-name enum-def
+                                        created-enums renamed-enums
+                                        new-schema created-enum-values))
+                (ds/enums schema))
 
           ;; Process entities and fields
-          (doseq [entity-name (ds/entities schema)]
-            (let [entity-uuid (ds/entity-uuid schema entity-name)
-                  old-entity-name (get (:entities old-metadata) entity-uuid)]
-              (if old-entity-name
-                (do
-                  (when (not= old-entity-name entity-name)
-                    (swap! renamed-entities assoc old-entity-name entity-name))
-                  ;; Process fields
-                  (doseq [[field-name field-spec] (ds/entity-fields schema entity-name)]
-                    (let [field-uuid (:uuid field-spec)
-                          old-field-info (get (:fields old-metadata) field-uuid)]
-                      (if old-field-info
-                        (when (not= (:field old-field-info) field-name)
-                          (swap! renamed-fields conj {:entity entity-name
-                                                      :old-field (:field old-field-info)
-                                                      :new-field field-name}))
-                        (do
-                          (swap! new-schema conj (build-field-schema entity-name field-name field-spec))
-                          (swap! created-fields conj {:entity entity-name :field field-name}))))))
-                (do
-                  (swap! created-entities conj entity-name)
-                  (doseq [[field-name field-spec] (ds/entity-fields schema entity-name)]
-                    (swap! new-schema conj (build-field-schema entity-name field-name field-spec))
-                    (swap! created-fields conj {:entity entity-name :field field-name}))))))
+          (run! #(process-single-entity! schema old-metadata %
+                                         created-entities renamed-entities
+                                         new-schema created-fields renamed-fields)
+                (ds/entities schema))
 
           ;; Transact new schema
           (when (seq @new-schema)

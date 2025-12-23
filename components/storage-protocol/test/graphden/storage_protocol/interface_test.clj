@@ -5,6 +5,8 @@
    will be added when implementations exist."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.data-schema-protocol.interface :as ds]
+    [graphden.malli-data-schema.interface :as mds]
     [graphden.storage-protocol.interface :as storage]))
 
 
@@ -28,6 +30,20 @@
     (is (= #{:jsonb} (:text storage/type-widening)))))
 
 
+(deftest types-equivalent?-test
+  (testing "uuid and ref are equivalent"
+    (is (storage/types-equivalent? :uuid :ref))
+    (is (storage/types-equivalent? :ref :uuid)))
+
+  (testing "jsonb and union are equivalent"
+    (is (storage/types-equivalent? :jsonb :union))
+    (is (storage/types-equivalent? :union :jsonb)))
+
+  (testing "non-equivalent types return nil"
+    (is (nil? (storage/types-equivalent? :text :int)))
+    (is (nil? (storage/types-equivalent? :uuid :text)))))
+
+
 (deftest safe-type-change?-test
   (testing "same type is always safe"
     (is (storage/safe-type-change? :int :int))
@@ -36,6 +52,12 @@
     (is (storage/safe-type-change? :uuid :uuid))
     (is (storage/safe-type-change? :jsonb :jsonb))
     (is (storage/safe-type-change? :bytes :bytes)))
+
+  (testing "equivalent types are safe"
+    (is (storage/safe-type-change? :uuid :ref))
+    (is (storage/safe-type-change? :ref :uuid))
+    (is (storage/safe-type-change? :jsonb :union))
+    (is (storage/safe-type-change? :union :jsonb)))
 
   (testing "widening is safe"
     (is (storage/safe-type-change? :int :numeric))
@@ -80,7 +102,36 @@
     (is (not (storage/safe-nullable-change? true false)))))
 
 
+(deftest check-type-change!-test
+  (testing "nil old-type doesn't throw (new field)"
+    (is (nil? (storage/check-type-change! :user :name nil :text))))
+
+  (testing "safe changes don't throw"
+    (is (nil? (storage/check-type-change! :user :name :text :text)))
+    (is (nil? (storage/check-type-change! :user :name :int :numeric)))
+    (is (nil? (storage/check-type-change! :user :name :uuid :ref))))
+
+  (testing "unsafe change throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"incompatible type change"
+          (storage/check-type-change! :user :name :text :int))))
+
+  (testing "exception contains correct data"
+    (try
+      (storage/check-type-change! :user :email :text :bool)
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :destructive-change (:type (ex-data e))))
+        (is (= :user (:entity (ex-data e))))
+        (is (= :email (:field (ex-data e))))
+        (is (= :text (:old-type (ex-data e))))
+        (is (= :bool (:new-type (ex-data e))))))))
+
+
 (deftest check-nullable-change!-test
+  (testing "nil old-nullable? doesn't throw (new field)"
+    (is (nil? (storage/check-nullable-change! :user :name nil false))))
+
   (testing "safe changes don't throw"
     (is (nil? (storage/check-nullable-change! :user :name true true)))
     (is (nil? (storage/check-nullable-change! :user :name false false)))
@@ -101,6 +152,82 @@
         (is (= :email (:field (ex-data e))))
         (is (true? (:old-nullable? (ex-data e))))
         (is (false? (:new-nullable? (ex-data e))))))))
+
+
+(deftest build-metadata-from-schema-test
+  (testing "empty schema returns empty metadata"
+    (let [schema (-> (mds/create-builder) ds/build)
+          metadata (storage/build-metadata-from-schema schema)]
+      (is (= {} (:entities metadata)))
+      (is (= {} (:fields metadata)))
+      (is (= {} (:enums metadata)))
+      (is (= {} (:enum-values metadata)))))
+
+  (testing "converts schema to metadata format with enums"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000000010"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000011" :value :active}
+                                   {:uuid #uuid "00000000-0000-0000-0000-000000000012" :value :inactive}])
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
+                     ds/build)
+          metadata (storage/build-metadata-from-schema schema)]
+      ;; Check entities
+      (is (= :user (get (:entities metadata) #uuid "00000000-0000-0000-0000-000000000001")))
+      ;; Check fields
+      (is (= {:entity :user :field :name}
+             (get (:fields metadata) #uuid "00000000-0000-0000-0000-000000000002")))
+      ;; Check enums
+      (is (= :status (get (:enums metadata) #uuid "00000000-0000-0000-0000-000000000010")))
+      ;; Check enum values (this hits the nested for)
+      (is (= {:enum :status :value :active}
+             (get (:enum-values metadata) #uuid "00000000-0000-0000-0000-000000000011")))
+      (is (= {:enum :status :value :inactive}
+             (get (:enum-values metadata) #uuid "00000000-0000-0000-0000-000000000012"))))))
+
+
+(deftest build-first-init-changes-test
+  (testing "empty schema returns empty changes"
+    (let [schema (-> (mds/create-builder) ds/build)
+          changes (storage/build-first-init-changes schema)]
+      (is (= [] (:created (:entities changes))))
+      (is (= [] (:created (:fields changes))))
+      (is (= [] (:created (:enums changes))))
+      (is (= [] (:created (:enum-values changes))))))
+
+  (testing "builds changes for schema with enums"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000000010"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000011" :value :active}])
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
+                     ds/build)
+          changes (storage/build-first-init-changes schema)]
+      ;; Check entities created
+      (is (= [:user] (:created (:entities changes))))
+      ;; Check fields created (hits nested for)
+      (is (= [{:entity :user :field :name}] (:created (:fields changes))))
+      ;; Check enums created
+      (is (= [:status] (:created (:enums changes))))
+      ;; Check enum values created (hits nested for)
+      (is (= [{:enum :status :value :active}] (:created (:enum-values changes)))))))
+
+
+(deftest check-all-removals!-test
+  (testing "empty old metadata and empty schema doesn't throw"
+    (let [empty-metadata {:entities {} :fields {} :enums {} :enum-values {}}
+          schema (-> (mds/create-builder) ds/build)]
+      (is (nil? (storage/check-all-removals! empty-metadata schema)))))
+
+  (testing "matching metadata and schema doesn't throw"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000000010"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000011" :value :active}])
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
+                     ds/build)
+          metadata (storage/build-metadata-from-schema schema)]
+      (is (nil? (storage/check-all-removals! metadata schema))))))
 
 
 (deftest protocols-defined-test

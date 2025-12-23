@@ -456,6 +456,74 @@
             (is (= "value1" (:new-field migrated-data)))))))))
 
 
+(deftest data-preserved-without-renames-test
+  (testing "data is preserved when no renames occur (empty renames branch)"
+    (let [storage (mem/create-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000400"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000401"
+          field2-uuid #uuid "00000000-0000-0000-0000-000000000402"
+          schema1 (make-schema :entity-name :record
+                               :entity-uuid entity-uuid
+                               :fields {:name {:uuid field-uuid :type :text}})]
+      ;; Initialize with first schema
+      (sp/initialize storage schema1)
+
+      ;; Add some data
+      (let [state-atom (:state storage)
+            row-id (random-uuid)]
+        (swap! state-atom assoc-in [:data :record row-id] {:name "test-value"})
+
+        ;; Add a NEW field (no rename, just addition) - this tests the empty renames branch
+        (let [schema2 (make-schema :entity-name :record
+                                   :entity-uuid entity-uuid
+                                   :fields {:name {:uuid field-uuid :type :text}
+                                            :email {:uuid field2-uuid :type :text}})
+              changes (sp/initialize storage schema2)]
+          ;; New field was added
+          (is (= [{:entity :record :field :email}] (:created (:fields changes))))
+          ;; No renames
+          (is (= [] (:renamed (:fields changes))))
+
+          ;; Data should be preserved unchanged
+          (let [preserved-data (get-in @state-atom [:data :record row-id])]
+            (is (= {:name "test-value"} preserved-data))))))))
+
+
+(deftest new-entity-with-existing-data-test
+  (testing "adding new entity doesn't affect existing entity data"
+    (let [storage (mem/create-storage)
+          entity1-uuid #uuid "00000000-0000-0000-0000-000000000500"
+          entity2-uuid #uuid "00000000-0000-0000-0000-000000000510"
+          field1-uuid #uuid "00000000-0000-0000-0000-000000000501"
+          field2-uuid #uuid "00000000-0000-0000-0000-000000000511"
+          schema1 (-> (mds/create-builder)
+                      (ds/add-entity :user entity1-uuid
+                                     {:name {:uuid field1-uuid :type :text}})
+                      ds/build)]
+      ;; Initialize with first schema
+      (sp/initialize storage schema1)
+
+      ;; Add data to existing entity
+      (let [state-atom (:state storage)
+            row-id (random-uuid)]
+        (swap! state-atom assoc-in [:data :user row-id] {:name "existing"})
+
+        ;; Add a completely NEW entity
+        (let [schema2 (-> (mds/create-builder)
+                          (ds/add-entity :user entity1-uuid
+                                         {:name {:uuid field1-uuid :type :text}})
+                          (ds/add-entity :post entity2-uuid
+                                         {:title {:uuid field2-uuid :type :text}})
+                          ds/build)
+              changes (sp/initialize storage schema2)]
+          ;; New entity was created
+          (is (= [:post] (:created (:entities changes))))
+
+          ;; Existing data preserved
+          (let [preserved-data (get-in @state-atom [:data :user row-id])]
+            (is (= {:name "existing"} preserved-data))))))))
+
+
 (deftest data-migration-with-entity-rename-test
   (testing "data is preserved when entity is renamed"
     (let [storage (mem/create-storage)
@@ -486,3 +554,130 @@
 
           ;; Old entity data should be gone
           (is (nil? (get-in @state-atom [:data :old-entity]))))))))
+
+
+;; === Multi-entity and multi-field tests for check-type-changes coverage ===
+
+(deftest multi-entity-type-check-test
+  (testing "type changes checked across multiple entities with multiple fields"
+    (let [storage (mem/create-storage)
+          user-uuid #uuid "00000000-0000-0000-0000-000000000600"
+          post-uuid #uuid "00000000-0000-0000-0000-000000000610"
+          name-uuid #uuid "00000000-0000-0000-0000-000000000601"
+          email-uuid #uuid "00000000-0000-0000-0000-000000000602"
+          title-uuid #uuid "00000000-0000-0000-0000-000000000611"
+          content-uuid #uuid "00000000-0000-0000-0000-000000000612"
+          schema1 (-> (mds/create-builder)
+                      (ds/add-entity :user user-uuid
+                                     {:name {:uuid name-uuid :type :text}
+                                      :email {:uuid email-uuid :type :text :nullable? true}})
+                      (ds/add-entity :post post-uuid
+                                     {:title {:uuid title-uuid :type :text}
+                                      :content {:uuid content-uuid :type :text :nullable? true}})
+                      ds/build)]
+      (sp/initialize storage schema1)
+      ;; Re-initialize with same schema - exercises all loops with no changes
+      (let [changes (sp/initialize storage schema1)]
+        (is (= [] (:created (:entities changes))))
+        (is (= {} (:renamed (:entities changes))))))))
+
+
+(deftest multi-field-safe-type-change-test
+  (testing "multiple safe type changes in same entity"
+    (let [storage (mem/create-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000700"
+          field1-uuid #uuid "00000000-0000-0000-0000-000000000701"
+          field2-uuid #uuid "00000000-0000-0000-0000-000000000702"
+          field3-uuid #uuid "00000000-0000-0000-0000-000000000703"
+          schema1 (-> (mds/create-builder)
+                      (ds/add-entity :record entity-uuid
+                                     {:count {:uuid field1-uuid :type :int}
+                                      :amount {:uuid field2-uuid :type :int}
+                                      :data {:uuid field3-uuid :type :text}})
+                      ds/build)]
+      (sp/initialize storage schema1)
+      ;; Safe widening for multiple fields
+      (let [schema2 (-> (mds/create-builder)
+                        (ds/add-entity :record entity-uuid
+                                       {:count {:uuid field1-uuid :type :numeric}
+                                        :amount {:uuid field2-uuid :type :numeric}
+                                        :data {:uuid field3-uuid :type :jsonb}})
+                        ds/build)
+            changes (sp/initialize storage schema2)]
+        (is (= [] (:created (:fields changes))))
+        (is (= :numeric (:type (get (sp/current-fields storage :record) :count))))
+        (is (= :numeric (:type (get (sp/current-fields storage :record) :amount))))
+        (is (= :jsonb (:type (get (sp/current-fields storage :record) :data)))))))
+
+  (testing "mixed: some fields have type changes, some don't"
+    (let [storage (mem/create-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000710"
+          field1-uuid #uuid "00000000-0000-0000-0000-000000000711"
+          field2-uuid #uuid "00000000-0000-0000-0000-000000000712"
+          schema1 (-> (mds/create-builder)
+                      (ds/add-entity :record entity-uuid
+                                     {:count {:uuid field1-uuid :type :int}
+                                      :name {:uuid field2-uuid :type :text}})
+                      ds/build)]
+      (sp/initialize storage schema1)
+      ;; Only count changes type, name stays same
+      (let [schema2 (-> (mds/create-builder)
+                        (ds/add-entity :record entity-uuid
+                                       {:count {:uuid field1-uuid :type :numeric}
+                                        :name {:uuid field2-uuid :type :text}})
+                        ds/build)
+            changes (sp/initialize storage schema2)]
+        (is (= [] (:created (:fields changes))))
+        (is (= :numeric (:type (get (sp/current-fields storage :record) :count))))
+        (is (= :text (:type (get (sp/current-fields storage :record) :name))))))))
+
+
+(deftest new-field-added-to-existing-entity-check-test
+  (testing "new field to existing entity skips type check for new field"
+    (let [storage (mem/create-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000720"
+          field1-uuid #uuid "00000000-0000-0000-0000-000000000721"
+          field2-uuid #uuid "00000000-0000-0000-0000-000000000722"
+          schema1 (-> (mds/create-builder)
+                      (ds/add-entity :record entity-uuid
+                                     {:name {:uuid field1-uuid :type :text}})
+                      ds/build)]
+      (sp/initialize storage schema1)
+      ;; Add new field - old-field-info is nil for new field
+      (let [schema2 (-> (mds/create-builder)
+                        (ds/add-entity :record entity-uuid
+                                       {:name {:uuid field1-uuid :type :text}
+                                        :count {:uuid field2-uuid :type :int}})
+                        ds/build)
+            changes (sp/initialize storage schema2)]
+        (is (= [{:entity :record :field :count}] (:created (:fields changes))))
+        (is (= :text (:type (get (sp/current-fields storage :record) :name))))
+        (is (= :int (:type (get (sp/current-fields storage :record) :count))))))))
+
+
+(deftest nullable-changes-across-multiple-fields-test
+  (testing "nullable changes checked for multiple fields"
+    (let [storage (mem/create-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000730"
+          field1-uuid #uuid "00000000-0000-0000-0000-000000000731"
+          field2-uuid #uuid "00000000-0000-0000-0000-000000000732"
+          field3-uuid #uuid "00000000-0000-0000-0000-000000000733"
+          schema1 (-> (mds/create-builder)
+                      (ds/add-entity :record entity-uuid
+                                     {:required1 {:uuid field1-uuid :type :text :nullable? false}
+                                      :required2 {:uuid field2-uuid :type :text :nullable? false}
+                                      :optional {:uuid field3-uuid :type :text :nullable? true}})
+                      ds/build)]
+      (sp/initialize storage schema1)
+      ;; Make required fields nullable (safe)
+      (let [schema2 (-> (mds/create-builder)
+                        (ds/add-entity :record entity-uuid
+                                       {:required1 {:uuid field1-uuid :type :text :nullable? true}
+                                        :required2 {:uuid field2-uuid :type :text :nullable? true}
+                                        :optional {:uuid field3-uuid :type :text :nullable? true}})
+                        ds/build)
+            changes (sp/initialize storage schema2)]
+        (is (= [] (:created (:fields changes))))
+        (is (true? (:nullable? (get (sp/current-fields storage :record) :required1))))
+        (is (true? (:nullable? (get (sp/current-fields storage :record) :required2))))
+        (is (true? (:nullable? (get (sp/current-fields storage :record) :optional))))))))

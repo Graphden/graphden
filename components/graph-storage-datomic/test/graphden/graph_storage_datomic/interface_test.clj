@@ -6,6 +6,14 @@
 
 
 (deftest create-storage-test
+  (testing "creates storage with explicit db-name"
+    (let [storage (gsd/create-storage {:db-name "test-explicit-db"})]
+      (try
+        (is (= #{:fn-schema :arg-schema :fn :arg-value}
+               (sp/current-entities storage)))
+        (finally
+          (sp/close storage)))))
+
   (testing "creates storage with graph-data-schema entities"
     (let [storage (gsd/create-storage)]
       (try

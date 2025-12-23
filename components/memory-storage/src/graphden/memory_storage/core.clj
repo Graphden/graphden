@@ -28,25 +28,38 @@
           [enum-name {:values (set (keys values))}])))
 
 
+(defn- check-single-field-change
+  "Checks a single field for type/nullable changes. Throws on unsafe change."
+  [entity-name field-name field-spec old-fields old-metadata]
+  (let [field-uuid (:uuid field-spec)
+        old-field-info (get (:fields old-metadata) field-uuid)]
+    (when old-field-info
+      (let [old-field-name (:field old-field-info)
+            old-type (get-in old-fields [old-field-name :type])
+            new-type (:type field-spec)
+            old-nullable? (get-in old-fields [old-field-name :nullable?])
+            new-nullable? (get field-spec :nullable? false)]
+        (sp/check-type-change! entity-name field-name old-type new-type)
+        (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?)))))
+
+
+(defn- check-entity-type-changes
+  "Checks all field type changes for a single entity. Throws on unsafe change."
+  [entity-name old-state old-metadata schema]
+  (let [entity-uuid (ds/entity-uuid schema entity-name)
+        old-entity-name (get (:entities old-metadata) entity-uuid)
+        old-fields (get-in old-state [:entities old-entity-name :fields])]
+    (when old-fields
+      (run! (fn [[field-name field-spec]]
+              (check-single-field-change entity-name field-name field-spec old-fields old-metadata))
+            (ds/entity-fields schema entity-name)))))
+
+
 (defn- check-type-changes
   "Checks that all field type changes are safe. Throws on unsafe change."
   [old-state old-metadata schema]
-  (doseq [entity-name (ds/entities schema)]
-    (let [entity-uuid (ds/entity-uuid schema entity-name)
-          old-entity-name (get (:entities old-metadata) entity-uuid)
-          old-fields (get-in old-state [:entities old-entity-name :fields])]
-      (when old-fields
-        (doseq [[field-name field-spec] (ds/entity-fields schema entity-name)]
-          (let [field-uuid (:uuid field-spec)
-                old-field-info (get (:fields old-metadata) field-uuid)]
-            (when old-field-info
-              (let [old-field-name (:field old-field-info)
-                    old-type (get-in old-fields [old-field-name :type])
-                    new-type (:type field-spec)
-                    old-nullable? (get-in old-fields [old-field-name :nullable?])
-                    new-nullable? (get field-spec :nullable? false)]
-                (sp/check-type-change! entity-name field-name old-type new-type)
-                (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?)))))))))
+  (run! #(check-entity-type-changes % old-state old-metadata schema)
+        (ds/entities schema)))
 
 
 (defn- migrate-data

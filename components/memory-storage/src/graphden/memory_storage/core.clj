@@ -62,42 +62,65 @@
         (ds/entities schema)))
 
 
+(defn- rename-row-fields
+  "Renames fields in a single row using the renames map."
+  [renames row]
+  (persistent!
+    (reduce-kv (fn [acc k v]
+                 (assoc! acc (get renames k k) v))
+               (transient {})
+               row)))
+
+
+(defn- rename-entity-rows
+  "Renames fields in all rows of an entity."
+  [renames entity-data]
+  (persistent!
+    (reduce-kv (fn [acc row-id row]
+                 (assoc! acc row-id (rename-row-fields renames row)))
+               (transient {})
+               entity-data)))
+
+
 (defn- migrate-data
-  "Migrates existing data when entities/fields are renamed."
+  "Migrates existing data when entities/fields are renamed.
+   Uses transients for O(n) performance instead of O(n²)."
   [old-data old-metadata schema]
   (let [entity-uuid->old-name (:entities old-metadata)
         entity-uuid->new-name (into {}
-                                    (for [entity-name (ds/entities schema)]
-                                      [(ds/entity-uuid schema entity-name) entity-name]))
+                                    (map (fn [entity-name]
+                                           [(ds/entity-uuid schema entity-name) entity-name])
+                                         (ds/entities schema)))
         field-uuid->old-info (:fields old-metadata)
         ;; Build field renames per entity
-        field-renames (into {}
-                            (for [entity-name (ds/entities schema)
-                                  :let [entity-uuid (ds/entity-uuid schema entity-name)
-                                        old-entity-name (get entity-uuid->old-name entity-uuid)]
-                                  :when old-entity-name]
-                              [entity-uuid
-                               (into {}
-                                     (for [[field-name field-spec] (ds/entity-fields schema entity-name)
-                                           :let [field-uuid (:uuid field-spec)
-                                                 old-info (get field-uuid->old-info field-uuid)]
-                                           :when (and old-info (not= (:field old-info) field-name))]
-                                       [(:field old-info) field-name]))]))]
-    (into {}
-          (for [[entity-uuid entity-new-name] entity-uuid->new-name
-                :let [old-entity-name (get entity-uuid->old-name entity-uuid)
-                      entity-data (get old-data old-entity-name)]
-                :when entity-data]
-            [entity-new-name
-             (let [renames (get field-renames entity-uuid {})]
-               (if (empty? renames)
-                 entity-data
-                 (into {}
-                       (for [[row-id row] entity-data]
-                         [row-id
-                          (into {}
-                                (for [[k v] row]
-                                  [(get renames k k) v]))]))))]))))
+        field-renames (reduce (fn [acc entity-name]
+                                (let [entity-uuid (ds/entity-uuid schema entity-name)
+                                      old-entity-name (get entity-uuid->old-name entity-uuid)]
+                                  (if-not old-entity-name
+                                    acc
+                                    (let [renames (reduce (fn [racc [field-name field-spec]]
+                                                            (let [field-uuid (:uuid field-spec)
+                                                                  old-info (get field-uuid->old-info field-uuid)]
+                                                              (if (and old-info (not= (:field old-info) field-name))
+                                                                (assoc racc (:field old-info) field-name)
+                                                                racc)))
+                                                          {}
+                                                          (ds/entity-fields schema entity-name))]
+                                      (assoc acc entity-uuid renames)))))
+                              {}
+                              (ds/entities schema))]
+    (reduce-kv (fn [acc entity-uuid entity-new-name]
+                 (let [old-entity-name (get entity-uuid->old-name entity-uuid)
+                       entity-data (get old-data old-entity-name)]
+                   (if-not entity-data
+                     acc
+                     (let [renames (get field-renames entity-uuid {})]
+                       (assoc acc entity-new-name
+                              (if (empty? renames)
+                                entity-data
+                                (rename-entity-rows renames entity-data)))))))
+               {}
+               entity-uuid->new-name)))
 
 
 (defn- do-initialize

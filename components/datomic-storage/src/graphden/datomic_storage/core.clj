@@ -77,14 +77,37 @@
       (get type->datomic t :db.type/string))))
 
 
+(defn- single-field-unique-constraint?
+  "Returns true if constraint is a single-field unique constraint."
+  [constraint]
+  (if (= (:type constraint) :unique)
+    (= (count (:fields constraint)) 1)
+    false))
+
+
+(defn- get-single-field-constraints
+  "Returns a set of field names that are part of single-field unique constraints."
+  [schema entity-name]
+  (let [constraints (ds/entity-constraints schema entity-name)]
+    (->> constraints
+         (filter single-field-unique-constraint?)
+         (mapcat :fields)
+         (set))))
+
+
 (defn- build-field-schema
-  "Builds Datomic schema for a single field."
-  [entity-name field-name field-spec]
+  "Builds Datomic schema for a single field.
+   Adds :db/unique when field is part of a single-field unique constraint."
+  [schema entity-name field-name field-spec]
   (let [attr-ident (entity-attr entity-name field-name)
-        value-type (field-type->datomic field-spec)]
-    {:db/ident attr-ident
-     :db/valueType value-type
-     :db/cardinality :db.cardinality/one}))
+        value-type (field-type->datomic field-spec)
+        unique-fields (get-single-field-constraints schema entity-name)
+        base-schema {:db/ident attr-ident
+                     :db/valueType value-type
+                     :db/cardinality :db.cardinality/one}]
+    (if (contains? unique-fields field-name)
+      (assoc base-schema :db/unique :db.unique/value)
+      base-schema)))
 
 
 (defn- build-enum-value-schema
@@ -372,13 +395,13 @@
 
 (defn- process-single-field!
   "Processes a single field during migration."
-  [old-metadata entity-name field-name field-spec new-schema created-fields renamed-fields]
+  [schema old-metadata entity-name field-name field-spec new-schema created-fields renamed-fields]
   (let [field-uuid (:uuid field-spec)
         old-field-info (get (:fields old-metadata) field-uuid)]
     (if old-field-info
       (process-existing-field! old-field-info entity-name field-name renamed-fields)
       (do
-        (swap! new-schema conj (build-field-schema entity-name field-name field-spec))
+        (swap! new-schema conj (build-field-schema schema entity-name field-name field-spec))
         (swap! created-fields conj {:entity entity-name :field field-name})))))
 
 
@@ -390,7 +413,7 @@
     (swap! renamed-entities assoc old-entity-name entity-name))
   ;; Process fields
   (run! (fn [[field-name field-spec]]
-          (process-single-field! old-metadata entity-name field-name field-spec
+          (process-single-field! schema old-metadata entity-name field-name field-spec
                                  new-schema created-fields renamed-fields))
         (ds/entity-fields schema entity-name)))
 
@@ -407,7 +430,7 @@
       (do
         (swap! created-entities conj entity-name)
         (run! (fn [[field-name field-spec]]
-                (swap! new-schema conj (build-field-schema entity-name field-name field-spec))
+                (swap! new-schema conj (build-field-schema schema entity-name field-name field-spec))
                 (swap! created-fields conj {:entity entity-name :field field-name}))
               (ds/entity-fields schema entity-name))))))
 
@@ -428,7 +451,7 @@
   [schema]
   (mapcat (fn [entity-name]
             (map (fn [[field-name field-spec]]
-                   (build-field-schema entity-name field-name field-spec))
+                   (build-field-schema schema entity-name field-name field-spec))
                  (ds/entity-fields schema entity-name)))
           (ds/entities schema)))
 
@@ -562,26 +585,28 @@
 ;; === Storage record ===
 
 (defrecord DatomicStorage
-  [client-config db-name client-atom conn-atom]
+  [client-config db-name client-atom conn-atom lock]
 
   sp/Storage
 
   (initialize
     [_this schema]
-    (let [client (d/client client-config)]
-      (reset! client-atom client)
-      (d/create-database client {:db-name db-name})
-      (let [conn (d/connect client {:db-name db-name})]
-        (reset! conn-atom conn)
-        (do-initialize conn schema))))
+    (locking lock
+      (let [client (d/client client-config)]
+        (reset! client-atom client)
+        (d/create-database client {:db-name db-name})
+        (let [conn (d/connect client {:db-name db-name})]
+          (reset! conn-atom conn)
+          (do-initialize conn schema)))))
 
 
   (close
     [_this]
-    (when-let [client @client-atom]
-      (d/delete-database client {:db-name db-name}))
-    (reset! conn-atom nil)
-    (reset! client-atom nil)
+    (locking lock
+      (when-let [client @client-atom]
+        (d/delete-database client {:db-name db-name}))
+      (reset! conn-atom nil)
+      (reset! client-atom nil))
     nil)
 
 
@@ -676,4 +701,4 @@
   [{:keys [db-name client-config]
     :or {db-name "graphden"
          client-config default-local-config}}]
-  (->DatomicStorage client-config db-name (atom nil) (atom nil)))
+  (->DatomicStorage client-config db-name (atom nil) (atom nil) (Object.)))

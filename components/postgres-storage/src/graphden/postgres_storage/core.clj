@@ -277,16 +277,15 @@
         values))
 
 
-(defn- save-metadata!
+(defn- save-metadata-in-tx!
   "Saves complete metadata to table (truncate + insert all).
-   Uses a transaction to ensure atomicity."
-  [ds schema]
-  (jdbc/with-transaction [tx ds]
-                         (jdbc/execute! tx (sql/format {:truncate (keyword metadata-table-name)}
-                                                       {:quoted true}))
-                         (run! #(save-entity-metadata! tx schema %) (ds/entities schema))
-                         (run! (fn [[enum-name enum-def]] (save-enum-metadata! tx enum-name enum-def))
-                               (ds/enums schema))))
+   Assumes caller has already started a transaction."
+  [tx schema]
+  (jdbc/execute! tx (sql/format {:truncate (keyword metadata-table-name)}
+                                {:quoted true}))
+  (run! #(save-entity-metadata! tx schema %) (ds/entities schema))
+  (run! (fn [[enum-name enum-def]] (save-enum-metadata! tx enum-name enum-def))
+        (ds/enums schema)))
 
 
 ;; === Introspection ===
@@ -444,6 +443,30 @@
                                {:quoted true}))))
 
 
+(defn- constraint-index-name
+  "Generates unique index name for a constraint."
+  [entity-name constraint]
+  (let [fields-str (str/join "_" (map kw->snake-case (:fields constraint)))]
+    (str "idx_" (kw->snake-case entity-name) "_" fields-str "_unique")))
+
+
+(defn- create-constraint!
+  "Creates a unique constraint (as unique index) in PostgreSQL."
+  [ds entity-name constraint]
+  (let [table-name (ident->sql entity-name)
+        index-name (constraint-index-name entity-name constraint)
+        columns-sql (str/join ", " (map #(ident->sql %) (:fields constraint)))]
+    (jdbc/execute! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
+                            " (" columns-sql ")")])))
+
+
+(defn- create-entity-constraints!
+  "Creates all constraints for a single entity."
+  [ds schema entity-name]
+  (run! #(create-constraint! ds entity-name %)
+        (ds/entity-constraints schema entity-name)))
+
+
 (defn- add-column!
   "Adds a column to an existing table."
   [ds table-name field-name field-spec]
@@ -493,15 +516,17 @@
 
 
 (defn- create-single-enum!
-  "Creates a single enum during first-time initialization."
+  "Creates a single enum during first-time initialization.
+   Values are sorted alphabetically for deterministic ordering."
   [ds enum-name {:keys [values]}]
-  (create-enum! ds enum-name (keys values)))
+  (create-enum! ds enum-name (sort (keys values))))
 
 
 (defn- create-single-entity!
   "Creates a single entity table during first-time initialization."
   [ds schema entity-name]
-  (create-table! ds entity-name (ds/entity-fields schema entity-name)))
+  (create-table! ds entity-name (ds/entity-fields schema entity-name))
+  (create-entity-constraints! ds schema entity-name))
 
 
 (defn- check-single-field-type!
@@ -562,9 +587,9 @@
       (run! (fn [[value-kw value-uuid]]
               (process-existing-enum-value! ds old-metadata enum-name value-kw value-uuid created-enum-values))
             values))
-    ;; New enum
+    ;; New enum - values sorted alphabetically for deterministic ordering
     (do
-      (create-enum! ds enum-name (keys values))
+      (create-enum! ds enum-name (sort (keys values)))
       (swap! created-enums conj enum-name)
       (run! (fn [[v _]] (swap! created-enum-values conj {:enum enum-name :value v}))
             values))))
@@ -629,13 +654,68 @@
       ;; New entity
       (do
         (create-table! ds entity-name (ds/entity-fields schema entity-name))
+        (create-entity-constraints! ds schema entity-name)
         (swap! created-entities conj entity-name)
         (run! (fn [[f _]] (swap! created-fields conj {:entity entity-name :field f}))
               (ds/entity-fields schema entity-name))))))
 
 
+(defn- do-first-init!
+  "Performs first-time initialization within a transaction."
+  [tx schema]
+  ;; Create enums first (tables may reference them)
+  (run! (fn [[enum-name enum-def]] (create-single-enum! tx enum-name enum-def))
+        (ds/enums schema))
+  ;; Create tables
+  (run! #(create-single-entity! tx schema %) (ds/entities schema))
+  ;; Save metadata
+  (save-metadata-in-tx! tx schema)
+  ;; Return changes
+  (sp/build-first-init-changes schema))
+
+
+(defn- do-migration!
+  "Performs schema migration within a transaction."
+  [tx schema old-metadata]
+  ;; Check for destructive changes (removals)
+  (sp/check-all-removals! old-metadata schema)
+
+  ;; Check type compatibility
+  (run! #(check-entity-fields-type! tx schema old-metadata %) (ds/entities schema))
+
+  ;; Apply enum changes
+  (let [created-enums (atom [])
+        renamed-enums (atom {})
+        created-enum-values (atom [])]
+    (run! (fn [[enum-name enum-def]]
+            (process-single-enum! tx old-metadata enum-name enum-def
+                                  created-enums renamed-enums created-enum-values))
+          (ds/enums schema))
+
+    ;; Apply entity/field changes
+    (let [created-entities (atom [])
+          renamed-entities (atom {})
+          created-fields (atom [])
+          renamed-fields (atom [])]
+      (run! #(process-single-entity! tx schema old-metadata %
+                                     created-entities renamed-entities
+                                     created-fields renamed-fields)
+            (ds/entities schema))
+
+      ;; Save metadata
+      (save-metadata-in-tx! tx schema)
+
+      ;; Return changes
+      {:entities {:created @created-entities :renamed @renamed-entities}
+       :fields {:created @created-fields :renamed @renamed-fields}
+       :enums {:created @created-enums :renamed @renamed-enums}
+       :enum-values {:created @created-enum-values}})))
+
+
 (defn- do-initialize
-  "Performs schema initialization/migration."
+  "Performs schema initialization/migration.
+   All DDL and metadata operations are wrapped in a single transaction
+   to ensure atomicity - either all changes succeed or none do."
   [ds schema]
   ;; Check for snake_case naming collisions before any DDL
   (check-snake-case-collisions! {:context "entities"} (ds/entities schema))
@@ -645,54 +725,10 @@
   (ensure-metadata-table! ds)
   (let [metadata-rows (read-metadata-rows ds)
         old-metadata (parse-metadata metadata-rows)]
-    (if (nil? old-metadata)
-      ;; First-time initialization
-      (do
-        ;; Create enums first (tables may reference them)
-        (run! (fn [[enum-name enum-def]] (create-single-enum! ds enum-name enum-def))
-              (ds/enums schema))
-        ;; Create tables
-        (run! #(create-single-entity! ds schema %) (ds/entities schema))
-        ;; Save metadata
-        (save-metadata! ds schema)
-        ;; Return changes
-        (sp/build-first-init-changes schema))
-
-      ;; Migration
-      (do
-        ;; Check for destructive changes (removals)
-        (sp/check-all-removals! old-metadata schema)
-
-        ;; Check type compatibility
-        (run! #(check-entity-fields-type! ds schema old-metadata %) (ds/entities schema))
-
-        ;; Apply enum changes
-        (let [created-enums (atom [])
-              renamed-enums (atom {})
-              created-enum-values (atom [])]
-          (run! (fn [[enum-name enum-def]]
-                  (process-single-enum! ds old-metadata enum-name enum-def
-                                        created-enums renamed-enums created-enum-values))
-                (ds/enums schema))
-
-          ;; Apply entity/field changes
-          (let [created-entities (atom [])
-                renamed-entities (atom {})
-                created-fields (atom [])
-                renamed-fields (atom [])]
-            (run! #(process-single-entity! ds schema old-metadata %
-                                           created-entities renamed-entities
-                                           created-fields renamed-fields)
-                  (ds/entities schema))
-
-            ;; Save metadata
-            (save-metadata! ds schema)
-
-            ;; Return changes
-            {:entities {:created @created-entities :renamed @renamed-entities}
-             :fields {:created @created-fields :renamed @renamed-fields}
-             :enums {:created @created-enums :renamed @renamed-enums}
-             :enum-values {:created @created-enum-values}}))))))
+    (jdbc/with-transaction [tx ds]
+      (if (nil? old-metadata)
+        (do-first-init! tx schema)
+        (do-migration! tx schema old-metadata)))))
 
 
 ;; === Storage record ===

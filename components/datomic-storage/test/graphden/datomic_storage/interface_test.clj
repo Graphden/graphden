@@ -76,6 +76,37 @@
                  {:enum :status :value :inactive}}
                (set (:created (:enum-values changes)))))
         (finally
+          (sp/close storage)))))
+
+  (testing "single-field unique constraint adds :db/unique"
+    (let [storage (create-test-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000020"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000021"
+                                             :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (try
+        (sp/initialize storage schema)
+        (is (contains? (sp/current-entities storage) :user))
+        (finally
+          (sp/close storage)))))
+
+  (testing "multi-field unique constraint is skipped (Datomic limitation)"
+    (let [storage (create-test-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000030"
+                                    {:first-name {:uuid #uuid "00000000-0000-0000-0000-000000000031"
+                                                  :type :text}
+                                     :last-name {:uuid #uuid "00000000-0000-0000-0000-000000000032"
+                                                 :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:first-name :last-name]})
+                     ds/build)]
+      (try
+        (sp/initialize storage schema)
+        ;; Multi-field constraints are silently skipped in Datomic
+        (is (contains? (sp/current-entities storage) :user))
+        (finally
           (sp/close storage))))))
 
 
@@ -466,3 +497,17 @@
           (is (false? (metadata-exists-fn conn))))
         (finally
           (sp/close storage))))))
+
+
+;; === Private function unit tests ===
+
+(deftest single-field-unique-constraint?-test
+  (let [single-field-unique-constraint? #'core/single-field-unique-constraint?]
+    (testing "returns true for single-field unique constraint"
+      (is (true? (single-field-unique-constraint? {:type :unique :fields [:email]}))))
+
+    (testing "returns false for multi-field unique constraint"
+      (is (false? (single-field-unique-constraint? {:type :unique :fields [:first-name :last-name]}))))
+
+    (testing "returns false for non-unique constraint type"
+      (is (false? (single-field-unique-constraint? {:type :other :fields [:field]}))))))

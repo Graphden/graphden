@@ -448,6 +448,42 @@
             clojure.lang.ExceptionInfo #"Duplicate UUID"
             (-> (mds/create-builder)
                 (ds/add-entity :item same-uuid {:field {:uuid same-uuid :type :text}})
+                (ds/build))))))
+
+  (testing "enum value UUID same as entity UUID throws"
+    (let [same-uuid (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Duplicate UUID"
+            (-> (mds/create-builder)
+                (ds/add-entity :item same-uuid {:field {:uuid (uuid) :type :text}})
+                (ds/add-enum :status (uuid) [{:uuid same-uuid :value :active}])
+                (ds/build))))))
+
+  (testing "enum value UUID same as field UUID throws"
+    (let [same-uuid (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Duplicate UUID"
+            (-> (mds/create-builder)
+                (ds/add-entity :item (uuid) {:field {:uuid same-uuid :type :text}})
+                (ds/add-enum :status (uuid) [{:uuid same-uuid :value :active}])
+                (ds/build))))))
+
+  (testing "enum UUID same as entity UUID throws"
+    (let [same-uuid (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Duplicate UUID"
+            (-> (mds/create-builder)
+                (ds/add-entity :item same-uuid {:field {:uuid (uuid) :type :text}})
+                (ds/add-enum :status same-uuid [{:uuid (uuid) :value :active}])
+                (ds/build))))))
+
+  (testing "cross-enum value UUID collision throws"
+    (let [same-uuid (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Duplicate UUID"
+            (-> (mds/create-builder)
+                (ds/add-enum :status (uuid) [{:uuid same-uuid :value :active}])
+                (ds/add-enum :role (uuid) [{:uuid same-uuid :value :admin}])
                 (ds/build)))))))
 
 

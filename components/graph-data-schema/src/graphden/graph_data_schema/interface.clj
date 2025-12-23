@@ -12,85 +12,88 @@
 
 
 ;; === Stable UUIDs for schema elements ===
-;; These UUIDs never change, allowing storage to track identity across renames.
+;; These are cryptographically random RFC 4122 v4 UUIDs.
+;; Generated once with (random-uuid) and fixed forever in code.
+;; UUID is the stable identity of an element - names can change, UUIDs cannot.
+;; This allows storage to detect renames vs delete+create.
 
 ;; Enum UUIDs
 (def ^:private value-kind-enum-uuid
-  #uuid "10000000-0000-0000-0000-000000000001")
+  #uuid "b79e6e8b-8aff-4188-862b-d8a85ef4fcdf")
 
 
 ;; Enum value UUIDs for :value-kind
 (def ^:private value-kind-values
-  {:null        #uuid "10000000-0000-0000-0001-000000000001"
-   :uuid        #uuid "10000000-0000-0000-0001-000000000002"
-   :text        #uuid "10000000-0000-0000-0001-000000000003"
-   :int         #uuid "10000000-0000-0000-0001-000000000004"
-   :bool        #uuid "10000000-0000-0000-0001-000000000005"
-   :numeric     #uuid "10000000-0000-0000-0001-000000000006"
-   :timestamptz #uuid "10000000-0000-0000-0001-000000000007"
-   :jsonb       #uuid "10000000-0000-0000-0001-000000000008"
-   :bytes       #uuid "10000000-0000-0000-0001-000000000009"})
+  {:null        #uuid "c703ffd9-6401-4c49-9ca3-a280f6aac8ba"
+   :uuid        #uuid "3a83af1b-f15c-421d-a5f1-f13db07deb72"
+   :text        #uuid "cf26384f-d093-461d-9268-b42b8fd6eae6"
+   :int         #uuid "154d3c4f-8d11-4592-9e24-5c40176cc5a7"
+   :bool        #uuid "7497d750-67aa-4b55-8477-8323a9ab7761"
+   :numeric     #uuid "f7a6728b-5ac6-4e1a-8bdb-ddc240cc059d"
+   :timestamptz #uuid "e4476a32-3e93-4333-b0e5-964b9b19bea1"
+   :jsonb       #uuid "b1b15bb9-a458-4337-9241-2a33e1ef25ea"
+   :bytes       #uuid "2dcadfbd-800f-4b7b-bbcc-82b2afcf9f86"})
 
 
 ;; Entity UUIDs
 (def ^:private fn-schema-entity-uuid
-  #uuid "20000000-0000-0000-0000-000000000001")
+  #uuid "dc2df695-6167-4add-9e75-022213c96537")
 
 
 (def ^:private arg-schema-entity-uuid
-  #uuid "20000000-0000-0000-0000-000000000002")
+  #uuid "946c1f9c-30ce-4fab-98ed-dd9a26f6676b")
 
 
 (def ^:private fn-entity-uuid
-  #uuid "20000000-0000-0000-0000-000000000003")
+  #uuid "986e8a2a-39ba-41ae-8449-d06c31515486")
 
 
 (def ^:private arg-value-entity-uuid
-  #uuid "20000000-0000-0000-0000-000000000004")
+  #uuid "afb02fb7-0174-496b-9b21-a61063de0c04")
 
 
-;; Field UUIDs for :fn-schema
+;; Field UUIDs for :fn-schema entity
 (def ^:private fn-schema-name-field-uuid
-  #uuid "30000000-0001-0000-0000-000000000001")
+  #uuid "abe8475e-9130-4647-a2bf-be0cb07099b7")
 
 
 (def ^:private fn-schema-returned-type-field-uuid
-  #uuid "30000000-0001-0000-0000-000000000002")
+  #uuid "5ea6c13d-553c-4d85-8511-38ae88f7f9e5")
 
 
-;; Field UUIDs for :arg-schema
+;; Field UUIDs for :arg-schema entity
 (def ^:private arg-schema-fn-schema-id-field-uuid
-  #uuid "30000000-0002-0000-0000-000000000001")
+  #uuid "c100ed37-f3d8-4a93-becc-17ae2b91f64a")
 
 
 (def ^:private arg-schema-name-field-uuid
-  #uuid "30000000-0002-0000-0000-000000000002")
+  #uuid "e68c993e-7840-4541-b55f-cf4b08ba3de7")
 
 
 (def ^:private arg-schema-type-field-uuid
-  #uuid "30000000-0002-0000-0000-000000000003")
+  #uuid "be65f37b-4758-49da-9091-37dee0e28ad1")
 
 
-;; Field UUIDs for :fn
+;; Field UUIDs for :fn entity
 (def ^:private fn-name-field-uuid
-  #uuid "30000000-0003-0000-0000-000000000001")
+  #uuid "af336498-6d1e-4879-b2a5-b0d6c1994d12")
 
 
 (def ^:private fn-fn-schema-id-field-uuid
-  #uuid "30000000-0003-0000-0000-000000000002")
+  #uuid "3a685253-07f7-4469-be8b-1a585ba3e7d4")
 
 
-;; Field UUIDs for :arg-value
+;; Field UUIDs for :arg-value entity
 (def ^:private arg-value-owner-fn-id-field-uuid
-  #uuid "30000000-0004-0000-0000-000000000001")
+  #uuid "d9331598-36b3-4238-83f8-16558d8b3a7e")
 
 
 (def ^:private arg-value-arg-schema-id-field-uuid
-  #uuid "30000000-0004-0000-0000-000000000002")
+  #uuid "834336b1-b55c-4557-b580-a62799deb729")
 
 
 (def ^:private arg-value-value-field-uuid
-  #uuid "30000000-0004-0000-0000-000000000003")
+  #uuid "b6780ba3-d050-4162-aba8-5f68ac17bcb8")
 
 
 (defn- value-kind-enum-values

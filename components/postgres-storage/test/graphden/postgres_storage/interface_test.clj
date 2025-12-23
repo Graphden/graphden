@@ -935,6 +935,32 @@
                               :password "test"
                               :pool-size 2}))))
 
+  (testing "creating storage without username throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"username is required"
+          (pg/create-storage {:jdbc-url "jdbc:postgresql://localhost/test"
+                              :password "test"}))))
+
+  (testing "creating storage with empty username throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"username is required"
+          (pg/create-storage {:jdbc-url "jdbc:postgresql://localhost/test"
+                              :username "   "
+                              :password "test"}))))
+
+  (testing "creating storage without password throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"password is required"
+          (pg/create-storage {:jdbc-url "jdbc:postgresql://localhost/test"
+                              :username "test"}))))
+
+  (testing "creating storage with empty password throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"password is required"
+          (pg/create-storage {:jdbc-url "jdbc:postgresql://localhost/test"
+                              :username "test"
+                              :password "  "}))))
+
   (testing "error ex-data contains reason instead of sensitive credentials info"
     (try
       (pg/create-storage {:username "testuser" :password "testpass"})
@@ -971,6 +997,31 @@
           ;; The :location column should have type :point (unknown type passes through)
           (is (= :point (:type (:location columns)))))
         (finally
+          (sp/close storage)))))
+
+  (testing "current-columns handles timestamp without time zone"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000009010"
+          field-uuid #uuid "00000000-0000-0000-0000-000000009011"]
+      (try
+        (let [schema (make-schema :entity-name :test-entity
+                                  :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})]
+          (sp/initialize storage schema))
+        ;; Add a timestamp without time zone column
+        (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
+              username (PostgreSQLContainer/.getUsername *container*)
+              password (PostgreSQLContainer/.getPassword *container*)]
+          (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
+                                                 :user username
+                                                 :password password})]
+            (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN created_at timestamp without time zone"])))
+        (let [current-columns-fn #'core/current-columns
+              pool (:pool storage)
+              columns (current-columns-fn pool "test_entity")]
+          ;; timestamp without time zone maps to :timestamptz
+          (is (= :timestamptz (:type (:created-at columns)))))
+        (finally
           (sp/close storage))))))
 
 
@@ -993,6 +1044,85 @@
             ;; schema-metadata uses parse-metadata-lenient which calls parse-extra
             (let [metadata (sp/schema-metadata storage)]
               ;; Should not throw, just parse what it can
+              (is (some? metadata)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "parse-extra handles string 'null' value"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000008050"
+          field-uuid #uuid "00000000-0000-0000-0000-000000008051"]
+      (try
+        (let [schema (make-schema :entity-name :test-entity
+                                  :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})]
+          (sp/initialize storage schema))
+        ;; Mock read-metadata-rows to return "null" string
+        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra "null"}
+                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
+                          :extra "null"}]]
+          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+            (let [metadata (sp/schema-metadata storage)]
+              (is (some? metadata)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "parse-extra handles empty JSON object string"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000008060"
+          field-uuid #uuid "00000000-0000-0000-0000-000000008061"]
+      (try
+        (let [schema (make-schema :entity-name :test-entity
+                                  :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})]
+          (sp/initialize storage schema))
+        ;; Mock read-metadata-rows to return "{}" string
+        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra "{}"}
+                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
+                          :extra "{}"}]]
+          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+            (let [metadata (sp/schema-metadata storage)]
+              (is (some? metadata)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "parse-extra handles raw string input"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000008070"
+          field-uuid #uuid "00000000-0000-0000-0000-000000008071"]
+      (try
+        (let [schema (make-schema :entity-name :test-entity
+                                  :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})]
+          (sp/initialize storage schema))
+        ;; Mock read-metadata-rows to return a valid JSON string
+        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra nil}
+                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
+                          :extra "{\"type\": \"text\", \"nullable?\": \"false\"}"}]]
+          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+            (let [metadata (sp/schema-metadata storage)]
+              (is (some? metadata))
+              ;; Should have parsed the string values to keywords
+              (is (= :text (:type (val (first (:fields metadata)))))))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "parse-extra handles empty string"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000008080"
+          field-uuid #uuid "00000000-0000-0000-0000-000000008081"]
+      (try
+        (let [schema (make-schema :entity-name :test-entity
+                                  :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})]
+          (sp/initialize storage schema))
+        ;; Mock read-metadata-rows to return empty string for extra
+        (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra ""}
+                         {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
+                          :extra ""}]]
+          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+            (let [metadata (sp/schema-metadata storage)]
+              ;; Should work, extra is just nil
               (is (some? metadata)))))
         (finally
           (sp/close storage)))))
@@ -1128,6 +1258,43 @@
       (is (thrown? clojure.lang.ExceptionInfo (validate-fn "123starts_with_number" {})))
       (is (thrown? clojure.lang.ExceptionInfo (validate-fn "UPPERCASE" {})))
       (is (thrown? clojure.lang.ExceptionInfo (validate-fn "" {}))))))
+
+
+(deftest pg-type-validation-test
+  (testing "validate-pg-type! accepts valid base types"
+    (let [validate-fn #'core/validate-pg-type!]
+      (is (nil? (validate-fn "UUID" {})))
+      (is (nil? (validate-fn "TEXT" {})))
+      (is (nil? (validate-fn "BIGINT" {})))
+      (is (nil? (validate-fn "BOOLEAN" {})))
+      (is (nil? (validate-fn "NUMERIC" {})))
+      (is (nil? (validate-fn "TIMESTAMPTZ" {})))
+      (is (nil? (validate-fn "JSONB" {})))
+      (is (nil? (validate-fn "BYTEA" {})))))
+
+  (testing "validate-pg-type! accepts valid quoted enum identifiers"
+    (let [validate-fn #'core/validate-pg-type!]
+      (is (nil? (validate-fn "\"status\"" {})))
+      (is (nil? (validate-fn "\"user_role\"" {})))
+      (is (nil? (validate-fn "\"my_enum123\"" {})))))
+
+  (testing "validate-pg-type! rejects invalid types"
+    (let [validate-fn #'core/validate-pg-type!]
+      ;; SQL injection attempts
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid PostgreSQL type"
+            (validate-fn "TEXT; DROP TABLE users; --" {})))
+      ;; Invalid type names
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid PostgreSQL type"
+            (validate-fn "INVALID_TYPE" {})))
+      ;; Improperly quoted identifiers
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid PostgreSQL type"
+            (validate-fn "\"UPPERCASE\"" {})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid PostgreSQL type"
+            (validate-fn "\"has-dash\"" {}))))))
 
 
 (deftest metadata-caching-test

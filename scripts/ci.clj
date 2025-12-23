@@ -61,12 +61,12 @@
         security-cmd ["clojure" "-M:watson" "-p" "deps.edn"]
 
         ;; Define checks (eastwood disabled - incompatible with polylith namespace layout)
+        ;; security disabled - requires NVD API key, run manually with bb security
         checks [{:name "clj-kondo" :cmd kondo-cmd}
                 {:name "splint" :cmd splint-cmd}
                 {:name "cljstyle" :cmd cljstyle-cmd}
                 {:name "tests+coverage" :cmd test-cmd}
-                {:name "outdated" :cmd outdated-cmd}
-                {:name "security" :cmd security-cmd}]
+                {:name "outdated" :cmd outdated-cmd}]
 
         ;; Status tracking
         status (atom (into {} (map (fn [c] [(:name c) :running]) checks)))

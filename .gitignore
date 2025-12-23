@@ -29,3 +29,6 @@ pom.xml.asc
 
 # Tools
 .aider*
+
+# Security (contains API key)
+cljwatson.properties

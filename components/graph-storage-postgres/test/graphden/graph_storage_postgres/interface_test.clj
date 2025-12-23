@@ -131,21 +131,15 @@
         (is (some? (:enums metadata)))
         (is (some? (:enum-values metadata)))
         (finally
-          (sp/close storage))))))
+          (sp/close storage)))))
 
-
-(deftest initialization-error-handling-test
-  (testing "pool is closed if initialization fails"
-    ;; Mock sp/initialize to throw to test cleanup path
-    (let [pool-closed? (atom false)
-          original-close sp/close]
-      (with-redefs [sp/initialize (fn [_ _] (throw (ex-info "Test error" {})))
-                    sp/close (fn [storage]
-                               (reset! pool-closed? true)
-                               (original-close storage))]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Test error"
+  (testing "cleans up storage on initialization error"
+    (let [closed? (atom false)]
+      (with-redefs [sp/initialize (fn [_ _] (throw (ex-info "Init error" {:test true})))
+                    sp/close (fn [_] (reset! closed? true))]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Init error"
               (gsp/create-storage {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
                                    :username (PostgreSQLContainer/.getUsername *container*)
                                    :password (PostgreSQLContainer/.getPassword *container*)
                                    :pool-size 2})))
-        (is (true? @pool-closed?) "Pool should be closed after initialization failure")))))
+        (is @closed? "Storage should be closed on init failure")))))

@@ -1200,3 +1200,11 @@
                                        :type :enum
                                        :enum-name :nonexistent-enum}})
               ds/build)))))
+
+
+(deftest validate-single-ref-unknown-type-test
+  (testing "validate-single-ref with unknown ref-type throws"
+    (let [validate-single-ref-fn #'core/validate-single-ref]
+      ;; case without default throws IllegalArgumentException for unknown keys
+      (is (thrown? IllegalArgumentException
+            (validate-single-ref-fn :entity :field :unknown-type :ref-name {} {}))))))

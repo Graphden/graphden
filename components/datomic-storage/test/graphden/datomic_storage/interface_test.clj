@@ -536,3 +536,72 @@
                 (sp/initialize storage schema))))
         (finally
           (sp/close storage))))))
+
+
+(deftest current-attrs-edge-cases-test
+  (testing "filters out idents without namespace"
+    (let [current-attrs-fn #'core/current-attrs
+          ;; Mock query results with some idents without namespace
+          fake-results [[:db/ident :db.type/string]
+                        ['no-namespace-symbol :db.type/string] ; symbol without namespace
+                        [:user/name :db.type/string]]]
+      (with-redefs [d/q (constantly fake-results)]
+        (let [result (current-attrs-fn :fake-db)]
+          ;; Should have filtered out the non-namespaced one and db/* ones
+          (is (= {:user/name :db.type/string} result))))))
+
+  (testing "filters out idents from db and fressian namespaces"
+    (let [current-attrs-fn #'core/current-attrs
+          fake-results [[:db/ident :db.type/ref]
+                        [:fressian/tag :db.type/string]
+                        [:graphden.metadata/uuid :db.type/uuid]
+                        [:myapp/field :db.type/string]]]
+      (with-redefs [d/q (constantly fake-results)]
+        (let [result (current-attrs-fn :fake-db)]
+          (is (= {:myapp/field :db.type/string} result)))))))
+
+
+(deftest current-enum-values-db-edge-cases-test
+  (testing "filters out idents without namespace"
+    (let [current-enum-values-db-fn #'core/current-enum-values-db
+          ;; Include idents without namespace - they should be filtered
+          fake-results [['no-namespace] [:status.value/active] [:other/thing]]]
+      (with-redefs [d/q (constantly fake-results)]
+        (let [result (current-enum-values-db-fn :fake-db)]
+          ;; Only :status.value/active has .value in namespace
+          (is (= [:status.value/active] result)))))))
+
+
+(deftest read-metadata-empty-test
+  (testing "read-metadata returns nil when no metadata entities exist"
+    (let [read-metadata-fn #'core/read-metadata
+          ;; Mock all queries to return empty - but first query is metadata-schema-exists?
+          ;; which checks for :graphden.metadata/uuid attribute
+          query-results (atom 0)]
+      (with-redefs [d/q (fn [& _]
+                          (swap! query-results inc)
+                          (case @query-results
+                            1 [[123]] ; metadata-schema-exists? returns truthy
+                            2 []      ; entities
+                            3 []      ; fields
+                            4 []      ; enums
+                            5 []))]   ; enum-values
+        (let [result (read-metadata-fn :fake-db)]
+          (is (nil? result))))))
+
+  (testing "read-metadata returns data when entities exist but other types are empty"
+    (let [read-metadata-fn #'core/read-metadata
+          entity-uuid #uuid "11111111-1111-1111-1111-111111111111"
+          query-results (atom 0)]
+      (with-redefs [d/q (fn [& _]
+                          (swap! query-results inc)
+                          (case @query-results
+                            1 [[123]]                   ; metadata-schema-exists?
+                            2 [[entity-uuid :user]]     ; entities
+                            3 []                        ; fields
+                            4 []                        ; enums
+                            5 []))]                     ; enum-values
+        (let [result (read-metadata-fn :fake-db)]
+          (is (some? result))
+          (is (= {entity-uuid :user} (:entities result)))
+          (is (= {} (:fields result))))))))

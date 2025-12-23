@@ -11,9 +11,9 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
-      - uses: nnichols/clojure-dependency-update-action@v5
+      - uses: nnichols/clojure-dependency-update-action@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           batch: "true"

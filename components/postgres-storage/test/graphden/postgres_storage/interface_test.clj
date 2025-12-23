@@ -3,8 +3,10 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
-    [graphden.postgres-storage.core :as core]
     [graphden.postgres-storage.interface :as pg]
+    [graphden.postgres-storage.introspection :as introspection]
+    [graphden.postgres-storage.metadata :as metadata]
+    [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]
     [next.jdbc :as jdbc])
   (:import
@@ -991,7 +993,7 @@
             ;; Add a 'point' type column
             (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN location point"])))
         ;; Call the private current-columns function directly
-        (let [current-columns-fn #'core/current-columns
+        (let [current-columns-fn #'introspection/current-columns
               pool (:pool storage)
               columns (current-columns-fn pool "test_entity")]
           ;; The :location column should have type :point (unknown type passes through)
@@ -1016,11 +1018,42 @@
                                                  :user username
                                                  :password password})]
             (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN created_at timestamp without time zone"])))
-        (let [current-columns-fn #'core/current-columns
+        (let [current-columns-fn #'introspection/current-columns
               pool (:pool storage)
               columns (current-columns-fn pool "test_entity")]
           ;; timestamp without time zone maps to :timestamptz
           (is (= :timestamptz (:type (:created-at columns)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "current-columns handles all postgres type mappings"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000009020"
+          field-uuid #uuid "00000000-0000-0000-0000-000000009021"]
+      (try
+        (let [schema (make-schema :entity-name :test-entity
+                                  :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})]
+          (sp/initialize storage schema))
+        ;; Add columns with various postgres types
+        (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
+              username (PostgreSQLContainer/.getUsername *container*)
+              password (PostgreSQLContainer/.getPassword *container*)]
+          (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
+                                                 :user username
+                                                 :password password})]
+            (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN is_active boolean"])
+            (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN amount numeric"])
+            (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN data bytea"])))
+        (let [current-columns-fn #'introspection/current-columns
+              pool (:pool storage)
+              columns (current-columns-fn pool "test_entity")]
+          ;; boolean maps to :bool
+          (is (= :bool (:type (:is-active columns))))
+          ;; numeric stays as :numeric
+          (is (= :numeric (:type (:amount columns))))
+          ;; bytea maps to :bytes
+          (is (= :bytes (:type (:data columns)))))
         (finally
           (sp/close storage))))))
 
@@ -1040,7 +1073,7 @@
         (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra nil}
                          {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
                           :extra 12345}]] ; number instead of string/PGobject
-          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
             ;; schema-metadata uses parse-metadata-lenient which calls parse-extra
             (let [metadata (sp/schema-metadata storage)]
               ;; Should not throw, just parse what it can
@@ -1061,7 +1094,7 @@
         (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra "null"}
                          {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
                           :extra "null"}]]
-          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
             (let [metadata (sp/schema-metadata storage)]
               (is (some? metadata)))))
         (finally
@@ -1080,7 +1113,7 @@
         (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra "{}"}
                          {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
                           :extra "{}"}]]
-          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
             (let [metadata (sp/schema-metadata storage)]
               (is (some? metadata)))))
         (finally
@@ -1099,7 +1132,7 @@
         (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra nil}
                          {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
                           :extra "{\"type\": \"text\", \"nullable?\": \"false\"}"}]]
-          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
             (let [metadata (sp/schema-metadata storage)]
               (is (some? metadata))
               ;; Should have parsed the string values to keywords
@@ -1120,7 +1153,7 @@
         (let [fake-rows [{:uuid entity-uuid :kind "entity" :name "test-entity" :parent_uuid nil :extra ""}
                          {:uuid field-uuid :kind "field" :name "name" :parent_uuid entity-uuid
                           :extra ""}]]
-          (with-redefs [core/read-metadata-rows (constantly fake-rows)]
+          (with-redefs [metadata/read-metadata-rows (constantly fake-rows)]
             (let [metadata (sp/schema-metadata storage)]
               ;; Should work, extra is just nil
               (is (some? metadata)))))
@@ -1203,7 +1236,7 @@
                                           :ghost-field {:uuid #uuid "00000000-0000-0000-0000-000000007099"
                                                         :type :text}})
                           ds/build)]
-          (with-redefs [core/parse-metadata (constantly fake-metadata)]
+          (with-redefs [metadata/parse-metadata (constantly fake-metadata)]
             (is (thrown-with-msg? clojure.lang.ExceptionInfo
                                   #"Metadata/DB inconsistency"
                   (sp/initialize storage schema2)))))
@@ -1214,18 +1247,18 @@
 (deftest table-not-found-error-handling-test
   (testing "table-not-found? returns true for SQLState 42P01"
     (let [e (SQLException. "relation does not exist" "42P01")]
-      (is (true? (#'core/table-not-found? e)))))
+      (is (true? (#'util/table-not-found? e)))))
 
   (testing "table-not-found? returns false for other SQLState"
     (let [e (SQLException. "connection failed" "08001")]
-      (is (false? (#'core/table-not-found? e)))))
+      (is (false? (#'util/table-not-found? e)))))
 
   (testing "current-fields re-throws non-42P01 SQLException"
     (let [storage (create-test-storage)]
       (try
         ;; Mock read-metadata-rows to throw a non-42P01 SQLException
         (let [connection-error (SQLException. "connection failed" "08001")]
-          (with-redefs [core/read-metadata-rows (fn [_] (throw connection-error))]
+          (with-redefs [metadata/read-metadata-rows (fn [_] (throw connection-error))]
             (is (thrown? SQLException (sp/current-fields storage :any-entity)))))
         (finally
           (sp/close storage)))))
@@ -1235,7 +1268,7 @@
       (try
         ;; Mock read-metadata-rows to throw a non-42P01 SQLException
         (let [connection-error (SQLException. "connection failed" "08001")]
-          (with-redefs [core/read-metadata-rows (fn [_] (throw connection-error))]
+          (with-redefs [metadata/read-metadata-rows (fn [_] (throw connection-error))]
             (is (thrown? SQLException (sp/schema-metadata storage)))))
         (finally
           (sp/close storage))))))
@@ -1243,13 +1276,13 @@
 
 (deftest sql-identifier-validation-test
   (testing "validate-sql-identifier! accepts valid identifiers"
-    (let [validate-fn #'core/validate-sql-identifier!]
+    (let [validate-fn #'util/validate-sql-identifier!]
       (is (nil? (validate-fn "valid_name" {})))
       (is (nil? (validate-fn "name123" {})))
       (is (nil? (validate-fn "a" {})))))
 
   (testing "validate-sql-identifier! rejects invalid identifiers"
-    (let [validate-fn #'core/validate-sql-identifier!]
+    (let [validate-fn #'util/validate-sql-identifier!]
       ;; SQL injection attempts
       (is (thrown? clojure.lang.ExceptionInfo (validate-fn "name'; DROP TABLE users; --" {})))
       (is (thrown? clojure.lang.ExceptionInfo (validate-fn "name\"" {})))
@@ -1262,7 +1295,7 @@
 
 (deftest pg-type-validation-test
   (testing "validate-pg-type! accepts valid base types"
-    (let [validate-fn #'core/validate-pg-type!]
+    (let [validate-fn #'util/validate-pg-type!]
       (is (nil? (validate-fn "UUID" {})))
       (is (nil? (validate-fn "TEXT" {})))
       (is (nil? (validate-fn "BIGINT" {})))
@@ -1273,13 +1306,13 @@
       (is (nil? (validate-fn "BYTEA" {})))))
 
   (testing "validate-pg-type! accepts valid quoted enum identifiers"
-    (let [validate-fn #'core/validate-pg-type!]
+    (let [validate-fn #'util/validate-pg-type!]
       (is (nil? (validate-fn "\"status\"" {})))
       (is (nil? (validate-fn "\"user_role\"" {})))
       (is (nil? (validate-fn "\"my_enum123\"" {})))))
 
   (testing "validate-pg-type! rejects invalid types"
-    (let [validate-fn #'core/validate-pg-type!]
+    (let [validate-fn #'util/validate-pg-type!]
       ;; SQL injection attempts
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Invalid PostgreSQL type"

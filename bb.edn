@@ -2,7 +2,8 @@
 
  :tasks
  {:requires ([babashka.fs :as fs]
-             [babashka.process :as p])
+             [babashka.process :as p]
+             [clojure.string :as str])
 
   :init (do
           (def all-paths "components bases development")
@@ -89,6 +90,10 @@
   security
   {:doc "Scan for CVE vulnerabilities"
    :task (clojure "-M:watson -p deps.edn -w cljwatson.properties")}
+
+  bench
+  {:doc "Run performance benchmarks [--quick] [--memory|--postgres|--datomic]"
+   :task (clojure (str "-M:bench -m graphden.bench " (str/join " " *command-line-args*)))}
 
   clean
   {:doc "Clean generated files"

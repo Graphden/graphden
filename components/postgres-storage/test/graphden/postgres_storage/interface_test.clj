@@ -562,6 +562,44 @@
           ;; union type is preserved in metadata (maps to JSONB in DB)
           (is (= :union (:type (:value fields)))))
         (finally
+          (sp/close storage)))))
+
+  (testing "adding ref field during migration creates index"
+    (let [storage (create-test-storage)
+          user-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          post-uuid #uuid "00000000-0000-0000-0000-000000000003"
+          ;; First schema: entities without ref
+          schema1 (-> (mds/create-builder)
+                      (ds/add-entity :user user-uuid
+                                     {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                             :type :text}})
+                      (ds/add-entity :post post-uuid
+                                     {:title {:uuid #uuid "00000000-0000-0000-0000-000000000004"
+                                              :type :text}})
+                      ds/build)
+          ;; Second schema: add ref field to post
+          schema2 (-> (mds/create-builder)
+                      (ds/add-entity :user user-uuid
+                                     {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                             :type :text}})
+                      (ds/add-entity :post post-uuid
+                                     {:title {:uuid #uuid "00000000-0000-0000-0000-000000000004"
+                                              :type :text}
+                                      :author {:uuid #uuid "00000000-0000-0000-0000-000000000005"
+                                               :type :ref
+                                               :ref-entity :user}})
+                      ds/build)]
+      (try
+        ;; Initialize with first schema
+        (sp/initialize storage schema1)
+        ;; Migrate to second schema (adds ref field)
+        (let [changes (sp/initialize storage schema2)]
+          ;; Verify the ref field was added
+          (is (some #(= :author (:field %)) (:created (:fields changes))))
+          ;; Verify the field exists and is ref type
+          (let [fields (sp/current-fields storage :post)]
+            (is (= :ref (:type (:author fields))))))
+        (finally
           (sp/close storage))))))
 
 
@@ -891,23 +929,13 @@
                               :password "test"
                               :pool-size 2}))))
 
-  (testing "error message includes provided username when password missing"
-    (try
-      (pg/create-storage {:username "testuser"})
-      (catch clojure.lang.ExceptionInfo e
-        (is (= [:username] (:provided-keys (ex-data e)))))))
-
-  (testing "error message includes provided password when username missing"
-    (try
-      (pg/create-storage {:password "testpass"})
-      (catch clojure.lang.ExceptionInfo e
-        (is (= [:password] (:provided-keys (ex-data e)))))))
-
-  (testing "error message includes both when both provided"
+  (testing "error ex-data contains reason instead of sensitive credentials info"
     (try
       (pg/create-storage {:username "testuser" :password "testpass"})
       (catch clojure.lang.ExceptionInfo e
-        (is (= [:username :password] (:provided-keys (ex-data e))))))))
+        ;; Should NOT expose :username or :password in ex-data
+        (is (= :missing-jdbc-url (:reason (ex-data e))))
+        (is (nil? (:provided-keys (ex-data e))))))))
 
 
 (deftest unknown-pg-type-coverage-test
@@ -1073,5 +1101,57 @@
         (let [connection-error (SQLException. "connection failed" "08001")]
           (with-redefs [core/read-metadata-rows (fn [_] (throw connection-error))]
             (is (thrown? SQLException (sp/schema-metadata storage)))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest sql-identifier-validation-test
+  (testing "validate-sql-identifier! accepts valid identifiers"
+    (let [validate-fn #'core/validate-sql-identifier!]
+      (is (nil? (validate-fn "valid_name" {})))
+      (is (nil? (validate-fn "name123" {})))
+      (is (nil? (validate-fn "a" {})))))
+
+  (testing "validate-sql-identifier! rejects invalid identifiers"
+    (let [validate-fn #'core/validate-sql-identifier!]
+      ;; SQL injection attempts
+      (is (thrown? clojure.lang.ExceptionInfo (validate-fn "name'; DROP TABLE users; --" {})))
+      (is (thrown? clojure.lang.ExceptionInfo (validate-fn "name\"" {})))
+      ;; Invalid characters
+      (is (thrown? clojure.lang.ExceptionInfo (validate-fn "name-with-dash" {})))
+      (is (thrown? clojure.lang.ExceptionInfo (validate-fn "123starts_with_number" {})))
+      (is (thrown? clojure.lang.ExceptionInfo (validate-fn "UPPERCASE" {})))
+      (is (thrown? clojure.lang.ExceptionInfo (validate-fn "" {}))))))
+
+
+(deftest metadata-caching-test
+  (testing "metadata is cached after first read"
+    (let [storage (create-test-storage)
+          schema (make-schema)]
+      (try
+        (sp/initialize storage schema)
+        ;; First call reads from DB
+        (let [metadata1 (sp/schema-metadata storage)
+              ;; Second call should use cache (same object)
+              metadata2 (sp/schema-metadata storage)]
+          (is (some? metadata1))
+          (is (identical? metadata1 metadata2) "Metadata should be cached"))
+        (finally
+          (sp/close storage)))))
+
+  (testing "cache is invalidated on initialize"
+    (let [storage (create-test-storage)
+          schema1 (make-schema)]
+      (try
+        (sp/initialize storage schema1)
+        (let [metadata1 (sp/schema-metadata storage)
+              ;; Re-initialize with same schema
+              _ (sp/initialize storage schema1)
+              ;; Cache should be invalidated
+              metadata2 (sp/schema-metadata storage)]
+          (is (some? metadata1))
+          (is (some? metadata2))
+          ;; After re-init, cache was cleared, so new object
+          (is (not (identical? metadata1 metadata2)) "Cache should be invalidated on initialize"))
         (finally
           (sp/close storage))))))

@@ -37,5 +37,9 @@
   [opts]
   (let [storage (pg/create-storage opts)
         schema (graph/build-schema (mds/create-builder))]
-    (sp/initialize storage schema)
-    storage))
+    (try
+      (sp/initialize storage schema)
+      storage
+      (catch Exception e
+        (sp/close storage)
+        (throw e)))))

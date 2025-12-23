@@ -89,23 +89,36 @@
 ;; === Connection pool ===
 
 (defn create-pool
-  "Creates a HikariCP connection pool."
-  [{:keys [jdbc-url username password pool-size]
-    :or {pool-size 10}}]
+  "Creates a HikariCP connection pool.
+
+   Options:
+   - :jdbc-url - JDBC connection URL (required)
+   - :username - database username
+   - :password - database password
+   - :pool-size - maximum pool size (default 10)
+   - :min-idle - minimum idle connections (default 2)
+   - :connection-timeout - connection timeout in ms (default 30000)
+   - :idle-timeout - idle connection timeout in ms (default 600000)
+   - :max-lifetime - maximum connection lifetime in ms (default 1800000)"
+  [{:keys [jdbc-url username password pool-size min-idle
+           connection-timeout idle-timeout max-lifetime]
+    :or {pool-size 10
+         min-idle 2
+         connection-timeout 30000
+         idle-timeout 600000
+         max-lifetime 1800000}}]
   (when-not jdbc-url
     (throw (ex-info "jdbc-url is required for postgres connection pool"
-                    {:provided-keys (cond-> []
-                                      username (conj :username)
-                                      password (conj :password))})))
+                    {:reason :missing-jdbc-url})))
   (let [config (HikariConfig.)]
     (HikariConfig/.setJdbcUrl config jdbc-url)
     (when username (HikariConfig/.setUsername config username))
     (when password (HikariConfig/.setPassword config password))
     (HikariConfig/.setMaximumPoolSize config pool-size)
-    (HikariConfig/.setMinimumIdle config 2)
-    (HikariConfig/.setConnectionTimeout config 30000)
-    (HikariConfig/.setIdleTimeout config 600000)
-    (HikariConfig/.setMaxLifetime config 1800000)
+    (HikariConfig/.setMinimumIdle config min-idle)
+    (HikariConfig/.setConnectionTimeout config connection-timeout)
+    (HikariConfig/.setIdleTimeout config idle-timeout)
+    (HikariConfig/.setMaxLifetime config max-lifetime)
     (HikariDataSource. config)))
 
 
@@ -406,10 +419,29 @@
 
 ;; === DDL operations ===
 
+(def ^:private sql-identifier-pattern
+  "Pattern for valid SQL identifiers (snake_case, alphanumeric + underscore)."
+  #"^[a-z][a-z0-9_]*$")
+
+
+(defn- validate-sql-identifier!
+  "Validates that a string is a safe SQL identifier.
+   Prevents SQL injection in DDL statements where parameterization isn't possible."
+  [s context]
+  (when-not (re-matches sql-identifier-pattern s)
+    (throw (ex-info "Invalid SQL identifier"
+                    {:value s
+                     :context context
+                     :pattern (str sql-identifier-pattern)}))))
+
+
 (defn- enum-value->sql
-  "Converts an enum value keyword to SQL string (snake_case, no quotes wrapper)."
+  "Converts an enum value keyword to SQL string (snake_case, no quotes wrapper).
+   Validates the result to prevent SQL injection."
   [k]
-  (str/replace (name k) "-" "_"))
+  (let [sql-val (str/replace (name k) "-" "_")]
+    (validate-sql-identifier! sql-val {:type :enum-value :keyword k})
+    sql-val))
 
 
 (defn- create-enum!
@@ -483,13 +515,41 @@
         (ds/entity-constraints schema entity-name)))
 
 
+(defn- ref-index-name
+  "Generates index name for a ref field (foreign key)."
+  [entity-name field-name]
+  (str "idx_" (kw->snake-case entity-name) "_" (kw->snake-case field-name) "_ref"))
+
+
+(defn- create-ref-index!
+  "Creates an index for a ref field to optimize joins."
+  [ds entity-name field-name]
+  (let [table-name (ident->sql entity-name)
+        index-name (ref-index-name entity-name field-name)
+        column-name (ident->sql field-name)]
+    (jdbc/execute! ds [(str "CREATE INDEX IF NOT EXISTS \"" index-name
+                            "\" ON " table-name " (" column-name ")")])))
+
+
+(defn- create-ref-indexes!
+  "Creates indexes for all ref fields in an entity."
+  [ds entity-name fields]
+  (run! (fn [[field-name field-spec]]
+          (when (= :ref (:type field-spec))
+            (create-ref-index! ds entity-name field-name)))
+        fields))
+
+
 (defn- add-column!
-  "Adds a column to an existing table."
+  "Adds a column to an existing table. Creates index for ref fields."
   [ds table-name field-name field-spec]
   (jdbc/execute! ds
                  (sql/format {:alter-table (keyword (kw->snake-case table-name))
                               :add-column (build-column-spec field-name field-spec)}
-                             {:quoted true})))
+                             {:quoted true}))
+  ;; Create index for ref fields to optimize joins
+  (when (= :ref (:type field-spec))
+    (create-ref-index! ds table-name field-name)))
 
 
 (defn- rename-table!
@@ -541,8 +601,10 @@
 (defn- create-single-entity!
   "Creates a single entity table during first-time initialization."
   [ds schema entity-name]
-  (create-table! ds entity-name (ds/entity-fields schema entity-name))
-  (create-entity-constraints! ds schema entity-name))
+  (let [fields (ds/entity-fields schema entity-name)]
+    (create-table! ds entity-name fields)
+    (create-entity-constraints! ds schema entity-name)
+    (create-ref-indexes! ds entity-name fields)))
 
 
 (defn- check-single-field-type!
@@ -749,13 +811,30 @@
 
 ;; === Storage record ===
 
+(defn- get-cached-metadata
+  "Gets metadata from cache or reads from database.
+   Cache is invalidated on schema changes (initialize)."
+  [pool metadata-cache]
+  (if-let [cached @metadata-cache]
+    cached
+    (let [metadata (try
+                     (parse-metadata-lenient (read-metadata-rows pool))
+                     (catch SQLException e
+                       (when-not (table-not-found? e) (throw e))
+                       nil))]
+      (reset! metadata-cache metadata)
+      metadata)))
+
+
 (defrecord PostgresStorage
-  [pool]
+  [pool metadata-cache]
 
   sp/Storage
 
   (initialize
     [_this schema]
+    ;; Invalidate cache on schema changes
+    (reset! metadata-cache nil)
     (do-initialize pool schema))
 
 
@@ -775,12 +854,7 @@
 
   (current-fields
     [_this entity-name]
-    (let [metadata (try
-                     (parse-metadata-lenient (read-metadata-rows pool))
-                     (catch SQLException e
-                       ;; Only swallow "table not found" - re-throw other errors
-                       (when-not (table-not-found? e) (throw e))
-                       nil))
+    (let [metadata (get-cached-metadata pool metadata-cache)
           ;; Check if entity exists in metadata
           entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
       (when entity-exists?
@@ -807,12 +881,7 @@
 
   (schema-metadata
     [_this]
-    (try
-      (parse-metadata-lenient (read-metadata-rows pool))
-      (catch SQLException e
-        ;; Only swallow "table not found" - re-throw other errors
-        (when-not (table-not-found? e) (throw e))
-        nil))))
+    (get-cached-metadata pool metadata-cache)))
 
 
 (defn create-storage
@@ -820,8 +889,12 @@
 
    Options:
    - :jdbc-url - JDBC connection URL (required)
-   - :username - database username (required)
-   - :password - database password (required)
-   - :pool-size - connection pool size (default 10)"
+   - :username - database username
+   - :password - database password
+   - :pool-size - maximum pool size (default 10)
+   - :min-idle - minimum idle connections (default 2)
+   - :connection-timeout - connection timeout in ms (default 30000)
+   - :idle-timeout - idle connection timeout in ms (default 600000)
+   - :max-lifetime - maximum connection lifetime in ms (default 1800000)"
   [opts]
-  (->PostgresStorage (create-pool opts)))
+  (->PostgresStorage (create-pool opts) (atom nil)))

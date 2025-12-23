@@ -36,5 +36,9 @@
                      (str "graph-" (System/currentTimeMillis) "-" (rand-int 10000)))
          storage (dat/create-storage {:db-name db-name})
          schema (graph/build-schema (mds/create-builder))]
-     (sp/initialize storage schema)
-     storage)))
+     (try
+       (sp/initialize storage schema)
+       storage
+       (catch Exception e
+         (sp/close storage)
+         (throw e))))))

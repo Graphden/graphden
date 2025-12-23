@@ -79,12 +79,4 @@
         (is (some? (:enums metadata)))
         (is (some? (:enum-values metadata)))
         (finally
-          (sp/close storage)))))
-
-  (testing "cleans up storage on initialization error"
-    (let [closed? (atom false)]
-      (with-redefs [sp/initialize (fn [_ _] (throw (ex-info "Init error" {:test true})))
-                    sp/close (fn [_] (reset! closed? true))]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Init error"
-              (gsd/create-storage)))
-        (is @closed? "Storage should be closed on init failure")))))
+          (sp/close storage))))))

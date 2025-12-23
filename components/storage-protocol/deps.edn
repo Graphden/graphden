@@ -1,4 +1,4 @@
 {:paths ["src" "resources"]
- :deps {}
+ :deps {graphden/data-schema-protocol {:local/root "../data-schema-protocol"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

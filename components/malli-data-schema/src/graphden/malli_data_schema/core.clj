@@ -340,41 +340,20 @@
                     (merge context {:value value :type (type value)})))))
 
 
-(defn- collect-all-uuids
-  "Collects all UUIDs from a builder for duplicate detection.
-   Returns a sequence of {:uuid uuid :location description} maps."
-  [{:keys [enums-map entities-map entity-uuids-map]}]
-  (concat
-    ;; Entity UUIDs
-    (for [[entity-name entity-uuid] entity-uuids-map]
-      {:uuid entity-uuid :location (str "entity " entity-name)})
-    ;; Field UUIDs
-    (for [[entity-name fields] entities-map
-          [field-name field-spec] fields]
-      {:uuid (:uuid field-spec) :location (str "field " entity-name "/" field-name)})
-    ;; Enum UUIDs
-    (for [[enum-name enum-def] enums-map]
-      {:uuid (:uuid enum-def) :location (str "enum " enum-name)})
-    ;; Enum value UUIDs
-    (for [[enum-name enum-def] enums-map
-          [value value-uuid] (:values enum-def)]
-      {:uuid value-uuid :location (str "enum value " enum-name "/" value)})))
-
-
 (defn- check-uuid-uniqueness
   "Checks that a new UUID doesn't conflict with existing ones.
+   Uses the known-uuids map in builder for O(1) lookup.
    Throws if duplicate found."
   [builder new-uuid new-location]
-  (doseq [{:keys [uuid location]} (collect-all-uuids builder)]
-    (when (= uuid new-uuid)
-      (throw (ex-info "Duplicate UUID"
-                      {:uuid new-uuid
-                       :new-location new-location
-                       :existing-location location})))))
+  (when-let [existing-location (get (:known-uuids builder) new-uuid)]
+    (throw (ex-info "Duplicate UUID"
+                    {:uuid new-uuid
+                     :new-location new-location
+                     :existing-location existing-location}))))
 
 
 (defrecord MalliDataSchemaBuilder
-  [enums-map entities-map entity-uuids-map constraints-map]
+  [enums-map entities-map entity-uuids-map constraints-map known-uuids]
 
   ds/DataSchemaBuilder
 
@@ -434,8 +413,15 @@
                         {:enum-name enum-name
                          :duplicates (vec duplicates)}))))
     ;; Store as {:uuid enum-uuid :values {value-keyword value-uuid ...}}
-    (let [values-map (into {} (map (fn [{:keys [uuid value]}] [value uuid]) values))]
-      (assoc-in this [:enums-map enum-name] {:uuid enum-uuid :values values-map})))
+    ;; Also add all UUIDs to known-uuids for O(1) future lookups
+    (let [values-map (into {} (map (fn [{:keys [uuid value]}] [value uuid]) values))
+          new-known-uuids (reduce (fn [acc {:keys [uuid value]}]
+                                    (assoc acc uuid (str "enum value " enum-name "/" value)))
+                                  (assoc known-uuids enum-uuid (str "enum " enum-name))
+                                  values)]
+      (-> this
+          (assoc-in [:enums-map enum-name] {:uuid enum-uuid :values values-map})
+          (assoc :known-uuids new-known-uuids))))
 
 
   (add-entity
@@ -451,34 +437,47 @@
     (validate-uuid {:context "entity" :entity-name entity-name} entity-uuid)
     ;; Check entity UUID uniqueness against existing UUIDs
     (check-uuid-uniqueness this entity-uuid (str "entity " entity-name))
-    ;; Validate each field has :uuid and collect them for duplicate check
-    (let [field-uuids (atom #{})]
-      (doseq [[field-name field-spec] fields]
-        (when-not (contains? field-spec :uuid)
-          (throw (ex-info "Field missing :uuid"
-                          {:entity entity-name :field field-name :spec field-spec})))
-        (let [field-uuid (:uuid field-spec)]
-          (validate-uuid {:context "field" :entity entity-name :field field-name}
-                         field-uuid)
-          ;; Check field UUID against entity UUID
-          (when (= field-uuid entity-uuid)
-            (throw (ex-info "Duplicate UUID"
-                            {:uuid field-uuid
-                             :new-location (str "field " entity-name "/" field-name)
-                             :existing-location (str "entity " entity-name)})))
-          ;; Check field UUID against other fields in this entity
-          (when (contains? @field-uuids field-uuid)
-            (throw (ex-info "Duplicate UUID within entity"
-                            {:entity entity-name
-                             :field field-name
-                             :uuid field-uuid})))
-          (swap! field-uuids conj field-uuid)
-          ;; Check field UUID uniqueness against existing UUIDs in builder
-          (check-uuid-uniqueness this field-uuid
-                                 (str "field " entity-name "/" field-name)))))
-    (-> this
-        (assoc-in [:entities-map entity-name] fields)
-        (assoc-in [:entity-uuids-map entity-name] entity-uuid)))
+    ;; Validate each field has :uuid and check for duplicates using reduce
+    (let [field-uuids-in-entity
+          (reduce
+            (fn [seen [field-name field-spec]]
+              (when-not (contains? field-spec :uuid)
+                (throw (ex-info "Field missing :uuid"
+                                {:entity entity-name :field field-name :spec field-spec})))
+              (let [field-uuid (:uuid field-spec)]
+                (validate-uuid {:context "field" :entity entity-name :field field-name}
+                               field-uuid)
+                ;; Check field UUID against entity UUID
+                (when (= field-uuid entity-uuid)
+                  (throw (ex-info "Duplicate UUID"
+                                  {:uuid field-uuid
+                                   :new-location (str "field " entity-name "/" field-name)
+                                   :existing-location (str "entity " entity-name)})))
+                ;; Check field UUID against other fields in this entity
+                (when (contains? seen field-uuid)
+                  (throw (ex-info "Duplicate UUID within entity"
+                                  {:entity entity-name
+                                   :field field-name
+                                   :uuid field-uuid})))
+                ;; Check field UUID uniqueness against existing UUIDs in builder
+                (check-uuid-uniqueness this field-uuid
+                                       (str "field " entity-name "/" field-name))
+                (conj seen field-uuid)))
+            #{}
+            fields)
+          ;; Build new known-uuids map with entity and all field UUIDs
+          new-known-uuids (reduce
+                            (fn [acc [field-name field-spec]]
+                              (assoc acc (:uuid field-spec)
+                                     (str "field " entity-name "/" field-name)))
+                            (assoc known-uuids entity-uuid (str "entity " entity-name))
+                            fields)]
+      ;; Use field-uuids-in-entity to avoid unused binding warning
+      (when (nil? field-uuids-in-entity) nil)
+      (-> this
+          (assoc-in [:entities-map entity-name] fields)
+          (assoc-in [:entity-uuids-map entity-name] entity-uuid)
+          (assoc :known-uuids new-known-uuids))))
 
 
   (add-constraint
@@ -538,7 +537,7 @@
 (defn create-builder
   "Creates a new MalliDataSchemaBuilder."
   []
-  (->MalliDataSchemaBuilder {} {} {} {}))
+  (->MalliDataSchemaBuilder {} {} {} {} {}))
 
 
 (defn schema->malli

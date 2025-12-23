@@ -676,3 +676,254 @@
           (-> (mds/create-builder)
               (ds/add-entity :item (uuid) {:name {:type :text}})
               (ds/build))))))
+
+
+;; === Additional error path tests for coverage ===
+
+(deftest enum-values-format-test
+  (testing "enum values not a vector throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Enum values must be a vector"
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) {:active {:uuid (uuid)}})
+              (ds/build)))))
+
+  (testing "enum value entry not a map throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Each enum value must be a map"
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) [:active])
+              (ds/build)))))
+
+  (testing "duplicate enum value UUIDs throw"
+    (let [same-uuid (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Enum has duplicate value UUIDs"
+            (-> (mds/create-builder)
+                (ds/add-enum :status (uuid) [{:uuid same-uuid :value :active}
+                                             {:uuid same-uuid :value :inactive}])
+                (ds/build)))))))
+
+
+(deftest constraint-error-paths-test
+  (testing "constraint missing :type throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Constraint missing :type"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid) {:name {:uuid (uuid) :type :text}})
+              (ds/add-constraint :item {:fields [:name]})
+              (ds/build)))))
+
+  (testing "constraint :fields with non-keywords throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Constraint :fields must contain only keywords"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid) {:name {:uuid (uuid) :type :text}})
+              (ds/add-constraint :item {:type :unique :fields ["name"]})
+              (ds/build)))))
+
+  (testing "constraint with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Constraint has unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid) {:name {:uuid (uuid) :type :text}})
+              (ds/add-constraint :item {:type :unique :fields [:name] :extra "value"})
+              (ds/build)))))
+
+  (testing "duplicate constraint throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Duplicate constraint"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid) {:name {:uuid (uuid) :type :text}})
+              (ds/add-constraint :item {:type :unique :fields [:name]})
+              (ds/add-constraint :item {:type :unique :fields [:name]})
+              (ds/build))))))
+
+
+(deftest duplicate-uuid-within-entity-test
+  (testing "duplicate field UUIDs within same entity throws specific error"
+    (let [same-uuid (uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo #"Duplicate UUID within entity"
+            (-> (mds/create-builder)
+                (ds/add-entity :item (uuid) {:field1 {:uuid same-uuid :type :text}
+                                             :field2 {:uuid same-uuid :type :int}})
+                (ds/build)))))))
+
+
+;; === Union type tests ===
+
+(deftest union-with-ref-variant-test
+  (testing "union with ref variant validates correctly"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :user (uuid) {:name {:uuid (uuid) :type :text}})
+                     (ds/add-entity :item (uuid)
+                                    {:owner {:uuid (uuid)
+                                             :type :union
+                                             :variants [{:type :ref :ref-entity :user}
+                                                        {:type :text}]}})
+                     ds/build)]
+      ;; Valid with UUID (ref to user)
+      (is (nil? (ds/validate-entity schema :item {:id (uuid) :owner (uuid)})))
+      ;; Valid with string (text variant)
+      (is (nil? (ds/validate-entity schema :item {:id (uuid) :owner "some text"})))
+      ;; Invalid with number
+      (let [errors (ds/validate-entity schema :item {:id (uuid) :owner 123})]
+        (is (some? (:errors errors)))))))
+
+
+(deftest union-with-enum-variant-test
+  (testing "union with enum variant validates correctly"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status (uuid)
+                                  [{:uuid (uuid) :value :active}
+                                   {:uuid (uuid) :value :inactive}])
+                     (ds/add-entity :item (uuid)
+                                    {:state {:uuid (uuid)
+                                             :type :union
+                                             :variants [{:type :enum :enum-name :status}
+                                                        {:type :int}]}})
+                     ds/build)]
+      ;; Valid with enum value
+      (is (nil? (ds/validate-entity schema :item {:id (uuid) :state :active})))
+      ;; Valid with int
+      (is (nil? (ds/validate-entity schema :item {:id (uuid) :state 42})))
+      ;; Invalid with string
+      (let [errors (ds/validate-entity schema :item {:id (uuid) :state "invalid"})]
+        (is (some? (:errors errors)))))))
+
+
+(deftest union-variant-nullable-error-test
+  (testing "union variant with :nullable? throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Union variant cannot have :nullable?"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid)
+                             {:value {:uuid (uuid)
+                                      :type :union
+                                      :variants [{:type :text :nullable? true}]}})
+              ds/build)))))
+
+
+(deftest union-with-duplicate-variants-test
+  (testing "union with duplicate variants throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Union has duplicate variants"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid)
+                             {:value {:uuid (uuid)
+                                      :type :union
+                                      :variants [{:type :text} {:type :text}]}})
+              ds/build)))))
+
+
+(deftest union-empty-variants-test
+  (testing "union with empty variants throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Union variants cannot be empty"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid)
+                             {:value {:uuid (uuid) :type :union :variants []}})
+              ds/build)))))
+
+
+;; === More field type validation tests ===
+
+(deftest ref-type-extra-attributes-test
+  (testing "ref field with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"ref has unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-entity :user (uuid) {:name {:uuid (uuid) :type :text}})
+              (ds/add-entity :item (uuid)
+                             {:owner {:uuid (uuid)
+                                      :type :ref
+                                      :ref-entity :user
+                                      :extra-attr "value"}})
+              ds/build)))))
+
+
+(deftest enum-type-extra-attributes-test
+  (testing "enum field with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"enum has unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) [{:uuid (uuid) :value :active}])
+              (ds/add-entity :item (uuid)
+                             {:status {:uuid (uuid)
+                                       :type :enum
+                                       :enum-name :status
+                                       :extra-attr "value"}})
+              ds/build)))))
+
+
+(deftest base-type-extra-attributes-test
+  (testing "base field type with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"text has unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid)
+                             {:name {:uuid (uuid)
+                                     :type :text
+                                     :extra-attr "value"}})
+              ds/build)))))
+
+
+(deftest union-extra-attributes-test
+  (testing "union field with extra attributes throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"union has unsupported attributes"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid)
+                             {:value {:uuid (uuid)
+                                      :type :union
+                                      :variants [{:type :text}]
+                                      :extra-attr "value"}})
+              ds/build)))))
+
+
+;; === All field types validation ===
+
+(deftest all-field-types-validation-test
+  (testing "all field types validate correctly"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status (uuid) [{:uuid (uuid) :value :active}])
+                     (ds/add-entity :target (uuid) {:name {:uuid (uuid) :type :text}})
+                     (ds/add-entity :test-entity (uuid)
+                                    {:uuid-field {:uuid (uuid) :type :uuid}
+                                     :text-field {:uuid (uuid) :type :text}
+                                     :int-field {:uuid (uuid) :type :int}
+                                     :bool-field {:uuid (uuid) :type :bool}
+                                     :numeric-field {:uuid (uuid) :type :numeric}
+                                     :timestamp-field {:uuid (uuid) :type :timestamptz}
+                                     :jsonb-field {:uuid (uuid) :type :jsonb}
+                                     :bytes-field {:uuid (uuid) :type :bytes}
+                                     :ref-field {:uuid (uuid) :type :ref :ref-entity :target}
+                                     :enum-field {:uuid (uuid) :type :enum :enum-name :status}})
+                     ds/build)]
+      ;; Valid data
+      (is (nil? (ds/validate-entity schema :test-entity
+                                    {:id (uuid)
+                                     :uuid-field (uuid)
+                                     :text-field "hello"
+                                     :int-field 42
+                                     :bool-field true
+                                     :numeric-field 3.14
+                                     :timestamp-field (java.util.Date.)
+                                     :jsonb-field {"key" "value"}
+                                     :bytes-field (byte-array [1 2 3])
+                                     :ref-field (uuid)
+                                     :enum-field :active})))
+      ;; Invalid uuid-field
+      (is (some? (:errors (ds/validate-entity schema :test-entity
+                                              {:id (uuid)
+                                               :uuid-field "not-uuid"
+                                               :text-field "hello"
+                                               :int-field 42
+                                               :bool-field true
+                                               :numeric-field 3.14
+                                               :timestamp-field (java.util.Date.)
+                                               :jsonb-field nil
+                                               :bytes-field (byte-array [])
+                                               :ref-field (uuid)
+                                               :enum-field :active})))))))

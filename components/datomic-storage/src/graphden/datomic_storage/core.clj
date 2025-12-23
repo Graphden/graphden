@@ -343,19 +343,24 @@
                       old-field-info (get (:fields old-metadata) field-uuid)]
                   (when old-field-info
                     (let [old-attr (entity-attr old-entity-name (:field old-field-info))
-                          attr-info (ffirst (d/q '[:find ?type
+                          attr-exists? (seq (d/q '[:find ?e
                                                    :in $ ?attr
-                                                   :where
-                                                   [?e :db/ident ?attr]
-                                                   [?e :db/valueType ?vt]
-                                                   [?vt :db/ident ?type]]
-                                                 db old-attr))
-                          old-type (get datomic->type attr-info)
-                          new-type (:type field-spec)
-                          old-nullable? (:nullable? old-field-info)
-                          new-nullable? (get field-spec :nullable? false)]
-                      (sp/check-type-change! entity-name field-name old-type new-type)
-                      (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?))))))))
+                                                   :where [?e :db/ident ?attr]]
+                                                 db old-attr))]
+                      ;; Check for metadata/DB inconsistency
+                      (when-not attr-exists?
+                        (throw (ex-info "Metadata/DB inconsistency: field exists in metadata but not in database"
+                                        {:type :metadata-inconsistency
+                                         :entity entity-name
+                                         :field field-name
+                                         :expected-attr old-attr})))
+                      ;; Use type from metadata (preserves JSONB/Union correctly)
+                      (let [old-type (:type old-field-info)
+                            new-type (:type field-spec)
+                            old-nullable? (:nullable? old-field-info)
+                            new-nullable? (get field-spec :nullable? false)]
+                        (sp/check-type-change! entity-name field-name old-type new-type)
+                        (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?)))))))))
 
         ;; Compute changes and apply new schema
         (let [;; Compute entity changes
@@ -463,7 +468,7 @@
 
   (current-entities
     [_this]
-    (when-let [conn @conn-atom]
+    (if-let [conn @conn-atom]
       (let [db (d/db conn)
             attrs (current-attrs db)]
         (->> (keys attrs)
@@ -471,7 +476,8 @@
              (filter some?)
              (set)
              (map keyword)
-             (set)))))
+             (set)))
+      #{}))
 
 
   (current-fields
@@ -479,24 +485,27 @@
     (when-let [conn @conn-atom]
       (let [db (d/db conn)
             metadata (read-metadata db)
-            entity-fields (->> (:fields metadata)
-                               (vals)
-                               (filter #(= (:entity %) entity-name)))]
-        (when (seq entity-fields)
-          (into {}
-                (map (fn [{:keys [field nullable?] field-type :type}]
-                       [field {:type field-type :nullable? nullable?}])
-                     entity-fields))))))
+            ;; Check if entity exists in metadata
+            entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
+        (when entity-exists?
+          (let [entity-fields (->> (:fields metadata)
+                                   (vals)
+                                   (filter #(= (:entity %) entity-name)))]
+            (into {}
+                  (map (fn [{:keys [field nullable?] field-type :type}]
+                         [field {:type field-type :nullable? nullable?}])
+                       entity-fields)))))))
 
 
   (current-enums
     [_this]
-    (when-let [conn @conn-atom]
+    (if-let [conn @conn-atom]
       (let [db (d/db conn)
             enum-values (current-enum-values-db db)]
         (->> enum-values
              (map #(-> (namespace %) (str/replace ".value" "") keyword))
-             (set)))))
+             (set)))
+      #{}))
 
 
   (current-enum-values

@@ -72,7 +72,8 @@
     org.testcontainers/testcontainers #:mvn{:version "1.21.3"},
     ch.qos.logback/logback-classic #:mvn{:version "1.5.15"},
     com.datomic/local #:mvn{:version "1.0.291"},
-    metosin/malli #:mvn{:version "0.20.0"}}},
+    metosin/malli #:mvn{:version "0.20.0"},
+    cheshire/cheshire #:mvn{:version "5.13.0"}}},
   :dev
   {:extra-paths
    ["development/src"

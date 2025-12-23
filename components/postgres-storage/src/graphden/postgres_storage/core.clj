@@ -1,6 +1,7 @@
 (ns graphden.postgres-storage.core
   "PostgreSQL implementation of Storage protocol."
   (:require
+    [cheshire.core :as json]
     [clojure.string :as str]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.storage-protocol.interface :as sp]
@@ -35,6 +36,21 @@
   (str/replace (name k) "-" "_"))
 
 
+(defn- check-snake-case-collisions!
+  "Checks that converting keywords to snake_case doesn't create collisions.
+   E.g., :foo-bar and :foo_bar would both become 'foo_bar'.
+   Throws if collisions detected."
+  [context keywords]
+  (let [snake-names (map kw->snake-case keywords)
+        collisions (for [[snake freq] (frequencies snake-names)
+                         :when (> freq 1)
+                         :let [originals (filter #(= (kw->snake-case %) snake) keywords)]]
+                     {:snake-case snake :originals (vec originals)})]
+    (when (seq collisions)
+      (throw (ex-info "Snake_case naming collision detected"
+                      (merge context {:collisions (vec collisions)}))))))
+
+
 (defn- ident->sql
   "Converts a keyword identifier to quoted SQL-safe name (snake_case).
    Uses double quotes to handle reserved words like 'order', 'user', etc."
@@ -60,10 +76,15 @@
   "Creates a HikariCP connection pool."
   [{:keys [jdbc-url username password pool-size]
     :or {pool-size 10}}]
+  (when-not jdbc-url
+    (throw (ex-info "jdbc-url is required for postgres connection pool"
+                    {:provided-keys (cond-> []
+                                      username (conj :username)
+                                      password (conj :password))})))
   (let [config (HikariConfig.)]
     (HikariConfig/.setJdbcUrl config jdbc-url)
-    (HikariConfig/.setUsername config username)
-    (HikariConfig/.setPassword config password)
+    (when username (HikariConfig/.setUsername config username))
+    (when password (HikariConfig/.setPassword config password))
     (HikariConfig/.setMaximumPoolSize config pool-size)
     (HikariConfig/.setMinimumIdle config 2)
     (HikariConfig/.setConnectionTimeout config 30000)
@@ -73,10 +94,13 @@
 
 
 (defn close-pool
-  "Closes a HikariCP connection pool."
+  "Closes a HikariCP connection pool. Idempotent - safe to call multiple times.
+   Uses locking to prevent race conditions between check and close."
   [^HikariDataSource pool]
   (when pool
-    (HikariDataSource/.close pool)))
+    (locking pool
+      (when-not (HikariDataSource/.isClosed pool)
+        (HikariDataSource/.close pool)))))
 
 
 ;; === Metadata table operations ===
@@ -97,6 +121,11 @@
                              {:quoted true})))
 
 
+(def ^:private query-timeout-seconds
+  "Default timeout for metadata queries (in seconds)."
+  30)
+
+
 (defn- read-metadata-rows
   "Reads raw metadata rows for processing."
   [ds]
@@ -104,48 +133,25 @@
                  (sql/format {:select [:uuid :kind :name :parent_uuid :extra]
                               :from [(keyword metadata-table-name)]}
                              {:quoted true})
-                 {:builder-fn rs/as-unqualified-lower-maps}))
-
-
-(defn- value->json
-  "Converts a value to JSON representation."
-  [v]
-  (cond
-    (nil? v) "null"
-    (boolean? v) (str v)
-    (keyword? v) (str "\"" (name v) "\"")
-    (string? v) (str "\"" v "\"")
-    :else (str v)))
+                 {:builder-fn rs/as-unqualified-lower-maps
+                  :timeout query-timeout-seconds}))
 
 
 (defn- extra->json
-  "Converts extra map to JSON string for PostgreSQL JSONB."
+  "Converts extra map to JSON string for PostgreSQL JSONB.
+   Keywords are converted to their name strings."
   [extra]
   (when extra
-    (str "{"
-         (->> extra
-              (map (fn [[k v]]
-                     (str "\"" (name k) "\":" (value->json v))))
-              (str/join ","))
-         "}")))
-
-
-(defn- parse-json-value
-  "Parse a JSON value string into Clojure value."
-  [v]
-  (let [v (str/trim v)]
-    (cond
-      (= v "null") nil
-      (= v "true") true
-      (= v "false") false
-      (str/starts-with? v "\"")
-      (let [inner (subs v 1 (dec (count v)))]
-        (keyword inner))
-      :else v)))
+    (json/generate-string
+      (into {}
+            (map (fn [[k v]]
+                   [(name k) (if (keyword? v) (name v) v)])
+                 extra)))))
 
 
 (defn- parse-extra
-  "Parses the extra JSONB column. Handles both string and PGobject formats."
+  "Parses the extra JSONB column. Handles both string and PGobject formats.
+   String values are converted back to keywords."
   [extra]
   (when extra
     (let [s (cond
@@ -153,22 +159,19 @@
               (instance? PGobject extra) (PGobject/.getValue ^PGobject extra)
               :else (str extra))]
       (when (and (seq s) (not= s "null") (not= s "{}"))
-        ;; Parse JSON object manually
-        (let [inner (-> s
-                        (str/replace #"^\{" "")
-                        (str/replace #"\}$" "")
-                        str/trim)]
-          (when (seq inner)
-            ;; Split by comma, but handle quoted strings
-            (let [pairs (re-seq #"\"([^\"]+)\":([^,}]+)" s)]
-              (into {}
-                    (for [[_ k v] pairs]
-                      [(keyword k) (parse-json-value v)])))))))))
+        (let [parsed (json/parse-string s)]
+          (when (map? parsed)
+            (into {}
+                  (map (fn [[k v]]
+                         [(keyword k) (if (string? v) (keyword v) v)])
+                       parsed))))))))
 
 
-(defn- parse-metadata
-  "Parses metadata rows into structured format."
-  [rows]
+(defn- parse-metadata-impl
+  "Parses metadata rows into structured format.
+   When strict? is true, throws if orphaned entries are detected.
+   When strict? is false, skips orphaned entries silently."
+  [rows strict?]
   (when (seq rows)
     (let [uuid->row (into {} (map (fn [r] [(:uuid r) r]) rows))]
       (reduce
@@ -181,19 +184,47 @@
                 extra (parse-extra (:extra row))]
             (case kind
               :entity (assoc-in acc [:entities uuid] n)
-              :field (assoc-in acc [:fields uuid]
-                               (merge {:entity (keyword (:name parent-row))
-                                       :field n}
-                                      (when extra
-                                        {:type (:type extra)
-                                         :nullable? (:nullable? extra)})))
+              :field (if parent-row
+                       (assoc-in acc [:fields uuid]
+                                 (merge {:entity (keyword (:name parent-row))
+                                         :field n}
+                                        (when extra
+                                          {:type (:type extra)
+                                           :nullable? (:nullable? extra)})))
+                       (if strict?
+                         (throw (ex-info "Orphaned field entry in metadata"
+                                         {:type :metadata-corruption
+                                          :field-uuid uuid
+                                          :field-name n
+                                          :missing-parent-uuid parent-uuid}))
+                         acc)) ; Skip orphaned entry in lenient mode
               :enum (assoc-in acc [:enums uuid] n)
-              :enum-value (assoc-in acc [:enum-values uuid]
-                                    {:enum (keyword (:name parent-row))
-                                     :value n})
+              :enum-value (if parent-row
+                            (assoc-in acc [:enum-values uuid]
+                                      {:enum (keyword (:name parent-row))
+                                       :value n})
+                            (if strict?
+                              (throw (ex-info "Orphaned enum-value entry in metadata"
+                                              {:type :metadata-corruption
+                                               :enum-value-uuid uuid
+                                               :value-name n
+                                               :missing-parent-uuid parent-uuid}))
+                              acc)) ; Skip orphaned entry in lenient mode
               acc)))
         {:entities {} :fields {} :enums {} :enum-values {}}
         rows))))
+
+
+(defn- parse-metadata
+  "Parses metadata rows strictly. Throws on orphaned entries."
+  [rows]
+  (parse-metadata-impl rows true))
+
+
+(defn- parse-metadata-lenient
+  "Parses metadata rows leniently. Skips orphaned entries."
+  [rows]
+  (parse-metadata-impl rows false))
 
 
 (defn- upsert-metadata!
@@ -214,21 +245,23 @@
 
 
 (defn- save-metadata!
-  "Saves complete metadata to table (truncate + insert all)."
+  "Saves complete metadata to table (truncate + insert all).
+   Uses a transaction to ensure atomicity."
   [ds schema]
-  (jdbc/execute! ds (sql/format {:truncate (keyword metadata-table-name)}
-                                {:quoted true}))
-  (doseq [entity-name (ds/entities schema)]
-    (let [entity-uuid (ds/entity-uuid schema entity-name)]
-      (upsert-metadata! ds entity-uuid :entity entity-name nil)
-      (doseq [[field-name field-spec] (ds/entity-fields schema entity-name)]
-        (upsert-metadata! ds (:uuid field-spec) :field field-name entity-uuid
-                          {:type (:type field-spec)
-                           :nullable? (get field-spec :nullable? false)}))))
-  (doseq [[enum-name {:keys [uuid values]}] (ds/enums schema)]
-    (upsert-metadata! ds uuid :enum enum-name nil)
-    (doseq [[value-kw value-uuid] values]
-      (upsert-metadata! ds value-uuid :enum-value value-kw uuid))))
+  (jdbc/with-transaction [tx ds]
+                         (jdbc/execute! tx (sql/format {:truncate (keyword metadata-table-name)}
+                                                       {:quoted true}))
+                         (doseq [entity-name (ds/entities schema)]
+                           (let [entity-uuid (ds/entity-uuid schema entity-name)]
+                             (upsert-metadata! tx entity-uuid :entity entity-name nil)
+                             (doseq [[field-name field-spec] (ds/entity-fields schema entity-name)]
+                               (upsert-metadata! tx (:uuid field-spec) :field field-name entity-uuid
+                                                 {:type (:type field-spec)
+                                                  :nullable? (get field-spec :nullable? false)}))))
+                         (doseq [[enum-name {:keys [uuid values]}] (ds/enums schema)]
+                           (upsert-metadata! tx uuid :enum enum-name nil)
+                           (doseq [[value-kw value-uuid] values]
+                             (upsert-metadata! tx value-uuid :enum-value value-kw uuid)))))
 
 
 ;; === Introspection ===
@@ -243,7 +276,8 @@
                                                  [:= :table_schema "public"]
                                                  [:= :table_type "BASE TABLE"]]}
                                         {:quoted true})
-                            {:builder-fn rs/as-unqualified-lower-maps})]
+                            {:builder-fn rs/as-unqualified-lower-maps
+                             :timeout query-timeout-seconds})]
     (set (remove #(= % metadata-table-name)
                  (map :table_name rows)))))
 
@@ -259,7 +293,8 @@
                                                  [:= :table_name table-name]
                                                  [:<> :column_name "id"]]}
                                         {:quoted true})
-                            {:builder-fn rs/as-unqualified-lower-maps})]
+                            {:builder-fn rs/as-unqualified-lower-maps
+                             :timeout query-timeout-seconds})]
     (into {}
           (map (fn [row]
                  (let [col-name (keyword (str/replace (:column_name row) "_" "-"))
@@ -298,12 +333,20 @@
                                                  [:= :n.nspname "public"]
                                                  [:= :t.typtype "e"]]}
                                         {:quoted true})
-                            {:builder-fn rs/as-unqualified-lower-maps})]
+                            {:builder-fn rs/as-unqualified-lower-maps
+                             :timeout query-timeout-seconds})]
     (set (map :typname rows))))
 
 
+(defn- sql->enum-value
+  "Converts SQL enum value back to keyword (reverses enum-value->sql)."
+  [s]
+  (keyword (str/replace s "_" "-")))
+
+
 (defn- current-enum-values-pg
-  "Returns set of values for a PostgreSQL enum type."
+  "Returns set of values for a PostgreSQL enum type.
+   Converts SQL snake_case back to kebab-case keywords."
   [ds enum-name]
   (let [rows (jdbc/execute! ds
                             (sql/format {:select [:e.enumlabel]
@@ -316,8 +359,9 @@
                                                  [:= :n.nspname "public"]
                                                  [:= :t.typname enum-name]]}
                                         {:quoted true})
-                            {:builder-fn rs/as-unqualified-lower-maps})]
-    (set (map (comp keyword :enumlabel) rows))))
+                            {:builder-fn rs/as-unqualified-lower-maps
+                             :timeout query-timeout-seconds})]
+    (set (map (comp sql->enum-value :enumlabel) rows))))
 
 
 ;; === DDL operations ===
@@ -419,6 +463,13 @@
 (defn- do-initialize
   "Performs schema initialization/migration."
   [ds schema]
+  ;; Check for snake_case naming collisions before any DDL
+  (check-snake-case-collisions! {:context "entities"} (ds/entities schema))
+  (doseq [entity-name (ds/entities schema)]
+    (check-snake-case-collisions! {:context "fields" :entity entity-name}
+                                  (keys (ds/entity-fields schema entity-name))))
+  (check-snake-case-collisions! {:context "enums"} (keys (ds/enums schema)))
+
   (ensure-metadata-table! ds)
   (let [metadata-rows (read-metadata-rows ds)
         old-metadata (parse-metadata metadata-rows)]
@@ -434,58 +485,40 @@
         ;; Save metadata
         (save-metadata! ds schema)
         ;; Return changes
-        {:entities {:created (vec (ds/entities schema)) :renamed {}}
-         :fields {:created (vec (for [e (ds/entities schema)
-                                      [f _] (ds/entity-fields schema e)]
-                                  {:entity e :field f}))
-                  :renamed []}
-         :enums {:created (vec (keys (ds/enums schema))) :renamed {}}
-         :enum-values {:created (vec (for [[enum-name {:keys [values]}] (ds/enums schema)
-                                           [v _] values]
-                                       {:enum enum-name :value v}))}})
+        (sp/build-first-init-changes schema))
 
       ;; Migration
-      (let [old-entity-uuids (set (keys (:entities old-metadata)))
-            new-entity-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))
-            old-field-uuids (set (keys (:fields old-metadata)))
-            new-field-uuids (set (for [e (ds/entities schema)
-                                       [_ f] (ds/entity-fields schema e)]
-                                   (:uuid f)))
-            old-enum-uuids (set (keys (:enums old-metadata)))
-            new-enum-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) (ds/enums schema)))
-            old-enum-value-uuids (set (keys (:enum-values old-metadata)))
-            new-enum-value-uuids (set (for [[_ {:keys [values]}] (ds/enums schema)
-                                            [_ v] values] v))]
-
-        ;; Check for destructive changes
-        (sp/check-removed! "entities" old-entity-uuids new-entity-uuids
-                           #(get (:entities old-metadata) %))
-        (sp/check-removed! "fields" old-field-uuids new-field-uuids
-                           #(get (:fields old-metadata) %))
-        (sp/check-removed! "enums" old-enum-uuids new-enum-uuids
-                           #(get (:enums old-metadata) %))
-        (sp/check-removed! "enum values" old-enum-value-uuids new-enum-value-uuids
-                           #(get (:enum-values old-metadata) %))
+      (do
+        ;; Check for destructive changes (removals)
+        (sp/check-all-removals! old-metadata schema)
 
         ;; Check type compatibility
         (doseq [entity-name (ds/entities schema)]
           (let [entity-uuid (ds/entity-uuid schema entity-name)
                 old-entity-name (get (:entities old-metadata) entity-uuid)
-                old-fields (when old-entity-name
-                             (current-columns ds (kw->snake-case old-entity-name)))]
-            (when old-fields
+                old-db-fields (when old-entity-name
+                                (current-columns ds (kw->snake-case old-entity-name)))]
+            (when old-entity-name
               (doseq [[field-name field-spec] (ds/entity-fields schema entity-name)]
                 (let [field-uuid (:uuid field-spec)
                       old-field-info (get (:fields old-metadata) field-uuid)]
                   (when old-field-info
                     (let [old-field-name (:field old-field-info)
-                          old-field (get old-fields old-field-name)
-                          old-type (:type old-field)
-                          new-type (:type field-spec)
-                          old-nullable? (:nullable? old-field)
-                          new-nullable? (get field-spec :nullable? false)]
-                      (sp/check-type-change! entity-name field-name old-type new-type)
-                      (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?))))))))
+                          old-db-field (get old-db-fields old-field-name)]
+                      ;; Verify column exists in database
+                      (when (and (seq old-db-fields) (nil? old-db-field))
+                        (throw (ex-info "Metadata/DB inconsistency: field exists in metadata but not in database"
+                                        {:type :metadata-inconsistency
+                                         :entity entity-name
+                                         :field field-name
+                                         :expected-column (kw->snake-case old-field-name)})))
+                      ;; Use type from metadata (preserves original types correctly)
+                      (let [old-type (:type old-field-info)
+                            new-type (:type field-spec)
+                            old-nullable? (:nullable? old-field-info)
+                            new-nullable? (get field-spec :nullable? false)]
+                        (sp/check-type-change! entity-name field-name old-type new-type)
+                        (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?)))))))))
 
         ;; Apply enum changes
         (let [created-enums (atom [])
@@ -594,15 +627,19 @@
 
   (current-fields
     [_this entity-name]
-    (let [metadata (parse-metadata (read-metadata-rows pool))
-          entity-fields (->> (:fields metadata)
-                             (vals)
-                             (filter #(= (:entity %) entity-name)))]
-      (when (seq entity-fields)
-        (into {}
-              (map (fn [{:keys [field nullable?] field-type :type}]
-                     [field {:type field-type :nullable? nullable?}])
-                   entity-fields)))))
+    (let [metadata (try
+                     (parse-metadata-lenient (read-metadata-rows pool))
+                     (catch Exception _ nil))
+          ;; Check if entity exists in metadata
+          entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
+      (when entity-exists?
+        (let [entity-fields (->> (:fields metadata)
+                                 (vals)
+                                 (filter #(= (:entity %) entity-name)))]
+          (into {}
+                (map (fn [{:keys [field nullable?] :as f}]
+                       [field {:type (:type f) :nullable? nullable?}])
+                     entity-fields))))))
 
 
   (current-enums
@@ -619,7 +656,11 @@
 
   (schema-metadata
     [_this]
-    (parse-metadata (read-metadata-rows pool))))
+    (try
+      (parse-metadata-lenient (read-metadata-rows pool))
+      (catch Exception _
+        ;; Table doesn't exist or other error - storage not initialized
+        nil))))
 
 
 (defn create-storage

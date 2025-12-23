@@ -653,3 +653,211 @@
       ;; close should be idempotent - calling twice should not throw
       (is (nil? (sp/close storage)))
       (is (nil? (sp/close storage))))))
+
+
+;; === Error path tests ===
+
+(deftest create-storage-errors-test
+  (testing "create-storage without jdbc-url throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"jdbc-url is required"
+          (pg/create-storage {:username "user" :password "pass"})))))
+
+
+(deftest nullable-change-test
+  (testing "changing from nullable to non-nullable throws"
+    (let [storage (create-test-storage)
+          field-uuid #uuid "00000000-0000-0000-0000-000000003001"
+          schema1 (make-schema :entity-name :nullable-test
+                               :entity-uuid #uuid "00000000-0000-0000-0000-000000003000"
+                               :fields {:optional {:uuid field-uuid
+                                                   :type :text
+                                                   :nullable? true}})
+          _ (sp/initialize storage schema1)
+          schema2 (make-schema :entity-name :nullable-test
+                               :entity-uuid #uuid "00000000-0000-0000-0000-000000003000"
+                               :fields {:optional {:uuid field-uuid
+                                                   :type :text
+                                                   :nullable? false}})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"field changed from nullable to non-nullable"
+              (sp/initialize storage schema2)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest introspection-uninitialized-test
+  (testing "introspection on uninitialized storage returns correct defaults"
+    (let [storage (create-test-storage)]
+      (try
+        ;; Before initialize - should return empty/nil appropriately
+        (is (set? (sp/current-entities storage)))
+        (is (nil? (sp/schema-metadata storage)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest kebab-case-enum-values-test
+  (testing "enum values with hyphens are handled correctly"
+    (let [storage (create-test-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-enum :my-status #uuid "00000000-0000-0000-0000-000000003110"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000003111"
+                                    :value :in-progress}
+                                   {:uuid #uuid "00000000-0000-0000-0000-000000003112"
+                                    :value :on-hold}])
+                     (ds/add-entity :ticket #uuid "00000000-0000-0000-0000-000000003100"
+                                    {:title {:uuid #uuid "00000000-0000-0000-0000-000000003101"
+                                             :type :text}})
+                     ds/build)]
+      (try
+        (sp/initialize storage schema)
+        ;; Verify kebab-case enum values are preserved through round-trip
+        (let [values (sp/current-enum-values storage :my-status)]
+          (is (contains? values :in-progress))
+          (is (contains? values :on-hold)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest snake-case-collision-test
+  (testing "snake_case naming collision is detected for entities"
+    (let [storage (create-test-storage)]
+      (try
+        ;; :user-name and :user_name both become user_name
+        (let [schema (-> (mds/create-builder)
+                         (ds/add-entity :user-name #uuid "00000000-0000-0000-0000-000000004001"
+                                        {:field1 {:uuid #uuid "00000000-0000-0000-0000-000000004002"
+                                                  :type :text}})
+                         (ds/add-entity :user_name #uuid "00000000-0000-0000-0000-000000004003"
+                                        {:field2 {:uuid #uuid "00000000-0000-0000-0000-000000004004"
+                                                  :type :text}})
+                         ds/build)]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Snake_case naming collision"
+                (sp/initialize storage schema))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "snake_case naming collision is detected for fields"
+    (let [storage (create-test-storage)]
+      (try
+        ;; :first-name and :first_name both become first_name
+        (let [schema (-> (mds/create-builder)
+                         (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000004010"
+                                        {:first-name {:uuid #uuid "00000000-0000-0000-0000-000000004011"
+                                                      :type :text}
+                                         :first_name {:uuid #uuid "00000000-0000-0000-0000-000000004012"
+                                                      :type :text}})
+                         ds/build)]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Snake_case naming collision"
+                (sp/initialize storage schema))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "snake_case naming collision is detected for enums"
+    (let [storage (create-test-storage)]
+      (try
+        (let [schema (-> (mds/create-builder)
+                         (ds/add-enum :my-status #uuid "00000000-0000-0000-0000-000000004020"
+                                      [{:uuid #uuid "00000000-0000-0000-0000-000000004021"
+                                        :value :active}])
+                         (ds/add-enum :my_status #uuid "00000000-0000-0000-0000-000000004022"
+                                      [{:uuid #uuid "00000000-0000-0000-0000-000000004023"
+                                        :value :inactive}])
+                         (ds/add-entity :item #uuid "00000000-0000-0000-0000-000000004030"
+                                        {:name {:uuid #uuid "00000000-0000-0000-0000-000000004031"
+                                                :type :text}})
+                         ds/build)]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Snake_case naming collision"
+                (sp/initialize storage schema))))
+        (finally
+          (sp/close storage))))))
+
+
+(defn- insert-orphaned-metadata!
+  "Insert an orphaned metadata entry directly into the database.
+   Uses a fresh connection to ensure the insert is committed."
+  [kind entry-name parent-uuid extra]
+  (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
+        username (PostgreSQLContainer/.getUsername *container*)
+        password (PostgreSQLContainer/.getPassword *container*)
+        orphan-uuid (random-uuid)]
+    (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
+                                           :user username
+                                           :password password})]
+      (if extra
+        (jdbc/execute! conn
+                       [(str "INSERT INTO _schema_metadata (uuid, kind, name, parent_uuid, extra) "
+                             "VALUES (?, ?, ?, ?, ?::jsonb)")
+                        orphan-uuid kind entry-name parent-uuid extra])
+        (jdbc/execute! conn
+                       ["INSERT INTO _schema_metadata (uuid, kind, name, parent_uuid) VALUES (?, ?, ?, ?)"
+                        orphan-uuid kind entry-name parent-uuid])))))
+
+
+(deftest metadata-corruption-test
+  (testing "orphaned field metadata throws in strict mode"
+    (let [storage (create-test-storage)]
+      (try
+        ;; First initialize normally
+        (let [schema (make-schema :entity-name :test-entity
+                                  :entity-uuid #uuid "00000000-0000-0000-0000-000000005001"
+                                  :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000005002"
+                                                  :type :text}})
+              result (sp/initialize storage schema)]
+          ;; Verify tables were created
+          (is (some? result) "sp/initialize should return changes"))
+        ;; Verify metadata table exists
+        (is (contains? (sp/current-entities storage) :test-entity)
+            "test-entity should exist after initialize")
+        ;; Now insert an orphaned field entry (field with non-existent parent)
+        (insert-orphaned-metadata! "field" "orphan_field" (random-uuid)
+                                   "{\"type\": \"text\", \"nullable?\": false}")
+        ;; Now try to initialize again - should throw because of orphaned entry
+        (let [schema2 (make-schema :entity-name :test-entity
+                                   :entity-uuid #uuid "00000000-0000-0000-0000-000000005001"
+                                   :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000005002"
+                                                   :type :text}
+                                            :email {:uuid #uuid "00000000-0000-0000-0000-000000005003"
+                                                    :type :text}})]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Orphaned field entry"
+                (sp/initialize storage schema2))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "orphaned enum-value metadata throws in strict mode"
+    (let [storage (create-test-storage)]
+      (try
+        ;; First initialize with an enum
+        (let [schema (-> (mds/create-builder)
+                         (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000005010"
+                                      [{:uuid #uuid "00000000-0000-0000-0000-000000005011"
+                                        :value :active}])
+                         (ds/add-entity :item #uuid "00000000-0000-0000-0000-000000005020"
+                                        {:name {:uuid #uuid "00000000-0000-0000-0000-000000005021"
+                                                :type :text}})
+                         ds/build)]
+          (sp/initialize storage schema))
+        ;; Insert an orphaned enum-value entry
+        (insert-orphaned-metadata! "enum-value" "orphan_value" (random-uuid) nil)
+        ;; Try to initialize again - should throw
+        (let [schema2 (-> (mds/create-builder)
+                          (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000005010"
+                                       [{:uuid #uuid "00000000-0000-0000-0000-000000005011"
+                                         :value :active}
+                                        {:uuid #uuid "00000000-0000-0000-0000-000000005012"
+                                         :value :inactive}])
+                          (ds/add-entity :item #uuid "00000000-0000-0000-0000-000000005020"
+                                         {:name {:uuid #uuid "00000000-0000-0000-0000-000000005021"
+                                                 :type :text}})
+                          ds/build)]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Orphaned enum-value entry"
+                (sp/initialize storage schema2))))
+        (finally
+          (sp/close storage))))))

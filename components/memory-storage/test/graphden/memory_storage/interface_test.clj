@@ -398,3 +398,91 @@
       (sp/close storage)
       (sp/close storage)
       (is (= #{} (sp/current-entities storage))))))
+
+
+;; === Additional edge case tests ===
+
+(deftest current-enum-values-unknown-test
+  (testing "current-enum-values returns nil for unknown enum"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (is (nil? (sp/current-enum-values storage :nonexistent))))))
+
+
+(deftest entity-with-no-fields-test
+  (testing "entity with no fields works correctly"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :empty-entity #uuid "00000000-0000-0000-0000-000000000100"
+                                    {})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (is (= #{:empty-entity} (sp/current-entities storage)))
+      ;; Entity exists so should return empty map, not nil
+      (is (= {} (sp/current-fields storage :empty-entity))))))
+
+
+(deftest data-migration-with-field-rename-test
+  (testing "data is migrated when field is renamed"
+    (let [storage (mem/create-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000200"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000201"
+          schema1 (make-schema :entity-name :record
+                               :entity-uuid entity-uuid
+                               :fields {:old-field {:uuid field-uuid :type :text}})]
+      ;; Initialize with first schema
+      (sp/initialize storage schema1)
+
+      ;; Simulate having data by directly modifying the atom
+      ;; (This tests the data migration logic that's otherwise not exercised)
+      (let [state-atom (:state storage)
+            row-id (random-uuid)]
+        (swap! state-atom assoc-in [:data :record row-id] {:old-field "value1"})
+
+        ;; Now rename the field
+        (let [schema2 (make-schema :entity-name :record
+                                   :entity-uuid entity-uuid
+                                   :fields {:new-field {:uuid field-uuid :type :text}})
+              changes (sp/initialize storage schema2)]
+          ;; Verify field was renamed
+          (is (= [{:entity :record :old-field :old-field :new-field :new-field}]
+                 (:renamed (:fields changes))))
+
+          ;; Verify data was migrated - old-field renamed to new-field
+          (let [migrated-data (get-in @state-atom [:data :record row-id])]
+            (is (contains? migrated-data :new-field))
+            (is (not (contains? migrated-data :old-field)))
+            (is (= "value1" (:new-field migrated-data)))))))))
+
+
+(deftest data-migration-with-entity-rename-test
+  (testing "data is preserved when entity is renamed"
+    (let [storage (mem/create-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000300"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000301"
+          schema1 (make-schema :entity-name :old-entity
+                               :entity-uuid entity-uuid
+                               :fields {:name {:uuid field-uuid :type :text}})]
+      ;; Initialize with first schema
+      (sp/initialize storage schema1)
+
+      ;; Simulate having data
+      (let [state-atom (:state storage)
+            row-id (random-uuid)]
+        (swap! state-atom assoc-in [:data :old-entity row-id] {:name "test-value"})
+
+        ;; Rename the entity
+        (let [schema2 (make-schema :entity-name :new-entity
+                                   :entity-uuid entity-uuid
+                                   :fields {:name {:uuid field-uuid :type :text}})
+              changes (sp/initialize storage schema2)]
+          ;; Verify entity was renamed
+          (is (= {:old-entity :new-entity} (:renamed (:entities changes))))
+
+          ;; Verify data was migrated to new entity name
+          (let [migrated-data (get-in @state-atom [:data :new-entity row-id])]
+            (is (= {:name "test-value"} migrated-data)))
+
+          ;; Old entity data should be gone
+          (is (nil? (get-in @state-atom [:data :old-entity]))))))))

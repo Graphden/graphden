@@ -7,30 +7,6 @@
 
 ;; === Internal helpers ===
 
-(defn- build-metadata-from-schema
-  "Builds metadata structure from DataSchema for first-time initialization."
-  [schema]
-  (let [entities-meta (into {}
-                            (for [entity-name (ds/entities schema)]
-                              [(ds/entity-uuid schema entity-name) entity-name]))
-        fields-meta (into {}
-                          (for [entity-name (ds/entities schema)
-                                [field-name field-spec] (ds/entity-fields schema entity-name)]
-                            [(:uuid field-spec)
-                             {:entity entity-name :field field-name}]))
-        enums-data (ds/enums schema)
-        enums-meta (into {}
-                         (for [[enum-name {:keys [uuid]}] enums-data]
-                           [uuid enum-name]))
-        enum-values-meta (into {}
-                               (for [[enum-name {:keys [values]}] enums-data
-                                     [value-kw value-uuid] values]
-                                 [value-uuid {:enum enum-name :value value-kw}]))]
-    {:entities entities-meta
-     :fields fields-meta
-     :enums enums-meta
-     :enum-values enum-values-meta}))
-
 
 (defn- build-entities-structure
   "Builds :entities structure from DataSchema."
@@ -52,46 +28,6 @@
           [enum-name {:values (set (keys values))}])))
 
 
-(defn- check-removed-entities
-  "Checks for entities that exist in metadata but not in schema. Throws on removal."
-  [old-metadata schema]
-  (let [old-uuids (set (keys (:entities old-metadata)))
-        new-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))]
-    (sp/check-removed! "entities" old-uuids new-uuids
-                       #(get (:entities old-metadata) %))))
-
-
-(defn- check-removed-fields
-  "Checks for fields that exist in metadata but not in schema. Throws on removal."
-  [old-metadata schema]
-  (let [old-uuids (set (keys (:fields old-metadata)))
-        new-uuids (set (for [entity-name (ds/entities schema)
-                             [_ field-spec] (ds/entity-fields schema entity-name)]
-                         (:uuid field-spec)))]
-    (sp/check-removed! "fields" old-uuids new-uuids
-                       #(get (:fields old-metadata) %))))
-
-
-(defn- check-removed-enums
-  "Checks for enums that exist in metadata but not in schema. Throws on removal."
-  [old-metadata schema]
-  (let [old-uuids (set (keys (:enums old-metadata)))
-        new-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) (ds/enums schema)))]
-    (sp/check-removed! "enums" old-uuids new-uuids
-                       #(get (:enums old-metadata) %))))
-
-
-(defn- check-removed-enum-values
-  "Checks for enum values that exist in metadata but not in schema. Throws on removal."
-  [old-metadata schema]
-  (let [old-uuids (set (keys (:enum-values old-metadata)))
-        new-uuids (set (for [[_ {:keys [values]}] (ds/enums schema)
-                             [_ value-uuid] values]
-                         value-uuid))]
-    (sp/check-removed! "enum values" old-uuids new-uuids
-                       #(get (:enum-values old-metadata) %))))
-
-
 (defn- check-type-changes
   "Checks that all field type changes are safe. Throws on unsafe change."
   [old-state old-metadata schema]
@@ -111,71 +47,6 @@
                     new-nullable? (get field-spec :nullable? false)]
                 (sp/check-type-change! entity-name field-name old-type new-type)
                 (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?)))))))))
-
-
-(defn- compute-entity-changes
-  "Computes created and renamed entities."
-  [old-metadata schema]
-  (let [old-uuid->name (:entities old-metadata)
-        created (vec (for [entity-name (ds/entities schema)
-                           :let [uuid (ds/entity-uuid schema entity-name)]
-                           :when (not (contains? old-uuid->name uuid))]
-                       entity-name))
-        renamed (into {}
-                      (for [entity-name (ds/entities schema)
-                            :let [uuid (ds/entity-uuid schema entity-name)
-                                  old-name (get old-uuid->name uuid)]
-                            :when (and old-name (not= old-name entity-name))]
-                        [old-name entity-name]))]
-    {:created created :renamed renamed}))
-
-
-(defn- compute-field-changes
-  "Computes created and renamed fields."
-  [old-metadata schema]
-  (let [old-uuid->info (:fields old-metadata)
-        created (vec (for [entity-name (ds/entities schema)
-                           [field-name field-spec] (ds/entity-fields schema entity-name)
-                           :let [uuid (:uuid field-spec)]
-                           :when (not (contains? old-uuid->info uuid))]
-                       {:entity entity-name :field field-name}))
-        renamed (vec (for [entity-name (ds/entities schema)
-                           [field-name field-spec] (ds/entity-fields schema entity-name)
-                           :let [uuid (:uuid field-spec)
-                                 old-info (get old-uuid->info uuid)]
-                           :when (and old-info (not= (:field old-info) field-name))]
-                       {:entity entity-name
-                        :old-field (:field old-info)
-                        :new-field field-name}))]
-    {:created created :renamed renamed}))
-
-
-(defn- compute-enum-changes
-  "Computes created and renamed enums."
-  [old-metadata schema]
-  (let [old-uuid->name (:enums old-metadata)
-        enums-data (ds/enums schema)
-        created (vec (for [[enum-name {:keys [uuid]}] enums-data
-                           :when (not (contains? old-uuid->name uuid))]
-                       enum-name))
-        renamed (into {}
-                      (for [[enum-name {:keys [uuid]}] enums-data
-                            :let [old-name (get old-uuid->name uuid)]
-                            :when (and old-name (not= old-name enum-name))]
-                        [old-name enum-name]))]
-    {:created created :renamed renamed}))
-
-
-(defn- compute-enum-value-changes
-  "Computes created enum values."
-  [old-metadata schema]
-  (let [old-uuid->info (:enum-values old-metadata)
-        enums-data (ds/enums schema)
-        created (vec (for [[enum-name {:keys [values]}] enums-data
-                           [value-kw value-uuid] values
-                           :when (not (contains? old-uuid->info value-uuid))]
-                       {:enum enum-name :value value-kw}))]
-    {:created created}))
 
 
 (defn- migrate-data
@@ -223,38 +94,27 @@
         old-metadata (:metadata old-state)]
     (if (nil? old-metadata)
       ;; First-time initialization
-      (let [new-metadata (build-metadata-from-schema schema)
+      (let [new-metadata (sp/build-metadata-from-schema schema)
             new-entities (build-entities-structure schema)
             new-enums (build-enums-structure schema)
             new-state {:entities new-entities
                        :enums new-enums
                        :metadata new-metadata
                        :data {}}
-            changes {:entities {:created (vec (ds/entities schema)) :renamed {}}
-                     :fields {:created (vec (for [e (ds/entities schema)
-                                                  [f _] (ds/entity-fields schema e)]
-                                              {:entity e :field f}))
-                              :renamed []}
-                     :enums {:created (vec (keys (ds/enums schema))) :renamed {}}
-                     :enum-values {:created (vec (for [[enum-name {:keys [values]}] (ds/enums schema)
-                                                       [v _] values]
-                                                   {:enum enum-name :value v}))}}]
+            changes (sp/build-first-init-changes schema)]
         [new-state changes])
       ;; Migration
       (do
         ;; Check for destructive changes
-        (check-removed-entities old-metadata schema)
-        (check-removed-fields old-metadata schema)
-        (check-removed-enums old-metadata schema)
-        (check-removed-enum-values old-metadata schema)
+        (sp/check-all-removals! old-metadata schema)
         (check-type-changes old-state old-metadata schema)
         ;; Compute changes
-        (let [entity-changes (compute-entity-changes old-metadata schema)
-              field-changes (compute-field-changes old-metadata schema)
-              enum-changes (compute-enum-changes old-metadata schema)
-              enum-value-changes (compute-enum-value-changes old-metadata schema)
+        (let [entity-changes (sp/compute-entity-changes old-metadata schema)
+              field-changes (sp/compute-field-changes old-metadata schema)
+              enum-changes (sp/compute-enum-changes old-metadata schema)
+              enum-value-changes (sp/compute-enum-value-changes old-metadata schema)
               ;; Build new state
-              new-metadata (build-metadata-from-schema schema)
+              new-metadata (sp/build-metadata-from-schema schema)
               new-entities (build-entities-structure schema)
               new-enums (build-enums-structure schema)
               new-data (migrate-data (:data old-state) old-metadata schema)

@@ -25,7 +25,15 @@
                   (not (str/includes? output "0 style warning")))
     ;; cljstyle: actual formatting issues
     "cljstyle" (str/includes? output "formatted incorrectly")
+    ;; outdated: check if antq found any outdated deps (shows :upgrade in table)
+    "outdated" (str/includes? output ":upgrade")
     false))
+
+(defn soft-check?
+  "Returns true for checks that are informational and shouldn't fail CI.
+   These checks provide useful info but failures don't block the build."
+  [check-name]
+  (contains? #{"outdated" "security"} check-name))
 
 (defn status-char [s]
   (case s
@@ -49,12 +57,16 @@
                   "--test-ns-path" "components"
                   "--ns-regex" "graphden\\..*"
                   "--ns-exclude-regex" ".*-test"]
+        outdated-cmd ["clojure" "-M:outdated"]
+        security-cmd ["clojure" "-M:watson" "-p" "deps.edn"]
 
         ;; Define checks (eastwood disabled - incompatible with polylith namespace layout)
         checks [{:name "clj-kondo" :cmd kondo-cmd}
                 {:name "splint" :cmd splint-cmd}
                 {:name "cljstyle" :cmd cljstyle-cmd}
-                {:name "tests+coverage" :cmd test-cmd}]
+                {:name "tests+coverage" :cmd test-cmd}
+                {:name "outdated" :cmd outdated-cmd}
+                {:name "security" :cmd security-cmd}]
 
         ;; Status tracking
         status (atom (into {} (map (fn [c] [(:name c) :running]) checks)))
@@ -82,16 +94,17 @@
                           result @proc
                           output (str (:out result) "\n" (:err result))
                           exit (:exit result)
-                          warnings? (has-warnings? check-name output)]
+                          warnings? (has-warnings? check-name output)
+                          soft? (soft-check? check-name)]
                       (swap! results assoc check-name {:exit exit :output output :warnings warnings?})
                       (cond
                         (not= 0 exit)
                         (do (swap! status assoc check-name :failed)
-                            (reset! failed true))
+                            (when-not soft? (reset! failed true)))
 
                         warnings?
                         (do (swap! status assoc check-name :warning)
-                            (reset! failed true))
+                            (when-not soft? (reset! failed true)))
 
                         :else
                         (swap! status assoc check-name :passed))))

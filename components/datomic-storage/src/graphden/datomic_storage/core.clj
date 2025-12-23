@@ -620,63 +620,68 @@
 
   (current-entities
     [_this]
-    (if-let [conn @conn-atom]
-      (let [db (d/db conn)
-            attrs (current-attrs db)]
-        (->> (keys attrs)
-             (map namespace)
-             (filter some?)
-             (set)
-             (map keyword)
-             (set)))
-      #{}))
+    (locking lock
+      (if-let [conn @conn-atom]
+        (let [db (d/db conn)
+              attrs (current-attrs db)]
+          (->> (keys attrs)
+               (map namespace)
+               (filter some?)
+               (set)
+               (map keyword)
+               (set)))
+        #{})))
 
 
   (current-fields
     [_this entity-name]
-    (when-let [conn @conn-atom]
-      (let [db (d/db conn)
-            metadata (read-metadata db)
-            ;; Check if entity exists in metadata
-            entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
-        (when entity-exists?
-          (let [entity-fields (->> (:fields metadata)
-                                   (vals)
-                                   (filter #(= (:entity %) entity-name)))]
-            (into {}
-                  (map (fn [{:keys [field nullable?] field-type :type}]
-                         [field {:type field-type :nullable? nullable?}])
-                       entity-fields)))))))
+    (locking lock
+      (when-let [conn @conn-atom]
+        (let [db (d/db conn)
+              metadata (read-metadata db)
+              ;; Check if entity exists in metadata
+              entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
+          (when entity-exists?
+            (let [entity-fields (->> (:fields metadata)
+                                     (vals)
+                                     (filter #(= (:entity %) entity-name)))]
+              (into {}
+                    (map (fn [{:keys [field nullable?] field-type :type}]
+                           [field {:type field-type :nullable? nullable?}])
+                         entity-fields))))))))
 
 
   (current-enums
     [_this]
-    (if-let [conn @conn-atom]
-      (let [db (d/db conn)
-            enum-values (current-enum-values-db db)]
-        (->> enum-values
-             (map #(-> (namespace %) (str/replace ".value" "") keyword))
-             (set)))
-      #{}))
+    (locking lock
+      (if-let [conn @conn-atom]
+        (let [db (d/db conn)
+              enum-values (current-enum-values-db db)]
+          (->> enum-values
+               (map #(-> (namespace %) (str/replace ".value" "") keyword))
+               (set)))
+        #{})))
 
 
   (current-enum-values
     [_this enum-name]
-    (when-let [conn @conn-atom]
-      (let [db (d/db conn)
-            enum-values (current-enum-values-db db)
-            enum-ns (str (name enum-name) ".value")
-            values (->> enum-values
-                        (filter #(= (namespace %) enum-ns))
-                        (map #(keyword (name %)))
-                        (set))]
-        (when (seq values) values))))
+    (locking lock
+      (when-let [conn @conn-atom]
+        (let [db (d/db conn)
+              enum-values (current-enum-values-db db)
+              enum-ns (str (name enum-name) ".value")
+              values (->> enum-values
+                          (filter #(= (namespace %) enum-ns))
+                          (map #(keyword (name %)))
+                          (set))]
+          (when (seq values) values)))))
 
 
   (schema-metadata
     [_this]
-    (when-let [conn @conn-atom]
-      (read-metadata (d/db conn)))))
+    (locking lock
+      (when-let [conn @conn-atom]
+        (read-metadata (d/db conn))))))
 
 
 (defn create-storage

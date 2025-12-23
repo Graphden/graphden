@@ -3,6 +3,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
@@ -93,32 +94,41 @@
 
    Options:
    - :jdbc-url - JDBC connection URL (required)
-   - :username - database username
-   - :password - database password
+   - :username - database username (required, non-empty)
+   - :password - database password (required, non-empty)
    - :pool-size - maximum pool size (default 10)
    - :min-idle - minimum idle connections (default 2)
    - :connection-timeout - connection timeout in ms (default 30000)
    - :idle-timeout - idle connection timeout in ms (default 600000)
-   - :max-lifetime - maximum connection lifetime in ms (default 1800000)"
+   - :max-lifetime - maximum connection lifetime in ms (default 1800000)
+   - :leak-detection-threshold - connection leak detection in ms (default 60000)"
   [{:keys [jdbc-url username password pool-size min-idle
-           connection-timeout idle-timeout max-lifetime]
+           connection-timeout idle-timeout max-lifetime leak-detection-threshold]
     :or {pool-size 10
          min-idle 2
          connection-timeout 30000
          idle-timeout 600000
-         max-lifetime 1800000}}]
+         max-lifetime 1800000
+         leak-detection-threshold 60000}}]
   (when-not jdbc-url
     (throw (ex-info "jdbc-url is required for postgres connection pool"
                     {:reason :missing-jdbc-url})))
+  (when-not (and username (seq (str/trim username)))
+    (throw (ex-info "username is required and cannot be empty"
+                    {:reason :missing-username})))
+  (when-not (and password (seq (str/trim password)))
+    (throw (ex-info "password is required and cannot be empty"
+                    {:reason :missing-password})))
   (let [config (HikariConfig.)]
     (HikariConfig/.setJdbcUrl config jdbc-url)
-    (when username (HikariConfig/.setUsername config username))
-    (when password (HikariConfig/.setPassword config password))
+    (HikariConfig/.setUsername config username)
+    (HikariConfig/.setPassword config password)
     (HikariConfig/.setMaximumPoolSize config pool-size)
     (HikariConfig/.setMinimumIdle config min-idle)
     (HikariConfig/.setConnectionTimeout config connection-timeout)
     (HikariConfig/.setIdleTimeout config idle-timeout)
     (HikariConfig/.setMaxLifetime config max-lifetime)
+    (HikariConfig/.setLeakDetectionThreshold config leak-detection-threshold)
     (HikariDataSource. config)))
 
 
@@ -138,7 +148,7 @@
 
 
 (defn- ensure-metadata-table!
-  "Creates metadata table if it doesn't exist."
+  "Creates metadata table and indexes if they don't exist."
   [ds]
   (jdbc/execute! ds
                  (sql/format {:create-table [(keyword metadata-table-name) :if-not-exists]
@@ -147,7 +157,10 @@
                                              [:name :text [:not nil]]
                                              [:parent_uuid :uuid]
                                              [:extra :jsonb]]}
-                             {:quoted true})))
+                             {:quoted true}))
+  ;; Index on parent_uuid for faster lookups when parsing metadata
+  (jdbc/execute! ds [(str "CREATE INDEX IF NOT EXISTS \"idx_" metadata-table-name "_parent_uuid\" "
+                          "ON \"" metadata-table-name "\" (parent_uuid)")]))
 
 
 (def ^:private query-timeout-seconds
@@ -226,7 +239,12 @@
                                           :field-uuid uuid
                                           :field-name n
                                           :missing-parent-uuid parent-uuid}))
-                         acc)) ; Skip orphaned entry in lenient mode
+                         (do
+                           (log/warn "Orphaned field entry in metadata, skipping"
+                                     {:field-uuid uuid
+                                      :field-name n
+                                      :missing-parent-uuid parent-uuid})
+                           acc)))
               :enum (assoc-in acc [:enums uuid] n)
               :enum-value (if parent-row
                             (assoc-in acc [:enum-values uuid]
@@ -238,7 +256,12 @@
                                                :enum-value-uuid uuid
                                                :value-name n
                                                :missing-parent-uuid parent-uuid}))
-                              acc)) ; Skip orphaned entry in lenient mode
+                              (do
+                                (log/warn "Orphaned enum-value entry in metadata, skipping"
+                                          {:enum-value-uuid uuid
+                                           :value-name n
+                                           :missing-parent-uuid parent-uuid})
+                                acc)))
               acc)))
         {:entities {} :fields {} :enums {} :enum-values {}}
         rows))))
@@ -571,9 +594,22 @@
                              {:quoted true})))
 
 
+(defn- validate-pg-type!
+  "Validates that a PostgreSQL type string is safe to use in DDL.
+   Allows base types and quoted identifiers (for enums)."
+  [type-str context]
+  (let [valid-pg-types #{"UUID" "TEXT" "BIGINT" "BOOLEAN" "NUMERIC" "TIMESTAMPTZ" "JSONB" "BYTEA"}]
+    (when-not (or (contains? valid-pg-types type-str)
+                  ;; Quoted identifier pattern: \"snake_case_name\"
+                  (re-matches #"^\"[a-z][a-z0-9_]*\"$" type-str))
+      (throw (ex-info "Invalid PostgreSQL type specification"
+                      {:type type-str :context context})))))
+
+
 (defn- alter-column-type!
   "Changes column type (for safe widening)."
   [ds table-name col-name new-type-sql]
+  (validate-pg-type! new-type-sql {:table table-name :column col-name})
   ;; ALTER COLUMN with USING clause needs raw SQL for complex expressions
   (jdbc/execute! ds [(str "ALTER TABLE " (ident->sql table-name)
                           " ALTER COLUMN " (ident->sql col-name)
@@ -813,34 +849,39 @@
 
 (defn- get-cached-metadata
   "Gets metadata from cache or reads from database.
+   Thread-safe: uses locking to prevent concurrent database reads.
    Cache is invalidated on schema changes (initialize)."
-  [pool metadata-cache]
-  (if-let [cached @metadata-cache]
-    cached
-    (let [metadata (try
-                     (parse-metadata-lenient (read-metadata-rows pool))
-                     (catch SQLException e
-                       (when-not (table-not-found? e) (throw e))
-                       nil))]
-      (reset! metadata-cache metadata)
-      metadata)))
+  [pool metadata-cache lock]
+  (or @metadata-cache
+      (locking lock
+        ;; Double-check after acquiring lock
+        (or @metadata-cache
+            (let [metadata (try
+                             (parse-metadata-lenient (read-metadata-rows pool))
+                             (catch SQLException e
+                               (when-not (table-not-found? e) (throw e))
+                               nil))]
+              (reset! metadata-cache metadata)
+              metadata)))))
 
 
 (defrecord PostgresStorage
-  [pool metadata-cache]
+  [pool metadata-cache lock]
 
   sp/Storage
 
   (initialize
     [_this schema]
-    ;; Invalidate cache on schema changes
-    (reset! metadata-cache nil)
-    (do-initialize pool schema))
+    (locking lock
+      ;; Invalidate cache on schema changes
+      (reset! metadata-cache nil)
+      (do-initialize pool schema)))
 
 
   (close
     [_this]
-    (close-pool pool)
+    (locking lock
+      (close-pool pool))
     nil)
 
 
@@ -854,10 +895,8 @@
 
   (current-fields
     [_this entity-name]
-    (let [metadata (get-cached-metadata pool metadata-cache)
-          ;; Check if entity exists in metadata
-          entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
-      (when entity-exists?
+    (when-let [metadata (get-cached-metadata pool metadata-cache lock)]
+      (when (some #(= % entity-name) (vals (:entities metadata)))
         (let [entity-fields (->> (:fields metadata)
                                  (vals)
                                  (filter #(= (:entity %) entity-name)))]
@@ -881,7 +920,7 @@
 
   (schema-metadata
     [_this]
-    (get-cached-metadata pool metadata-cache)))
+    (get-cached-metadata pool metadata-cache lock)))
 
 
 (defn create-storage
@@ -897,4 +936,4 @@
    - :idle-timeout - idle connection timeout in ms (default 600000)
    - :max-lifetime - maximum connection lifetime in ms (default 1800000)"
   [opts]
-  (->PostgresStorage (create-pool opts) (atom nil)))
+  (->PostgresStorage (create-pool opts) (atom nil) (Object.)))

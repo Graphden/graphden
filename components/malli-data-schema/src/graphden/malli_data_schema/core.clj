@@ -304,9 +304,8 @@
                       :uuid
 
                       :enum
-                      (let [enum-def (get enums (:enum-name field-spec))]
-                        ;; :values is a map of value->uuid, use keys for enum schema
-                        (into [:enum] (keys (:values enum-def))))
+                      ;; enum existence validated by validate-refs during build
+                      (into [:enum] (keys (:values (get enums (:enum-name field-spec)))))
 
                       :union
                       (into [:or] (map #(make-variant-schema % enums)

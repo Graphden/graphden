@@ -2,17 +2,19 @@
  ;; https://github.com/clj-kondo/clj-kondo/blob/master/doc/config.md
 
  :linters
- {;; Enable all useful linters
-  :unused-binding {:level :warning}
-  :unused-import {:level :warning}
-  :unused-namespace {:level :warning}
-  :unused-private-var {:level :warning}
-  :unused-referred-var {:level :warning}
+ {;; Critical - these indicate real bugs or dead code
+  :unused-binding {:level :error}
+  :unused-import {:level :error}
+  :unused-namespace {:level :error}
+  :unused-private-var {:level :error}
+  :unused-referred-var {:level :error}
+  :shadowed-var {:level :error}
+  :inline-def {:level :error}
+
+  ;; Code quality
   :redundant-do {:level :warning}
   :redundant-let {:level :warning}
   :redundant-fn-wrapper {:level :warning}
-  :inline-def {:level :warning}
-  :shadowed-var {:level :warning}
   :single-key-in {:level :warning}
   :missing-else-branch {:level :warning}
   :unsorted-required-namespaces {:level :warning}
@@ -23,7 +25,7 @@
   :single-logical-operand {:level :warning}
   :reduce-without-init {:level :warning}
 
-  ;; Type hints
+  ;; Type hints - critical for correctness
   :unresolved-symbol {:level :error}
   :unresolved-namespace {:level :error}
   :unresolved-var {:level :error}

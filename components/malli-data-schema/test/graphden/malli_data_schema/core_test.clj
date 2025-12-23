@@ -1187,3 +1187,16 @@
       (is (= 1 (count (ds/entity-constraints schema :user))))
       (is (= 1 (count (ds/entity-constraints schema :document))))
       (is (= 1 (count (ds/entity-constraints schema :folder)))))))
+
+
+(deftest unknown-enum-reference-test
+  (testing "field referencing non-existent enum throws descriptive error"
+    ;; Exception thrown by validate-refs during build
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Unknown enum reference"
+          (-> (mds/create-builder)
+              (ds/add-entity :item (uuid)
+                             {:status {:uuid (uuid)
+                                       :type :enum
+                                       :enum-name :nonexistent-enum}})
+              ds/build)))))

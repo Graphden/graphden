@@ -43,11 +43,17 @@
 
 (defn with-postgres-container
   [f]
-  (let [container (PostgreSQLContainer. "postgres:16-alpine")]
+  (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
+                    (PostgreSQLContainer/.withStartupAttempts 3))]
     (PostgreSQLContainer/.start container)
+    (when-not (PostgreSQLContainer/.isRunning container)
+      (throw (ex-info "Failed to start PostgreSQL test container" {})))
     (try
       (binding [*container* container]
         (f))
+      (catch Exception e
+        (println "Test failed:" (Exception/.getMessage e))
+        (throw e))
       (finally
         (PostgreSQLContainer/.stop container)))))
 
@@ -1153,5 +1159,167 @@
           (is (some? metadata2))
           ;; After re-init, cache was cleared, so new object
           (is (not (identical? metadata1 metadata2)) "Cache should be invalidated on initialize"))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest concurrent-access-test
+  (testing "concurrent reads are thread-safe"
+    (let [storage (create-test-storage)
+          schema (make-schema)
+          errors (atom [])
+          num-threads 10
+          iterations 50]
+      (try
+        (sp/initialize storage schema)
+        ;; Launch multiple threads reading concurrently
+        (let [futures (doall
+                        (for [_ (range num-threads)]
+                          (future
+                            (try
+                              (dotimes [_ iterations]
+                                (sp/current-entities storage)
+                                (sp/current-fields storage :user)
+                                (sp/schema-metadata storage))
+                              (catch Exception e
+                                (swap! errors conj e))))))]
+          ;; Wait for all threads to complete
+          (doseq [f futures]
+            (deref f 5000 :timeout)))
+        ;; No errors should have occurred
+        (is (empty? @errors) (str "Errors during concurrent access: " @errors))
+        (finally
+          (sp/close storage)))))
+
+  (testing "concurrent initialize and read are thread-safe"
+    (let [storage (create-test-storage)
+          schema (make-schema)
+          errors (atom [])
+          num-readers 5
+          num-iterations 20]
+      (try
+        ;; First initialize
+        (sp/initialize storage schema)
+        ;; Start reader threads
+        (let [readers (doall
+                        (for [_ (range num-readers)]
+                          (future
+                            (try
+                              (dotimes [_ num-iterations]
+                                (sp/schema-metadata storage)
+                                (Thread/sleep 1))
+                              (catch Exception e
+                                (swap! errors conj e))))))
+              ;; Writer thread that re-initializes
+              writer (future
+                       (try
+                         (dotimes [_ 3]
+                           (sp/initialize storage schema)
+                           (Thread/sleep 5))
+                         (catch Exception e
+                           (swap! errors conj e))))]
+          ;; Wait for all
+          (deref writer 5000 :timeout)
+          (doseq [r readers]
+            (deref r 5000 :timeout)))
+        (is (empty? @errors) (str "Errors during concurrent read/write: " @errors))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Type widening with data tests ===
+
+(deftest type-widening-preserves-data-test
+  (testing "int→numeric widening preserves integer data"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (make-schema :entity-uuid entity-uuid
+                               :fields {:count {:uuid field-uuid :type :int}})
+          _ (sp/initialize storage schema1)
+          ;; Insert data with int type
+          pool (:pool storage)
+          _ (jdbc/execute! pool ["INSERT INTO \"user\" (id, count) VALUES (?, ?)"
+                                 #uuid "11111111-1111-1111-1111-111111111111" 42])
+          _ (jdbc/execute! pool ["INSERT INTO \"user\" (id, count) VALUES (?, ?)"
+                                 #uuid "22222222-2222-2222-2222-222222222222" -100])
+          ;; Widen type to numeric
+          schema2 (make-schema :entity-uuid entity-uuid
+                               :fields {:count {:uuid field-uuid :type :numeric}})
+          _ (sp/initialize storage schema2)
+          ;; Query data
+          rows (jdbc/execute! pool ["SELECT id, count FROM \"user\" ORDER BY count"])]
+      (try
+        (is (= 2 (count rows)))
+        (is (= -100M (:user/count (first rows))))
+        (is (= 42M (:user/count (second rows))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "numeric→text widening preserves decimal data"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (make-schema :entity-uuid entity-uuid
+                               :fields {:price {:uuid field-uuid :type :numeric}})
+          _ (sp/initialize storage schema1)
+          pool (:pool storage)
+          _ (jdbc/execute! pool ["INSERT INTO \"user\" (id, price) VALUES (?, ?)"
+                                 #uuid "11111111-1111-1111-1111-111111111111" 3.14159M])
+          ;; Widen to text
+          schema2 (make-schema :entity-uuid entity-uuid
+                               :fields {:price {:uuid field-uuid :type :text}})
+          _ (sp/initialize storage schema2)
+          rows (jdbc/execute! pool ["SELECT price FROM \"user\""])]
+      (try
+        (is (= 1 (count rows)))
+        (is (= "3.14159" (:user/price (first rows))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "int→text widening preserves data"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (make-schema :entity-uuid entity-uuid
+                               :fields {:code {:uuid field-uuid :type :int}})
+          _ (sp/initialize storage schema1)
+          pool (:pool storage)
+          _ (jdbc/execute! pool ["INSERT INTO \"user\" (id, code) VALUES (?, ?)"
+                                 #uuid "11111111-1111-1111-1111-111111111111" 12345])
+          ;; Widen to text
+          schema2 (make-schema :entity-uuid entity-uuid
+                               :fields {:code {:uuid field-uuid :type :text}})
+          _ (sp/initialize storage schema2)
+          rows (jdbc/execute! pool ["SELECT code FROM \"user\""])]
+      (try
+        (is (= "12345" (:user/code (first rows))))
+        (finally
+          (sp/close storage)))))
+
+  ;; Note: text→jsonb is NOT supported by PostgreSQL directly (requires explicit to_jsonb())
+  ;; so we don't test that conversion
+
+  (testing "NULL values survive type widening"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema1 (make-schema :entity-uuid entity-uuid
+                               :fields {:value {:uuid field-uuid :type :int :nullable? true}})
+          _ (sp/initialize storage schema1)
+          pool (:pool storage)
+          _ (jdbc/execute! pool ["INSERT INTO \"user\" (id, value) VALUES (?, ?)"
+                                 #uuid "11111111-1111-1111-1111-111111111111" nil])
+          _ (jdbc/execute! pool ["INSERT INTO \"user\" (id, value) VALUES (?, ?)"
+                                 #uuid "22222222-2222-2222-2222-222222222222" 42])
+          ;; Widen to text
+          schema2 (make-schema :entity-uuid entity-uuid
+                               :fields {:value {:uuid field-uuid :type :text :nullable? true}})
+          _ (sp/initialize storage schema2)
+          rows (jdbc/execute! pool ["SELECT id, value FROM \"user\" ORDER BY id"])]
+      (try
+        (is (= 2 (count rows)))
+        (is (nil? (:user/value (first rows))))
+        (is (= "42" (:user/value (second rows))))
         (finally
           (sp/close storage))))))

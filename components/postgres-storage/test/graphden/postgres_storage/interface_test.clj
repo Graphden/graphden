@@ -12,6 +12,9 @@
   (:import
     (java.sql
       SQLException)
+    (java.util.concurrent
+      CountDownLatch
+      TimeUnit)
     (org.testcontainers.containers
       PostgreSQLContainer)))
 
@@ -22,7 +25,8 @@
 
 
 (defn- clean-database!
-  "Drops all user-created objects in public schema."
+  "Drops all user-created objects in public schema.
+   Uses DROP SCHEMA CASCADE + CREATE SCHEMA for speed (single DDL vs N operations)."
   [container]
   (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
         username (PostgreSQLContainer/.getUsername container)
@@ -30,17 +34,10 @@
     (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
                                            :user username
                                            :password password})]
-      ;; Drop all tables
-      (let [tables (jdbc/execute! conn ["SELECT tablename FROM pg_tables WHERE schemaname = 'public'"])]
-        (doseq [{:pg_tables/keys [tablename]} tables]
-          (jdbc/execute! conn [(str "DROP TABLE IF EXISTS \"" tablename "\" CASCADE")])))
-      ;; Drop all enum types
-      (let [enums (jdbc/execute! conn
-                                 ["SELECT t.typname FROM pg_type t
-                                    JOIN pg_namespace n ON n.oid = t.typnamespace
-                                    WHERE n.nspname = 'public' AND t.typtype = 'e'"])]
-        (doseq [{:pg_type/keys [typname]} enums]
-          (jdbc/execute! conn [(str "DROP TYPE IF EXISTS \"" typname "\" CASCADE")]))))))
+      ;; Drop and recreate public schema - much faster than iterating tables/enums
+      (jdbc/execute! conn ["DROP SCHEMA public CASCADE"])
+      (jdbc/execute! conn ["CREATE SCHEMA public"])
+      (jdbc/execute! conn ["GRANT ALL ON SCHEMA public TO PUBLIC"]))))
 
 
 (defn with-postgres-container
@@ -71,7 +68,8 @@
 
 
 (defn- create-test-storage
-  "Creates a test storage with a clean database."
+  "Creates a test storage with a clean database.
+   Cleans DB to ensure isolation when multiple storages created in one test."
   []
   (clean-database! *container*)
   (pg/create-storage {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
@@ -1330,6 +1328,88 @@
             (validate-fn "\"has-dash\"" {}))))))
 
 
+(deftest kw->snake-case-test
+  (testing "converts kebab-case to snake_case"
+    (is (= "foo_bar" (util/kw->snake-case :foo-bar)))
+    (is (= "foo_bar_baz" (util/kw->snake-case :foo-bar-baz))))
+
+  (testing "handles already snake_case"
+    (is (= "foo_bar" (util/kw->snake-case :foo_bar))))
+
+  (testing "handles simple keywords"
+    (is (= "foo" (util/kw->snake-case :foo)))
+    (is (= "x" (util/kw->snake-case :x)))))
+
+
+(deftest check-snake-case-collisions-test
+  (testing "detects collision between kebab and snake case"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Snake_case naming collision"
+          (util/check-snake-case-collisions! {:context "test"} [:foo-bar :foo_bar]))))
+
+  (testing "allows non-colliding names"
+    (is (nil? (util/check-snake-case-collisions! {:context "test"} [:foo :bar :baz])))
+    (is (nil? (util/check-snake-case-collisions! {:context "test"} [:foo-bar :baz-qux]))))
+
+  (testing "empty and single-element collections pass"
+    (is (nil? (util/check-snake-case-collisions! {:context "test"} [])))
+    (is (nil? (util/check-snake-case-collisions! {:context "test"} [:foo])))))
+
+
+(deftest ident->sql-test
+  (testing "wraps identifier in double quotes"
+    (is (= "\"foo\"" (util/ident->sql :foo)))
+    (is (= "\"foo_bar\"" (util/ident->sql :foo-bar)))
+    (is (= "\"user\"" (util/ident->sql :user)))))
+
+
+(deftest field-type->pg-test
+  (testing "maps basic types"
+    (is (= "UUID" (util/field-type->pg {:type :uuid})))
+    (is (= "TEXT" (util/field-type->pg {:type :text})))
+    (is (= "BIGINT" (util/field-type->pg {:type :int})))
+    (is (= "BOOLEAN" (util/field-type->pg {:type :bool})))
+    (is (= "NUMERIC" (util/field-type->pg {:type :numeric})))
+    (is (= "TIMESTAMPTZ" (util/field-type->pg {:type :timestamptz})))
+    (is (= "JSONB" (util/field-type->pg {:type :jsonb})))
+    (is (= "BYTEA" (util/field-type->pg {:type :bytes}))))
+
+  (testing "maps ref to UUID"
+    (is (= "UUID" (util/field-type->pg {:type :ref :ref-entity :user}))))
+
+  (testing "maps union to JSONB"
+    (is (= "JSONB" (util/field-type->pg {:type :union :union-types [:foo :bar]}))))
+
+  (testing "maps enum to quoted identifier"
+    (is (= "\"status\"" (util/field-type->pg {:type :enum :enum-name :status})))
+    (is (= "\"user_role\"" (util/field-type->pg {:type :enum :enum-name :user-role}))))
+
+  (testing "falls back to TEXT for unknown types"
+    (is (= "TEXT" (util/field-type->pg {:type :unknown})))))
+
+
+(deftest enum-value-conversion-test
+  (testing "enum-value->sql converts to snake_case"
+    (is (= "active" (util/enum-value->sql :active)))
+    (is (= "in_progress" (util/enum-value->sql :in-progress))))
+
+  (testing "sql->enum-value converts back to kebab-case keyword"
+    (is (= :active (util/sql->enum-value "active")))
+    (is (= :in-progress (util/sql->enum-value "in_progress"))))
+
+  (testing "roundtrip conversion"
+    (let [original :in-progress
+          sql-val (util/enum-value->sql original)
+          back (util/sql->enum-value sql-val)]
+      (is (= original back))))
+
+  (testing "enum-value->sql rejects invalid values"
+    (is (thrown? clojure.lang.ExceptionInfo
+          (util/enum-value->sql :123-invalid)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (util/enum-value->sql :UPPERCASE)))))
+
+
 (deftest metadata-caching-test
   (testing "metadata is cached after first read"
     (let [storage (create-test-storage)
@@ -1396,32 +1476,40 @@
           schema (make-schema)
           errors (atom [])
           num-readers 5
-          num-iterations 20]
+          num-iterations 20
+          ;; Use CountDownLatch to start all threads simultaneously
+          start-latch (CountDownLatch. 1)
+          ;; Track completion
+          done-latch (CountDownLatch. (inc num-readers))]
       (try
         ;; First initialize
         (sp/initialize storage schema)
-        ;; Start reader threads
-        (let [readers (doall
-                        (for [_ (range num-readers)]
-                          (future
-                            (try
-                              (dotimes [_ num-iterations]
-                                (sp/schema-metadata storage)
-                                (Thread/sleep 1))
-                              (catch Exception e
-                                (swap! errors conj e))))))
-              ;; Writer thread that re-initializes
-              writer (future
-                       (try
-                         (dotimes [_ 3]
-                           (sp/initialize storage schema)
-                           (Thread/sleep 5))
-                         (catch Exception e
-                           (swap! errors conj e))))]
-          ;; Wait for all
-          (deref writer 5000 :timeout)
-          (doseq [r readers]
-            (deref r 5000 :timeout)))
+        ;; Start reader threads - wait for start signal
+        (doseq [_ (range num-readers)]
+          (future
+            (try
+              (CountDownLatch/.await start-latch)
+              (dotimes [_ num-iterations]
+                (sp/schema-metadata storage))
+              (catch Exception e
+                (swap! errors conj e))
+              (finally
+                (CountDownLatch/.countDown done-latch)))))
+        ;; Writer thread that re-initializes
+        (future
+          (try
+            (CountDownLatch/.await start-latch)
+            (dotimes [_ 3]
+              (sp/initialize storage schema))
+            (catch Exception e
+              (swap! errors conj e))
+            (finally
+              (CountDownLatch/.countDown done-latch))))
+        ;; Start all threads at once
+        (CountDownLatch/.countDown start-latch)
+        ;; Wait for all threads to complete (max 10 seconds)
+        (is (true? (CountDownLatch/.await done-latch 10 TimeUnit/SECONDS))
+            "Threads did not complete in time")
         (is (empty? @errors) (str "Errors during concurrent read/write: " @errors))
         (finally
           (sp/close storage))))))
@@ -1521,5 +1609,95 @@
         (is (= 2 (count rows)))
         (is (nil? (:user/value (first rows))))
         (is (= "42" (:user/value (second rows))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Concurrent migration tests ===
+
+(deftest concurrent-migration-test
+  (testing "concurrent initializations are handled safely"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema (make-schema :entity-uuid entity-uuid
+                              :fields {:name {:uuid field-uuid :type :text}})
+          results (atom [])
+          errors (atom [])
+          num-threads 5
+          start-latch (CountDownLatch. 1)
+          done-latch (CountDownLatch. num-threads)]
+      (try
+        ;; Create threads that wait for start signal
+        (doseq [_ (range num-threads)]
+          (future
+            (try
+              (CountDownLatch/.await start-latch)
+              (let [result (sp/initialize storage schema)]
+                (swap! results conj result))
+              (catch Exception e
+                (swap! errors conj e))
+              (finally
+                (CountDownLatch/.countDown done-latch)))))
+        ;; Start all threads simultaneously
+        (CountDownLatch/.countDown start-latch)
+        ;; Wait for all threads to complete (max 10 seconds)
+        (is (true? (CountDownLatch/.await done-latch 10 TimeUnit/SECONDS))
+            "Threads did not complete in time")
+
+        ;; All threads should complete without errors
+        (is (empty? @errors) (str "Got errors: " (map #(Exception/.getMessage %) @errors)))
+
+        ;; At least one thread should have created the table
+        (is (pos? (count @results)))
+
+        ;; Database state should be consistent
+        (is (= #{:user} (sp/current-entities storage)))
+        (is (= #{:name} (set (keys (sp/current-fields storage :user)))))
+
+        (finally
+          (sp/close storage)))))
+
+  (testing "concurrent migrations with schema changes"
+    (let [storage (create-test-storage)
+          entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field1-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          field2-uuid #uuid "00000000-0000-0000-0000-000000000003"
+          schema1 (make-schema :entity-uuid entity-uuid
+                               :fields {:name {:uuid field1-uuid :type :text}})
+          schema2 (make-schema :entity-uuid entity-uuid
+                               :fields {:name {:uuid field1-uuid :type :text}
+                                        :email {:uuid field2-uuid :type :text}})
+          _ (sp/initialize storage schema1)
+          results (atom [])
+          errors (atom [])
+          num-threads 3
+          start-latch (CountDownLatch. 1)
+          done-latch (CountDownLatch. num-threads)]
+      (try
+        ;; Create threads that wait for start signal
+        (doseq [_ (range num-threads)]
+          (future
+            (try
+              (CountDownLatch/.await start-latch)
+              (let [result (sp/initialize storage schema2)]
+                (swap! results conj result))
+              (catch Exception e
+                (swap! errors conj e))
+              (finally
+                (CountDownLatch/.countDown done-latch)))))
+        ;; Start all threads simultaneously
+        (CountDownLatch/.countDown start-latch)
+        ;; Wait for all threads to complete (max 10 seconds)
+        (is (true? (CountDownLatch/.await done-latch 10 TimeUnit/SECONDS))
+            "Threads did not complete in time")
+
+        ;; All threads should complete without errors
+        (is (empty? @errors) (str "Got errors: " (map #(Exception/.getMessage %) @errors)))
+
+        ;; Database state should reflect schema2
+        (is (= #{:user} (sp/current-entities storage)))
+        (is (= #{:name :email} (set (keys (sp/current-fields storage :user)))))
+
         (finally
           (sp/close storage))))))

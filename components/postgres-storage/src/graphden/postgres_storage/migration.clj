@@ -113,16 +113,21 @@
 ;; === Field migration ===
 
 (defn- process-existing-field!
-  "Processes an existing field during migration (rename or type widening)."
-  [ds entity-name field-name field-spec old-field-info renamed-fields]
+  "Processes an existing field during migration (rename or type widening).
+   Uses columns-cache to avoid redundant database queries."
+  [ds entity-name field-name field-spec old-field-info renamed-fields columns-cache]
   ;; Check for rename
   (when (not= (:field old-field-info) field-name)
     (ddl/rename-column! ds entity-name (:field old-field-info) field-name)
     (swap! renamed-fields conj {:entity entity-name
                                 :old-field (:field old-field-info)
                                 :new-field field-name}))
-  ;; Check for type widening
-  (let [old-fields (introspection/current-columns ds (util/kw->snake-case entity-name))
+  ;; Check for type widening - use cached columns
+  (let [table-name (util/kw->snake-case entity-name)
+        old-fields (or (get @columns-cache table-name)
+                       (let [cols (introspection/current-columns ds table-name)]
+                         (swap! columns-cache assoc table-name cols)
+                         cols))
         old-type (:type (get old-fields field-name))
         new-type (:type field-spec)]
     (when (and old-type
@@ -134,11 +139,11 @@
 
 (defn- process-single-field!
   "Processes a single field during migration."
-  [ds old-metadata entity-name field-name field-spec created-fields renamed-fields]
+  [ds old-metadata entity-name field-name field-spec created-fields renamed-fields columns-cache]
   (let [field-uuid (:uuid field-spec)
         old-field-info (get (:fields old-metadata) field-uuid)]
     (if old-field-info
-      (process-existing-field! ds entity-name field-name field-spec old-field-info renamed-fields)
+      (process-existing-field! ds entity-name field-name field-spec old-field-info renamed-fields columns-cache)
       ;; New field - add column and index if ref
       (do
         (ddl/add-column! ds entity-name field-name field-spec)
@@ -152,7 +157,7 @@
 (defn- process-existing-entity!
   "Processes an existing entity during migration."
   [ds schema old-metadata entity-name old-entity-name
-   renamed-entities created-fields renamed-fields]
+   renamed-entities created-fields renamed-fields columns-cache]
   ;; Check for rename
   (when (not= old-entity-name entity-name)
     (ddl/rename-table! ds old-entity-name entity-name)
@@ -160,18 +165,18 @@
   ;; Process fields
   (run! (fn [[field-name field-spec]]
           (process-single-field! ds old-metadata entity-name field-name field-spec
-                                 created-fields renamed-fields))
+                                 created-fields renamed-fields columns-cache))
         (ds/entity-fields schema entity-name)))
 
 
 (defn- process-single-entity!
   "Processes a single entity during migration (existing or new)."
-  [ds schema old-metadata entity-name created-entities renamed-entities created-fields renamed-fields]
+  [ds schema old-metadata entity-name created-entities renamed-entities created-fields renamed-fields columns-cache]
   (let [entity-uuid (ds/entity-uuid schema entity-name)
         old-entity-name (get (:entities old-metadata) entity-uuid)]
     (if old-entity-name
       (process-existing-entity! ds schema old-metadata entity-name old-entity-name
-                                renamed-entities created-fields renamed-fields)
+                                renamed-entities created-fields renamed-fields columns-cache)
       ;; New entity
       (do
         (ddl/create-table! ds entity-name (ds/entity-fields schema entity-name))
@@ -219,10 +224,11 @@
     (let [created-entities (atom [])
           renamed-entities (atom {})
           created-fields (atom [])
-          renamed-fields (atom [])]
+          renamed-fields (atom [])
+          columns-cache (atom {})]
       (run! #(process-single-entity! tx schema old-metadata %
                                      created-entities renamed-entities
-                                     created-fields renamed-fields)
+                                     created-fields renamed-fields columns-cache)
             (ds/entities schema))
 
       ;; Save metadata

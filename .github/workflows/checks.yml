@@ -91,3 +91,107 @@ jobs:
 
       - name: Run tests
         run: bb test
+
+  coverage:
+    name: coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+          bb: latest
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: deps-${{ hashFiles('deps.edn') }}
+          restore-keys: deps-
+
+      - name: Run coverage
+        run: |
+          bb coverage 2>&1 | tee coverage-output.txt
+          # Extract coverage percentage and check threshold
+          COVERAGE=$(grep "ALL FILES" coverage-output.txt | awk '{print $4}' | tr -d '%')
+          echo "Coverage: ${COVERAGE}%"
+          if [ -z "$COVERAGE" ]; then
+            echo "Could not parse coverage"
+            exit 1
+          fi
+          # Fail if coverage below 95%
+          if (( $(echo "$COVERAGE < 95" | bc -l) )); then
+            echo "Coverage ${COVERAGE}% is below 95% threshold"
+            exit 1
+          fi
+
+  security:
+    name: security scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+          bb: latest
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: deps-${{ hashFiles('deps.edn') }}
+          restore-keys: deps-
+
+      - name: Run security scan
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: |
+          # Create properties file with API key if provided
+          if [ -n "$NVD_API_KEY" ]; then
+            echo "nvd.api-key=$NVD_API_KEY" > cljwatson.properties
+          fi
+          bb security || echo "Security scan completed with warnings"
+
+  outdated:
+    name: outdated deps
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: 'temurin'
+          java-version: ${{ env.JAVA_VERSION }}
+
+      - uses: DeLaGuardo/setup-clojure@13.4
+        with:
+          cli: latest
+          bb: latest
+
+      - uses: actions/cache@v5
+        with:
+          path: |
+            ~/.m2/repository
+            ~/.gitlibs
+            ~/.deps.clj
+          key: deps-${{ hashFiles('deps.edn') }}
+          restore-keys: deps-
+
+      - name: Check outdated dependencies
+        run: bb outdated

@@ -37,10 +37,6 @@
   ;; Consistent naming
   :non-arg-vec-return-type-hint {:level :warning}}
 
- :lint-as
- {integrant.core/init-key clojure.core/defmethod
-  integrant.core/halt-key! clojure.core/defmethod}
-
  :output
  {:progress true
   :canonical-paths true}}

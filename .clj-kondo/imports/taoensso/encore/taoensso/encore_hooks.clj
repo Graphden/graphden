@@ -64,8 +64,8 @@
              binding-vec
              body))))}))
 
-(defn -def-impl
-  [{:keys [node]} core-macro-sym]
+(defn defonce
+  [{:keys [node]}]
   ;; args = [sym doc-string? attr-map? init-expr]
   (let [[sym & args] (rest (:children node))
         [doc-string args]    (if (and (hooks/string-node? (first args)) (next args)) [(hooks/sexpr (first args)) (next  args)] [nil        args])
@@ -73,16 +73,10 @@
 
         attr-map (if doc-string (assoc attr-map :doc doc-string) attr-map)
         sym+meta (if attr-map (with-meta sym attr-map) sym)
-
         rewritten
         (hooks/list-node
-          [(hooks/token-node core-macro-sym)
+          [(hooks/token-node 'clojure.core/defonce)
            sym+meta
            init-expr])]
 
-    #_(println "old node:" node)
-    #_(println "new node:" rewritten)
     {:node rewritten}))
-
-(defn def*    [arg] (-def-impl arg 'def))
-(defn defonce [arg] (-def-impl arg 'clojure.core/defonce))

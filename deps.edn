@@ -15,7 +15,7 @@
                           #:git{:tag "v6.0.1", :sha "b520351"}},
    :main-opts ["-m" "clj-watson.cli" "scan"]},
   :kondo
-  {:extra-deps #:clj-kondo{clj-kondo #:mvn{:version "2025.10.23"}},
+  {:extra-deps #:clj-kondo{clj-kondo #:mvn{:version "2025.12.23"}},
    :main-opts ["-m" "clj-kondo.main"]},
   :cljstyle
   {:extra-deps #:mvxcvi{cljstyle #:mvn{:version "0.17.642"}},

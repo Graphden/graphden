@@ -33,6 +33,21 @@
       (is (= :text (get-in fields [:name :type])))
       (is (= :enum (get-in fields [:returned-type :type])))))
 
+  (testing "arg-schema has expected fields including required"
+    (let [fields (ds/entity-fields schema :arg-schema)]
+      (is (= :ref (get-in fields [:fn-schema-id :type])))
+      (is (= :text (get-in fields [:name :type])))
+      (is (= :enum (get-in fields [:type :type])))
+      (is (= :bool (get-in fields [:required :type])))))
+
+  (testing "fn has expected fields including parent-fn-id"
+    (let [fields (ds/entity-fields schema :fn)]
+      (is (= :text (get-in fields [:name :type])))
+      (is (= :ref (get-in fields [:fn-schema-id :type])))
+      (is (= :ref (get-in fields [:parent-fn-id :type])))
+      (is (= :fn (get-in fields [:parent-fn-id :ref-entity])))
+      (is (true? (get-in fields [:parent-fn-id :nullable?])))))
+
   (testing "arg-value has union type for value"
     (let [fields (ds/entity-fields schema :arg-value)]
       (is (= :union (get-in fields [:value :type])))
@@ -66,4 +81,34 @@
                                   {:id (random-uuid)
                                    :owner-fn-id (random-uuid)
                                    :arg-schema-id (random-uuid)
-                                   :value (random-uuid)})))))
+                                   :value (random-uuid)}))))
+
+  (testing "valid fn without parent"
+    (is (nil? (ds/validate-entity schema :fn
+                                  {:id (random-uuid)
+                                   :name "my-fn"
+                                   :fn-schema-id (random-uuid)
+                                   :parent-fn-id nil}))))
+
+  (testing "valid fn with parent"
+    (is (nil? (ds/validate-entity schema :fn
+                                  {:id (random-uuid)
+                                   :name "child-fn"
+                                   :fn-schema-id (random-uuid)
+                                   :parent-fn-id (random-uuid)}))))
+
+  (testing "valid arg-schema with required true"
+    (is (nil? (ds/validate-entity schema :arg-schema
+                                  {:id (random-uuid)
+                                   :fn-schema-id (random-uuid)
+                                   :name "x"
+                                   :type :int
+                                   :required true}))))
+
+  (testing "valid arg-schema with required false"
+    (is (nil? (ds/validate-entity schema :arg-schema
+                                  {:id (random-uuid)
+                                   :fn-schema-id (random-uuid)
+                                   :name "optional-arg"
+                                   :type :text
+                                   :required false})))))

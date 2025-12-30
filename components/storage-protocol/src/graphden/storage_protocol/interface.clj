@@ -101,6 +101,137 @@
      Returns nil if storage has not been initialized yet."))
 
 
+(defprotocol StorageCRUD
+  "Protocol for CRUD operations on stored entities.
+   All operations work with entity data as maps.
+   The :id field is always a UUID and is the primary key."
+
+  (create-entity
+    [this entity-name data]
+    "Creates a new entity record.
+     If :id is not provided, a random UUID is generated.
+
+     Arguments:
+     - entity-name: keyword name of the entity (e.g., :fn-schema, :fn)
+     - data: map of field values (without :id, or with :id to use specific UUID)
+
+     Returns the created record with :id.
+     Throws ExceptionInfo if validation fails or constraints are violated.")
+
+  (read-entity
+    [this entity-name id]
+    "Reads an entity record by ID.
+
+     Arguments:
+     - entity-name: keyword name of the entity
+     - id: UUID of the record
+
+     Returns the record as a map, or nil if not found.")
+
+  (update-entity
+    [this entity-name id data]
+    "Updates an existing entity record.
+
+     Arguments:
+     - entity-name: keyword name of the entity
+     - id: UUID of the record to update
+     - data: map of fields to update (partial update supported)
+
+     Returns the updated record.
+     Throws ExceptionInfo if record not found or constraints are violated.")
+
+  (delete-entity
+    [this entity-name id]
+    "Deletes an entity record by ID.
+
+     Arguments:
+     - entity-name: keyword name of the entity
+     - id: UUID of the record to delete
+
+     Returns true if deleted, false if not found.
+     Throws ExceptionInfo if referential integrity would be violated.")
+
+  (query-entities
+    [this entity-name where]
+    "Queries entities matching the given criteria.
+
+     Arguments:
+     - entity-name: keyword name of the entity
+     - where: map of field->value for exact match, or nil for all records
+
+     Returns a sequence of matching records (may be empty).
+     Example: (query-entities storage :fn {:fn-schema-id some-uuid})"))
+
+
+(defprotocol GraphConstraints
+  "Constraints for graph integrity in the function composition graph.
+   Each storage MUST implement this protocol.
+   Violation of any constraint throws ExceptionInfo.
+
+   These methods are called during CRUD operations to validate
+   data integrity before persisting changes."
+
+  (validate-parent-same-schema!
+    [this fn-id parent-fn-id]
+    "Validates that parent-fn has the same fn-schema-id as fn.
+     Called when creating/updating fn with parent-fn-id.
+
+     Arguments:
+     - fn-id: UUID of the fn being created/updated
+     - parent-fn-id: UUID of the proposed parent fn
+
+     Throws ExceptionInfo with :type :constraint-violation/parent-schema-mismatch
+     if parent has a different fn-schema-id.")
+
+  (validate-no-arg-override!
+    [this fn-id arg-schema-id]
+    "Validates that arg-schema-id is not already defined in the parent chain.
+     Called when creating arg-value.
+
+     Arguments:
+     - fn-id: UUID of the fn that owns this arg-value
+     - arg-schema-id: UUID of the arg-schema being set
+
+     Throws ExceptionInfo with :type :constraint-violation/arg-already-defined
+     if any ancestor fn already has an arg-value for this arg-schema-id.")
+
+  (validate-arg-schema-belongs-to-fn!
+    [this fn-id arg-schema-id]
+    "Validates that arg-schema belongs to the fn-schema of this fn.
+     Called when creating arg-value.
+
+     Arguments:
+     - fn-id: UUID of the fn that owns this arg-value
+     - arg-schema-id: UUID of the arg-schema
+
+     Throws ExceptionInfo with :type :constraint-violation/arg-schema-mismatch
+     if arg-schema's fn-schema-id differs from fn's fn-schema-id.")
+
+  (validate-no-inheritance-cycle!
+    [this fn-id parent-fn-id]
+    "Validates that setting parent-fn-id does not create an inheritance cycle.
+     Called when creating/updating fn with parent-fn-id.
+
+     Arguments:
+     - fn-id: UUID of the fn being created/updated
+     - parent-fn-id: UUID of the proposed parent fn
+
+     Throws ExceptionInfo with :type :constraint-violation/inheritance-cycle
+     if setting this parent would create a cycle (parent chain leads back to fn-id).")
+
+  (validate-no-dependency-cycle!
+    [this owner-fn-id value-fn-id]
+    "Validates that referencing value-fn does not create a dependency cycle.
+     Called when creating arg-value with value = ref<fn>.
+
+     Arguments:
+     - owner-fn-id: UUID of the fn that owns this arg-value
+     - value-fn-id: UUID of the fn being referenced as value
+
+     Throws ExceptionInfo with :type :constraint-violation/dependency-cycle
+     if this reference would create a cycle (value-fn depends on owner-fn)."))
+
+
 ;; === Type compatibility ===
 
 (def type-widening

@@ -7,9 +7,13 @@
    - metadata.clj - Metadata table operations
    - introspection.clj - Database introspection
    - ddl.clj - DDL operations (CREATE/ALTER)
-   - migration.clj - Schema migration logic"
+   - migration.clj - Schema migration logic
+   - crud.clj - CRUD operations
+   - constraints.clj - Graph constraints validation"
   (:require
     [clojure.string :as str]
+    [graphden.postgres-storage.constraints :as constraints]
+    [graphden.postgres-storage.crud :as crud]
     [graphden.postgres-storage.introspection :as introspection]
     [graphden.postgres-storage.metadata :as metadata]
     [graphden.postgres-storage.migration :as migration]
@@ -153,7 +157,61 @@
 
   (schema-metadata
     [_this]
-    (get-cached-metadata pool metadata-cache lock)))
+    (get-cached-metadata pool metadata-cache lock))
+
+
+  sp/StorageCRUD
+
+  (create-entity
+    [_this entity-name data]
+    (crud/create-entity pool entity-name data))
+
+
+  (read-entity
+    [_this entity-name id]
+    (crud/read-entity pool entity-name id))
+
+
+  (update-entity
+    [_this entity-name id data]
+    (crud/update-entity pool entity-name id data))
+
+
+  (delete-entity
+    [_this entity-name id]
+    (crud/delete-entity pool entity-name id))
+
+
+  (query-entities
+    [_this entity-name where]
+    (crud/query-entities pool entity-name where))
+
+
+  sp/GraphConstraints
+
+  (validate-parent-same-schema!
+    [_this fn-id parent-fn-id]
+    (constraints/validate-parent-same-schema! pool fn-id parent-fn-id))
+
+
+  (validate-no-arg-override!
+    [_this fn-id arg-schema-id]
+    (constraints/validate-no-arg-override! pool fn-id arg-schema-id))
+
+
+  (validate-arg-schema-belongs-to-fn!
+    [_this fn-id arg-schema-id]
+    (constraints/validate-arg-schema-belongs-to-fn! pool fn-id arg-schema-id))
+
+
+  (validate-no-inheritance-cycle!
+    [_this fn-id parent-fn-id]
+    (constraints/validate-no-inheritance-cycle! pool fn-id parent-fn-id))
+
+
+  (validate-no-dependency-cycle!
+    [_this owner-fn-id value-fn-id]
+    (constraints/validate-no-dependency-cycle! pool owner-fn-id value-fn-id)))
 
 
 (defn create-storage

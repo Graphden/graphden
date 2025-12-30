@@ -681,3 +681,184 @@
         (is (true? (:nullable? (get (sp/current-fields storage :record) :required1))))
         (is (true? (:nullable? (get (sp/current-fields storage :record) :required2))))
         (is (true? (:nullable? (get (sp/current-fields storage :record) :optional))))))))
+
+
+;; === CRUD tests ===
+
+(deftest crud-basic-test
+  (testing "create-entity creates record with generated id"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [record (sp/create-entity storage :user {:name "Alice"})]
+        (is (uuid? (:id record)))
+        (is (= "Alice" (:name record))))))
+
+  (testing "create-entity uses provided id"
+    (let [storage (mem/create-storage)
+          schema (make-schema)
+          id (random-uuid)]
+      (sp/initialize storage schema)
+      (let [record (sp/create-entity storage :user {:id id :name "Bob"})]
+        (is (= id (:id record)))
+        (is (= "Bob" (:name record))))))
+
+  (testing "read-entity returns record by id"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [created (sp/create-entity storage :user {:name "Charlie"})
+            read-result (sp/read-entity storage :user (:id created))]
+        (is (= created read-result)))))
+
+  (testing "read-entity returns nil for unknown id"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (is (nil? (sp/read-entity storage :user (random-uuid))))))
+
+  (testing "update-entity updates record"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [created (sp/create-entity storage :user {:name "Dave"})
+            updated (sp/update-entity storage :user (:id created) {:name "David"})]
+        (is (= "David" (:name updated)))
+        (is (= (:id created) (:id updated))))))
+
+  (testing "update-entity throws for unknown id"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Entity not found"
+            (sp/update-entity storage :user (random-uuid) {:name "Nobody"})))))
+
+  (testing "delete-entity removes record"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [created (sp/create-entity storage :user {:name "Eve"})]
+        (is (true? (sp/delete-entity storage :user (:id created))))
+        (is (nil? (sp/read-entity storage :user (:id created)))))))
+
+  (testing "delete-entity returns false for unknown id"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (is (false? (sp/delete-entity storage :user (random-uuid)))))))
+
+
+(deftest query-entities-test
+  (testing "query-entities returns all records when where is empty"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:name "Alice"})
+      (sp/create-entity storage :user {:name "Bob"})
+      (let [results (sp/query-entities storage :user {})]
+        (is (= 2 (count results)))
+        (is (= #{"Alice" "Bob"} (set (map :name results)))))))
+
+  (testing "query-entities filters by field"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:name "Alice"})
+      (sp/create-entity storage :user {:name "Bob"})
+      (let [results (sp/query-entities storage :user {:name "Alice"})]
+        (is (= 1 (count results)))
+        (is (= "Alice" (:name (first results)))))))
+
+  (testing "query-entities returns empty seq when no match"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:name "Alice"})
+      (let [results (sp/query-entities storage :user {:name "Nobody"})]
+        (is (empty? results))))))
+
+
+;; === GraphConstraints tests ===
+
+(deftest validate-parent-same-schema-test
+  (testing "passes when parent has same fn-schema-id"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :fn-schema #uuid "10000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002" :type :text}})
+                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
+                                                 :fn-schema-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
+                                                                :type :ref :ref-entity :fn-schema}
+                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
+                                                                :type :ref :ref-entity :fn :nullable? true}})
+                                 ds/build))
+      (let [schema-id (random-uuid)
+            parent (sp/create-entity storage :fn {:name "parent" :fn-schema-id schema-id :parent-fn-id nil})
+            child (sp/create-entity storage :fn {:name "child" :fn-schema-id schema-id :parent-fn-id (:id parent)})]
+        ;; Should not throw
+        (sp/validate-parent-same-schema! storage (:id child) (:id parent)))))
+
+  (testing "throws when parent has different fn-schema-id"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :fn-schema #uuid "10000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002" :type :text}})
+                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
+                                                 :fn-schema-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
+                                                                :type :ref :ref-entity :fn-schema}
+                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
+                                                                :type :ref :ref-entity :fn :nullable? true}})
+                                 ds/build))
+      (let [schema1-id (random-uuid)
+            schema2-id (random-uuid)
+            parent (sp/create-entity storage :fn {:name "parent" :fn-schema-id schema1-id :parent-fn-id nil})
+            child (sp/create-entity storage :fn {:name "child" :fn-schema-id schema2-id :parent-fn-id (:id parent)})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"different fn-schema-id"
+              (sp/validate-parent-same-schema! storage (:id child) (:id parent))))))))
+
+
+(deftest validate-no-inheritance-cycle-test
+  (testing "passes when no cycle"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
+                                                 :fn-schema-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
+                                                                :type :ref :ref-entity :fn :nullable? true}
+                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
+                                                                :type :ref :ref-entity :fn :nullable? true}})
+                                 ds/build))
+      (let [a (sp/create-entity storage :fn {:name "a" :parent-fn-id nil})
+            b (sp/create-entity storage :fn {:name "b" :parent-fn-id (:id a)})]
+        ;; c -> b -> a: no cycle
+        (sp/validate-no-inheritance-cycle! storage (random-uuid) (:id b)))))
+
+  (testing "throws when self-reference"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
+                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
+                                                                :type :ref :ref-entity :fn :nullable? true}})
+                                 ds/build))
+      (let [a (sp/create-entity storage :fn {:name "a" :parent-fn-id nil})]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Cannot set self as parent"
+              (sp/validate-no-inheritance-cycle! storage (:id a) (:id a)))))))
+
+  (testing "throws when cycle detected"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
+                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
+                                                                :type :ref :ref-entity :fn :nullable? true}})
+                                 ds/build))
+      (let [a (sp/create-entity storage :fn {:name "a" :parent-fn-id nil})
+            _ (sp/update-entity storage :fn (:id a) {:parent-fn-id nil})
+            b (sp/create-entity storage :fn {:name "b" :parent-fn-id (:id a)})
+            c (sp/create-entity storage :fn {:name "c" :parent-fn-id (:id b)})]
+        ;; Try to make a -> c, which would create c -> b -> a -> c cycle
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"inheritance cycle"
+              (sp/validate-no-inheritance-cycle! storage (:id a) (:id c))))))))

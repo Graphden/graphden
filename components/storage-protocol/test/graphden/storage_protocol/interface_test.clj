@@ -242,4 +242,20 @@
     (is (contains? (:sigs storage/StorageIntrospection) :current-fields))
     (is (contains? (:sigs storage/StorageIntrospection) :current-enums))
     (is (contains? (:sigs storage/StorageIntrospection) :current-enum-values))
-    (is (contains? (:sigs storage/StorageIntrospection) :schema-metadata))))
+    (is (contains? (:sigs storage/StorageIntrospection) :schema-metadata)))
+
+  (testing "StorageCRUD protocol is defined"
+    (is (some? storage/StorageCRUD))
+    (is (contains? (:sigs storage/StorageCRUD) :create-entity))
+    (is (contains? (:sigs storage/StorageCRUD) :read-entity))
+    (is (contains? (:sigs storage/StorageCRUD) :update-entity))
+    (is (contains? (:sigs storage/StorageCRUD) :delete-entity))
+    (is (contains? (:sigs storage/StorageCRUD) :query-entities)))
+
+  (testing "GraphConstraints protocol is defined"
+    (is (some? storage/GraphConstraints))
+    (is (contains? (:sigs storage/GraphConstraints) :validate-parent-same-schema!))
+    (is (contains? (:sigs storage/GraphConstraints) :validate-no-arg-override!))
+    (is (contains? (:sigs storage/GraphConstraints) :validate-arg-schema-belongs-to-fn!))
+    (is (contains? (:sigs storage/GraphConstraints) :validate-no-inheritance-cycle!))
+    (is (contains? (:sigs storage/GraphConstraints) :validate-no-dependency-cycle!))))

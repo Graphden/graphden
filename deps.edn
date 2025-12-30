@@ -2,7 +2,7 @@
  :deps #:org.clojure{clojure #:mvn{:version "1.12.4"}},
  :aliases
  {:poly
-  {:extra-deps #:polylith{clj-poly #:mvn{:version "0.3.31"}},
+  {:extra-deps #:polylith{clj-poly #:mvn{:version "0.3.32"}},
    :main-opts ["-m" "polylith.clj.core.poly-cli.core"]},
   :outdated
   {:extra-deps #:com.github.liquidz{antq #:mvn{:version "2.11.1276"}},
@@ -25,7 +25,7 @@
    :main-opts ["-m" "cloverage.coverage"]},
   :nrepl
   {:extra-deps
-   {nrepl/nrepl #:mvn{:version "1.5.1"},
+   {nrepl/nrepl #:mvn{:version "1.5.2"},
     cider/cider-nrepl #:mvn{:version "0.58.0"},
     refactor-nrepl/refactor-nrepl #:mvn{:version "3.11.0"}},
    :main-opts
@@ -67,7 +67,7 @@
     com.datomic/local #:mvn{:version "1.0.291"}
     metosin/malli #:mvn{:version "0.20.0"}
     cheshire/cheshire #:mvn{:version "6.1.0"}
-    org.clojure/tools.logging #:mvn{:version "1.3.0"}}},
+    org.clojure/tools.logging #:mvn{:version "1.3.1"}}},
   :test
   {:extra-paths
    ["development/resources"
@@ -107,7 +107,7 @@
     com.datomic/local #:mvn{:version "1.0.291"},
     metosin/malli #:mvn{:version "0.20.0"},
     cheshire/cheshire #:mvn{:version "6.1.0"}
-    org.clojure/tools.logging #:mvn{:version "1.3.0"}}},
+    org.clojure/tools.logging #:mvn{:version "1.3.1"}}},
   :dev
   {:extra-paths
    ["development/src"
@@ -146,4 +146,4 @@
     org.testcontainers/postgresql #:mvn{:version "1.21.4"},
     com.datomic/local #:mvn{:version "1.0.291"},
     cheshire/cheshire #:mvn{:version "6.1.0"}
-    org.clojure/tools.logging #:mvn{:version "1.3.0"}}}}}
+    org.clojure/tools.logging #:mvn{:version "1.3.1"}}}}}

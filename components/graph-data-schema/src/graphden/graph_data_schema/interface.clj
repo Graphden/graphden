@@ -74,6 +74,10 @@
   #uuid "be65f37b-4758-49da-9091-37dee0e28ad1")
 
 
+(def ^:private arg-schema-required-field-uuid
+  #uuid "a1d4e8c2-5f67-4b3a-9c12-8e0f7d6b5a4c")
+
+
 ;; Field UUIDs for :fn entity
 (def ^:private fn-name-field-uuid
   #uuid "af336498-6d1e-4879-b2a5-b0d6c1994d12")
@@ -81,6 +85,10 @@
 
 (def ^:private fn-fn-schema-id-field-uuid
   #uuid "3a685253-07f7-4469-be8b-1a585ba3e7d4")
+
+
+(def ^:private fn-parent-fn-id-field-uuid
+  #uuid "7c8e2f4a-9b31-4d56-a8e7-3f2c1b5d9a0e")
 
 
 ;; Field UUIDs for :arg-value entity
@@ -129,19 +137,25 @@
       (ds/add-constraint :fn-schema {:type :unique :fields [:name]})
 
       ;; arg_schema: defines function arguments
+      ;; required defaults to true in business logic (not enforced at schema level)
       (ds/add-entity :arg-schema arg-schema-entity-uuid
                      {:fn-schema-id {:uuid arg-schema-fn-schema-id-field-uuid
                                      :type :ref :ref-entity :fn-schema}
                       :name {:uuid arg-schema-name-field-uuid :type :text}
                       :type {:uuid arg-schema-type-field-uuid
-                             :type :enum :enum-name :value-kind}})
+                             :type :enum :enum-name :value-kind}
+                      :required {:uuid arg-schema-required-field-uuid :type :bool}})
       (ds/add-constraint :arg-schema {:type :unique :fields [:fn-schema-id :name]})
 
       ;; fn: actual function instances
+      ;; parent-fn-id enables inheritance chain for partial application
       (ds/add-entity :fn fn-entity-uuid
                      {:name {:uuid fn-name-field-uuid :type :text}
                       :fn-schema-id {:uuid fn-fn-schema-id-field-uuid
-                                     :type :ref :ref-entity :fn-schema}})
+                                     :type :ref :ref-entity :fn-schema}
+                      :parent-fn-id {:uuid fn-parent-fn-id-field-uuid
+                                     :type :ref :ref-entity :fn
+                                     :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
       ;; arg_value: argument values for function instances

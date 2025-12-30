@@ -123,6 +123,103 @@
                entity-uuid->new-name)))
 
 
+;; === CRUD helpers ===
+
+(defn- get-entity-data
+  "Gets all records for an entity from state."
+  [state entity-name]
+  (get-in state [:data entity-name] {}))
+
+
+(defn- get-record
+  "Gets a single record by id."
+  [state entity-name id]
+  (get-in state [:data entity-name id]))
+
+
+(defn- put-record!
+  "Puts a record into state atom. Returns the record."
+  [state-atom entity-name record]
+  (let [id (:id record)]
+    (swap! state-atom assoc-in [:data entity-name id] record)
+    record))
+
+
+(defn- remove-record!
+  "Removes a record from state atom. Returns true if existed."
+  [state-atom entity-name id]
+  (let [existed? (some? (get-in @state-atom [:data entity-name id]))]
+    (swap! state-atom update-in [:data entity-name] dissoc id)
+    existed?))
+
+
+;; === GraphConstraints helpers ===
+
+(defn- get-fn-schema-id
+  "Gets fn-schema-id for a fn record."
+  [state fn-id]
+  (:fn-schema-id (get-record state :fn fn-id)))
+
+
+(defn- get-parent-fn-id
+  "Gets parent-fn-id for a fn record."
+  [state fn-id]
+  (:parent-fn-id (get-record state :fn fn-id)))
+
+
+(defn- get-arg-schema-fn-schema-id
+  "Gets fn-schema-id for an arg-schema record."
+  [state arg-schema-id]
+  (:fn-schema-id (get-record state :arg-schema arg-schema-id)))
+
+
+(defn- collect-parent-chain
+  "Collects all ancestor fn-ids by following parent-fn-id links.
+   Returns a set of fn-ids (not including the starting fn-id)."
+  [state fn-id]
+  (loop [current-id (get-parent-fn-id state fn-id)
+         ancestor-ids #{}]
+    (if (or (nil? current-id) (contains? ancestor-ids current-id))
+      ancestor-ids
+      (recur (get-parent-fn-id state current-id)
+             (conj ancestor-ids current-id)))))
+
+
+(defn- collect-arg-schema-ids-in-chain
+  "Collects all arg-schema-ids defined in the parent chain (not including fn-id itself)."
+  [state fn-id]
+  (let [ancestor-ids (collect-parent-chain state fn-id)]
+    (->> (get-entity-data state :arg-value)
+         (vals)
+         (filter #(contains? ancestor-ids (:owner-fn-id %)))
+         (map :arg-schema-id)
+         (set))))
+
+
+(defn- collect-dependency-chain
+  "Collects all fn-ids that owner-fn depends on through arg-values.
+   DFS traversal of value refs."
+  [state owner-fn-id]
+  (loop [to-visit [owner-fn-id]
+         visited #{}]
+    (if (empty? to-visit)
+      visited
+      (let [current-id (first to-visit)
+            rest-to-visit (rest to-visit)]
+        (if (contains? visited current-id)
+          (recur rest-to-visit visited)
+          (let [arg-values (filter #(= (:owner-fn-id %) current-id)
+                                   (vals (get-entity-data state :arg-value)))
+                ;; Get fn references from arg-values (UUIDs that are fn refs)
+                ref-fn-ids (->> arg-values
+                                (map :value)
+                                (filter uuid?)
+                                ;; Check if this UUID is actually a fn
+                                (filter #(some? (get-record state :fn %))))]
+            (recur (concat rest-to-visit ref-fn-ids)
+                   (conj visited current-id))))))))
+
+
 (defn- do-initialize
   "Performs initialization, returns [new-state changes]."
   [state schema]
@@ -212,7 +309,126 @@
 
   (schema-metadata
     [_this]
-    (:metadata @state)))
+    (:metadata @state))
+
+
+  sp/StorageCRUD
+
+  (create-entity
+    [_this entity-name data]
+    (let [id (or (:id data) (random-uuid))
+          record (assoc data :id id)]
+      (put-record! state entity-name record)))
+
+
+  (read-entity
+    [_this entity-name id]
+    (get-record @state entity-name id))
+
+
+  (update-entity
+    [_this entity-name id data]
+    (let [existing (get-record @state entity-name id)]
+      (when-not existing
+        (throw (ex-info "Entity not found"
+                        {:type :not-found
+                         :entity entity-name
+                         :id id})))
+      (let [updated (merge existing data {:id id})]
+        (put-record! state entity-name updated))))
+
+
+  (delete-entity
+    [_this entity-name id]
+    (remove-record! state entity-name id))
+
+
+  (query-entities
+    [_this entity-name where]
+    (let [all-records (vals (get-entity-data @state entity-name))]
+      (if (empty? where)
+        all-records
+        (filter (fn [record]
+                  (every? (fn [[k v]] (= (get record k) v)) where))
+                all-records))))
+
+
+  sp/GraphConstraints
+
+  (validate-parent-same-schema!
+    [_this fn-id parent-fn-id]
+    (when parent-fn-id
+      (let [s @state
+            fn-record (get-record s :fn fn-id)
+            parent-record (get-record s :fn parent-fn-id)
+            fn-schema-id (:fn-schema-id fn-record)
+            parent-schema-id (:fn-schema-id parent-record)]
+        (when (and fn-schema-id parent-schema-id
+                   (not= fn-schema-id parent-schema-id))
+          (throw (ex-info "Parent fn has different fn-schema-id"
+                          {:type :constraint-violation/parent-schema-mismatch
+                           :fn-id fn-id
+                           :parent-fn-id parent-fn-id
+                           :fn-schema-id fn-schema-id
+                           :parent-schema-id parent-schema-id}))))))
+
+
+  (validate-no-arg-override!
+    [_this fn-id arg-schema-id]
+    (let [s @state
+          parent-arg-schema-ids (collect-arg-schema-ids-in-chain s fn-id)]
+      (when (contains? parent-arg-schema-ids arg-schema-id)
+        (throw (ex-info "Argument already defined in parent chain"
+                        {:type :constraint-violation/arg-already-defined
+                         :fn-id fn-id
+                         :arg-schema-id arg-schema-id})))))
+
+
+  (validate-arg-schema-belongs-to-fn!
+    [_this fn-id arg-schema-id]
+    (let [s @state
+          fn-schema-id (get-fn-schema-id s fn-id)
+          arg-fn-schema-id (get-arg-schema-fn-schema-id s arg-schema-id)]
+      (when (and fn-schema-id arg-fn-schema-id
+                 (not= fn-schema-id arg-fn-schema-id))
+        (throw (ex-info "Arg-schema does not belong to fn's schema"
+                        {:type :constraint-violation/arg-schema-mismatch
+                         :fn-id fn-id
+                         :arg-schema-id arg-schema-id
+                         :fn-schema-id fn-schema-id
+                         :arg-fn-schema-id arg-fn-schema-id})))))
+
+
+  (validate-no-inheritance-cycle!
+    [_this fn-id parent-fn-id]
+    (when parent-fn-id
+      (let [s @state]
+        ;; Check if fn-id would appear in the parent chain of parent-fn-id
+        (when (= fn-id parent-fn-id)
+          (throw (ex-info "Cannot set self as parent"
+                          {:type :constraint-violation/inheritance-cycle
+                           :fn-id fn-id
+                           :parent-fn-id parent-fn-id})))
+        (let [parent-ancestors (collect-parent-chain s parent-fn-id)]
+          (when (contains? parent-ancestors fn-id)
+            (throw (ex-info "Setting parent would create inheritance cycle"
+                            {:type :constraint-violation/inheritance-cycle
+                             :fn-id fn-id
+                             :parent-fn-id parent-fn-id
+                             :cycle-through (conj parent-ancestors parent-fn-id)})))))))
+
+
+  (validate-no-dependency-cycle!
+    [_this owner-fn-id value-fn-id]
+    (when value-fn-id
+      (let [s @state
+            ;; Check if owner-fn-id is in the dependency chain of value-fn-id
+            value-deps (collect-dependency-chain s value-fn-id)]
+        (when (contains? value-deps owner-fn-id)
+          (throw (ex-info "Reference would create dependency cycle"
+                          {:type :constraint-violation/dependency-cycle
+                           :owner-fn-id owner-fn-id
+                           :value-fn-id value-fn-id})))))))
 
 
 (defn create-storage

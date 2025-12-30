@@ -814,10 +814,17 @@
                                   [?e :arg-value/owner-fn-id ?owner-id]
                                   [?e :arg-value/value ?value]]
                                 db current-id)
+                ;; Parse value to UUID (handles both UUID and string UUID)
+                parse-to-uuid (fn [v]
+                                (cond
+                                  (uuid? v) v
+                                  (string? v) (try (parse-uuid v) (catch Exception _ nil))
+                                  :else nil))
                 ;; Get fn references from arg-values (UUIDs that are fn refs)
                 ref-fn-ids (->> arg-values
                                 (map first)
-                                (filter uuid?)
+                                (map parse-to-uuid)
+                                (filter some?)
                                 ;; Check if this UUID is actually a fn
                                 (filter (fn [fn-id]
                                           (seq (d/q '[:find ?e

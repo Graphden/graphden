@@ -982,4 +982,35 @@
       (try
         (is (nil? (sp/validate-no-dependency-cycle! storage owner-fn-id nil)))
         (finally
+          (sp/close storage)))))
+
+  (testing "throws when dependency cycle detected"
+    (let [storage (create-test-storage)
+          schema (make-graph-schema)
+          _ (sp/initialize storage schema)
+          fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+          fn-a-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+          fn-b-id #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
+          fn-c-id #uuid "dddddddd-dddd-dddd-dddd-dddddddddddd"
+          arg-schema-id #uuid "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+          _ (sp/create-entity storage :fn-schema {:id fn-schema-id :name "test" :returned-type "int"})
+          _ (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id fn-schema-id
+                                                   :name "x" :type "int" :required true})
+          _ (sp/create-entity storage :fn {:id fn-a-id :name "fn-a" :fn-schema-id fn-schema-id})
+          _ (sp/create-entity storage :fn {:id fn-b-id :name "fn-b" :fn-schema-id fn-schema-id})
+          _ (sp/create-entity storage :fn {:id fn-c-id :name "fn-c" :fn-schema-id fn-schema-id})
+          ;; Create b -> c reference (b depends on c)
+          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-b-id
+                                                  :arg-schema-id arg-schema-id
+                                                  :value (str fn-c-id)})
+          ;; Create c -> a reference (c depends on a)
+          _ (sp/create-entity storage :arg-value {:id #uuid "ffffffff-ffff-ffff-ffff-ffffffffffff"
+                                                  :owner-fn-id fn-c-id
+                                                  :arg-schema-id arg-schema-id
+                                                  :value (str fn-a-id)})]
+      (try
+        ;; Try to validate a -> b, which would create cycle: a -> b -> c -> a
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"
+              (sp/validate-no-dependency-cycle! storage fn-a-id fn-b-id)))
+        (finally
           (sp/close storage))))))

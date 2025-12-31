@@ -1161,3 +1161,83 @@
       (let [fn-rec (sp/create-entity storage :fn {:name "orphan" :parent-fn-id nil})]
         ;; Should not throw when fn has no parent, returns nil
         (is (nil? (sp/validate-no-arg-override! storage (:id fn-rec) (random-uuid))))))))
+
+
+(deftest required-field-validation-test
+  (testing "create-entity throws when required field is missing"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :user #uuid "10000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002"
+                                                        :type :text}
+                                                 :email {:uuid #uuid "10000000-0000-0000-0000-000000000003"
+                                                         :type :text}})
+                                 ds/build))
+      ;; Missing :email field
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'email' is missing or nil"
+            (sp/create-entity storage :user {:name "Alice"})))))
+
+  (testing "create-entity throws when required field is nil"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :user #uuid "10000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002"
+                                                        :type :text}})
+                                 ds/build))
+      ;; :name is nil
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'name' is missing or nil"
+            (sp/create-entity storage :user {:name nil})))))
+
+  (testing "create-entity allows nil for nullable field"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :user #uuid "10000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002"
+                                                        :type :text}
+                                                 :bio {:uuid #uuid "10000000-0000-0000-0000-000000000003"
+                                                       :type :text :nullable? true}})
+                                 ds/build))
+      ;; :bio is nullable, so nil is allowed
+      (let [user (sp/create-entity storage :user {:name "Alice" :bio nil})]
+        (is (= "Alice" (:name user)))
+        (is (nil? (:bio user))))))
+
+  (testing "create-entity allows missing nullable field"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :user #uuid "10000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002"
+                                                        :type :text}
+                                                 :bio {:uuid #uuid "10000000-0000-0000-0000-000000000003"
+                                                       :type :text :nullable? true}})
+                                 ds/build))
+      ;; :bio is not provided at all
+      (let [user (sp/create-entity storage :user {:name "Alice"})]
+        (is (= "Alice" (:name user))))))
+
+  (testing "update-entity throws when setting required field to nil"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :user #uuid "10000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002"
+                                                        :type :text}})
+                                 ds/build))
+      (let [user (sp/create-entity storage :user {:name "Alice"})]
+        ;; Try to set :name to nil
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'name' is missing or nil"
+              (sp/update-entity storage :user (:id user) {:name nil}))))))
+
+  (testing "update-entity allows setting nullable field to nil"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :user #uuid "10000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002"
+                                                        :type :text}
+                                                 :bio {:uuid #uuid "10000000-0000-0000-0000-000000000003"
+                                                       :type :text :nullable? true}})
+                                 ds/build))
+      (let [user (sp/create-entity storage :user {:name "Alice" :bio "Developer"})
+            ;; Set :bio to nil
+            updated (sp/update-entity storage :user (:id user) {:bio nil})]
+        (is (= "Alice" (:name updated)))
+        (is (nil? (:bio updated)))))))

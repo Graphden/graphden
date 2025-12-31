@@ -125,6 +125,22 @@
 
 ;; === CRUD helpers ===
 
+(defn- validate-required-fields!
+  "Validates that all required (non-nullable) fields are present and not nil.
+   Throws if validation fails."
+  [state entity-name data]
+  (let [fields (get-in state [:entities entity-name :fields])]
+    (doseq [[field-name field-spec] fields]
+      (when (and (not= field-name :id) ; :id is auto-generated
+                 (not (:nullable? field-spec))
+                 (or (not (contains? data field-name))
+                     (nil? (get data field-name))))
+        (throw (ex-info (str "Required field '" (name field-name) "' is missing or nil")
+                        {:type :validation-error/required-field-missing
+                         :entity entity-name
+                         :field field-name}))))))
+
+
 (defn- get-entity-data
   "Gets all records for an entity from state."
   [state entity-name]
@@ -316,6 +332,7 @@
 
   (create-entity
     [_this entity-name data]
+    (validate-required-fields! @state entity-name data)
     (let [id (or (:id data) (random-uuid))
           record (assoc data :id id)]
       (put-record! state entity-name record)))
@@ -328,13 +345,15 @@
 
   (update-entity
     [_this entity-name id data]
-    (let [existing (get-record @state entity-name id)]
+    (let [s @state
+          existing (get-record s entity-name id)]
       (when-not existing
         (throw (ex-info "Entity not found"
                         {:type :not-found
                          :entity entity-name
                          :id id})))
       (let [updated (merge existing data {:id id})]
+        (validate-required-fields! s entity-name updated)
         (put-record! state entity-name updated))))
 
 

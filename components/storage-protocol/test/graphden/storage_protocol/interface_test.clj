@@ -259,3 +259,210 @@
     (is (contains? (:sigs storage/GraphConstraints) :validate-arg-schema-belongs-to-fn!))
     (is (contains? (:sigs storage/GraphConstraints) :validate-no-inheritance-cycle!))
     (is (contains? (:sigs storage/GraphConstraints) :validate-no-dependency-cycle!))))
+
+
+;; === check-removed! tests ===
+
+(deftest check-removed!-test
+  (testing "no removals doesn't throw"
+    (is (nil? (storage/check-removed! "entities"
+                                      #{#uuid "00000000-0000-0000-0000-000000000001"}
+                                      #{#uuid "00000000-0000-0000-0000-000000000001"}
+                                      identity))))
+
+  (testing "new items added doesn't throw"
+    (is (nil? (storage/check-removed! "entities"
+                                      #{#uuid "00000000-0000-0000-0000-000000000001"}
+                                      #{#uuid "00000000-0000-0000-0000-000000000001"
+                                        #uuid "00000000-0000-0000-0000-000000000002"}
+                                      identity))))
+
+  (testing "removed items throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"entities removed"
+          (storage/check-removed! "entities"
+                                  #{#uuid "00000000-0000-0000-0000-000000000001"
+                                    #uuid "00000000-0000-0000-0000-000000000002"}
+                                  #{#uuid "00000000-0000-0000-0000-000000000001"}
+                                  (fn [uuid] {:name (str "entity-" uuid)})))))
+
+  (testing "exception contains removed items"
+    (try
+      (storage/check-removed! "fields"
+                              #{#uuid "00000000-0000-0000-0000-000000000001"}
+                              #{}
+                              (fn [_] :removed-field))
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :destructive-change (:type (ex-data e))))
+        (is (= [:removed-field] (:removed (ex-data e))))))))
+
+
+;; === compute-*-changes tests ===
+
+(deftest compute-entity-changes-test
+  (testing "empty metadata returns all as created"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001" {})
+                     ds/build)
+          changes (storage/compute-entity-changes {:entities {}} schema)]
+      (is (= [:user] (:created changes)))
+      (is (= {} (:renamed changes)))))
+
+  (testing "existing entity with same name returns empty"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001" {})
+                     ds/build)
+          old-metadata {:entities {#uuid "00000000-0000-0000-0000-000000000001" :user}}
+          changes (storage/compute-entity-changes old-metadata schema)]
+      (is (= [] (:created changes)))
+      (is (= {} (:renamed changes)))))
+
+  (testing "renamed entity detected"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :customer #uuid "00000000-0000-0000-0000-000000000001" {})
+                     ds/build)
+          old-metadata {:entities {#uuid "00000000-0000-0000-0000-000000000001" :user}}
+          changes (storage/compute-entity-changes old-metadata schema)]
+      (is (= [] (:created changes)))
+      (is (= {:user :customer} (:renamed changes))))))
+
+
+(deftest compute-field-changes-test
+  (testing "empty metadata returns all as created"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
+                     ds/build)
+          changes (storage/compute-field-changes {:fields {}} schema)]
+      (is (= [{:entity :user :field :name}] (:created changes)))
+      (is (= [] (:renamed changes)))))
+
+  (testing "existing field with same name returns empty"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
+                     ds/build)
+          old-metadata {:fields {#uuid "00000000-0000-0000-0000-000000000002" {:entity :user :field :name}}}
+          changes (storage/compute-field-changes old-metadata schema)]
+      (is (= [] (:created changes)))
+      (is (= [] (:renamed changes)))))
+
+  (testing "renamed field detected"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:full-name {:uuid #uuid "00000000-0000-0000-0000-000000000002" :type :text}})
+                     ds/build)
+          old-metadata {:fields {#uuid "00000000-0000-0000-0000-000000000002" {:entity :user :field :name}}}
+          changes (storage/compute-field-changes old-metadata schema)]
+      (is (= [] (:created changes)))
+      (is (= [{:entity :user :old-field :name :new-field :full-name}] (:renamed changes))))))
+
+
+(deftest compute-enum-changes-test
+  (testing "empty metadata returns all as created"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000000001"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000002" :value :active}])
+                     ds/build)
+          changes (storage/compute-enum-changes {:enums {}} schema)]
+      (is (= [:status] (:created changes)))
+      (is (= {} (:renamed changes)))))
+
+  (testing "existing enum with same name returns empty"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000000001"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000002" :value :active}])
+                     ds/build)
+          old-metadata {:enums {#uuid "00000000-0000-0000-0000-000000000001" :status}}
+          changes (storage/compute-enum-changes old-metadata schema)]
+      (is (= [] (:created changes)))
+      (is (= {} (:renamed changes)))))
+
+  (testing "renamed enum detected"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :user-status #uuid "00000000-0000-0000-0000-000000000001"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000002" :value :active}])
+                     ds/build)
+          old-metadata {:enums {#uuid "00000000-0000-0000-0000-000000000001" :status}}
+          changes (storage/compute-enum-changes old-metadata schema)]
+      (is (= [] (:created changes)))
+      (is (= {:status :user-status} (:renamed changes))))))
+
+
+(deftest compute-enum-value-changes-test
+  (testing "empty metadata returns all as created"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000000001"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000002" :value :active}
+                                   {:uuid #uuid "00000000-0000-0000-0000-000000000003" :value :inactive}])
+                     ds/build)
+          changes (storage/compute-enum-value-changes {:enum-values {}} schema)]
+      (is (= 2 (count (:created changes))))
+      (is (some #(= {:enum :status :value :active} %) (:created changes)))
+      (is (some #(= {:enum :status :value :inactive} %) (:created changes)))))
+
+  (testing "existing value returns only new ones"
+    (let [schema (-> (mds/create-builder)
+                     (ds/add-enum :status #uuid "00000000-0000-0000-0000-000000000001"
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000002" :value :active}
+                                   {:uuid #uuid "00000000-0000-0000-0000-000000000003" :value :inactive}])
+                     ds/build)
+          old-metadata {:enum-values {#uuid "00000000-0000-0000-0000-000000000002" {:enum :status :value :active}}}
+          changes (storage/compute-enum-value-changes old-metadata schema)]
+      (is (= [{:enum :status :value :inactive}] (:created changes))))))
+
+
+;; === validate-required-fields! tests ===
+
+(deftest validate-required-fields!-test
+  (testing "valid data with all required fields passes"
+    (let [fields {:name {:type :text :nullable? false}
+                  :email {:type :text :nullable? false}}
+          data {:name "Alice" :email "alice@example.com"}]
+      (is (nil? (storage/validate-required-fields! :user fields data)))))
+
+  (testing "missing required field throws"
+    (let [fields {:name {:type :text :nullable? false}
+                  :email {:type :text :nullable? false}}
+          data {:name "Alice"}]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Required field 'email' is missing or nil"
+            (storage/validate-required-fields! :user fields data)))))
+
+  (testing "nil required field throws"
+    (let [fields {:name {:type :text :nullable? false}}
+          data {:name nil}]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Required field 'name' is missing or nil"
+            (storage/validate-required-fields! :user fields data)))))
+
+  (testing "nullable field can be nil"
+    (let [fields {:name {:type :text :nullable? false}
+                  :bio {:type :text :nullable? true}}
+          data {:name "Alice" :bio nil}]
+      (is (nil? (storage/validate-required-fields! :user fields data)))))
+
+  (testing "nullable field can be missing"
+    (let [fields {:name {:type :text :nullable? false}
+                  :bio {:type :text :nullable? true}}
+          data {:name "Alice"}]
+      (is (nil? (storage/validate-required-fields! :user fields data)))))
+
+  (testing ":id field is ignored (auto-generated)"
+    (let [fields {:id {:type :uuid :nullable? false}
+                  :name {:type :text :nullable? false}}
+          data {:name "Alice"}]  ; no :id provided
+      (is (nil? (storage/validate-required-fields! :user fields data)))))
+
+  (testing "exception contains correct data"
+    (try
+      (storage/validate-required-fields! :user
+                                         {:email {:type :text :nullable? false}}
+                                         {:email nil})
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :validation-error/required-field-missing (:type (ex-data e))))
+        (is (= :user (:entity (ex-data e))))
+        (is (= :email (:field (ex-data e))))))))

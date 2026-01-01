@@ -751,6 +751,77 @@
           (sp/close storage))))))
 
 
+;; === Required field validation tests ===
+
+(deftest crud-required-field-validation-test
+  (testing "create-entity throws when required field is missing"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}
+                                       :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                               :type :text}})]
+      (sp/initialize storage schema)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'email' is missing or nil"
+              (sp/create-entity storage :user {:name "Alice"})))
+        (finally
+          (sp/close storage)))))
+
+  (testing "create-entity throws when required field is nil"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}})]
+      (sp/initialize storage schema)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'name' is missing or nil"
+              (sp/create-entity storage :user {:name nil})))
+        (finally
+          (sp/close storage)))))
+
+  (testing "create-entity allows missing nullable field"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}
+                                       :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                             :type :text :nullable? true}})]
+      (sp/initialize storage schema)
+      (try
+        ;; Note: Datomic doesn't allow nil values, so we just omit the field
+        (let [user (sp/create-entity storage :user {:name "Alice"})]
+          (is (= "Alice" (:name user)))
+          (is (nil? (:bio user))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entity throws when setting required field to nil"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}})]
+      (sp/initialize storage schema)
+      (try
+        (let [user (sp/create-entity storage :user {:name "Alice"})]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'name' is missing or nil"
+                (sp/update-entity storage :user (:id user) {:name nil}))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entity preserves nullable field when not updating it"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}
+                                       :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                             :type :text :nullable? true}})]
+      (sp/initialize storage schema)
+      (try
+        ;; Note: Datomic doesn't allow nil values, but we can update without including the field
+        (let [user (sp/create-entity storage :user {:name "Alice" :bio "Hello"})
+              updated (sp/update-entity storage :user (:id user) {:name "Alice Updated"})]
+          (is (= "Alice Updated" (:name updated)))
+          (is (= "Hello" (:bio updated))))
+        (finally
+          (sp/close storage))))))
+
+
 ;; === GraphConstraints tests ===
 
 (defn- make-graph-schema

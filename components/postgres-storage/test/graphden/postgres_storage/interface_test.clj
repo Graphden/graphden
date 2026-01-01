@@ -1,8 +1,10 @@
 (ns graphden.postgres-storage.interface-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
+    [graphden.postgres-storage.crud :as crud]
     [graphden.postgres-storage.interface :as pg]
     [graphden.postgres-storage.introspection :as introspection]
     [graphden.postgres-storage.metadata :as metadata]
@@ -15,6 +17,8 @@
     (java.util.concurrent
       CountDownLatch
       TimeUnit)
+    (org.postgresql.util
+      PGobject)
     (org.testcontainers.containers
       PostgreSQLContainer)))
 
@@ -1845,6 +1849,121 @@
         (is (= "Alice" (:name (first result))))
         (finally
           (sp/close storage))))))
+
+
+;; === Required field validation tests ===
+
+(deftest crud-required-field-validation-test
+  (testing "create-entity throws when required field is missing"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}
+                                       :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                               :type :text}})]
+      (sp/initialize storage schema)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'email' is missing or nil"
+              (sp/create-entity storage :user {:name "Alice"})))
+        (finally
+          (sp/close storage)))))
+
+  (testing "create-entity throws when required field is nil"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}})]
+      (sp/initialize storage schema)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'name' is missing or nil"
+              (sp/create-entity storage :user {:name nil})))
+        (finally
+          (sp/close storage)))))
+
+  (testing "create-entity allows nil for nullable field"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}
+                                       :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                             :type :text :nullable? true}})]
+      (sp/initialize storage schema)
+      (try
+        (let [user (sp/create-entity storage :user {:name "Alice" :bio nil})]
+          (is (= "Alice" (:name user)))
+          (is (nil? (:bio user))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entity throws when setting required field to nil"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}})]
+      (sp/initialize storage schema)
+      (try
+        (let [user (sp/create-entity storage :user {:name "Alice"})]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'name' is missing or nil"
+                (sp/update-entity storage :user (:id user) {:name nil}))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entity allows setting nullable field to nil"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}
+                                       :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                             :type :text :nullable? true}})]
+      (sp/initialize storage schema)
+      (try
+        (let [user (sp/create-entity storage :user {:name "Alice" :bio "Hello"})
+              updated (sp/update-entity storage :user (:id user) {:bio nil})]
+          (is (= "Alice" (:name updated)))
+          (is (nil? (:bio updated))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === JSONB parsing error tests ===
+
+(deftest jsonb-parsing-error-test
+  (testing "parse-pgobject throws with context on invalid JSON (short value)"
+    (let [parse-pgobject #'crud/parse-pgobject
+          invalid-pg (doto (PGobject.)
+                       (PGobject/.setType "jsonb")
+                       (PGobject/.setValue "{invalid json}"))]
+      (try
+        (parse-pgobject invalid-pg)
+        (is false "Should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :parse-error/jsonb (:type (ex-data e))))
+          (is (= "{invalid json}" (:raw-value (ex-data e))))
+          (is (some? (:cause (ex-data e))))))))
+
+  (testing "parse-pgobject truncates long values in error"
+    (let [parse-pgobject #'crud/parse-pgobject
+          ;; Create a string longer than 100 characters
+          long-invalid-value (str "{" (str/join (repeat 150 "x")) "}")
+          invalid-pg (doto (PGobject.)
+                       (PGobject/.setType "jsonb")
+                       (PGobject/.setValue long-invalid-value))]
+      (try
+        (parse-pgobject invalid-pg)
+        (is false "Should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :parse-error/jsonb (:type (ex-data e))))
+          ;; Should be truncated to 100 chars + "..."
+          (is (= 103 (count (:raw-value (ex-data e)))))
+          (is (str/ends-with? (:raw-value (ex-data e)) "..."))))))
+
+  (testing "parse-pgobject returns value for non-jsonb PGobject"
+    (let [parse-pgobject #'crud/parse-pgobject
+          text-pg (doto (PGobject.)
+                    (PGobject/.setType "text")
+                    (PGobject/.setValue "hello"))]
+      (is (= "hello" (parse-pgobject text-pg)))))
+
+  (testing "parse-pgobject returns non-PGobject values unchanged"
+    (let [parse-pgobject #'crud/parse-pgobject]
+      (is (= "plain string" (parse-pgobject "plain string")))
+      (is (= 42 (parse-pgobject 42)))
+      (is (nil? (parse-pgobject nil))))))
 
 
 ;; === GraphConstraints tests ===

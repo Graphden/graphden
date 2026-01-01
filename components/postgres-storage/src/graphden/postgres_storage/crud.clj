@@ -3,8 +3,10 @@
    Generic entity operations for create, read, update, delete, query."
   (:require
     [cheshire.core :as json]
+    [clojure.set :as set]
     [clojure.string :as str]
     [graphden.postgres-storage.util :as util]
+    [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs])
@@ -19,14 +21,23 @@
 
 
 (defn- parse-pgobject
-  "Parses PGobject values (like JSONB) to Clojure data."
+  "Parses PGobject values (like JSONB) to Clojure data.
+   Wraps JSON parsing errors with context information."
   [v]
   (if (instance? PGobject v)
     (let [pg-type (PGobject/.getType v)
           pg-value (PGobject/.getValue v)]
-      (case pg-type
-        "jsonb" (json/parse-string pg-value true)
-        "json" (json/parse-string pg-value true)
+      (if (= pg-type "jsonb")
+        (try
+          (json/parse-string pg-value true)
+          (catch Exception e
+            (throw (ex-info "Failed to parse JSONB value"
+                            {:type :parse-error/jsonb
+                             :raw-value (if (> (count pg-value) 100)
+                                          (str (subs pg-value 0 100) "...")
+                                          pg-value)
+                             :cause (Throwable/.getMessage e)}
+                            e))))
         pg-value))
     v))
 
@@ -82,8 +93,11 @@
 
 (defn create-entity
   "Creates a new entity record in the database.
-   Returns the created record with generated id if not provided."
-  [ds entity-name data]
+   Returns the created record with generated id if not provided.
+   Validates required fields if fields metadata is provided."
+  [ds entity-name data fields]
+  (when fields
+    (sp/validate-required-fields! entity-name fields data))
   (let [table-name (keyword (util/kw->snake-case entity-name))
         id (or (:id data) (random-uuid))
         record (assoc data :id id)
@@ -117,8 +131,9 @@
 
 (defn update-entity
   "Updates an entity by id. Returns the updated record.
-   Throws if entity not found."
-  [ds entity-name id data]
+   Throws if entity not found.
+   Validates required fields if fields metadata is provided."
+  [ds entity-name id data fields]
   (let [table-name (keyword (util/kw->snake-case entity-name))
         existing (read-entity ds entity-name id)]
     (when-not existing
@@ -126,18 +141,19 @@
                       {:type :not-found
                        :entity entity-name
                        :id id})))
-    (let [updated (merge existing data {:id id})
-          row (entity->row (dissoc updated :id))
-          set-clause (into {} (map (fn [[k v]] [k v]) row))
-          query (sql/format {:update table-name
-                             :set set-clause
-                             :where [:= :id id]
-                             :returning [:*]}
-                            {:quoted true})]
-      (-> (jdbc/execute-one! ds query
-                             {:builder-fn rs/as-unqualified-lower-maps
-                              :timeout query-timeout-seconds})
-          row->entity))))
+    (let [updated (merge existing data {:id id})]
+      (when fields
+        (sp/validate-required-fields! entity-name fields updated))
+      (let [row (entity->row (dissoc updated :id))
+            query (sql/format {:update table-name
+                               :set row
+                               :where [:= :id id]
+                               :returning [:*]}
+                              {:quoted true})]
+        (-> (jdbc/execute-one! ds query
+                               {:builder-fn rs/as-unqualified-lower-maps
+                                :timeout query-timeout-seconds})
+            row->entity)))))
 
 
 (defn delete-entity
@@ -171,3 +187,138 @@
                             {:builder-fn rs/as-unqualified-lower-maps
                              :timeout query-timeout-seconds})]
     (map row->entity rows)))
+
+
+;; === ExecutionGraph ===
+
+(defn- collect-parent-chain-sql
+  "Collects parent chain for a fn using recursive CTE.
+   Returns vector of fn-ids from child to root."
+  [ds fn-id]
+  (let [query (sql/format
+                {:with-recursive
+                 [[:parent_chain
+                   {:union-all
+                    [{:select [:id :parent_fn_id]
+                      :from [:fn]
+                      :where [:= :id fn-id]}
+                     {:select [:f.id :f.parent_fn_id]
+                      :from [[:fn :f]]
+                      :join [[:parent_chain :pc] [:= :f.id :pc.parent_fn_id]]}]}]]
+                 :select [:id]
+                 :from [:parent_chain]}
+                {:quoted true})
+        rows (jdbc/execute! ds query
+                            {:builder-fn rs/as-unqualified-lower-maps
+                             :timeout query-timeout-seconds})]
+    (mapv :id rows)))
+
+
+(defn- merge-arg-values-for-chain
+  "Gets merged arg-values for a parent chain (child overrides parent).
+   Returns {arg-schema-id -> arg-value-record}."
+  [ds chain]
+  (when (seq chain)
+    (let [query (sql/format {:select [:*]
+                             :from [:arg_value]
+                             :where [:in :owner_fn_id (vec chain)]}
+                            {:quoted true})
+          rows (jdbc/execute! ds query
+                              {:builder-fn rs/as-unqualified-lower-maps
+                               :timeout query-timeout-seconds})
+          arg-values (map row->entity rows)
+          ;; Create position map for chain (lower = higher priority)
+          chain-pos (zipmap chain (range))]
+      ;; Group by arg-schema-id, pick the one with lowest chain position (closest to target fn)
+      (->> arg-values
+           (group-by :arg-schema-id)
+           (map (fn [[arg-schema-id avs]]
+                  [arg-schema-id (apply min-key #(get chain-pos (:owner-fn-id %) Integer/MAX_VALUE) avs)]))
+           (into {})))))
+
+
+(defn- try-parse-uuid
+  "Attempts to parse value as UUID. Returns UUID or nil."
+  [v]
+  (cond
+    (uuid? v) v
+    (string? v) (try
+                  (java.util.UUID/fromString v)
+                  (catch Exception _ nil))
+    :else nil))
+
+
+(defn- extract-fn-refs
+  "Extracts fn-id references from arg-values.
+   A value is a fn-ref if it's a UUID (or parseable as UUID) and exists in fn table."
+  [ds arg-values-map]
+  (let [uuid-values (->> (vals arg-values-map)
+                         (map :value)
+                         (keep try-parse-uuid)
+                         (distinct)
+                         (vec))]
+    (if (empty? uuid-values)
+      #{}
+      (let [query (sql/format {:select [:id]
+                               :from [:fn]
+                               :where [:in :id uuid-values]}
+                              {:quoted true})
+            rows (jdbc/execute! ds query
+                                {:builder-fn rs/as-unqualified-lower-maps
+                                 :timeout query-timeout-seconds})]
+        (set (map :id rows))))))
+
+
+(defn resolve-execution-graph
+  "Resolves complete execution graph for a function.
+   Uses BFS to collect all transitively referenced functions."
+  [ds fn-id]
+  (let [root-fn (read-entity ds :fn fn-id)]
+    (when-not root-fn
+      (throw (ex-info "Function not found"
+                      {:type :not-found
+                       :fn-id fn-id})))
+    (loop [to-visit #{fn-id}
+           visited #{}
+           fns {}
+           fn-schemas {}
+           arg-schemas {}
+           resolved-args {}]
+      (if (empty? to-visit)
+        {:fns fns
+         :fn-schemas fn-schemas
+         :arg-schemas arg-schemas
+         :resolved-args resolved-args}
+        (let [current-fn-id (first to-visit)
+              rest-to-visit (disj to-visit current-fn-id)]
+          (if (contains? visited current-fn-id)
+            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args)
+            (let [fn-rec (or (get fns current-fn-id)
+                             (read-entity ds :fn current-fn-id))]
+              (if-not fn-rec
+                (recur rest-to-visit (conj visited current-fn-id)
+                       fns fn-schemas arg-schemas resolved-args)
+                (let [fn-schema-id (:fn-schema-id fn-rec)
+                      ;; Load fn-schema if not already loaded
+                      fn-schema (or (get fn-schemas fn-schema-id)
+                                    (read-entity ds :fn-schema fn-schema-id))
+                      ;; Load arg-schemas if not already loaded
+                      new-arg-schemas (if (contains? fn-schemas fn-schema-id)
+                                        {}
+                                        (->> (query-entities ds :arg-schema {:fn-schema-id fn-schema-id})
+                                             (map (juxt :id identity))
+                                             (into {})))
+                      ;; Get parent chain and merge arg-values
+                      chain (collect-parent-chain-sql ds current-fn-id)
+                      merged-args (merge-arg-values-for-chain ds chain)
+                      ;; Find referenced fns
+                      ref-fn-ids (extract-fn-refs ds merged-args)
+                      new-to-visit (set/difference ref-fn-ids visited)]
+                  (recur (set/union rest-to-visit new-to-visit)
+                         (conj visited current-fn-id)
+                         (assoc fns current-fn-id fn-rec)
+                         (if fn-schema
+                           (assoc fn-schemas fn-schema-id fn-schema)
+                           fn-schemas)
+                         (merge arg-schemas new-arg-schemas)
+                         (assoc resolved-args current-fn-id merged-args)))))))))))

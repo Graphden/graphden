@@ -61,15 +61,20 @@
     (if-not parent-id
       #{}
       ;; Use recursive CTE to collect all ancestors
-      (let [query ["WITH RECURSIVE ancestors AS (
-                      SELECT id, parent_fn_id FROM \"fn\" WHERE id = ?
-                      UNION ALL
-                      SELECT f.id, f.parent_fn_id
-                      FROM \"fn\" f
-                      INNER JOIN ancestors a ON f.id = a.parent_fn_id
-                    )
-                    SELECT id FROM ancestors WHERE id != ?"
-                   parent-id fn-id]
+      (let [query (sql/format
+                    {:with-recursive
+                     [[:ancestors
+                       {:union-all
+                        [{:select [:id :parent_fn_id]
+                          :from [:fn]
+                          :where [:= :id parent-id]}
+                         {:select [:f.id :f.parent_fn_id]
+                          :from [[:fn :f]]
+                          :join [[:ancestors :a] [:= :f.id :a.parent_fn_id]]}]}]]
+                     :select [:id]
+                     :from [:ancestors]
+                     :where [:<> :id fn-id]}
+                    {:quoted true})
             rows (jdbc/execute! ds query
                                 {:builder-fn rs/as-unqualified-lower-maps
                                  :timeout query-timeout-seconds})]
@@ -100,19 +105,25 @@
   [ds owner-fn-id]
   ;; Use recursive CTE to traverse dependencies
   ;; arg_value.value is JSONB, refs are stored as UUIDs
-  (let [query ["WITH RECURSIVE deps AS (
-                  -- Base case: start with owner-fn-id
-                  SELECT ?::uuid AS fn_id
-                  UNION
-                  -- Recursive case: follow fn references in arg_values
-                  SELECT (av.value #>> '{}')::uuid
-                  FROM deps d
-                  JOIN \"arg_value\" av ON av.owner_fn_id = d.fn_id
-                  WHERE av.value #>> '{}' IS NOT NULL
-                    AND EXISTS (SELECT 1 FROM \"fn\" WHERE id = (av.value #>> '{}')::uuid)
-                )
-                SELECT DISTINCT fn_id FROM deps"
-               owner-fn-id]
+  ;; Note: JSONB operators (#>>) require raw SQL
+  (let [query (sql/format
+                {:with-recursive
+                 [[:deps
+                   {:union
+                    [;; Base case: start with owner-fn-id
+                     {:select [[[:cast owner-fn-id :uuid] :fn_id]]}
+                     ;; Recursive case: follow fn references in arg_values
+                     {:select [[[:cast [:raw "av.value #>> '{}'"] :uuid]]]
+                      :from [[:deps :d]]
+                      :join [[:arg_value :av] [:= :av.owner_fn_id :d.fn_id]]
+                      :where [:and
+                              [:is-not [:raw "av.value #>> '{}'"] nil]
+                              [:exists {:select [[[:raw "1"]]]
+                                        :from [:fn]
+                                        :where [:= :id [:cast [:raw "av.value #>> '{}'"] :uuid]]}]]}]}]]
+                 :select-distinct [:fn_id]
+                 :from [:deps]}
+                {:quoted true})
         rows (jdbc/execute! ds query
                             {:builder-fn rs/as-unqualified-lower-maps
                              :timeout query-timeout-seconds})]

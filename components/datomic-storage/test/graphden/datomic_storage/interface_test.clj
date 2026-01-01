@@ -1014,3 +1014,237 @@
               (sp/validate-no-dependency-cycle! storage fn-a-id fn-b-id)))
         (finally
           (sp/close storage))))))
+
+
+;; === ExecutionGraph tests ===
+
+(deftest resolve-execution-graph-simple-test
+  (testing "resolves simple function with no dependencies"
+    (let [storage (create-test-storage)]
+      (sp/initialize storage (make-graph-schema))
+      (let [fn-schema (sp/create-entity storage :fn-schema
+                                        {:name "add" :returned-type "int"})
+            arg-a (sp/create-entity storage :arg-schema
+                                    {:fn-schema-id (:id fn-schema)
+                                     :name "a" :type "int" :required true})
+            arg-b (sp/create-entity storage :arg-schema
+                                    {:fn-schema-id (:id fn-schema)
+                                     :name "b" :type "int" :required true})
+            fn-add (sp/create-entity storage :fn
+                                     {:name "add-1-2"
+                                      :fn-schema-id (:id fn-schema)})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id fn-add)
+                                 :arg-schema-id (:id arg-a)
+                                 :value "1"})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id fn-add)
+                                 :arg-schema-id (:id arg-b)
+                                 :value "2"})
+            graph (sp/resolve-execution-graph storage (:id fn-add))]
+        (try
+          (is (contains? (:fns graph) (:id fn-add)))
+          (is (contains? (:fn-schemas graph) (:id fn-schema)))
+          (is (contains? (:arg-schemas graph) (:id arg-a)))
+          (is (contains? (:arg-schemas graph) (:id arg-b)))
+          (is (contains? (:resolved-args graph) (:id fn-add)))
+          (let [args (get (:resolved-args graph) (:id fn-add))]
+            (is (= "1" (:value (get args (:id arg-a)))))
+            (is (= "2" (:value (get args (:id arg-b))))))
+          (finally
+            (sp/close storage)))))))
+
+
+(deftest resolve-execution-graph-with-parent-test
+  (testing "resolves function with parent chain - child overrides parent"
+    (let [storage (create-test-storage)]
+      (sp/initialize storage (make-graph-schema))
+      (let [fn-schema (sp/create-entity storage :fn-schema
+                                        {:name "greet" :returned-type "text"})
+            arg-name (sp/create-entity storage :arg-schema
+                                       {:fn-schema-id (:id fn-schema)
+                                        :name "name" :type "text" :required true})
+            arg-greeting (sp/create-entity storage :arg-schema
+                                           {:fn-schema-id (:id fn-schema)
+                                            :name "greeting" :type "text" :required true})
+            parent-fn (sp/create-entity storage :fn
+                                        {:name "greet-hello"
+                                         :fn-schema-id (:id fn-schema)})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id parent-fn)
+                                 :arg-schema-id (:id arg-greeting)
+                                 :value "Hello"})
+            child-fn (sp/create-entity storage :fn
+                                       {:name "greet-hello-world"
+                                        :fn-schema-id (:id fn-schema)
+                                        :parent-fn-id (:id parent-fn)})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id child-fn)
+                                 :arg-schema-id (:id arg-name)
+                                 :value "World"})
+            graph (sp/resolve-execution-graph storage (:id child-fn))]
+        (try
+          (is (contains? (:fns graph) (:id child-fn)))
+          (let [args (get (:resolved-args graph) (:id child-fn))]
+            (is (= "World" (:value (get args (:id arg-name)))))
+            (is (= "Hello" (:value (get args (:id arg-greeting))))))
+          (finally
+            (sp/close storage)))))))
+
+
+(deftest resolve-execution-graph-with-fn-refs-test
+  (testing "resolves function with references to other functions"
+    (let [storage (create-test-storage)]
+      (sp/initialize storage (make-graph-schema))
+      (let [const-schema (sp/create-entity storage :fn-schema
+                                           {:name "const-int" :returned-type "int"})
+            const-arg (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id const-schema)
+                                         :name "value" :type "int" :required true})
+            add-schema (sp/create-entity storage :fn-schema
+                                         {:name "add" :returned-type "int"})
+            add-arg-a (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id add-schema)
+                                         :name "a" :type "int" :required true})
+            add-arg-b (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id add-schema)
+                                         :name "b" :type "int" :required true})
+            const-3 (sp/create-entity storage :fn
+                                      {:name "const-3"
+                                       :fn-schema-id (:id const-schema)})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id const-3)
+                                 :arg-schema-id (:id const-arg)
+                                 :value "3"})
+            const-5 (sp/create-entity storage :fn
+                                      {:name "const-5"
+                                       :fn-schema-id (:id const-schema)})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id const-5)
+                                 :arg-schema-id (:id const-arg)
+                                 :value "5"})
+            add-3-5 (sp/create-entity storage :fn
+                                      {:name "add-3-5"
+                                       :fn-schema-id (:id add-schema)})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id add-3-5)
+                                 :arg-schema-id (:id add-arg-a)
+                                 :value (str (:id const-3))})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id add-3-5)
+                                 :arg-schema-id (:id add-arg-b)
+                                 :value (str (:id const-5))})
+            graph (sp/resolve-execution-graph storage (:id add-3-5))]
+        (try
+          (is (= 3 (count (:fns graph))))
+          (is (contains? (:fns graph) (:id add-3-5)))
+          (is (contains? (:fns graph) (:id const-3)))
+          (is (contains? (:fns graph) (:id const-5)))
+          (is (= 2 (count (:fn-schemas graph))))
+          (is (= 3 (count (:arg-schemas graph))))
+          (finally
+            (sp/close storage)))))))
+
+
+(deftest resolve-execution-graph-not-found-test
+  (testing "throws when function not found"
+    (let [storage (create-test-storage)]
+      (sp/initialize storage (make-graph-schema))
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found"
+              (sp/resolve-execution-graph storage (random-uuid))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest resolve-execution-graph-self-reference-test
+  (testing "handles fn with self-reference in arg-value (triggers 'already visited' branch)"
+    (let [storage (create-test-storage)]
+      (sp/initialize storage (make-graph-schema))
+      (let [;; recursive fn-schema with two args
+            rec-schema (sp/create-entity storage :fn-schema
+                                         {:name "recursive" :returned-type "int"})
+            ;; 'self' arg will reference the fn itself (for recursion)
+            arg-self (sp/create-entity storage :arg-schema
+                                       {:fn-schema-id (:id rec-schema)
+                                        :name "self" :type "fn" :required true})
+            arg-n (sp/create-entity storage :arg-schema
+                                    {:fn-schema-id (:id rec-schema)
+                                     :name "n" :type "int" :required true})
+            ;; Create fn instance that references itself
+            rec-fn (sp/create-entity storage :fn
+                                     {:name "factorial"
+                                      :fn-schema-id (:id rec-schema)})
+            ;; Self-reference: arg-value points to the fn itself
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id rec-fn)
+                                 :arg-schema-id (:id arg-self)
+                                 :value (str (:id rec-fn))})  ; Self-reference!
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id rec-fn)
+                                 :arg-schema-id (:id arg-n)
+                                 :value "5"})
+            graph (sp/resolve-execution-graph storage (:id rec-fn))]
+        (try
+          ;; Should only have 1 fn (self-reference doesn't create duplicate)
+          (is (= 1 (count (:fns graph))))
+          (is (contains? (:fns graph) (:id rec-fn)))
+          ;; Self arg should reference the same fn
+          (let [args (get (:resolved-args graph) (:id rec-fn))]
+            (is (= (str (:id rec-fn)) (str (:value (get args (:id arg-self))))))
+            (is (= "5" (str (:value (get args (:id arg-n)))))))
+          (finally
+            (sp/close storage)))))))
+
+
+(deftest resolve-execution-graph-shared-reference-test
+  (testing "handles shared fn reference (same fn referenced by multiple args)"
+    (let [storage (create-test-storage)]
+      (sp/initialize storage (make-graph-schema))
+      (let [;; const-int schema
+            const-schema (sp/create-entity storage :fn-schema
+                                           {:name "const-shared" :returned-type "int"})
+            const-arg (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id const-schema)
+                                         :name "value" :type "int" :required true})
+            ;; add schema - both args reference fns
+            add-schema (sp/create-entity storage :fn-schema
+                                         {:name "add-shared" :returned-type "int"})
+            add-arg-a (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id add-schema)
+                                         :name "a" :type "int" :required true})
+            add-arg-b (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id add-schema)
+                                         :name "b" :type "int" :required true})
+            ;; const-5 fn - will be referenced TWICE
+            const-5 (sp/create-entity storage :fn
+                                      {:name "const-5-shared"
+                                       :fn-schema-id (:id const-schema)})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id const-5)
+                                 :arg-schema-id (:id const-arg)
+                                 :value "5"})
+            ;; add-5-5 fn referencing const-5 for BOTH args
+            add-5-5 (sp/create-entity storage :fn
+                                      {:name "add-5-5-shared"
+                                       :fn-schema-id (:id add-schema)})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id add-5-5)
+                                 :arg-schema-id (:id add-arg-a)
+                                 :value (str (:id const-5))})
+            _ (sp/create-entity storage :arg-value
+                                {:owner-fn-id (:id add-5-5)
+                                 :arg-schema-id (:id add-arg-b)
+                                 :value (str (:id const-5))})  ; Same fn referenced again!
+            graph (sp/resolve-execution-graph storage (:id add-5-5))]
+        (try
+          ;; const-5 should only appear once in the graph despite being referenced twice
+          (is (= 2 (count (:fns graph))))
+          (is (contains? (:fns graph) (:id add-5-5)))
+          (is (contains? (:fns graph) (:id const-5)))
+          ;; Both args should reference const-5
+          (let [args (get (:resolved-args graph) (:id add-5-5))]
+            (is (= (str (:id const-5)) (str (:value (get args (:id add-arg-a))))))
+            (is (= (str (:id const-5)) (str (:value (get args (:id add-arg-b)))))))
+          (finally
+            (sp/close storage)))))))

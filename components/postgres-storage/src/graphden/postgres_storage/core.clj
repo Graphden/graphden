@@ -164,7 +164,15 @@
 
   (create-entity
     [_this entity-name data]
-    (crud/create-entity pool entity-name data))
+    (let [cached-metadata (get-cached-metadata pool metadata-cache lock)
+          fields (when cached-metadata
+                   (->> (:fields cached-metadata)
+                        (vals)
+                        (filter #(= (:entity %) entity-name))
+                        (map (fn [{:keys [field nullable?] field-type :type}]
+                               [field {:type field-type :nullable? nullable?}]))
+                        (into {})))]
+      (crud/create-entity pool entity-name data fields)))
 
 
   (read-entity
@@ -174,7 +182,15 @@
 
   (update-entity
     [_this entity-name id data]
-    (crud/update-entity pool entity-name id data))
+    (let [cached-metadata (get-cached-metadata pool metadata-cache lock)
+          fields (when cached-metadata
+                   (->> (:fields cached-metadata)
+                        (vals)
+                        (filter #(= (:entity %) entity-name))
+                        (map (fn [{:keys [field nullable?] field-type :type}]
+                               [field {:type field-type :nullable? nullable?}]))
+                        (into {})))]
+      (crud/update-entity pool entity-name id data fields)))
 
 
   (delete-entity
@@ -211,7 +227,14 @@
 
   (validate-no-dependency-cycle!
     [_this owner-fn-id value-fn-id]
-    (constraints/validate-no-dependency-cycle! pool owner-fn-id value-fn-id)))
+    (constraints/validate-no-dependency-cycle! pool owner-fn-id value-fn-id))
+
+
+  sp/ExecutionGraph
+
+  (resolve-execution-graph
+    [_this fn-id]
+    (crud/resolve-execution-graph pool fn-id)))
 
 
 (defn create-storage

@@ -1,6 +1,7 @@
 (ns graphden.memory-storage.core
   "In-memory implementation of Storage protocol."
   (:require
+    [clojure.set :as set]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -127,18 +128,10 @@
 
 (defn- validate-required-fields!
   "Validates that all required (non-nullable) fields are present and not nil.
-   Throws if validation fails."
+   Uses shared utility from storage-protocol."
   [state entity-name data]
   (let [fields (get-in state [:entities entity-name :fields])]
-    (doseq [[field-name field-spec] fields]
-      (when (and (not= field-name :id) ; :id is auto-generated
-                 (not (:nullable? field-spec))
-                 (or (not (contains? data field-name))
-                     (nil? (get data field-name))))
-        (throw (ex-info (str "Required field '" (name field-name) "' is missing or nil")
-                        {:type :validation-error/required-field-missing
-                         :entity entity-name
-                         :field field-name}))))))
+    (sp/validate-required-fields! entity-name fields data)))
 
 
 (defn- get-entity-data
@@ -234,6 +227,93 @@
                                 (filter #(some? (get-record state :fn %))))]
             (recur (concat rest-to-visit ref-fn-ids)
                    (conj visited current-id))))))))
+
+
+;; === ExecutionGraph helpers ===
+
+(defn- collect-fn-parent-chain
+  "Collects all fn-ids in the parent chain (including the fn itself)."
+  [state fn-id]
+  (loop [current-id fn-id
+         chain []]
+    (if-not current-id
+      chain
+      (let [fn-rec (get-record state :fn current-id)]
+        (recur (:parent-fn-id fn-rec) (conj chain current-id))))))
+
+
+(defn- merge-arg-values-from-chain
+  "Merges arg-values from parent chain, child values override parent.
+   Returns {arg-schema-id -> arg-value-record}."
+  [state fn-id]
+  (let [chain (collect-fn-parent-chain state fn-id)]
+    ;; Process from root to leaf so child overrides parent
+    (reduce (fn [acc chain-fn-id]
+              (let [arg-values (filter #(= (:owner-fn-id %) chain-fn-id)
+                                       (vals (get-entity-data state :arg-value)))]
+                (reduce (fn [a av]
+                          (assoc a (:arg-schema-id av) av))
+                        acc
+                        arg-values)))
+            {}
+            (reverse chain))))
+
+
+(defn- extract-fn-refs-from-arg-values
+  "Extracts fn-ids referenced in arg-values."
+  [arg-values-map]
+  (->> (vals arg-values-map)
+       (map :value)
+       (filter uuid?)
+       (set)))
+
+
+(defn- resolve-execution-graph-impl
+  "Resolves execution graph starting from fn-id.
+   Uses BFS to collect all transitively referenced functions."
+  [state fn-id]
+  (loop [to-visit #{fn-id}
+         visited #{}
+         fns {}
+         fn-schemas {}
+         arg-schemas {}
+         resolved-args {}]
+    (if (empty? to-visit)
+      {:fns fns
+       :fn-schemas fn-schemas
+       :arg-schemas arg-schemas
+       :resolved-args resolved-args}
+      (let [current-fn-id (first to-visit)
+            rest-to-visit (disj to-visit current-fn-id)]
+        (if (contains? visited current-fn-id)
+          (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args)
+          (let [fn-rec (get-record state :fn current-fn-id)]
+            (if-not fn-rec
+              ;; fn doesn't exist, skip (might be literal value that looks like UUID)
+              (recur rest-to-visit (conj visited current-fn-id)
+                     fns fn-schemas arg-schemas resolved-args)
+              (let [fn-schema-id (:fn-schema-id fn-rec)
+                    fn-schema (get-record state :fn-schema fn-schema-id)
+                    ;; Get arg-schemas for this fn-schema if not already loaded
+                    new-arg-schemas (if (contains? fn-schemas fn-schema-id)
+                                      {}
+                                      (->> (vals (get-entity-data state :arg-schema))
+                                           (filter #(= (:fn-schema-id %) fn-schema-id))
+                                           (map (juxt :id identity))
+                                           (into {})))
+                    ;; Merge arg-values from parent chain
+                    merged-args (merge-arg-values-from-chain state current-fn-id)
+                    ;; Find referenced fns
+                    ref-fn-ids (extract-fn-refs-from-arg-values merged-args)
+                    new-to-visit (set/difference ref-fn-ids visited)]
+                (recur (set/union rest-to-visit new-to-visit)
+                       (conj visited current-fn-id)
+                       (assoc fns current-fn-id fn-rec)
+                       (if fn-schema
+                         (assoc fn-schemas fn-schema-id fn-schema)
+                         fn-schemas)
+                       (merge arg-schemas new-arg-schemas)
+                       (assoc resolved-args current-fn-id merged-args))))))))))
 
 
 (defn- do-initialize
@@ -447,7 +527,19 @@
           (throw (ex-info "Reference would create dependency cycle"
                           {:type :constraint-violation/dependency-cycle
                            :owner-fn-id owner-fn-id
-                           :value-fn-id value-fn-id})))))))
+                           :value-fn-id value-fn-id}))))))
+
+
+  sp/ExecutionGraph
+
+  (resolve-execution-graph
+    [_this fn-id]
+    (let [s @state]
+      (when-not (get-record s :fn fn-id)
+        (throw (ex-info "Function not found"
+                        {:type :not-found
+                         :fn-id fn-id})))
+      (resolve-execution-graph-impl s fn-id))))
 
 
 (defn create-storage

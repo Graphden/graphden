@@ -12,5 +12,6 @@
     "components/malli-data-schema/test"
     "components/memory-storage/test"
     "components/postgres-storage/test"
-    "components/storage-protocol/test"]}]
+    "components/storage-protocol/test"
+    "components/executor/test"]}]
  :plugins [:kaocha.plugin/profiling]}

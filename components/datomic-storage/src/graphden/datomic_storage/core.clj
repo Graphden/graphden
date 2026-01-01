@@ -1,6 +1,7 @@
 (ns graphden.datomic-storage.core
   "Datomic Local implementation of Storage protocol."
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]
     [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
@@ -80,9 +81,8 @@
 (defn- single-field-unique-constraint?
   "Returns true if constraint is a single-field unique constraint."
   [constraint]
-  (if (= (:type constraint) :unique)
-    (= (count (:fields constraint)) 1)
-    false))
+  (and (= (:type constraint) :unique)
+       (= (count (:fields constraint)) 1)))
 
 
 (defn- get-single-field-constraints
@@ -287,7 +287,9 @@
 
 
 (defn- save-metadata!
-  "Saves metadata to the database (retract old, assert new)."
+  "Saves metadata to the database (retract old, then assert new).
+   Note: These must be separate transactions because Datomic does not allow
+   retracting and asserting the same unique value in a single transaction."
   [conn schema]
   ;; First, retract all existing metadata
   (let [db (d/db conn)
@@ -644,16 +646,34 @@
          (map :field))))
 
 
+(defn- get-fields-with-specs
+  "Gets field specifications for an entity from metadata.
+   Returns {field-name {:type ... :nullable? ...}}."
+  [db entity-name]
+  (let [metadata (read-metadata db)]
+    (->> (:fields metadata)
+         (vals)
+         (filter #(= (:entity %) entity-name))
+         (map (fn [{:keys [field nullable?] field-type :type}]
+                [field {:type field-type :nullable? nullable?}]))
+         (into {}))))
+
+
 (defn- create-entity-impl
-  "Creates a new entity in Datomic."
+  "Creates a new entity in Datomic.
+   Validates required fields before creating."
   [conn entity-name data]
-  (let [id (or (:id data) (random-uuid))
-        temp-id (str "new-entity-" (random-uuid))
-        tx-data [(entity->tx entity-name (assoc data :id id) id temp-id)]]
-    (d/transact conn {:tx-data tx-data})
-    (let [new-db (d/db conn)
-          fields (get-entity-fields new-db entity-name)]
-      (pull-entity new-db entity-name id fields))))
+  (let [db (d/db conn)
+        field-specs (get-fields-with-specs db entity-name)]
+    (when (seq field-specs)
+      (sp/validate-required-fields! entity-name field-specs data))
+    (let [id (or (:id data) (random-uuid))
+          temp-id (str "new-entity-" (random-uuid))
+          tx-data [(entity->tx entity-name (assoc data :id id) id temp-id)]]
+      (d/transact conn {:tx-data tx-data})
+      (let [new-db (d/db conn)
+            fields (get-entity-fields new-db entity-name)]
+        (pull-entity new-db entity-name id fields)))))
 
 
 (defn- read-entity-impl
@@ -665,10 +685,12 @@
 
 
 (defn- update-entity-impl
-  "Updates an entity by id."
+  "Updates an entity by id.
+   Validates required fields after merging."
   [conn entity-name id data]
   (let [db (d/db conn)
         fields (get-entity-fields db entity-name)
+        field-specs (get-fields-with-specs db entity-name)
         id-attr (entity-attr entity-name :id)
         ;; Find entity id
         eid (ffirst (d/q {:find '[?e]
@@ -681,12 +703,14 @@
                        :entity entity-name
                        :id id})))
     (let [existing (pull-entity db entity-name id fields)
-          updated (merge existing data {:id id})
-          ;; Use actual entity id for update
-          tx-data [(entity->tx entity-name updated id eid)]]
-      (d/transact conn {:tx-data tx-data})
-      (let [new-db (d/db conn)]
-        (pull-entity new-db entity-name id fields)))))
+          updated (merge existing data {:id id})]
+      (when (seq field-specs)
+        (sp/validate-required-fields! entity-name field-specs updated))
+      ;; Use actual entity id for update
+      (let [tx-data [(entity->tx entity-name updated id eid)]]
+        (d/transact conn {:tx-data tx-data})
+        (let [new-db (d/db conn)]
+          (pull-entity new-db entity-name id fields))))))
 
 
 (defn- delete-entity-impl
@@ -834,6 +858,137 @@
                                                     db fn-id)))))]
             (recur (concat rest-to-visit ref-fn-ids)
                    (conj visited current-id))))))))
+
+
+;; === ExecutionGraph helpers ===
+
+(defn- collect-full-parent-chain
+  "Collects all fn-ids in the parent chain (including the fn itself).
+   Returns vector from child to root."
+  [db fn-id]
+  (loop [current-id fn-id
+         chain []]
+    (if-not current-id
+      chain
+      (recur (get-parent-fn-id db current-id)
+             (conj chain current-id)))))
+
+
+(defn- merge-arg-values-for-chain-impl
+  "Gets merged arg-values for a parent chain (child overrides parent).
+   Returns {arg-schema-id -> arg-value-map}."
+  [db chain]
+  (when (seq chain)
+    (let [;; Query all arg-values for the chain
+          arg-value-rows (d/q '[:find ?id ?owner-fn-id ?arg-schema-id ?value
+                                :in $ [?owner-id ...]
+                                :where
+                                [?e :arg-value/id ?id]
+                                [?e :arg-value/owner-fn-id ?owner-fn-id]
+                                [?e :arg-value/arg-schema-id ?arg-schema-id]
+                                [?e :arg-value/value ?value]]
+                              db (vec chain))
+          ;; Create position map for chain (lower = higher priority)
+          chain-pos (zipmap chain (range))
+          ;; Convert to arg-value maps
+          arg-values (map (fn [[id owner-fn-id arg-schema-id value]]
+                            {:id id
+                             :owner-fn-id owner-fn-id
+                             :arg-schema-id arg-schema-id
+                             :value value})
+                          arg-value-rows)]
+      ;; Group by arg-schema-id, pick the one with lowest chain position (closest to target fn)
+      (->> arg-values
+           (group-by :arg-schema-id)
+           (map (fn [[arg-schema-id avs]]
+                  [arg-schema-id (apply min-key #(get chain-pos (:owner-fn-id %) Integer/MAX_VALUE) avs)]))
+           (into {})))))
+
+
+(defn- extract-fn-refs-impl
+  "Extracts fn-id references from arg-values."
+  [db arg-values-map]
+  (let [parse-to-uuid (fn [v]
+                        (cond
+                          (uuid? v) v
+                          (string? v) (try (parse-uuid v) (catch Exception _ nil))
+                          :else nil))
+        uuid-values (->> (vals arg-values-map)
+                         (map :value)
+                         (map parse-to-uuid)
+                         (filter some?)
+                         (distinct)
+                         (vec))]
+    (if (empty? uuid-values)
+      #{}
+      (let [results (d/q '[:find ?fn-id
+                           :in $ [?fn-id ...]
+                           :where
+                           [?e :fn/id ?fn-id]]
+                         db uuid-values)]
+        (set (map first results))))))
+
+
+(defn- resolve-execution-graph-impl
+  "Resolves complete execution graph for a function.
+   Uses BFS to collect all transitively referenced functions."
+  [conn fn-id]
+  (let [db (d/db conn)
+        ;; Check if fn exists
+        exists? (seq (d/q '[:find ?e
+                            :in $ ?fn-id
+                            :where
+                            [?e :fn/id ?fn-id]]
+                          db fn-id))]
+    (when-not exists?
+      (throw (ex-info "Function not found"
+                      {:type :not-found
+                       :fn-id fn-id})))
+    (loop [to-visit #{fn-id}
+           visited #{}
+           fns {}
+           fn-schemas {}
+           arg-schemas {}
+           resolved-args {}]
+      (if (empty? to-visit)
+        {:fns fns
+         :fn-schemas fn-schemas
+         :arg-schemas arg-schemas
+         :resolved-args resolved-args}
+        (let [current-fn-id (first to-visit)
+              rest-to-visit (disj to-visit current-fn-id)]
+          (if (contains? visited current-fn-id)
+            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args)
+            (let [fn-fields (get-entity-fields db :fn)
+                  fn-rec (pull-entity db :fn current-fn-id fn-fields)]
+              (if-not fn-rec
+                (recur rest-to-visit (conj visited current-fn-id)
+                       fns fn-schemas arg-schemas resolved-args)
+                (let [fn-schema-id (:fn-schema-id fn-rec)
+                      ;; Load fn-schema if not already loaded
+                      fn-schema (or (get fn-schemas fn-schema-id)
+                                    (let [schema-fields (get-entity-fields db :fn-schema)]
+                                      (pull-entity db :fn-schema fn-schema-id schema-fields)))
+                      ;; Load arg-schemas if not already loaded
+                      new-arg-schemas (if (contains? fn-schemas fn-schema-id)
+                                        {}
+                                        (->> (query-entities-impl conn :arg-schema {:fn-schema-id fn-schema-id})
+                                             (map (juxt :id identity))
+                                             (into {})))
+                      ;; Get parent chain and merge arg-values
+                      chain (collect-full-parent-chain db current-fn-id)
+                      merged-args (merge-arg-values-for-chain-impl db chain)
+                      ;; Find referenced fns
+                      ref-fn-ids (extract-fn-refs-impl db merged-args)
+                      new-to-visit (set/difference ref-fn-ids visited)]
+                  (recur (set/union rest-to-visit new-to-visit)
+                         (conj visited current-fn-id)
+                         (assoc fns current-fn-id fn-rec)
+                         (if fn-schema
+                           (assoc fn-schemas fn-schema-id fn-schema)
+                           fn-schemas)
+                         (merge arg-schemas new-arg-schemas)
+                         (assoc resolved-args current-fn-id merged-args)))))))))))
 
 
 (defn- validate-parent-same-schema-impl!
@@ -1086,7 +1241,16 @@
     [_this owner-fn-id value-fn-id]
     (locking lock
       (when-let [conn @conn-atom]
-        (validate-no-dependency-cycle-impl! (d/db conn) owner-fn-id value-fn-id)))))
+        (validate-no-dependency-cycle-impl! (d/db conn) owner-fn-id value-fn-id))))
+
+
+  sp/ExecutionGraph
+
+  (resolve-execution-graph
+    [_this fn-id]
+    (locking lock
+      (when-let [conn @conn-atom]
+        (resolve-execution-graph-impl conn fn-id)))))
 
 
 (defn create-storage

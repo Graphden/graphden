@@ -270,14 +270,17 @@
 
 (defn- resolve-execution-graph-impl
   "Resolves execution graph starting from fn-id.
-   Uses BFS to collect all transitively referenced functions."
+   Uses BFS to collect all transitively referenced functions.
+   Throws if iteration count exceeds sp/max-graph-iterations."
   [state fn-id]
   (loop [to-visit #{fn-id}
          visited #{}
          fns {}
          fn-schemas {}
          arg-schemas {}
-         resolved-args {}]
+         resolved-args {}
+         iter-count 0]
+    (sp/check-graph-iteration-limit! iter-count fn-id)
     (if (empty? to-visit)
       {:fns fns
        :fn-schemas fn-schemas
@@ -286,12 +289,14 @@
       (let [current-fn-id (first to-visit)
             rest-to-visit (disj to-visit current-fn-id)]
         (if (contains? visited current-fn-id)
-          (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args)
+          (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args
+                 (inc iter-count))
           (let [fn-rec (get-record state :fn current-fn-id)]
             (if-not fn-rec
               ;; fn doesn't exist, skip (might be literal value that looks like UUID)
               (recur rest-to-visit (conj visited current-fn-id)
-                     fns fn-schemas arg-schemas resolved-args)
+                     fns fn-schemas arg-schemas resolved-args
+                     (inc iter-count))
               (let [fn-schema-id (:fn-schema-id fn-rec)
                     fn-schema (get-record state :fn-schema fn-schema-id)
                     ;; Get arg-schemas for this fn-schema if not already loaded
@@ -313,7 +318,8 @@
                          (assoc fn-schemas fn-schema-id fn-schema)
                          fn-schemas)
                        (merge arg-schemas new-arg-schemas)
-                       (assoc resolved-args current-fn-id merged-args))))))))))
+                       (assoc resolved-args current-fn-id merged-args)
+                       (inc iter-count))))))))))
 
 
 (defn- do-initialize

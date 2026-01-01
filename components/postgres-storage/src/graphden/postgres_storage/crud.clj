@@ -237,24 +237,13 @@
            (into {})))))
 
 
-(defn- try-parse-uuid
-  "Attempts to parse value as UUID. Returns UUID or nil."
-  [v]
-  (cond
-    (uuid? v) v
-    (string? v) (try
-                  (java.util.UUID/fromString v)
-                  (catch Exception _ nil))
-    :else nil))
-
-
 (defn- extract-fn-refs
   "Extracts fn-id references from arg-values.
    A value is a fn-ref if it's a UUID (or parseable as UUID) and exists in fn table."
   [ds arg-values-map]
   (let [uuid-values (->> (vals arg-values-map)
                          (map :value)
-                         (keep try-parse-uuid)
+                         (keep sp/try-parse-uuid)
                          (distinct)
                          (vec))]
     (if (empty? uuid-values)
@@ -271,7 +260,8 @@
 
 (defn resolve-execution-graph
   "Resolves complete execution graph for a function.
-   Uses BFS to collect all transitively referenced functions."
+   Uses BFS to collect all transitively referenced functions.
+   Throws if iteration count exceeds sp/max-graph-iterations."
   [ds fn-id]
   (let [root-fn (read-entity ds :fn fn-id)]
     (when-not root-fn
@@ -283,7 +273,9 @@
            fns {}
            fn-schemas {}
            arg-schemas {}
-           resolved-args {}]
+           resolved-args {}
+           iter-count 0]
+      (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
         {:fns fns
          :fn-schemas fn-schemas
@@ -292,12 +284,14 @@
         (let [current-fn-id (first to-visit)
               rest-to-visit (disj to-visit current-fn-id)]
           (if (contains? visited current-fn-id)
-            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args)
+            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args
+                   (inc iter-count))
             (let [fn-rec (or (get fns current-fn-id)
                              (read-entity ds :fn current-fn-id))]
               (if-not fn-rec
                 (recur rest-to-visit (conj visited current-fn-id)
-                       fns fn-schemas arg-schemas resolved-args)
+                       fns fn-schemas arg-schemas resolved-args
+                       (inc iter-count))
                 (let [fn-schema-id (:fn-schema-id fn-rec)
                       ;; Load fn-schema if not already loaded
                       fn-schema (or (get fn-schemas fn-schema-id)
@@ -321,4 +315,5 @@
                            (assoc fn-schemas fn-schema-id fn-schema)
                            fn-schemas)
                          (merge arg-schemas new-arg-schemas)
-                         (assoc resolved-args current-fn-id merged-args)))))))))))
+                         (assoc resolved-args current-fn-id merged-args)
+                         (inc iter-count)))))))))))

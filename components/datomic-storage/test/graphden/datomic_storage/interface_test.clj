@@ -1319,3 +1319,69 @@
             (is (= (str (:id const-5)) (str (:value (get args (:id add-arg-b)))))))
           (finally
             (sp/close storage)))))))
+
+
+(deftest collect-dependency-chain-with-cycle-test
+  (testing "collect-dependency-chain handles mutual dependency (A -> B -> A)"
+    ;; This tests the 'already visited' branch at line 833
+    (let [storage (create-test-storage)
+          schema (make-graph-schema)
+          _ (sp/initialize storage schema)
+          fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+          fn-a-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+          fn-b-id #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
+          arg-schema-a-id #uuid "dddddddd-dddd-dddd-dddd-dddddddddddd"
+          arg-schema-b-id #uuid "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
+          _ (sp/create-entity storage :fn-schema {:id fn-schema-id :name "test" :returned-type "int"})
+          _ (sp/create-entity storage :arg-schema {:id arg-schema-a-id :fn-schema-id fn-schema-id
+                                                   :name "ref-a" :type "ref" :required false})
+          _ (sp/create-entity storage :arg-schema {:id arg-schema-b-id :fn-schema-id fn-schema-id
+                                                   :name "ref-b" :type "ref" :required false})
+          _ (sp/create-entity storage :fn {:id fn-a-id :name "fn-a" :fn-schema-id fn-schema-id})
+          _ (sp/create-entity storage :fn {:id fn-b-id :name "fn-b" :fn-schema-id fn-schema-id})
+          ;; Create mutual dependency: a -> b
+          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-a-id
+                                                  :arg-schema-id arg-schema-a-id
+                                                  :value (str fn-b-id)})
+          ;; b -> a (creating cycle)
+          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-b-id
+                                                  :arg-schema-id arg-schema-b-id
+                                                  :value (str fn-a-id)})]
+      (try
+        ;; Test validate-no-dependency-cycle! which uses collect-dependency-chain
+        ;; When checking if we can add a dependency from X to fn-a,
+        ;; it will traverse fn-a's dependencies: fn-a -> fn-b -> fn-a (cycle, revisit)
+        (let [new-fn-id #uuid "ffffffff-ffff-ffff-ffff-ffffffffffff"
+              _ (sp/create-entity storage :fn {:id new-fn-id :name "fn-new" :fn-schema-id fn-schema-id})]
+          ;; This should not throw because new-fn is not in fn-a's dependency chain
+          ;; But it will exercise the "already visited" branch when traversing the cycle
+          (is (nil? (sp/validate-no-dependency-cycle! storage new-fn-id fn-a-id))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest resolve-execution-graph-with-deleted-ref-test
+  (testing "handles fn deleted during graph traversal (covers line 956)"
+    ;; This tests when a referenced fn doesn't exist
+    (let [storage (create-test-storage)
+          schema (make-graph-schema)
+          _ (sp/initialize storage schema)
+          fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+          fn-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+          arg-schema-id #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
+          non-existent-fn-id #uuid "99999999-9999-9999-9999-999999999999"
+          _ (sp/create-entity storage :fn-schema {:id fn-schema-id :name "test" :returned-type "int"})
+          _ (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id fn-schema-id
+                                                   :name "ref" :type "ref" :required false})
+          _ (sp/create-entity storage :fn {:id fn-id :name "test-fn" :fn-schema-id fn-schema-id})
+          ;; Create arg-value referencing non-existent fn
+          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-id
+                                                  :arg-schema-id arg-schema-id
+                                                  :value (str non-existent-fn-id)})]
+      (try
+        ;; resolve-execution-graph should skip the non-existent fn
+        (let [graph (sp/resolve-execution-graph storage fn-id)]
+          (is (= 1 (count (:fns graph))))
+          (is (contains? (:fns graph) fn-id)))
+        (finally
+          (sp/close storage))))))

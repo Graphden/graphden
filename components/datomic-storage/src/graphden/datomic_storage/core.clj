@@ -838,17 +838,10 @@
                                   [?e :arg-value/owner-fn-id ?owner-id]
                                   [?e :arg-value/value ?value]]
                                 db current-id)
-                ;; Parse value to UUID (handles both UUID and string UUID)
-                parse-to-uuid (fn [v]
-                                (cond
-                                  (uuid? v) v
-                                  (string? v) (try (parse-uuid v) (catch Exception _ nil))
-                                  :else nil))
                 ;; Get fn references from arg-values (UUIDs that are fn refs)
                 ref-fn-ids (->> arg-values
                                 (map first)
-                                (map parse-to-uuid)
-                                (filter some?)
+                                (keep sp/try-parse-uuid)
                                 ;; Check if this UUID is actually a fn
                                 (filter (fn [fn-id]
                                           (seq (d/q '[:find ?e
@@ -908,15 +901,9 @@
 (defn- extract-fn-refs-impl
   "Extracts fn-id references from arg-values."
   [db arg-values-map]
-  (let [parse-to-uuid (fn [v]
-                        (cond
-                          (uuid? v) v
-                          (string? v) (try (parse-uuid v) (catch Exception _ nil))
-                          :else nil))
-        uuid-values (->> (vals arg-values-map)
+  (let [uuid-values (->> (vals arg-values-map)
                          (map :value)
-                         (map parse-to-uuid)
-                         (filter some?)
+                         (keep sp/try-parse-uuid)
                          (distinct)
                          (vec))]
     (if (empty? uuid-values)
@@ -931,7 +918,8 @@
 
 (defn- resolve-execution-graph-impl
   "Resolves complete execution graph for a function.
-   Uses BFS to collect all transitively referenced functions."
+   Uses BFS to collect all transitively referenced functions.
+   Throws if iteration count exceeds sp/max-graph-iterations."
   [conn fn-id]
   (let [db (d/db conn)
         ;; Check if fn exists
@@ -949,7 +937,9 @@
            fns {}
            fn-schemas {}
            arg-schemas {}
-           resolved-args {}]
+           resolved-args {}
+           iter-count 0]
+      (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
         {:fns fns
          :fn-schemas fn-schemas
@@ -958,12 +948,14 @@
         (let [current-fn-id (first to-visit)
               rest-to-visit (disj to-visit current-fn-id)]
           (if (contains? visited current-fn-id)
-            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args)
+            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args
+                   (inc iter-count))
             (let [fn-fields (get-entity-fields db :fn)
                   fn-rec (pull-entity db :fn current-fn-id fn-fields)]
               (if-not fn-rec
                 (recur rest-to-visit (conj visited current-fn-id)
-                       fns fn-schemas arg-schemas resolved-args)
+                       fns fn-schemas arg-schemas resolved-args
+                       (inc iter-count))
                 (let [fn-schema-id (:fn-schema-id fn-rec)
                       ;; Load fn-schema if not already loaded
                       fn-schema (or (get fn-schemas fn-schema-id)
@@ -988,7 +980,8 @@
                            (assoc fn-schemas fn-schema-id fn-schema)
                            fn-schemas)
                          (merge arg-schemas new-arg-schemas)
-                         (assoc resolved-args current-fn-id merged-args)))))))))))
+                         (assoc resolved-args current-fn-id merged-args)
+                         (inc iter-count)))))))))))
 
 
 (defn- validate-parent-same-schema-impl!

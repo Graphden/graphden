@@ -98,6 +98,63 @@
 
 ;; === Thunk Building ===
 
+(defn- validate-provided-arg-type!
+  "Validates that a provided argument matches the expected arg-schema type.
+   Throws ExceptionInfo if type mismatch detected.
+   Note: This is a runtime check for common type mismatches."
+  [provided-value arg-schema]
+  (let [arg-type (:type arg-schema)
+        arg-name (:name arg-schema)]
+    (cond
+      ;; :fn type expects a UUID (function reference)
+      (and (= arg-type :fn) (not (uuid? provided-value)))
+      (throw (ex-info "Provided arg for :fn type must be a UUID (function reference)"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :fn
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :ref type expects a UUID
+      (and (= arg-type :ref) (not (uuid? provided-value)))
+      (throw (ex-info "Provided arg for :ref type must be a UUID"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :ref
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :int type expects an integer
+      (and (= arg-type :int) (not (int? provided-value)))
+      (throw (ex-info "Provided arg for :int type must be an integer"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :int
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :bool type expects a boolean
+      (and (= arg-type :bool) (not (boolean? provided-value)))
+      (throw (ex-info "Provided arg for :bool type must be a boolean"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :bool
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :text type expects a string
+      (and (= arg-type :text) (not (string? provided-value)))
+      (throw (ex-info "Provided arg for :text type must be a string"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :text
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; Other types: no strict validation (numeric, jsonb, union, etc.)
+      :else nil)))
+
+
 (defn- build-thunk
   "Builds a thunk for an arg-value.
    - If value is a UUID and arg-schema type is not :fn -> FnRefThunk
@@ -109,7 +166,9 @@
         arg-schema-id (:id arg-schema)]
     ;; Check if there's a provided arg that overrides this
     (if-let [provided-value (get provided-args arg-schema-id)]
-      (->LiteralThunk provided-value)
+      (do
+        (validate-provided-arg-type! provided-value arg-schema)
+        (->LiteralThunk provided-value))
       ;; No override, use the stored value
       (cond
         ;; UUID value means reference to another fn

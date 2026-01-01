@@ -1046,7 +1046,9 @@
                                                  :password password})]
             (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN is_active boolean"])
             (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN amount numeric"])
-            (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN data bytea"])))
+            (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN data bytea"])
+            (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN big_count bigint"])
+            (jdbc/execute! conn ["ALTER TABLE test_entity ADD COLUMN updated_at timestamp with time zone"])))
         (let [current-columns-fn #'introspection/current-columns
               pool (:pool storage)
               columns (current-columns-fn pool "test_entity")]
@@ -1055,7 +1057,11 @@
           ;; numeric stays as :numeric
           (is (= :numeric (:type (:amount columns))))
           ;; bytea maps to :bytes
-          (is (= :bytes (:type (:data columns)))))
+          (is (= :bytes (:type (:data columns))))
+          ;; bigint maps to :int
+          (is (= :int (:type (:big-count columns))))
+          ;; timestamp with time zone maps to :timestamptz
+          (is (= :timestamptz (:type (:updated-at columns)))))
         (finally
           (sp/close storage))))))
 
@@ -2537,5 +2543,171 @@
           (let [args (get (:resolved-args graph) (:id rec-fn))]
             (is (= (str (:id rec-fn)) (str (:value (get args (:id arg-self))))))
             (is (= 5 (:value (get args (:id arg-n)))))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest resolve-execution-graph-dangling-ref-test
+  (testing "handles arg-value referencing non-existent fn (dangling reference)"
+    (let [storage (create-test-storage)]
+      (try
+        (sp/initialize storage (make-graph-schema))
+        (let [pool (:pool storage)
+              ;; Create a fn-schema
+              fn-schema (crud/create-entity pool :fn-schema
+                                            {:name "test-fn"
+                                             :returned-type "int"}
+                                            nil)
+              ;; Create an arg-schema for a :ref type argument
+              arg-ref (crud/create-entity pool :arg-schema
+                                          {:fn-schema-id (:id fn-schema)
+                                           :name "ref-arg"
+                                           :type "ref"
+                                           :required false}
+                                          nil)
+              ;; Create a fn
+              fn-rec (crud/create-entity pool :fn
+                                         {:name "fn-with-dangling-ref"
+                                          :fn-schema-id (:id fn-schema)}
+                                         nil)
+              ;; Create an arg-value that references a non-existent fn
+              ;; This UUID is valid but doesn't exist in the fn table
+              non-existent-fn-id #uuid "99999999-9999-9999-9999-999999999999"
+              _ (crud/create-entity pool :arg-value
+                                    {:owner-fn-id (:id fn-rec)
+                                     :arg-schema-id (:id arg-ref)
+                                     :value non-existent-fn-id}
+                                    nil)
+              ;; Resolve should succeed but skip the dangling reference
+              graph (sp/resolve-execution-graph storage (:id fn-rec))]
+          ;; Should only have 1 fn (the dangling reference is skipped)
+          (is (= 1 (count (:fns graph))))
+          (is (contains? (:fns graph) (:id fn-rec)))
+          ;; The arg-value should still be present with the non-existent ref
+          ;; JSONB stores UUIDs as strings
+          (let [args (get (:resolved-args graph) (:id fn-rec))]
+            (is (= (str non-existent-fn-id) (str (:value (get args (:id arg-ref))))))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Mock-based coverage tests ===
+
+(deftest delete-entity-nil-update-count-test
+  (testing "delete-entity handles nil update-count via or fallback"
+    ;; This tests line 168: (pos? (or (:next.jdbc/update-count result) 0))
+    ;; where jdbc returns a result without :next.jdbc/update-count
+    (let [delete-entity-fn #'crud/delete-entity
+          ;; Mock jdbc/execute-one! to return empty map (no update-count key)
+          original-execute-one! jdbc/execute-one!]
+      (with-redefs [jdbc/execute-one! (fn [ds query & opts]
+                                        ;; Return empty map without :next.jdbc/update-count
+                                        {})]
+        (is (false? (delete-entity-fn nil :test-entity (random-uuid))))))))
+
+
+(deftest resolve-execution-graph-fn-deleted-during-traversal-test
+  (testing "handles fn deleted during graph traversal (covers line 292)"
+    ;; This tests the case where a fn reference exists but the fn is deleted
+    ;; between extract-fn-refs check and read-entity call
+    (let [storage (create-test-storage)]
+      (try
+        (sp/initialize storage (make-graph-schema))
+        (let [pool (:pool storage)
+              ;; Create fn-schema
+              fn-schema (crud/create-entity pool :fn-schema
+                                            {:name "test-fn"
+                                             :returned-type "int"}
+                                            nil)
+              arg-ref (crud/create-entity pool :arg-schema
+                                          {:fn-schema-id (:id fn-schema)
+                                           :name "ref-arg"
+                                           :type "ref"
+                                           :required false}
+                                          nil)
+              ;; Create main fn
+              main-fn (crud/create-entity pool :fn
+                                          {:name "main-fn"
+                                           :fn-schema-id (:id fn-schema)}
+                                          nil)
+              ;; Create referenced fn (will be "deleted" via mock)
+              ref-fn (crud/create-entity pool :fn
+                                         {:name "ref-fn"
+                                          :fn-schema-id (:id fn-schema)}
+                                         nil)
+              ;; Create arg-value pointing to ref-fn
+              _ (crud/create-entity pool :arg-value
+                                    {:owner-fn-id (:id main-fn)
+                                     :arg-schema-id (:id arg-ref)
+                                     :value (:id ref-fn)}
+                                    nil)
+              ;; Save original read-entity
+              original-read-entity crud/read-entity
+              call-count (atom 0)]
+          ;; Mock read-entity to return nil for ref-fn on second call
+          ;; (first call is for main-fn, second is for ref-fn)
+          (with-redefs [crud/read-entity (fn [ds entity-name id]
+                                           (if (and (= entity-name :fn)
+                                                    (= id (:id ref-fn)))
+                                             ;; Simulate deleted fn
+                                             nil
+                                             (original-read-entity ds entity-name id)))]
+            (let [graph (sp/resolve-execution-graph storage (:id main-fn))]
+              ;; main-fn should be in graph, ref-fn should be skipped
+              (is (= 1 (count (:fns graph))))
+              (is (contains? (:fns graph) (:id main-fn)))
+              (is (not (contains? (:fns graph) (:id ref-fn)))))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest merge-arg-values-unknown-owner-test
+  (testing "merge-arg-values handles arg-value with owner not in chain (covers line 236)"
+    ;; This tests the Integer/MAX_VALUE fallback in min-key
+    (let [storage (create-test-storage)]
+      (try
+        (sp/initialize storage (make-graph-schema))
+        (let [pool (:pool storage)
+              ;; Create fn-schema with arg
+              fn-schema (crud/create-entity pool :fn-schema
+                                            {:name "test-fn"
+                                             :returned-type "int"}
+                                            nil)
+              arg-schema (crud/create-entity pool :arg-schema
+                                             {:fn-schema-id (:id fn-schema)
+                                              :name "x"
+                                              :type "int"
+                                              :required false}
+                                             nil)
+              ;; Create fn
+              fn-rec (crud/create-entity pool :fn
+                                         {:name "test-fn-instance"
+                                          :fn-schema-id (:id fn-schema)}
+                                         nil)
+              ;; Create arg-value
+              _ (crud/create-entity pool :arg-value
+                                    {:owner-fn-id (:id fn-rec)
+                                     :arg-schema-id (:id arg-schema)
+                                     :value 42}
+                                    nil)
+              ;; Mock jdbc/execute! to inject an extra arg-value with unknown owner
+              unknown-owner-id (random-uuid)
+              original-execute! jdbc/execute!
+              merge-arg-values-fn #'crud/merge-arg-values-for-chain]
+          ;; Call merge-arg-values-for-chain with mocked data
+          (with-redefs [jdbc/execute! (fn [ds query & opts]
+                                        (let [result (apply original-execute! ds query opts)]
+                                          ;; If this is the arg_value query, add an extra row
+                                          (if (and (string? (first query))
+                                                   (str/includes? (first query) "arg_value"))
+                                            (conj result
+                                                  {:id (random-uuid)
+                                                   :owner_fn_id unknown-owner-id
+                                                   :arg_schema_id (:id arg-schema)
+                                                   :value 999})
+                                            result)))]
+            (let [result (merge-arg-values-fn pool [(:id fn-rec)])]
+              ;; The arg-value with known owner should win (lower chain position)
+              (is (= 42 (:value (get result (:id arg-schema))))))))
         (finally
           (sp/close storage))))))

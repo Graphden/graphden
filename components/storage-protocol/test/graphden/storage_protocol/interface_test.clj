@@ -465,4 +465,82 @@
       (catch clojure.lang.ExceptionInfo e
         (is (= :validation-error/required-field-missing (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
-        (is (= :email (:field (ex-data e))))))))
+        (is (= :email (:field (ex-data e)))))))
+
+  (testing "multiple fields - some nullable, some not, iterating through all"
+    ;; This exercises more paths through the doseq
+    (let [fields {:id {:type :uuid :nullable? false}    ; skipped (is :id)
+                  :name {:type :text :nullable? false}  ; required
+                  :bio {:type :text :nullable? true}    ; nullable
+                  :email {:type :text :nullable? false} ; required
+                  :avatar {:type :text :nullable? true}} ; nullable
+          data {:name "Alice" :email "alice@example.com"}] ; bio and avatar missing but nullable
+      (is (nil? (storage/validate-required-fields! :user fields data)))))
+
+  (testing "field with nil nullable spec is treated as required"
+    ;; When :nullable? is missing from field-spec, (not (:nullable? field-spec)) = (not nil) = true
+    (let [fields {:name {:type :text}}  ; no :nullable? key
+          data {}]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Required field 'name' is missing or nil"
+            (storage/validate-required-fields! :user fields data)))))
+
+  (testing "empty fields map passes with any data"
+    (is (nil? (storage/validate-required-fields! :user {} {:foo "bar"}))))
+
+  (testing "empty data with only nullable fields passes"
+    (let [fields {:bio {:type :text :nullable? true}
+                  :avatar {:type :text :nullable? true}}]
+      (is (nil? (storage/validate-required-fields! :user fields {}))))))
+
+
+;; === check-graph-iteration-limit! tests ===
+
+(deftest check-graph-iteration-limit!-test
+  (testing "under limit doesn't throw"
+    (is (nil? (storage/check-graph-iteration-limit! 0 (random-uuid))))
+    (is (nil? (storage/check-graph-iteration-limit! 100 (random-uuid))))
+    (is (nil? (storage/check-graph-iteration-limit! 9999 (random-uuid))))
+    (is (nil? (storage/check-graph-iteration-limit! storage/max-graph-iterations (random-uuid)))))
+
+  (testing "over limit throws"
+    (let [fn-id (random-uuid)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"exceeded maximum iterations"
+            (storage/check-graph-iteration-limit! (inc storage/max-graph-iterations) fn-id)))))
+
+  (testing "exception contains correct data"
+    (let [fn-id (random-uuid)]
+      (try
+        (storage/check-graph-iteration-limit! 10001 fn-id)
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/graph-too-large (:type (ex-data e))))
+          (is (= fn-id (:fn-id (ex-data e))))
+          (is (= storage/max-graph-iterations (:max-iterations (ex-data e))))
+          (is (= 10001 (:iteration-count (ex-data e)))))))))
+
+
+;; === try-parse-uuid tests ===
+
+(deftest try-parse-uuid-test
+  (testing "returns UUID for UUID input"
+    (let [u (random-uuid)]
+      (is (= u (storage/try-parse-uuid u)))))
+
+  (testing "returns UUID for valid UUID string"
+    (let [u (random-uuid)
+          s (str u)]
+      (is (= u (storage/try-parse-uuid s)))))
+
+  (testing "returns nil for invalid UUID string"
+    (is (nil? (storage/try-parse-uuid "not-a-uuid")))
+    (is (nil? (storage/try-parse-uuid "12345")))
+    (is (nil? (storage/try-parse-uuid ""))))
+
+  (testing "returns nil for non-string, non-UUID values"
+    (is (nil? (storage/try-parse-uuid 12345)))
+    (is (nil? (storage/try-parse-uuid nil)))
+    (is (nil? (storage/try-parse-uuid :keyword)))
+    (is (nil? (storage/try-parse-uuid [1 2 3])))))

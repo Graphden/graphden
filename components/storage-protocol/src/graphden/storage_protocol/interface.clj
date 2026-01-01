@@ -274,6 +274,41 @@
      Throws ExceptionInfo with :type :not-found if fn-id doesn't exist."))
 
 
+;; === Execution graph limits ===
+
+(def max-graph-iterations
+  "Maximum number of iterations when resolving execution graph.
+   Prevents infinite loops in case of data inconsistencies.
+   Default: 10000 (enough for complex graphs, catches runaway loops)."
+  10000)
+
+
+(defn check-graph-iteration-limit!
+  "Checks if iteration count exceeds the limit.
+   Throws ExceptionInfo if limit is exceeded."
+  [iteration-count fn-id]
+  (when (> iteration-count max-graph-iterations)
+    (throw (ex-info "Execution graph resolution exceeded maximum iterations"
+                    {:type :execution-error/graph-too-large
+                     :fn-id fn-id
+                     :max-iterations max-graph-iterations
+                     :iteration-count iteration-count}))))
+
+
+;; === UUID parsing ===
+
+(defn try-parse-uuid
+  "Attempts to parse value as UUID. Returns UUID or nil.
+   Handles UUIDs, UUID strings, and returns nil for non-UUID values."
+  [v]
+  (cond
+    (uuid? v) v
+    (string? v) (try
+                  (java.util.UUID/fromString v)
+                  (catch Exception _ nil))
+    :else nil))
+
+
 ;; === Type compatibility ===
 
 (def type-widening

@@ -70,9 +70,11 @@
 
 
 (defn- maybe-wrap-jsonb
-  "Wraps value as JSONB if column is known to be JSONB type."
+  "Wraps value as JSONB if column is known to be JSONB type.
+   Returns nil as-is (SQL NULL) rather than converting to JSON null."
   [col-name v]
   (if (and (contains? jsonb-columns col-name)
+           (some? v)
            (not (instance? PGobject v)))
     (value->jsonb v)
     v))

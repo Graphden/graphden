@@ -102,6 +102,19 @@
               result)))))
 
 
+(defn- extract-entity-fields
+  "Extracts field specs for an entity from cached metadata.
+   Returns a map of field-name -> {:type type :nullable? nullable?}."
+  [cached-metadata entity-name]
+  (when cached-metadata
+    (->> (:fields cached-metadata)
+         (vals)
+         (filter #(= (:entity %) entity-name))
+         (map (fn [{:keys [field nullable?] field-type :type}]
+                [field {:type field-type :nullable? nullable?}]))
+         (into {}))))
+
+
 (defrecord PostgresStorage
   [pool metadata-cache lock]
 
@@ -165,13 +178,7 @@
   (create-entity
     [_this entity-name data]
     (let [cached-metadata (get-cached-metadata pool metadata-cache lock)
-          fields (when cached-metadata
-                   (->> (:fields cached-metadata)
-                        (vals)
-                        (filter #(= (:entity %) entity-name))
-                        (map (fn [{:keys [field nullable?] field-type :type}]
-                               [field {:type field-type :nullable? nullable?}]))
-                        (into {})))]
+          fields (extract-entity-fields cached-metadata entity-name)]
       (crud/create-entity pool entity-name data fields)))
 
 
@@ -183,13 +190,7 @@
   (update-entity
     [_this entity-name id data]
     (let [cached-metadata (get-cached-metadata pool metadata-cache lock)
-          fields (when cached-metadata
-                   (->> (:fields cached-metadata)
-                        (vals)
-                        (filter #(= (:entity %) entity-name))
-                        (map (fn [{:keys [field nullable?] field-type :type}]
-                               [field {:type field-type :nullable? nullable?}]))
-                        (into {})))]
+          fields (extract-entity-fields cached-metadata entity-name)]
       (crud/update-entity pool entity-name id data fields)))
 
 

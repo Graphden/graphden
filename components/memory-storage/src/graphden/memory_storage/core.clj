@@ -18,7 +18,8 @@
            {:fields (into {}
                           (for [[field-name field-spec] (ds/entity-fields schema entity-name)]
                             [field-name {:type (:type field-spec)
-                                         :nullable? (get field-spec :nullable? false)}]))}])))
+                                         :nullable? (get field-spec :nullable? false)}]))
+            :constraints (ds/entity-constraints schema entity-name)}])))
 
 
 (defn- build-enums-structure
@@ -134,6 +135,29 @@
     (sp/validate-required-fields! entity-name fields data)))
 
 
+(defn- validate-unique-constraints!
+  "Validates unique constraints for an entity.
+   Checks that the data doesn't violate any unique constraints.
+   exclude-id: optional id to exclude from check (for updates)."
+  [state entity-name data exclude-id]
+  (let [constraints (get-in state [:entities entity-name :constraints])
+        existing-records (vals (get-in state [:data entity-name] {}))]
+    (doseq [{constraint-type :type constraint-fields :fields} constraints]
+      (when (= constraint-type :unique)
+        (let [new-values (mapv #(get data %) constraint-fields)
+              ;; Only check if all fields are present in data
+              all-present? (every? some? new-values)]
+          (when all-present?
+            (doseq [record existing-records]
+              (when (and (not= (:id record) exclude-id)
+                         (= new-values (mapv #(get record %) constraint-fields)))
+                (throw (ex-info "Unique constraint violation"
+                                {:type :constraint-violation/unique
+                                 :entity entity-name
+                                 :fields constraint-fields
+                                 :values new-values}))))))))))
+
+
 (defn- get-entity-data
   "Gets all records for an entity from state."
   [state entity-name]
@@ -162,71 +186,64 @@
     existed?))
 
 
-;; === GraphConstraints helpers ===
+;; === ConstraintHelpers implementation for Memory storage ===
 
-(defn- get-fn-schema-id
-  "Gets fn-schema-id for a fn record."
-  [state fn-id]
-  (:fn-schema-id (get-record state :fn fn-id)))
+(defrecord MemoryConstraintHelpers
+  [state-atom]
 
+  sp/ConstraintHelpers
 
-(defn- get-parent-fn-id
-  "Gets parent-fn-id for a fn record."
-  [state fn-id]
-  (:parent-fn-id (get-record state :fn fn-id)))
+  (get-fn-schema-id-for-fn
+    [_this fn-id]
+    (:fn-schema-id (get-record @state-atom :fn fn-id)))
 
 
-(defn- get-arg-schema-fn-schema-id
-  "Gets fn-schema-id for an arg-schema record."
-  [state arg-schema-id]
-  (:fn-schema-id (get-record state :arg-schema arg-schema-id)))
+  (get-fn-schema-id-for-arg-schema
+    [_this arg-schema-id]
+    (:fn-schema-id (get-record @state-atom :arg-schema arg-schema-id)))
 
 
-(defn- collect-parent-chain
-  "Collects all ancestor fn-ids by following parent-fn-id links.
-   Returns a set of fn-ids (not including the starting fn-id)."
-  [state fn-id]
-  (loop [current-id (get-parent-fn-id state fn-id)
-         ancestor-ids #{}]
-    (if (or (nil? current-id) (contains? ancestor-ids current-id))
-      ancestor-ids
-      (recur (get-parent-fn-id state current-id)
-             (conj ancestor-ids current-id)))))
+  (get-parent-fn-id
+    [_this fn-id]
+    (:parent-fn-id (get-record @state-atom :fn fn-id)))
 
 
-(defn- collect-arg-schema-ids-in-chain
-  "Collects all arg-schema-ids defined in the parent chain (not including fn-id itself)."
-  [state fn-id]
-  (let [ancestor-ids (collect-parent-chain state fn-id)]
-    (->> (get-entity-data state :arg-value)
-         (vals)
-         (filter #(contains? ancestor-ids (:owner-fn-id %)))
-         (map :arg-schema-id)
-         (set))))
+  (collect-parent-chain
+    [this fn-id]
+    (sp/collect-parent-chain-impl this fn-id))
 
 
-(defn- collect-dependency-chain
-  "Collects all fn-ids that owner-fn depends on through arg-values.
-   DFS traversal of value refs."
-  [state owner-fn-id]
-  (loop [to-visit [owner-fn-id]
-         visited #{}]
-    (if (empty? to-visit)
-      visited
-      (let [current-id (first to-visit)
-            rest-to-visit (rest to-visit)]
-        (if (contains? visited current-id)
-          (recur rest-to-visit visited)
-          (let [arg-values (filter #(= (:owner-fn-id %) current-id)
-                                   (vals (get-entity-data state :arg-value)))
-                ;; Get fn references from arg-values (UUIDs that are fn refs)
-                ref-fn-ids (->> arg-values
-                                (map :value)
-                                (filter uuid?)
-                                ;; Check if this UUID is actually a fn
-                                (filter #(some? (get-record state :fn %))))]
-            (recur (concat rest-to-visit ref-fn-ids)
-                   (conj visited current-id))))))))
+  (collect-arg-schema-ids-in-chain
+    [this fn-id]
+    (let [ancestor-ids (sp/collect-parent-chain this fn-id)]
+      (->> (get-entity-data @state-atom :arg-value)
+           (vals)
+           (filter #(contains? ancestor-ids (:owner-fn-id %)))
+           (map :arg-schema-id)
+           (set))))
+
+
+  (collect-dependency-chain
+    [_this owner-fn-id]
+    (let [state @state-atom]
+      (loop [to-visit [owner-fn-id]
+             visited #{}]
+        (if (empty? to-visit)
+          visited
+          (let [current-id (first to-visit)
+                rest-to-visit (rest to-visit)]
+            (if (contains? visited current-id)
+              (recur rest-to-visit visited)
+              (let [arg-values (filter #(= (:owner-fn-id %) current-id)
+                                       (vals (get-entity-data state :arg-value)))
+                    ;; Get fn references from arg-values (UUIDs that are fn refs)
+                    ref-fn-ids (->> arg-values
+                                    (map :value)
+                                    (filter uuid?)
+                                    ;; Check if this UUID is actually a fn
+                                    (filter #(some? (get-record state :fn %))))]
+                (recur (concat rest-to-visit ref-fn-ids)
+                       (conj visited current-id))))))))))
 
 
 ;; === ExecutionGraph helpers ===
@@ -418,9 +435,11 @@
 
   (create-entity
     [_this entity-name data]
-    (validate-required-fields! @state entity-name data)
-    (let [id (or (:id data) (random-uuid))
+    (let [s @state
+          id (or (:id data) (random-uuid))
           record (assoc data :id id)]
+      (validate-required-fields! s entity-name record)
+      (validate-unique-constraints! s entity-name record nil)
       (put-record! state entity-name record)))
 
 
@@ -440,6 +459,7 @@
                          :id id})))
       (let [updated (merge existing data {:id id})]
         (validate-required-fields! s entity-name updated)
+        (validate-unique-constraints! s entity-name updated id)
         (put-record! state entity-name updated))))
 
 
@@ -462,78 +482,27 @@
 
   (validate-parent-same-schema!
     [_this fn-id parent-fn-id]
-    (when parent-fn-id
-      (let [s @state
-            fn-record (get-record s :fn fn-id)
-            parent-record (get-record s :fn parent-fn-id)
-            fn-schema-id (:fn-schema-id fn-record)
-            parent-schema-id (:fn-schema-id parent-record)]
-        (when (and fn-schema-id parent-schema-id
-                   (not= fn-schema-id parent-schema-id))
-          (throw (ex-info "Parent fn has different fn-schema-id"
-                          {:type :constraint-violation/parent-schema-mismatch
-                           :fn-id fn-id
-                           :parent-fn-id parent-fn-id
-                           :fn-schema-id fn-schema-id
-                           :parent-schema-id parent-schema-id}))))))
+    (sp/validate-parent-same-schema-impl (->MemoryConstraintHelpers state) fn-id parent-fn-id))
 
 
   (validate-no-arg-override!
     [_this fn-id arg-schema-id]
-    (let [s @state
-          parent-arg-schema-ids (collect-arg-schema-ids-in-chain s fn-id)]
-      (when (contains? parent-arg-schema-ids arg-schema-id)
-        (throw (ex-info "Argument already defined in parent chain"
-                        {:type :constraint-violation/arg-already-defined
-                         :fn-id fn-id
-                         :arg-schema-id arg-schema-id})))))
+    (sp/validate-no-arg-override-impl (->MemoryConstraintHelpers state) fn-id arg-schema-id))
 
 
   (validate-arg-schema-belongs-to-fn!
     [_this fn-id arg-schema-id]
-    (let [s @state
-          fn-schema-id (get-fn-schema-id s fn-id)
-          arg-fn-schema-id (get-arg-schema-fn-schema-id s arg-schema-id)]
-      (when (and fn-schema-id arg-fn-schema-id
-                 (not= fn-schema-id arg-fn-schema-id))
-        (throw (ex-info "Arg-schema does not belong to fn's schema"
-                        {:type :constraint-violation/arg-schema-mismatch
-                         :fn-id fn-id
-                         :arg-schema-id arg-schema-id
-                         :fn-schema-id fn-schema-id
-                         :arg-fn-schema-id arg-fn-schema-id})))))
+    (sp/validate-arg-schema-belongs-to-fn-impl (->MemoryConstraintHelpers state) fn-id arg-schema-id))
 
 
   (validate-no-inheritance-cycle!
     [_this fn-id parent-fn-id]
-    (when parent-fn-id
-      (let [s @state]
-        ;; Check if fn-id would appear in the parent chain of parent-fn-id
-        (when (= fn-id parent-fn-id)
-          (throw (ex-info "Cannot set self as parent"
-                          {:type :constraint-violation/inheritance-cycle
-                           :fn-id fn-id
-                           :parent-fn-id parent-fn-id})))
-        (let [parent-ancestors (collect-parent-chain s parent-fn-id)]
-          (when (contains? parent-ancestors fn-id)
-            (throw (ex-info "Setting parent would create inheritance cycle"
-                            {:type :constraint-violation/inheritance-cycle
-                             :fn-id fn-id
-                             :parent-fn-id parent-fn-id
-                             :cycle-through (conj parent-ancestors parent-fn-id)})))))))
+    (sp/validate-no-inheritance-cycle-impl (->MemoryConstraintHelpers state) fn-id parent-fn-id))
 
 
   (validate-no-dependency-cycle!
     [_this owner-fn-id value-fn-id]
-    (when value-fn-id
-      (let [s @state
-            ;; Check if owner-fn-id is in the dependency chain of value-fn-id
-            value-deps (collect-dependency-chain s value-fn-id)]
-        (when (contains? value-deps owner-fn-id)
-          (throw (ex-info "Reference would create dependency cycle"
-                          {:type :constraint-violation/dependency-cycle
-                           :owner-fn-id owner-fn-id
-                           :value-fn-id value-fn-id}))))))
+    (sp/validate-no-dependency-cycle-impl (->MemoryConstraintHelpers state) owner-fn-id value-fn-id))
 
 
   sp/ExecutionGraph

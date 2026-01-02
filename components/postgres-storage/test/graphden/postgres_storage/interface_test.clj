@@ -2597,10 +2597,9 @@
   (testing "delete-entity handles nil update-count via or fallback"
     ;; This tests line 168: (pos? (or (:next.jdbc/update-count result) 0))
     ;; where jdbc returns a result without :next.jdbc/update-count
-    (let [delete-entity-fn #'crud/delete-entity
-          ;; Mock jdbc/execute-one! to return empty map (no update-count key)
-          original-execute-one! jdbc/execute-one!]
-      (with-redefs [jdbc/execute-one! (fn [ds query & opts]
+    (let [delete-entity-fn #'crud/delete-entity]
+      ;; Mock jdbc/execute-one! to return empty map (no update-count key)
+      (with-redefs [jdbc/execute-one! (fn [_ds _query & _opts]
                                         ;; Return empty map without :next.jdbc/update-count
                                         {})]
         (is (false? (delete-entity-fn nil :test-entity (random-uuid))))))))
@@ -2642,15 +2641,13 @@
                                      :value (:id ref-fn)}
                                     nil)
               ;; Save original read-entity
-              original-read-entity crud/read-entity
-              call-count (atom 0)]
-          ;; Mock read-entity to return nil for ref-fn on second call
-          ;; (first call is for main-fn, second is for ref-fn)
+              original-read-entity crud/read-entity]
+          ;; Mock read-entity to return nil for ref-fn
+          ;; (simulates fn being deleted during traversal)
           (with-redefs [crud/read-entity (fn [ds entity-name id]
-                                           (if (and (= entity-name :fn)
-                                                    (= id (:id ref-fn)))
-                                             ;; Simulate deleted fn
-                                             nil
+                                           ;; Return nil for ref-fn to simulate deleted fn
+                                           (when-not (and (= entity-name :fn)
+                                                          (= id (:id ref-fn)))
                                              (original-read-entity ds entity-name id)))]
             (let [graph (sp/resolve-execution-graph storage (:id main-fn))]
               ;; main-fn should be in graph, ref-fn should be skipped

@@ -649,7 +649,7 @@
           ctx (exec/create-context {:storage storage})
           ;; Provide valid int values
           result (exec/execute ctx (:id fn-rec) {(:id arg-a) 10
-                                                  (:id arg-b) 20})]
+                                                 (:id arg-b) 20})]
       (is (= 30 result))
       (sp/close storage)))
 
@@ -679,3 +679,127 @@
           result (exec/execute ctx (:id fn-rec) {(:id n-arg) 2.718})]
       (is (= 2.718 result))
       (sp/close storage))))
+
+
+;; === Mutual Reference Tests ===
+
+(deftest mutual-reference-graph-test
+  (testing "mutual references are correctly resolved in execution graph"
+    ;; This tests that functions referencing each other (A -> B, B -> A)
+    ;; are correctly resolved without infinite loops in graph resolution
+    (let [storage (create-test-storage)
+          ;; Register base functions that return their :fn type args
+          ;; (demonstrating that LazyFnThunk works for mutual refs)
+          _ (exec/register-base-fn!
+              :get-partner
+              (fn [{:keys [n partner]} ctx]
+                (let [n-val (exec/force-value n ctx)
+                      ;; partner is a LazyFnThunk - forcing returns fn-id, not result
+                      partner-id (exec/force-value partner ctx)]
+                  {:n n-val :partner-id partner-id})))
+
+          ;; Create fn-schemas
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "get-partner"
+                                       :returned-type :jsonb})
+          arg-n (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id fn-schema)
+                                   :name "n"
+                                   :type :int
+                                   :required true})
+          arg-partner (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id fn-schema)
+                                         :name "partner"
+                                         :type :fn  ; :fn type means lazy reference
+                                         :required true})
+
+          ;; Create two fn instances that reference each other
+          fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id fn-schema)})
+          fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id fn-schema)})
+
+          ;; fn-a's n = 1, partner = fn-b
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-a)
+                               :arg-schema-id (:id arg-n)
+                               :value 1})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-a)
+                               :arg-schema-id (:id arg-partner)
+                               :value (:id fn-b)})
+
+          ;; fn-b's n = 2, partner = fn-a
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-b)
+                               :arg-schema-id (:id arg-n)
+                               :value 2})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-b)
+                               :arg-schema-id (:id arg-partner)
+                               :value (:id fn-a)})
+
+          ctx (exec/create-context {:storage storage})]
+
+      (try
+        ;; Execute fn-a - should get its own n and fn-b's id as partner
+        (let [result-a (exec/execute ctx (:id fn-a) {})]
+          (is (= 1 (:n result-a)))
+          (is (= (:id fn-b) (:partner-id result-a))))
+
+        ;; Execute fn-b - should get its own n and fn-a's id as partner
+        (let [result-b (exec/execute ctx (:id fn-b) {})]
+          (is (= 2 (:n result-b)))
+          (is (= (:id fn-a) (:partner-id result-b))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest self-reference-test
+  (testing "function with self-reference via :fn type arg"
+    ;; A function can reference itself. The self-ref is a LazyFnThunk
+    ;; so forcing it returns the fn-id, not causing infinite execution
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :with-self
+              (fn [{:keys [n self-ref]} ctx]
+                (let [n-val (exec/force-value n ctx)
+                      ;; self-ref is LazyFnThunk - forcing returns fn-id
+                      self-id (exec/force-value self-ref ctx)]
+                  {:n n-val :self-id self-id})))
+
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "with-self"
+                                       :returned-type :jsonb})
+          arg-n (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id fn-schema)
+                                   :name "n"
+                                   :type :int
+                                   :required true})
+          arg-self (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "self-ref"
+                                      :type :fn
+                                      :required true})
+
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-self-fn"
+                                    :fn-schema-id (:id fn-schema)})
+
+          ;; n = 42
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-n)
+                               :value 42})
+          ;; Self-reference
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-self)
+                               :value (:id fn-rec)})
+
+          ctx (exec/create-context {:storage storage})]
+
+      (try
+        (let [result (exec/execute ctx (:id fn-rec) {})]
+          (is (= 42 (:n result)))
+          (is (= (:id fn-rec) (:self-id result))))
+        (finally
+          (sp/close storage))))))

@@ -232,6 +232,139 @@
      if this reference would create a cycle (value-fn depends on owner-fn)."))
 
 
+(defprotocol ConstraintHelpers
+  "Helper protocol for constraint validation.
+   Provides low-level operations that vary by storage implementation.
+   Used by the shared constraint validation functions below."
+
+  (get-fn-schema-id-for-fn
+    [this fn-id]
+    "Returns the fn-schema-id for the given fn-id, or nil if fn not found.")
+
+  (get-fn-schema-id-for-arg-schema
+    [this arg-schema-id]
+    "Returns the fn-schema-id for the given arg-schema-id, or nil if not found.")
+
+  (get-parent-fn-id
+    [this fn-id]
+    "Returns the parent-fn-id for the given fn-id, or nil if no parent.")
+
+  (collect-parent-chain
+    [this fn-id]
+    "Returns a set of all ancestor fn-ids (not including fn-id itself).
+     Traverses the parent-fn-id chain up to the root.")
+
+  (collect-arg-schema-ids-in-chain
+    [this fn-id]
+    "Returns a set of arg-schema-ids defined in the parent chain.
+     Does NOT include arg-values owned by fn-id itself.")
+
+  (collect-dependency-chain
+    [this fn-id]
+    "Returns a set of all fn-ids that fn-id depends on through arg-values.
+     Includes fn-id itself. Used for cycle detection."))
+
+
+;; === Shared constraint helper implementations ===
+;; Default implementations for ConstraintHelpers methods.
+;; Storage implementations can use these if they only provide get-parent-fn-id.
+
+(defn collect-parent-chain-impl
+  "Default implementation of collect-parent-chain.
+   Uses get-parent-fn-id to traverse the chain.
+   Returns a set of all ancestor fn-ids (not including fn-id itself)."
+  [helpers fn-id]
+  (loop [current-id (get-parent-fn-id helpers fn-id)
+         ancestor-ids #{}]
+    (if (or (nil? current-id) (contains? ancestor-ids current-id))
+      ancestor-ids
+      (recur (get-parent-fn-id helpers current-id)
+             (conj ancestor-ids current-id)))))
+
+
+;; === Shared constraint validation functions ===
+;; These use ConstraintHelpers protocol and can be called from any storage impl.
+
+(defn validate-parent-same-schema-impl
+  "Shared implementation of parent-same-schema validation.
+   Uses ConstraintHelpers protocol methods."
+  [helpers fn-id parent-fn-id]
+  (when parent-fn-id
+    (let [fn-schema-id (get-fn-schema-id-for-fn helpers fn-id)
+          parent-schema-id (get-fn-schema-id-for-fn helpers parent-fn-id)]
+      (when (and fn-schema-id parent-schema-id
+                 (not= fn-schema-id parent-schema-id))
+        (throw (ex-info "Parent fn has different fn-schema-id"
+                        {:type :constraint-violation/parent-schema-mismatch
+                         :fn-id fn-id
+                         :parent-fn-id parent-fn-id
+                         :fn-schema-id fn-schema-id
+                         :parent-schema-id parent-schema-id}))))))
+
+
+(defn validate-no-arg-override-impl
+  "Shared implementation of no-arg-override validation.
+   Uses ConstraintHelpers protocol methods."
+  [helpers fn-id arg-schema-id]
+  (let [parent-arg-schema-ids (collect-arg-schema-ids-in-chain helpers fn-id)]
+    (when (contains? parent-arg-schema-ids arg-schema-id)
+      (throw (ex-info "Argument already defined in parent chain"
+                      {:type :constraint-violation/arg-already-defined
+                       :fn-id fn-id
+                       :arg-schema-id arg-schema-id})))))
+
+
+(defn validate-arg-schema-belongs-to-fn-impl
+  "Shared implementation of arg-schema-belongs-to-fn validation.
+   Uses ConstraintHelpers protocol methods."
+  [helpers fn-id arg-schema-id]
+  (let [fn-schema-id (get-fn-schema-id-for-fn helpers fn-id)
+        arg-fn-schema-id (get-fn-schema-id-for-arg-schema helpers arg-schema-id)]
+    (when (and fn-schema-id arg-fn-schema-id
+               (not= fn-schema-id arg-fn-schema-id))
+      (throw (ex-info "Arg-schema does not belong to fn's schema"
+                      {:type :constraint-violation/arg-schema-mismatch
+                       :fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :fn-schema-id fn-schema-id
+                       :arg-fn-schema-id arg-fn-schema-id})))))
+
+
+(defn validate-no-inheritance-cycle-impl
+  "Shared implementation of no-inheritance-cycle validation.
+   Uses ConstraintHelpers protocol methods."
+  [helpers fn-id parent-fn-id]
+  (when parent-fn-id
+    ;; Check self-reference
+    (when (= fn-id parent-fn-id)
+      (throw (ex-info "Cannot set self as parent"
+                      {:type :constraint-violation/inheritance-cycle
+                       :fn-id fn-id
+                       :parent-fn-id parent-fn-id})))
+    ;; Check if fn-id appears in parent's ancestor chain
+    (let [parent-ancestors (collect-parent-chain helpers parent-fn-id)]
+      (when (contains? parent-ancestors fn-id)
+        (throw (ex-info "Setting parent would create inheritance cycle"
+                        {:type :constraint-violation/inheritance-cycle
+                         :fn-id fn-id
+                         :parent-fn-id parent-fn-id
+                         :cycle-through (conj parent-ancestors parent-fn-id)}))))))
+
+
+(defn validate-no-dependency-cycle-impl
+  "Shared implementation of no-dependency-cycle validation.
+   Uses ConstraintHelpers protocol methods."
+  [helpers owner-fn-id value-fn-id]
+  (when value-fn-id
+    ;; Check if owner-fn-id is in the dependency chain of value-fn-id
+    (let [value-deps (collect-dependency-chain helpers value-fn-id)]
+      (when (contains? value-deps owner-fn-id)
+        (throw (ex-info "Reference would create dependency cycle"
+                        {:type :constraint-violation/dependency-cycle
+                         :owner-fn-id owner-fn-id
+                         :value-fn-id value-fn-id}))))))
+
+
 (defprotocol ExecutionGraph
   "Protocol for retrieving complete execution graph for a function.
    Implementations should optimize for efficient retrieval - using JOINs,

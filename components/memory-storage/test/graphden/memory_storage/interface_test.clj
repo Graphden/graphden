@@ -1592,3 +1592,56 @@
         (let [args (get (:resolved-args graph) (:id rec-fn))]
           (is (= (:id rec-fn) (:value (get args (:id arg-self)))))
           (is (= 5 (:value (get args (:id arg-n))))))))))
+
+
+(deftest unique-constraint-test
+  (testing "single-field unique constraint"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                             :type :text}
+                                     :name {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                            :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:email "alice@example.com" :name "Alice"})
+      (sp/create-entity storage :user {:email "bob@example.com" :name "Bob"})
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Unique constraint violation"
+            (sp/create-entity storage :user {:email "alice@example.com" :name "Charlie"})))))
+
+  (testing "unique constraint on update allows same record"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000011"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                             :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (let [user1 (sp/create-entity storage :user {:email "alice@example.com"})
+            _user2 (sp/create-entity storage :user {:email "bob@example.com"})]
+        (sp/update-entity storage :user (:id user1) {:email "alice@example.com"})
+        (is (thrown-with-msg?
+              clojure.lang.ExceptionInfo
+              #"Unique constraint violation"
+              (sp/update-entity storage :user (:id user1) {:email "bob@example.com"}))))))
+
+  (testing "nil values bypass unique constraint"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000021"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000022"
+                                             :type :text
+                                             :nullable? true}
+                                     :name {:uuid #uuid "00000000-0000-0000-0000-000000000023"
+                                            :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:email nil :name "Alice"})
+      (sp/create-entity storage :user {:email nil :name "Bob"})
+      (is (= 2 (count (sp/query-entities storage :user {})))))))

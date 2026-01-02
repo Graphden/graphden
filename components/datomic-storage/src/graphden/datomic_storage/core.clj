@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
+    [graphden.datomic-storage.constraints :as constraints]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -757,21 +758,10 @@
          entity-ids)))
 
 
-;; === GraphConstraints helpers ===
+;; === ExecutionGraph helper functions ===
 
-(defn- get-fn-schema-id
-  "Gets fn-schema-id for a fn record."
-  [db fn-id]
-  (ffirst (d/q '[:find ?schema-id
-                 :in $ ?fn-id
-                 :where
-                 [?e :fn/id ?fn-id]
-                 [?e :fn/fn-schema-id ?schema-id]]
-               db fn-id)))
-
-
-(defn- get-parent-fn-id
-  "Gets parent-fn-id for a fn record."
+(defn- get-parent-fn-id-from-db
+  "Gets parent-fn-id for a fn record from the database."
   [db fn-id]
   (ffirst (d/q '[:find ?parent-id
                  :in $ ?fn-id
@@ -779,78 +769,6 @@
                  [?e :fn/id ?fn-id]
                  [?e :fn/parent-fn-id ?parent-id]]
                db fn-id)))
-
-
-(defn- get-arg-schema-fn-schema-id
-  "Gets fn-schema-id for an arg-schema record."
-  [db arg-schema-id]
-  (ffirst (d/q '[:find ?schema-id
-                 :in $ ?arg-schema-id
-                 :where
-                 [?e :arg-schema/id ?arg-schema-id]
-                 [?e :arg-schema/fn-schema-id ?schema-id]]
-               db arg-schema-id)))
-
-
-(defn- collect-parent-chain
-  "Collects all ancestor fn-ids by following parent-fn-id links.
-   Returns a set of fn-ids (not including the starting fn-id)."
-  [db fn-id]
-  (loop [current-id (get-parent-fn-id db fn-id)
-         ancestor-ids #{}]
-    (if (or (nil? current-id) (contains? ancestor-ids current-id))
-      ancestor-ids
-      (recur (get-parent-fn-id db current-id)
-             (conj ancestor-ids current-id)))))
-
-
-(defn- collect-arg-schema-ids-in-chain
-  "Collects all arg-schema-ids defined in the parent chain (not including fn-id itself)."
-  [db fn-id]
-  (let [ancestor-ids (collect-parent-chain db fn-id)]
-    (if (empty? ancestor-ids)
-      #{}
-      (let [results (d/q '[:find ?arg-schema-id
-                           :in $ [?owner-id ...]
-                           :where
-                           [?e :arg-value/owner-fn-id ?owner-id]
-                           [?e :arg-value/arg-schema-id ?arg-schema-id]]
-                         db (vec ancestor-ids))]
-        (set (map first results))))))
-
-
-(defn- collect-dependency-chain
-  "Collects all fn-ids that owner-fn depends on through arg-values.
-   DFS traversal of value refs."
-  [db owner-fn-id]
-  (loop [to-visit [owner-fn-id]
-         visited #{}]
-    (if (empty? to-visit)
-      visited
-      (let [current-id (first to-visit)
-            rest-to-visit (rest to-visit)]
-        (if (contains? visited current-id)
-          (recur rest-to-visit visited)
-          (let [;; Get arg-values for current fn
-                arg-values (d/q '[:find ?value
-                                  :in $ ?owner-id
-                                  :where
-                                  [?e :arg-value/owner-fn-id ?owner-id]
-                                  [?e :arg-value/value ?value]]
-                                db current-id)
-                ;; Get fn references from arg-values (UUIDs that are fn refs)
-                ref-fn-ids (->> arg-values
-                                (map first)
-                                (keep sp/try-parse-uuid)
-                                ;; Check if this UUID is actually a fn
-                                (filter (fn [fn-id]
-                                          (seq (d/q '[:find ?e
-                                                      :in $ ?fn-id
-                                                      :where
-                                                      [?e :fn/id ?fn-id]]
-                                                    db fn-id)))))]
-            (recur (concat rest-to-visit ref-fn-ids)
-                   (conj visited current-id))))))))
 
 
 ;; === ExecutionGraph helpers ===
@@ -863,7 +781,7 @@
          chain []]
     (if-not current-id
       chain
-      (recur (get-parent-fn-id db current-id)
+      (recur (get-parent-fn-id-from-db db current-id)
              (conj chain current-id)))))
 
 
@@ -982,81 +900,6 @@
                          (merge arg-schemas new-arg-schemas)
                          (assoc resolved-args current-fn-id merged-args)
                          (inc iter-count)))))))))))
-
-
-(defn- validate-parent-same-schema-impl!
-  "Validates that parent-fn has the same fn-schema-id as fn."
-  [db fn-id parent-fn-id]
-  (when parent-fn-id
-    (let [fn-schema-id (get-fn-schema-id db fn-id)
-          parent-schema-id (get-fn-schema-id db parent-fn-id)]
-      (when (and fn-schema-id parent-schema-id
-                 (not= fn-schema-id parent-schema-id))
-        (throw (ex-info "Parent fn has different fn-schema-id"
-                        {:type :constraint-violation/parent-schema-mismatch
-                         :fn-id fn-id
-                         :parent-fn-id parent-fn-id
-                         :fn-schema-id fn-schema-id
-                         :parent-schema-id parent-schema-id}))))))
-
-
-(defn- validate-no-arg-override-impl!
-  "Validates that arg-schema-id is not already defined in the parent chain."
-  [db fn-id arg-schema-id]
-  (let [parent-arg-schema-ids (collect-arg-schema-ids-in-chain db fn-id)]
-    (when (contains? parent-arg-schema-ids arg-schema-id)
-      (throw (ex-info "Argument already defined in parent chain"
-                      {:type :constraint-violation/arg-already-defined
-                       :fn-id fn-id
-                       :arg-schema-id arg-schema-id})))))
-
-
-(defn- validate-arg-schema-belongs-to-fn-impl!
-  "Validates that arg-schema belongs to fn's fn-schema."
-  [db fn-id arg-schema-id]
-  (let [fn-schema-id (get-fn-schema-id db fn-id)
-        arg-fn-schema-id (get-arg-schema-fn-schema-id db arg-schema-id)]
-    (when (and fn-schema-id arg-fn-schema-id
-               (not= fn-schema-id arg-fn-schema-id))
-      (throw (ex-info "Arg-schema does not belong to fn's schema"
-                      {:type :constraint-violation/arg-schema-mismatch
-                       :fn-id fn-id
-                       :arg-schema-id arg-schema-id
-                       :fn-schema-id fn-schema-id
-                       :arg-fn-schema-id arg-fn-schema-id})))))
-
-
-(defn- validate-no-inheritance-cycle-impl!
-  "Validates that setting parent-fn-id would not create an inheritance cycle."
-  [db fn-id parent-fn-id]
-  (when parent-fn-id
-    ;; Check self-reference
-    (when (= fn-id parent-fn-id)
-      (throw (ex-info "Cannot set self as parent"
-                      {:type :constraint-violation/inheritance-cycle
-                       :fn-id fn-id
-                       :parent-fn-id parent-fn-id})))
-    ;; Check if fn-id appears in parent's ancestor chain
-    (let [parent-ancestors (collect-parent-chain db parent-fn-id)]
-      (when (contains? parent-ancestors fn-id)
-        (throw (ex-info "Setting parent would create inheritance cycle"
-                        {:type :constraint-violation/inheritance-cycle
-                         :fn-id fn-id
-                         :parent-fn-id parent-fn-id
-                         :cycle-through (conj parent-ancestors parent-fn-id)}))))))
-
-
-(defn- validate-no-dependency-cycle-impl!
-  "Validates that referencing value-fn-id would not create a dependency cycle."
-  [db owner-fn-id value-fn-id]
-  (when value-fn-id
-    ;; Check if owner-fn-id is in the dependency chain of value-fn-id
-    (let [value-deps (collect-dependency-chain db value-fn-id)]
-      (when (contains? value-deps owner-fn-id)
-        (throw (ex-info "Reference would create dependency cycle"
-                        {:type :constraint-violation/dependency-cycle
-                         :owner-fn-id owner-fn-id
-                         :value-fn-id value-fn-id}))))))
 
 
 ;; === Storage record ===
@@ -1205,36 +1048,31 @@
   (validate-parent-same-schema!
     [_this fn-id parent-fn-id]
     (locking lock
-      (when-let [conn @conn-atom]
-        (validate-parent-same-schema-impl! (d/db conn) fn-id parent-fn-id))))
+      (constraints/validate-parent-same-schema! conn-atom fn-id parent-fn-id)))
 
 
   (validate-no-arg-override!
     [_this fn-id arg-schema-id]
     (locking lock
-      (when-let [conn @conn-atom]
-        (validate-no-arg-override-impl! (d/db conn) fn-id arg-schema-id))))
+      (constraints/validate-no-arg-override! conn-atom fn-id arg-schema-id)))
 
 
   (validate-arg-schema-belongs-to-fn!
     [_this fn-id arg-schema-id]
     (locking lock
-      (when-let [conn @conn-atom]
-        (validate-arg-schema-belongs-to-fn-impl! (d/db conn) fn-id arg-schema-id))))
+      (constraints/validate-arg-schema-belongs-to-fn! conn-atom fn-id arg-schema-id)))
 
 
   (validate-no-inheritance-cycle!
     [_this fn-id parent-fn-id]
     (locking lock
-      (when-let [conn @conn-atom]
-        (validate-no-inheritance-cycle-impl! (d/db conn) fn-id parent-fn-id))))
+      (constraints/validate-no-inheritance-cycle! conn-atom fn-id parent-fn-id)))
 
 
   (validate-no-dependency-cycle!
     [_this owner-fn-id value-fn-id]
     (locking lock
-      (when-let [conn @conn-atom]
-        (validate-no-dependency-cycle-impl! (d/db conn) owner-fn-id value-fn-id))))
+      (constraints/validate-no-dependency-cycle! conn-atom owner-fn-id value-fn-id)))
 
 
   sp/ExecutionGraph

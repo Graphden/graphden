@@ -1,0 +1,247 @@
+# Extending Graphden
+
+This guide covers common extension points in the Graphden system.
+
+## Adding Base Functions
+
+Base functions are the primitives that execute actual computations. They are registered at runtime and referenced by `fn-schema.name`.
+
+### Step 1: Register the Base Function
+
+```clojure
+(require '[graphden.executor.interface :as exec])
+
+;; Simple function that adds two numbers
+(exec/register-base-fn!
+  :add
+  (fn [{:keys [a b]} ctx]
+    (+ (exec/force-value a ctx)
+       (exec/force-value b ctx))))
+```
+
+### Step 2: Create fn-schema in Storage
+
+```clojure
+(require '[graphden.storage-protocol.interface :as sp])
+
+(let [fn-schema (sp/create-entity storage :fn-schema
+                                  {:name "add"           ; Must match registered name
+                                   :returned-type :int})]
+  ;; Create arg-schemas for the function
+  (sp/create-entity storage :arg-schema
+                    {:fn-schema-id (:id fn-schema)
+                     :name "a"
+                     :type :int
+                     :required true})
+  (sp/create-entity storage :arg-schema
+                    {:fn-schema-id (:id fn-schema)
+                     :name "b"
+                     :type :int
+                     :required true}))
+```
+
+### Step 3: Create Function Instance and Execute
+
+```clojure
+;; Create a function instance
+(let [fn-rec (sp/create-entity storage :fn
+                               {:name "my-add"
+                                :fn-schema-id (:id fn-schema)})
+      ;; Set argument values
+      _ (sp/create-entity storage :arg-value
+                          {:owner-fn-id (:id fn-rec)
+                           :arg-schema-id (:id arg-a)
+                           :value 5})
+      _ (sp/create-entity storage :arg-value
+                          {:owner-fn-id (:id fn-rec)
+                           :arg-schema-id (:id arg-b)
+                           :value 3})
+      ;; Execute
+      ctx (exec/create-context {:storage storage})
+      result (exec/execute ctx (:id fn-rec) {})]
+  (println result)) ; => 8
+```
+
+### Argument Types
+
+| Type | Clojure Type | Description |
+|------|--------------|-------------|
+| `:int` | Long | Integer value |
+| `:text` | String | Text value |
+| `:bool` | Boolean | Boolean value |
+| `:numeric` | Number | Any numeric type |
+| `:jsonb` | Map/Vector | JSON-compatible data |
+| `:uuid` | UUID | UUID reference |
+| `:fn` | UUID | Lazy function reference (not executed) |
+| `:ref` | UUID | Function reference (executed on force) |
+
+### Working with Thunks
+
+Arguments are passed as thunks (lazy values). Use `force-value` to get the actual value:
+
+```clojure
+(exec/register-base-fn!
+  :conditional-add
+  (fn [{:keys [condition a b]} ctx]
+    ;; force-value evaluates the thunk
+    (if (exec/force-value condition ctx)
+      (+ (exec/force-value a ctx)
+         (exec/force-value b ctx))
+      0)))
+```
+
+### Higher-Order Functions
+
+For `:fn` type arguments, `force-value` returns the fn-id without executing:
+
+```clojure
+(exec/register-base-fn!
+  :apply-twice
+  (fn [{:keys [f x]} ctx]
+    ;; f is a :fn type - forcing returns fn-id
+    (let [f-id (exec/force-value f ctx)
+          x-val (exec/force-value x ctx)
+          ;; Execute f with x
+          result1 (exec/execute ctx f-id {arg-schema-id x-val})
+          ;; Execute f again with result
+          result2 (exec/execute ctx f-id {arg-schema-id result1})]
+      result2)))
+```
+
+## Execution Configuration
+
+### Depth and Timeout Limits
+
+```clojure
+(exec/create-context
+  {:storage storage
+   :max-depth 1000      ; Maximum recursion depth (default: 1000)
+   :timeout-ms 30000})  ; Execution timeout in ms (default: 30000)
+```
+
+### Error Handling
+
+Common execution errors:
+
+| Error Type | Cause |
+|------------|-------|
+| `:execution-error/fn-not-found` | Function ID not in graph |
+| `:execution-error/missing-required-arg` | Required argument not provided |
+| `:execution-error/type-mismatch` | Provided arg doesn't match type |
+| `:execution-error/max-depth-exceeded` | Recursion limit reached |
+| `:execution-error/timeout` | Execution took too long |
+
+## Implementing Custom Storage
+
+To implement a custom storage backend, implement these protocols from `graphden.storage-protocol.interface`:
+
+### Required Protocols
+
+1. **Storage** - Lifecycle management
+   - `initialize` - Set up schema
+   - `close` - Clean up resources
+
+2. **StorageIntrospection** - Schema inspection
+   - `current-entities` - List entity types
+   - `current-enums` - List enum types
+
+3. **StorageCRUD** - Data operations
+   - `create-entity` - Create record
+   - `read-entity` - Read by ID
+   - `update-entity` - Update record
+   - `delete-entity` - Delete record
+   - `query-entities` - Query with conditions
+
+4. **GraphConstraints** - Graph integrity
+   - `validate-parent-same-schema!`
+   - `validate-no-arg-override!`
+   - `validate-arg-schema-belongs-to-fn!`
+   - `validate-no-inheritance-cycle!`
+   - `validate-no-dependency-cycle!`
+
+5. **ExecutionGraph** - Graph resolution
+   - `resolve-execution-graph` - Build execution graph
+
+### Example Implementation Skeleton
+
+```clojure
+(ns my.custom-storage
+  (:require [graphden.storage-protocol.interface :as sp]))
+
+(defrecord CustomStorage [connection metadata]
+  sp/Storage
+  (initialize [this schema]
+    ;; Create tables/collections for entities
+    ;; Store metadata
+    this)
+
+  (close [this]
+    ;; Close connections
+    nil)
+
+  sp/StorageCRUD
+  (create-entity [this entity-name data]
+    ;; Insert record, return with generated :id
+    )
+
+  (read-entity [this entity-name id]
+    ;; Fetch by id, return nil if not found
+    )
+
+  ;; ... implement remaining protocols
+  )
+
+(defn create-storage [opts]
+  (->CustomStorage (:connection opts) (atom {})))
+```
+
+### Contract Tests
+
+Use the contract tests from `storage-protocol` to verify your implementation:
+
+```clojure
+(ns my.custom-storage-test
+  (:require [graphden.storage-protocol.interface-test :as contract]))
+
+;; Run contract tests with your storage factory
+(contract/run-storage-tests create-my-storage)
+```
+
+## Graph Data Schema
+
+The default graph schema includes these entities:
+
+| Entity | Fields | Description |
+|--------|--------|-------------|
+| `fn-schema` | id, name, returned-type | Function type definition |
+| `arg-schema` | id, fn-schema-id, name, type, required | Argument definition |
+| `fn` | id, name, fn-schema-id, parent-fn-id | Function instance |
+| `arg-value` | id, owner-fn-id, arg-schema-id, value | Argument value |
+
+### Customizing the Schema
+
+You can extend the schema by modifying `graph-data-schema`:
+
+```clojure
+(ns my.extended-schema
+  (:require [graphden.graph-data-schema.interface :as graph]
+            [graphden.data-schema-protocol.interface :as ds]))
+
+(defn build-extended-schema [builder]
+  ;; Start with base graph schema
+  (let [schema (graph/build-schema builder)]
+    ;; Add custom entities
+    (-> schema
+        (ds/add-entity builder :my-entity
+                       {:id {:type :uuid :primary-key true}
+                        :name {:type :text :nullable false}
+                        :data {:type :jsonb :nullable true}}))))
+```
+
+## Best Practices
+
+1. **Register base functions at startup** - Before any execution
+2. **Use appropriate arg types** - `:fn` for HOF, `:ref` for computed values
+3. **Set reasonable limits** - Adjust max-depth and timeout for your use case
+4. **Handle errors gracefully** - Catch and log execution errors
+5. **Test with contract tests** - Ensure storage implementations are correct

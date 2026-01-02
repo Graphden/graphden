@@ -438,7 +438,7 @@
     (uuid? v) v
     (string? v) (try
                   (java.util.UUID/fromString v)
-                  (catch Exception _ nil))
+                  (catch IllegalArgumentException _ nil))
     :else nil))
 
 

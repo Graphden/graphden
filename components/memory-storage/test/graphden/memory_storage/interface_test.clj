@@ -1717,46 +1717,45 @@
         ;; This should NOT throw - diamond is not a cycle
         ;; Start from X and check adding a reference to A
         ;; This traverses the entire A subgraph including the diamond
-        (sp/validate-no-dependency-cycle! storage (:id fn-x) (:id fn-a))))))
+        (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-x) (:id fn-a)))))))
 
-
-(testing "diamond pattern with cycle attempt detects correctly"
-  (let [storage (mem/create-storage)]
-    (sp/initialize storage (-> (mds/create-builder)
-                               (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                              {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
-                               (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
-                                              {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
-                                                             :type :ref :ref-entity :fn}
-                                               :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
-                                                               :type :uuid}
-                                               :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
-                                                       :type :uuid}})
-                               ds/build))
-    ;; Create diamond: A -> B -> D, A -> C -> D, then try D -> A (creates cycle)
-    (let [fn-d (sp/create-entity storage :fn {:name "d"})
-          fn-b (sp/create-entity storage :fn {:name "b"})
-          fn-c (sp/create-entity storage :fn {:name "c"})
-          fn-a (sp/create-entity storage :fn {:name "a"})
-          ;; B -> D
-          _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-b)
-                                                  :arg-schema-id (random-uuid)
-                                                  :value (:id fn-d)})
-          ;; C -> D
-          _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-c)
-                                                  :arg-schema-id (random-uuid)
-                                                  :value (:id fn-d)})
-          ;; A -> B
-          _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
-                                                  :arg-schema-id (random-uuid)
-                                                  :value (:id fn-b)})
-          ;; A -> C
-          _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
-                                                  :arg-schema-id (random-uuid)
-                                                  :value (:id fn-c)})]
-      ;; Now try to add D -> A, which would create a cycle
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"
-            (sp/validate-no-dependency-cycle! storage (:id fn-d) (:id fn-a)))))))
+  (testing "diamond pattern with cycle attempt detects correctly"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
+                                 (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
+                                                {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
+                                                               :type :ref :ref-entity :fn}
+                                                 :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
+                                                                 :type :uuid}
+                                                 :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
+                                                         :type :uuid}})
+                                 ds/build))
+      ;; Create diamond: A -> B -> D, A -> C -> D, then try D -> A (creates cycle)
+      (let [fn-d (sp/create-entity storage :fn {:name "d"})
+            fn-b (sp/create-entity storage :fn {:name "b"})
+            fn-c (sp/create-entity storage :fn {:name "c"})
+            fn-a (sp/create-entity storage :fn {:name "a"})
+            ;; B -> D
+            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-b)
+                                                    :arg-schema-id (random-uuid)
+                                                    :value (:id fn-d)})
+            ;; C -> D
+            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-c)
+                                                    :arg-schema-id (random-uuid)
+                                                    :value (:id fn-d)})
+            ;; A -> B
+            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
+                                                    :arg-schema-id (random-uuid)
+                                                    :value (:id fn-b)})
+            ;; A -> C
+            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
+                                                    :arg-schema-id (random-uuid)
+                                                    :value (:id fn-c)})]
+        ;; Now try to add D -> A, which would create a cycle
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"
+              (sp/validate-no-dependency-cycle! storage (:id fn-d) (:id fn-a))))))))
 
 
 (deftest entity-without-constraints-test
@@ -1846,3 +1845,53 @@
             clojure.lang.ExceptionInfo
             #"Unique constraint violation"
             (sp/create-entity storage :product {:sku "SKU-003" :name "Duplicate"}))))))
+
+
+;; === Concurrent operation tests ===
+
+(deftest concurrent-access-test
+  (testing "concurrent reads are thread-safe"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000081"
+                                    {:name {:uuid #uuid "00000000-0000-0000-0000-000000000082"
+                                            :type :text}})
+                     ds/build)
+          errors (atom [])]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:name "Alice"})
+      ;; Launch multiple threads reading concurrently
+      (let [futures (doall
+                      (for [_ (range 10)]
+                        (future
+                          (try
+                            (dotimes [_ 100]
+                              (sp/query-entities storage :user {}))
+                            (catch Exception e
+                              (swap! errors conj e))))))]
+        (doseq [f futures]
+          (deref f 5000 :timeout)))
+      (is (empty? @errors) (str "Errors during concurrent access: " @errors))))
+
+  (testing "concurrent writes are thread-safe"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :counter #uuid "00000000-0000-0000-0000-000000000091"
+                                    {:value {:uuid #uuid "00000000-0000-0000-0000-000000000092"
+                                             :type :int}})
+                     ds/build)
+          errors (atom [])]
+      (sp/initialize storage schema)
+      ;; Launch multiple threads creating entities concurrently
+      (let [futures (doall
+                      (for [i (range 10)]
+                        (future
+                          (try
+                            (dotimes [j 10]
+                              (sp/create-entity storage :counter {:value (+ (* i 10) j)}))
+                            (catch Exception e
+                              (swap! errors conj e))))))]
+        (doseq [f futures]
+          (deref f 5000 :timeout)))
+      (is (empty? @errors) (str "Errors during concurrent writes: " @errors))
+      (is (= 100 (count (sp/query-entities storage :counter {})))))))

@@ -263,7 +263,20 @@
 (defn resolve-execution-graph
   "Resolves complete execution graph for a function.
    Uses BFS to collect all transitively referenced functions.
-   Throws if iteration count exceeds sp/max-graph-iterations."
+   Throws if iteration count exceeds sp/max-graph-iterations.
+
+   PERFORMANCE NOTE: This implementation has N+1 query issues. For each fn node
+   in the graph, it makes separate queries for fn, fn-schema, arg-schemas,
+   parent chain, arg-values, and fn-refs. For deep/wide graphs this can result
+   in many database round-trips.
+
+   Potential optimizations:
+   1. Batch load fns when their IDs are known (collect all to-visit, query once)
+   2. Use JOINs to fetch fn + fn-schema + arg-schemas in single query
+   3. Prefetch all arg-values for known fn-ids in batch
+   4. Use recursive CTE to resolve entire graph in single query
+
+   For now, caching at the executor level mitigates this for repeated executions."
   [ds fn-id]
   (let [root-fn (read-entity ds :fn fn-id)]
     (when-not root-fn

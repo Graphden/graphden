@@ -289,8 +289,11 @@
 
 (defn- save-metadata!
   "Saves metadata to the database (retract old, then assert new).
-   Note: These must be separate transactions because Datomic does not allow
-   retracting and asserting the same unique value in a single transaction."
+   WARNING: These must be separate transactions because Datomic does not allow
+   retracting and asserting the same unique value in a single transaction.
+   This breaks atomicity - if the second transaction fails after the first
+   succeeds, metadata will be lost. For production use, consider implementing
+   a recovery mechanism or using a different metadata storage strategy."
   [conn schema]
   ;; First, retract all existing metadata
   (let [db (d/db conn)
@@ -837,7 +840,19 @@
 (defn- resolve-execution-graph-impl
   "Resolves complete execution graph for a function.
    Uses BFS to collect all transitively referenced functions.
-   Throws if iteration count exceeds sp/max-graph-iterations."
+   Throws if iteration count exceeds sp/max-graph-iterations.
+
+   PERFORMANCE NOTE: This implementation has N+1 query issues. For each fn node
+   in the graph, it makes separate queries for fn, fn-schema, arg-schemas,
+   parent chain, arg-values, and fn-refs. For deep/wide graphs this can result
+   in many database round-trips.
+
+   Potential optimizations:
+   1. Use Datomic pull patterns to fetch related data in single query
+   2. Batch entity loads when their IDs are known
+   3. Use recursive rules to resolve entire graph in single query
+
+   For now, caching at the executor level mitigates this for repeated executions."
   [conn fn-id]
   (let [db (d/db conn)
         ;; Check if fn exists
@@ -915,10 +930,11 @@
       (let [client (d/client client-config)]
         (reset! client-atom client)
         ;; Create database if it doesn't exist (idempotent)
+        ;; Note: Datomic doesn't provide a specific exception type for "already exists",
+        ;; so we catch Exception and check the message. Other errors are re-thrown.
         (try
           (d/create-database client {:db-name db-name})
           (catch Exception e
-            ;; Ignore "already exists" errors for idempotency
             (when-not (str/includes? (ex-message e) "already exists")
               (throw e))))
         (let [conn (d/connect client {:db-name db-name})]

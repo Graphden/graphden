@@ -2,7 +2,7 @@
 
 [![Clojure](https://img.shields.io/badge/Clojure-1.12-blue.svg)](https://clojure.org/)
 [![Polylith](https://img.shields.io/badge/architecture-Polylith-purple.svg)](https://polylith.gitbook.io/)
-[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)](#testing)
+[![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen.svg)](#testing)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 **Визуальная среда функционального программирования** — граф функций в базе данных.
@@ -96,6 +96,12 @@ fn: create-user (parent: auth-api)
 | [graph-storage-postgres](components/graph-storage-postgres/) | PostgreSQL, готовый к работе | [→](components/graph-storage-postgres/README.md) |
 | [graph-storage-datomic](components/graph-storage-datomic/) | Datomic, готовый к работе | [→](components/graph-storage-datomic/README.md) |
 
+### Исполнение
+
+| Компонент | Описание | README |
+|-----------|----------|--------|
+| [executor](components/executor/) | Исполнитель графа функций (thunks, рекурсия, таймауты) | — |
+
 ## Документация
 
 - **[Архитектура](docs/ARCHITECTURE.md)** — детальное описание системы, решений и ограничений
@@ -171,7 +177,7 @@ bb coverage
 open target/coverage/index.html
 ```
 
-Текущее покрытие: **91% форм / 99% строк**
+Текущее покрытие: **98% форм / 99% строк**
 
 ## Структура проекта
 
@@ -206,14 +212,14 @@ graphden/
 - [x] Memory storage
 - [x] PostgreSQL storage
 - [x] Datomic storage
+- [x] CRUD операции (StorageCRUD протокол)
+- [x] Протокол GraphConstraints (валидация ограничений графа)
+- [x] Наследование (parent-fn-id, цепочка родителей)
+- [x] Исполнитель (executor с thunks, защитой от рекурсии и таймаутами)
 
 ### В разработке
 
-- [ ] CRUD операции
-- [ ] Протокол GraphConstraints
-- [ ] Наследование (parent-fn-id)
-- [ ] Исполнитель (executor)
-- [ ] Базовые функции
+- [ ] Базовые функции (add, if, map, filter и т.д.)
 - [ ] REST API
 - [ ] Веб-интерфейс
 

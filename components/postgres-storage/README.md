@@ -205,6 +205,46 @@ CREATE TABLE _schema_metadata (
 | `ddl.clj` | DDL операции |
 | `migration.clj` | Логика миграции |
 
+## Ограничения именования
+
+### Kebab-case → Snake_case
+
+Все идентификаторы (имена сущностей, полей, enum-ов) преобразуются
+из kebab-case (`:my-field`) в snake_case (`my_field`) для SQL.
+
+**Коллизии запрещены:**
+
+```clojure
+;; Эти имена дадут одинаковый SQL идентификатор
+:my-field  ; → my_field
+:my_field  ; → my_field (коллизия!)
+
+;; При попытке использовать оба:
+(sp/initialize storage schema) ; => throws "Snake_case naming collision"
+```
+
+### Валидные SQL идентификаторы
+
+Имена должны соответствовать паттерну `^[a-z][a-z0-9_]*$`:
+- Начинаются с буквы a-z
+- Содержат только буквы, цифры и подчёркивания
+- Максимальная длина — 63 символа (PostgreSQL ограничение)
+
+**Примеры:**
+
+```clojure
+;; Валидные
+:user
+:user-profile
+:user_profile
+:item123
+
+;; Невалидные (вызовут ошибку)
+:123user      ; начинается с цифры
+:User         ; заглавные буквы
+:user-name!   ; специальные символы
+```
+
 ## Требования
 
 - PostgreSQL 12+ (для `gen_random_uuid()`)

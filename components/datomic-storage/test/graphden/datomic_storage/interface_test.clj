@@ -1385,3 +1385,53 @@
           (is (contains? (:fns graph) fn-id)))
         (finally
           (sp/close storage))))))
+
+
+;; === Concurrent operation tests ===
+
+(deftest concurrent-access-test
+  (testing "concurrent reads are thread-safe"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}})
+          errors (atom [])]
+      (sp/initialize storage schema)
+      (try
+        (sp/create-entity storage :user {:name "Alice"})
+        ;; Launch multiple threads reading concurrently
+        (let [futures (doall
+                        (for [_ (range 10)]
+                          (future
+                            (try
+                              (dotimes [_ 50]
+                                (sp/query-entities storage :user {}))
+                              (catch Exception e
+                                (swap! errors conj e))))))]
+          (doseq [f futures]
+            (deref f 5000 :timeout)))
+        (is (empty? @errors) (str "Errors during concurrent access: " @errors))
+        (finally
+          (sp/close storage)))))
+
+  (testing "concurrent writes are thread-safe"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:value {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                               :type :int}})
+          errors (atom [])]
+      (sp/initialize storage schema)
+      (try
+        ;; Launch multiple threads creating entities concurrently
+        (let [futures (doall
+                        (for [i (range 5)]
+                          (future
+                            (try
+                              (dotimes [j 10]
+                                (sp/create-entity storage :user {:value (+ (* i 10) j)}))
+                              (catch Exception e
+                                (swap! errors conj e))))))]
+          (doseq [f futures]
+            (deref f 10000 :timeout)))
+        (is (empty? @errors) (str "Errors during concurrent writes: " @errors))
+        (is (= 50 (count (sp/query-entities storage :user {}))))
+        (finally
+          (sp/close storage))))))

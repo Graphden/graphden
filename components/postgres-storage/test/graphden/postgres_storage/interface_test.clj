@@ -1898,6 +1898,20 @@
         (finally
           (sp/close storage)))))
 
+  (testing "create-entity allows missing nullable field"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}
+                                       :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                             :type :text :nullable? true}})]
+      (sp/initialize storage schema)
+      (try
+        ;; :bio is not provided at all
+        (let [user (sp/create-entity storage :user {:name "Alice"})]
+          (is (= "Alice" (:name user))))
+        (finally
+          (sp/close storage)))))
+
   (testing "update-entity throws when setting required field to nil"
     (let [storage (create-test-storage)
           schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"

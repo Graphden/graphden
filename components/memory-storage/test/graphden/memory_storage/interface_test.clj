@@ -1644,4 +1644,205 @@
       (sp/initialize storage schema)
       (sp/create-entity storage :user {:email nil :name "Alice"})
       (sp/create-entity storage :user {:email nil :name "Bob"})
-      (is (= 2 (count (sp/query-entities storage :user {})))))))
+      (is (= 2 (count (sp/query-entities storage :user {}))))))
+
+  (testing "multi-field unique constraint"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :order #uuid "00000000-0000-0000-0000-000000000031"
+                                    {:user-id {:uuid #uuid "00000000-0000-0000-0000-000000000032"
+                                               :type :uuid}
+                                     :product-id {:uuid #uuid "00000000-0000-0000-0000-000000000033"
+                                                  :type :uuid}
+                                     :quantity {:uuid #uuid "00000000-0000-0000-0000-000000000034"
+                                                :type :int}})
+                     (ds/add-constraint :order {:type :unique :fields [:user-id :product-id]})
+                     ds/build)
+          user-1 (random-uuid)
+          user-2 (random-uuid)
+          product-1 (random-uuid)
+          product-2 (random-uuid)]
+      (sp/initialize storage schema)
+      ;; Same user, different products - OK
+      (sp/create-entity storage :order {:user-id user-1 :product-id product-1 :quantity 1})
+      (sp/create-entity storage :order {:user-id user-1 :product-id product-2 :quantity 2})
+      ;; Different user, same product - OK
+      (sp/create-entity storage :order {:user-id user-2 :product-id product-1 :quantity 3})
+      ;; Same user AND same product - should fail
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Unique constraint violation"
+            (sp/create-entity storage :order {:user-id user-1 :product-id product-1 :quantity 5}))))))
+
+
+(deftest diamond-dependency-cycle-detection-test
+  (testing "diamond pattern in dependency chain (A->B->D, A->C->D) - no cycle"
+    (let [storage (mem/create-storage)]
+      (sp/initialize storage (-> (mds/create-builder)
+                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
+                                 (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
+                                                {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
+                                                               :type :ref :ref-entity :fn}
+                                                 :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
+                                                                 :type :uuid}
+                                                 :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
+                                                         :type :uuid}})
+                                 ds/build))
+      ;; Create diamond: A -> B -> D, A -> C -> D
+      ;; When checking from A, both B and C will add D to to-visit
+      ;; D will be visited first from one path, then skipped from the other (already-visited)
+      (let [fn-d (sp/create-entity storage :fn {:name "d"})
+            fn-b (sp/create-entity storage :fn {:name "b"})
+            fn-c (sp/create-entity storage :fn {:name "c"})
+            fn-a (sp/create-entity storage :fn {:name "a"})
+            ;; B -> D
+            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-b)
+                                                    :arg-schema-id (random-uuid)
+                                                    :value (:id fn-d)})
+            ;; C -> D
+            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-c)
+                                                    :arg-schema-id (random-uuid)
+                                                    :value (:id fn-d)})
+            ;; A -> B
+            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
+                                                    :arg-schema-id (random-uuid)
+                                                    :value (:id fn-b)})
+            ;; A -> C
+            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
+                                                    :arg-schema-id (random-uuid)
+                                                    :value (:id fn-c)})
+            ;; Create X to test diamond traversal
+            fn-x (sp/create-entity storage :fn {:name "x"})]
+        ;; This should NOT throw - diamond is not a cycle
+        ;; Start from X and check adding a reference to A
+        ;; This traverses the entire A subgraph including the diamond
+        (sp/validate-no-dependency-cycle! storage (:id fn-x) (:id fn-a))))))
+
+
+(testing "diamond pattern with cycle attempt detects correctly"
+  (let [storage (mem/create-storage)]
+    (sp/initialize storage (-> (mds/create-builder)
+                               (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                                              {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
+                               (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
+                                              {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
+                                                             :type :ref :ref-entity :fn}
+                                               :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
+                                                               :type :uuid}
+                                               :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
+                                                       :type :uuid}})
+                               ds/build))
+    ;; Create diamond: A -> B -> D, A -> C -> D, then try D -> A (creates cycle)
+    (let [fn-d (sp/create-entity storage :fn {:name "d"})
+          fn-b (sp/create-entity storage :fn {:name "b"})
+          fn-c (sp/create-entity storage :fn {:name "c"})
+          fn-a (sp/create-entity storage :fn {:name "a"})
+          ;; B -> D
+          _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-b)
+                                                  :arg-schema-id (random-uuid)
+                                                  :value (:id fn-d)})
+          ;; C -> D
+          _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-c)
+                                                  :arg-schema-id (random-uuid)
+                                                  :value (:id fn-d)})
+          ;; A -> B
+          _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
+                                                  :arg-schema-id (random-uuid)
+                                                  :value (:id fn-b)})
+          ;; A -> C
+          _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
+                                                  :arg-schema-id (random-uuid)
+                                                  :value (:id fn-c)})]
+      ;; Now try to add D -> A, which would create a cycle
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"
+            (sp/validate-no-dependency-cycle! storage (:id fn-d) (:id fn-a)))))))
+
+
+(deftest entity-without-constraints-test
+  (testing "CRUD works on entity with no constraints defined"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :item #uuid "00000000-0000-0000-0000-000000000041"
+                                    {:name {:uuid #uuid "00000000-0000-0000-0000-000000000042"
+                                            :type :text}})
+                     ;; No constraints added!
+                     ds/build)]
+      (sp/initialize storage schema)
+      ;; Can create multiple entities with same values (no unique constraint)
+      (sp/create-entity storage :item {:name "Same Name"})
+      (sp/create-entity storage :item {:name "Same Name"})
+      (sp/create-entity storage :item {:name "Same Name"})
+      (is (= 3 (count (sp/query-entities storage :item {})))))))
+
+
+(deftest unique-constraint-partial-fields-test
+  (testing "unique constraint check skips when not all constraint fields are present"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :record #uuid "00000000-0000-0000-0000-000000000051"
+                                    {:field-a {:uuid #uuid "00000000-0000-0000-0000-000000000052"
+                                               :type :text
+                                               :nullable? true}
+                                     :field-b {:uuid #uuid "00000000-0000-0000-0000-000000000053"
+                                               :type :text
+                                               :nullable? true}
+                                     :field-c {:uuid #uuid "00000000-0000-0000-0000-000000000054"
+                                               :type :text
+                                               :nullable? true}})
+                     (ds/add-constraint :record {:type :unique :fields [:field-a :field-b]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      ;; First record: has both fields
+      (sp/create-entity storage :record {:field-a "a1" :field-b "b1" :field-c "c1"})
+      ;; Second record: only has field-a (field-b is nil) - bypasses constraint check
+      (sp/create-entity storage :record {:field-a "a1" :field-b nil :field-c "c2"})
+      ;; Third record: only has field-b (field-a is nil) - bypasses constraint check
+      (sp/create-entity storage :record {:field-a nil :field-b "b1" :field-c "c3"})
+      ;; All three records should be created successfully
+      (is (= 3 (count (sp/query-entities storage :record {}))))))
+
+  (testing "unique constraint check still enforces when all fields present"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :record #uuid "00000000-0000-0000-0000-000000000061"
+                                    {:field-a {:uuid #uuid "00000000-0000-0000-0000-000000000062"
+                                               :type :text}
+                                     :field-b {:uuid #uuid "00000000-0000-0000-0000-000000000063"
+                                               :type :text}})
+                     (ds/add-constraint :record {:type :unique :fields [:field-a :field-b]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :record {:field-a "a1" :field-b "b1"})
+      ;; Different field-b, same field-a - OK
+      (sp/create-entity storage :record {:field-a "a1" :field-b "b2"})
+      ;; Same field-a AND field-b - should fail
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Unique constraint violation"
+            (sp/create-entity storage :record {:field-a "a1" :field-b "b1"})))))
+
+  (testing "multiple records with varied constraint checks"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :product #uuid "00000000-0000-0000-0000-000000000071"
+                                    {:sku {:uuid #uuid "00000000-0000-0000-0000-000000000072"
+                                           :type :text}
+                                     :name {:uuid #uuid "00000000-0000-0000-0000-000000000073"
+                                            :type :text}})
+                     (ds/add-constraint :product {:type :unique :fields [:sku]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      ;; Create multiple records with unique SKUs
+      (sp/create-entity storage :product {:sku "SKU-001" :name "Product 1"})
+      (sp/create-entity storage :product {:sku "SKU-002" :name "Product 2"})
+      (sp/create-entity storage :product {:sku "SKU-003" :name "Product 3"})
+      (sp/create-entity storage :product {:sku "SKU-004" :name "Product 4"})
+      (sp/create-entity storage :product {:sku "SKU-005" :name "Product 5"})
+      ;; All 5 products should be created
+      (is (= 5 (count (sp/query-entities storage :product {}))))
+      ;; Try to create duplicate SKU
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Unique constraint violation"
+            (sp/create-entity storage :product {:sku "SKU-003" :name "Duplicate"}))))))

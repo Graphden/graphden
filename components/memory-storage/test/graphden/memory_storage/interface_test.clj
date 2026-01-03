@@ -1777,7 +1777,62 @@
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
             #"Unique constraint violation"
-            (sp/create-entity storage :order {:user-id user-1 :product-id product-1 :quantity 5}))))))
+            (sp/create-entity storage :order {:user-id user-1 :product-id product-1 :quantity 5})))))
+
+  (testing "multi-field unique constraint with null values is skipped"
+    ;; When one of the fields in the constraint is nil, the constraint check is skipped
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :order #uuid "00000000-0000-0000-0000-000000000041"
+                                    {:user-id {:uuid #uuid "00000000-0000-0000-0000-000000000042"
+                                               :type :uuid
+                                               :nullable? true}
+                                     :product-id {:uuid #uuid "00000000-0000-0000-0000-000000000043"
+                                                  :type :uuid
+                                                  :nullable? true}
+                                     :quantity {:uuid #uuid "00000000-0000-0000-0000-000000000044"
+                                                :type :int}})
+                     (ds/add-constraint :order {:type :unique :fields [:user-id :product-id]})
+                     ds/build)
+          user-1 (random-uuid)
+          product-1 (random-uuid)]
+      (sp/initialize storage schema)
+      ;; Create with user-id nil - should allow multiple
+      (sp/create-entity storage :order {:user-id nil :product-id product-1 :quantity 1})
+      (sp/create-entity storage :order {:user-id nil :product-id product-1 :quantity 2})
+      ;; Create with product-id nil - should allow multiple
+      (sp/create-entity storage :order {:user-id user-1 :product-id nil :quantity 3})
+      (sp/create-entity storage :order {:user-id user-1 :product-id nil :quantity 4})
+      ;; Create with both nil - should allow multiple
+      (sp/create-entity storage :order {:user-id nil :product-id nil :quantity 5})
+      (sp/create-entity storage :order {:user-id nil :product-id nil :quantity 6})
+      (is (= 6 (count (sp/query-entities storage :order {}))))))
+
+  (testing "multi-field unique constraint violation during update"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :order #uuid "00000000-0000-0000-0000-000000000051"
+                                    {:user-id {:uuid #uuid "00000000-0000-0000-0000-000000000052"
+                                               :type :uuid}
+                                     :product-id {:uuid #uuid "00000000-0000-0000-0000-000000000053"
+                                                  :type :uuid}
+                                     :quantity {:uuid #uuid "00000000-0000-0000-0000-000000000054"
+                                                :type :int}})
+                     (ds/add-constraint :order {:type :unique :fields [:user-id :product-id]})
+                     ds/build)
+          user-1 (random-uuid)
+          user-2 (random-uuid)
+          product-1 (random-uuid)
+          product-2 (random-uuid)]
+      (sp/initialize storage schema)
+      ;; Create two orders
+      (let [order-1 (sp/create-entity storage :order {:user-id user-1 :product-id product-1 :quantity 1})
+            _ (sp/create-entity storage :order {:user-id user-2 :product-id product-2 :quantity 2})]
+        ;; Update order-1 to have same user-id and product-id as order-2 - should fail
+        (is (thrown-with-msg?
+              clojure.lang.ExceptionInfo
+              #"Unique constraint violation"
+              (sp/update-entity storage :order (:id order-1) {:user-id user-2 :product-id product-2})))))))
 
 
 (deftest diamond-dependency-cycle-detection-test

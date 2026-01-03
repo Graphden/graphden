@@ -94,7 +94,7 @@
         (finally
           (sp/close storage)))))
 
-  (testing "multi-field unique constraint is skipped (Datomic limitation)"
+  (testing "multi-field unique constraint is enforced at application level"
     (let [storage (create-test-storage)
           schema (-> (mds/create-builder)
                      (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000030"
@@ -105,9 +105,81 @@
                      (ds/add-constraint :user {:type :unique :fields [:first-name :last-name]})
                      ds/build)]
       (try
+        ;; Initialize succeeds - multi-field constraints are enforced at create/update time
         (sp/initialize storage schema)
-        ;; Multi-field constraints are silently skipped in Datomic
         (is (contains? (sp/current-entities storage) :user))
+        ;; Create first user
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"
+                                         :last-name "Doe"})
+        ;; Creating duplicate should fail
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Unique constraint violation"
+              (sp/create-entity storage :user {:id (random-uuid)
+                                               :first-name "John"
+                                               :last-name "Doe"})))
+        ;; Different combination should succeed
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"
+                                         :last-name "Smith"})
+        (finally
+          (sp/close storage)))))
+
+  (testing "multi-field unique constraint with missing values is skipped"
+    ;; In Datomic, nullable fields are omitted rather than set to nil
+    (let [storage (create-test-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000040"
+                                    {:first-name {:uuid #uuid "00000000-0000-0000-0000-000000000041"
+                                                  :type :text
+                                                  :nullable? true}
+                                     :last-name {:uuid #uuid "00000000-0000-0000-0000-000000000042"
+                                                 :type :text
+                                                 :nullable? true}})
+                     (ds/add-constraint :user {:type :unique :fields [:first-name :last-name]})
+                     ds/build)]
+      (try
+        (sp/initialize storage schema)
+        ;; Create with first-name missing - should allow multiple
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :last-name "Doe"})
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :last-name "Doe"})
+        ;; Create with last-name missing - should allow multiple
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"})
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"})
+        ;; Create with both missing - should allow multiple
+        (sp/create-entity storage :user {:id (random-uuid)})
+        (sp/create-entity storage :user {:id (random-uuid)})
+        (is (= 6 (count (sp/query-entities storage :user {}))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "multi-field unique constraint violation during update"
+    (let [storage (create-test-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000050"
+                                    {:first-name {:uuid #uuid "00000000-0000-0000-0000-000000000051"
+                                                  :type :text}
+                                     :last-name {:uuid #uuid "00000000-0000-0000-0000-000000000052"
+                                                 :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:first-name :last-name]})
+                     ds/build)]
+      (try
+        (sp/initialize storage schema)
+        (let [user-1 (sp/create-entity storage :user {:id (random-uuid)
+                                                      :first-name "John"
+                                                      :last-name "Doe"})
+              _ (sp/create-entity storage :user {:id (random-uuid)
+                                                 :first-name "Jane"
+                                                 :last-name "Smith"})]
+          ;; Update user-1 to have same first-name and last-name as user-2 - should fail
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"Unique constraint violation"
+                (sp/update-entity storage :user (:id user-1) {:first-name "Jane" :last-name "Smith"}))))
         (finally
           (sp/close storage))))))
 
@@ -461,7 +533,42 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
             (sp/validate-no-inheritance-cycle! storage fake-fn-id fake-fn-id)))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
-            (sp/validate-no-dependency-cycle! storage fake-fn-id fake-fn-id))))))
+            (sp/validate-no-dependency-cycle! storage fake-fn-id fake-fn-id)))))
+
+  (testing "CRUD operations throw when storage not initialized"
+    (let [storage (create-test-storage)
+          fake-id #uuid "11111111-1111-1111-1111-111111111111"]
+      ;; Don't initialize, just close to ensure conn is nil
+      (sp/close storage)
+      ;; All CRUD operations should throw :storage-not-initialized
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/create-entity storage :user {:id fake-id :name "test"})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/read-entity storage :user fake-id)))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/update-entity storage :user fake-id {:name "updated"})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/delete-entity storage :user fake-id)))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/query-entities storage :user {:name "test"})))))
+
+  (testing "Batch CRUD operations throw when storage not initialized"
+    (let [storage (create-test-storage)
+          fake-id #uuid "11111111-1111-1111-1111-111111111111"]
+      (sp/close storage)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/create-entities storage :user [{:id fake-id :name "test"}])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/read-entities storage :user [fake-id])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/delete-entities storage :user [fake-id])))))
+
+  (testing "resolve-execution-graph throws when storage not initialized"
+    (let [storage (create-test-storage)
+          fake-id #uuid "11111111-1111-1111-1111-111111111111"]
+      (sp/close storage)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+            (sp/resolve-execution-graph storage fake-id))))))
 
 
 (deftest metadata-db-inconsistency-test

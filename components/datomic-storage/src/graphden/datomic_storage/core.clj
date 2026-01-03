@@ -24,16 +24,9 @@
    :bytes       :db.type/bytes})
 
 
-(def datomic->type
-  "Reverse mapping from Datomic types to our types."
-  {:db.type/uuid    :uuid
-   :db.type/string  :text
-   :db.type/long    :int
-   :db.type/boolean :bool
-   :db.type/bigdec  :numeric
-   :db.type/instant :timestamptz
-   :db.type/bytes   :bytes
-   :db.type/ref     :ref})
+;; NOTE: Type information (:enum vs :ref, etc.) is preserved through the metadata system,
+;; not through Datomic's native schema introspection. Both :enum and :ref map to
+;; :db.type/ref in Datomic, but the original type is stored in graphden.metadata entities.
 
 
 ;; === Attribute naming ===
@@ -56,6 +49,22 @@
    E.g., :status.value/active"
   [enum-name value-kw]
   (keyword (str (name enum-name) ".value") (name value-kw)))
+
+
+;; === Connection validation ===
+
+(defn- ensure-connection!
+  "Ensures connection is available for CRUD operations.
+   Throws :storage-not-initialized if conn-atom is nil.
+   Returns the connection if valid."
+  [conn-atom operation-name]
+  (if-let [conn @conn-atom]
+    conn
+    (do
+      (log/error "CRUD operation failed: storage not initialized" {:operation operation-name})
+      (throw (ex-info "Cannot perform operation: storage not initialized"
+                      {:type :storage-not-initialized
+                       :operation operation-name})))))
 
 
 ;; === Default configurations ===
@@ -94,17 +103,17 @@
        (> (count (:fields constraint)) 1)))
 
 
-(defn- warn-unsupported-constraints!
-  "Logs warning for multi-field unique constraints which are not supported in Datomic.
-   Datomic only supports single-attribute unique constraints natively."
+(defn- warn-multi-field-constraints!
+  "Logs info about multi-field unique constraints which require application-level enforcement.
+   Datomic only supports single-attribute unique constraints natively, but we enforce
+   multi-field constraints at the application level during create/update operations."
   [schema entity-name]
   (let [constraints (ds/entity-constraints schema entity-name)
         multi-field (filter multi-field-unique-constraint? constraints)]
     (doseq [c multi-field]
-      (log/warn "Multi-field unique constraint not enforced in Datomic storage"
+      (log/info "Multi-field unique constraint will be enforced at application level"
                 {:entity entity-name
-                 :fields (:fields c)
-                 :note "Consider using application-level validation or composite attributes"}))))
+                 :fields (:fields c)}))))
 
 
 (defn- get-single-field-constraints
@@ -115,6 +124,61 @@
          (filter single-field-unique-constraint?)
          (mapcat :fields)
          (set))))
+
+
+(defn- get-multi-field-constraints
+  "Returns a seq of multi-field unique constraints for an entity.
+   Each constraint is {:type :unique :fields [:field1 :field2 ...]}."
+  [schema entity-name]
+  (let [constraints (ds/entity-constraints schema entity-name)]
+    (filter multi-field-unique-constraint? constraints)))
+
+
+(defn- validate-multi-field-unique-constraint!
+  "Validates that a multi-field unique constraint is not violated.
+   db - Datomic database value
+   entity-name - entity name (e.g., :user)
+   data - the data being inserted/updated
+   constraint - the constraint to check {:type :unique :fields [...]}
+   exclude-id - optional id to exclude (for updates)"
+  [db entity-name data constraint exclude-id]
+  (let [fields (:fields constraint)
+        ;; Get values for all constraint fields from data
+        field-values (map #(get data %) fields)]
+    ;; Only check if all fields have values
+    (when (every? some? field-values)
+      ;; Build a query to find existing records with same field values
+      (let [id-attr (entity-attr entity-name :id)
+            ;; Build where clauses for each field value
+            field-clauses (for [[field value] (map vector fields field-values)]
+                            (let [attr (entity-attr entity-name field)]
+                              ['?e attr value]))
+            ;; Build the complete query
+            base-query (vec (concat '[:find ?e ?id :where]
+                                    field-clauses
+                                    [['?e id-attr '?id]]))
+            ;; Execute query
+            results (d/q base-query db)
+            ;; Filter out the exclude-id (for updates)
+            conflicting (if exclude-id
+                          (filter #(not= (second %) exclude-id) results)
+                          results)]
+        (when (seq conflicting)
+          (throw (ex-info "Unique constraint violation"
+                          {:type :constraint-violation/unique
+                           :entity entity-name
+                           :fields fields
+                           :values (zipmap fields field-values)})))))))
+
+
+(defn- validate-multi-field-constraints!
+  "Validates all multi-field unique constraints for an entity during create/update.
+   This provides application-level enforcement since Datomic doesn't support
+   composite unique constraints natively."
+  [db schema entity-name data exclude-id]
+  (let [constraints (get-multi-field-constraints schema entity-name)]
+    (doseq [constraint constraints]
+      (validate-multi-field-unique-constraint! db entity-name data constraint exclude-id))))
 
 
 (defn- build-field-schema
@@ -533,9 +597,9 @@
 (defn- do-initialize
   "Performs initialization/migration of the database."
   [conn schema]
-  ;; Warn about unsupported multi-field unique constraints
+  ;; Log info about multi-field unique constraints (enforced at application level)
   (doseq [entity-name (ds/entities schema)]
-    (warn-unsupported-constraints! schema entity-name))
+    (warn-multi-field-constraints! schema entity-name))
 
   (let [db (d/db conn)
         old-metadata (read-metadata db)]
@@ -1123,7 +1187,7 @@
 ;; === Storage record ===
 
 (defrecord DatomicStorage
-  [client-config db-name client-atom conn-atom lock]
+  [client-config db-name client-atom conn-atom schema-atom lock]
 
   sp/Storage
 
@@ -1132,6 +1196,8 @@
     (locking lock
       (let [client (d/client client-config)]
         (reset! client-atom client)
+        ;; Store schema for multi-field constraint validation
+        (reset! schema-atom schema)
         ;; Create database if it doesn't exist (idempotent)
         ;; Note: Datomic doesn't provide a specific exception type for "already exists",
         ;; so we catch Exception and check the message. Other errors are re-thrown.
@@ -1228,38 +1294,44 @@
   (create-entity
     [_this entity-name data]
     (locking lock
-      (when-let [conn @conn-atom]
+      (let [conn (ensure-connection! conn-atom :create-entity)
+            db (d/db conn)]
+        ;; Validate multi-field unique constraints before creating
+        (when-let [schema @schema-atom]
+          (validate-multi-field-constraints! db schema entity-name data nil))
         (create-entity-impl conn entity-name data))))
 
 
   (read-entity
     [_this entity-name id]
     (locking lock
-      (when-let [conn @conn-atom]
+      (let [conn (ensure-connection! conn-atom :read-entity)]
         (read-entity-impl conn entity-name id))))
 
 
   (update-entity
     [_this entity-name id data]
     (locking lock
-      (when-let [conn @conn-atom]
+      (let [conn (ensure-connection! conn-atom :update-entity)
+            db (d/db conn)]
+        ;; Validate multi-field unique constraints before updating
+        (when-let [schema @schema-atom]
+          (validate-multi-field-constraints! db schema entity-name data id))
         (update-entity-impl conn entity-name id data))))
 
 
   (delete-entity
     [_this entity-name id]
     (locking lock
-      (if-let [conn @conn-atom]
-        (delete-entity-impl conn entity-name id)
-        false)))
+      (let [conn (ensure-connection! conn-atom :delete-entity)]
+        (delete-entity-impl conn entity-name id))))
 
 
   (query-entities
     [_this entity-name where]
     (locking lock
-      (if-let [conn @conn-atom]
-        (query-entities-impl conn entity-name where)
-        [])))
+      (let [conn (ensure-connection! conn-atom :query-entities)]
+        (query-entities-impl conn entity-name where))))
 
 
   sp/StorageBatchCRUD
@@ -1267,25 +1339,27 @@
   (create-entities
     [_this entity-name data-seq]
     (locking lock
-      (if-let [conn @conn-atom]
-        (create-entities-impl conn entity-name data-seq)
-        [])))
+      (let [conn (ensure-connection! conn-atom :create-entities)
+            db (d/db conn)]
+        ;; Validate multi-field unique constraints for each entity
+        (when-let [schema @schema-atom]
+          (doseq [data data-seq]
+            (validate-multi-field-constraints! db schema entity-name data nil)))
+        (create-entities-impl conn entity-name data-seq))))
 
 
   (read-entities
     [_this entity-name ids]
     (locking lock
-      (if-let [conn @conn-atom]
-        (read-entities-impl conn entity-name ids)
-        {})))
+      (let [conn (ensure-connection! conn-atom :read-entities)]
+        (read-entities-impl conn entity-name ids))))
 
 
   (delete-entities
     [_this entity-name ids]
     (locking lock
-      (if-let [conn @conn-atom]
-        (delete-entities-impl conn entity-name ids)
-        0)))
+      (let [conn (ensure-connection! conn-atom :delete-entities)]
+        (delete-entities-impl conn entity-name ids))))
 
 
   sp/GraphConstraints
@@ -1325,7 +1399,7 @@
   (resolve-execution-graph
     [_this fn-id]
     (locking lock
-      (when-let [conn @conn-atom]
+      (let [conn (ensure-connection! conn-atom :resolve-execution-graph)]
         (resolve-execution-graph-impl conn fn-id)))))
 
 
@@ -1357,4 +1431,4 @@
   [{:keys [db-name client-config]
     :or {db-name "graphden"
          client-config default-local-config}}]
-  (->DatomicStorage client-config db-name (atom nil) (atom nil) (Object.)))
+  (->DatomicStorage client-config db-name (atom nil) (atom nil) (atom nil) (Object.)))

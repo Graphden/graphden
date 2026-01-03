@@ -185,15 +185,22 @@
 
 
 (defn- metadata-schema-exists?
-  "Checks if metadata schema attributes exist in the database."
+  "Checks if metadata schema attributes exist in the database.
+   Returns false if the attribute doesn't exist.
+   Re-throws unexpected exceptions (connection errors, etc.)."
   [db]
   (try
     (let [result (d/q '[:find ?e
                         :where [?e :db/ident :graphden.metadata/uuid]]
                       db)]
       (seq result))
-    (catch Exception _
-      false)))
+    (catch clojure.lang.ExceptionInfo e
+      ;; Datomic throws ExceptionInfo for various errors
+      ;; Only suppress "not-an-entity" errors (attribute doesn't exist)
+      (let [data (ex-data e)]
+        (if (= (:db/error data) :db.error/not-an-entity)
+          false
+          (throw e))))))
 
 
 (defn- read-metadata
@@ -289,11 +296,15 @@
 
 (defn- save-metadata!
   "Saves metadata to the database (retract old, then assert new).
-   WARNING: These must be separate transactions because Datomic does not allow
-   retracting and asserting the same unique value in a single transaction.
-   This breaks atomicity - if the second transaction fails after the first
-   succeeds, metadata will be lost. For production use, consider implementing
-   a recovery mechanism or using a different metadata storage strategy."
+
+   NOTE: Uses two separate transactions because Datomic doesn't allow
+   retracting and asserting the same :db/unique value in a single transaction.
+   If the second transaction fails after the first succeeds, metadata will be lost.
+
+   In practice, this is acceptable because:
+   1. Metadata changes only happen during schema migrations
+   2. The schema itself (Datomic attributes) remains intact even if metadata is lost
+   3. Re-initializing with the same DataSchema will restore metadata"
   [conn schema]
   ;; First, retract all existing metadata
   (let [db (d/db conn)

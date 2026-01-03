@@ -488,15 +488,28 @@
 
 (deftest metadata-schema-missing-test
   (testing "metadata-schema-exists? returns false when metadata schema not installed"
-    ;; This exercises the try/catch path in metadata-schema-exists?
-    ;; On a fresh database, the metadata attributes don't exist
-    (let [storage (create-test-storage)]
+    ;; This test verifies that querying for non-existent metadata returns false
+    ;; We initialize with a minimal schema that doesn't include graphden.metadata attributes
+    ;; then directly query to confirm metadata-schema-exists? returns false on fresh db
+    (let [storage (create-test-storage)
+          metadata-exists-fn #'core/metadata-schema-exists?]
       (try
-        ;; Don't initialize - directly check if metadata schema exists
-        (let [metadata-exists-fn #'core/metadata-schema-exists?
-              conn (:conn storage)]
-          ;; Should return false without throwing
-          (is (false? (metadata-exists-fn conn))))
+        ;; First, create the client and database without initializing schema
+        ;; This gives us a fresh db without metadata schema
+        (let [client (d/client {:server-type :dev-local
+                                :storage-dir :mem
+                                :system "graphden-test"})
+              temp-db-name (str "test-fresh-" (random-uuid))]
+          (try
+            (d/create-database client {:db-name temp-db-name})
+            (let [conn (d/connect client {:db-name temp-db-name})
+                  db (d/db conn)]
+              ;; Fresh database - no metadata schema exists
+              ;; Function returns nil (falsy) when schema doesn't exist
+              (is (not (metadata-exists-fn db))))
+            (finally
+              ;; Cleanup
+              (d/delete-database client {:db-name temp-db-name}))))
         (finally
           (sp/close storage))))))
 

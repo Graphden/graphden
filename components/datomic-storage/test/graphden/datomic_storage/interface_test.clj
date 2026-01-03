@@ -1724,3 +1724,68 @@
   (contract/run-graph-constraints-tests
     create-test-storage
     sp/close))
+
+
+;; === Lock function tests ===
+
+(deftest with-read-lock-test
+  (let [rw-lock (java.util.concurrent.locks.ReentrantReadWriteLock.)
+        write-lock (java.util.concurrent.locks.ReentrantReadWriteLock/.writeLock rw-lock)]
+    (testing "with-read-lock returns value from function"
+      (is (= 42 (core/with-read-lock rw-lock #(+ 40 2)))))
+
+    (testing "with-read-lock releases lock after normal return"
+      (core/with-read-lock rw-lock #(identity :done))
+      ;; If lock wasn't released, we couldn't acquire write lock
+      (is (true? (java.util.concurrent.locks.Lock/.tryLock write-lock)))
+      (java.util.concurrent.locks.Lock/.unlock write-lock))
+
+    (testing "with-read-lock releases lock after exception"
+      (try
+        (core/with-read-lock rw-lock #(throw (ex-info "test error" {})))
+        (catch Exception _))
+      ;; If lock wasn't released, we couldn't acquire write lock
+      (is (true? (java.util.concurrent.locks.Lock/.tryLock write-lock)))
+      (java.util.concurrent.locks.Lock/.unlock write-lock))
+
+    (testing "multiple readers can run concurrently"
+      (let [read-count (atom 0)
+            latch (java.util.concurrent.CountDownLatch. 2)]
+        ;; Start two readers
+        (future
+          (core/with-read-lock rw-lock
+                               (fn []
+                                 (swap! read-count inc)
+                                 (java.util.concurrent.CountDownLatch/.countDown latch)
+                                 (Thread/sleep 50))))
+        (future
+          (core/with-read-lock rw-lock
+                               (fn []
+                                 (swap! read-count inc)
+                                 (java.util.concurrent.CountDownLatch/.countDown latch)
+                                 (Thread/sleep 50))))
+        ;; Wait for both to be inside the lock
+        (java.util.concurrent.CountDownLatch/.await latch 1 java.util.concurrent.TimeUnit/SECONDS)
+        ;; Both readers should be running concurrently
+        (is (= 2 @read-count))))))
+
+
+(deftest with-write-lock-test
+  (let [rw-lock (java.util.concurrent.locks.ReentrantReadWriteLock.)
+        write-lock (java.util.concurrent.locks.ReentrantReadWriteLock/.writeLock rw-lock)]
+    (testing "with-write-lock returns value from function"
+      (is (= 42 (core/with-write-lock rw-lock #(+ 40 2)))))
+
+    (testing "with-write-lock releases lock after normal return"
+      (core/with-write-lock rw-lock #(identity :done))
+      ;; If lock wasn't released, we couldn't acquire another write lock
+      (is (true? (java.util.concurrent.locks.Lock/.tryLock write-lock)))
+      (java.util.concurrent.locks.Lock/.unlock write-lock))
+
+    (testing "with-write-lock releases lock after exception"
+      (try
+        (core/with-write-lock rw-lock #(throw (ex-info "test error" {})))
+        (catch Exception _))
+      ;; If lock wasn't released, we couldn't acquire another write lock
+      (is (true? (java.util.concurrent.locks.Lock/.tryLock write-lock)))
+      (java.util.concurrent.locks.Lock/.unlock write-lock))))

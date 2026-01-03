@@ -1,7 +1,9 @@
 (ns ci
   "CI runner with live progress display and coverage report."
-  (:require [babashka.process :as p]
-            [clojure.string :as str]))
+  (:require
+    [babashka.process :as p]
+    [clojure.string :as str]))
+
 
 ;; Colors
 (def green "\u001b[32m")
@@ -11,10 +13,14 @@
 (def reset "\u001b[0m")
 (def clear-line "\u001b[2K\r")
 
-(defn native-cmd? [cmd]
+
+(defn native-cmd?
+  [cmd]
   (= 0 (:exit (p/shell {:out :string :err :string :continue true} (str "which " cmd)))))
 
-(defn has-warnings? [check-name output]
+
+(defn has-warnings?
+  [check-name output]
   (case check-name
     ;; clj-kondo: check for actual warnings (not just the word in status line)
     "clj-kondo" (and (or (str/includes? output "warning:")
@@ -29,13 +35,16 @@
     "outdated" (str/includes? output ":upgrade")
     false))
 
+
 (defn soft-check?
   "Returns true for checks that are informational and shouldn't fail CI.
    These checks provide useful info but failures don't block the build."
   [check-name]
   (contains? #{"outdated" "security"} check-name))
 
-(defn status-char [s]
+
+(defn status-char
+  [s]
   (case s
     :running (str yellow "◐" reset)
     :passed (str green "✓" reset)
@@ -43,7 +52,9 @@
     :warning (str yellow "⚠" reset)
     "?"))
 
-(defn run-ci []
+
+(defn run-ci
+  []
   (let [;; Build commands
         kondo-cmd (if (native-cmd? "clj-kondo")
                     ["clj-kondo" "--lint" "components" "bases" "development"]
@@ -182,5 +193,6 @@
           (println (str red bold "✗ CI FAILED" reset " (" passed-count "/" total-count " checks passed in " (format "%.1fs" elapsed) ")"))
           (System/exit 1))
         (println (str green bold "✓ CI PASSED" reset " (" total-count "/" total-count " checks passed in " (format "%.1fs" elapsed) ")"))))))
+
 
 (run-ci)

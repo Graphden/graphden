@@ -1,9 +1,9 @@
 (ns sync-paths
   "Sync component/base paths to deps.edn and tests.edn"
   (:require
-   [babashka.fs :as fs]
-   [clojure.edn :as edn]
-   [clojure.string :as str]))
+    [babashka.fs :as fs]
+    [clojure.edn :as edn]
+    [clojure.string :as str]))
 
 
 (defn find-paths
@@ -32,11 +32,13 @@
                                  (str "bases/" name "/resources")])))}))
 
 
-(defn read-edn [path]
+(defn read-edn
+  [path]
   (edn/read-string (slurp path)))
 
 
-(defn write-edn [path data]
+(defn write-edn
+  [path data]
   (spit path (with-out-str (clojure.pprint/pprint data))))
 
 
@@ -64,7 +66,8 @@
      :plugins [:kaocha.plugin/profiling]}))
 
 
-(defn sync! []
+(defn sync!
+  []
   (let [paths (find-paths)]
     (println "Found paths:" paths)
     (write-edn "deps.edn" (update-deps-edn paths))

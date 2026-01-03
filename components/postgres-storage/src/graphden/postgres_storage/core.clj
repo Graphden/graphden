@@ -28,6 +28,25 @@
       SQLException)))
 
 
+;; === Configuration ===
+
+(def ^:dynamic *query-timeout-seconds*
+  "Timeout for SQL queries in seconds. Can be rebound per-thread.
+   Default is 30 seconds. Use `with-query-timeout` to temporarily change."
+  30)
+
+
+(defn with-query-timeout
+  "Executes f with a custom query timeout (in seconds).
+
+   Example:
+   (with-query-timeout 60
+     #(sp/query-entities storage :user {}))"
+  [timeout-seconds f]
+  (binding [*query-timeout-seconds* timeout-seconds]
+    (f)))
+
+
 ;; === Connection pool ===
 
 (defn create-pool

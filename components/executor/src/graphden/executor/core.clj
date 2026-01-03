@@ -267,9 +267,12 @@
         fn-name (keyword (:name fn-schema))
         base-fn (get-base-fn fn-name)]
     (when-not base-fn
-      (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry")
-                      {:type :execution-error/base-fn-not-found
-                       :fn-name fn-name})))
+      (let [available-fns (keys @base-fns-registry)]
+        (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry. "
+                             "Available functions: " (pr-str available-fns))
+                        {:type :execution-error/base-fn-not-found
+                         :fn-name fn-name
+                         :available-fns available-fns}))))
     (let [thunks (build-thunks fn-data provided-args)
           new-context (update context :depth inc)]
       (base-fn thunks new-context))))

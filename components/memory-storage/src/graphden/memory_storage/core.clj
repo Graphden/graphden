@@ -174,12 +174,12 @@
 
 
 (defn- validate-entity-exists!
-  "Validates that entity exists in schema. Throws :entity-not-found if not.
-   This provides consistent behavior with postgres-storage which throws :table-not-found."
+  "Validates that entity exists in schema. Throws :table-not-found if not.
+   This provides consistent behavior with postgres-storage."
   [state entity-name]
   (when-not (contains? (:entities state) entity-name)
     (throw (ex-info "Entity not found in schema"
-                    {:type :entity-not-found
+                    {:type :table-not-found
                      :entity entity-name}))))
 
 

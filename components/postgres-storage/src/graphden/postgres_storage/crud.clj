@@ -18,9 +18,13 @@
       PGobject)))
 
 
-(def ^:private query-timeout-seconds
-  "Default timeout for CRUD queries (in seconds)."
-  30)
+;; Forward declare to avoid circular dependency with core.clj
+;; The actual value comes from graphden.postgres-storage.core/*query-timeout-seconds*
+(defn- get-query-timeout
+  []
+  (if-let [timeout (resolve 'graphden.postgres-storage.core/*query-timeout-seconds*)]
+    (deref timeout)
+    30))
 
 
 (defn- wrap-sql-error
@@ -107,9 +111,23 @@
   (contains? #{:jsonb :union} field-type))
 
 
-;; Fallback JSONB columns for cases when field metadata is not available.
-;; This ensures that known JSONB columns are properly wrapped even when
-;; crud functions are called directly without field metadata.
+;; === Fallback JSONB columns ===
+;;
+;; These columns are always treated as JSONB, even when field metadata is not available.
+;; This is a safety mechanism for:
+;;
+;; 1. Direct CRUD calls without schema context - some internal operations may call
+;;    create-entity/update-entity without the full field metadata
+;;
+;; 2. Specific entity types with known JSONB fields - the :value field in arg_value
+;;    entities stores polymorphic values (refs, literals) as JSONB
+;;
+;; IMPORTANT: If you add new entities with JSONB fields that might be accessed
+;; without field metadata, add them here. However, the preferred approach is to
+;; always pass field metadata to CRUD operations.
+;;
+;; Current fallbacks:
+;; - :value - Used in arg_value entity for polymorphic value storage (:union type)
 (def ^:private fallback-jsonb-columns
   #{:value})
 
@@ -175,7 +193,7 @@
     (with-sql-error-handling :create-entity {:entity-name entity-name :id id}
       (-> (jdbc/execute-one! ds query
                              {:builder-fn rs/as-unqualified-lower-maps
-                              :timeout query-timeout-seconds})
+                              :timeout (get-query-timeout)})
           row->entity))))
 
 
@@ -191,7 +209,7 @@
     (with-sql-error-handling :read-entity {:entity-name entity-name :id id}
       (-> (jdbc/execute-one! ds query
                              {:builder-fn rs/as-unqualified-lower-maps
-                              :timeout query-timeout-seconds})
+                              :timeout (get-query-timeout)})
           row->entity))))
 
 
@@ -221,7 +239,7 @@
         (with-sql-error-handling :update-entity {:entity-name entity-name :id id}
           (-> (jdbc/execute-one! ds query
                                  {:builder-fn rs/as-unqualified-lower-maps
-                                  :timeout query-timeout-seconds})
+                                  :timeout (get-query-timeout)})
               row->entity))))))
 
 
@@ -235,7 +253,7 @@
                           {:quoted true})]
     (with-sql-error-handling :delete-entity {:entity-name entity-name :id id}
       (pos? (:next.jdbc/update-count
-              (jdbc/execute-one! ds query {:timeout query-timeout-seconds}))))))
+              (jdbc/execute-one! ds query {:timeout (get-query-timeout)}))))))
 
 
 (defn query-entities
@@ -261,7 +279,7 @@
     (with-sql-error-handling :query-entities {:entity-name entity-name :where where}
       (let [rows (jdbc/execute! ds query
                                 {:builder-fn rs/as-unqualified-lower-maps
-                                 :timeout query-timeout-seconds})]
+                                 :timeout (get-query-timeout)})]
         (map row->entity rows)))))
 
 
@@ -299,7 +317,7 @@
       (with-sql-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
         (let [result-rows (jdbc/execute! ds query
                                          {:builder-fn rs/as-unqualified-lower-maps
-                                          :timeout query-timeout-seconds})]
+                                          :timeout (get-query-timeout)})]
           (map row->entity result-rows))))))
 
 
@@ -317,7 +335,7 @@
       (with-sql-error-handling :read-entities {:entity-name entity-name :count (count ids)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout query-timeout-seconds})]
+                                   :timeout (get-query-timeout)})]
           (->> rows
                (map row->entity)
                (map (juxt :id identity))
@@ -336,7 +354,7 @@
                             {:quoted true})]
       (with-sql-error-handling :delete-entities {:entity-name entity-name :count (count ids)}
         (:next.jdbc/update-count
-          (jdbc/execute-one! ds query {:timeout query-timeout-seconds}))))))
+          (jdbc/execute-one! ds query {:timeout (get-query-timeout)}))))))
 
 
 ;; === ExecutionGraph ===
@@ -367,7 +385,7 @@
       (with-sql-error-handling :collect-parent-chains {:fn-count (count fn-ids)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout query-timeout-seconds})]
+                                   :timeout (get-query-timeout)})]
           ;; Group by origin and extract ordered chain
           (->> rows
                (group-by :origin)
@@ -389,7 +407,7 @@
       (with-sql-error-handling :load-arg-values {:fn-count (count fn-ids)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout query-timeout-seconds})]
+                                   :timeout (get-query-timeout)})]
           (map row->entity rows))))))
 
 
@@ -434,7 +452,7 @@
       (with-sql-error-handling :verify-fn-refs {:candidate-count (count uuid-candidates)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout query-timeout-seconds})]
+                                   :timeout (get-query-timeout)})]
           (set (map :id rows)))))))
 
 
@@ -451,7 +469,7 @@
       (with-sql-error-handling :load-entities-batch {:table table :count (count values)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout query-timeout-seconds})]
+                                   :timeout (get-query-timeout)})]
           (->> rows
                (map row->entity)
                (map (juxt :id identity))

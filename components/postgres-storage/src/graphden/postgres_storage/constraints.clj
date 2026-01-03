@@ -9,9 +9,13 @@
     [next.jdbc.result-set :as rs]))
 
 
-(def ^:private query-timeout-seconds
-  "Default timeout for constraint queries (in seconds)."
-  30)
+;; Forward declare to avoid circular dependency with core.clj
+;; The actual value comes from graphden.postgres-storage.core/*query-timeout-seconds*
+(defn- get-query-timeout
+  []
+  (if-let [timeout (resolve 'graphden.postgres-storage.core/*query-timeout-seconds*)]
+    (deref timeout)
+    30))
 
 
 ;; === ConstraintHelpers implementation for PostgreSQL ===
@@ -29,7 +33,7 @@
                             {:quoted true})
           row (jdbc/execute-one! ds query
                                  {:builder-fn rs/as-unqualified-lower-maps
-                                  :timeout query-timeout-seconds})]
+                                  :timeout (get-query-timeout)})]
       (:fn_schema_id row)))
 
 
@@ -41,7 +45,7 @@
                             {:quoted true})
           row (jdbc/execute-one! ds query
                                  {:builder-fn rs/as-unqualified-lower-maps
-                                  :timeout query-timeout-seconds})]
+                                  :timeout (get-query-timeout)})]
       (:fn_schema_id row)))
 
 
@@ -53,7 +57,7 @@
                             {:quoted true})
           row (jdbc/execute-one! ds query
                                  {:builder-fn rs/as-unqualified-lower-maps
-                                  :timeout query-timeout-seconds})]
+                                  :timeout (get-query-timeout)})]
       (:parent_fn_id row)))
 
 
@@ -62,7 +66,21 @@
     (let [parent-id (sp/get-parent-fn-id this fn-id)]
       (if-not parent-id
         #{}
-        ;; Use recursive CTE to collect all ancestors
+        ;; Use recursive CTE to collect all ancestors in the parent-fn-id chain.
+        ;;
+        ;; SQL equivalent:
+        ;; WITH RECURSIVE ancestors AS (
+        ;;   -- Base case: start with the direct parent
+        ;;   SELECT id, parent_fn_id FROM fn WHERE id = <parent-id>
+        ;;   UNION ALL
+        ;;   -- Recursive case: follow parent_fn_id links up the chain
+        ;;   SELECT f.id, f.parent_fn_id FROM fn f
+        ;;   JOIN ancestors a ON f.id = a.parent_fn_id
+        ;; )
+        ;; SELECT id FROM ancestors WHERE id <> <fn-id>
+        ;;
+        ;; The UNION ALL is used because we need all rows (no duplicates possible
+        ;; in a tree structure). The WHERE clause excludes fn-id itself from results.
         (let [query (sql/format
                       {:with-recursive
                        [[:ancestors
@@ -79,13 +97,30 @@
                       {:quoted true})
               rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout query-timeout-seconds})]
+                                   :timeout (get-query-timeout)})]
           (set (map :id rows))))))
 
 
   (collect-arg-schema-ids-in-chain
     [this fn-id]
     ;; Optimized: single query using CTE to collect parent chain and arg-schema-ids
+    ;; in one database round-trip instead of N+1 queries.
+    ;;
+    ;; SQL equivalent:
+    ;; WITH RECURSIVE ancestors AS (
+    ;;   -- Same recursive CTE as collect-parent-chain
+    ;;   SELECT id, parent_fn_id FROM fn WHERE id = <parent-id>
+    ;;   UNION ALL
+    ;;   SELECT f.id, f.parent_fn_id FROM fn f
+    ;;   JOIN ancestors a ON f.id = a.parent_fn_id
+    ;; )
+    ;; -- Join with arg_value to get all arg-schema-ids defined in the chain
+    ;; SELECT DISTINCT av.arg_schema_id
+    ;; FROM arg_value av
+    ;; JOIN ancestors anc ON av.owner_fn_id = anc.id
+    ;;
+    ;; This query finds all arg-schema-ids that are already defined in any
+    ;; ancestor function, used to prevent re-definition at lower levels.
     (let [parent-id (sp/get-parent-fn-id this fn-id)]
       (if-not parent-id
         #{}
@@ -105,15 +140,35 @@
                       {:quoted true})
               rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout query-timeout-seconds})]
+                                   :timeout (get-query-timeout)})]
           (set (map :arg_schema_id rows))))))
 
 
   (collect-dependency-chain
     [_this owner-fn-id]
-    ;; Use recursive CTE to traverse dependencies
-    ;; arg_value.value is JSONB, refs are stored as UUIDs
-    ;; Note: JSONB operators (#>>) require raw SQL
+    ;; Use recursive CTE to traverse all function dependencies through arg_value.
+    ;; This is used for cycle detection when adding new dependencies.
+    ;;
+    ;; SQL equivalent:
+    ;; WITH RECURSIVE deps AS (
+    ;;   -- Base case: start with the owner function
+    ;;   SELECT <owner-fn-id>::uuid AS fn_id
+    ;;   UNION
+    ;;   -- Recursive case: follow references stored in arg_value.value
+    ;;   SELECT (av.value #>> '{}')::uuid
+    ;;   FROM deps d
+    ;;   JOIN arg_value av ON av.owner_fn_id = d.fn_id
+    ;;   WHERE av.value #>> '{}' IS NOT NULL
+    ;;     AND EXISTS (SELECT 1 FROM fn WHERE id = (av.value #>> '{}')::uuid)
+    ;; )
+    ;; SELECT DISTINCT fn_id FROM deps
+    ;;
+    ;; Notes:
+    ;; - UNION (not UNION ALL) is used to prevent infinite loops by
+    ;;   automatically deduplicating already-visited nodes
+    ;; - arg_value.value is JSONB; #>> '{}' extracts the root value as text
+    ;; - The EXISTS check ensures we only follow valid fn references
+    ;; - The cast to uuid converts the text representation to UUID type
     (let [query (sql/format
                   {:with-recursive
                    [[:deps
@@ -134,7 +189,7 @@
                   {:quoted true})
           rows (jdbc/execute! ds query
                               {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout query-timeout-seconds})]
+                               :timeout (get-query-timeout)})]
       (set (map :fn_id rows)))))
 
 

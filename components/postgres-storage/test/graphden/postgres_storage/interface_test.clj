@@ -4,6 +4,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
+    [graphden.postgres-storage.core :as core]
     [graphden.postgres-storage.crud :as crud]
     [graphden.postgres-storage.ddl :as ddl]
     [graphden.postgres-storage.interface :as pg]
@@ -14,6 +15,8 @@
     [graphden.storage-protocol.interface :as sp]
     [next.jdbc :as jdbc])
   (:import
+    (com.zaxxer.hikari
+      HikariDataSource)
     (java.sql
       SQLException)
     (java.util.concurrent
@@ -973,7 +976,61 @@
       (catch clojure.lang.ExceptionInfo e
         ;; Should NOT expose :username or :password in ex-data
         (is (= :config-error/missing-jdbc-url (:type (ex-data e))))
-        (is (nil? (:provided-keys (ex-data e))))))))
+        (is (nil? (:provided-keys (ex-data e)))))))
+
+  (testing "missing username error has correct type"
+    (try
+      (pg/create-storage {:jdbc-url "jdbc:postgresql://localhost/test"
+                          :password "test"})
+      (is false "Should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :config-error/missing-username (:type (ex-data e)))))))
+
+  (testing "missing password error has correct type"
+    (try
+      (pg/create-storage {:jdbc-url "jdbc:postgresql://localhost/test"
+                          :username "test"})
+      (is false "Should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :config-error/missing-password (:type (ex-data e))))))))
+
+
+(deftest with-query-timeout-test
+  (testing "with-query-timeout function changes timeout value"
+    (is (= 30 core/*query-timeout-seconds*) "Default should be 30")
+    (pg/with-query-timeout 60
+                           (fn []
+                             (is (= 60 core/*query-timeout-seconds*) "Should be 60 inside function")))
+    (is (= 30 core/*query-timeout-seconds*) "Should restore to 30 after function"))
+
+  (testing "with-query-timeout returns body result"
+    (is (= 42 (pg/with-query-timeout 10 #(+ 40 2)))))
+
+  (testing "nested with-query-timeout works correctly"
+    (pg/with-query-timeout 100
+                           (fn []
+                             (is (= 100 core/*query-timeout-seconds*))
+                             (pg/with-query-timeout 200
+                                                    (fn []
+                                                      (is (= 200 core/*query-timeout-seconds*))))
+                             (is (= 100 core/*query-timeout-seconds*))))))
+
+
+(deftest close-pool-idempotency-test
+  (testing "close-pool with nil pool does not throw"
+    (is (nil? (core/close-pool nil))))
+
+  (testing "close-pool is idempotent - can be called multiple times"
+    (let [pool (core/create-pool {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
+                                  :username (PostgreSQLContainer/.getUsername *container*)
+                                  :password (PostgreSQLContainer/.getPassword *container*)
+                                  :pool-size 1})]
+      ;; First close
+      (is (nil? (core/close-pool pool)))
+      (is (true? (HikariDataSource/.isClosed pool)))
+      ;; Second close - should not throw
+      (is (nil? (core/close-pool pool)))
+      (is (true? (HikariDataSource/.isClosed pool))))))
 
 
 (deftest unknown-pg-type-coverage-test

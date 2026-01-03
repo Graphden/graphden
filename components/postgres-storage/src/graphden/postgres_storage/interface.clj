@@ -4,6 +4,23 @@
     [graphden.postgres-storage.core :as core]))
 
 
+;; Re-export timeout configuration for external use
+(def ^:dynamic *query-timeout-seconds*
+  "Timeout for SQL queries in seconds. Can be rebound per-thread.
+   Default is 30 seconds."
+  core/*query-timeout-seconds*)
+
+
+(defn with-query-timeout
+  "Executes f with a custom query timeout (in seconds).
+
+   Example:
+   (with-query-timeout 60
+     #(sp/query-entities storage :user {}))"
+  [timeout-seconds f]
+  (core/with-query-timeout timeout-seconds f))
+
+
 (defn create-storage
   "Creates a new PostgreSQL storage instance.
 

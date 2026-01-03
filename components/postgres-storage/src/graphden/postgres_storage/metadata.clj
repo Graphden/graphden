@@ -16,9 +16,13 @@
 (def ^:private metadata-table-name "_schema_metadata")
 
 
-(def ^:private query-timeout-seconds
-  "Default timeout for metadata queries (in seconds)."
-  30)
+;; Forward declare to avoid circular dependency with core.clj
+;; The actual value comes from graphden.postgres-storage.core/*query-timeout-seconds*
+(defn- get-query-timeout
+  []
+  (if-let [timeout (resolve 'graphden.postgres-storage.core/*query-timeout-seconds*)]
+    (deref timeout)
+    30))
 
 
 ;; === Table management ===
@@ -49,7 +53,7 @@
                               :from [(keyword metadata-table-name)]}
                              {:quoted true})
                  {:builder-fn rs/as-unqualified-lower-maps
-                  :timeout query-timeout-seconds}))
+                  :timeout (get-query-timeout)}))
 
 
 ;; === JSON conversion ===

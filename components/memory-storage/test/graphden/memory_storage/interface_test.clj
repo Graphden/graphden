@@ -2118,3 +2118,18 @@
   (contract/run-graph-constraints-tests
     mem/create-storage
     sp/close))
+
+
+;; === Edge case tests ===
+
+(deftest query-non-existent-entity-test
+  (testing "query-entities throws when entity doesn't exist in schema"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Entity not found in schema"
+              (sp/query-entities storage :non-existent-entity {})))
+        (finally
+          (sp/close storage))))))

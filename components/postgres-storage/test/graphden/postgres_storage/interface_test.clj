@@ -9,6 +9,7 @@
     [graphden.postgres-storage.introspection :as introspection]
     [graphden.postgres-storage.metadata :as metadata]
     [graphden.postgres-storage.util :as util]
+    [graphden.storage-protocol.contract-tests :as contract]
     [graphden.storage-protocol.interface :as sp]
     [next.jdbc :as jdbc])
   (:import
@@ -965,12 +966,12 @@
                               :username "test"
                               :password "  "}))))
 
-  (testing "error ex-data contains reason instead of sensitive credentials info"
+  (testing "error ex-data contains type instead of sensitive credentials info"
     (try
       (pg/create-storage {:username "testuser" :password "testpass"})
       (catch clojure.lang.ExceptionInfo e
         ;; Should NOT expose :username or :password in ex-data
-        (is (= :missing-jdbc-url (:reason (ex-data e))))
+        (is (= :config-error/missing-jdbc-url (:type (ex-data e))))
         (is (nil? (:provided-keys (ex-data e))))))))
 
 
@@ -2722,3 +2723,11 @@
               (is (= 42 (:value (get result (:id arg-schema))))))))
         (finally
           (sp/close storage))))))
+
+
+;; === GraphConstraints contract tests ===
+
+(deftest graph-constraints-contract-test
+  (contract/run-graph-constraints-tests
+    create-test-storage
+    sp/close))

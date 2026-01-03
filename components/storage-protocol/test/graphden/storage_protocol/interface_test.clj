@@ -653,7 +653,23 @@
 
   (testing "missing fn returns nil (fn not found)"
     (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
-      (is (nil? (storage/validate-parent-same-schema-impl helpers (random-uuid) (random-uuid)))))))
+      (is (nil? (storage/validate-parent-same-schema-impl helpers (random-uuid) (random-uuid))))))
+
+  (testing "fn-schema-id nil but parent-schema-id present returns nil"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          schema-b (random-uuid)
+          ;; fn-a has no schema, fn-b has schema
+          helpers (->MockConstraintHelpers {fn-b schema-b} {} {} {} {})]
+      (is (nil? (storage/validate-parent-same-schema-impl helpers fn-a fn-b)))))
+
+  (testing "fn-schema-id present but parent-schema-id nil returns nil"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          schema-a (random-uuid)
+          ;; fn-a has schema, fn-b has no schema
+          helpers (->MockConstraintHelpers {fn-a schema-a} {} {} {} {})]
+      (is (nil? (storage/validate-parent-same-schema-impl helpers fn-a fn-b))))))
 
 
 ;; === validate-no-arg-override-impl tests ===
@@ -724,7 +740,15 @@
 
   (testing "missing fn-schema returns nil"
     (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
-      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers (random-uuid) (random-uuid)))))))
+      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers (random-uuid) (random-uuid))))))
+
+  (testing "fn-schema-id present but arg-fn-schema-id nil returns nil"
+    (let [fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          schema-id (random-uuid)
+          ;; fn has schema-id, but arg-schema has no fn-schema-id
+          helpers (->MockConstraintHelpers {fn-id schema-id} {} {} {} {})]
+      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id))))))
 
 
 ;; === validate-no-inheritance-cycle-impl tests ===

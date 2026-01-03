@@ -4,6 +4,7 @@
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.memory-storage.interface :as mem]
+    [graphden.storage-protocol.contract-tests :as contract]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -1775,6 +1776,77 @@
       (is (= 3 (count (sp/query-entities storage :item {})))))))
 
 
+(deftest multiple-unique-constraints-test
+  (testing "entity with multiple unique constraints iterates through all constraints"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000051"
+                                    {:username {:uuid #uuid "00000000-0000-0000-0000-000000000052"
+                                                :type :text}
+                                     :email {:uuid #uuid "00000000-0000-0000-0000-000000000053"
+                                             :type :text}
+                                     :phone {:uuid #uuid "00000000-0000-0000-0000-000000000054"
+                                             :type :text :nullable? true}})
+                     (ds/add-constraint :user {:type :unique :fields [:username]})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     (ds/add-constraint :user {:type :unique :fields [:phone]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      ;; Create first user
+      (sp/create-entity storage :user {:username "alice" :email "alice@test.com" :phone "111"})
+      (sp/create-entity storage :user {:username "bob" :email "bob@test.com" :phone "222"})
+      (sp/create-entity storage :user {:username "charlie" :email "charlie@test.com" :phone nil})
+      ;; Duplicate username should fail
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Unique constraint violation"
+            (sp/create-entity storage :user {:username "alice" :email "new@test.com" :phone nil})))
+      ;; Duplicate email should fail
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Unique constraint violation"
+            (sp/create-entity storage :user {:username "david" :email "bob@test.com" :phone nil})))
+      ;; Duplicate phone should fail
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Unique constraint violation"
+            (sp/create-entity storage :user {:username "eve" :email "eve@test.com" :phone "111"})))
+      ;; Null phone is allowed multiple times
+      (sp/create-entity storage :user {:username "frank" :email "frank@test.com" :phone nil})
+      (is (= 4 (count (sp/query-entities storage :user {}))))))
+
+  (testing "update with multiple unique constraints and multiple existing records"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :item #uuid "00000000-0000-0000-0000-000000000061"
+                                    {:code {:uuid #uuid "00000000-0000-0000-0000-000000000062"
+                                            :type :text}
+                                     :name {:uuid #uuid "00000000-0000-0000-0000-000000000063"
+                                            :type :text}})
+                     (ds/add-constraint :item {:type :unique :fields [:code]})
+                     (ds/add-constraint :item {:type :unique :fields [:name]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      ;; Create multiple items
+      (let [item1 (sp/create-entity storage :item {:code "A" :name "Alpha"})
+            _item2 (sp/create-entity storage :item {:code "B" :name "Beta"})
+            _item3 (sp/create-entity storage :item {:code "C" :name "Gamma"})]
+        ;; Update item1 keeping same values - should work (exclude-id)
+        (sp/update-entity storage :item (:id item1) {:code "A" :name "Alpha"})
+        ;; Update item1 with new unique values
+        (sp/update-entity storage :item (:id item1) {:code "A1" :name "Alpha1"})
+        ;; Try to update item1 to conflict with item2's code
+        (is (thrown-with-msg?
+              clojure.lang.ExceptionInfo
+              #"Unique constraint violation"
+              (sp/update-entity storage :item (:id item1) {:code "B"})))
+        ;; Try to update item1 to conflict with item2's name
+        (is (thrown-with-msg?
+              clojure.lang.ExceptionInfo
+              #"Unique constraint violation"
+              (sp/update-entity storage :item (:id item1) {:name "Beta"})))))))
+
+
 (deftest unique-constraint-partial-fields-test
   (testing "unique constraint check skips when not all constraint fields are present"
     (let [storage (mem/create-storage)
@@ -1894,4 +1966,51 @@
         (doseq [f futures]
           (deref f 5000 :timeout)))
       (is (empty? @errors) (str "Errors during concurrent writes: " @errors))
-      (is (= 100 (count (sp/query-entities storage :counter {})))))))
+      (is (= 100 (count (sp/query-entities storage :counter {}))))))
+
+  (testing "concurrent writes with unique constraint are atomic"
+    ;; This test verifies that validation happens atomically with write.
+    ;; Multiple threads try to create records with the same unique value.
+    ;; Only ONE should succeed, all others should fail with constraint violation.
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000093"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000094"
+                                             :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)
+          successes (atom 0)
+          constraint-violations (atom 0)
+          other-errors (atom [])]
+      (sp/initialize storage schema)
+      ;; Launch 10 threads all trying to create record with same email
+      (let [futures (doall
+                      (for [_ (range 10)]
+                        (future
+                          (try
+                            (sp/create-entity storage :user {:email "test@example.com"})
+                            (swap! successes inc)
+                            (catch clojure.lang.ExceptionInfo e
+                              (if (= :constraint-violation/unique (:type (ex-data e)))
+                                (swap! constraint-violations inc)
+                                (swap! other-errors conj e)))
+                            (catch Exception e
+                              (swap! other-errors conj e))))))]
+        (doseq [f futures]
+          (deref f 5000 :timeout)))
+      ;; Exactly one should succeed
+      (is (= 1 @successes) "Exactly one thread should succeed")
+      ;; Rest should get constraint violations
+      (is (= 9 @constraint-violations) "Other threads should get constraint violations")
+      ;; No other errors
+      (is (empty? @other-errors) (str "Unexpected errors: " @other-errors))
+      ;; Verify only one record exists
+      (is (= 1 (count (sp/query-entities storage :user {})))))))
+
+
+;; === GraphConstraints contract tests ===
+
+(deftest graph-constraints-contract-test
+  (contract/run-graph-constraints-tests
+    mem/create-storage
+    sp/close))

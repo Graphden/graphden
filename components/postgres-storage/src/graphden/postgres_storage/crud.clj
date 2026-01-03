@@ -64,15 +64,37 @@
     (PGobject/.setValue (json/generate-string v))))
 
 
-;; Columns known to be JSONB type
-(def ^:private jsonb-columns
+(defn- jsonb-column?
+  "Returns true if field type should be stored as JSONB."
+  [field-type]
+  (contains? #{:jsonb :union} field-type))
+
+
+;; Fallback JSONB columns for cases when field metadata is not available.
+;; This ensures that known JSONB columns are properly wrapped even when
+;; crud functions are called directly without field metadata.
+(def ^:private fallback-jsonb-columns
   #{:value})
 
 
+(defn- extract-jsonb-columns
+  "Extracts set of column names that should be stored as JSONB from fields map.
+   Falls back to known JSONB columns when fields is nil."
+  [fields]
+  (if (nil? fields)
+    fallback-jsonb-columns
+    (let [from-schema (->> fields
+                           (filter (fn [[_ spec]] (jsonb-column? (:type spec))))
+                           (map first)
+                           (set))]
+      ;; Merge with fallback to ensure known JSONB columns are always included
+      (into from-schema fallback-jsonb-columns))))
+
+
 (defn- maybe-wrap-jsonb
-  "Wraps value as JSONB if column is known to be JSONB type.
+  "Wraps value as JSONB if column is in jsonb-columns set.
    Returns nil as-is (SQL NULL) rather than converting to JSON null."
-  [col-name v]
+  [jsonb-columns col-name v]
   (if (and (contains? jsonb-columns col-name)
            (some? v)
            (not (instance? PGobject v)))
@@ -83,11 +105,11 @@
 (defn- entity->row
   "Converts entity map to database row.
    Converts kebab-case keywords to snake_case column names.
-   Wraps JSONB column values appropriately."
-  [entity]
+   Wraps JSONB column values appropriately based on fields metadata."
+  [entity jsonb-columns]
   (reduce-kv (fn [acc k v]
                (let [new-key (keyword (str/replace (name k) "-" "_"))
-                     wrapped-v (maybe-wrap-jsonb k v)]
+                     wrapped-v (maybe-wrap-jsonb jsonb-columns k v)]
                  (assoc acc new-key wrapped-v)))
              {}
              entity))
@@ -101,9 +123,10 @@
   (when fields
     (sp/validate-required-fields! entity-name fields data))
   (let [table-name (keyword (util/kw->snake-case entity-name))
+        jsonb-cols (extract-jsonb-columns fields)
         id (or (:id data) (random-uuid))
         record (assoc data :id id)
-        row (entity->row record)
+        row (entity->row record jsonb-cols)
         columns (keys row)
         values (vals row)
         query (sql/format {:insert-into table-name
@@ -137,6 +160,7 @@
    Validates required fields if fields metadata is provided."
   [ds entity-name id data fields]
   (let [table-name (keyword (util/kw->snake-case entity-name))
+        jsonb-cols (extract-jsonb-columns fields)
         existing (read-entity ds entity-name id)]
     (when-not existing
       (throw (ex-info "Entity not found"
@@ -146,7 +170,7 @@
     (let [updated (merge existing data {:id id})]
       (when fields
         (sp/validate-required-fields! entity-name fields updated))
-      (let [row (entity->row (dissoc updated :id))
+      (let [row (entity->row (dissoc updated :id) jsonb-cols)
             query (sql/format {:update table-name
                                :set row
                                :where [:= :id id]

@@ -56,7 +56,8 @@
                   "--src-ns-path" "components"
                   "--test-ns-path" "components"
                   "--ns-regex" "graphden\\..*"
-                  "--ns-exclude-regex" ".*-test"]
+                  "--ns-exclude-regex" ".*-test"
+                  "--ns-exclude-regex" ".*contract-tests"]
         outdated-cmd ["clojure" "-M:outdated"]
         security-cmd ["clojure" "-M:watson" "-p" "deps.edn"]
 

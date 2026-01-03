@@ -85,13 +85,24 @@
 
   (collect-arg-schema-ids-in-chain
     [this fn-id]
-    (let [ancestor-ids (sp/collect-parent-chain this fn-id)]
-      (if (empty? ancestor-ids)
+    ;; Optimized: single query using CTE to collect parent chain and arg-schema-ids
+    (let [parent-id (sp/get-parent-fn-id this fn-id)]
+      (if-not parent-id
         #{}
-        (let [query (sql/format {:select [:arg_schema_id]
-                                 :from [:arg_value]
-                                 :where [:in :owner_fn_id (vec ancestor-ids)]}
-                                {:quoted true})
+        (let [query (sql/format
+                      {:with-recursive
+                       [[:ancestors
+                         {:union-all
+                          [{:select [:id :parent_fn_id]
+                            :from [:fn]
+                            :where [:= :id parent-id]}
+                           {:select [:f.id :f.parent_fn_id]
+                            :from [[:fn :f]]
+                            :join [[:ancestors :a] [:= :f.id :a.parent_fn_id]]}]}]]
+                       :select-distinct [:av.arg_schema_id]
+                       :from [[:arg_value :av]]
+                       :join [[:ancestors :anc] [:= :av.owner_fn_id :anc.id]]}
+                      {:quoted true})
               rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
                                    :timeout query-timeout-seconds})]

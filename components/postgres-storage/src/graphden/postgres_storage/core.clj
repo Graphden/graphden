@@ -52,13 +52,13 @@
          leak-detection-threshold 60000}}]
   (when-not jdbc-url
     (throw (ex-info "jdbc-url is required for postgres connection pool"
-                    {:reason :missing-jdbc-url})))
+                    {:type :config-error/missing-jdbc-url})))
   (when-not (and username (seq (str/trim username)))
     (throw (ex-info "username is required and cannot be empty"
-                    {:reason :missing-username})))
+                    {:type :config-error/missing-username})))
   (when-not (and password (seq (str/trim password)))
     (throw (ex-info "password is required and cannot be empty"
-                    {:reason :missing-password})))
+                    {:type :config-error/missing-password})))
   (let [config (HikariConfig.)]
     (HikariConfig/.setJdbcUrl config jdbc-url)
     (HikariConfig/.setUsername config username)

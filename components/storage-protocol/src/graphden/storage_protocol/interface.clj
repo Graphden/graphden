@@ -356,6 +356,12 @@
    Uses ConstraintHelpers protocol methods."
   [helpers owner-fn-id value-fn-id]
   (when value-fn-id
+    ;; Early check for self-reference (avoids expensive dependency chain query)
+    (when (= owner-fn-id value-fn-id)
+      (throw (ex-info "Reference would create dependency cycle"
+                      {:type :constraint-violation/dependency-cycle
+                       :owner-fn-id owner-fn-id
+                       :value-fn-id value-fn-id})))
     ;; Check if owner-fn-id is in the dependency chain of value-fn-id
     (let [value-deps (collect-dependency-chain helpers value-fn-id)]
       (when (contains? value-deps owner-fn-id)

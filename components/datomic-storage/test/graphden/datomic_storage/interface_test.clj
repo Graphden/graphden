@@ -6,6 +6,7 @@
     [graphden.datomic-storage.core :as core]
     [graphden.datomic-storage.interface :as dat]
     [graphden.malli-data-schema.interface :as mds]
+    [graphden.storage-protocol.contract-tests :as contract]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -1435,3 +1436,11 @@
         (is (= 50 (count (sp/query-entities storage :user {}))))
         (finally
           (sp/close storage))))))
+
+
+;; === GraphConstraints contract tests ===
+
+(deftest graph-constraints-contract-test
+  (contract/run-graph-constraints-tests
+    create-test-storage
+    sp/close))

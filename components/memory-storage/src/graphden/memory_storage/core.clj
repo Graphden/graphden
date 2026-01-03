@@ -135,6 +135,17 @@
     (sp/validate-required-fields! entity-name fields data)))
 
 
+(defn- find-conflicting-record
+  "Finds the first record that conflicts with new-values for the given fields.
+   Returns the conflicting record or nil."
+  [records exclude-id fields new-values]
+  (some (fn [record]
+          (when (and (not= (:id record) exclude-id)
+                     (= new-values (mapv #(get record %) fields)))
+            record))
+        records))
+
+
 (defn- validate-unique-constraints!
   "Validates unique constraints for an entity.
    Checks that the data doesn't violate any unique constraints.
@@ -142,20 +153,16 @@
   [state entity-name data exclude-id]
   (let [constraints (get-in state [:entities entity-name :constraints])
         existing-records (vals (get-in state [:data entity-name] {}))]
-    (doseq [{constraint-type :type constraint-fields :fields} constraints]
-      (when (= constraint-type :unique)
-        (let [new-values (mapv #(get data %) constraint-fields)
-              ;; Only check if all fields are present in data
-              all-present? (every? some? new-values)]
-          (when all-present?
-            (doseq [record existing-records]
-              (when (and (not= (:id record) exclude-id)
-                         (= new-values (mapv #(get record %) constraint-fields)))
-                (throw (ex-info "Unique constraint violation"
-                                {:type :constraint-violation/unique
-                                 :entity entity-name
-                                 :fields constraint-fields
-                                 :values new-values}))))))))))
+    (doseq [{:keys [fields] :as constraint} constraints
+            :when (= (:type constraint) :unique)
+            :let [new-values (mapv #(get data %) fields)]
+            :when (every? some? new-values)
+            :when (find-conflicting-record existing-records exclude-id fields new-values)]
+      (throw (ex-info "Unique constraint violation"
+                      {:type :constraint-violation/unique
+                       :entity entity-name
+                       :fields fields
+                       :values new-values})))))
 
 
 (defn- get-entity-data
@@ -170,12 +177,37 @@
   (get-in state [:data entity-name id]))
 
 
-(defn- put-record!
-  "Puts a record into state atom. Returns the record."
+(defn- create-record-atomic!
+  "Atomically validates and creates a record. Returns the record.
+   Validation happens inside swap! to prevent race conditions."
   [state-atom entity-name record]
-  (let [id (:id record)]
-    (swap! state-atom assoc-in [:data entity-name id] record)
-    record))
+  (swap! state-atom
+         (fn [state]
+           (validate-required-fields! state entity-name record)
+           (validate-unique-constraints! state entity-name record nil)
+           (assoc-in state [:data entity-name (:id record)] record)))
+  record)
+
+
+(defn- update-record-atomic!
+  "Atomically validates and updates a record. Returns the updated record.
+   Validation happens inside swap! to prevent race conditions."
+  [state-atom entity-name id updated-record]
+  (let [result (atom nil)]
+    (swap! state-atom
+           (fn [state]
+             (let [existing (get-record state entity-name id)]
+               (when-not existing
+                 (throw (ex-info "Entity not found"
+                                 {:type :not-found
+                                  :entity entity-name
+                                  :id id})))
+               (let [merged (merge existing updated-record {:id id})]
+                 (validate-required-fields! state entity-name merged)
+                 (validate-unique-constraints! state entity-name merged id)
+                 (reset! result merged)
+                 (assoc-in state [:data entity-name id] merged)))))
+    @result))
 
 
 (defn- remove-record!
@@ -435,12 +467,9 @@
 
   (create-entity
     [_this entity-name data]
-    (let [s @state
-          id (or (:id data) (random-uuid))
+    (let [id (or (:id data) (random-uuid))
           record (assoc data :id id)]
-      (validate-required-fields! s entity-name record)
-      (validate-unique-constraints! s entity-name record nil)
-      (put-record! state entity-name record)))
+      (create-record-atomic! state entity-name record)))
 
 
   (read-entity
@@ -450,17 +479,7 @@
 
   (update-entity
     [_this entity-name id data]
-    (let [s @state
-          existing (get-record s entity-name id)]
-      (when-not existing
-        (throw (ex-info "Entity not found"
-                        {:type :not-found
-                         :entity entity-name
-                         :id id})))
-      (let [updated (merge existing data {:id id})]
-        (validate-required-fields! s entity-name updated)
-        (validate-unique-constraints! s entity-name updated id)
-        (put-record! state entity-name updated))))
+    (update-record-atomic! state entity-name id data))
 
 
   (delete-entity

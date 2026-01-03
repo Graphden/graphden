@@ -76,13 +76,13 @@
 
 (defn close-pool
   "Closes a HikariCP connection pool. Idempotent - safe to call multiple times.
-   Uses locking to prevent race conditions between check and close."
+   HikariDataSource.close() is itself thread-safe and idempotent.
+   Note: When called from PostgresStorage.close(), synchronization is handled
+   by the storage's lock. Direct callers should ensure proper synchronization."
   [^HikariDataSource pool]
-  (when pool
-    (locking pool
-      (when-not (HikariDataSource/.isClosed pool)
-        (log/info "Closing PostgreSQL connection pool")
-        (HikariDataSource/.close pool)))))
+  (when (and pool (not (HikariDataSource/.isClosed pool)))
+    (log/info "Closing PostgreSQL connection pool")
+    (HikariDataSource/.close pool)))
 
 
 ;; === Storage record ===

@@ -103,6 +103,10 @@
    Throws ExceptionInfo if type mismatch detected.
    Note: This is a runtime check for common type mismatches."
   [provided-value arg-schema]
+  (when-not (and arg-schema (:type arg-schema))
+    (throw (ex-info "Invalid arg-schema: missing type"
+                    {:type :execution-error/invalid-arg-schema
+                     :arg-schema arg-schema})))
   (let [arg-type (:type arg-schema)
         arg-name (:name arg-schema)]
     (cond
@@ -195,16 +199,21 @@
                       {:type :execution-error/fn-not-found
                        :fn-id fn-id})))
     (let [fn-schema-id (:fn-schema-id fn-rec)
-          fn-schema (get fn-schemas fn-schema-id)
-          ;; Filter arg-schemas to only those belonging to this fn-schema
-          fn-arg-schemas (->> arg-schemas
-                              (filter (fn [[_ as]] (= (:fn-schema-id as) fn-schema-id)))
-                              (into {}))
-          arg-values (get resolved-args fn-id {})]
-      {:fn fn-rec
-       :fn-schema fn-schema
-       :arg-schemas fn-arg-schemas
-       :arg-values arg-values})))
+          fn-schema (get fn-schemas fn-schema-id)]
+      (when-not fn-schema
+        (throw (ex-info "Function schema not found in execution graph"
+                        {:type :execution-error/fn-schema-not-found
+                         :fn-id fn-id
+                         :fn-schema-id fn-schema-id})))
+      ;; Filter arg-schemas to only those belonging to this fn-schema
+      (let [fn-arg-schemas (->> arg-schemas
+                                (filter (fn [[_ as]] (= (:fn-schema-id as) fn-schema-id)))
+                                (into {}))
+            arg-values (get resolved-args fn-id {})]
+        {:fn fn-rec
+         :fn-schema fn-schema
+         :arg-schemas fn-arg-schemas
+         :arg-values arg-values}))))
 
 
 (defn- build-thunks

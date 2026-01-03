@@ -3,6 +3,7 @@
   (:require
     [clojure.set :as set]
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.datomic-storage.constraints :as constraints]
@@ -84,6 +85,26 @@
   [constraint]
   (and (= (:type constraint) :unique)
        (= (count (:fields constraint)) 1)))
+
+
+(defn- multi-field-unique-constraint?
+  "Returns true if constraint is a multi-field unique constraint."
+  [constraint]
+  (and (= (:type constraint) :unique)
+       (> (count (:fields constraint)) 1)))
+
+
+(defn- warn-unsupported-constraints!
+  "Logs warning for multi-field unique constraints which are not supported in Datomic.
+   Datomic only supports single-attribute unique constraints natively."
+  [schema entity-name]
+  (let [constraints (ds/entity-constraints schema entity-name)
+        multi-field (filter multi-field-unique-constraint? constraints)]
+    (doseq [c multi-field]
+      (log/warn "Multi-field unique constraint not enforced in Datomic storage"
+                {:entity entity-name
+                 :fields (:fields c)
+                 :note "Consider using application-level validation or composite attributes"}))))
 
 
 (defn- get-single-field-constraints
@@ -299,43 +320,59 @@
 
    NOTE: Uses two separate transactions because Datomic doesn't allow
    retracting and asserting the same :db/unique value in a single transaction.
-   If the second transaction fails after the first succeeds, metadata will be lost.
-
-   In practice, this is acceptable because:
-   1. Metadata changes only happen during schema migrations
-   2. The schema itself (Datomic attributes) remains intact even if metadata is lost
-   3. Re-initializing with the same DataSchema will restore metadata"
+   If the second transaction fails after the first succeeds, we attempt to
+   restore the old metadata to maintain consistency."
   [conn schema]
-  ;; First, retract all existing metadata
+  ;; Capture old metadata for potential rollback
   (let [db (d/db conn)
         existing (d/q '[:find ?e
                         :where [?e :graphden.metadata/uuid _]]
-                      db)]
-    (when (seq existing)
-      (d/transact conn {:tx-data (vec (map (fn [[e]] [:db/retractEntity e]) existing))})))
+                      db)
+        ;; Pull full entity data for rollback
+        old-metadata (when (seq existing)
+                       (mapv (fn [[e]] (d/pull db '[*] e)) existing))]
 
-  ;; Then add new metadata
-  (let [tx-data
-        (concat
-          ;; Entities
-          (map #(build-entity-metadata-tx schema %) (ds/entities schema))
-          ;; Fields
-          (mapcat (fn [entity-name]
-                    (map (fn [[field-name field-spec]]
-                           (build-field-metadata-tx schema entity-name field-name field-spec))
-                         (ds/entity-fields schema entity-name)))
-                  (ds/entities schema))
-          ;; Enums
-          (map (fn [[enum-name enum-def]] (build-enum-metadata-tx enum-name enum-def))
-               (ds/enums schema))
-          ;; Enum values
-          (mapcat (fn [[_enum-name {:keys [uuid values]}]]
-                    (map (fn [[value-kw value-uuid]]
-                           (build-enum-value-metadata-tx uuid value-kw value-uuid))
-                         values))
-                  (ds/enums schema)))]
-    (when (seq tx-data)
-      (d/transact conn {:tx-data (vec tx-data)}))))
+    ;; First, retract all existing metadata
+    (when (seq existing)
+      (log/debug "Retracting old metadata" {:count (count existing)})
+      (d/transact conn {:tx-data (vec (map (fn [[e]] [:db/retractEntity e]) existing))}))
+
+    ;; Then add new metadata
+    (let [tx-data
+          (concat
+            ;; Entities
+            (map #(build-entity-metadata-tx schema %) (ds/entities schema))
+            ;; Fields
+            (mapcat (fn [entity-name]
+                      (map (fn [[field-name field-spec]]
+                             (build-field-metadata-tx schema entity-name field-name field-spec))
+                           (ds/entity-fields schema entity-name)))
+                    (ds/entities schema))
+            ;; Enums
+            (map (fn [[enum-name enum-def]] (build-enum-metadata-tx enum-name enum-def))
+                 (ds/enums schema))
+            ;; Enum values
+            (mapcat (fn [[_enum-name {:keys [uuid values]}]]
+                      (map (fn [[value-kw value-uuid]]
+                             (build-enum-value-metadata-tx uuid value-kw value-uuid))
+                           values))
+                    (ds/enums schema)))]
+      (when (seq tx-data)
+        (try
+          (log/debug "Asserting new metadata" {:count (count tx-data)})
+          (d/transact conn {:tx-data (vec tx-data)})
+          (catch Exception e
+            ;; Attempt to restore old metadata
+            (log/error e "Failed to save new metadata, attempting rollback")
+            (when (seq old-metadata)
+              (try
+                ;; Remove :db/id from old data (Datomic will assign new ids)
+                (let [restore-data (mapv #(dissoc % :db/id) old-metadata)]
+                  (d/transact conn {:tx-data restore-data})
+                  (log/info "Successfully restored old metadata after failure"))
+                (catch Exception restore-ex
+                  (log/error restore-ex "Failed to restore old metadata - metadata may be lost"))))
+            (throw e)))))))
 
 
 ;; === Destructive change checks ===
@@ -496,6 +533,10 @@
 (defn- do-initialize
   "Performs initialization/migration of the database."
   [conn schema]
+  ;; Warn about unsupported multi-field unique constraints
+  (doseq [entity-name (ds/entities schema)]
+    (warn-unsupported-constraints! schema entity-name))
+
   (let [db (d/db conn)
         old-metadata (read-metadata db)]
 

@@ -772,6 +772,81 @@
          entity-ids)))
 
 
+;; === Batch CRUD helpers ===
+
+(defn- create-entities-impl
+  "Creates multiple entities in a single transaction."
+  [conn entity-name data-seq]
+  (if (empty? data-seq)
+    []
+    (let [db (d/db conn)
+          field-specs (get-fields-with-specs db entity-name)
+          ;; Validate all records first
+          _ (when (seq field-specs)
+              (doseq [data data-seq]
+                (sp/validate-required-fields! entity-name field-specs data)))
+          ;; Prepare transaction data
+          records (map (fn [data]
+                         (let [id (or (:id data) (random-uuid))
+                               temp-id (str "new-entity-" (random-uuid))]
+                           {:id id
+                            :temp-id temp-id
+                            :data (assoc data :id id)}))
+                       data-seq)
+          tx-data (map (fn [{:keys [id temp-id data]}]
+                         (entity->tx entity-name data id temp-id))
+                       records)]
+      (d/transact conn {:tx-data (vec tx-data)})
+      ;; Read back created entities
+      (let [new-db (d/db conn)
+            fields (get-entity-fields new-db entity-name)
+            ids (map :id records)]
+        (keep (fn [id] (pull-entity new-db entity-name id fields)) ids)))))
+
+
+(defn- read-entities-impl
+  "Reads multiple entities by ids. Returns {id -> record}."
+  [conn entity-name ids]
+  (if (empty? ids)
+    {}
+    (let [db (d/db conn)
+          fields (get-entity-fields db entity-name)
+          id-attr (entity-attr entity-name :id)
+          pattern (into [id-attr] (map #(entity-attr entity-name %) fields))
+          ;; Find all entity ids in one query
+          results (d/q {:find '[?e ?id]
+                        :in '[$ [?id ...]]
+                        :where [['?e id-attr '?id]]}
+                       db (vec ids))]
+      (->> results
+           (map (fn [[eid id]]
+                  (let [result (d/pull db pattern eid)]
+                    [id (reduce-kv (fn [acc k v]
+                                     (let [field-name (keyword (name k))]
+                                       (assoc acc field-name v)))
+                                   {}
+                                   result)])))
+           (into {})))))
+
+
+(defn- delete-entities-impl
+  "Deletes multiple entities by ids. Returns count of deleted."
+  [conn entity-name ids]
+  (if (empty? ids)
+    0
+    (let [db (d/db conn)
+          id-attr (entity-attr entity-name :id)
+          ;; Find all entity ids in one query
+          results (d/q {:find '[?e]
+                        :in '[$ [?id ...]]
+                        :where [['?e id-attr '?id]]}
+                       db (vec ids))
+          entity-ids (map first results)]
+      (when (seq entity-ids)
+        (d/transact conn {:tx-data (mapv (fn [eid] [:db/retractEntity eid]) entity-ids)}))
+      (count entity-ids))))
+
+
 ;; === ExecutionGraph helpers ===
 
 (defn- collect-parent-chains-batch
@@ -1174,6 +1249,32 @@
       (if-let [conn @conn-atom]
         (query-entities-impl conn entity-name where)
         [])))
+
+
+  sp/StorageBatchCRUD
+
+  (create-entities
+    [_this entity-name data-seq]
+    (locking lock
+      (if-let [conn @conn-atom]
+        (create-entities-impl conn entity-name data-seq)
+        [])))
+
+
+  (read-entities
+    [_this entity-name ids]
+    (locking lock
+      (if-let [conn @conn-atom]
+        (read-entities-impl conn entity-name ids)
+        {})))
+
+
+  (delete-entities
+    [_this entity-name ids]
+    (locking lock
+      (if-let [conn @conn-atom]
+        (delete-entities-impl conn entity-name ids)
+        0)))
 
 
   sp/GraphConstraints

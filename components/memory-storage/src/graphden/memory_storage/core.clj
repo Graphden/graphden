@@ -218,6 +218,46 @@
     existed?))
 
 
+;; === Batch CRUD helpers ===
+
+(defn- create-records-atomic!
+  "Atomically validates and creates multiple records. Returns sequence of records.
+   All validations happen inside swap! to ensure atomicity."
+  [state-atom entity-name records]
+  (swap! state-atom
+         (fn [state]
+           (reduce (fn [s record]
+                     (validate-required-fields! s entity-name record)
+                     (validate-unique-constraints! s entity-name record nil)
+                     (assoc-in s [:data entity-name (:id record)] record))
+                   state
+                   records)))
+  records)
+
+
+(defn- read-records
+  "Reads multiple records by ids. Returns {id -> record} for found records."
+  [state entity-name ids]
+  (let [entity-data (get-entity-data state entity-name)]
+    (->> ids
+         (keep (fn [id]
+                 (when-let [record (get entity-data id)]
+                   [id record])))
+         (into {}))))
+
+
+(defn- remove-records!
+  "Removes multiple records from state atom. Returns count of removed."
+  [state-atom entity-name ids]
+  (let [ids-set (set ids)
+        existing-ids (set (keys (get-in @state-atom [:data entity-name])))
+        to-remove (set/intersection ids-set existing-ids)
+        removed-count (count to-remove)]
+    (swap! state-atom update-in [:data entity-name]
+           (fn [data] (apply dissoc data to-remove)))
+    removed-count))
+
+
 ;; === ConstraintHelpers implementation for Memory storage ===
 
 (defrecord MemoryConstraintHelpers
@@ -495,6 +535,29 @@
         (filter (fn [record]
                   (every? (fn [[k v]] (= (get record k) v)) where))
                 all-records))))
+
+
+  sp/StorageBatchCRUD
+
+  (create-entities
+    [_this entity-name data-seq]
+    (if (empty? data-seq)
+      []
+      (let [records (map (fn [data]
+                           (let [id (or (:id data) (random-uuid))]
+                             (assoc data :id id)))
+                         data-seq)]
+        (create-records-atomic! state entity-name records))))
+
+
+  (read-entities
+    [_this entity-name ids]
+    (read-records @state entity-name ids))
+
+
+  (delete-entities
+    [_this entity-name ids]
+    (remove-records! state entity-name ids))
 
 
   sp/GraphConstraints

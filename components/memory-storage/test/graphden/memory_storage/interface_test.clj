@@ -779,6 +779,110 @@
         (is (empty? results))))))
 
 
+;; === StorageBatchCRUD tests ===
+
+(deftest batch-create-entities-test
+  (testing "create-entities creates multiple entities"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [data [{:name "Alice"} {:name "Bob"} {:name "Charlie"}]
+            results (sp/create-entities storage :user data)]
+        (is (= 3 (count results)))
+        (is (= #{"Alice" "Bob" "Charlie"} (set (map :name results))))
+        (is (every? uuid? (map :id results)))
+        ;; Verify persistence
+        (is (= 3 (count (sp/query-entities storage :user {})))))))
+
+  (testing "create-entities with provided ids"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id2 #uuid "22222222-2222-2222-2222-222222222222"
+            data [{:id id1 :name "Alice"} {:id id2 :name "Bob"}]
+            results (sp/create-entities storage :user data)]
+        (is (= #{id1 id2} (set (map :id results)))))))
+
+  (testing "create-entities with empty sequence returns empty"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [results (sp/create-entities storage :user [])]
+        (is (empty? results))))))
+
+
+(deftest batch-read-entities-test
+  (testing "read-entities returns map of found entities"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id2 #uuid "22222222-2222-2222-2222-222222222222"
+            _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+            _ (sp/create-entity storage :user {:id id2 :name "Bob"})
+            results (sp/read-entities storage :user [id1 id2])]
+        (is (= 2 (count results)))
+        (is (= "Alice" (:name (get results id1))))
+        (is (= "Bob" (:name (get results id2)))))))
+
+  (testing "read-entities excludes non-existent ids"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id-nonexistent #uuid "99999999-9999-9999-9999-999999999999"
+            _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+            results (sp/read-entities storage :user [id1 id-nonexistent])]
+        (is (= 1 (count results)))
+        (is (= "Alice" (:name (get results id1))))
+        (is (nil? (get results id-nonexistent))))))
+
+  (testing "read-entities with empty ids returns empty map"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [results (sp/read-entities storage :user [])]
+        (is (= {} results))))))
+
+
+(deftest batch-delete-entities-test
+  (testing "delete-entities deletes multiple entities and returns count"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id2 #uuid "22222222-2222-2222-2222-222222222222"
+            id3 #uuid "33333333-3333-3333-3333-333333333333"
+            _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+            _ (sp/create-entity storage :user {:id id2 :name "Bob"})
+            _ (sp/create-entity storage :user {:id id3 :name "Charlie"})
+            deleted-count (sp/delete-entities storage :user [id1 id2])]
+        (is (= 2 deleted-count))
+        ;; Verify entities are gone
+        (is (nil? (sp/read-entity storage :user id1)))
+        (is (nil? (sp/read-entity storage :user id2)))
+        ;; Charlie should still exist
+        (is (= "Charlie" (:name (sp/read-entity storage :user id3)))))))
+
+  (testing "delete-entities with non-existent ids returns count of actually deleted"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id-nonexistent #uuid "99999999-9999-9999-9999-999999999999"
+            _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+            deleted-count (sp/delete-entities storage :user [id1 id-nonexistent])]
+        (is (= 1 deleted-count)))))
+
+  (testing "delete-entities with empty ids returns 0"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (let [deleted-count (sp/delete-entities storage :user [])]
+        (is (= 0 deleted-count))))))
+
+
 ;; === GraphConstraints tests ===
 
 (deftest validate-parent-same-schema-test

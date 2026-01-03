@@ -215,6 +215,75 @@
     (map row->entity rows)))
 
 
+;; === Batch CRUD operations ===
+
+(defn create-entities
+  "Creates multiple entity records in a single transaction.
+   Returns a sequence of created records with generated ids."
+  [ds entity-name data-seq fields]
+  (if (empty? data-seq)
+    []
+    (let [table-name (keyword (util/kw->snake-case entity-name))
+          jsonb-cols (extract-jsonb-columns fields)
+          ;; Prepare all records with IDs
+          records (map (fn [data]
+                         (when fields
+                           (sp/validate-required-fields! entity-name fields data))
+                         (let [id (or (:id data) (random-uuid))]
+                           (assoc data :id id)))
+                       data-seq)
+          ;; Convert to rows
+          rows (map #(entity->row % jsonb-cols) records)
+          ;; Get consistent column order from first row
+          columns (vec (keys (first rows)))
+          ;; Extract values in column order
+          values (vec (map (fn [row]
+                             (mapv #(get row %) columns))
+                           rows))
+          query (sql/format {:insert-into table-name
+                             :columns columns
+                             :values values
+                             :returning [:*]}
+                            {:quoted true})
+          result-rows (jdbc/execute! ds query
+                                     {:builder-fn rs/as-unqualified-lower-maps
+                                      :timeout query-timeout-seconds})]
+      (map row->entity result-rows))))
+
+
+(defn read-entities
+  "Reads multiple entities by ids. Returns {id -> record} for found records."
+  [ds entity-name ids]
+  (if (empty? ids)
+    {}
+    (let [table-name (keyword (util/kw->snake-case entity-name))
+          query (sql/format {:select [:*]
+                             :from [table-name]
+                             :where [:in :id (vec ids)]}
+                            {:quoted true})
+          rows (jdbc/execute! ds query
+                              {:builder-fn rs/as-unqualified-lower-maps
+                               :timeout query-timeout-seconds})]
+      (->> rows
+           (map row->entity)
+           (map (juxt :id identity))
+           (into {})))))
+
+
+(defn delete-entities
+  "Deletes multiple entities by ids. Returns count of deleted records."
+  [ds entity-name ids]
+  (if (empty? ids)
+    0
+    (let [table-name (keyword (util/kw->snake-case entity-name))
+          query (sql/format {:delete-from table-name
+                             :where [:in :id (vec ids)]}
+                            {:quoted true})
+          result (jdbc/execute-one! ds query
+                                    {:timeout query-timeout-seconds})]
+      (or (:next.jdbc/update-count result) 0))))
+
+
 ;; === ExecutionGraph ===
 
 (defn- collect-parent-chains-batch

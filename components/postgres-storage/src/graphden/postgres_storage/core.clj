@@ -204,6 +204,25 @@
     (crud/query-entities pool entity-name where))
 
 
+  sp/StorageBatchCRUD
+
+  (create-entities
+    [_this entity-name data-seq]
+    (let [cached-metadata (get-cached-metadata pool metadata-cache lock)
+          fields (extract-entity-fields cached-metadata entity-name)]
+      (crud/create-entities pool entity-name data-seq fields)))
+
+
+  (read-entities
+    [_this entity-name ids]
+    (crud/read-entities pool entity-name ids))
+
+
+  (delete-entities
+    [_this entity-name ids]
+    (crud/delete-entities pool entity-name ids))
+
+
   sp/GraphConstraints
 
   (validate-parent-same-schema!

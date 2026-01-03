@@ -163,6 +163,47 @@
      Example: (query-entities storage :fn {:fn-schema-id some-uuid})"))
 
 
+(defprotocol StorageBatchCRUD
+  "Protocol for batch CRUD operations on stored entities.
+   Provides more efficient operations when working with multiple records.
+   Implementations should optimize for bulk operations (batch inserts, IN clauses, etc.)."
+
+  (create-entities
+    [this entity-name data-seq]
+    "Creates multiple entity records in a single operation.
+     If :id is not provided for a record, a random UUID is generated.
+
+     Arguments:
+     - entity-name: keyword name of the entity (e.g., :fn-schema, :fn)
+     - data-seq: sequence of maps, each representing a record to create
+
+     Returns a sequence of created records with :id fields.
+     Throws ExceptionInfo if validation fails or constraints are violated.
+     On failure, no records are created (atomic operation).")
+
+  (read-entities
+    [this entity-name ids]
+    "Reads multiple entity records by IDs.
+
+     Arguments:
+     - entity-name: keyword name of the entity
+     - ids: sequence of UUIDs
+
+     Returns a map of {id -> record} for found records.
+     Records not found are simply not included in the result.")
+
+  (delete-entities
+    [this entity-name ids]
+    "Deletes multiple entity records by IDs.
+
+     Arguments:
+     - entity-name: keyword name of the entity
+     - ids: sequence of UUIDs to delete
+
+     Returns the count of actually deleted records.
+     Throws ExceptionInfo if referential integrity would be violated."))
+
+
 (defprotocol GraphConstraints
   "Constraints for graph integrity in the function composition graph.
    Each storage MUST implement this protocol.

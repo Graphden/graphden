@@ -2,6 +2,7 @@
   "In-memory implementation of Storage protocol."
   (:require
     [clojure.set :as set]
+    [clojure.tools.logging :as log]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -158,6 +159,7 @@
             :let [new-values (mapv #(get data %) fields)]
             :when (every? some? new-values)
             :when (find-conflicting-record existing-records exclude-id fields new-values)]
+      (log/warn "Unique constraint violation" {:entity entity-name :fields fields :values new-values})
       (throw (ex-info "Unique constraint violation"
                       {:type :constraint-violation/unique
                        :entity entity-name
@@ -169,6 +171,16 @@
   "Gets all records for an entity from state."
   [state entity-name]
   (get-in state [:data entity-name] {}))
+
+
+(defn- validate-entity-exists!
+  "Validates that entity exists in schema. Throws :entity-not-found if not.
+   This provides consistent behavior with postgres-storage which throws :table-not-found."
+  [state entity-name]
+  (when-not (contains? (:entities state) entity-name)
+    (throw (ex-info "Entity not found in schema"
+                    {:type :entity-not-found
+                     :entity entity-name}))))
 
 
 (defn- get-record
@@ -191,23 +203,24 @@
 
 (defn- update-record-atomic!
   "Atomically validates and updates a record. Returns the updated record.
-   Validation happens inside swap! to prevent race conditions."
+   Validation happens inside swap! to prevent race conditions.
+   Uses swap-vals! to safely extract result without nested atoms."
   [state-atom entity-name id updated-record]
-  (let [result (atom nil)]
-    (swap! state-atom
-           (fn [state]
-             (let [existing (get-record state entity-name id)]
-               (when-not existing
-                 (throw (ex-info "Entity not found"
-                                 {:type :not-found
-                                  :entity entity-name
-                                  :id id})))
-               (let [merged (merge existing updated-record {:id id})]
-                 (validate-required-fields! state entity-name merged)
-                 (validate-unique-constraints! state entity-name merged id)
-                 (reset! result merged)
-                 (assoc-in state [:data entity-name id] merged)))))
-    @result))
+  (let [[_old-state new-state]
+        (swap-vals! state-atom
+                    (fn [state]
+                      (let [existing (get-record state entity-name id)]
+                        (when-not existing
+                          (throw (ex-info "Entity not found"
+                                          {:type :not-found
+                                           :entity entity-name
+                                           :id id})))
+                        (let [merged (merge existing updated-record {:id id})]
+                          (validate-required-fields! state entity-name merged)
+                          (validate-unique-constraints! state entity-name merged id)
+                          (assoc-in state [:data entity-name id] merged)))))]
+    ;; Extract updated record from new state
+    (get-in new-state [:data entity-name id])))
 
 
 (defn- remove-record!
@@ -468,13 +481,17 @@
 
   (initialize
     [_this schema]
+    (log/info "Initializing memory storage")
     (let [[new-state changes] (do-initialize state schema)]
       (reset! state new-state)
+      (log/info "Memory storage initialized" {:entities (count (:entities new-state))
+                                              :enums (count (:enums new-state))})
       changes))
 
 
   (close
     [_this]
+    (log/info "Closing memory storage")
     (reset! state {:entities {}
                    :enums {}
                    :metadata nil
@@ -535,12 +552,14 @@
 
   (query-entities
     [_this entity-name where]
-    (let [all-records (vals (get-entity-data @state entity-name))]
-      (if (empty? where)
-        all-records
-        (filter (fn [record]
-                  (every? (fn [[k v]] (= (get record k) v)) where))
-                all-records))))
+    (let [s @state]
+      (validate-entity-exists! s entity-name)
+      (let [all-records (vals (get-entity-data s entity-name))]
+        (if (empty? where)
+          all-records
+          (filter (fn [record]
+                    (every? (fn [[k v]] (= (get record k) v)) where))
+                  all-records)))))
 
 
   sp/StorageBatchCRUD

@@ -297,7 +297,11 @@
 
   (collect-dependency-chain
     [_this owner-fn-id]
-    (let [state @state-atom]
+    (let [state @state-atom
+          ;; Build index: owner-fn-id -> [arg-values...]
+          ;; This changes O(N*M) to O(N+M) where N=fns, M=arg-values
+          arg-values-by-owner (group-by :owner-fn-id (vals (get-entity-data state :arg-value)))
+          fns-data (get-entity-data state :fn)]
       (loop [to-visit [owner-fn-id]
              visited #{}]
         (if (empty? to-visit)
@@ -306,14 +310,13 @@
                 rest-to-visit (rest to-visit)]
             (if (contains? visited current-id)
               (recur rest-to-visit visited)
-              (let [arg-values (filter #(= (:owner-fn-id %) current-id)
-                                       (vals (get-entity-data state :arg-value)))
+              (let [arg-values (get arg-values-by-owner current-id [])
                     ;; Get fn references from arg-values (UUIDs that are fn refs)
                     ref-fn-ids (->> arg-values
                                     (map :value)
                                     (filter uuid?)
                                     ;; Check if this UUID is actually a fn
-                                    (filter #(some? (get-record state :fn %))))]
+                                    (filter #(contains? fns-data %)))]
                 (recur (concat rest-to-visit ref-fn-ids)
                        (conj visited current-id))))))))))
 
@@ -333,13 +336,13 @@
 
 (defn- merge-arg-values-from-chain
   "Merges arg-values from parent chain, child values override parent.
+   Requires pre-built arg-values-by-owner index for O(N+M) performance.
    Returns {arg-schema-id -> arg-value-record}."
-  [state fn-id]
+  [state fn-id arg-values-by-owner]
   (let [chain (collect-fn-parent-chain state fn-id)]
     ;; Process from root to leaf so child overrides parent
     (reduce (fn [acc chain-fn-id]
-              (let [arg-values (filter #(= (:owner-fn-id %) chain-fn-id)
-                                       (vals (get-entity-data state :arg-value)))]
+              (let [arg-values (get arg-values-by-owner chain-fn-id [])]
                 (reduce (fn [a av]
                           (assoc a (:arg-schema-id av) av))
                         acc
@@ -360,55 +363,58 @@
 (defn- resolve-execution-graph-impl
   "Resolves execution graph starting from fn-id.
    Uses BFS to collect all transitively referenced functions.
+   Builds indexes once for O(N+M) performance instead of O(N*M).
    Throws if iteration count exceeds sp/max-graph-iterations."
   [state fn-id]
-  (loop [to-visit #{fn-id}
-         visited #{}
-         fns {}
-         fn-schemas {}
-         arg-schemas {}
-         resolved-args {}
-         iter-count 0]
-    (sp/check-graph-iteration-limit! iter-count fn-id)
-    (if (empty? to-visit)
-      {:fns fns
-       :fn-schemas fn-schemas
-       :arg-schemas arg-schemas
-       :resolved-args resolved-args}
-      (let [current-fn-id (first to-visit)
-            rest-to-visit (disj to-visit current-fn-id)]
-        (if (contains? visited current-fn-id)
-          (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args
-                 (inc iter-count))
-          (let [fn-rec (get-record state :fn current-fn-id)]
-            (if-not fn-rec
-              ;; fn doesn't exist, skip (might be literal value that looks like UUID)
-              (recur rest-to-visit (conj visited current-fn-id)
-                     fns fn-schemas arg-schemas resolved-args
-                     (inc iter-count))
-              (let [fn-schema-id (:fn-schema-id fn-rec)
-                    fn-schema (get-record state :fn-schema fn-schema-id)
-                    ;; Get arg-schemas for this fn-schema if not already loaded
-                    new-arg-schemas (if (contains? fn-schemas fn-schema-id)
-                                      {}
-                                      (->> (vals (get-entity-data state :arg-schema))
-                                           (filter #(= (:fn-schema-id %) fn-schema-id))
-                                           (map (juxt :id identity))
-                                           (into {})))
-                    ;; Merge arg-values from parent chain
-                    merged-args (merge-arg-values-from-chain state current-fn-id)
-                    ;; Find referenced fns
-                    ref-fn-ids (extract-fn-refs-from-arg-values merged-args)
-                    new-to-visit (set/difference ref-fn-ids visited)]
-                (recur (set/union rest-to-visit new-to-visit)
-                       (conj visited current-fn-id)
-                       (assoc fns current-fn-id fn-rec)
-                       (if fn-schema
-                         (assoc fn-schemas fn-schema-id fn-schema)
-                         fn-schemas)
-                       (merge arg-schemas new-arg-schemas)
-                       (assoc resolved-args current-fn-id merged-args)
-                       (inc iter-count))))))))))
+  ;; Build indexes once for efficient lookups
+  (let [arg-values-by-owner (group-by :owner-fn-id (vals (get-entity-data state :arg-value)))
+        arg-schemas-by-fn-schema (group-by :fn-schema-id (vals (get-entity-data state :arg-schema)))]
+    (loop [to-visit #{fn-id}
+           visited #{}
+           fns {}
+           fn-schemas {}
+           arg-schemas {}
+           resolved-args {}
+           iter-count 0]
+      (sp/check-graph-iteration-limit! iter-count fn-id)
+      (if (empty? to-visit)
+        {:fns fns
+         :fn-schemas fn-schemas
+         :arg-schemas arg-schemas
+         :resolved-args resolved-args}
+        (let [current-fn-id (first to-visit)
+              rest-to-visit (disj to-visit current-fn-id)]
+          (if (contains? visited current-fn-id)
+            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args
+                   (inc iter-count))
+            (let [fn-rec (get-record state :fn current-fn-id)]
+              (if-not fn-rec
+                ;; fn doesn't exist, skip (might be literal value that looks like UUID)
+                (recur rest-to-visit (conj visited current-fn-id)
+                       fns fn-schemas arg-schemas resolved-args
+                       (inc iter-count))
+                (let [fn-schema-id (:fn-schema-id fn-rec)
+                      fn-schema (get-record state :fn-schema fn-schema-id)
+                      ;; Get arg-schemas for this fn-schema using pre-built index
+                      new-arg-schemas (if (contains? fn-schemas fn-schema-id)
+                                        {}
+                                        (->> (get arg-schemas-by-fn-schema fn-schema-id [])
+                                             (map (juxt :id identity))
+                                             (into {})))
+                      ;; Merge arg-values from parent chain using pre-built index
+                      merged-args (merge-arg-values-from-chain state current-fn-id arg-values-by-owner)
+                      ;; Find referenced fns
+                      ref-fn-ids (extract-fn-refs-from-arg-values merged-args)
+                      new-to-visit (set/difference ref-fn-ids visited)]
+                  (recur (set/union rest-to-visit new-to-visit)
+                         (conj visited current-fn-id)
+                         (assoc fns current-fn-id fn-rec)
+                         (if fn-schema
+                           (assoc fn-schemas fn-schema-id fn-schema)
+                           fn-schemas)
+                         (merge arg-schemas new-arg-schemas)
+                         (assoc resolved-args current-fn-id merged-args)
+                         (inc iter-count)))))))))))
 
 
 (defn- do-initialize

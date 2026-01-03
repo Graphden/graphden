@@ -3,10 +3,44 @@
    CREATE/ALTER for tables, columns, enums, indexes, and constraints."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.postgres-storage.util :as util]
     [honey.sql :as sql]
-    [next.jdbc :as jdbc]))
+    [next.jdbc :as jdbc])
+  (:import
+    (java.sql
+      SQLException)))
+
+
+;; === Error handling ===
+
+(defn- wrap-ddl-error
+  "Wraps a SQLException with DDL-specific context.
+   Returns an ex-info with :type and operation context."
+  [^SQLException e operation context]
+  (let [error-type (util/classify-sql-error e)
+        sql-state (SQLException/.getSQLState e)
+        message (SQLException/.getMessage e)
+        error-data (merge {:type error-type
+                           :operation operation
+                           :sql-state sql-state
+                           :message message}
+                          context)]
+    (log/warn e "DDL error" error-data)
+    (ex-info (str "DDL error during " (name operation) ": " message)
+             error-data
+             e)))
+
+
+(defmacro with-ddl-error-handling
+  "Wraps DDL operation body with SQLException handling.
+   Catches SQLException and rethrows with application context."
+  [operation context & body]
+  `(try
+     (do ~@body)
+     (catch SQLException e#
+       (throw (wrap-ddl-error e# ~operation ~context)))))
 
 
 ;; === Enum operations ===
@@ -14,23 +48,26 @@
 (defn create-enum!
   "Creates a PostgreSQL enum type."
   [ds enum-name values]
-  (let [sql-name (util/ident->sql enum-name)
-        vals-sql (str/join ", " (map #(str "'" (util/enum-value->sql %) "'") values))]
-    (jdbc/execute! ds [(str "CREATE TYPE " sql-name " AS ENUM (" vals-sql ")")])))
+  (with-ddl-error-handling :create-enum {:enum-name enum-name}
+    (let [sql-name (util/ident->sql enum-name)
+          vals-sql (str/join ", " (map #(str "'" (util/enum-value->sql %) "'") values))]
+      (jdbc/execute! ds [(str "CREATE TYPE " sql-name " AS ENUM (" vals-sql ")")]))))
 
 
 (defn add-enum-value!
   "Adds a value to an existing PostgreSQL enum type."
   [ds enum-name value]
-  (jdbc/execute! ds [(str "ALTER TYPE " (util/ident->sql enum-name)
-                          " ADD VALUE IF NOT EXISTS '" (util/enum-value->sql value) "'")]))
+  (with-ddl-error-handling :add-enum-value {:enum-name enum-name :value value}
+    (jdbc/execute! ds [(str "ALTER TYPE " (util/ident->sql enum-name)
+                            " ADD VALUE IF NOT EXISTS '" (util/enum-value->sql value) "'")])))
 
 
 (defn rename-enum!
   "Renames a PostgreSQL enum type."
   [ds old-name new-name]
-  (jdbc/execute! ds [(str "ALTER TYPE " (util/ident->sql old-name)
-                          " RENAME TO " (util/ident->sql new-name))]))
+  (with-ddl-error-handling :rename-enum {:old-name old-name :new-name new-name}
+    (jdbc/execute! ds [(str "ALTER TYPE " (util/ident->sql old-name)
+                            " RENAME TO " (util/ident->sql new-name))])))
 
 
 ;; === Column specification ===
@@ -54,21 +91,23 @@
 (defn create-table!
   "Creates a PostgreSQL table with id as primary key."
   [ds table-name fields]
-  (let [columns (into [[:id :uuid [:primary-key] [:default [:raw "gen_random_uuid()"]]]]
-                      (map (fn [[fname fspec]] (build-column-spec fname fspec)) fields))]
-    (jdbc/execute! ds
-                   (sql/format {:create-table (keyword (util/kw->snake-case table-name))
-                                :with-columns columns}
-                               {:quoted true}))))
+  (with-ddl-error-handling :create-table {:table-name table-name}
+    (let [columns (into [[:id :uuid [:primary-key] [:default [:raw "gen_random_uuid()"]]]]
+                        (map (fn [[fname fspec]] (build-column-spec fname fspec)) fields))]
+      (jdbc/execute! ds
+                     (sql/format {:create-table (keyword (util/kw->snake-case table-name))
+                                  :with-columns columns}
+                                 {:quoted true})))))
 
 
 (defn rename-table!
   "Renames a PostgreSQL table."
   [ds old-name new-name]
-  (jdbc/execute! ds
-                 (sql/format {:alter-table (keyword (util/kw->snake-case old-name))
-                              :rename-table (keyword (util/kw->snake-case new-name))}
-                             {:quoted true})))
+  (with-ddl-error-handling :rename-table {:old-name old-name :new-name new-name}
+    (jdbc/execute! ds
+                   (sql/format {:alter-table (keyword (util/kw->snake-case old-name))
+                                :rename-table (keyword (util/kw->snake-case new-name))}
+                               {:quoted true}))))
 
 
 ;; === Column operations ===
@@ -76,31 +115,34 @@
 (defn add-column!
   "Adds a column to an existing table."
   [ds table-name field-name field-spec]
-  (jdbc/execute! ds
-                 (sql/format {:alter-table (keyword (util/kw->snake-case table-name))
-                              :add-column (build-column-spec field-name field-spec)}
-                             {:quoted true})))
+  (with-ddl-error-handling :add-column {:table-name table-name :field-name field-name}
+    (jdbc/execute! ds
+                   (sql/format {:alter-table (keyword (util/kw->snake-case table-name))
+                                :add-column (build-column-spec field-name field-spec)}
+                               {:quoted true}))))
 
 
 (defn rename-column!
   "Renames a column in a table."
   [ds table-name old-col-name new-col-name]
-  (jdbc/execute! ds
-                 (sql/format {:alter-table (keyword (util/kw->snake-case table-name))
-                              :rename-column [(keyword (util/kw->snake-case old-col-name))
-                                              (keyword (util/kw->snake-case new-col-name))]}
-                             {:quoted true})))
+  (with-ddl-error-handling :rename-column {:table-name table-name :old-col-name old-col-name :new-col-name new-col-name}
+    (jdbc/execute! ds
+                   (sql/format {:alter-table (keyword (util/kw->snake-case table-name))
+                                :rename-column [(keyword (util/kw->snake-case old-col-name))
+                                                (keyword (util/kw->snake-case new-col-name))]}
+                               {:quoted true}))))
 
 
 (defn alter-column-type!
   "Changes column type (for safe widening)."
   [ds table-name col-name new-type-sql]
   (util/validate-pg-type! new-type-sql {:table table-name :column col-name})
-  ;; ALTER COLUMN with USING clause needs raw SQL for complex expressions
-  (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
-                          " ALTER COLUMN " (util/ident->sql col-name)
-                          " TYPE " new-type-sql " USING " (util/ident->sql col-name)
-                          "::" new-type-sql)]))
+  (with-ddl-error-handling :alter-column-type {:table-name table-name :col-name col-name :new-type new-type-sql}
+    ;; ALTER COLUMN with USING clause needs raw SQL for complex expressions
+    (jdbc/execute! ds [(str "ALTER TABLE " (util/ident->sql table-name)
+                            " ALTER COLUMN " (util/ident->sql col-name)
+                            " TYPE " new-type-sql " USING " (util/ident->sql col-name)
+                            "::" new-type-sql)])))
 
 
 ;; === Index operations ===
@@ -114,11 +156,12 @@
 (defn create-ref-index!
   "Creates an index for a ref field to optimize joins."
   [ds entity-name field-name]
-  (let [table-name (util/ident->sql entity-name)
-        index-name (ref-index-name entity-name field-name)
-        column-name (util/ident->sql field-name)]
-    (jdbc/execute! ds [(str "CREATE INDEX IF NOT EXISTS \"" index-name
-                            "\" ON " table-name " (" column-name ")")])))
+  (with-ddl-error-handling :create-index {:entity-name entity-name :field-name field-name}
+    (let [table-name (util/ident->sql entity-name)
+          index-name (ref-index-name entity-name field-name)
+          column-name (util/ident->sql field-name)]
+      (jdbc/execute! ds [(str "CREATE INDEX IF NOT EXISTS \"" index-name
+                              "\" ON " table-name " (" column-name ")")]))))
 
 
 (defn create-ref-indexes!
@@ -142,11 +185,12 @@
 (defn- create-constraint!
   "Creates a unique constraint (as unique index) in PostgreSQL."
   [ds entity-name constraint]
-  (let [table-name (util/ident->sql entity-name)
-        index-name (constraint-index-name entity-name constraint)
-        columns-sql (str/join ", " (map util/ident->sql (:fields constraint)))]
-    (jdbc/execute! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
-                            " (" columns-sql ")")])))
+  (with-ddl-error-handling :create-constraint {:entity-name entity-name :constraint constraint}
+    (let [table-name (util/ident->sql entity-name)
+          index-name (constraint-index-name entity-name constraint)
+          columns-sql (str/join ", " (map util/ident->sql (:fields constraint)))]
+      (jdbc/execute! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
+                              " (" columns-sql ")")]))))
 
 
 (defn create-entity-constraints!

@@ -241,6 +241,7 @@
 (defn query-entities
   "Queries entities by conditions.
    where is a map of field->value for equality matching.
+   Supports nil values (generates IS NULL instead of = NULL).
    Returns a sequence of matching entities.
    Throws :table-not-found if entity table doesn't exist."
   [ds entity-name where]
@@ -248,7 +249,10 @@
         where-clause (when (seq where)
                        (into [:and]
                              (map (fn [[k v]]
-                                    [:= (keyword (util/kw->snake-case k)) v])
+                                    (let [col (keyword (util/kw->snake-case k))]
+                                      (if (nil? v)
+                                        [:is col nil]
+                                        [:= col v])))
                                   where)))
         query (sql/format (cond-> {:select [:*]
                                    :from [table-name]}

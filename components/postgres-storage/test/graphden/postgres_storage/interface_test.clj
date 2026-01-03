@@ -5,6 +5,7 @@
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.postgres-storage.crud :as crud]
+    [graphden.postgres-storage.ddl :as ddl]
     [graphden.postgres-storage.interface :as pg]
     [graphden.postgres-storage.introspection :as introspection]
     [graphden.postgres-storage.metadata :as metadata]
@@ -1855,6 +1856,25 @@
         (is (= 1 (count result)))
         (is (= "Alice" (:name (first result))))
         (finally
+          (sp/close storage)))))
+
+  (testing "query-entities with nil value uses IS NULL (not = NULL)"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text
+                                              :nullable? true}})
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"})
+          _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222" :name nil})
+          result-with-nil (sp/query-entities storage :user {:name nil})
+          result-with-value (sp/query-entities storage :user {:name "Alice"})]
+      (try
+        ;; This test verifies that WHERE name IS NULL works (SQL = NULL always returns false)
+        (is (= 1 (count result-with-nil)) "Should find record with NULL name using IS NULL")
+        (is (nil? (:name (first result-with-nil))))
+        (is (= 1 (count result-with-value)))
+        (is (= "Alice" (:name (first result-with-value))))
+        (finally
           (sp/close storage))))))
 
 
@@ -3193,3 +3213,173 @@
           (catch clojure.lang.ExceptionInfo e
             (is (= :check-constraint-violation (:type (ex-data e))))
             (is (= :load-entities-batch (:operation (ex-data e))))))))))
+
+
+;; === DDL Error Tests ===
+;; These tests verify DDL operations properly wrap SQLExceptions
+
+(deftest ddl-error-create-enum-mock-test
+  (testing "create-enum! throws wrapped error on SQLException"
+    (let [create-enum-fn #'ddl/create-enum!
+          ex (SQLException. "type already exists" "42710")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (create-enum-fn nil :my-enum [:a :b])
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            ;; Type from classify-sql-error (unknown for 42710)
+            (is (= :unknown-sql-error (:type (ex-data e))))
+            (is (= :create-enum (:operation (ex-data e))))
+            (is (= :my-enum (:enum-name (ex-data e))))))))))
+
+
+(deftest ddl-error-add-enum-value-mock-test
+  (testing "add-enum-value! throws wrapped error on SQLException"
+    (let [add-fn #'ddl/add-enum-value!
+          ex (SQLException. "type does not exist" "42704")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (add-fn nil :my-enum :new-val)
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :unknown-sql-error (:type (ex-data e))))
+            (is (= :add-enum-value (:operation (ex-data e))))
+            (is (= :new-val (:value (ex-data e))))))))))
+
+
+(deftest ddl-error-rename-enum-mock-test
+  (testing "rename-enum! throws wrapped error on SQLException"
+    (let [rename-fn #'ddl/rename-enum!
+          ex (SQLException. "type does not exist" "42704")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (rename-fn nil :old-name :new-name)
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :unknown-sql-error (:type (ex-data e))))
+            (is (= :rename-enum (:operation (ex-data e))))
+            (is (= :old-name (:old-name (ex-data e))))
+            (is (= :new-name (:new-name (ex-data e))))))))))
+
+
+(deftest ddl-error-create-table-mock-test
+  (testing "create-table! throws wrapped error on SQLException"
+    (let [create-fn #'ddl/create-table!
+          ex (SQLException. "relation already exists" "42P07")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (create-fn nil :my-table {:name {:type :text}})
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :unknown-sql-error (:type (ex-data e))))
+            (is (= :create-table (:operation (ex-data e))))
+            (is (= :my-table (:table-name (ex-data e))))))))))
+
+
+(deftest ddl-error-rename-table-mock-test
+  (testing "rename-table! throws wrapped error on SQLException"
+    (let [rename-fn #'ddl/rename-table!
+          ex (SQLException. "relation does not exist" "42P01")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (rename-fn nil :old-table :new-table)
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :table-not-found (:type (ex-data e))))
+            (is (= :rename-table (:operation (ex-data e))))))))))
+
+
+(deftest ddl-error-add-column-mock-test
+  (testing "add-column! throws wrapped error on SQLException"
+    (let [add-fn #'ddl/add-column!
+          ex (SQLException. "column already exists" "42701")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (add-fn nil :my-table :new-col {:type :text})
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :unknown-sql-error (:type (ex-data e))))
+            (is (= :add-column (:operation (ex-data e))))
+            (is (= :new-col (:field-name (ex-data e))))))))))
+
+
+(deftest ddl-error-rename-column-mock-test
+  (testing "rename-column! throws wrapped error on SQLException"
+    (let [rename-fn #'ddl/rename-column!
+          ex (SQLException. "column does not exist" "42703")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (rename-fn nil :my-table :old-col :new-col)
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :unknown-sql-error (:type (ex-data e))))
+            (is (= :rename-column (:operation (ex-data e))))
+            (is (= :old-col (:old-col-name (ex-data e))))))))))
+
+
+(deftest ddl-error-alter-column-type-mock-test
+  (testing "alter-column-type! throws wrapped error on SQLException"
+    (let [alter-fn #'ddl/alter-column-type!
+          ex (SQLException. "column does not exist" "42703")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (alter-fn nil :my-table :my-col "TEXT")
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :unknown-sql-error (:type (ex-data e))))
+            (is (= :alter-column-type (:operation (ex-data e))))
+            (is (= :my-col (:col-name (ex-data e))))))))))
+
+
+(deftest ddl-error-create-ref-index-mock-test
+  (testing "create-ref-index! throws wrapped error on SQLException"
+    (let [create-fn #'ddl/create-ref-index!
+          ex (SQLException. "relation does not exist" "42P01")]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (create-fn nil :my-table :my-ref-col)
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :table-not-found (:type (ex-data e))))
+            (is (= :create-index (:operation (ex-data e))))
+            (is (= :my-table (:entity-name (ex-data e))))))))))
+
+
+(deftest ddl-error-create-constraint-mock-test
+  (testing "create-entity-constraints! throws wrapped error on SQLException"
+    (let [create-fn #'ddl/create-entity-constraints!
+          ex (SQLException. "relation does not exist" "42P01")
+          ;; Mock schema that returns one constraint
+          mock-schema (reify ds/DataSchema
+                        (entities [_] [:my-table])
+
+                        (entity-uuid [_ _] (random-uuid))
+
+                        (entity-fields [_ _] {})
+
+                        (enums [_] {})
+
+                        (enum-uuid [_ _] nil)
+
+                        (validate-entity [_ _ _] nil)
+
+                        (entity-constraints
+                          [_ _entity-name]
+                          [{:type :unique :fields [:name]}]))]
+      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
+                                    (throw ex))]
+        (try
+          (create-fn nil mock-schema :my-table)
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :table-not-found (:type (ex-data e))))
+            (is (= :create-constraint (:operation (ex-data e))))))))))

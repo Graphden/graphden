@@ -234,9 +234,8 @@
                            :where [:= :id id]}
                           {:quoted true})]
     (with-sql-error-handling :delete-entity {:entity-name entity-name :id id}
-      (let [result (jdbc/execute-one! ds query
-                                      {:timeout query-timeout-seconds})]
-        (pos? (or (:next.jdbc/update-count result) 0))))))
+      (pos? (:next.jdbc/update-count
+              (jdbc/execute-one! ds query {:timeout query-timeout-seconds}))))))
 
 
 (defn query-entities
@@ -332,9 +331,8 @@
                              :where [:in :id (vec ids)]}
                             {:quoted true})]
       (with-sql-error-handling :delete-entities {:entity-name entity-name :count (count ids)}
-        (let [result (jdbc/execute-one! ds query
-                                        {:timeout query-timeout-seconds})]
-          (or (:next.jdbc/update-count result) 0))))))
+        (:next.jdbc/update-count
+          (jdbc/execute-one! ds query {:timeout query-timeout-seconds}))))))
 
 
 ;; === ExecutionGraph ===

@@ -761,98 +761,198 @@
          entity-ids)))
 
 
-;; === ExecutionGraph helper functions ===
-
-(defn- get-parent-fn-id-from-db
-  "Gets parent-fn-id for a fn record from the database."
-  [db fn-id]
-  (ffirst (d/q '[:find ?parent-id
-                 :in $ ?fn-id
-                 :where
-                 [?e :fn/id ?fn-id]
-                 [?e :fn/parent-fn-id ?parent-id]]
-               db fn-id)))
-
-
 ;; === ExecutionGraph helpers ===
 
-(defn- collect-full-parent-chain
-  "Collects all fn-ids in the parent chain (including the fn itself).
-   Returns vector from child to root."
-  [db fn-id]
-  (loop [current-id fn-id
-         chain []]
-    (if-not current-id
-      chain
-      (recur (get-parent-fn-id-from-db db current-id)
-             (conj chain current-id)))))
+(defn- collect-parent-chains-batch
+  "Collects parent chains for multiple fns.
+   Returns {fn-id -> [chain-fn-ids from child to root]}.
+   Uses iterative approach to collect all parent chains at once."
+  [db fn-ids]
+  (if (empty? fn-ids)
+    {}
+    (loop [chains (into {} (map (fn [fid] [fid [fid]]) fn-ids))
+           ;; Track current parents for each chain
+           current-parents (into {} (map (fn [fid] [fid fid]) fn-ids))]
+      (let [;; Get all current parent IDs that need parent lookup
+            ids-to-lookup (set (filter some? (vals current-parents)))
+            ;; Batch query parent-fn-ids for all current nodes
+            parent-rows (when (seq ids-to-lookup)
+                          (d/q '[:find ?fn-id ?parent-id
+                                 :in $ [?fn-id ...]
+                                 :where
+                                 [?e :fn/id ?fn-id]
+                                 [?e :fn/parent-fn-id ?parent-id]]
+                               db (vec ids-to-lookup)))
+            parent-map (into {} parent-rows)]
+        (if (empty? parent-map)
+          chains
+          ;; Update chains and current-parents for next iteration
+          (let [new-chains (reduce (fn [acc [origin current-id]]
+                                     (if-let [parent-id (get parent-map current-id)]
+                                       (update acc origin conj parent-id)
+                                       acc))
+                                   chains
+                                   current-parents)
+                new-parents (reduce (fn [acc [origin current-id]]
+                                      (if-let [parent-id (get parent-map current-id)]
+                                        (assoc acc origin parent-id)
+                                        (dissoc acc origin)))
+                                    current-parents
+                                    current-parents)]
+            (if (empty? new-parents)
+              new-chains
+              (recur new-chains new-parents))))))))
 
 
-(defn- merge-arg-values-for-chain-impl
+(defn- load-arg-values-batch
+  "Loads all arg-values for a set of fn-ids.
+   Returns seq of arg-value maps."
+  [db fn-ids]
+  (if (empty? fn-ids)
+    []
+    (let [rows (d/q '[:find ?id ?owner-fn-id ?arg-schema-id ?value
+                      :in $ [?owner-id ...]
+                      :where
+                      [?e :arg-value/id ?id]
+                      [?e :arg-value/owner-fn-id ?owner-fn-id]
+                      [?e :arg-value/arg-schema-id ?arg-schema-id]
+                      [?e :arg-value/value ?value]]
+                    db (vec fn-ids))]
+      (map (fn [[id owner-fn-id arg-schema-id value]]
+             {:id id
+              :owner-fn-id owner-fn-id
+              :arg-schema-id arg-schema-id
+              :value value})
+           rows))))
+
+
+(defn- merge-arg-values-for-chain
   "Gets merged arg-values for a parent chain (child overrides parent).
+   Uses pre-loaded arg-values to avoid additional queries.
    Returns {arg-schema-id -> arg-value-map}."
-  [db chain]
+  [all-arg-values chain]
   (when (seq chain)
-    (let [;; Query all arg-values for the chain
-          arg-value-rows (d/q '[:find ?id ?owner-fn-id ?arg-schema-id ?value
-                                :in $ [?owner-id ...]
-                                :where
-                                [?e :arg-value/id ?id]
-                                [?e :arg-value/owner-fn-id ?owner-fn-id]
-                                [?e :arg-value/arg-schema-id ?arg-schema-id]
-                                [?e :arg-value/value ?value]]
-                              db (vec chain))
-          ;; Create position map for chain (lower = higher priority)
+    (let [chain-set (set chain)
           chain-pos (zipmap chain (range))
-          ;; Convert to arg-value maps
-          arg-values (map (fn [[id owner-fn-id arg-schema-id value]]
-                            {:id id
-                             :owner-fn-id owner-fn-id
-                             :arg-schema-id arg-schema-id
-                             :value value})
-                          arg-value-rows)]
+          ;; Filter arg-values belonging to this chain
+          chain-arg-values (filter #(chain-set (:owner-fn-id %)) all-arg-values)]
       ;; Group by arg-schema-id, pick the one with lowest chain position (closest to target fn)
-      (->> arg-values
+      (->> chain-arg-values
            (group-by :arg-schema-id)
            (map (fn [[arg-schema-id avs]]
                   [arg-schema-id (apply min-key #(get chain-pos (:owner-fn-id %) Integer/MAX_VALUE) avs)]))
            (into {})))))
 
 
-(defn- extract-fn-refs-impl
-  "Extracts fn-id references from arg-values."
-  [db arg-values-map]
-  (let [uuid-values (->> (vals arg-values-map)
-                         (map :value)
-                         (keep sp/try-parse-uuid)
-                         (distinct)
-                         (vec))]
-    (if (empty? uuid-values)
-      #{}
-      (let [results (d/q '[:find ?fn-id
-                           :in $ [?fn-id ...]
-                           :where
-                           [?e :fn/id ?fn-id]]
-                         db uuid-values)]
-        (set (map first results))))))
+(defn- extract-potential-fn-refs
+  "Extracts potential fn-id references from arg-values.
+   Returns set of UUIDs that might be fn references."
+  [arg-values-map]
+  (->> (vals arg-values-map)
+       (map :value)
+       (keep sp/try-parse-uuid)
+       (set)))
+
+
+(defn- verify-fn-refs-batch
+  "Verifies which UUIDs actually exist as fns.
+   Returns set of valid fn-ids."
+  [db uuid-candidates]
+  (if (empty? uuid-candidates)
+    #{}
+    (let [results (d/q '[:find ?fn-id
+                         :in $ [?fn-id ...]
+                         :where
+                         [?e :fn/id ?fn-id]]
+                       db (vec uuid-candidates))]
+      (set (map first results)))))
+
+
+(defn- load-fns-batch
+  "Loads multiple fns by id. Returns {fn-id -> fn-record}."
+  [db fn-ids]
+  (if (empty? fn-ids)
+    {}
+    (let [;; Query all fns at once - required fields
+          rows (d/q '[:find ?id ?name ?fn-schema-id
+                      :in $ [?id ...]
+                      :where
+                      [?e :fn/id ?id]
+                      [?e :fn/name ?name]
+                      [?e :fn/fn-schema-id ?fn-schema-id]]
+                    db (vec fn-ids))
+          ;; Query parent-fn-ids separately (optional attribute)
+          parent-rows (d/q '[:find ?id ?parent-fn-id
+                             :in $ [?id ...]
+                             :where
+                             [?e :fn/id ?id]
+                             [?e :fn/parent-fn-id ?parent-fn-id]]
+                           db (vec fn-ids))
+          parent-map (into {} parent-rows)]
+      (->> rows
+           (map (fn [[id fn-name fn-schema-id]]
+                  [id {:id id
+                       :name fn-name
+                       :fn-schema-id fn-schema-id
+                       :parent-fn-id (get parent-map id)}]))
+           (into {})))))
+
+
+(defn- load-fn-schemas-batch
+  "Loads multiple fn-schemas by id. Returns {fn-schema-id -> fn-schema-record}."
+  [db fn-schema-ids]
+  (if (empty? fn-schema-ids)
+    {}
+    (let [rows (d/q '[:find ?id ?name ?returned-type
+                      :in $ [?id ...]
+                      :where
+                      [?e :fn-schema/id ?id]
+                      [?e :fn-schema/name ?name]
+                      [?e :fn-schema/returned-type ?returned-type]]
+                    db (vec fn-schema-ids))]
+      (->> rows
+           (map (fn [[id schema-name returned-type]]
+                  [id {:id id
+                       :name schema-name
+                       :returned-type returned-type}]))
+           (into {})))))
+
+
+(defn- load-arg-schemas-batch
+  "Loads arg-schemas for multiple fn-schema-ids. Returns {arg-schema-id -> arg-schema-record}."
+  [db fn-schema-ids]
+  (if (empty? fn-schema-ids)
+    {}
+    (let [rows (d/q '[:find ?id ?fn-schema-id ?name ?type ?required
+                      :in $ [?fns-id ...]
+                      :where
+                      [?e :arg-schema/id ?id]
+                      [?e :arg-schema/fn-schema-id ?fn-schema-id]
+                      [?e :arg-schema/name ?name]
+                      [?e :arg-schema/type ?type]
+                      [(get-else $ ?e :arg-schema/required true) ?required]]
+                    db (vec fn-schema-ids))]
+      (->> rows
+           (map (fn [[id fn-schema-id arg-name arg-type required]]
+                  [id {:id id
+                       :fn-schema-id fn-schema-id
+                       :name arg-name
+                       :type arg-type
+                       :required required}]))
+           (into {})))))
 
 
 (defn- resolve-execution-graph-impl
   "Resolves complete execution graph for a function.
-   Uses BFS to collect all transitively referenced functions.
+   Uses batched BFS to collect all transitively referenced functions.
    Throws if iteration count exceeds sp/max-graph-iterations.
 
-   PERFORMANCE NOTE: This implementation has N+1 query issues. For each fn node
-   in the graph, it makes separate queries for fn, fn-schema, arg-schemas,
-   parent chain, arg-values, and fn-refs. For deep/wide graphs this can result
-   in many database round-trips.
-
-   Potential optimizations:
-   1. Use Datomic pull patterns to fetch related data in single query
-   2. Batch entity loads when their IDs are known
-   3. Use recursive rules to resolve entire graph in single query
-
-   For now, caching at the executor level mitigates this for repeated executions."
+   This implementation uses batch queries to minimize database round-trips:
+   1. Process pending fn-ids in batches
+   2. Batch load parent chains
+   3. Batch load arg-values for all chain members
+   4. Extract fn-refs and continue until graph is complete
+   5. Final batch load of all fns, fn-schemas, arg-schemas"
   [conn fn-id]
   (let [db (d/db conn)
         ;; Check if fn exists
@@ -865,56 +965,62 @@
       (throw (ex-info "Function not found"
                       {:type :not-found
                        :fn-id fn-id})))
+    ;; Phase 1: Discover all fn-ids in the graph using batched BFS
     (loop [to-visit #{fn-id}
            visited #{}
-           fns {}
-           fn-schemas {}
-           arg-schemas {}
-           resolved-args {}
+           ;; Accumulate: fn-id -> parent-chain, fn-id -> merged-args
+           all-chains {}
+           all-merged-args {}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
-        {:fns fns
-         :fn-schemas fn-schemas
-         :arg-schemas arg-schemas
-         :resolved-args resolved-args}
-        (let [current-fn-id (first to-visit)
-              rest-to-visit (disj to-visit current-fn-id)]
-          (if (contains? visited current-fn-id)
-            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args
-                   (inc iter-count))
-            (let [fn-fields (get-entity-fields db :fn)
-                  fn-rec (pull-entity db :fn current-fn-id fn-fields)]
-              (if-not fn-rec
-                (recur rest-to-visit (conj visited current-fn-id)
-                       fns fn-schemas arg-schemas resolved-args
-                       (inc iter-count))
-                (let [fn-schema-id (:fn-schema-id fn-rec)
-                      ;; Load fn-schema if not already loaded
-                      fn-schema (or (get fn-schemas fn-schema-id)
-                                    (let [schema-fields (get-entity-fields db :fn-schema)]
-                                      (pull-entity db :fn-schema fn-schema-id schema-fields)))
-                      ;; Load arg-schemas if not already loaded
-                      new-arg-schemas (if (contains? fn-schemas fn-schema-id)
-                                        {}
-                                        (->> (query-entities-impl conn :arg-schema {:fn-schema-id fn-schema-id})
-                                             (map (juxt :id identity))
-                                             (into {})))
-                      ;; Get parent chain and merge arg-values
-                      chain (collect-full-parent-chain db current-fn-id)
-                      merged-args (merge-arg-values-for-chain-impl db chain)
-                      ;; Find referenced fns
-                      ref-fn-ids (extract-fn-refs-impl db merged-args)
-                      new-to-visit (set/difference ref-fn-ids visited)]
-                  (recur (set/union rest-to-visit new-to-visit)
-                         (conj visited current-fn-id)
-                         (assoc fns current-fn-id fn-rec)
-                         (if fn-schema
-                           (assoc fn-schemas fn-schema-id fn-schema)
-                           fn-schemas)
-                         (merge arg-schemas new-arg-schemas)
-                         (assoc resolved-args current-fn-id merged-args)
-                         (inc iter-count)))))))))))
+        ;; Phase 2: Batch load all data
+        (let [all-fn-ids (set (keys all-chains))
+              ;; Load all fns
+              fns (load-fns-batch db all-fn-ids)
+              ;; Get unique fn-schema-ids
+              fn-schema-ids (->> (vals fns)
+                                 (map :fn-schema-id)
+                                 (set))
+              ;; Load all fn-schemas
+              fn-schemas (load-fn-schemas-batch db fn-schema-ids)
+              ;; Load all arg-schemas
+              arg-schemas (load-arg-schemas-batch db fn-schema-ids)]
+          {:fns fns
+           :fn-schemas fn-schemas
+           :arg-schemas arg-schemas
+           :resolved-args all-merged-args})
+        ;; Process batch of pending fn-ids
+        (let [batch (vec to-visit)
+              new-visited (into visited batch)
+              ;; Batch load parent chains
+              chains (collect-parent-chains-batch db batch)
+              ;; Get all fn-ids in all chains
+              all-chain-fn-ids (->> (vals chains)
+                                    (mapcat identity)
+                                    (set))
+              ;; Batch load arg-values for all chain members
+              all-arg-values (load-arg-values-batch db all-chain-fn-ids)
+              ;; Merge arg-values for each fn
+              merged-args-batch (into {}
+                                      (map (fn [fid]
+                                             [fid (merge-arg-values-for-chain
+                                                    all-arg-values
+                                                    (get chains fid [fid]))]))
+                                      batch)
+              ;; Extract all potential fn-refs
+              all-potential-refs (->> (vals merged-args-batch)
+                                      (mapcat extract-potential-fn-refs)
+                                      (set))
+              ;; Remove already visited
+              new-candidates (set/difference all-potential-refs new-visited)
+              ;; Verify which candidates are actual fns
+              verified-refs (verify-fn-refs-batch db new-candidates)]
+          (recur verified-refs
+                 new-visited
+                 (merge all-chains chains)
+                 (merge all-merged-args merged-args-batch)
+                 (+ iter-count (count batch))))))))
 
 
 ;; === Storage record ===

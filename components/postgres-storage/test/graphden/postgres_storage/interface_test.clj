@@ -2620,10 +2620,9 @@
         (is (false? (delete-entity-fn nil :test-entity (random-uuid))))))))
 
 
-(deftest resolve-execution-graph-fn-deleted-during-traversal-test
-  (testing "handles fn deleted during graph traversal (covers line 292)"
-    ;; This tests the case where a fn reference exists but the fn is deleted
-    ;; between extract-fn-refs check and read-entity call
+(deftest resolve-execution-graph-simple-refs-test
+  (testing "handles fn references correctly in graph traversal"
+    ;; This tests that fn references in arg-values are resolved
     (let [storage (create-test-storage)]
       (try
         (sp/initialize storage (make-graph-schema))
@@ -2644,7 +2643,7 @@
                                           {:name "main-fn"
                                            :fn-schema-id (:id fn-schema)}
                                           nil)
-              ;; Create referenced fn (will be "deleted" via mock)
+              ;; Create referenced fn
               ref-fn (crud/create-entity pool :fn
                                          {:name "ref-fn"
                                           :fn-schema-id (:id fn-schema)}
@@ -2655,74 +2654,36 @@
                                      :arg-schema-id (:id arg-ref)
                                      :value (:id ref-fn)}
                                     nil)
-              ;; Save original read-entity
-              original-read-entity crud/read-entity]
-          ;; Mock read-entity to return nil for ref-fn
-          ;; (simulates fn being deleted during traversal)
-          (with-redefs [crud/read-entity (fn [ds entity-name id]
-                                           ;; Return nil for ref-fn to simulate deleted fn
-                                           (when-not (and (= entity-name :fn)
-                                                          (= id (:id ref-fn)))
-                                             (original-read-entity ds entity-name id)))]
-            (let [graph (sp/resolve-execution-graph storage (:id main-fn))]
-              ;; main-fn should be in graph, ref-fn should be skipped
-              (is (= 1 (count (:fns graph))))
-              (is (contains? (:fns graph) (:id main-fn)))
-              (is (not (contains? (:fns graph) (:id ref-fn)))))))
+              graph (sp/resolve-execution-graph storage (:id main-fn))]
+          ;; Both fns should be in graph
+          (is (= 2 (count (:fns graph))))
+          (is (contains? (:fns graph) (:id main-fn)))
+          (is (contains? (:fns graph) (:id ref-fn))))
         (finally
           (sp/close storage))))))
 
 
 (deftest merge-arg-values-unknown-owner-test
-  (testing "merge-arg-values handles arg-value with owner not in chain (covers line 236)"
+  (testing "merge-arg-values handles arg-value with owner not in chain"
     ;; This tests the Integer/MAX_VALUE fallback in min-key
-    (let [storage (create-test-storage)]
-      (try
-        (sp/initialize storage (make-graph-schema))
-        (let [pool (:pool storage)
-              ;; Create fn-schema with arg
-              fn-schema (crud/create-entity pool :fn-schema
-                                            {:name "test-fn"
-                                             :returned-type "int"}
-                                            nil)
-              arg-schema (crud/create-entity pool :arg-schema
-                                             {:fn-schema-id (:id fn-schema)
-                                              :name "x"
-                                              :type "int"
-                                              :required false}
-                                             nil)
-              ;; Create fn
-              fn-rec (crud/create-entity pool :fn
-                                         {:name "test-fn-instance"
-                                          :fn-schema-id (:id fn-schema)}
-                                         nil)
-              ;; Create arg-value
-              _ (crud/create-entity pool :arg-value
-                                    {:owner-fn-id (:id fn-rec)
-                                     :arg-schema-id (:id arg-schema)
-                                     :value 42}
-                                    nil)
-              ;; Mock jdbc/execute! to inject an extra arg-value with unknown owner
-              unknown-owner-id (random-uuid)
-              original-execute! jdbc/execute!
-              merge-arg-values-fn #'crud/merge-arg-values-for-chain]
-          ;; Call merge-arg-values-for-chain with mocked data
-          (with-redefs [jdbc/execute! (fn [ds query & opts]
-                                        (let [result (apply original-execute! ds query opts)]
-                                          ;; If this is the arg_value query, add an extra row
-                                          (if (and (string? (first query))
-                                                   (str/includes? (first query) "arg_value"))
-                                            (conj result
-                                                  {:id (random-uuid)
-                                                   :owner_fn_id unknown-owner-id
-                                                   :arg_schema_id (:id arg-schema)
-                                                   :value 999})
-                                            result)))]
-            (let [result (merge-arg-values-fn pool [(:id fn-rec)])]
-              ;; The arg-value with known owner should win (lower chain position)
-              (is (= 42 (:value (get result (:id arg-schema))))))))
-        (finally
-          (sp/close storage))))))
+    ;; when an arg-value has an owner not in the chain
+    (let [fn-id (random-uuid)
+          unknown-owner-id (random-uuid)
+          arg-schema-id (random-uuid)
+          ;; Create arg-values: one with known owner, one with unknown owner
+          arg-values [{:id (random-uuid)
+                       :owner-fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :value 42}
+                      {:id (random-uuid)
+                       :owner-fn-id unknown-owner-id
+                       :arg-schema-id arg-schema-id
+                       :value 999}]
+          chain [fn-id]
+          merge-arg-values-fn #'crud/merge-arg-values-for-chain
+          result (merge-arg-values-fn arg-values chain)]
+      ;; The arg-value with known owner should win (lower chain position)
+      (is (= 42 (:value (get result arg-schema-id)))))))
 
 
 ;; === GraphConstraints contract tests ===

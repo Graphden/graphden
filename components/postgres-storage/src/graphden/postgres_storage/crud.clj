@@ -5,12 +5,15 @@
     [cheshire.core :as json]
     [clojure.set :as set]
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs])
   (:import
+    (java.sql
+      SQLException)
     (org.postgresql.util
       PGobject)))
 
@@ -18,6 +21,40 @@
 (def ^:private query-timeout-seconds
   "Default timeout for CRUD queries (in seconds)."
   30)
+
+
+(defn- wrap-sql-error
+  "Wraps a SQLException with application-level context.
+   Translates PostgreSQL error codes to meaningful error types.
+   Logs the error with context for debugging.
+   Returns an ex-info with :type, :sql-state, and operation context."
+  [^SQLException e operation context]
+  (let [error-type (util/classify-sql-error e)
+        sql-state (SQLException/.getSQLState e)
+        message (SQLException/.getMessage e)
+        error-data (merge {:type error-type
+                           :operation operation
+                           :sql-state sql-state
+                           :message message}
+                          context)]
+    (log/warn e "Database error" error-data)
+    (ex-info (str "Database error during " (name operation) ": " message)
+             error-data
+             e)))
+
+
+(defmacro with-sql-error-handling
+  "Wraps body with SQLException handling.
+   Catches SQLException and rethrows with application context.
+
+   Usage:
+   (with-sql-error-handling :create-entity {:entity-name name}
+     (jdbc/execute! ...))"
+  [operation context & body]
+  `(try
+     (do ~@body)
+     (catch SQLException e#
+       (throw (wrap-sql-error e# ~operation ~context)))))
 
 
 (defn- parse-pgobject
@@ -118,7 +155,8 @@
 (defn create-entity
   "Creates a new entity record in the database.
    Returns the created record with generated id if not provided.
-   Validates required fields if fields metadata is provided."
+   Validates required fields if fields metadata is provided.
+   Throws with :unique-violation type if unique constraint violated."
   [ds entity-name data fields]
   (when fields
     (sp/validate-required-fields! entity-name fields data))
@@ -134,29 +172,33 @@
                            :values [values]
                            :returning [:*]}
                           {:quoted true})]
-    (-> (jdbc/execute-one! ds query
-                           {:builder-fn rs/as-unqualified-lower-maps
-                            :timeout query-timeout-seconds})
-        row->entity)))
+    (with-sql-error-handling :create-entity {:entity-name entity-name :id id}
+      (-> (jdbc/execute-one! ds query
+                             {:builder-fn rs/as-unqualified-lower-maps
+                              :timeout query-timeout-seconds})
+          row->entity))))
 
 
 (defn read-entity
-  "Reads an entity by id. Returns nil if not found."
+  "Reads an entity by id. Returns nil if not found.
+   Throws with :table-not-found if entity table doesn't exist."
   [ds entity-name id]
   (let [table-name (keyword (util/kw->snake-case entity-name))
         query (sql/format {:select [:*]
                            :from [table-name]
                            :where [:= :id id]}
                           {:quoted true})]
-    (-> (jdbc/execute-one! ds query
-                           {:builder-fn rs/as-unqualified-lower-maps
-                            :timeout query-timeout-seconds})
-        row->entity)))
+    (with-sql-error-handling :read-entity {:entity-name entity-name :id id}
+      (-> (jdbc/execute-one! ds query
+                             {:builder-fn rs/as-unqualified-lower-maps
+                              :timeout query-timeout-seconds})
+          row->entity))))
 
 
 (defn update-entity
   "Updates an entity by id. Returns the updated record.
-   Throws if entity not found.
+   Throws :not-found if entity doesn't exist.
+   Throws :unique-violation if update violates unique constraint.
    Validates required fields if fields metadata is provided."
   [ds entity-name id data fields]
   (let [table-name (keyword (util/kw->snake-case entity-name))
@@ -176,28 +218,32 @@
                                :where [:= :id id]
                                :returning [:*]}
                               {:quoted true})]
-        (-> (jdbc/execute-one! ds query
-                               {:builder-fn rs/as-unqualified-lower-maps
-                                :timeout query-timeout-seconds})
-            row->entity)))))
+        (with-sql-error-handling :update-entity {:entity-name entity-name :id id}
+          (-> (jdbc/execute-one! ds query
+                                 {:builder-fn rs/as-unqualified-lower-maps
+                                  :timeout query-timeout-seconds})
+              row->entity))))))
 
 
 (defn delete-entity
-  "Deletes an entity by id. Returns true if entity existed and was deleted."
+  "Deletes an entity by id. Returns true if entity existed and was deleted.
+   Throws :foreign-key-violation if entity is referenced by other records."
   [ds entity-name id]
   (let [table-name (keyword (util/kw->snake-case entity-name))
         query (sql/format {:delete-from table-name
                            :where [:= :id id]}
-                          {:quoted true})
-        result (jdbc/execute-one! ds query
-                                  {:timeout query-timeout-seconds})]
-    (pos? (or (:next.jdbc/update-count result) 0))))
+                          {:quoted true})]
+    (with-sql-error-handling :delete-entity {:entity-name entity-name :id id}
+      (let [result (jdbc/execute-one! ds query
+                                      {:timeout query-timeout-seconds})]
+        (pos? (or (:next.jdbc/update-count result) 0))))))
 
 
 (defn query-entities
   "Queries entities by conditions.
    where is a map of field->value for equality matching.
-   Returns a sequence of matching entities."
+   Returns a sequence of matching entities.
+   Throws :table-not-found if entity table doesn't exist."
   [ds entity-name where]
   (let [table-name (keyword (util/kw->snake-case entity-name))
         where-clause (when (seq where)
@@ -208,18 +254,20 @@
         query (sql/format (cond-> {:select [:*]
                                    :from [table-name]}
                             where-clause (assoc :where where-clause))
-                          {:quoted true})
-        rows (jdbc/execute! ds query
-                            {:builder-fn rs/as-unqualified-lower-maps
-                             :timeout query-timeout-seconds})]
-    (map row->entity rows)))
+                          {:quoted true})]
+    (with-sql-error-handling :query-entities {:entity-name entity-name :where where}
+      (let [rows (jdbc/execute! ds query
+                                {:builder-fn rs/as-unqualified-lower-maps
+                                 :timeout query-timeout-seconds})]
+        (map row->entity rows)))))
 
 
 ;; === Batch CRUD operations ===
 
 (defn create-entities
   "Creates multiple entity records in a single transaction.
-   Returns a sequence of created records with generated ids."
+   Returns a sequence of created records with generated ids.
+   Throws :unique-violation if any unique constraint violated."
   [ds entity-name data-seq fields]
   (if (empty? data-seq)
     []
@@ -244,15 +292,17 @@
                              :columns columns
                              :values values
                              :returning [:*]}
-                            {:quoted true})
-          result-rows (jdbc/execute! ds query
-                                     {:builder-fn rs/as-unqualified-lower-maps
-                                      :timeout query-timeout-seconds})]
-      (map row->entity result-rows))))
+                            {:quoted true})]
+      (with-sql-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
+        (let [result-rows (jdbc/execute! ds query
+                                         {:builder-fn rs/as-unqualified-lower-maps
+                                          :timeout query-timeout-seconds})]
+          (map row->entity result-rows))))))
 
 
 (defn read-entities
-  "Reads multiple entities by ids. Returns {id -> record} for found records."
+  "Reads multiple entities by ids. Returns {id -> record} for found records.
+   Throws :table-not-found if entity table doesn't exist."
   [ds entity-name ids]
   (if (empty? ids)
     {}
@@ -260,28 +310,31 @@
           query (sql/format {:select [:*]
                              :from [table-name]
                              :where [:in :id (vec ids)]}
-                            {:quoted true})
-          rows (jdbc/execute! ds query
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout query-timeout-seconds})]
-      (->> rows
-           (map row->entity)
-           (map (juxt :id identity))
-           (into {})))))
+                            {:quoted true})]
+      (with-sql-error-handling :read-entities {:entity-name entity-name :count (count ids)}
+        (let [rows (jdbc/execute! ds query
+                                  {:builder-fn rs/as-unqualified-lower-maps
+                                   :timeout query-timeout-seconds})]
+          (->> rows
+               (map row->entity)
+               (map (juxt :id identity))
+               (into {})))))))
 
 
 (defn delete-entities
-  "Deletes multiple entities by ids. Returns count of deleted records."
+  "Deletes multiple entities by ids. Returns count of deleted records.
+   Throws :foreign-key-violation if any entity is referenced."
   [ds entity-name ids]
   (if (empty? ids)
     0
     (let [table-name (keyword (util/kw->snake-case entity-name))
           query (sql/format {:delete-from table-name
                              :where [:in :id (vec ids)]}
-                            {:quoted true})
-          result (jdbc/execute-one! ds query
-                                    {:timeout query-timeout-seconds})]
-      (or (:next.jdbc/update-count result) 0))))
+                            {:quoted true})]
+      (with-sql-error-handling :delete-entities {:entity-name entity-name :count (count ids)}
+        (let [result (jdbc/execute-one! ds query
+                                        {:timeout query-timeout-seconds})]
+          (or (:next.jdbc/update-count result) 0))))))
 
 
 ;; === ExecutionGraph ===
@@ -308,16 +361,17 @@
                    :select [:id :origin :depth]
                    :from [:parent_chain]
                    :order-by [:origin :depth]}
-                  {:quoted true})
-          rows (jdbc/execute! ds query
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout query-timeout-seconds})]
-      ;; Group by origin and extract ordered chain
-      (->> rows
-           (group-by :origin)
-           (map (fn [[origin chain-rows]]
-                  [origin (mapv :id (sort-by :depth chain-rows))]))
-           (into {})))))
+                  {:quoted true})]
+      (with-sql-error-handling :collect-parent-chains {:fn-count (count fn-ids)}
+        (let [rows (jdbc/execute! ds query
+                                  {:builder-fn rs/as-unqualified-lower-maps
+                                   :timeout query-timeout-seconds})]
+          ;; Group by origin and extract ordered chain
+          (->> rows
+               (group-by :origin)
+               (map (fn [[origin chain-rows]]
+                      [origin (mapv :id (sort-by :depth chain-rows))]))
+               (into {})))))))
 
 
 (defn- load-arg-values-batch
@@ -329,11 +383,12 @@
     (let [query (sql/format {:select [:*]
                              :from [:arg_value]
                              :where [:in :owner_fn_id (vec fn-ids)]}
-                            {:quoted true})
-          rows (jdbc/execute! ds query
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout query-timeout-seconds})]
-      (map row->entity rows))))
+                            {:quoted true})]
+      (with-sql-error-handling :load-arg-values {:fn-count (count fn-ids)}
+        (let [rows (jdbc/execute! ds query
+                                  {:builder-fn rs/as-unqualified-lower-maps
+                                   :timeout query-timeout-seconds})]
+          (map row->entity rows))))))
 
 
 (defn- merge-arg-values-for-chain
@@ -373,65 +428,50 @@
     (let [query (sql/format {:select [:id]
                              :from [:fn]
                              :where [:in :id (vec uuid-candidates)]}
-                            {:quoted true})
-          rows (jdbc/execute! ds query
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout query-timeout-seconds})]
-      (set (map :id rows)))))
+                            {:quoted true})]
+      (with-sql-error-handling :verify-fn-refs {:candidate-count (count uuid-candidates)}
+        (let [rows (jdbc/execute! ds query
+                                  {:builder-fn rs/as-unqualified-lower-maps
+                                   :timeout query-timeout-seconds})]
+          (set (map :id rows)))))))
+
+
+(defn- load-entities-batch
+  "Generic batch loader. Loads entities from table where key-column matches values.
+   Returns {id -> record} map keyed by :id field of each record."
+  [ds table key-column values]
+  (if (empty? values)
+    {}
+    (let [query (sql/format {:select [:*]
+                             :from [table]
+                             :where [:in key-column (vec values)]}
+                            {:quoted true})]
+      (with-sql-error-handling :load-entities-batch {:table table :count (count values)}
+        (let [rows (jdbc/execute! ds query
+                                  {:builder-fn rs/as-unqualified-lower-maps
+                                   :timeout query-timeout-seconds})]
+          (->> rows
+               (map row->entity)
+               (map (juxt :id identity))
+               (into {})))))))
 
 
 (defn- load-fns-batch
   "Loads multiple fns by id. Returns {fn-id -> fn-record}."
   [ds fn-ids]
-  (if (empty? fn-ids)
-    {}
-    (let [query (sql/format {:select [:*]
-                             :from [:fn]
-                             :where [:in :id (vec fn-ids)]}
-                            {:quoted true})
-          rows (jdbc/execute! ds query
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout query-timeout-seconds})]
-      (->> rows
-           (map row->entity)
-           (map (juxt :id identity))
-           (into {})))))
+  (load-entities-batch ds :fn :id fn-ids))
 
 
 (defn- load-fn-schemas-batch
   "Loads multiple fn-schemas by id. Returns {fn-schema-id -> fn-schema-record}."
   [ds fn-schema-ids]
-  (if (empty? fn-schema-ids)
-    {}
-    (let [query (sql/format {:select [:*]
-                             :from [:fn_schema]
-                             :where [:in :id (vec fn-schema-ids)]}
-                            {:quoted true})
-          rows (jdbc/execute! ds query
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout query-timeout-seconds})]
-      (->> rows
-           (map row->entity)
-           (map (juxt :id identity))
-           (into {})))))
+  (load-entities-batch ds :fn_schema :id fn-schema-ids))
 
 
 (defn- load-arg-schemas-batch
   "Loads arg-schemas for multiple fn-schema-ids. Returns {arg-schema-id -> arg-schema-record}."
   [ds fn-schema-ids]
-  (if (empty? fn-schema-ids)
-    {}
-    (let [query (sql/format {:select [:*]
-                             :from [:arg_schema]
-                             :where [:in :fn_schema_id (vec fn-schema-ids)]}
-                            {:quoted true})
-          rows (jdbc/execute! ds query
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout query-timeout-seconds})]
-      (->> rows
-           (map row->entity)
-           (map (juxt :id identity))
-           (into {})))))
+  (load-entities-batch ds :arg_schema :fn_schema_id fn-schema-ids))
 
 
 (defn resolve-execution-graph

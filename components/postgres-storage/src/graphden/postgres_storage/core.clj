@@ -12,6 +12,7 @@
    - constraints.clj - Graph constraints validation"
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.postgres-storage.constraints :as constraints]
     [graphden.postgres-storage.crud :as crud]
     [graphden.postgres-storage.introspection :as introspection]
@@ -59,6 +60,7 @@
   (when-not (and password (seq (str/trim password)))
     (throw (ex-info "password is required and cannot be empty"
                     {:type :config-error/missing-password})))
+  (log/info "Creating PostgreSQL connection pool" {:pool-size pool-size :min-idle min-idle})
   (let [config (HikariConfig.)]
     (HikariConfig/.setJdbcUrl config jdbc-url)
     (HikariConfig/.setUsername config username)
@@ -79,6 +81,7 @@
   (when pool
     (locking pool
       (when-not (HikariDataSource/.isClosed pool)
+        (log/info "Closing PostgreSQL connection pool")
         (HikariDataSource/.close pool)))))
 
 

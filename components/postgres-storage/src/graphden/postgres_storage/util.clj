@@ -7,10 +7,65 @@
 
 ;; === Error handling ===
 
+;; PostgreSQL error codes: https://www.postgresql.org/docs/current/errcodes-appendix.html
+
 (defn table-not-found?
   "Returns true if the SQLException indicates a missing table (PostgreSQL 42P01)."
   [^java.sql.SQLException e]
   (= "42P01" (java.sql.SQLException/.getSQLState e)))
+
+
+(defn unique-violation?
+  "Returns true if the SQLException indicates a unique constraint violation (PostgreSQL 23505)."
+  [^java.sql.SQLException e]
+  (= "23505" (java.sql.SQLException/.getSQLState e)))
+
+
+(defn foreign-key-violation?
+  "Returns true if the SQLException indicates a foreign key violation (PostgreSQL 23503)."
+  [^java.sql.SQLException e]
+  (= "23503" (java.sql.SQLException/.getSQLState e)))
+
+
+(defn not-null-violation?
+  "Returns true if the SQLException indicates a NOT NULL violation (PostgreSQL 23502)."
+  [^java.sql.SQLException e]
+  (= "23502" (java.sql.SQLException/.getSQLState e)))
+
+
+(defn check-constraint-violation?
+  "Returns true if the SQLException indicates a CHECK constraint violation (PostgreSQL 23514)."
+  [^java.sql.SQLException e]
+  (= "23514" (java.sql.SQLException/.getSQLState e)))
+
+
+(defn connection-error?
+  "Returns true if the SQLException indicates a connection failure (PostgreSQL class 08)."
+  [^java.sql.SQLException e]
+  (when-let [state (java.sql.SQLException/.getSQLState e)]
+    (str/starts-with? state "08")))
+
+
+(defn query-canceled?
+  "Returns true if the SQLException indicates a query was canceled (timeout) (PostgreSQL 57014)."
+  [^java.sql.SQLException e]
+  (= "57014" (java.sql.SQLException/.getSQLState e)))
+
+
+(defn classify-sql-error
+  "Classifies SQLException into application error type.
+   Returns a keyword like :unique-violation, :foreign-key-violation, etc.
+   Returns :unknown-sql-error for unrecognized errors."
+  [^java.sql.SQLException e]
+  (cond
+    (unique-violation? e)           :unique-violation
+    (foreign-key-violation? e)      :foreign-key-violation
+    (not-null-violation? e)         :not-null-violation
+    (check-constraint-violation? e) :check-constraint-violation
+    (table-not-found? e)            :table-not-found
+    (connection-error? e)           :connection-error
+    (query-canceled? e)             :query-timeout
+    :else                           :unknown-sql-error))
 
 
 ;; === Type mapping ===

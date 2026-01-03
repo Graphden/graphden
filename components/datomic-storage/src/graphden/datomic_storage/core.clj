@@ -486,39 +486,9 @@
           (ds/entities schema)))
 
 
-(defn- collect-created-fields
-  "Collects all field creation info for changes report."
-  [schema]
-  (vec (mapcat (fn [e]
-                 (map (fn [[f _]] {:entity e :field f})
-                      (ds/entity-fields schema e)))
-               (ds/entities schema))))
-
-
-(defn- collect-created-enum-values
-  "Collects all enum value creation info for changes report."
-  [schema]
-  (vec (mapcat (fn [[enum-name {:keys [values]}]]
-                 (map (fn [[v _]] {:enum enum-name :value v})
-                      values))
-               (ds/enums schema))))
-
-
-(defn- collect-field-uuids
-  "Collects all field UUIDs from schema."
-  [schema]
-  (set (mapcat (fn [e]
-                 (map (fn [[_ spec]] (:uuid spec))
-                      (ds/entity-fields schema e)))
-               (ds/entities schema))))
-
-
-(defn- collect-enum-value-uuids
-  "Collects all enum value UUIDs from schema."
-  [schema]
-  (set (mapcat (fn [[_ {:keys [values]}]]
-                 (map second values))
-               (ds/enums schema))))
+;; Use shared functions from storage-protocol:
+;; sp/collect-created-fields, sp/collect-created-enum-values,
+;; sp/collect-field-uuids, sp/collect-enum-value-uuids
 
 
 ;; === Initialize ===
@@ -545,9 +515,9 @@
 
         ;; Return changes
         {:entities {:created (vec (ds/entities schema)) :renamed {}}
-         :fields {:created (collect-created-fields schema) :renamed []}
+         :fields {:created (sp/collect-created-fields schema) :renamed []}
          :enums {:created (vec (keys (ds/enums schema))) :renamed {}}
-         :enum-values {:created (collect-created-enum-values schema)}})
+         :enum-values {:created (sp/collect-created-enum-values schema)}})
 
       ;; Migration
       (do
@@ -558,7 +528,7 @@
                              #(get (:entities old-metadata) %)))
 
         (let [old-field-uuids (set (keys (:fields old-metadata)))
-              new-field-uuids (collect-field-uuids schema)]
+              new-field-uuids (sp/collect-field-uuids schema)]
           (sp/check-removed! "fields" old-field-uuids new-field-uuids
                              #(get (:fields old-metadata) %)))
 
@@ -568,7 +538,7 @@
                              #(get (:enums old-metadata) %)))
 
         (let [old-value-uuids (set (keys (:enum-values old-metadata)))
-              new-value-uuids (collect-enum-value-uuids schema)]
+              new-value-uuids (sp/collect-enum-value-uuids schema)]
           (sp/check-removed! "enum values" old-value-uuids new-value-uuids
                              #(get (:enum-values old-metadata) %)))
 

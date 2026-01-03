@@ -86,17 +86,20 @@
                                         [?e :arg-value/owner-fn-id ?owner-id]
                                         [?e :arg-value/value ?value]]
                                       db current-id)
-                      ;; Get fn references from arg-values (UUIDs that are fn refs)
-                      ref-fn-ids (->> arg-values
-                                      (map first)
-                                      (keep sp/try-parse-uuid)
-                                      ;; Check if this UUID is actually a fn
-                                      (filter (fn [fn-id]
-                                                (seq (d/q '[:find ?e
-                                                            :in $ ?fn-id
-                                                            :where
-                                                            [?e :fn/id ?fn-id]]
-                                                          db fn-id)))))]
+                      ;; Extract UUID candidates from arg-values
+                      uuid-candidates (->> arg-values
+                                           (map first)
+                                           (keep sp/try-parse-uuid)
+                                           vec)
+                      ;; Batch check: find which UUIDs are actually fn-ids
+                      ref-fn-ids (if (empty? uuid-candidates)
+                                   []
+                                   (let [valid-fn-ids (d/q '[:find ?fn-id
+                                                             :in $ [?fn-id ...]
+                                                             :where
+                                                             [?e :fn/id ?fn-id]]
+                                                           db uuid-candidates)]
+                                     (map first valid-fn-ids)))]
                   (recur (concat rest-to-visit ref-fn-ids)
                          (conj visited current-id)))))))))))
 

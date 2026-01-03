@@ -730,8 +730,9 @@
                 enums-data)))
 
 
-(defn- collect-created-fields
-  "Collects created fields info for changes report."
+(defn collect-created-fields
+  "Collects created fields info for changes report.
+   Returns [{:entity e :field f} ...]"
   [schema]
   (vec (mapcat (fn [e]
                  (map (fn [[f _]] {:entity e :field f})
@@ -739,8 +740,9 @@
                (ds/entities schema))))
 
 
-(defn- collect-created-enum-values
-  "Collects created enum values info for changes report."
+(defn collect-created-enum-values
+  "Collects created enum values info for changes report.
+   Returns [{:enum enum-name :value v} ...]"
   [schema]
   (vec (mapcat (fn [[enum-name {:keys [values]}]]
                  (map (fn [[v _]] {:enum enum-name :value v})
@@ -748,8 +750,9 @@
                (ds/enums schema))))
 
 
-(defn- collect-field-uuids
-  "Collects all field UUIDs from schema."
+(defn collect-field-uuids
+  "Collects all field UUIDs from schema.
+   Returns set of UUIDs."
   [schema]
   (set (mapcat (fn [e]
                  (map (fn [[_ spec]] (:uuid spec))
@@ -757,8 +760,9 @@
                (ds/entities schema))))
 
 
-(defn- collect-enum-value-uuids
-  "Collects all enum value UUIDs from schema."
+(defn collect-enum-value-uuids
+  "Collects all enum value UUIDs from schema.
+   Returns set of UUIDs."
   [schema]
   (set (mapcat (fn [[_ {:keys [values]}]]
                  (map second values))

@@ -489,7 +489,107 @@
     :else nil))
 
 
+;; === Type System Documentation ===
+;;
+;; Graphden uses an abstract type system that gets mapped to concrete storage types.
+;; This section documents how types are represented across different storage backends.
+;;
+;; ## Base Types (from field-types component)
+;;
+;; | Type          | Description                      |
+;; |---------------|----------------------------------|
+;; | :uuid         | UUID identifier                  |
+;; | :text         | Text/string value                |
+;; | :int          | Integer number                   |
+;; | :bool         | Boolean true/false               |
+;; | :numeric      | Numeric value (int or double)    |
+;; | :timestamptz  | Timestamp with timezone          |
+;; | :jsonb        | JSON/EDN data                    |
+;; | :bytes        | Binary data                      |
+;;
+;; ## Special Types (schema-specific)
+;;
+;; | Type   | Description                              | Storage        |
+;; |--------|------------------------------------------|----------------|
+;; | :ref   | Reference to another entity              | Same as :uuid  |
+;; | :enum  | Enumeration value                        | Backend-specific |
+;; | :union | Union type (multiple possible types)     | Same as :jsonb |
+;;
+;; ## PostgreSQL Type Mapping (postgres-storage/util.clj)
+;;
+;; | Abstract  | PostgreSQL    | Notes                           |
+;; |-----------|---------------|---------------------------------|
+;; | :uuid     | UUID          |                                 |
+;; | :text     | TEXT          |                                 |
+;; | :int      | BIGINT        | 64-bit signed integer           |
+;; | :bool     | BOOLEAN       |                                 |
+;; | :numeric  | NUMERIC       | Arbitrary precision             |
+;; | :timestamptz | TIMESTAMPTZ | With timezone                 |
+;; | :jsonb    | JSONB         | Binary JSON, supports indexing  |
+;; | :bytes    | BYTEA         |                                 |
+;; | :ref      | UUID          | Foreign key reference           |
+;; | :enum     | Custom TYPE   | PostgreSQL ENUM type            |
+;; | :union    | JSONB         | Tagged union as JSON            |
+;;
+;; ## Datomic Type Mapping (datomic-storage/core.clj)
+;;
+;; | Abstract  | Datomic           | Notes                        |
+;; |-----------|-------------------|------------------------------|
+;; | :uuid     | :db.type/uuid     |                              |
+;; | :text     | :db.type/string   |                              |
+;; | :int      | :db.type/long     | 64-bit signed integer        |
+;; | :bool     | :db.type/boolean  |                              |
+;; | :numeric  | :db.type/bigdec   | Java BigDecimal              |
+;; | :timestamptz | :db.type/instant | java.util.Date            |
+;; | :jsonb    | :db.type/string   | Stored as EDN string         |
+;; | :bytes    | :db.type/bytes    |                              |
+;; | :ref      | :db.type/ref      | Datomic entity reference     |
+;; | :enum     | :db.type/ref      | Reference to ident entity    |
+;; | :union    | :db.type/string   | Stored as EDN string         |
+;;
+;; ## Memory Storage
+;;
+;; No type conversion - values stored as native Clojure data structures.
+;; Validation happens at schema level, not storage level.
+;;
+;; ## Type Equivalence
+;;
+;; Some types are stored identically and can be treated as equivalent:
+;; - :ref ≡ :uuid (both stored as UUID)
+;; - :union ≡ :jsonb (both stored as JSONB/EDN)
+;;
+;; ## Type Widening
+;;
+;; Safe type changes that preserve data:
+;; - :int → :numeric, :text, :jsonb
+;; - :bool → :text, :jsonb
+;; - :numeric → :text, :jsonb
+;; - :text → :jsonb
+;; - :uuid → :text
+;; - :timestamptz → :text
+
+
 ;; === Type compatibility ===
+
+(def type-mappings
+  "Complete type mapping reference for all storage backends.
+   Keys are abstract types, values are maps of backend -> concrete type.
+
+   Usage:
+     (get-in type-mappings [:uuid :postgres]) ;=> \"UUID\"
+     (get-in type-mappings [:int :datomic])   ;=> :db.type/long"
+  {:uuid        {:postgres "UUID"        :datomic :db.type/uuid    :memory :any}
+   :text        {:postgres "TEXT"        :datomic :db.type/string  :memory :any}
+   :int         {:postgres "BIGINT"      :datomic :db.type/long    :memory :any}
+   :bool        {:postgres "BOOLEAN"     :datomic :db.type/boolean :memory :any}
+   :numeric     {:postgres "NUMERIC"     :datomic :db.type/bigdec  :memory :any}
+   :timestamptz {:postgres "TIMESTAMPTZ" :datomic :db.type/instant :memory :any}
+   :jsonb       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}
+   :bytes       {:postgres "BYTEA"       :datomic :db.type/bytes   :memory :any}
+   :ref         {:postgres "UUID"        :datomic :db.type/ref     :memory :any}
+   :enum        {:postgres :custom       :datomic :db.type/ref     :memory :any}
+   :union       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}})
+
 
 (def type-widening
   "Map of type→set of types it can safely widen to.

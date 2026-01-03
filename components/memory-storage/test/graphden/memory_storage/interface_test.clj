@@ -880,7 +880,7 @@
           schema (make-schema)]
       (sp/initialize storage schema)
       (let [deleted-count (sp/delete-entities storage :user [])]
-        (is (= 0 deleted-count))))))
+        (is (zero? deleted-count))))))
 
 
 ;; === GraphConstraints tests ===

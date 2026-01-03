@@ -1996,7 +1996,7 @@
           _ (sp/initialize storage schema)
           deleted-count (sp/delete-entities storage :user [])]
       (try
-        (is (= 0 deleted-count))
+        (is (zero? deleted-count))
         (finally
           (sp/close storage))))))
 

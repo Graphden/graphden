@@ -9,10 +9,8 @@
    This is the recommended way to create a fully-functional
    graphden instance with Datahike backend."
   (:require
-    [graphden.base-functions.interface :as bf]
     [graphden.fn-registry.interface :as registry]
-    [graphden.graph-storage-datomic.interface :as gsd]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.graph-storage-datomic.interface :as gsd]))
 
 
 (defn create-storage
@@ -39,13 +37,5 @@
   ([]
    (create-storage {}))
   ([opts]
-   (let [storage (gsd/create-storage opts)]
-     (try
-       ;; Register base functions in executor
-       (registry/register-base-fns! (bf/get-all-defs))
-       ;; Sync base function schemas to storage
-       (registry/sync-defs-to-storage! storage (bf/get-all-defs))
-       storage
-       (catch Exception e
-         (sp/close storage)
-         (throw e))))))
+   (-> (gsd/create-storage opts)
+       (registry/initialize-with-base-fns!))))

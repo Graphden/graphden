@@ -81,7 +81,24 @@
     (exec/register-base-fn! :fn2 identity)
     (exec/clear-base-fns!)
     (is (nil? (exec/get-base-fn :fn1)))
-    (is (nil? (exec/get-base-fn :fn2)))))
+    (is (nil? (exec/get-base-fn :fn2))))
+
+  (testing "get-default-registry returns registered functions"
+    (exec/register-base-fn! :reg-test-1 identity)
+    (exec/register-base-fn! :reg-test-2 str)
+    (let [registry (exec/get-default-registry)]
+      (is (map? registry))
+      (is (= identity (get registry :reg-test-1)))
+      (is (= str (get registry :reg-test-2)))))
+
+  (testing "get-base-fn-from-context returns function from context"
+    (let [storage (create-test-storage)
+          my-fn (fn [_ _] 42)
+          ctx (exec/create-context {:storage storage
+                                    :base-fns {:my-custom-fn my-fn}})]
+      (is (= my-fn (exec/get-base-fn-from-context ctx :my-custom-fn)))
+      (is (nil? (exec/get-base-fn-from-context ctx :nonexistent)))
+      (sp/close storage))))
 
 
 (deftest create-context-test
@@ -1558,4 +1575,97 @@
       ;; Unknown type should accept any value without throwing
       (is (= "test-value" (exec/execute ctx (:id fn-rec) {(:id data-arg) "test-value"})))
       (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
+      (sp/close storage))))
+
+
+;; === execute-with-named-args Tests ===
+
+(deftest execute-with-named-args-test
+  (testing "executes with named args mapped to schema ids"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          ;; Create default arg-values
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 1})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 2})
+          ctx (exec/create-context {:storage storage})]
+      ;; Override args by name
+      (is (= 30 (exec/execute-with-named-args ctx (:id fn-rec) {:a 10 :b 20})))
+      ;; Override only one arg
+      (is (= 102 (exec/execute-with-named-args ctx (:id fn-rec) {:a 100})))
+      (sp/close storage)))
+
+  (testing "executes with nil named-args (uses defaults)"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 5})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 7})
+          ctx (exec/create-context {:storage storage})]
+      (is (= 12 (exec/execute-with-named-args ctx (:id fn-rec) nil)))
+      (sp/close storage)))
+
+  (testing "executes with empty named-args map (uses defaults)"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 3})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 4})
+          ctx (exec/create-context {:storage storage})]
+      (is (= 7 (exec/execute-with-named-args ctx (:id fn-rec) {})))
+      (sp/close storage)))
+
+  (testing "throws on invalid named-args type"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 1})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 2})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"named-args must be nil or a map"
+            (exec/execute-with-named-args ctx (:id fn-rec) "not a map")))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"named-args must be nil or a map"
+            (exec/execute-with-named-args ctx (:id fn-rec) [:a :b])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"named-args must be nil or a map"
+            (exec/execute-with-named-args ctx (:id fn-rec) 123)))
+      (sp/close storage)))
+
+  (testing "throws on unknown arg name"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 1})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 2})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown argument name"
+            (exec/execute-with-named-args ctx (:id fn-rec) {:unknown-arg 42})))
       (sp/close storage))))

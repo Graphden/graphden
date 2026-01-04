@@ -18,6 +18,7 @@
    - All other args are forced to their values"
   (:require
     [graphden.executor.interface :as exec]
+    [graphden.field-types.interface :as ft]
     [graphden.storage-protocol.interface :as sp])
   (:import
     (java.nio.charset
@@ -117,17 +118,38 @@
   (uuid-v5 base-fn-namespace-uuid (str "arg-schema:" (name fn-name) ":" (name arg-name))))
 
 
+(def ^:private valid-arg-types
+  "Valid types for base function arguments.
+   Includes all field types plus executor-specific types."
+  (into ft/supported-types #{:any :fn}))
+
+
+(defn- validate-arg-type!
+  "Validates that arg-type is a known type. Throws if invalid."
+  [arg-name arg-type]
+  (when-not (contains? valid-arg-types arg-type)
+    (throw (ex-info (str "Unknown arg type: " arg-type)
+                    {:type :invalid-arg-type
+                     :arg-name arg-name
+                     :arg-type arg-type
+                     :valid-types valid-arg-types}))))
+
+
 (defn- parse-arg-spec
   "Parses an arg spec which can be either a keyword (type) or a map with :type and :required.
-   Throws if arg-spec is invalid."
+   Validates that the type is known. Throws if arg-spec is invalid."
   [arg-name arg-spec]
   (cond
     (keyword? arg-spec)
-    {:arg-type arg-spec :required true}
+    (do
+      (validate-arg-type! arg-name arg-spec)
+      {:arg-type arg-spec :required true})
 
     (map? arg-spec)
     (if-let [arg-type (:type arg-spec)]
-      {:arg-type arg-type :required (get arg-spec :required true)}
+      (do
+        (validate-arg-type! arg-name arg-type)
+        {:arg-type arg-type :required (get arg-spec :required true)})
       (throw (ex-info "arg-spec map must contain :type key"
                       {:type :invalid-arg-spec
                        :arg-name arg-name

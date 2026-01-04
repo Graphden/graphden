@@ -259,6 +259,64 @@
           (is (true? (:required req-arg)))
           (is (false? (:required opt-arg))))
         (finally
+          (sp/close storage)))))
+
+  (testing "sync-fn-schema! updates only when return-type changes"
+    (let [storage (gsm/create-storage)
+          defs-v1 {:ret-change {:args {:x :int}
+                                :return-type :int
+                                :impl (fn [_ _] 1)}}
+          defs-v2 {:ret-change {:args {:x :int}
+                                :return-type :numeric  ; Only return-type changed
+                                :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs-v1)
+        (let [schema-v1 (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :ret-change))]
+          (is (= :int (:returned-type schema-v1))))
+        (registry/sync-defs-to-storage! storage defs-v2)
+        (let [schema-v2 (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :ret-change))]
+          (is (= :numeric (:returned-type schema-v2))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "sync-arg-schemas! updates when required changes"
+    (let [storage (gsm/create-storage)
+          defs-v1 {:req-change {:args {:x {:type :int :required true}}
+                                :return-type :int
+                                :impl (fn [_ _] 1)}}
+          defs-v2 {:req-change {:args {:x {:type :int :required false}}  ; required changed
+                                :return-type :int
+                                :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs-v1)
+        (let [fn-id (registry/fn-schema-uuid :req-change)
+              arg-v1 (first (sp/query-entities storage :arg-schema {:fn-schema-id fn-id}))]
+          (is (true? (:required arg-v1))))
+        (registry/sync-defs-to-storage! storage defs-v2)
+        (let [fn-id (registry/fn-schema-uuid :req-change)
+              arg-v2 (first (sp/query-entities storage :arg-schema {:fn-schema-id fn-id}))]
+          (is (false? (:required arg-v2))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "sync-arg-schemas! updates when type changes"
+    (let [storage (gsm/create-storage)
+          defs-v1 {:type-change {:args {:x :int}
+                                 :return-type :any
+                                 :impl (fn [_ _] 1)}}
+          defs-v2 {:type-change {:args {:x :numeric}  ; type changed
+                                 :return-type :any
+                                 :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs-v1)
+        (let [fn-id (registry/fn-schema-uuid :type-change)
+              arg-v1 (first (sp/query-entities storage :arg-schema {:fn-schema-id fn-id}))]
+          (is (= :int (:type arg-v1))))
+        (registry/sync-defs-to-storage! storage defs-v2)
+        (let [fn-id (registry/fn-schema-uuid :type-change)
+              arg-v2 (first (sp/query-entities storage :arg-schema {:fn-schema-id fn-id}))]
+          (is (= :numeric (:type arg-v2))))
+        (finally
           (sp/close storage))))))
 
 
@@ -366,10 +424,143 @@
       (#'core/parse-arg-spec :my-arg nil)
       (is false "should have thrown")
       (catch clojure.lang.ExceptionInfo e
-        (is (= :my-arg (:arg-name (ex-data e))))))))
+        (is (= :my-arg (:arg-name (ex-data e)))))))
+
+  (testing "validates known arg types - keyword spec"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown arg type"
+          (#'core/parse-arg-spec :x :unknown-type))))
+
+  (testing "validates known arg types - map spec"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown arg type"
+          (#'core/parse-arg-spec :x {:type :invalid-type :required true}))))
+
+  (testing "accepts all valid storage types"
+    (doseq [valid-type [:uuid :text :int :bool :numeric :timestamptz :jsonb :bytes]]
+      (is (= {:arg-type valid-type :required true}
+             (#'core/parse-arg-spec :x valid-type)))))
+
+  (testing "accepts executor-specific types"
+    (is (= {:arg-type :any :required true} (#'core/parse-arg-spec :x :any)))
+    (is (= {:arg-type :fn :required true} (#'core/parse-arg-spec :x :fn))))
+
+  (testing "invalid type error includes valid types"
+    (try
+      (#'core/parse-arg-spec :x :bad-type)
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-arg-type (:type (ex-data e))))
+        (is (= :x (:arg-name (ex-data e))))
+        (is (= :bad-type (:arg-type (ex-data e))))
+        (is (set? (:valid-types (ex-data e))))))))
 
 
 ;; === Wrapper Edge Cases ===
+
+;; === Short-circuit Coverage Tests ===
+;; These tests ensure all branches of `or` conditions are evaluated
+
+(deftest sync-fn-schema-or-branches-test
+  (testing "sync-fn-schema! triggers update when only base-fn-name differs"
+    ;; This tests the third branch of the `or` in sync-fn-schema!
+    ;; We manually modify base-fn-name in storage, then sync to trigger update
+    (let [storage (gsm/create-storage)
+          defs {:base-fn-test {:args {:x :int}
+                               :return-type :int
+                               :impl (fn [_ _] 1)}}]
+      (try
+        ;; First sync creates the fn-schema
+        (registry/sync-defs-to-storage! storage defs)
+        (let [fn-id (registry/fn-schema-uuid :base-fn-test)
+              schema-before (sp/read-entity storage :fn-schema fn-id)]
+          (is (= "base-fn-test" (:base-fn-name schema-before)))
+          ;; Manually corrupt base-fn-name in storage
+          (sp/update-entity storage :fn-schema fn-id
+                            {:name "base-fn-test"
+                             :returned-type :int
+                             :base-fn-name "corrupted-name"})
+          ;; Verify corruption
+          (let [corrupted (sp/read-entity storage :fn-schema fn-id)]
+            (is (= "corrupted-name" (:base-fn-name corrupted))))
+          ;; Re-sync - should update because base-fn-name differs
+          (registry/sync-defs-to-storage! storage defs)
+          (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
+            (is (= "base-fn-test" (:base-fn-name schema-after)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "sync-fn-schema! triggers update when only name differs"
+    ;; This tests the first branch of the `or` in sync-fn-schema!
+    (let [storage (gsm/create-storage)
+          defs {:name-test {:args {:x :int}
+                            :return-type :int
+                            :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs)
+        (let [fn-id (registry/fn-schema-uuid :name-test)]
+          ;; Manually corrupt name in storage
+          (sp/update-entity storage :fn-schema fn-id
+                            {:name "wrong-name"
+                             :returned-type :int
+                             :base-fn-name "name-test"})
+          ;; Re-sync - should update because name differs
+          (registry/sync-defs-to-storage! storage defs)
+          (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
+            (is (= "name-test" (:name schema-after)))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest sync-arg-schema-or-branches-test
+  (testing "sync-arg-schemas! triggers update when only fn-schema-id differs"
+    ;; This tests the first branch of the `or` in sync-arg-schemas!
+    (let [storage (gsm/create-storage)
+          defs {:arg-fn-test {:args {:x :int}
+                              :return-type :int
+                              :impl (fn [_ _] 1)}}
+          ;; Create a different fn-schema to use as wrong reference
+          wrong-schema (sp/create-entity storage :fn-schema
+                                         {:name "wrong-schema"
+                                          :returned-type :text})]
+      (try
+        (registry/sync-defs-to-storage! storage defs)
+        (let [fn-id (registry/fn-schema-uuid :arg-fn-test)
+              arg-id (registry/arg-schema-uuid :arg-fn-test :x)]
+          ;; Manually corrupt fn-schema-id in arg-schema
+          (sp/update-entity storage :arg-schema arg-id
+                            {:fn-schema-id (:id wrong-schema)
+                             :name "x"
+                             :type :int
+                             :required true})
+          ;; Re-sync - should update because fn-schema-id differs
+          (registry/sync-defs-to-storage! storage defs)
+          (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
+            (is (= fn-id (:fn-schema-id arg-after)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "sync-arg-schemas! triggers update when only name differs"
+    ;; This tests the second branch of the `or` in sync-arg-schemas!
+    (let [storage (gsm/create-storage)
+          defs {:arg-name-test {:args {:myarg :int}
+                                :return-type :int
+                                :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs)
+        (let [fn-id (registry/fn-schema-uuid :arg-name-test)
+              arg-id (registry/arg-schema-uuid :arg-name-test :myarg)]
+          ;; Manually corrupt name in arg-schema
+          (sp/update-entity storage :arg-schema arg-id
+                            {:fn-schema-id fn-id
+                             :name "wrong-name"
+                             :type :int
+                             :required true})
+          ;; Re-sync - should update because name differs
+          (registry/sync-defs-to-storage! storage defs)
+          (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
+            (is (= "myarg" (:name arg-after)))))
+        (finally
+          (sp/close storage))))))
+
 
 (deftest wrap-base-fn-edge-cases-test
   (testing "wrap-base-fn handles empty args map"

@@ -9,10 +9,8 @@
    This is the recommended way to create a fully-functional
    graphden instance for development and testing."
   (:require
-    [graphden.base-functions.interface :as bf]
     [graphden.fn-registry.interface :as registry]
-    [graphden.graph-storage-memory.interface :as gsm]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.graph-storage-memory.interface :as gsm]))
 
 
 (defn create-storage
@@ -34,13 +32,5 @@
        ;; ... use storage ...
        (sp/close storage))"
   []
-  (let [storage (gsm/create-storage)]
-    (try
-      ;; Register base functions in executor
-      (registry/register-base-fns! (bf/get-all-defs))
-      ;; Sync base function schemas to storage
-      (registry/sync-defs-to-storage! storage (bf/get-all-defs))
-      storage
-      (catch Exception e
-        (sp/close storage)
-        (throw e)))))
+  (-> (gsm/create-storage)
+      (registry/initialize-with-base-fns!)))

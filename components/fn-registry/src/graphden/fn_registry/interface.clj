@@ -9,7 +9,9 @@
    Base function implementations (arithmetic, strings, etc.) are in the
    base-functions component which uses this infrastructure."
   (:require
-    [graphden.fn-registry.core :as core]))
+    [graphden.base-functions.interface :as bf]
+    [graphden.fn-registry.core :as core]
+    [graphden.storage-protocol.interface :as sp]))
 
 
 ;; === Function Definition ===
@@ -79,3 +81,37 @@
     :arg-schemas {:created n :updated m}}"
   [storage defs]
   (core/sync-defs-to-storage! storage defs))
+
+
+;; === Storage Initialization Helper ===
+
+(defn initialize-with-base-fns!
+  "Initializes a storage with base function definitions.
+
+   This is a convenience function that:
+   1. Registers all base functions in the executor
+   2. Syncs base function schemas to storage
+   3. Handles errors by closing storage and re-throwing
+
+   Takes an already-created storage instance (from any backend) and
+   prepares it for graph operations with all base functions available.
+
+   Arguments:
+   - storage: an initialized storage instance (memory, postgres, datomic, etc.)
+
+   Returns the storage instance on success.
+   On error, closes the storage and re-throws the exception.
+
+   Example:
+     (-> (gsm/create-storage)
+         (registry/initialize-with-base-fns!))"
+  [storage]
+  (try
+    ;; Register base functions in executor
+    (register-base-fns! (bf/get-all-defs))
+    ;; Sync base function schemas to storage
+    (sync-defs-to-storage! storage (bf/get-all-defs))
+    storage
+    (catch Exception e
+      (sp/close storage)
+      (throw e))))

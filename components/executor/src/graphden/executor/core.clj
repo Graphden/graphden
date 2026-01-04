@@ -82,6 +82,24 @@
   100000)
 
 
+(def ^:private min-timeout-ms
+  "Minimum allowed timeout in milliseconds.
+   50ms allows for fast test cases while preventing unrealistic timeouts."
+  50)
+
+
+(def ^:private default-timeout-ms
+  "Default execution timeout in milliseconds.
+   30 seconds is generous for most operations."
+  30000)
+
+
+(def ^:private error-value-truncation-length
+  "Maximum length for values in error messages.
+   Prevents huge exception data for large values."
+  100)
+
+
 (defn create-context
   "Creates initial execution context. Note: execution-graph is populated
    later when execute is called with a root fn-id.
@@ -98,14 +116,14 @@
    - max-depth must be positive and <= 100000"
   [{:keys [storage base-fns max-depth timeout-ms]
     :or {max-depth sp/default-max-depth
-         timeout-ms 30000}}]
+         timeout-ms default-timeout-ms}}]
   (when-not storage
     (throw (ex-info "Storage is required" {:type :execution-error/invalid-context})))
-  (when (and timeout-ms (< timeout-ms 50))
-    (throw (ex-info "timeout-ms must be at least 50ms"
+  (when (and timeout-ms (< timeout-ms min-timeout-ms))
+    (throw (ex-info (str "timeout-ms must be at least " min-timeout-ms "ms")
                     {:type :execution-error/invalid-context
                      :timeout-ms timeout-ms
-                     :min-allowed 50})))
+                     :min-allowed min-timeout-ms})))
   (when (and max-depth (not (pos-int? max-depth)))
     (throw (ex-info "max-depth must be a positive integer"
                     {:type :execution-error/invalid-context
@@ -203,7 +221,7 @@
                      :arg-schema-id arg-schema-id
                      :expected-type arg-type
                      :expected-hint hint
-                     :provided-value (truncate-value provided-value 100)
+                     :provided-value (truncate-value provided-value error-value-truncation-length)
                      :provided-type (type provided-value)}))))
 
 

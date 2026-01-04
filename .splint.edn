@@ -2,8 +2,6 @@
 ;; https://github.com/NoahTheDuke/splint
 
 {;; Enable all rules by default, with exceptions
- :rules {;; Disable prefer-method-values - traditional interop works better with doto
-         "lint/prefer-method-values" false}
 
  ;; Paths to lint
  :paths ["components" "bases" "development"]

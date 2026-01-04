@@ -135,6 +135,18 @@
       (into from-schema fallback-jsonb-columns))))
 
 
+(defn- extract-enum-columns
+  "Extracts map of {field-name -> enum-name} for enum fields.
+   Returns empty map when fields is nil."
+  [fields]
+  (if (nil? fields)
+    {}
+    (->> fields
+         (filter (fn [[_ spec]] (= (:type spec) :enum)))
+         (map (fn [[field-name spec]] [field-name (:enum-name spec)]))
+         (into {}))))
+
+
 (defn- maybe-wrap-jsonb
   "Wraps value as JSONB if column is in jsonb-columns set.
    Returns nil as-is (SQL NULL) rather than converting to JSON null.
@@ -147,14 +159,29 @@
     v))
 
 
+(defn- maybe-convert-enum
+  "Converts enum value (keyword) to PGobject for PostgreSQL enum columns.
+   Returns nil as-is. Non-keyword values pass through unchanged."
+  [enum-columns col-name v]
+  (if-let [enum-name (get enum-columns col-name)]
+    (if (keyword? v)
+      (doto (PGobject.)
+        (PGobject/.setType (util/kw->snake-case enum-name))
+        (PGobject/.setValue (util/enum-value->sql v)))
+      v)
+    v))
+
+
 (defn- entity->row
   "Converts entity map to database row.
    Converts kebab-case keywords to snake_case column names.
+   Converts enum values (keywords) to snake_case strings.
    Wraps JSONB column values appropriately based on fields metadata."
-  [entity jsonb-columns]
+  [entity jsonb-columns enum-columns]
   (reduce-kv (fn [acc k v]
                (let [new-key (keyword (str/replace (name k) "-" "_"))
-                     wrapped-v (maybe-wrap-jsonb jsonb-columns k v)]
+                     enum-v (maybe-convert-enum enum-columns k v)
+                     wrapped-v (maybe-wrap-jsonb jsonb-columns k enum-v)]
                  (assoc acc new-key wrapped-v)))
              {}
              entity))
@@ -167,19 +194,15 @@
    Throws with :unique-violation type if unique constraint violated.
    Throws with :invalid-data type if data is not a map."
   [ds entity-name data fields]
-  (when-not (map? data)
-    (throw (ex-info "data must be a map"
-                    {:type :invalid-data
-                     :entity-name entity-name
-                     :data data
-                     :data-type (type data)})))
+  (sp/validate-data-is-map! entity-name data)
   (when fields
     (sp/validate-required-fields! entity-name fields data))
   (let [table-name (keyword (util/kw->snake-case entity-name))
         jsonb-cols (extract-jsonb-columns fields)
+        enum-cols (extract-enum-columns fields)
         id (or (:id data) (random-uuid))
         record (assoc data :id id)
-        row (entity->row record jsonb-cols)
+        row (entity->row record jsonb-cols enum-cols)
         columns (keys row)
         values (vals row)
         query (sql/format {:insert-into table-name
@@ -218,6 +241,7 @@
   [ds entity-name id data fields]
   (let [table-name (keyword (util/kw->snake-case entity-name))
         jsonb-cols (extract-jsonb-columns fields)
+        enum-cols (extract-enum-columns fields)
         existing (read-entity ds entity-name id)]
     (when-not existing
       (throw (ex-info "Entity not found"
@@ -227,7 +251,7 @@
     (let [updated (merge existing data {:id id})]
       (when fields
         (sp/validate-required-fields! entity-name fields updated))
-      (let [row (entity->row (dissoc updated :id) jsonb-cols)
+      (let [row (entity->row (dissoc updated :id) jsonb-cols enum-cols)
             query (sql/format {:update table-name
                                :set row
                                :where [:= :id id]
@@ -261,11 +285,7 @@
    Throws :table-not-found if entity table doesn't exist.
    Throws :invalid-where-clause if where is not nil or a map."
   [ds entity-name where]
-  (when (and (some? where) (not (map? where)))
-    (throw (ex-info "where clause must be nil or a map"
-                    {:type :invalid-where-clause
-                     :where where
-                     :where-type (type where)})))
+  (sp/validate-where-clause! where)
   (let [table-name (keyword (util/kw->snake-case entity-name))
         where-clause (when (seq where)
                        (into [:and]
@@ -300,6 +320,7 @@
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name (keyword (util/kw->snake-case entity-name))
             jsonb-cols (extract-jsonb-columns fields)
+            enum-cols (extract-enum-columns fields)
             ;; Prepare all records with IDs
             records (map (fn [data]
                            (when fields
@@ -308,7 +329,7 @@
                              (assoc data :id id)))
                          data-seq)
             ;; Convert to rows
-            rows (map #(entity->row % jsonb-cols) records)
+            rows (map #(entity->row % jsonb-cols enum-cols) records)
             ;; Get consistent column order from first row
             columns (vec (keys (first rows)))
             ;; Extract values in column order

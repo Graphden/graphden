@@ -722,8 +722,10 @@
                             1 [[123]] ; metadata-schema-exists? returns truthy
                             2 []      ; entities
                             3 []      ; fields
-                            4 []      ; enums
-                            5 []))]   ; enum-values
+                            4 []      ; fields-enum-names
+                            5 []      ; fields-ref-entities
+                            6 []      ; enums
+                            7 []))]   ; enum-values
         (let [result (read-metadata-fn :fake-db)]
           (is (nil? result))))))
 
@@ -737,8 +739,10 @@
                             1 [[123]]                   ; metadata-schema-exists?
                             2 [[entity-uuid :user]]     ; entities
                             3 []                        ; fields
-                            4 []                        ; enums
-                            5 []))]                     ; enum-values
+                            4 []                        ; fields-enum-names
+                            5 []                        ; fields-ref-entities
+                            6 []                        ; enums
+                            7 []))]                     ; enum-values
         (let [result (read-metadata-fn :fake-db)]
           (is (some? result))
           (is (= {entity-uuid :user} (:entities result)))

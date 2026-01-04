@@ -6,9 +6,14 @@
    :main-opts ["-m" "polylith.clj.core.poly-cli.core"]},
   :outdated
   {:extra-deps #:com.github.liquidz{antq #:mvn{:version "2.11.1276"}},
-   :main-opts ["-m" "antq.core"
-               "--exclude=org.testcontainers/testcontainers"
-               "--exclude=org.testcontainers/postgresql"]},
+   :main-opts
+   ["-m"
+    "antq.core"
+    "--exclude=org.testcontainers/testcontainers"
+    "--exclude=org.testcontainers/postgresql"]},
+  :eastwood
+  {:extra-deps #:jonase{eastwood #:mvn{:version "1.4.3"}},
+   :main-opts ["-m" "eastwood.lint"]},
   :watson
   {:extra-deps
    #:io.github.clj-holmes{clj-watson
@@ -20,6 +25,36 @@
   :cljstyle
   {:extra-deps #:mvxcvi{cljstyle #:mvn{:version "0.17.642"}},
    :main-opts ["-m" "cljstyle.main"]},
+  :bench
+  {:extra-paths
+   ["development/bench"
+    "components/data-schema-protocol/src"
+    "components/datomic-storage/src"
+    "components/field-types/src"
+    "components/graph-data-schema/src"
+    "components/graph-storage-datomic/src"
+    "components/graph-storage-memory/src"
+    "components/graph-storage-postgres/src"
+    "components/malli-data-schema/src"
+    "components/memory-storage/src"
+    "components/postgres-storage/src"
+    "components/storage-protocol/src"
+    "components/executor/src"
+    "components/fn-registry/src"
+    "components/base-functions/src"],
+   :extra-deps
+   {criterium/criterium #:mvn{:version "0.4.6"},
+    com.zaxxer/HikariCP #:mvn{:version "7.0.2"},
+    org.clojure/tools.logging #:mvn{:version "1.3.1"},
+    com.datomic/local #:mvn{:version "1.0.291"},
+    org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
+    org.postgresql/postgresql #:mvn{:version "42.7.8"},
+    com.github.seancorfield/honeysql #:mvn{:version "2.7.1364"},
+    metosin/malli #:mvn{:version "0.20.0"},
+    com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1086"},
+    cheshire/cheshire #:mvn{:version "6.1.0"},
+    org.testcontainers/postgresql #:mvn{:version "1.21.4"},
+    ch.qos.logback/logback-classic #:mvn{:version "1.5.23"}}},
   :cloverage
   {:extra-deps #:cloverage{cloverage #:mvn{:version "1.2.4"}},
    :main-opts ["-m" "cloverage.coverage"]},
@@ -37,48 +72,20 @@
   {:extra-deps
    #:io.github.noahtheduke{splint #:mvn{:version "1.22.0"}},
    :main-opts ["-m" "noahtheduke.splint"]},
-  :eastwood
-  {:extra-deps
-   #:jonase{eastwood #:mvn{:version "1.4.3"}},
-   :main-opts ["-m" "eastwood.lint"]},
-  :bench
-  {:extra-paths
-   ["development/bench"
-    "components/data-schema-protocol/src"
-    "components/datomic-storage/src"
-    "components/field-types/src"
-    "components/graph-data-schema/src"
-    "components/graph-storage-datomic/src"
-    "components/graph-storage-memory/src"
-    "components/graph-storage-postgres/src"
-    "components/malli-data-schema/src"
-    "components/memory-storage/src"
-    "components/postgres-storage/src"
-    "components/storage-protocol/src"
-    "components/executor/src"
-    "components/base-functions/src"]
-   :extra-deps
-   {criterium/criterium #:mvn{:version "0.4.6"}
-    com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1086"}
-    com.github.seancorfield/honeysql #:mvn{:version "2.7.1364"}
-    com.zaxxer/HikariCP #:mvn{:version "7.0.2"}
-    org.postgresql/postgresql #:mvn{:version "42.7.8"}
-    org.testcontainers/postgresql #:mvn{:version "1.21.4"}
-    org.testcontainers/testcontainers #:mvn{:version "1.21.4"}
-    ch.qos.logback/logback-classic #:mvn{:version "1.5.23"}
-    com.datomic/local #:mvn{:version "1.0.291"}
-    metosin/malli #:mvn{:version "0.20.0"}
-    cheshire/cheshire #:mvn{:version "6.1.0"}
-    org.clojure/tools.logging #:mvn{:version "1.3.1"}}},
   :test
   {:extra-paths
-   ["development/resources"
+   ["components/base-functions/src"
+    "components/base-functions/test"
     "components/data-schema-protocol/src"
     "components/data-schema-protocol/test"
     "components/datomic-storage/src"
     "components/datomic-storage/test"
+    "components/executor/src"
+    "components/executor/test"
     "components/field-types/src"
     "components/field-types/test"
+    "components/fn-registry/src"
+    "components/fn-registry/test"
     "components/graph-data-schema/src"
     "components/graph-data-schema/test"
     "components/graph-storage-datomic/src"
@@ -87,6 +94,12 @@
     "components/graph-storage-memory/test"
     "components/graph-storage-postgres/src"
     "components/graph-storage-postgres/test"
+    "components/graph-with-base-fns-datomic/src"
+    "components/graph-with-base-fns-datomic/test"
+    "components/graph-with-base-fns-memory/src"
+    "components/graph-with-base-fns-memory/test"
+    "components/graph-with-base-fns-postgres/src"
+    "components/graph-with-base-fns-postgres/test"
     "components/malli-data-schema/src"
     "components/malli-data-schema/test"
     "components/memory-storage/src"
@@ -95,65 +108,69 @@
     "components/postgres-storage/test"
     "components/storage-protocol/src"
     "components/storage-protocol/test"
-    "components/executor/src"
-    "components/executor/test"
-    "components/base-functions/src"
-    "components/base-functions/test"
-    "bases/.gitkeep/src"
-    "bases/.gitkeep/resources"],
-   :extra-deps
-   {lambdaisland/kaocha #:mvn{:version "1.91.1392"},
-    com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1086"},
-    com.github.seancorfield/honeysql #:mvn{:version "2.7.1364"},
-    com.zaxxer/HikariCP #:mvn{:version "7.0.2"},
-    org.postgresql/postgresql #:mvn{:version "42.7.8"},
-    org.testcontainers/postgresql #:mvn{:version "1.21.4"},
-    org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
-    ch.qos.logback/logback-classic #:mvn{:version "1.5.23"},
-    com.datomic/local #:mvn{:version "1.0.291"},
-    metosin/malli #:mvn{:version "0.20.0"},
-    cheshire/cheshire #:mvn{:version "6.1.0"}
-    org.clojure/tools.logging #:mvn{:version "1.3.1"}}},
-  :dev
-  {:extra-paths
-   ["development/src"
-    "components/data-schema-protocol/src"
-    "components/data-schema-protocol/test"
-    "components/datomic-storage/src"
-    "components/datomic-storage/test"
-    "components/field-types/src"
-    "components/field-types/test"
-    "components/graph-data-schema/src"
-    "components/graph-data-schema/test"
-    "components/graph-storage-datomic/src"
-    "components/graph-storage-datomic/test"
-    "components/graph-storage-memory/src"
-    "components/graph-storage-memory/test"
-    "components/graph-storage-postgres/src"
-    "components/graph-storage-postgres/test"
-    "components/malli-data-schema/src"
-    "components/malli-data-schema/test"
-    "components/memory-storage/src"
-    "components/memory-storage/test"
-    "components/postgres-storage/src"
-    "components/postgres-storage/test"
-    "components/storage-protocol/src"
-    "components/storage-protocol/test"
-    "components/executor/src"
-    "components/executor/test"
-    "components/base-functions/src"
-    "components/base-functions/test"
     "bases/.gitkeep/src"
     "bases/.gitkeep/resources"],
    :extra-deps
    {com.zaxxer/HikariCP #:mvn{:version "7.0.2"},
+    org.clojure/tools.logging #:mvn{:version "1.3.1"},
+    lambdaisland/kaocha #:mvn{:version "1.91.1392"},
+    com.datomic/local #:mvn{:version "1.0.291"},
     org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
     org.postgresql/postgresql #:mvn{:version "42.7.8"},
-    metosin/malli #:mvn{:version "0.20.0"},
-    ch.qos.logback/logback-classic #:mvn{:version "1.5.23"},
-    com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1086"},
     com.github.seancorfield/honeysql #:mvn{:version "2.7.1364"},
+    metosin/malli #:mvn{:version "0.20.0"},
+    com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1086"},
+    cheshire/cheshire #:mvn{:version "6.1.0"},
     org.testcontainers/postgresql #:mvn{:version "1.21.4"},
+    ch.qos.logback/logback-classic #:mvn{:version "1.5.23"}}},
+  :dev
+  {:extra-paths
+   ["development/src"
+    "components/base-functions/src"
+    "components/base-functions/test"
+    "components/data-schema-protocol/src"
+    "components/data-schema-protocol/test"
+    "components/datomic-storage/src"
+    "components/datomic-storage/test"
+    "components/executor/src"
+    "components/executor/test"
+    "components/field-types/src"
+    "components/field-types/test"
+    "components/fn-registry/src"
+    "components/fn-registry/test"
+    "components/graph-data-schema/src"
+    "components/graph-data-schema/test"
+    "components/graph-storage-datomic/src"
+    "components/graph-storage-datomic/test"
+    "components/graph-storage-memory/src"
+    "components/graph-storage-memory/test"
+    "components/graph-storage-postgres/src"
+    "components/graph-storage-postgres/test"
+    "components/graph-with-base-fns-datomic/src"
+    "components/graph-with-base-fns-datomic/test"
+    "components/graph-with-base-fns-memory/src"
+    "components/graph-with-base-fns-memory/test"
+    "components/graph-with-base-fns-postgres/src"
+    "components/graph-with-base-fns-postgres/test"
+    "components/malli-data-schema/src"
+    "components/malli-data-schema/test"
+    "components/memory-storage/src"
+    "components/memory-storage/test"
+    "components/postgres-storage/src"
+    "components/postgres-storage/test"
+    "components/storage-protocol/src"
+    "components/storage-protocol/test"
+    "bases/.gitkeep/src"
+    "bases/.gitkeep/resources"],
+   :extra-deps
+   {com.zaxxer/HikariCP #:mvn{:version "7.0.2"},
+    org.clojure/tools.logging #:mvn{:version "1.3.1"},
     com.datomic/local #:mvn{:version "1.0.291"},
-    cheshire/cheshire #:mvn{:version "6.1.0"}
-    org.clojure/tools.logging #:mvn{:version "1.3.1"}}}}}
+    org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
+    org.postgresql/postgresql #:mvn{:version "42.7.8"},
+    com.github.seancorfield/honeysql #:mvn{:version "2.7.1364"},
+    metosin/malli #:mvn{:version "0.20.0"},
+    com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1086"},
+    cheshire/cheshire #:mvn{:version "6.1.0"},
+    org.testcontainers/postgresql #:mvn{:version "1.21.4"},
+    ch.qos.logback/logback-classic #:mvn{:version "1.5.23"}}}}}

@@ -19,11 +19,12 @@
 
 
 (deftest enums-test
-  (testing "schema contains value-kind enum with null + all field types"
+  (testing "schema contains value-kind enum with null + any + fn + all field types"
     (let [enums (ds/enums schema)]
       (is (contains? enums :value-kind))
       ;; :values is now a map of value->uuid
-      (is (= (conj ft/supported-types :null)
+      ;; Includes: :null (void), :any (polymorphic), :fn (function ref), + all storage types
+      (is (= (into #{:null :any :fn} ft/supported-types)
              (set (keys (:values (get enums :value-kind)))))))))
 
 
@@ -51,7 +52,8 @@
   (testing "arg-value has union type for value"
     (let [fields (ds/entity-fields schema :arg-value)]
       (is (= :union (get-in fields [:value :type])))
-      (is (= (inc (count ft/supported-types))  ; 1 ref + all literal types
+      ;; Variants: 1 ref + :any + :fn + all literal types = 3 + count(supported-types)
+      (is (= (+ 3 (count ft/supported-types))
              (count (get-in fields [:value :variants])))))))
 
 

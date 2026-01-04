@@ -165,19 +165,33 @@
    entity-name - entity name (e.g., :user)
    data - the data being inserted/updated
    constraint - the constraint to check {:type :unique :fields [...]}
+   field-specs - field specifications (for handling ref types)
    exclude-id - optional id to exclude (for updates)"
-  [db entity-name data constraint exclude-id]
+  [db entity-name data constraint field-specs exclude-id]
   (let [fields (:fields constraint)
         ;; Get values for all constraint fields from data
         field-values (map #(get data %) fields)]
     ;; Only check if all fields have values
     (when (every? some? field-values)
       ;; Build a query to find existing records with same field values
+      ;; For ref fields, we need to join through the referenced entity
       (let [id-attr (entity-attr entity-name :id)
+            ref-var-counter (atom 0)
             ;; Build where clauses for each field value
-            field-clauses (for [[field value] (map vector fields field-values)]
-                            (let [attr (entity-attr entity-name field)]
-                              ['?e attr value]))
+            field-clauses (mapcat
+                            (fn [[field value]]
+                              (let [attr (entity-attr entity-name field)
+                                    field-spec (get field-specs field)]
+                                (if (and (= (:type field-spec) :ref) (uuid? value))
+                                  ;; Ref field with UUID value: join through referenced entity
+                                  (let [ref-var (symbol (str "?ref-" (swap! ref-var-counter inc)))
+                                        ref-entity (:ref-entity field-spec)
+                                        ref-id-attr (entity-attr ref-entity :id)]
+                                    [['?e attr ref-var]
+                                     [ref-var ref-id-attr value]])
+                                  ;; Regular field: direct comparison
+                                  [['?e attr value]])))
+                            (map vector fields field-values))
             ;; Build the complete query
             base-query (vec (concat '[:find ?e ?id :where]
                                     field-clauses
@@ -190,7 +204,7 @@
                       (d/q base-query db)
                       (catch Exception e
                         (throw (ex-info "Failed to validate unique constraint"
-                                        {:type :constraint-validation-error
+                                        {:type :validation-error/constraint-check-failed
                                          :entity entity-name
                                          :fields fields
                                          :query base-query
@@ -212,10 +226,10 @@
   "Validates all multi-field unique constraints for an entity during create/update.
    This provides application-level enforcement since Datomic doesn't support
    composite unique constraints natively."
-  [db schema entity-name data exclude-id]
+  [db schema entity-name data field-specs exclude-id]
   (let [constraints (get-multi-field-constraints schema entity-name)]
     (doseq [constraint constraints]
-      (validate-multi-field-unique-constraint! db entity-name data constraint exclude-id))))
+      (validate-multi-field-unique-constraint! db entity-name data constraint field-specs exclude-id))))
 
 
 (defn- build-field-schema
@@ -269,6 +283,12 @@
     :db/cardinality :db.cardinality/one}
    {:db/ident (metadata-attr :field-nullable)
     :db/valueType :db.type/boolean
+    :db/cardinality :db.cardinality/one}
+   {:db/ident (metadata-attr :field-enum-name)
+    :db/valueType :db.type/keyword
+    :db/cardinality :db.cardinality/one}
+   {:db/ident (metadata-attr :field-ref-entity)
+    :db/valueType :db.type/keyword
     :db/cardinality :db.cardinality/one}])
 
 
@@ -346,6 +366,22 @@
                         [?e :graphden.metadata/field-type ?field-type]
                         [?e :graphden.metadata/field-nullable ?field-nullable]]
                       db)
+          ;; Query fields with enum-name (optional attribute, only for enum fields)
+          fields-enum-names (d/q '[:find ?uuid ?enum-name
+                                   :where
+                                   [?e :graphden.metadata/uuid ?uuid]
+                                   [?e :graphden.metadata/kind :field]
+                                   [?e :graphden.metadata/field-enum-name ?enum-name]]
+                                 db)
+          field-uuid->enum-name (into {} fields-enum-names)
+          ;; Query fields with ref-entity (optional attribute, only for ref fields)
+          fields-ref-entities (d/q '[:find ?uuid ?ref-entity
+                                     :where
+                                     [?e :graphden.metadata/uuid ?uuid]
+                                     [?e :graphden.metadata/kind :field]
+                                     [?e :graphden.metadata/field-ref-entity ?ref-entity]]
+                                   db)
+          field-uuid->ref-entity (into {} fields-ref-entities)
           ;; Query enums (no parent-uuid)
           enums (d/q '[:find ?uuid ?name
                        :where
@@ -369,10 +405,16 @@
           {:entities entity-uuid->name
            :fields (into {}
                          (for [[uuid field-name parent-uuid field-type field-nullable] fields]
-                           [uuid {:entity (get entity-uuid->name parent-uuid)
-                                  :field field-name
-                                  :type field-type
-                                  :nullable? field-nullable}]))
+                           [uuid (cond-> {:entity (get entity-uuid->name parent-uuid)
+                                          :field field-name
+                                          :type field-type
+                                          :nullable? field-nullable}
+                                   ;; Include enum-name if present
+                                   (get field-uuid->enum-name uuid)
+                                   (assoc :enum-name (get field-uuid->enum-name uuid))
+                                   ;; Include ref-entity if present
+                                   (get field-uuid->ref-entity uuid)
+                                   (assoc :ref-entity (get field-uuid->ref-entity uuid)))]))
            :enums enum-uuid->name
            :enum-values (into {}
                               (for [[uuid value-name parent-uuid] enum-values]
@@ -391,12 +433,18 @@
 (defn- build-field-metadata-tx
   "Builds transaction data for a single field's metadata."
   [schema entity-name field-name field-spec]
-  {:graphden.metadata/uuid (:uuid field-spec)
-   :graphden.metadata/kind :field
-   :graphden.metadata/name field-name
-   :graphden.metadata/parent-uuid (ds/entity-uuid schema entity-name)
-   :graphden.metadata/field-type (:type field-spec)
-   :graphden.metadata/field-nullable (get field-spec :nullable? false)})
+  (cond-> {:graphden.metadata/uuid (:uuid field-spec)
+           :graphden.metadata/kind :field
+           :graphden.metadata/name field-name
+           :graphden.metadata/parent-uuid (ds/entity-uuid schema entity-name)
+           :graphden.metadata/field-type (:type field-spec)
+           :graphden.metadata/field-nullable (get field-spec :nullable? false)}
+    ;; Include enum-name for enum fields
+    (= (:type field-spec) :enum)
+    (assoc :graphden.metadata/field-enum-name (:enum-name field-spec))
+    ;; Include ref-entity for ref fields
+    (= (:type field-spec) :ref)
+    (assoc :graphden.metadata/field-ref-entity (:ref-entity field-spec))))
 
 
 (defn- build-enum-metadata-tx
@@ -740,17 +788,40 @@
 
 ;; === CRUD helpers ===
 
+(defn- convert-field-value
+  "Converts field values for Datomic storage:
+   - Enum values (keywords) -> entity idents
+   - Ref values (UUIDs) -> lookup refs
+   Returns the original value for other field types."
+  [field-specs field-name v]
+  (let [field-spec (get field-specs field-name)]
+    (case (:type field-spec)
+      :enum (if (keyword? v)
+              (enum-value-ident (:enum-name field-spec) v)
+              v)
+      :ref (if (uuid? v)
+             ;; Convert UUID to lookup ref for the referenced entity type
+             (let [ref-entity (:ref-entity field-spec)]
+               [(entity-attr ref-entity :id) v])
+             v)
+      ;; Default: return as-is
+      v)))
+
+
 (defn- entity->tx
   "Converts entity map to Datomic transaction data.
    Uses namespaced attributes for the entity type.
-   The :id field is stored as :entity-name/id (UUID)."
-  [entity-name data id temp-id]
+   The :id field is stored as :entity-name/id (UUID).
+   Enum fields are converted to entity idents.
+   Ref fields are converted to lookup refs."
+  [entity-name data id temp-id field-specs]
   (let [base-tx {:db/id temp-id
                  (entity-attr entity-name :id) id}]
     (reduce-kv (fn [acc k v]
                  (if (= k :id)
                    acc  ; Already handled above
-                   (assoc acc (entity-attr entity-name k) v)))
+                   (let [converted-v (convert-field-value field-specs k v)]
+                     (assoc acc (entity-attr entity-name k) converted-v))))
                base-tx
                data)))
 
@@ -789,14 +860,16 @@
 
 (defn- get-fields-with-specs
   "Gets field specifications for an entity from metadata.
-   Returns {field-name {:type ... :nullable? ...}}."
+   Returns {field-name {:type ... :nullable? ... :enum-name ... :ref-entity ...}}."
   [db entity-name]
   (let [metadata (read-metadata db)]
     (->> (:fields metadata)
          (vals)
          (filter #(= (:entity %) entity-name))
-         (map (fn [{:keys [field nullable?] field-type :type}]
-                [field {:type field-type :nullable? nullable?}]))
+         (map (fn [{:keys [field nullable? enum-name ref-entity] field-type :type}]
+                [field (cond-> {:type field-type :nullable? nullable?}
+                         enum-name (assoc :enum-name enum-name)
+                         ref-entity (assoc :ref-entity ref-entity))]))
          (into {}))))
 
 
@@ -810,7 +883,7 @@
       (sp/validate-required-fields! entity-name field-specs data))
     (let [id (or (:id data) (random-uuid))
           temp-id (str "new-entity-" (random-uuid))
-          tx-data [(entity->tx entity-name (assoc data :id id) id temp-id)]]
+          tx-data [(entity->tx entity-name (assoc data :id id) id temp-id field-specs)]]
       (d/transact conn {:tx-data tx-data})
       (let [new-db (d/db conn)
             fields (get-entity-fields new-db entity-name)]
@@ -848,7 +921,7 @@
       (when (seq field-specs)
         (sp/validate-required-fields! entity-name field-specs updated))
       ;; Use actual entity id for update
-      (let [tx-data [(entity->tx entity-name updated id eid)]]
+      (let [tx-data [(entity->tx entity-name updated id eid field-specs)]]
         (d/transact conn {:tx-data tx-data})
         (let [new-db (d/db conn)]
           (pull-entity new-db entity-name id fields))))))
@@ -874,11 +947,7 @@
   "Queries entities by conditions.
    where must be nil or a map of field->value for equality matching."
   [conn entity-name where]
-  (when (and (some? where) (not (map? where)))
-    (throw (ex-info "where clause must be nil or a map"
-                    {:type :invalid-where-clause
-                     :where where
-                     :where-type (type where)})))
+  (sp/validate-where-clause! where)
   (let [db (d/db conn)
         fields (get-entity-fields db entity-name)
         id-attr (entity-attr entity-name :id)
@@ -929,7 +998,7 @@
                               :data (assoc data :id id)}))
                          data-seq)
             tx-data (map (fn [{:keys [id temp-id data]}]
-                           (entity->tx entity-name data id temp-id))
+                           (entity->tx entity-name data id temp-id field-specs))
                          records)]
         (d/transact conn {:tx-data (vec tx-data)})
         ;; Read back created entities
@@ -1377,19 +1446,15 @@
   (create-entity
     [_this entity-name data]
     ;; Validate data type before acquiring lock
-    (when-not (map? data)
-      (throw (ex-info "data must be a map"
-                      {:type :invalid-data
-                       :entity-name entity-name
-                       :data data
-                       :data-type (type data)})))
+    (sp/validate-data-is-map! entity-name data)
     (sp/with-write-lock rw-lock
                         (fn []
                           (let [conn (ensure-connection! conn-atom :create-entity)
-                                db (d/db conn)]
+                                db (d/db conn)
+                                field-specs (get-fields-with-specs db entity-name)]
                             ;; Validate multi-field unique constraints before creating
                             (when-let [schema @schema-atom]
-                              (validate-multi-field-constraints! db schema entity-name data nil))
+                              (validate-multi-field-constraints! db schema entity-name data field-specs nil))
                             (create-entity-impl conn entity-name data)))))
 
 
@@ -1406,10 +1471,11 @@
     (sp/with-write-lock rw-lock
                         (fn []
                           (let [conn (ensure-connection! conn-atom :update-entity)
-                                db (d/db conn)]
+                                db (d/db conn)
+                                field-specs (get-fields-with-specs db entity-name)]
                             ;; Validate multi-field unique constraints before updating
                             (when-let [schema @schema-atom]
-                              (validate-multi-field-constraints! db schema entity-name data id))
+                              (validate-multi-field-constraints! db schema entity-name data field-specs id))
                             (update-entity-impl conn entity-name id data)))))
 
 
@@ -1436,11 +1502,12 @@
     (sp/with-write-lock rw-lock
                         (fn []
                           (let [conn (ensure-connection! conn-atom :create-entities)
-                                db (d/db conn)]
+                                db (d/db conn)
+                                field-specs (get-fields-with-specs db entity-name)]
                             ;; Validate multi-field unique constraints for each entity
                             (when-let [schema @schema-atom]
                               (doseq [data data-seq]
-                                (validate-multi-field-constraints! db schema entity-name data nil)))
+                                (validate-multi-field-constraints! db schema entity-name data field-specs nil)))
                             (create-entities-impl conn entity-name data-seq)))))
 
 

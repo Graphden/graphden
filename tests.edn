@@ -1,18 +1,22 @@
 #kaocha/v1
 {:tests
- [{:id :unit
+ [{:id :unit,
    :test-paths
-   ["components/data-schema-protocol/test"
+   ["components/base-functions/test"
+    "components/data-schema-protocol/test"
     "components/datomic-storage/test"
+    "components/executor/test"
     "components/field-types/test"
+    "components/fn-registry/test"
     "components/graph-data-schema/test"
     "components/graph-storage-datomic/test"
     "components/graph-storage-memory/test"
     "components/graph-storage-postgres/test"
+    "components/graph-with-base-fns-datomic/test"
+    "components/graph-with-base-fns-memory/test"
+    "components/graph-with-base-fns-postgres/test"
     "components/malli-data-schema/test"
     "components/memory-storage/test"
     "components/postgres-storage/test"
-    "components/storage-protocol/test"
-    "components/executor/test"
-    "components/base-functions/test"]}]
+    "components/storage-protocol/test"]}],
  :plugins [:kaocha.plugin/profiling]}

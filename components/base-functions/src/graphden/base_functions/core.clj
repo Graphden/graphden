@@ -1,582 +1,396 @@
 (ns graphden.base-functions.core
-  "Core implementation of base functions.
+  "Base function definitions.
 
-   All base functions take a map of thunks and a context.
-   They use force-value to evaluate thunks lazily."
+   This component defines the standard library of base functions:
+   - Arithmetic: add, sub, mul, div, mod, neg, abs
+   - Comparison: eq, neq, lt, lte, gt, gte
+   - Logic: and, or, not
+   - Conditionals: if, cond
+   - Strings: str, subs, str-len, str-upper, str-lower, str-trim, str-split, str-join
+   - Collections: first, rest, cons, conj, get, assoc, dissoc, count, empty?, etc.
+   - HOF: map, filter, reduce, some, every?, find-first, group-by, sort-by, apply
+
+   Registration and storage sync should be done by consuming components
+   using fn-registry."
   (:require
     [clojure.string :as str]
     [graphden.executor.interface :as exec]))
 
 
-;; === Registration Helper ===
-
-(defn- register-fns!
-  "Registers multiple base functions from a name->fn map."
-  [fns-map]
-  (run! (fn [[fn-name f]]
-          (exec/register-base-fn! fn-name f))
-        fns-map))
-
-
 ;; === Arithmetic ===
+;; Note: add, sub, mul, div accept lists like Clojure's +, -, *, /
 
-(defn- base-add
-  [{:keys [a b]} ctx]
-  (+ (exec/force-value a ctx)
-     (exec/force-value b ctx)))
+(def arithmetic-defs
+  {:add {:args {:nums :jsonb}
+         :return-type :numeric
+         :impl (fn [{:keys [nums]} _ctx]
+                 (apply + nums))}
 
+   :sub {:args {:nums :jsonb}
+         :return-type :numeric
+         :impl (fn [{:keys [nums]} _ctx]
+                 (apply - nums))}
 
-(defn- base-sub
-  [{:keys [a b]} ctx]
-  (- (exec/force-value a ctx)
-     (exec/force-value b ctx)))
+   :mul {:args {:nums :jsonb}
+         :return-type :numeric
+         :impl (fn [{:keys [nums]} _ctx]
+                 (apply * nums))}
 
+   :div {:args {:nums :jsonb}
+         :return-type :numeric
+         :impl (fn [{:keys [nums]} _ctx]
+                 (when-let [zero-divisor (some #(when (zero? %) %) (rest nums))]
+                   (throw (ex-info "Division by zero"
+                                   {:type :execution-error/division-by-zero
+                                    :nums nums
+                                    :zero-at zero-divisor})))
+                 (apply / nums))}
 
-(defn- base-mul
-  [{:keys [a b]} ctx]
-  (* (exec/force-value a ctx)
-     (exec/force-value b ctx)))
+   :mod {:args {:a :numeric, :b :numeric}
+         :return-type :numeric
+         :impl (fn [{:keys [a b]} _ctx]
+                 (when (zero? b)
+                   (throw (ex-info "Modulo by zero"
+                                   {:type :execution-error/modulo-by-zero
+                                    :a a :b b})))
+                 (mod a b))}
 
+   :neg {:args {:n :numeric}
+         :return-type :numeric
+         :impl (fn [{:keys [n]} _ctx] (- n))}
 
-(defn- base-div
-  [{:keys [a b]} ctx]
-  (let [divisor (exec/force-value b ctx)]
-    (when (zero? divisor)
-      (throw (ex-info "Division by zero"
-                      {:type :execution-error/division-by-zero
-                       :a (exec/force-value a ctx)
-                       :b divisor})))
-    (/ (exec/force-value a ctx) divisor)))
-
-
-(defn- base-mod
-  [{:keys [a b]} ctx]
-  (mod (exec/force-value a ctx)
-       (exec/force-value b ctx)))
-
-
-(defn- base-neg
-  [{:keys [n]} ctx]
-  (- (exec/force-value n ctx)))
-
-
-(defn- base-abs
-  [{:keys [n]} ctx]
-  (abs (exec/force-value n ctx)))
-
-
-(def ^:private arithmetic-fns
-  {:add base-add
-   :sub base-sub
-   :mul base-mul
-   :div base-div
-   :mod base-mod
-   :neg base-neg
-   :abs base-abs})
-
-
-(defn register-arithmetic!
-  []
-  (register-fns! arithmetic-fns))
+   :abs {:args {:n :numeric}
+         :return-type :numeric
+         :impl (fn [{:keys [n]} _ctx] (abs n))}})
 
 
 ;; === Comparison ===
+;; Note: comparison functions accept lists like Clojure's =, <, >, etc.
+;; (eq [1 1 1]) => true, (lt [1 2 3]) => true (ascending)
 
-(defn- base-eq
-  [{:keys [a b]} ctx]
-  (= (exec/force-value a ctx)
-     (exec/force-value b ctx)))
+(def comparison-defs
+  {:eq  {:args {:values :jsonb}
+         :return-type :bool
+         :impl (fn [{:keys [values]} _ctx]
+                 (apply = values))}
 
+   :neq {:args {:values :jsonb}
+         :return-type :bool
+         :impl (fn [{:keys [values]} _ctx]
+                 (apply not= values))}
 
-(defn- base-neq
-  [{:keys [a b]} ctx]
-  (not= (exec/force-value a ctx)
-        (exec/force-value b ctx)))
+   :lt  {:args {:nums :jsonb}
+         :return-type :bool
+         :impl (fn [{:keys [nums]} _ctx]
+                 (apply < nums))}
 
+   :lte {:args {:nums :jsonb}
+         :return-type :bool
+         :impl (fn [{:keys [nums]} _ctx]
+                 (apply <= nums))}
 
-(defn- base-lt
-  [{:keys [a b]} ctx]
-  (< (exec/force-value a ctx)
-     (exec/force-value b ctx)))
+   :gt  {:args {:nums :jsonb}
+         :return-type :bool
+         :impl (fn [{:keys [nums]} _ctx]
+                 (apply > nums))}
 
-
-(defn- base-lte
-  [{:keys [a b]} ctx]
-  (<= (exec/force-value a ctx)
-      (exec/force-value b ctx)))
-
-
-(defn- base-gt
-  [{:keys [a b]} ctx]
-  (> (exec/force-value a ctx)
-     (exec/force-value b ctx)))
-
-
-(defn- base-gte
-  [{:keys [a b]} ctx]
-  (>= (exec/force-value a ctx)
-      (exec/force-value b ctx)))
-
-
-(def ^:private comparison-fns
-  {:eq  base-eq
-   :neq base-neq
-   :lt  base-lt
-   :lte base-lte
-   :gt  base-gt
-   :gte base-gte})
-
-
-(defn register-comparison!
-  []
-  (register-fns! comparison-fns))
+   :gte {:args {:nums :jsonb}
+         :return-type :bool
+         :impl (fn [{:keys [nums]} _ctx]
+                 (apply >= nums))}})
 
 
 ;; === Logic ===
-;; Note: and/or are lazy - they don't evaluate all arguments
+;; Note: and/or need lazy evaluation for short-circuit behavior
 
-(defn- base-and
-  [{:keys [a b]} ctx]
-  (and (exec/force-value a ctx)
-       (exec/force-value b ctx)))
+(def logic-defs
+  {:and {:args {:a :bool, :b :bool}
+         :lazy-args #{:b}  ; b is lazy for short-circuit
+         :return-type :bool
+         :impl (fn [{:keys [a b]} ctx]
+                 (and a (exec/force-value b ctx)))}
 
+   :or  {:args {:a :bool, :b :bool}
+         :lazy-args #{:b}  ; b is lazy for short-circuit
+         :return-type :bool
+         :impl (fn [{:keys [a b]} ctx]
+                 (or a (exec/force-value b ctx)))}
 
-(defn- base-or
-  [{:keys [a b]} ctx]
-  (or (exec/force-value a ctx)
-      (exec/force-value b ctx)))
-
-
-(defn- base-not
-  [{:keys [x]} ctx]
-  (not (exec/force-value x ctx)))
-
-
-(def ^:private logic-fns
-  {:and base-and
-   :or  base-or
-   :not base-not})
-
-
-(defn register-logic!
-  []
-  (register-fns! logic-fns))
+   :not {:args {:x :bool}
+         :return-type :bool
+         :impl (fn [{:keys [x]} _ctx] (not x))}})
 
 
 ;; === Conditionals ===
-;; Note: if is lazy - only one branch is evaluated
+;; Note: if needs lazy evaluation - only one branch is evaluated
 
-(defn- base-if
-  [{:keys [condition then else]} ctx]
-  (if (exec/force-value condition ctx)
-    (exec/force-value then ctx)
-    (exec/force-value else ctx)))
+(def conditional-defs
+  {:if   {:args {:condition :bool, :then :any, :else :any}
+          :lazy-args #{:then :else}
+          :return-type :any
+          :impl (fn [{:keys [condition then else]} ctx]
+                  (if condition
+                    (exec/force-value then ctx)
+                    (exec/force-value else ctx)))}
 
-
-(defn- base-cond
-  "Evaluates conditions in order, returns first truthy result.
-   Takes pairs of condition/result thunks.
-   Args: {:pairs [{:pred c1 :result r1} {:pred c2 :result r2} ...]
-          :default d}"
-  [{:keys [pairs default]} ctx]
-  (let [pairs-val (exec/force-value pairs ctx)]
-    (loop [ps pairs-val]
-      (if (empty? ps)
-        (when default (exec/force-value default ctx))
-        (let [{:keys [pred result]} (first ps)]
-          (if (exec/force-value pred ctx)
-            (exec/force-value result ctx)
-            (recur (rest ps))))))))
-
-
-(def ^:private conditional-fns
-  {:if   base-if
-   :cond base-cond})
-
-
-(defn register-conditionals!
-  []
-  (register-fns! conditional-fns))
+   :cond {:args {:pairs :jsonb, :default :any}
+          :lazy-args #{:default}
+          :return-type :any
+          :impl (fn [{:keys [pairs default]} ctx]
+                  ;; pairs is a vector of {:pred bool :result value}
+                  (loop [ps pairs]
+                    (if (empty? ps)
+                      (when default (exec/force-value default ctx))
+                      (let [{:keys [pred result]} (first ps)]
+                        (if pred result (recur (rest ps)))))))}})
 
 
 ;; === Strings ===
 
-(defn- base-str
-  [{:keys [args]} ctx]
-  (let [args-val (exec/force-value args ctx)]
-    (str/join (map #(exec/force-value % ctx) args-val))))
+(def string-defs
+  {:str       {:args {:args :jsonb}
+               :return-type :text
+               :impl (fn [{:keys [args]} _ctx] (str/join args))}
 
+   :subs      {:args {:s :text, :start :int, :end {:type :int :required false}}
+               :return-type :text
+               :impl (fn [{:keys [s start end]} _ctx]
+                       (let [len (count s)]
+                         (when (neg? start)
+                           (throw (ex-info "start index cannot be negative"
+                                           {:type :execution-error/invalid-index
+                                            :start start :string-length len})))
+                         (when (> start len)
+                           (throw (ex-info "start index out of bounds"
+                                           {:type :execution-error/index-out-of-bounds
+                                            :start start :string-length len})))
+                         (if end
+                           (do
+                             (when (< end start)
+                               (throw (ex-info "end index cannot be less than start"
+                                               {:type :execution-error/invalid-index
+                                                :start start :end end})))
+                             (when (> end len)
+                               (throw (ex-info "end index out of bounds"
+                                               {:type :execution-error/index-out-of-bounds
+                                                :end end :string-length len})))
+                             (subs s start end))
+                           (subs s start))))}
 
-(defn- base-subs
-  [{:keys [s start end]} ctx]
-  (let [s-val (exec/force-value s ctx)
-        start-val (exec/force-value start ctx)
-        end-val (when end (exec/force-value end ctx))]
-    (if end-val
-      (subs s-val start-val end-val)
-      (subs s-val start-val))))
+   :str-len   {:args {:s :text}
+               :return-type :int
+               :impl (fn [{:keys [s]} _ctx] (count s))}
 
+   :str-upper {:args {:s :text}
+               :return-type :text
+               :impl (fn [{:keys [s]} _ctx] (str/upper-case s))}
 
-(defn- base-str-len
-  [{:keys [s]} ctx]
-  (count (exec/force-value s ctx)))
+   :str-lower {:args {:s :text}
+               :return-type :text
+               :impl (fn [{:keys [s]} _ctx] (str/lower-case s))}
 
+   :str-trim  {:args {:s :text}
+               :return-type :text
+               :impl (fn [{:keys [s]} _ctx] (str/trim s))}
 
-(defn- base-str-upper
-  [{:keys [s]} ctx]
-  (str/upper-case (exec/force-value s ctx)))
+   :str-split {:args {:s :text, :sep :text}
+               :return-type :jsonb
+               :impl (fn [{:keys [s sep]} _ctx]
+                       (try
+                         (str/split s (re-pattern sep))
+                         (catch java.util.regex.PatternSyntaxException e
+                           (throw (ex-info "Invalid regex pattern in separator"
+                                           {:type :execution-error/invalid-regex
+                                            :separator sep
+                                            :cause (Throwable/.getMessage e)})))))}
 
-
-(defn- base-str-lower
-  [{:keys [s]} ctx]
-  (str/lower-case (exec/force-value s ctx)))
-
-
-(defn- base-str-trim
-  [{:keys [s]} ctx]
-  (str/trim (exec/force-value s ctx)))
-
-
-(defn- base-str-split
-  [{:keys [s sep]} ctx]
-  (str/split (exec/force-value s ctx)
-             (re-pattern (exec/force-value sep ctx))))
-
-
-(defn- base-str-join
-  [{:keys [coll sep]} ctx]
-  (let [coll-val (exec/force-value coll ctx)
-        sep-val (if sep (exec/force-value sep ctx) "")]
-    (str/join sep-val coll-val)))
-
-
-(def ^:private string-fns
-  {:str       base-str
-   :subs      base-subs
-   :str-len   base-str-len
-   :str-upper base-str-upper
-   :str-lower base-str-lower
-   :str-trim  base-str-trim
-   :str-split base-str-split
-   :str-join  base-str-join})
-
-
-(defn register-strings!
-  []
-  (register-fns! string-fns))
+   :str-join  {:args {:coll :jsonb, :sep {:type :text :required false}}
+               :return-type :text
+               :impl (fn [{:keys [coll sep]} _ctx]
+                       (str/join (or sep "") coll))}})
 
 
 ;; === Collections ===
 
-(defn- base-first
-  [{:keys [coll]} ctx]
-  (first (exec/force-value coll ctx)))
+(def collection-defs
+  {:first     {:args {:coll :jsonb}
+               :return-type :any
+               :impl (fn [{:keys [coll]} _ctx] (first coll))}
 
+   :rest      {:args {:coll :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [coll]} _ctx] (rest coll))}
 
-(defn- base-rest
-  [{:keys [coll]} ctx]
-  (rest (exec/force-value coll ctx)))
+   :cons      {:args {:x :any, :coll :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [x coll]} _ctx] (cons x coll))}
 
+   :conj      {:args {:coll :jsonb, :x :any}
+               :return-type :jsonb
+               :impl (fn [{:keys [coll x]} _ctx] (conj coll x))}
 
-(defn- base-cons
-  [{:keys [x coll]} ctx]
-  (cons (exec/force-value x ctx)
-        (exec/force-value coll ctx)))
+   :get       {:args {:coll :jsonb, :k :any, :default :any}
+               :return-type :any
+               :impl (fn [{:keys [coll k default]} _ctx] (get coll k default))}
 
+   :assoc     {:args {:m :jsonb, :k :any, :v :any}
+               :return-type :jsonb
+               :impl (fn [{:keys [m k v]} _ctx] (assoc m k v))}
 
-(defn- base-conj
-  [{:keys [coll x]} ctx]
-  (conj (exec/force-value coll ctx)
-        (exec/force-value x ctx)))
+   :dissoc    {:args {:m :jsonb, :k :any}
+               :return-type :jsonb
+               :impl (fn [{:keys [m k]} _ctx] (dissoc m k))}
 
+   :count     {:args {:coll :jsonb}
+               :return-type :int
+               :impl (fn [{:keys [coll]} _ctx] (count coll))}
 
-(defn- base-get
-  [{:keys [coll k default]} ctx]
-  (let [coll-val (exec/force-value coll ctx)
-        k-val (exec/force-value k ctx)
-        default-val (when default (exec/force-value default ctx))]
-    (get coll-val k-val default-val)))
+   :empty?    {:args {:coll :jsonb}
+               :return-type :bool
+               :impl (fn [{:keys [coll]} _ctx] (empty? coll))}
 
+   :contains? {:args {:coll :jsonb, :k :any}
+               :return-type :bool
+               :impl (fn [{:keys [coll k]} _ctx] (contains? coll k))}
 
-(defn- base-assoc
-  [{:keys [m k v]} ctx]
-  (assoc (exec/force-value m ctx)
-         (exec/force-value k ctx)
-         (exec/force-value v ctx)))
+   :keys      {:args {:m :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [m]} _ctx] (keys m))}
 
+   :vals      {:args {:m :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [m]} _ctx] (vals m))}
 
-(defn- base-dissoc
-  [{:keys [m k]} ctx]
-  (dissoc (exec/force-value m ctx)
-          (exec/force-value k ctx)))
+   :merge     {:args {:maps :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [maps]} _ctx] (apply merge maps))}
 
+   :into      {:args {:to :jsonb, :from :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [to from]} _ctx] (into to from))}
 
-(defn- base-count
-  [{:keys [coll]} ctx]
-  (count (exec/force-value coll ctx)))
+   :range     {:args {:start :int, :end :int, :step :int}
+               :return-type :jsonb
+               :impl (fn [{:keys [start end step]} _ctx]
+                       (range (or start 0) end (or step 1)))}
 
+   :repeat    {:args {:n :int, :x :any}
+               :return-type :jsonb
+               :impl (fn [{:keys [n x]} _ctx] (vec (repeat n x)))}
 
-(defn- base-empty?
-  [{:keys [coll]} ctx]
-  (empty? (exec/force-value coll ctx)))
+   :take      {:args {:n :int, :coll :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [n coll]} _ctx] (vec (take n coll)))}
 
+   :drop      {:args {:n :int, :coll :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [n coll]} _ctx] (vec (drop n coll)))}
 
-(defn- base-contains?
-  [{:keys [coll k]} ctx]
-  (contains? (exec/force-value coll ctx)
-             (exec/force-value k ctx)))
+   :reverse   {:args {:coll :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [coll]} _ctx] (vec (reverse coll)))}
 
+   :sort      {:args {:coll :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [coll]} _ctx] (vec (sort coll)))}
 
-(defn- base-keys
-  [{:keys [m]} ctx]
-  (keys (exec/force-value m ctx)))
+   :concat    {:args {:colls :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [colls]} _ctx] (vec (apply concat colls)))}
 
+   :flatten   {:args {:coll :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [coll]} _ctx] (vec (flatten coll)))}
 
-(defn- base-vals
-  [{:keys [m]} ctx]
-  (vals (exec/force-value m ctx)))
-
-
-(defn- base-merge
-  [{:keys [m1 m2]} ctx]
-  (merge (exec/force-value m1 ctx)
-         (exec/force-value m2 ctx)))
-
-
-(defn- base-into
-  [{:keys [to from]} ctx]
-  (into (exec/force-value to ctx)
-        (exec/force-value from ctx)))
-
-
-(defn- base-range
-  [{:keys [start end step]} ctx]
-  (let [start-val (if start (exec/force-value start ctx) 0)
-        end-val (exec/force-value end ctx)
-        step-val (if step (exec/force-value step ctx) 1)]
-    (range start-val end-val step-val)))
-
-
-(defn- base-repeat
-  [{:keys [n x]} ctx]
-  (let [n-val (exec/force-value n ctx)
-        x-val (exec/force-value x ctx)]
-    (vec (repeat n-val x-val))))
-
-
-(defn- base-take
-  [{:keys [n coll]} ctx]
-  (vec (take (exec/force-value n ctx)
-             (exec/force-value coll ctx))))
-
-
-(defn- base-drop
-  [{:keys [n coll]} ctx]
-  (vec (drop (exec/force-value n ctx)
-             (exec/force-value coll ctx))))
-
-
-(defn- base-reverse
-  [{:keys [coll]} ctx]
-  (vec (reverse (exec/force-value coll ctx))))
-
-
-(defn- base-sort
-  [{:keys [coll]} ctx]
-  (vec (sort (exec/force-value coll ctx))))
-
-
-(defn- base-concat
-  [{:keys [coll1 coll2]} ctx]
-  (vec (concat (exec/force-value coll1 ctx)
-               (exec/force-value coll2 ctx))))
-
-
-(defn- base-flatten
-  [{:keys [coll]} ctx]
-  (vec (flatten (exec/force-value coll ctx))))
-
-
-(defn- base-distinct
-  [{:keys [coll]} ctx]
-  (vec (distinct (exec/force-value coll ctx))))
-
-
-(def ^:private collection-fns
-  {:first     base-first
-   :rest      base-rest
-   :cons      base-cons
-   :conj      base-conj
-   :get       base-get
-   :assoc     base-assoc
-   :dissoc    base-dissoc
-   :count     base-count
-   :empty?    base-empty?
-   :contains? base-contains?
-   :keys      base-keys
-   :vals      base-vals
-   :merge     base-merge
-   :into      base-into
-   :range     base-range
-   :repeat    base-repeat
-   :take      base-take
-   :drop      base-drop
-   :reverse   base-reverse
-   :sort      base-sort
-   :concat    base-concat
-   :flatten   base-flatten
-   :distinct  base-distinct})
-
-
-(defn register-collections!
-  []
-  (register-fns! collection-fns))
+   :distinct  {:args {:coll :jsonb}
+               :return-type :jsonb
+               :impl (fn [{:keys [coll]} _ctx] (vec (distinct coll)))}})
 
 
 ;; === Higher-Order Functions ===
-;; Note: These work with fn-ids (LazyFnThunk returns fn-id, not result)
+;; Note: :fn type args receive fn-id (from LazyFnThunk.force-value)
 
-(defn- base-map
-  "Maps a function over a collection.
-   f is a fn-id, coll is a collection."
-  [{:keys [f coll]} ctx]
-  (let [f-id (exec/force-value f ctx)
-        coll-val (exec/force-value coll ctx)]
-    (vec (map (fn [item]
-                (exec/execute ctx f-id {:item item}))
-              coll-val))))
+(def hof-defs
+  {:map        {:args {:f :fn, :coll :jsonb}
+                :return-type :jsonb
+                :impl (fn [{:keys [f coll]} ctx]
+                        (mapv (fn [item]
+                                (exec/execute-with-named-args ctx f {:item item}))
+                              coll))}
 
+   :filter     {:args {:pred :fn, :coll :jsonb}
+                :return-type :jsonb
+                :impl (fn [{:keys [pred coll]} ctx]
+                        (filterv (fn [item]
+                                   (exec/execute-with-named-args ctx pred {:item item}))
+                                 coll))}
 
-(defn- base-filter
-  "Filters a collection by a predicate function.
-   pred is a fn-id that returns truthy/falsy, coll is a collection."
-  [{:keys [pred coll]} ctx]
-  (let [pred-id (exec/force-value pred ctx)
-        coll-val (exec/force-value coll ctx)]
-    (filterv (fn [item]
-               (exec/execute ctx pred-id {:item item}))
-             coll-val)))
+   :reduce     {:args {:f :fn, :init :any, :coll :jsonb}
+                :return-type :any
+                :impl (fn [{:keys [f init coll]} ctx]
+                        (reduce (fn [acc item]
+                                  (exec/execute-with-named-args ctx f {:acc acc :item item}))
+                                init coll))}
 
+   :some       {:args {:pred :fn, :coll :jsonb}
+                :return-type :any
+                :impl (fn [{:keys [pred coll]} ctx]
+                        (some (fn [item]
+                                (when-let [result (exec/execute-with-named-args ctx pred {:item item})]
+                                  result))
+                              coll))}
 
-(defn- base-reduce
-  "Reduces a collection with a function.
-   f is a fn-id that takes {:acc _ :item _}, init is initial value, coll is collection."
-  [{:keys [f init coll]} ctx]
-  (let [f-id (exec/force-value f ctx)
-        init-val (exec/force-value init ctx)
-        coll-val (exec/force-value coll ctx)]
-    (reduce (fn [acc item]
-              (exec/execute ctx f-id {:acc acc :item item}))
-            init-val
-            coll-val)))
+   :every?     {:args {:pred :fn, :coll :jsonb}
+                :return-type :bool
+                :impl (fn [{:keys [pred coll]} ctx]
+                        (every? (fn [item]
+                                  (exec/execute-with-named-args ctx pred {:item item}))
+                                coll))}
 
+   :find-first {:args {:pred :fn, :coll :jsonb}
+                :return-type :any
+                :impl (fn [{:keys [pred coll]} ctx]
+                        (first (filter (fn [item]
+                                         (exec/execute-with-named-args ctx pred {:item item}))
+                                       coll)))}
 
-(defn- base-some
-  "Returns first truthy result of applying pred to items in coll.
-   pred is a fn-id, coll is a collection."
-  [{:keys [pred coll]} ctx]
-  (let [pred-id (exec/force-value pred ctx)
-        coll-val (exec/force-value coll ctx)]
-    (some (fn [item]
-            (when-let [result (exec/execute ctx pred-id {:item item})]
-              result))
-          coll-val)))
+   :group-by   {:args {:key-fn :fn, :coll :jsonb}
+                :return-type :jsonb
+                :impl (fn [{:keys [key-fn coll]} ctx]
+                        (group-by (fn [item]
+                                    (exec/execute-with-named-args ctx key-fn {:item item}))
+                                  coll))}
 
+   :sort-by    {:args {:key-fn :fn, :coll :jsonb}
+                :return-type :jsonb
+                :impl (fn [{:keys [key-fn coll]} ctx]
+                        (vec (sort-by (fn [item]
+                                        (exec/execute-with-named-args ctx key-fn {:item item}))
+                                      coll)))}
 
-(defn- base-every?
-  "Returns true if pred is true for all items in coll.
-   pred is a fn-id, coll is a collection."
-  [{:keys [pred coll]} ctx]
-  (let [pred-id (exec/force-value pred ctx)
-        coll-val (exec/force-value coll ctx)]
-    (every? (fn [item]
-              (exec/execute ctx pred-id {:item item}))
-            coll-val)))
+   :apply      {:args {:f :fn, :args :jsonb}
+                :return-type :any
+                :impl (fn [{:keys [f args]} ctx]
+                        (exec/execute-with-named-args ctx f args))}
 
+   :identity   {:args {:x :any}
+                :return-type :any
+                :impl (fn [{:keys [x]} _ctx] x)}
 
-(defn- base-find-first
-  "Returns first item in coll for which pred returns true.
-   pred is a fn-id, coll is a collection."
-  [{:keys [pred coll]} ctx]
-  (let [pred-id (exec/force-value pred ctx)
-        coll-val (exec/force-value coll ctx)]
-    (first (filter (fn [item]
-                     (exec/execute ctx pred-id {:item item}))
-                   coll-val))))
-
-
-(defn- base-group-by
-  "Groups items by result of applying key-fn.
-   key-fn is a fn-id, coll is a collection."
-  [{:keys [key-fn coll]} ctx]
-  (let [key-fn-id (exec/force-value key-fn ctx)
-        coll-val (exec/force-value coll ctx)]
-    (group-by (fn [item]
-                (exec/execute ctx key-fn-id {:item item}))
-              coll-val)))
+   :constantly {:args {:x :any}
+                :return-type :any
+                :impl (fn [{:keys [x]} _ctx] x)}})
 
 
-(defn- base-sort-by
-  "Sorts collection by result of applying key-fn.
-   key-fn is a fn-id, coll is a collection."
-  [{:keys [key-fn coll]} ctx]
-  (let [key-fn-id (exec/force-value key-fn ctx)
-        coll-val (exec/force-value coll ctx)]
-    (vec (sort-by (fn [item]
-                    (exec/execute ctx key-fn-id {:item item}))
-                  coll-val))))
+;; === Introspection ===
 
-
-(defn- base-apply
-  "Applies a function to arguments.
-   f is a fn-id, args is a map of arguments."
-  [{:keys [f args]} ctx]
-  (let [f-id (exec/force-value f ctx)
-        args-val (exec/force-value args ctx)]
-    (exec/execute ctx f-id args-val)))
-
-
-(defn- base-identity
-  "Returns its argument unchanged."
-  [{:keys [x]} ctx]
-  (exec/force-value x ctx))
-
-
-(defn- base-constantly
-  "Returns a function that always returns the same value.
-   Returns the value directly since we can't create new functions dynamically."
-  [{:keys [x]} ctx]
-  (exec/force-value x ctx))
-
-
-(def ^:private hof-fns
-  {:map        base-map
-   :filter     base-filter
-   :reduce     base-reduce
-   :some       base-some
-   :every?     base-every?
-   :find-first base-find-first
-   :group-by   base-group-by
-   :sort-by    base-sort-by
-   :apply      base-apply
-   :identity   base-identity
-   :constantly base-constantly})
-
-
-(defn register-hof!
+(defn get-all-defs
+  "Returns all base function definitions with metadata."
   []
-  (register-fns! hof-fns))
-
-
-;; === Register All ===
-
-(defn register-all!
-  "Registers all base functions."
-  []
-  (register-arithmetic!)
-  (register-comparison!)
-  (register-logic!)
-  (register-conditionals!)
-  (register-strings!)
-  (register-collections!)
-  (register-hof!))
+  (merge arithmetic-defs
+         comparison-defs
+         logic-defs
+         conditional-defs
+         string-defs
+         collection-defs
+         hof-defs))

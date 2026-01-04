@@ -118,11 +118,11 @@
   (testing "converts kebab-case keys to snake_case"
     (let [entity {:user-name "john" :created-at "2024-01-01"}]
       (is (= {:user_name "john" :created_at "2024-01-01"}
-             (#'crud/entity->row entity #{})))))
+             (#'crud/entity->row entity #{} {})))))
 
   (testing "converts JSONB fields to PGobject"
     (let [entity {:data {:key "value"} :name "test"}
-          result (#'crud/entity->row entity #{:data})
+          result (#'crud/entity->row entity #{:data} {})
           data-pg ^PGobject (:data result)]
       (is (= "test" (:name result)))
       (is (instance? PGobject data-pg))

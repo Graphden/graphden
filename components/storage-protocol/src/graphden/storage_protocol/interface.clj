@@ -37,8 +37,9 @@
    - :constraint-violation/dependency-cycle    - Cycle in arg-value references
 
    ### Validation Errors (prefix :validation-error/)
-   - :validation-error/required-field-missing - Required field not provided
-   - :validation-error/duplicate-ids          - Duplicate IDs in batch
+   - :validation-error/required-field-missing   - Required field not provided
+   - :validation-error/duplicate-ids            - Duplicate IDs in batch
+   - :validation-error/constraint-check-failed  - Constraint validation query failed
 
    ### Configuration Errors (prefix :config-error/)
    - :config-error/invalid-timeout  - Invalid timeout value
@@ -1145,6 +1146,40 @@
                       {:type :validation-error/duplicate-ids
                        :entity entity-name
                        :duplicate-ids (vec duplicates)})))))
+
+
+(defn validate-data-is-map!
+  "Validates that data is a map for CRUD operations.
+   Throws ExceptionInfo if data is not a map.
+
+   Arguments:
+   - entity-name: keyword name of the entity
+   - data: the data to validate
+
+   Throws ExceptionInfo with :type :invalid-data if data is not a map."
+  [entity-name data]
+  (when-not (map? data)
+    (throw (ex-info "data must be a map"
+                    {:type :invalid-data
+                     :entity-name entity-name
+                     :data data
+                     :data-type (type data)}))))
+
+
+(defn validate-where-clause!
+  "Validates that where clause is nil or a map for query operations.
+   Throws ExceptionInfo if where is not nil or a map.
+
+   Arguments:
+   - where: the where clause to validate
+
+   Throws ExceptionInfo with :type :invalid-where-clause if invalid."
+  [where]
+  (when (and (some? where) (not (map? where)))
+    (throw (ex-info "where clause must be nil or a map"
+                    {:type :invalid-where-clause
+                     :where where
+                     :where-type (type where)}))))
 
 
 ;; === Read-Write Lock Utilities ===

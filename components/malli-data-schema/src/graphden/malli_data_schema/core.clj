@@ -32,8 +32,12 @@
 
 
 (def ^:private known-field-types
-  "All valid field types."
-  (into #{:ref :enum :union} (keys malli-type-mapping)))
+  "All valid field types.
+   Includes storage types from malli-type-mapping plus semantic types:
+   - :ref, :enum, :union - structural types
+   - :any - polymorphic type (accepts any value)
+   - :fn - function reference type (stored as UUID)"
+  (into #{:ref :enum :union :any :fn} (keys malli-type-mapping)))
 
 
 (def ^:private known-constraint-types
@@ -338,6 +342,10 @@
                       (into [:or] (map #(make-variant-schema % enums)
                                        (:variants field-spec)))
 
+                      ;; Semantic types for graph execution model
+                      :any :any  ; Accepts any value (polymorphic argument)
+                      :fn :uuid  ; Function reference (stored as UUID)
+
                       ;; default: lookup in malli-type-mapping
                       (get malli-type-mapping field-type field-type))]
     (if nullable?
@@ -350,7 +358,12 @@
   [fields enums]
   (let [field-schemas (into [[:id :uuid]]
                             (for [[field-name field-spec] fields]
-                              [field-name (make-field-schema field-spec enums)]))]
+                              (let [nullable? (get field-spec :nullable? false)
+                                    base-entry [field-name (make-field-schema field-spec enums)]]
+                                (if nullable?
+                                  ;; Nullable fields are optional - key can be omitted
+                                  [field-name {:optional true} (make-field-schema field-spec enums)]
+                                  base-entry))))]
     (into [:map {:closed true}] field-schemas)))
 
 

@@ -336,22 +336,40 @@
 
 (defn- build-thunks
   "Builds thunks for all arg-schemas.
-   Returns a map of {arg-name -> thunk}."
+   Returns a map of {arg-name -> thunk}.
+
+   Priority:
+   1. If provided-args has a value for this schema-id, use it directly
+   2. Else if arg-values has a value, use build-thunk (which may also check provided-args)
+   3. Else if required, throw error
+   4. Else skip (optional arg with no value)"
   [fn-data provided-args]
   (let [{:keys [arg-schemas arg-values]} fn-data]
     (reduce-kv
       (fn [acc arg-schema-id arg-schema]
-        (let [arg-value (get arg-values arg-schema-id)
-              arg-name (:name arg-schema)]
-          (if arg-value
+        (let [arg-name (:name arg-schema)
+              provided-value (get provided-args arg-schema-id)
+              arg-value (get arg-values arg-schema-id)]
+          (cond
+            ;; 1. Direct provided value - create LiteralThunk
+            (some? provided-value)
+            (do
+              (validate-provided-arg-type! provided-value arg-schema)
+              (assoc acc (keyword arg-name) (->LiteralThunk provided-value)))
+
+            ;; 2. Stored arg-value exists - use build-thunk
+            arg-value
             (assoc acc (keyword arg-name) (build-thunk arg-value arg-schema provided-args))
-            ;; No value for this arg - check if required
-            (if (:required arg-schema)
-              (throw (ex-info (str "Required argument '" arg-name "' not provided")
-                              {:type :execution-error/missing-required-arg
-                               :arg-schema-id arg-schema-id
-                               :arg-name arg-name}))
-              acc))))
+
+            ;; 3. Required arg with no value - error
+            (:required arg-schema)
+            (throw (ex-info (str "Required argument '" arg-name "' not provided")
+                            {:type :execution-error/missing-required-arg
+                             :arg-schema-id arg-schema-id
+                             :arg-name arg-name}))
+
+            ;; 4. Optional arg with no value - skip
+            :else acc)))
       {}
       arg-schemas)))
 
@@ -421,3 +439,49 @@
         execution-graph (sp/resolve-execution-graph storage fn-id)
         context-with-graph (assoc context :execution-graph execution-graph)]
     (execute-internal context-with-graph fn-id args)))
+
+
+(defn- resolve-named-args
+  "Converts a map of {arg-name-keyword -> value} to {arg-schema-id -> value}.
+   Used by execute-with-named-args for HOF functions that pass args by name."
+  [execution-graph fn-id named-args]
+  (let [{:keys [arg-schemas]} (get-fn-data-from-graph execution-graph fn-id)
+        name->schema-id (reduce-kv
+                          (fn [acc schema-id schema]
+                            (assoc acc (keyword (:name schema)) schema-id))
+                          {}
+                          arg-schemas)]
+    (reduce-kv
+      (fn [acc arg-name value]
+        (if-let [schema-id (get name->schema-id arg-name)]
+          (assoc acc schema-id value)
+          (throw (ex-info (str "Unknown argument name: " arg-name)
+                          {:type :execution-error/unknown-arg-name
+                           :arg-name arg-name
+                           :fn-id fn-id
+                           :available-args (keys name->schema-id)}))))
+      {}
+      named-args)))
+
+
+(defn execute-with-named-args
+  "Executes a function with arguments passed by name instead of by schema-id.
+   Useful for HOF functions that need to call child functions with dynamic args.
+
+   Example:
+   (execute-with-named-args ctx fn-id {:item 42 :acc 0})
+
+   This resolves :item and :acc to their respective arg-schema-ids and calls execute."
+  [context fn-id named-args]
+  (when (and (some? named-args) (not (map? named-args)))
+    (throw (ex-info "named-args must be nil or a map"
+                    {:type :execution-error/invalid-args
+                     :args named-args
+                     :args-type (type named-args)})))
+  (if (or (nil? named-args) (empty? named-args))
+    (execute context fn-id nil)
+    (let [storage (:storage context)
+          execution-graph (sp/resolve-execution-graph storage fn-id)
+          id-based-args (resolve-named-args execution-graph fn-id named-args)
+          context-with-graph (assoc context :execution-graph execution-graph)]
+      (execute-internal context-with-graph fn-id id-based-args))))

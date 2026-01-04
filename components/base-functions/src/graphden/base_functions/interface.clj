@@ -1,66 +1,26 @@
 (ns graphden.base-functions.interface
-  "Base functions for the graphden executor.
+  "Base function definitions for graphden executor.
 
-   Provides fundamental operations:
+   Provides definitions for fundamental operations:
    - Arithmetic: add, sub, mul, div, mod, neg, abs
    - Comparison: eq, neq, lt, lte, gt, gte
    - Logic: and, or, not
    - Conditionals: if, cond
-   - Strings: str, subs, str-len, str-upper, str-lower, str-trim
-   - Collections: first, rest, cons, conj, get, assoc, dissoc, count, empty?
-   - HOF: map, filter, reduce, comp
+   - Strings: str, subs, str-len, str-upper, str-lower, str-trim, str-split, str-join
+   - Collections: first, rest, cons, conj, get, assoc, dissoc, count, empty?, etc.
+   - HOF: map, filter, reduce, some, every?, find-first, group-by, sort-by, apply
 
-   All functions operate on thunks and use lazy evaluation."
+   Registration and storage sync should be done by consuming components
+   using fn-registry."
   (:require
     [graphden.base-functions.core :as core]))
 
 
-;; === Registration ===
+(defn get-all-defs
+  "Returns all base function definitions with metadata.
+   Each entry is {fn-name {:args {...} :return-type :type :impl fn}}.
 
-(defn register-arithmetic!
-  "Registers arithmetic base functions: add, sub, mul, div, mod, neg, abs."
+   Use fn-registry/register-base-fns! to register these functions.
+   Use fn-registry/sync-defs-to-storage! to sync to storage."
   []
-  (core/register-arithmetic!))
-
-
-(defn register-comparison!
-  "Registers comparison functions: eq, neq, lt, lte, gt, gte."
-  []
-  (core/register-comparison!))
-
-
-(defn register-logic!
-  "Registers logic functions: and, or, not."
-  []
-  (core/register-logic!))
-
-
-(defn register-conditionals!
-  "Registers conditional functions: if, cond."
-  []
-  (core/register-conditionals!))
-
-
-(defn register-strings!
-  "Registers string functions: str, subs, str-len, str-upper, str-lower, str-trim."
-  []
-  (core/register-strings!))
-
-
-(defn register-collections!
-  "Registers collection functions: first, rest, cons, conj, get, assoc, dissoc, count, empty?."
-  []
-  (core/register-collections!))
-
-
-(defn register-hof!
-  "Registers higher-order functions: map, filter, reduce, comp."
-  []
-  (core/register-hof!))
-
-
-(defn register-all!
-  "Registers all base functions.
-   Convenience function for setting up the complete function library."
-  []
-  (core/register-all!))
+  (core/get-all-defs))

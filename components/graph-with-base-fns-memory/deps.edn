@@ -1,0 +1,7 @@
+{:paths ["src" "resources"]
+ :deps {graphden/graph-storage-memory {:local/root "../graph-storage-memory"}
+        graphden/base-functions {:local/root "../base-functions"}
+        graphden/fn-registry {:local/root "../fn-registry"}
+        graphden/storage-protocol {:local/root "../storage-protocol"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

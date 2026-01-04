@@ -114,3 +114,24 @@
    - :execution-error/base-fn-not-found if base function is not registered"
   [context fn-id args]
   (core/execute context fn-id args))
+
+
+(defn execute-with-named-args
+  "Executes a function with arguments passed by name instead of by schema-id.
+   Useful for HOF functions that need to call child functions with dynamic args.
+
+   Arguments:
+   - context: Execution context (created with create-context)
+   - fn-id: UUID of the function to execute
+   - named-args: Map of {arg-name-keyword -> value}
+
+   Example:
+   (execute-with-named-args ctx fn-id {:item 42 :acc 0})
+
+   This resolves :item and :acc to their respective arg-schema-ids and calls execute.
+
+   Throws:
+   - :execution-error/unknown-arg-name if an arg name doesn't exist for the function
+   - All errors from execute"
+  [context fn-id named-args]
+  (core/execute-with-named-args context fn-id named-args))

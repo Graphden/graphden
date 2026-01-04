@@ -109,8 +109,10 @@
                                             (merge {:entity (keyword (:name parent-row))
                                                     :field n}
                                                    (when extra
-                                                     {:type (:type extra)
-                                                      :nullable? (:nullable? extra)})))
+                                                     (cond-> {:type (:type extra)
+                                                              :nullable? (:nullable? extra)}
+                                                       (:enum-name extra)
+                                                       (assoc :enum-name (:enum-name extra))))))
                                   (if strict?
                                     (throw (ex-info "Orphaned field entry in metadata"
                                                     {:type :metadata-corruption
@@ -188,8 +190,11 @@
   "Saves metadata for a single field."
   [tx entity-uuid field-name field-spec]
   (upsert-metadata! tx (:uuid field-spec) :field field-name entity-uuid
-                    {:type (:type field-spec)
-                     :nullable? (get field-spec :nullable? false)}))
+                    (cond-> {:type (:type field-spec)
+                             :nullable? (get field-spec :nullable? false)}
+                      ;; Include enum-name for enum fields to enable proper casting
+                      (= (:type field-spec) :enum)
+                      (assoc :enum-name (:enum-name field-spec)))))
 
 
 (defn- save-entity-metadata!

@@ -353,4 +353,317 @@
                   #"cycle"
                   (sp/validate-no-dependency-cycle! storage (:id fn-rec) (:id fn-rec)))))
           (finally
-            (close-storage-fn storage)))))))
+            (close-storage-fn storage))))))
+
+
+  ;; === Deep inheritance chain tests (5+ levels) ===
+
+  (testing "deep inheritance chain - 5 level parent chain"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "deep-schema" :returned-type "int"})
+              ;; Create chain: fn-1 <- fn-2 <- fn-3 <- fn-4 <- fn-5
+              fn-1 (sp/create-entity storage :fn
+                                     {:name "fn-level-1"
+                                      :fn-schema-id (:id schema)})
+              fn-2 (sp/create-entity storage :fn
+                                     {:name "fn-level-2"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-1)})
+              fn-3 (sp/create-entity storage :fn
+                                     {:name "fn-level-3"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-2)})
+              fn-4 (sp/create-entity storage :fn
+                                     {:name "fn-level-4"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-3)})
+              fn-5 (sp/create-entity storage :fn
+                                     {:name "fn-level-5"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-4)})]
+          ;; Deep chain cycle: fn-1 trying to have fn-5 as parent creates cycle
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"cycle"
+                (sp/validate-no-inheritance-cycle! storage (:id fn-1) (:id fn-5))))
+          ;; fn-2 trying to have fn-5 as parent also creates cycle
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"cycle"
+                (sp/validate-no-inheritance-cycle! storage (:id fn-2) (:id fn-5))))
+          ;; fn-3 trying to have fn-5 as parent creates cycle
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"cycle"
+                (sp/validate-no-inheritance-cycle! storage (:id fn-3) (:id fn-5))))
+          ;; But fn-5 can have a new sibling at any level
+          (is (nil? (sp/validate-no-inheritance-cycle! storage (random-uuid) (:id fn-4)))))
+        (finally
+          (close-storage-fn storage)))))
+
+
+  (testing "deep inheritance chain - arg override detection at depth 5"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "deep-schema-args" :returned-type "int"})
+              arg-x (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id schema)
+                                       :name "x"
+                                       :type "int"
+                                       :required true})
+              ;; Create deep chain
+              fn-1 (sp/create-entity storage :fn
+                                     {:name "fn-depth-1"
+                                      :fn-schema-id (:id schema)})
+              ;; Define arg-x at root level
+              _ (sp/create-entity storage :arg-value
+                                  {:owner-fn-id (:id fn-1)
+                                   :arg-schema-id (:id arg-x)
+                                   :value "root-value"})
+              fn-2 (sp/create-entity storage :fn
+                                     {:name "fn-depth-2"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-1)})
+              fn-3 (sp/create-entity storage :fn
+                                     {:name "fn-depth-3"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-2)})
+              fn-4 (sp/create-entity storage :fn
+                                     {:name "fn-depth-4"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-3)})
+              fn-5 (sp/create-entity storage :fn
+                                     {:name "fn-depth-5"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-4)})]
+          ;; Trying to define arg-x at level 5 should fail (already defined at level 1)
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"already defined"
+                (sp/validate-no-arg-override! storage (:id fn-5) (:id arg-x))))
+          ;; Also at level 3
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"already defined"
+                (sp/validate-no-arg-override! storage (:id fn-3) (:id arg-x)))))
+        (finally
+          (close-storage-fn storage)))))
+
+
+  ;; === Diamond pattern tests ===
+
+  (testing "diamond pattern - two branches from common ancestor"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "diamond-schema" :returned-type "int"})
+              arg-a (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id schema)
+                                       :name "a"
+                                       :type "int"
+                                       :required true})
+              arg-b (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id schema)
+                                       :name "b"
+                                       :type "int"
+                                       :required true})
+              ;; Diamond: root -> (left, right)
+              ;;          left -> bottom
+              ;;          right -> (not connected to bottom)
+              root (sp/create-entity storage :fn
+                                     {:name "diamond-root"
+                                      :fn-schema-id (:id schema)})
+              _ (sp/create-entity storage :arg-value
+                                  {:owner-fn-id (:id root)
+                                   :arg-schema-id (:id arg-a)
+                                   :value "root-a"})
+              left (sp/create-entity storage :fn
+                                     {:name "diamond-left"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id root)})
+              _ (sp/create-entity storage :arg-value
+                                  {:owner-fn-id (:id left)
+                                   :arg-schema-id (:id arg-b)
+                                   :value "left-b"})
+              right (sp/create-entity storage :fn
+                                      {:name "diamond-right"
+                                       :fn-schema-id (:id schema)
+                                       :parent-fn-id (:id root)})]
+          ;; Left branch already defines arg-a (from root) and arg-b
+          ;; A child of left cannot redefine arg-a or arg-b
+          (let [bottom (sp/create-entity storage :fn
+                                         {:name "diamond-bottom"
+                                          :fn-schema-id (:id schema)
+                                          :parent-fn-id (:id left)})]
+            ;; Cannot redefine arg-a (defined in root, ancestor of left)
+            (is (thrown-with-msg?
+                  clojure.lang.ExceptionInfo
+                  #"already defined"
+                  (sp/validate-no-arg-override! storage (:id bottom) (:id arg-a))))
+            ;; Cannot redefine arg-b (defined in left, direct parent)
+            (is (thrown-with-msg?
+                  clojure.lang.ExceptionInfo
+                  #"already defined"
+                  (sp/validate-no-arg-override! storage (:id bottom) (:id arg-b)))))
+          ;; Right branch only has arg-a from root, can define arg-b
+          (is (nil? (sp/validate-no-arg-override! storage (:id right) (:id arg-b)))))
+        (finally
+          (close-storage-fn storage)))))
+
+
+  ;; === Schema mismatch with valid parent chain ===
+
+  (testing "arg-schema from different schema - complex case"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema-a (sp/create-entity storage :fn-schema
+                                         {:name "schema-a" :returned-type "int"})
+              schema-b (sp/create-entity storage :fn-schema
+                                         {:name "schema-b" :returned-type "text"})
+              ;; arg belongs to schema-a
+              arg-from-a (sp/create-entity storage :arg-schema
+                                           {:fn-schema-id (:id schema-a)
+                                            :name "x"
+                                            :type "int"
+                                            :required true})
+              ;; fn uses schema-b
+              fn-with-b (sp/create-entity storage :fn
+                                          {:name "fn-using-schema-b"
+                                           :fn-schema-id (:id schema-b)})]
+          ;; Cannot use arg from schema-a in fn with schema-b
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"does not belong"
+                (sp/validate-arg-schema-belongs-to-fn! storage (:id fn-with-b) (:id arg-from-a)))))
+        (finally
+          (close-storage-fn storage)))))
+
+
+  ;; === Multiple siblings with shared parent ===
+
+  (testing "multiple siblings share parent args correctly"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "sibling-schema" :returned-type "int"})
+              arg-shared (sp/create-entity storage :arg-schema
+                                           {:fn-schema-id (:id schema)
+                                            :name "shared"
+                                            :type "int"
+                                            :required true})
+              arg-unique (sp/create-entity storage :arg-schema
+                                           {:fn-schema-id (:id schema)
+                                            :name "unique"
+                                            :type "int"
+                                            :required true})
+              parent (sp/create-entity storage :fn
+                                       {:name "parent-fn"
+                                        :fn-schema-id (:id schema)})
+              _ (sp/create-entity storage :arg-value
+                                  {:owner-fn-id (:id parent)
+                                   :arg-schema-id (:id arg-shared)
+                                   :value "shared-value"})
+              sibling-1 (sp/create-entity storage :fn
+                                          {:name "sibling-1"
+                                           :fn-schema-id (:id schema)
+                                           :parent-fn-id (:id parent)})
+              sibling-2 (sp/create-entity storage :fn
+                                          {:name "sibling-2"
+                                           :fn-schema-id (:id schema)
+                                           :parent-fn-id (:id parent)})
+              sibling-3 (sp/create-entity storage :fn
+                                          {:name "sibling-3"
+                                           :fn-schema-id (:id schema)
+                                           :parent-fn-id (:id parent)})]
+          ;; None of the siblings can redefine shared arg
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"already defined"
+                (sp/validate-no-arg-override! storage (:id sibling-1) (:id arg-shared))))
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"already defined"
+                (sp/validate-no-arg-override! storage (:id sibling-2) (:id arg-shared))))
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"already defined"
+                (sp/validate-no-arg-override! storage (:id sibling-3) (:id arg-shared))))
+          ;; But all can define the unique arg independently
+          (is (nil? (sp/validate-no-arg-override! storage (:id sibling-1) (:id arg-unique))))
+          ;; After sibling-1 defines it, sibling-2 can still define it (not in parent chain)
+          (sp/create-entity storage :arg-value
+                            {:owner-fn-id (:id sibling-1)
+                             :arg-schema-id (:id arg-unique)
+                             :value "sibling-1-unique"})
+          (is (nil? (sp/validate-no-arg-override! storage (:id sibling-2) (:id arg-unique)))))
+        (finally
+          (close-storage-fn storage)))))
+
+
+  ;; === Edge cases for cycle detection ===
+
+  (testing "cycle detection - indirect cycle through middle of chain"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "indirect-cycle-schema" :returned-type "int"})
+              ;; Chain: a -> b -> c -> d
+              fn-a (sp/create-entity storage :fn
+                                     {:name "indirect-a"
+                                      :fn-schema-id (:id schema)})
+              fn-b (sp/create-entity storage :fn
+                                     {:name "indirect-b"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-a)})
+              fn-c (sp/create-entity storage :fn
+                                     {:name "indirect-c"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-b)})
+              fn-d (sp/create-entity storage :fn
+                                     {:name "indirect-d"
+                                      :fn-schema-id (:id schema)
+                                      :parent-fn-id (:id fn-c)})]
+          ;; Setting b's parent to d would create: a -> b -> c -> d -> b (cycle)
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"cycle"
+                (sp/validate-no-inheritance-cycle! storage (:id fn-b) (:id fn-d))))
+          ;; Setting a's parent to c would create: a -> b -> c -> a (cycle)
+          (is (thrown-with-msg?
+                clojure.lang.ExceptionInfo
+                #"cycle"
+                (sp/validate-no-inheritance-cycle! storage (:id fn-a) (:id fn-c)))))
+        (finally
+          (close-storage-fn storage)))))
+
+
+  ;; === Non-existent entity handling ===
+
+  (testing "validation with non-existent entities"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "exists-schema" :returned-type "int"})
+              existing-fn (sp/create-entity storage :fn
+                                            {:name "existing-fn"
+                                             :fn-schema-id (:id schema)})
+              non-existent-id (random-uuid)]
+          ;; These should not throw (graceful handling of non-existent entities)
+          ;; The validation implementations should handle missing entities
+          ;; by either returning nil or treating them as having no constraints
+          (is (nil? (sp/validate-no-inheritance-cycle! storage (:id existing-fn) non-existent-id)))
+          ;; Note: validate-no-dependency-cycle! with non-existent entities is tested
+          ;; in storage-specific tests because it requires JSONB/union type for value field
+          )
+        (finally
+          (close-storage-fn storage))))))

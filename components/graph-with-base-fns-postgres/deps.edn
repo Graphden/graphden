@@ -1,0 +1,9 @@
+{:paths ["src" "resources"]
+ :deps {graphden/graph-storage-postgres {:local/root "../graph-storage-postgres"}
+        graphden/base-functions {:local/root "../base-functions"}
+        graphden/fn-registry {:local/root "../fn-registry"}
+        graphden/storage-protocol {:local/root "../storage-protocol"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {graphden/executor {:local/root "../executor"}
+                               org.testcontainers/postgresql {:mvn/version "1.21.4"}
+                               org.testcontainers/testcontainers {:mvn/version "1.21.4"}}}}}

@@ -47,7 +47,9 @@
    :numeric     #uuid "f7a6728b-5ac6-4e1a-8bdb-ddc240cc059d"
    :timestamptz #uuid "e4476a32-3e93-4333-b0e5-964b9b19bea1"
    :jsonb       #uuid "b1b15bb9-a458-4337-9241-2a33e1ef25ea"
-   :bytes       #uuid "2dcadfbd-800f-4b7b-bbcc-82b2afcf9f86"})
+   :bytes       #uuid "2dcadfbd-800f-4b7b-bbcc-82b2afcf9f86"
+   :any         #uuid "a3d7e8f1-9b2c-4d5e-8f6a-1c2d3e4f5a6b"
+   :fn          #uuid "b4e8f9a2-0c3d-5e6f-9a7b-2d3e4f5a6b7c"})
 
 
 ;; Entity UUIDs
@@ -74,6 +76,10 @@
 
 (def ^:private fn-schema-returned-type-field-uuid
   #uuid "5ea6c13d-553c-4d85-8511-38ae88f7f9e5")
+
+
+(def ^:private fn-schema-base-fn-name-field-uuid
+  #uuid "8f3d2e1c-4a5b-6c7d-8e9f-0a1b2c3d4e5f")
 
 
 ;; Field UUIDs for :arg-schema entity
@@ -121,18 +127,22 @@
 
 (defn- value-kind-enum-values
   "Generates enum values for :value-kind.
-   Includes :null (void) plus all supported field types."
+   Includes :null (void), :any, :fn plus all supported field types."
   []
-  (into [{:uuid (get value-kind-values :null) :value :null}]
+  (into [{:uuid (get value-kind-values :null) :value :null}
+         {:uuid (get value-kind-values :any) :value :any}
+         {:uuid (get value-kind-values :fn) :value :fn}]
         (map (fn [t] {:uuid (get value-kind-values t) :value t})
              ft/supported-types)))
 
 
 (defn- value-variants
   "Generates union variants for arg-value.
-   First variant is fn reference, rest are literal types from field-types."
+   First variant is fn reference, then :any/:fn types, rest are literal types."
   []
-  (into [{:type :ref :ref-entity :fn}]
+  (into [{:type :ref :ref-entity :fn}
+         {:type :any}
+         {:type :fn}]
         (map (fn [t] {:type t}) ft/supported-types)))
 
 
@@ -145,10 +155,14 @@
       (ds/add-enum :value-kind value-kind-enum-uuid (value-kind-enum-values))
 
       ;; fn_schema: defines function signatures
+      ;; base-fn-name links to Clojure impl (nil for user-defined composite fns)
       (ds/add-entity :fn-schema fn-schema-entity-uuid
                      {:name {:uuid fn-schema-name-field-uuid :type :text}
                       :returned-type {:uuid fn-schema-returned-type-field-uuid
-                                      :type :enum :enum-name :value-kind}})
+                                      :type :enum :enum-name :value-kind}
+                      :base-fn-name {:uuid fn-schema-base-fn-name-field-uuid
+                                     :type :text
+                                     :nullable? true}})
       (ds/add-constraint :fn-schema {:type :unique :fields [:name]})
 
       ;; arg_schema: defines function arguments

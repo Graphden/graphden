@@ -520,6 +520,135 @@
       (is (nil? (storage/validate-required-fields! :user fields {}))))))
 
 
+;; === validate-no-duplicate-ids! tests ===
+
+(deftest validate-no-duplicate-ids!-test
+  (testing "unique IDs pass validation"
+    (let [data-seq [{:id (random-uuid) :name "Alice"}
+                    {:id (random-uuid) :name "Bob"}]]
+      (is (nil? (storage/validate-no-duplicate-ids! :user data-seq)))))
+
+  (testing "data without explicit IDs passes (IDs auto-generated)"
+    (let [data-seq [{:name "Alice"}
+                    {:name "Bob"}]]
+      (is (nil? (storage/validate-no-duplicate-ids! :user data-seq)))))
+
+  (testing "empty data-seq passes"
+    (is (nil? (storage/validate-no-duplicate-ids! :user []))))
+
+  (testing "single record passes"
+    (let [id (random-uuid)]
+      (is (nil? (storage/validate-no-duplicate-ids! :user [{:id id :name "Alice"}])))))
+
+  (testing "duplicate IDs throw"
+    (let [dup-id (random-uuid)
+          data-seq [{:id dup-id :name "Alice"}
+                    {:id (random-uuid) :name "Bob"}
+                    {:id dup-id :name "Charlie"}]]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Duplicate IDs found in batch"
+            (storage/validate-no-duplicate-ids! :user data-seq)))))
+
+  (testing "exception contains correct data"
+    (let [dup-id (random-uuid)
+          data-seq [{:id dup-id} {:id dup-id}]]
+      (try
+        (storage/validate-no-duplicate-ids! :user data-seq)
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :validation-error/duplicate-ids (:type (ex-data e))))
+          (is (= :user (:entity (ex-data e))))
+          (is (= [dup-id] (:duplicate-ids (ex-data e)))))))))
+
+
+;; === validate-data-is-map! tests ===
+
+(deftest validate-data-is-map!-test
+  (testing "map data passes validation"
+    (is (nil? (storage/validate-data-is-map! :user {:name "Alice"}))))
+
+  (testing "empty map passes validation"
+    (is (nil? (storage/validate-data-is-map! :user {}))))
+
+  (testing "nil data throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"data must be a map"
+          (storage/validate-data-is-map! :user nil))))
+
+  (testing "vector throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"data must be a map"
+          (storage/validate-data-is-map! :user [{:name "Alice"}]))))
+
+  (testing "string throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"data must be a map"
+          (storage/validate-data-is-map! :user "not a map"))))
+
+  (testing "integer throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"data must be a map"
+          (storage/validate-data-is-map! :user 123))))
+
+  (testing "exception contains correct data"
+    (try
+      (storage/validate-data-is-map! :user [1 2 3])
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-data (:type (ex-data e))))
+        (is (= :user (:entity-name (ex-data e))))
+        (is (= [1 2 3] (:data (ex-data e))))
+        (is (some? (:data-type (ex-data e))))))))
+
+
+;; === validate-where-clause! tests ===
+
+(deftest validate-where-clause!-test
+  (testing "nil where clause passes"
+    (is (nil? (storage/validate-where-clause! nil))))
+
+  (testing "empty map passes"
+    (is (nil? (storage/validate-where-clause! {}))))
+
+  (testing "map with values passes"
+    (is (nil? (storage/validate-where-clause! {:name "Alice" :active true}))))
+
+  (testing "vector throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"where clause must be nil or a map"
+          (storage/validate-where-clause! [:name "Alice"]))))
+
+  (testing "string throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"where clause must be nil or a map"
+          (storage/validate-where-clause! "name = 'Alice'"))))
+
+  (testing "number throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"where clause must be nil or a map"
+          (storage/validate-where-clause! 123))))
+
+  (testing "keyword throws"
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"where clause must be nil or a map"
+          (storage/validate-where-clause! :name))))
+
+  (testing "exception contains correct data"
+    (try
+      (storage/validate-where-clause! [:bad :data])
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-where-clause (:type (ex-data e))))
+        (is (= [:bad :data] (:where (ex-data e))))
+        (is (some? (:where-type (ex-data e))))))))
+
+
 ;; === check-graph-iteration-limit! tests ===
 
 (deftest check-graph-iteration-limit!-test

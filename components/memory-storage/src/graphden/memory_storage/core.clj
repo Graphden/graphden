@@ -574,12 +574,7 @@
   (create-entity
     [_this entity-name data]
     ;; Validate data type before acquiring lock
-    (when-not (map? data)
-      (throw (ex-info "data must be a map"
-                      {:type :invalid-data
-                       :entity-name entity-name
-                       :data data
-                       :data-type (type data)})))
+    (sp/validate-data-is-map! entity-name data)
     (sp/with-write-lock rw-lock
                         (fn []
                           (let [id (or (:id data) (random-uuid))
@@ -608,11 +603,7 @@
   (query-entities
     [_this entity-name where]
     ;; Validate where clause type before acquiring lock
-    (when (and (some? where) (not (map? where)))
-      (throw (ex-info "where clause must be nil or a map"
-                      {:type :invalid-where-clause
-                       :where where
-                       :where-type (type where)})))
+    (sp/validate-where-clause! where)
     (sp/with-read-lock rw-lock
                        (fn []
                          (let [s @state]

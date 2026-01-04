@@ -89,31 +89,7 @@
                        :operation operation-name})))))
 
 
-;; === Read-Write Lock helpers ===
-;; Uses ReentrantReadWriteLock for better concurrency:
-;; - Multiple readers can run concurrently
-;; - Writers have exclusive access
-
-(defn with-read-lock
-  "Executes f with read lock held. Multiple readers can run concurrently."
-  [^ReentrantReadWriteLock rw-lock f]
-  (let [lock (ReentrantReadWriteLock/.readLock rw-lock)]
-    (java.util.concurrent.locks.Lock/.lock lock)
-    (try
-      (f)
-      (finally
-        (java.util.concurrent.locks.Lock/.unlock lock)))))
-
-
-(defn with-write-lock
-  "Executes f with write lock held. Exclusive access."
-  [^ReentrantReadWriteLock rw-lock f]
-  (let [lock (ReentrantReadWriteLock/.writeLock rw-lock)]
-    (java.util.concurrent.locks.Lock/.lock lock)
-    (try
-      (f)
-      (finally
-        (java.util.concurrent.locks.Lock/.unlock lock)))))
+;; Lock utilities imported from storage-protocol
 
 
 ;; === Default configurations ===
@@ -434,7 +410,10 @@
    NOTE: Uses two separate transactions because Datomic doesn't allow
    retracting and asserting the same :db/unique value in a single transaction.
    If the second transaction fails after the first succeeds, we attempt to
-   restore the old metadata to maintain consistency."
+   restore the old metadata to maintain consistency.
+
+   SAFETY: If rollback also fails, we throw an exception with both errors
+   to ensure the caller knows the database may be in an inconsistent state."
   [conn schema]
   ;; Capture old metadata for potential rollback
   (let [db (d/db conn)
@@ -477,14 +456,21 @@
           (catch Exception e
             ;; Attempt to restore old metadata
             (log/error e "Failed to save new metadata, attempting rollback")
-            (when (seq old-metadata)
+            (if (seq old-metadata)
               (try
                 ;; Remove :db/id from old data (Datomic will assign new ids)
                 (let [restore-data (mapv #(dissoc % :db/id) old-metadata)]
                   (d/transact conn {:tx-data restore-data})
                   (log/info "Successfully restored old metadata after failure"))
                 (catch Exception restore-ex
-                  (log/error restore-ex "Failed to restore old metadata - metadata may be lost"))))
+                  (log/error restore-ex "Failed to restore old metadata")
+                  ;; Throw combined exception so caller knows DB may be inconsistent
+                  (throw (ex-info "Metadata save failed and rollback also failed - database may be inconsistent"
+                                  {:type :metadata-error/rollback-failed
+                                   :original-error (ex-message e)
+                                   :rollback-error (ex-message restore-ex)}
+                                  e))))
+              (log/warn "No old metadata to restore - this was likely first initialization"))
             (throw e)))))))
 
 
@@ -1245,33 +1231,33 @@
 
   (initialize
     [_this schema]
-    (with-write-lock rw-lock
-      (fn []
-        (let [client (d/client client-config)]
-          (reset! client-atom client)
-          ;; Store schema for multi-field constraint validation
-          (reset! schema-atom schema)
-          ;; Create database if it doesn't exist (idempotent)
-          ;; Note: Datomic doesn't provide a specific exception type for "already exists",
-          ;; so we catch Exception and check the message. Other errors are re-thrown.
-          (try
-            (d/create-database client {:db-name db-name})
-            (catch Exception e
-              (when-not (str/includes? (ex-message e) "already exists")
-                (throw e))))
-          (let [conn (d/connect client {:db-name db-name})]
-            (reset! conn-atom conn)
-            (do-initialize conn schema))))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (let [client (d/client client-config)]
+                            (reset! client-atom client)
+                            ;; Store schema for multi-field constraint validation
+                            (reset! schema-atom schema)
+                            ;; Create database if it doesn't exist (idempotent)
+                            ;; Note: Datomic doesn't provide a specific exception type for "already exists",
+                            ;; so we catch Exception and check the message. Other errors are re-thrown.
+                            (try
+                              (d/create-database client {:db-name db-name})
+                              (catch Exception e
+                                (when-not (str/includes? (ex-message e) "already exists")
+                                  (throw e))))
+                            (let [conn (d/connect client {:db-name db-name})]
+                              (reset! conn-atom conn)
+                              (do-initialize conn schema))))))
 
 
   (close
     [_this]
-    (with-write-lock rw-lock
-      (fn []
-        (when-let [client @client-atom]
-          (d/delete-database client {:db-name db-name}))
-        (reset! conn-atom nil)
-        (reset! client-atom nil)))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (when-let [client @client-atom]
+                            (d/delete-database client {:db-name db-name}))
+                          (reset! conn-atom nil)
+                          (reset! client-atom nil)))
     nil)
 
 
@@ -1279,196 +1265,196 @@
 
   (current-entities
     [_this]
-    (with-read-lock rw-lock
-      (fn []
-        (if-let [conn @conn-atom]
-          (let [db (d/db conn)
-                attrs (current-attrs db)]
-            (->> (keys attrs)
-                 (map namespace)
-                 (filter some?)
-                 (set)
-                 (map keyword)
-                 (set)))
-          #{}))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (if-let [conn @conn-atom]
+                           (let [db (d/db conn)
+                                 attrs (current-attrs db)]
+                             (->> (keys attrs)
+                                  (map namespace)
+                                  (filter some?)
+                                  (set)
+                                  (map keyword)
+                                  (set)))
+                           #{}))))
 
 
   (current-fields
     [_this entity-name]
-    (with-read-lock rw-lock
-      (fn []
-        (when-let [conn @conn-atom]
-          (let [db (d/db conn)
-                metadata (read-metadata db)
-                ;; Check if entity exists in metadata
-                entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
-            (when entity-exists?
-              (let [entity-fields (->> (:fields metadata)
-                                       (vals)
-                                       (filter #(= (:entity %) entity-name)))]
-                (into {}
-                      (map (fn [{:keys [field nullable?] field-type :type}]
-                             [field {:type field-type :nullable? nullable?}])
-                           entity-fields)))))))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (when-let [conn @conn-atom]
+                           (let [db (d/db conn)
+                                 metadata (read-metadata db)
+                                 ;; Check if entity exists in metadata
+                                 entity-exists? (some #(= % entity-name) (vals (:entities metadata)))]
+                             (when entity-exists?
+                               (let [entity-fields (->> (:fields metadata)
+                                                        (vals)
+                                                        (filter #(= (:entity %) entity-name)))]
+                                 (into {}
+                                       (map (fn [{:keys [field nullable?] field-type :type}]
+                                              [field {:type field-type :nullable? nullable?}])
+                                            entity-fields)))))))))
 
 
   (current-enums
     [_this]
-    (with-read-lock rw-lock
-      (fn []
-        (if-let [conn @conn-atom]
-          (let [db (d/db conn)
-                enum-values (current-enum-values-db db)]
-            (->> enum-values
-                 (map #(-> (namespace %) (str/replace ".value" "") keyword))
-                 (set)))
-          #{}))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (if-let [conn @conn-atom]
+                           (let [db (d/db conn)
+                                 enum-values (current-enum-values-db db)]
+                             (->> enum-values
+                                  (map #(-> (namespace %) (str/replace ".value" "") keyword))
+                                  (set)))
+                           #{}))))
 
 
   (current-enum-values
     [_this enum-name]
-    (with-read-lock rw-lock
-      (fn []
-        (when-let [conn @conn-atom]
-          (let [db (d/db conn)
-                enum-values (current-enum-values-db db)
-                enum-ns (str (name enum-name) ".value")
-                values (->> enum-values
-                            (filter #(= (namespace %) enum-ns))
-                            (map #(keyword (name %)))
-                            (set))]
-            (when (seq values) values))))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (when-let [conn @conn-atom]
+                           (let [db (d/db conn)
+                                 enum-values (current-enum-values-db db)
+                                 enum-ns (str (name enum-name) ".value")
+                                 values (->> enum-values
+                                             (filter #(= (namespace %) enum-ns))
+                                             (map #(keyword (name %)))
+                                             (set))]
+                             (when (seq values) values))))))
 
 
   (schema-metadata
     [_this]
-    (with-read-lock rw-lock
-      (fn []
-        (when-let [conn @conn-atom]
-          (read-metadata (d/db conn))))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (when-let [conn @conn-atom]
+                           (read-metadata (d/db conn))))))
 
 
   sp/StorageCRUD
 
   (create-entity
     [_this entity-name data]
-    (with-write-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :create-entity)
-              db (d/db conn)]
-          ;; Validate multi-field unique constraints before creating
-          (when-let [schema @schema-atom]
-            (validate-multi-field-constraints! db schema entity-name data nil))
-          (create-entity-impl conn entity-name data)))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (let [conn (ensure-connection! conn-atom :create-entity)
+                                db (d/db conn)]
+                            ;; Validate multi-field unique constraints before creating
+                            (when-let [schema @schema-atom]
+                              (validate-multi-field-constraints! db schema entity-name data nil))
+                            (create-entity-impl conn entity-name data)))))
 
 
   (read-entity
     [_this entity-name id]
-    (with-read-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :read-entity)]
-          (read-entity-impl conn entity-name id)))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (let [conn (ensure-connection! conn-atom :read-entity)]
+                           (read-entity-impl conn entity-name id)))))
 
 
   (update-entity
     [_this entity-name id data]
-    (with-write-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :update-entity)
-              db (d/db conn)]
-          ;; Validate multi-field unique constraints before updating
-          (when-let [schema @schema-atom]
-            (validate-multi-field-constraints! db schema entity-name data id))
-          (update-entity-impl conn entity-name id data)))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (let [conn (ensure-connection! conn-atom :update-entity)
+                                db (d/db conn)]
+                            ;; Validate multi-field unique constraints before updating
+                            (when-let [schema @schema-atom]
+                              (validate-multi-field-constraints! db schema entity-name data id))
+                            (update-entity-impl conn entity-name id data)))))
 
 
   (delete-entity
     [_this entity-name id]
-    (with-write-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :delete-entity)]
-          (delete-entity-impl conn entity-name id)))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (let [conn (ensure-connection! conn-atom :delete-entity)]
+                            (delete-entity-impl conn entity-name id)))))
 
 
   (query-entities
     [_this entity-name where]
-    (with-read-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :query-entities)]
-          (query-entities-impl conn entity-name where)))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (let [conn (ensure-connection! conn-atom :query-entities)]
+                           (query-entities-impl conn entity-name where)))))
 
 
   sp/StorageBatchCRUD
 
   (create-entities
     [_this entity-name data-seq]
-    (with-write-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :create-entities)
-              db (d/db conn)]
-          ;; Validate multi-field unique constraints for each entity
-          (when-let [schema @schema-atom]
-            (doseq [data data-seq]
-              (validate-multi-field-constraints! db schema entity-name data nil)))
-          (create-entities-impl conn entity-name data-seq)))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (let [conn (ensure-connection! conn-atom :create-entities)
+                                db (d/db conn)]
+                            ;; Validate multi-field unique constraints for each entity
+                            (when-let [schema @schema-atom]
+                              (doseq [data data-seq]
+                                (validate-multi-field-constraints! db schema entity-name data nil)))
+                            (create-entities-impl conn entity-name data-seq)))))
 
 
   (read-entities
     [_this entity-name ids]
-    (with-read-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :read-entities)]
-          (read-entities-impl conn entity-name ids)))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (let [conn (ensure-connection! conn-atom :read-entities)]
+                           (read-entities-impl conn entity-name ids)))))
 
 
   (delete-entities
     [_this entity-name ids]
-    (with-write-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :delete-entities)]
-          (delete-entities-impl conn entity-name ids)))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (let [conn (ensure-connection! conn-atom :delete-entities)]
+                            (delete-entities-impl conn entity-name ids)))))
 
 
   sp/GraphConstraints
 
   (validate-parent-same-schema!
     [_this fn-id parent-fn-id]
-    (with-read-lock rw-lock
-      #(constraints/validate-parent-same-schema! conn-atom fn-id parent-fn-id)))
+    (sp/with-read-lock rw-lock
+                       #(constraints/validate-parent-same-schema! conn-atom fn-id parent-fn-id)))
 
 
   (validate-no-arg-override!
     [_this fn-id arg-schema-id]
-    (with-read-lock rw-lock
-      #(constraints/validate-no-arg-override! conn-atom fn-id arg-schema-id)))
+    (sp/with-read-lock rw-lock
+                       #(constraints/validate-no-arg-override! conn-atom fn-id arg-schema-id)))
 
 
   (validate-arg-schema-belongs-to-fn!
     [_this fn-id arg-schema-id]
-    (with-read-lock rw-lock
-      #(constraints/validate-arg-schema-belongs-to-fn! conn-atom fn-id arg-schema-id)))
+    (sp/with-read-lock rw-lock
+                       #(constraints/validate-arg-schema-belongs-to-fn! conn-atom fn-id arg-schema-id)))
 
 
   (validate-no-inheritance-cycle!
     [_this fn-id parent-fn-id]
-    (with-read-lock rw-lock
-      #(constraints/validate-no-inheritance-cycle! conn-atom fn-id parent-fn-id)))
+    (sp/with-read-lock rw-lock
+                       #(constraints/validate-no-inheritance-cycle! conn-atom fn-id parent-fn-id)))
 
 
   (validate-no-dependency-cycle!
     [_this owner-fn-id value-fn-id]
-    (with-read-lock rw-lock
-      #(constraints/validate-no-dependency-cycle! conn-atom owner-fn-id value-fn-id)))
+    (sp/with-read-lock rw-lock
+                       #(constraints/validate-no-dependency-cycle! conn-atom owner-fn-id value-fn-id)))
 
 
   sp/ExecutionGraph
 
   (resolve-execution-graph
     [_this fn-id]
-    (with-read-lock rw-lock
-      (fn []
-        (let [conn (ensure-connection! conn-atom :resolve-execution-graph)]
-          (resolve-execution-graph-impl conn fn-id))))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (let [conn (ensure-connection! conn-atom :resolve-execution-graph)]
+                           (resolve-execution-graph-impl conn fn-id))))))
 
 
 (defn create-storage

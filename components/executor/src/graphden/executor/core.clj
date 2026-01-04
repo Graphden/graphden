@@ -220,8 +220,16 @@
   "Builds a thunk for an arg-value.
    - If value is a UUID and arg-schema type is not :fn -> FnRefThunk
    - If value is a UUID and arg-schema type is :fn -> LazyFnThunk
-   - Otherwise -> LiteralThunk"
+   - Otherwise -> LiteralThunk
+
+   Validates that arg-value and arg-schema are not nil."
   [arg-value arg-schema provided-args]
+  (when-not arg-value
+    (throw (ex-info "arg-value cannot be nil"
+                    {:type :execution-error/nil-arg-value})))
+  (when-not arg-schema
+    (throw (ex-info "arg-schema cannot be nil"
+                    {:type :execution-error/nil-arg-schema})))
   (let [value (:value arg-value)
         arg-type (:type arg-schema)
         arg-schema-id (:id arg-schema)]

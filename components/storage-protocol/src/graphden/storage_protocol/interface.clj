@@ -17,7 +17,11 @@
    4. Call (close storage) when done"
   (:require
     [clojure.set :as set]
-    [graphden.data-schema-protocol.interface :as ds]))
+    [graphden.data-schema-protocol.interface :as ds])
+  (:import
+    (java.util.concurrent.locks
+      Lock
+      ReentrantReadWriteLock)))
 
 
 (defprotocol Storage
@@ -456,22 +460,42 @@
 
 ;; === Execution graph limits ===
 
-(def max-graph-iterations
+(def ^:dynamic *max-graph-iterations*
   "Maximum number of iterations when resolving execution graph.
    Prevents infinite loops in case of data inconsistencies.
-   Default: 10000 (enough for complex graphs, catches runaway loops)."
+   Default: 10000 (enough for complex graphs, catches runaway loops).
+
+   Can be overridden using with-max-graph-iterations."
   10000)
+
+
+;; Keep old name as alias for backward compatibility
+(def max-graph-iterations
+  "Deprecated: Use *max-graph-iterations* instead.
+   Kept for backward compatibility."
+  *max-graph-iterations*)
+
+
+(defn with-max-graph-iterations
+  "Executes f with a custom max-graph-iterations limit.
+   Useful for testing or for graphs that are known to be large.
+
+   Example:
+   (with-max-graph-iterations 50000 #(resolve-execution-graph storage fn-id))"
+  [limit f]
+  (binding [*max-graph-iterations* limit]
+    (f)))
 
 
 (defn check-graph-iteration-limit!
   "Checks if iteration count exceeds the limit.
    Throws ExceptionInfo if limit is exceeded."
   [iteration-count fn-id]
-  (when (> iteration-count max-graph-iterations)
+  (when (> iteration-count *max-graph-iterations*)
     (throw (ex-info "Execution graph resolution exceeded maximum iterations"
                     {:type :execution-error/graph-too-large
                      :fn-id fn-id
-                     :max-iterations max-graph-iterations
+                     :max-iterations *max-graph-iterations*
                      :iteration-count iteration-count}))))
 
 
@@ -947,3 +971,40 @@
                       {:type :validation-error/duplicate-ids
                        :entity entity-name
                        :duplicate-ids (vec duplicates)})))))
+
+
+;; === Read-Write Lock Utilities ===
+;;
+;; Shared lock utilities for storage implementations that need thread-safe
+;; concurrent access. Uses ReentrantReadWriteLock for better concurrency:
+;; - Multiple readers can run concurrently
+;; - Writers have exclusive access
+
+
+(defn with-read-lock
+  "Executes f with read lock held. Multiple readers can run concurrently.
+
+   Example:
+   (with-read-lock rw-lock #(read-data state))"
+  [^ReentrantReadWriteLock rw-lock f]
+  (let [lock ^Lock (ReentrantReadWriteLock/.readLock rw-lock)]
+    (Lock/.lock lock)
+    (try
+      (f)
+      (finally
+        (Lock/.unlock lock)))))
+
+
+(defn with-write-lock
+  "Executes f with write lock held. Exclusive access - no readers or writers
+   can proceed while this lock is held.
+
+   Example:
+   (with-write-lock rw-lock #(swap! state update-data))"
+  [^ReentrantReadWriteLock rw-lock f]
+  (let [lock ^Lock (ReentrantReadWriteLock/.writeLock rw-lock)]
+    (Lock/.lock lock)
+    (try
+      (f)
+      (finally
+        (Lock/.unlock lock)))))

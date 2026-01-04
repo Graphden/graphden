@@ -109,19 +109,23 @@
 (defn- get-cached-metadata
   "Gets metadata from cache or reads from database.
    Thread-safe: uses locking to prevent concurrent database reads.
-   Cache is invalidated on schema changes (initialize)."
+   Cache is invalidated on schema changes (initialize).
+
+   NOTE: Returns nil without caching if table not found (not initialized yet).
+   This prevents caching stale nil values during initialization race conditions."
   [pool metadata-cache lock]
   (or @metadata-cache
       (locking lock
         ;; Double-check after acquiring lock
         (or @metadata-cache
-            (let [result (try
-                           (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))
-                           (catch SQLException e
-                             (when-not (util/table-not-found? e) (throw e))
-                             nil))]
-              (reset! metadata-cache result)
-              result)))))
+            (try
+              (let [result (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))]
+                (reset! metadata-cache result)
+                result)
+              (catch SQLException e
+                ;; Don't cache nil - table might be created soon
+                (when-not (util/table-not-found? e)
+                  (throw e))))))))
 
 
 (defn- extract-entity-fields

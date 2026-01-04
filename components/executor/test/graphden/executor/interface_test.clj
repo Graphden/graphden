@@ -1247,3 +1247,121 @@
           test-uuid #uuid "12345678-1234-1234-1234-123456789abc"]
       (is (= test-uuid (exec/execute ctx (:id fn-rec) {(:id id-arg) test-uuid})))
       (sp/close storage))))
+
+
+;; === Union Type Tests ===
+
+(deftest union-type-validation-test
+  (testing ":union type accepts any value without strict validation"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-union
+              (fn [{:keys [data]} ctx]
+                (exec/force-value data ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-union"
+                                       :returned-type :union})
+          data-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "data"
+                                      :type :union
+                                      :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-union"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id data-arg)
+                               :value {:default "value"}})
+          ctx (exec/create-context {:storage storage})]
+      ;; Union type should accept any value
+      (is (= "a string" (exec/execute ctx (:id fn-rec) {(:id data-arg) "a string"})))
+      (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
+      (is (= {:key "value"} (exec/execute ctx (:id fn-rec) {(:id data-arg) {:key "value"}})))
+      (is (= [1 2 3] (exec/execute ctx (:id fn-rec) {(:id data-arg) [1 2 3]})))
+      (sp/close storage))))
+
+
+;; Note: Nil guards in build-thunk are for defensive programming.
+;; They cannot be triggered through normal execution flow because:
+;; - nil arg-value: build-thunks checks for nil before calling build-thunk
+;; - nil arg-schema: build-thunks iterates over arg-schemas map, not arg-values
+;; The guards protect against future code changes that might bypass these checks.
+
+
+;; === Deep Nesting Tests ===
+
+(deftest deep-nesting-near-limit-test
+  (testing "executes successfully at exactly max-depth"
+    (let [storage (create-test-storage)
+          ;; Register identity function that forces its arg
+          _ (exec/register-base-fn!
+              :identity
+              (fn [{:keys [x]} ctx]
+                (exec/force-value x ctx)))
+          ;; Create identity fn-schema
+          id-schema (sp/create-entity storage :fn-schema
+                                      {:name "identity"
+                                       :returned-type :int})
+          id-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id id-schema)
+                                    :name "x"
+                                    :type :int
+                                    :required true})
+          ;; Create a chain of 3 functions
+          fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
+          fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
+          fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
+          ;; fn-a -> fn-b -> fn-c -> literal
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-a)
+                               :arg-schema-id (:id id-arg)
+                               :value (:id fn-b)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-b)
+                               :arg-schema-id (:id id-arg)
+                               :value (:id fn-c)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-c)
+                               :arg-schema-id (:id id-arg)
+                               :value 42})
+          ;; max-depth=3 means: fn-a(0) -> fn-b(1) -> fn-c(2) -> literal
+          ;; This should work as 2 < 3
+          ctx (exec/create-context {:storage storage :max-depth 3})]
+      (is (= 42 (exec/execute ctx (:id fn-a) {})))
+      (sp/close storage)))
+
+  (testing "fails when depth exceeds max-depth"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :identity
+              (fn [{:keys [x]} ctx]
+                (exec/force-value x ctx)))
+          id-schema (sp/create-entity storage :fn-schema
+                                      {:name "identity"
+                                       :returned-type :int})
+          id-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id id-schema)
+                                    :name "x"
+                                    :type :int
+                                    :required true})
+          fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
+          fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
+          fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-a)
+                               :arg-schema-id (:id id-arg)
+                               :value (:id fn-b)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-b)
+                               :arg-schema-id (:id id-arg)
+                               :value (:id fn-c)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-c)
+                               :arg-schema-id (:id id-arg)
+                               :value 42})
+          ;; max-depth=1: fn-a(0) ok, fn-b(1) ok, fn-c(2) fails because depth=2 > max-depth=1
+          ctx (exec/create-context {:storage storage :max-depth 1})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Maximum recursion depth exceeded"
+            (exec/execute ctx (:id fn-a) {})))
+      (sp/close storage))))

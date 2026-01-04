@@ -10,33 +10,6 @@
       ReentrantReadWriteLock)))
 
 
-;; === Read-Write Lock helpers ===
-;; Uses ReentrantReadWriteLock for better concurrency:
-;; - Multiple readers can run concurrently
-;; - Writers have exclusive access
-
-(defn with-read-lock
-  "Executes f with read lock held. Multiple readers can run concurrently."
-  [^ReentrantReadWriteLock rw-lock f]
-  (let [lock (java.util.concurrent.locks.ReentrantReadWriteLock/.readLock rw-lock)]
-    (java.util.concurrent.locks.Lock/.lock lock)
-    (try
-      (f)
-      (finally
-        (java.util.concurrent.locks.Lock/.unlock lock)))))
-
-
-(defn with-write-lock
-  "Executes f with write lock held. Exclusive access."
-  [^ReentrantReadWriteLock rw-lock f]
-  (let [lock (java.util.concurrent.locks.ReentrantReadWriteLock/.writeLock rw-lock)]
-    (java.util.concurrent.locks.Lock/.lock lock)
-    (try
-      (f)
-      (finally
-        (java.util.concurrent.locks.Lock/.unlock lock)))))
-
-
 ;; === Internal helpers ===
 
 
@@ -511,176 +484,176 @@
 
   (initialize
     [_this schema]
-    (with-write-lock rw-lock
-      (fn []
-        (log/info "Initializing memory storage")
-        (let [[new-state changes] (do-initialize state schema)]
-          (reset! state new-state)
-          (log/info "Memory storage initialized" {:entities (count (:entities new-state))
-                                                  :enums (count (:enums new-state))})
-          changes))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (log/info "Initializing memory storage")
+                          (let [[new-state changes] (do-initialize state schema)]
+                            (reset! state new-state)
+                            (log/info "Memory storage initialized" {:entities (count (:entities new-state))
+                                                                    :enums (count (:enums new-state))})
+                            changes))))
 
 
   (close
     [_this]
-    (with-write-lock rw-lock
-      (fn []
-        (log/info "Closing memory storage")
-        (reset! state {:entities {}
-                       :enums {}
-                       :metadata nil
-                       :data {}})
-        nil)))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (log/info "Closing memory storage")
+                          (reset! state {:entities {}
+                                         :enums {}
+                                         :metadata nil
+                                         :data {}})
+                          nil)))
 
 
   sp/StorageIntrospection
 
   (current-entities
     [_this]
-    (with-read-lock rw-lock
-      #(set (keys (:entities @state)))))
+    (sp/with-read-lock rw-lock
+                       #(set (keys (:entities @state)))))
 
 
   (current-fields
     [_this entity-name]
-    (with-read-lock rw-lock
-      #(get-in @state [:entities entity-name :fields])))
+    (sp/with-read-lock rw-lock
+                       #(get-in @state [:entities entity-name :fields])))
 
 
   (current-enums
     [_this]
-    (with-read-lock rw-lock
-      #(set (keys (:enums @state)))))
+    (sp/with-read-lock rw-lock
+                       #(set (keys (:enums @state)))))
 
 
   (current-enum-values
     [_this enum-name]
-    (with-read-lock rw-lock
-      #(get-in @state [:enums enum-name :values])))
+    (sp/with-read-lock rw-lock
+                       #(get-in @state [:enums enum-name :values])))
 
 
   (schema-metadata
     [_this]
-    (with-read-lock rw-lock
-      #(:metadata @state)))
+    (sp/with-read-lock rw-lock
+                       #(:metadata @state)))
 
 
   sp/StorageCRUD
 
   (create-entity
     [_this entity-name data]
-    (with-write-lock rw-lock
-      (fn []
-        (let [id (or (:id data) (random-uuid))
-              record (assoc data :id id)]
-          (create-record-atomic! state entity-name record)))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (let [id (or (:id data) (random-uuid))
+                                record (assoc data :id id)]
+                            (create-record-atomic! state entity-name record)))))
 
 
   (read-entity
     [_this entity-name id]
-    (with-read-lock rw-lock
-      #(get-record @state entity-name id)))
+    (sp/with-read-lock rw-lock
+                       #(get-record @state entity-name id)))
 
 
   (update-entity
     [_this entity-name id data]
-    (with-write-lock rw-lock
-      #(update-record-atomic! state entity-name id data)))
+    (sp/with-write-lock rw-lock
+                        #(update-record-atomic! state entity-name id data)))
 
 
   (delete-entity
     [_this entity-name id]
-    (with-write-lock rw-lock
-      #(remove-record! state entity-name id)))
+    (sp/with-write-lock rw-lock
+                        #(remove-record! state entity-name id)))
 
 
   (query-entities
     [_this entity-name where]
-    (with-read-lock rw-lock
-      (fn []
-        (let [s @state]
-          (validate-entity-exists! s entity-name)
-          (let [all-records (vals (get-entity-data s entity-name))]
-            (if (empty? where)
-              all-records
-              (filter (fn [record]
-                        (every? (fn [[k v]] (= (get record k) v)) where))
-                      all-records)))))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (let [s @state]
+                           (validate-entity-exists! s entity-name)
+                           (let [all-records (vals (get-entity-data s entity-name))]
+                             (if (empty? where)
+                               all-records
+                               (filter (fn [record]
+                                         (every? (fn [[k v]] (= (get record k) v)) where))
+                                       all-records)))))))
 
 
   sp/StorageBatchCRUD
 
   (create-entities
     [_this entity-name data-seq]
-    (with-write-lock rw-lock
-      (fn []
-        (if (empty? data-seq)
-          []
-          (do
-            (sp/validate-no-duplicate-ids! entity-name data-seq)
-            (let [records (map (fn [data]
-                                 (let [id (or (:id data) (random-uuid))]
-                                   (assoc data :id id)))
-                               data-seq)]
-              (create-records-atomic! state entity-name records)))))))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          (if (empty? data-seq)
+                            []
+                            (do
+                              (sp/validate-no-duplicate-ids! entity-name data-seq)
+                              (let [records (map (fn [data]
+                                                   (let [id (or (:id data) (random-uuid))]
+                                                     (assoc data :id id)))
+                                                 data-seq)]
+                                (create-records-atomic! state entity-name records)))))))
 
 
   (read-entities
     [_this entity-name ids]
-    (with-read-lock rw-lock
-      #(read-records @state entity-name ids)))
+    (sp/with-read-lock rw-lock
+                       #(read-records @state entity-name ids)))
 
 
   (delete-entities
     [_this entity-name ids]
-    (with-write-lock rw-lock
-      #(remove-records! state entity-name ids)))
+    (sp/with-write-lock rw-lock
+                        #(remove-records! state entity-name ids)))
 
 
   sp/GraphConstraints
 
   (validate-parent-same-schema!
     [_this fn-id parent-fn-id]
-    (with-read-lock rw-lock
-      #(sp/validate-parent-same-schema-impl (->MemoryConstraintHelpers state) fn-id parent-fn-id)))
+    (sp/with-read-lock rw-lock
+                       #(sp/validate-parent-same-schema-impl (->MemoryConstraintHelpers state) fn-id parent-fn-id)))
 
 
   (validate-no-arg-override!
     [_this fn-id arg-schema-id]
-    (with-read-lock rw-lock
-      #(sp/validate-no-arg-override-impl (->MemoryConstraintHelpers state) fn-id arg-schema-id)))
+    (sp/with-read-lock rw-lock
+                       #(sp/validate-no-arg-override-impl (->MemoryConstraintHelpers state) fn-id arg-schema-id)))
 
 
   (validate-arg-schema-belongs-to-fn!
     [_this fn-id arg-schema-id]
-    (with-read-lock rw-lock
-      #(sp/validate-arg-schema-belongs-to-fn-impl (->MemoryConstraintHelpers state) fn-id arg-schema-id)))
+    (sp/with-read-lock rw-lock
+                       #(sp/validate-arg-schema-belongs-to-fn-impl (->MemoryConstraintHelpers state) fn-id arg-schema-id)))
 
 
   (validate-no-inheritance-cycle!
     [_this fn-id parent-fn-id]
-    (with-read-lock rw-lock
-      #(sp/validate-no-inheritance-cycle-impl (->MemoryConstraintHelpers state) fn-id parent-fn-id)))
+    (sp/with-read-lock rw-lock
+                       #(sp/validate-no-inheritance-cycle-impl (->MemoryConstraintHelpers state) fn-id parent-fn-id)))
 
 
   (validate-no-dependency-cycle!
     [_this owner-fn-id value-fn-id]
-    (with-read-lock rw-lock
-      #(sp/validate-no-dependency-cycle-impl (->MemoryConstraintHelpers state) owner-fn-id value-fn-id)))
+    (sp/with-read-lock rw-lock
+                       #(sp/validate-no-dependency-cycle-impl (->MemoryConstraintHelpers state) owner-fn-id value-fn-id)))
 
 
   sp/ExecutionGraph
 
   (resolve-execution-graph
     [_this fn-id]
-    (with-read-lock rw-lock
-      (fn []
-        (let [s @state]
-          (when-not (get-record s :fn fn-id)
-            (throw (ex-info "Function not found"
-                            {:type :not-found
-                             :fn-id fn-id})))
-          (resolve-execution-graph-impl s fn-id))))))
+    (sp/with-read-lock rw-lock
+                       (fn []
+                         (let [s @state]
+                           (when-not (get-record s :fn fn-id)
+                             (throw (ex-info "Function not found"
+                                             {:type :not-found
+                                              :fn-id fn-id})))
+                           (resolve-execution-graph-impl s fn-id))))))
 
 
 (defn create-storage

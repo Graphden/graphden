@@ -128,6 +128,58 @@ Default: 30 seconds. Prevents runaway computations.
 (force-value thunk context) ;; => forced value
 ```
 
+## Type Validation
+
+When providing arguments via the `args` map, the executor validates types:
+
+| Schema Type | Expected Clojure Type |
+|-------------|----------------------|
+| `:int` | `int?` |
+| `:bool` | `boolean?` |
+| `:text` | `string?` |
+| `:numeric` | `number?` |
+| `:fn` | `uuid?` (function reference) |
+| `:ref` | `uuid?` |
+| `:uuid` | `uuid?` |
+| `:jsonb` | `map?` or `vector?` |
+| `:bytes` | `bytes?` |
+| `:timestamptz` | `java.time.Instant` or `java.util.Date` |
+| `:enum` | `keyword?` |
+| `:union` | Any value (no strict validation) |
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                         execute                              │
+│  1. Resolve execution graph from storage                     │
+│  2. Check limits (depth, timeout)                            │
+│  3. Build thunks for all arguments                           │
+│  4. Call base function with thunks                           │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      Base Function                           │
+│  - Receives thunks as arguments                              │
+│  - Calls force-value when value is needed                    │
+│  - Returns result                                            │
+└─────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌─────────────────────────────────────────────────────────────┐
+│                      force-value                             │
+│  - LiteralThunk: return value                                │
+│  - FnRefThunk: recursive execute                             │
+│  - LazyFnThunk: return fn-id                                 │
+└─────────────────────────────────────────────────────────────┘
+```
+
 ## Dependencies
 
 - `storage-protocol` - Storage protocol for graph resolution
+
+## See Also
+
+- [ERROR_CODES.md](../../docs/ERROR_CODES.md) - All error types
+- [CONSTRAINTS.md](../../docs/CONSTRAINTS.md) - Graph constraints

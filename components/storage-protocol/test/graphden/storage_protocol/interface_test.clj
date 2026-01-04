@@ -522,6 +522,37 @@
           (is (= 10001 (:iteration-count (ex-data e)))))))))
 
 
+(deftest with-max-graph-iterations-test
+  (testing "executes function and returns result"
+    (is (= 42 (storage/with-max-graph-iterations 50000 #(+ 40 2)))))
+
+  (testing "overrides limit within binding"
+    (is (= 50000
+           (storage/with-max-graph-iterations 50000
+                                              #(deref #'storage/*max-graph-iterations*)))))
+
+  (testing "allows higher iterations when limit is increased"
+    (let [fn-id (random-uuid)]
+      ;; Default limit is 10000, this should throw normally
+      (is (thrown? clojure.lang.ExceptionInfo
+            (storage/check-graph-iteration-limit! 15000 fn-id)))
+      ;; But with increased limit it should not throw
+      (is (nil? (storage/with-max-graph-iterations 20000
+                                                   #(storage/check-graph-iteration-limit! 15000 fn-id))))))
+
+  (testing "restores original limit after execution"
+    (let [original storage/*max-graph-iterations*]
+      (storage/with-max-graph-iterations 50000 #(identity :done))
+      (is (= original storage/*max-graph-iterations*))))
+
+  (testing "restores original limit after exception"
+    (let [original storage/*max-graph-iterations*]
+      (try
+        (storage/with-max-graph-iterations 50000 #(throw (ex-info "test" {})))
+        (catch Exception _))
+      (is (= original storage/*max-graph-iterations*)))))
+
+
 ;; === try-parse-uuid tests ===
 
 (deftest try-parse-uuid-test

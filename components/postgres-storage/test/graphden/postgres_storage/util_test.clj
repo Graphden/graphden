@@ -1,6 +1,7 @@
 (ns graphden.postgres-storage.util-test
   "Tests for PostgreSQL storage utility functions."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.postgres-storage.util :as util])
   (:import
@@ -19,14 +20,16 @@
       (is (pos? result))))
 
   (testing "returns fallback 30 seconds when var cannot be resolved"
-    ;; Reset the atom for clean test
+    ;; Reset the atoms for clean test
     (reset! @#'util/timeout-fallback-logged? false)
+    (reset! @#'util/timeout-var-cache :graphden.postgres-storage.util/not-cached)
     (with-redefs [resolve (constantly nil)]
       (is (= 30 (util/get-query-timeout-seconds)))))
 
   (testing "logs warning only once when using fallback"
-    ;; Reset the atom for clean test
+    ;; Reset the atoms for clean test
     (reset! @#'util/timeout-fallback-logged? false)
+    (reset! @#'util/timeout-var-cache :graphden.postgres-storage.util/not-cached)
     (with-redefs [resolve (constantly nil)]
       ;; First call should set logged flag
       (util/get-query-timeout-seconds)
@@ -214,6 +217,25 @@
     (is (nil? (util/validate-sql-identifier! "foo" {})))
     (is (nil? (util/validate-sql-identifier! "foo_bar" {})))
     (is (nil? (util/validate-sql-identifier! "my_table_123" {}))))
+
+  (testing "accepts identifier at max length (63 chars)"
+    (let [max-length-id (str/join (repeat 63 "a"))]
+      (is (nil? (util/validate-sql-identifier! max-length-id {})))))
+
+  (testing "rejects identifier exceeding max length"
+    (let [too-long-id (str/join (repeat 64 "a"))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"SQL identifier too long"
+            (util/validate-sql-identifier! too-long-id {}))))
+    ;; Check exception data contains length info
+    (try
+      (util/validate-sql-identifier! (str/join (repeat 100 "a")) {:test true})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (is (= 100 (:length data)))
+          (is (= 63 (:max-length data)))
+          (is (= {:test true} (:context data)))))))
 
   (testing "rejects invalid identifiers"
     (is (thrown? clojure.lang.ExceptionInfo

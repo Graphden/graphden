@@ -1485,6 +1485,49 @@
       (sp/close storage))))
 
 
+;; === Execute Args Validation Tests ===
+
+(deftest execute-args-validation-test
+  (testing "throws when args is not nil or a map"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 1})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 2})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"args must be nil or a map"
+            (exec/execute ctx (:id fn-rec) "not a map")))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"args must be nil or a map"
+            (exec/execute ctx (:id fn-rec) [:a :vector])))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"args must be nil or a map"
+            (exec/execute ctx (:id fn-rec) 123)))
+      (sp/close storage)))
+
+  (testing "accepts nil args"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 1})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 2})
+          ctx (exec/create-context {:storage storage})]
+      ;; nil should work fine
+      (is (= 3 (exec/execute ctx (:id fn-rec) nil)))
+      (sp/close storage))))
+
+
 ;; === Unknown Type Validation Tests ===
 
 (deftest unknown-type-validation-test

@@ -183,6 +183,9 @@
                                     field-clauses
                                     [['?e id-attr '?id]]))
             ;; Execute query with error handling
+            ;; Note: Catching broad Exception because Datomic can throw various
+            ;; exception types (ExceptionInfo, RuntimeException, IllegalArgumentException)
+            ;; depending on query structure and data issues.
             results (try
                       (d/q base-query db)
                       (catch Exception e
@@ -868,8 +871,14 @@
 
 
 (defn- query-entities-impl
-  "Queries entities by conditions."
+  "Queries entities by conditions.
+   where must be nil or a map of field->value for equality matching."
   [conn entity-name where]
+  (when (and (some? where) (not (map? where)))
+    (throw (ex-info "where clause must be nil or a map"
+                    {:type :invalid-where-clause
+                     :where where
+                     :where-type (type where)})))
   (let [db (d/db conn)
         fields (get-entity-fields db entity-name)
         id-attr (entity-attr entity-name :id)
@@ -926,8 +935,18 @@
         ;; Read back created entities
         (let [new-db (d/db conn)
               fields (get-entity-fields new-db entity-name)
-              ids (map :id records)]
-          (keep (fn [id] (pull-entity new-db entity-name id fields)) ids))))))
+              ids (map :id records)
+              results (keep (fn [id] (pull-entity new-db entity-name id fields)) ids)
+              expected-count (count data-seq)
+              actual-count (count results)]
+          ;; Validate that all records were created
+          (when (not= expected-count actual-count)
+            (throw (ex-info "Batch insert returned unexpected number of records"
+                            {:type :batch-insert-mismatch
+                             :entity-name entity-name
+                             :expected-count expected-count
+                             :actual-count actual-count})))
+          results)))))
 
 
 (defn- read-entities-impl
@@ -1238,7 +1257,7 @@
 ;; === Storage record ===
 
 (defrecord DatomicStorage
-  [client-config db-name client-atom conn-atom schema-atom ^ReentrantReadWriteLock rw-lock]
+  [client-config db-name client-atom conn-atom schema-atom metadata-cache ^ReentrantReadWriteLock rw-lock]
 
   sp/Storage
 
@@ -1251,14 +1270,22 @@
                             ;; Store schema for multi-field constraint validation
                             (reset! schema-atom schema)
                             ;; Create database if it doesn't exist
-                            ;; Use list-databases to check existence first, avoiding fragile
-                            ;; string-based error detection
-                            (let [existing-dbs (set (d/list-databases client {}))]
-                              (when-not (contains? existing-dbs db-name)
-                                (d/create-database client {:db-name db-name})))
+                            ;; Uses optimistic approach: try to create and ignore "already exists" error.
+                            ;; This is race-condition safe: if another thread creates the DB between
+                            ;; our check and create, we simply catch the exception and continue.
+                            (try
+                              (d/create-database client {:db-name db-name})
+                              (catch clojure.lang.ExceptionInfo e
+                                ;; Datomic throws ExceptionInfo with :db/error when DB already exists
+                                (when-not (= (:db/error (ex-data e)) :db.error/db-already-exists)
+                                  (throw e))))
                             (let [conn (d/connect client {:db-name db-name})]
                               (reset! conn-atom conn)
-                              (do-initialize conn schema))))))
+                              ;; Perform initialization, then invalidate metadata cache on success
+                              ;; This prevents cache invalidation on failed migrations.
+                              (let [result (do-initialize conn schema)]
+                                (reset! metadata-cache nil)
+                                result))))))
 
 
   (close
@@ -1349,6 +1376,13 @@
 
   (create-entity
     [_this entity-name data]
+    ;; Validate data type before acquiring lock
+    (when-not (map? data)
+      (throw (ex-info "data must be a map"
+                      {:type :invalid-data
+                       :entity-name entity-name
+                       :data data
+                       :data-type (type data)})))
     (sp/with-write-lock rw-lock
                         (fn []
                           (let [conn (ensure-connection! conn-atom :create-entity)
@@ -1496,4 +1530,4 @@
   [{:keys [db-name client-config]
     :or {db-name "graphden"
          client-config default-local-config}}]
-  (->DatomicStorage client-config db-name (atom nil) (atom nil) (atom nil) (ReentrantReadWriteLock.)))
+  (->DatomicStorage client-config db-name (atom nil) (atom nil) (atom nil) (atom nil) (ReentrantReadWriteLock.)))

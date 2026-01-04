@@ -228,9 +228,12 @@
   (initialize
     [_this schema]
     (locking lock
-      ;; Invalidate cache on schema changes
-      (reset! metadata-cache nil)
-      (migration/do-initialize pool schema)))
+      ;; Perform migration first, only invalidate cache on success.
+      ;; If migration fails, cache remains unchanged (still reflects old schema).
+      ;; This prevents cache invalidation on failed migrations.
+      (let [result (migration/do-initialize pool schema)]
+        (reset! metadata-cache nil)
+        result)))
 
 
   (close

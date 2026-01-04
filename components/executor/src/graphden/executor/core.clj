@@ -70,7 +70,7 @@
    - timeout-ms must be at least 50ms (allows for fast test cases)
    - max-depth must be positive and <= 100000"
   [{:keys [storage max-depth timeout-ms]
-    :or {max-depth 1000
+    :or {max-depth sp/default-max-depth
          timeout-ms 30000}}]
   (when-not storage
     (throw (ex-info "Storage is required" {:type :execution-error/invalid-context})))
@@ -252,6 +252,8 @@
   (when-not arg-schema
     (throw (ex-info "arg-schema cannot be nil"
                     {:type :execution-error/nil-arg-schema})))
+  ;; Note: :value can be nil for optional args with null values.
+  ;; arg-values from storage are assumed to have :value key present.
   (let [value (:value arg-value)
         arg-type (:type arg-schema)
         arg-schema-id (:id arg-schema)]
@@ -378,8 +380,14 @@
 
 (defn execute
   "Public execution entry point.
-   Fetches the complete execution graph once, then executes using cached data."
+   Fetches the complete execution graph once, then executes using cached data.
+   args must be nil or a map of {arg-schema-id -> value}."
   [context fn-id args]
+  (when (and (some? args) (not (map? args)))
+    (throw (ex-info "args must be nil or a map"
+                    {:type :execution-error/invalid-args
+                     :args args
+                     :args-type (type args)})))
   (let [storage (:storage context)
         execution-graph (sp/resolve-execution-graph storage fn-id)
         context-with-graph (assoc context :execution-graph execution-graph)]

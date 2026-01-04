@@ -32,6 +32,8 @@
     (try
       (sp/initialize storage schema)
       storage
+      ;; Catch any exception to ensure storage cleanup on initialization failure.
+      ;; Re-throws the original exception after closing the storage.
       (catch Exception e
         (sp/close storage)
         (throw e)))))

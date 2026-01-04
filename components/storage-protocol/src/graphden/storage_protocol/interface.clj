@@ -14,7 +14,68 @@
    1. Create storage instance (implementation-specific)
    2. Call (initialize storage schema) to sync with DataSchema
    3. Use storage for CRUD operations (future protocol methods)
-   4. Call (close storage) when done"
+   4. Call (close storage) when done
+
+   ## Canonical Error Types
+
+   All storage implementations MUST use these error types for consistency.
+   Error types use namespaced keywords for categorization.
+
+   ### CRUD Errors
+   - :not-found                  - Entity/record not found by ID
+   - :entity-not-in-schema       - Entity name not defined in schema
+   - :invalid-data               - Data is not a map or has wrong shape
+   - :invalid-where-clause       - Where clause is not a map or nil
+   - :batch-insert-mismatch      - Batch insert returned wrong count
+
+   ### Constraint Violations (prefix :constraint-violation/)
+   - :constraint-violation/unique              - Unique constraint violated
+   - :constraint-violation/parent-schema-mismatch - Parent fn has different schema
+   - :constraint-violation/arg-already-defined - Arg already defined in parent chain
+   - :constraint-violation/arg-schema-mismatch - Arg schema doesn't belong to fn
+   - :constraint-violation/inheritance-cycle   - Cycle in parent-fn-id chain
+   - :constraint-violation/dependency-cycle    - Cycle in arg-value references
+
+   ### Validation Errors (prefix :validation-error/)
+   - :validation-error/required-field-missing - Required field not provided
+   - :validation-error/duplicate-ids          - Duplicate IDs in batch
+
+   ### Configuration Errors (prefix :config-error/)
+   - :config-error/invalid-timeout  - Invalid timeout value
+   - :config-error/missing-jdbc-url - JDBC URL not provided
+   - :config-error/invalid-pool-*   - Pool configuration issues
+
+   ### Migration Errors
+   - :destructive-change         - Attempt to remove entity/field/enum
+   - :metadata-inconsistency     - Metadata doesn't match DB state
+   - :metadata-corruption        - Metadata is corrupted
+
+   ### Storage State Errors
+   - :storage-not-initialized    - CRUD attempted before initialize
+
+   ## Logging Level Policy
+
+   All storage implementations SHOULD follow this logging policy:
+
+   - ERROR: Critical failures affecting system stability
+     - Failed to close resources (connection pool, etc.)
+     - Storage not initialized when operation attempted
+     - Metadata rollback failures
+
+   - WARN: Recoverable issues or fallback behavior
+     - Using fallback values (e.g., default timeout)
+     - Constraint violations (before throwing)
+     - Approaching limits (iteration count, etc.)
+
+   - INFO: Major lifecycle events
+     - Storage initialization/closing
+     - Migration completed
+     - Schema changes applied
+
+   - DEBUG: Internal details for troubleshooting
+     - Pool created/closed successfully
+     - Metadata operations
+     - Query details"
   (:require
     [clojure.set :as set]
     [clojure.tools.logging :as log]
@@ -483,6 +544,13 @@
 
 
 ;; === Execution graph limits ===
+
+(def default-max-depth
+  "Default maximum recursion depth for function execution.
+   Used by executor as default and by storage for parent chain limits.
+   Value: 1000 - reasonable default for most use cases."
+  1000)
+
 
 (def ^:dynamic *max-graph-iterations*
   "Maximum number of iterations when resolving execution graph.

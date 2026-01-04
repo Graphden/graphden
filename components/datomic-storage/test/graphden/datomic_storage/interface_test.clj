@@ -1812,3 +1812,43 @@
         (dat/with-query-timeout 99999 #(throw (ex-info "test" {})))
         (catch Exception _))
       (is (= original (deref #'core/*query-timeout-ms*))))))
+
+
+;; === Input validation tests ===
+
+(deftest create-entity-invalid-data-test
+  (testing "create-entity throws when data is not a map"
+    (let [storage (create-test-storage)
+          schema (make-schema)]
+      (try
+        (sp/initialize storage schema)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"data must be a map"
+              (sp/create-entity storage :user "not a map")))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"data must be a map"
+              (sp/create-entity storage :user [:a :vector])))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"data must be a map"
+              (sp/create-entity storage :user 123)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest query-entities-invalid-where-test
+  (testing "query-entities throws when where is not a map"
+    (let [storage (create-test-storage)
+          schema (make-schema)]
+      (try
+        (sp/initialize storage schema)
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"where clause must be nil or a map"
+              (sp/query-entities storage :user "not a map")))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"where clause must be nil or a map"
+              (sp/query-entities storage :user [:a :vector])))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"where clause must be nil or a map"
+              (sp/query-entities storage :user 123)))
+        (finally
+          (sp/close storage))))))

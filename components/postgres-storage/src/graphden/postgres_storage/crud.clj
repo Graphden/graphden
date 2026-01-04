@@ -25,23 +25,10 @@
 
 
 (defn- wrap-sql-error
-  "Wraps a SQLException with application-level context.
-   Translates PostgreSQL error codes to meaningful error types.
-   Logs the error with context for debugging.
-   Returns an ex-info with :type, :sql-state, and operation context."
+  "Wraps a SQLException with application-level context for CRUD operations.
+   Delegates to shared util/wrap-sql-error with 'Database error' prefix."
   [^SQLException e operation context]
-  (let [error-type (util/classify-sql-error e)
-        sql-state (SQLException/.getSQLState e)
-        message (SQLException/.getMessage e)
-        error-data (merge {:type error-type
-                           :operation operation
-                           :sql-state sql-state
-                           :message message}
-                          context)]
-    (log/warn e "Database error" error-data)
-    (ex-info (str "Database error during " (name operation) ": " message)
-             error-data
-             e)))
+  (util/wrap-sql-error e "Database error" operation context))
 
 
 (defmacro with-sql-error-handling
@@ -177,8 +164,15 @@
   "Creates a new entity record in the database.
    Returns the created record with generated id if not provided.
    Validates required fields if fields metadata is provided.
-   Throws with :unique-violation type if unique constraint violated."
+   Throws with :unique-violation type if unique constraint violated.
+   Throws with :invalid-data type if data is not a map."
   [ds entity-name data fields]
+  (when-not (map? data)
+    (throw (ex-info "data must be a map"
+                    {:type :invalid-data
+                     :entity-name entity-name
+                     :data data
+                     :data-type (type data)})))
   (when fields
     (sp/validate-required-fields! entity-name fields data))
   (let [table-name (keyword (util/kw->snake-case entity-name))
@@ -264,8 +258,14 @@
    where is a map of field->value for equality matching.
    Supports nil values (generates IS NULL instead of = NULL).
    Returns a sequence of matching entities.
-   Throws :table-not-found if entity table doesn't exist."
+   Throws :table-not-found if entity table doesn't exist.
+   Throws :invalid-where-clause if where is not nil or a map."
   [ds entity-name where]
+  (when (and (some? where) (not (map? where)))
+    (throw (ex-info "where clause must be nil or a map"
+                    {:type :invalid-where-clause
+                     :where where
+                     :where-type (type where)})))
   (let [table-name (keyword (util/kw->snake-case entity-name))
         where-clause (when (seq where)
                        (into [:and]
@@ -323,7 +323,16 @@
         (with-sql-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
           (let [result-rows (jdbc/execute! ds query
                                            {:builder-fn rs/as-unqualified-lower-maps
-                                            :timeout (get-query-timeout)})]
+                                            :timeout (get-query-timeout)})
+                expected-count (count data-seq)
+                actual-count (count result-rows)]
+            ;; Validate that all records were inserted
+            (when (not= expected-count actual-count)
+              (throw (ex-info "Batch insert returned unexpected number of records"
+                              {:type :batch-insert-mismatch
+                               :entity-name entity-name
+                               :expected-count expected-count
+                               :actual-count actual-count})))
             (map row->entity result-rows)))))))
 
 
@@ -367,8 +376,8 @@
 
 (def ^:private max-parent-chain-depth
   "Maximum depth for parent chain traversal to prevent runaway recursion.
-   Should match or exceed executor's default max-depth (1000)."
-  1000)
+   Uses shared default-max-depth from storage-protocol for consistency."
+  sp/default-max-depth)
 
 
 (defn- collect-parent-chains-batch

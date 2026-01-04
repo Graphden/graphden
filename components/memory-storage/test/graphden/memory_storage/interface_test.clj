@@ -2240,3 +2240,217 @@
               (sp/query-entities storage :non-existent-entity {})))
         (finally
           (sp/close storage))))))
+
+
+;; === NULL constraint handling tests ===
+
+(deftest null-in-unique-constraint-test
+  (testing "multiple records with NULL in unique constraint field are allowed"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000f01"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000f02"
+                                             :type :text
+                                             :nullable? true}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (try
+        ;; First record with NULL email
+        (let [r1 (sp/create-entity storage :user {:email nil})]
+          (is (some? (:id r1))))
+        ;; Second record with NULL email - should be allowed (PostgreSQL NULL semantics)
+        (let [r2 (sp/create-entity storage :user {:email nil})]
+          (is (some? (:id r2))))
+        ;; Third record with actual value
+        (let [r3 (sp/create-entity storage :user {:email "test@example.com"})]
+          (is (some? (:id r3))))
+        ;; Fourth record with same value - should fail
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Unique constraint violation"
+              (sp/create-entity storage :user {:email "test@example.com"})))
+        ;; Verify we have 3 records total
+        (is (= 3 (count (sp/query-entities storage :user {}))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "multi-field constraint with partial NULL is allowed"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000f11"
+                                    {:first-name {:uuid #uuid "00000000-0000-0000-0000-000000000f12"
+                                                  :type :text
+                                                  :nullable? true}
+                                     :last-name {:uuid #uuid "00000000-0000-0000-0000-000000000f13"
+                                                 :type :text
+                                                 :nullable? true}})
+                     (ds/add-constraint :user {:type :unique :fields [:first-name :last-name]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (try
+        ;; Record with one NULL - should be allowed
+        (sp/create-entity storage :user {:first-name "John" :last-name nil})
+        ;; Same first-name, different NULL - should be allowed
+        (sp/create-entity storage :user {:first-name "John" :last-name nil})
+        ;; Both NULL - should be allowed
+        (sp/create-entity storage :user {:first-name nil :last-name nil})
+        ;; Both NULL again - should be allowed
+        (sp/create-entity storage :user {:first-name nil :last-name nil})
+        ;; Non-NULL pair
+        (sp/create-entity storage :user {:first-name "John" :last-name "Doe"})
+        ;; Same non-NULL pair - should fail
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Unique constraint violation"
+              (sp/create-entity storage :user {:first-name "John" :last-name "Doe"})))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Delete entities edge cases ===
+
+(deftest delete-entities-edge-cases-test
+  (testing "delete-entities with empty collection returns 0"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (is (zero? (sp/delete-entities storage :user [])))
+        (finally
+          (sp/close storage)))))
+
+  (testing "delete-entities with non-existent IDs returns 0"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (is (zero? (sp/delete-entities storage :user [(random-uuid) (random-uuid)])))
+        (finally
+          (sp/close storage)))))
+
+  (testing "delete-entities with mix of existent and non-existent IDs"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (let [r1 (sp/create-entity storage :user {:name "Alice"})
+              r2 (sp/create-entity storage :user {:name "Bob"})
+              non-existent-id (random-uuid)]
+          ;; Delete one real and one fake
+          (is (= 1 (sp/delete-entities storage :user [(:id r1) non-existent-id])))
+          ;; Verify r1 is gone, r2 remains
+          (is (nil? (sp/read-entity storage :user (:id r1))))
+          (is (some? (sp/read-entity storage :user (:id r2)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Batch create edge cases ===
+
+(deftest batch-create-edge-cases-test
+  (testing "batch create fails at first record reports index 0"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000f21"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000f22"
+                                             :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (try
+        ;; Create initial record
+        (sp/create-entity storage :user {:email "exists@example.com"})
+        ;; Batch create where first record violates constraint
+        (try
+          (sp/create-entities storage :user
+                              [{:email "exists@example.com"}
+                               {:email "new@example.com"}])
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (zero? (:batch-index (ex-data e))))
+            (is (= 2 (:batch-size (ex-data e))))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "batch create fails at last record reports correct index"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000f31"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000f32"
+                                             :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (try
+        ;; Create initial record
+        (sp/create-entity storage :user {:email "exists@example.com"})
+        ;; Batch create where last record violates constraint
+        (try
+          (sp/create-entities storage :user
+                              [{:email "new1@example.com"}
+                               {:email "new2@example.com"}
+                               {:email "exists@example.com"}])
+          (is false "Should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= 2 (:batch-index (ex-data e))))
+            (is (= 3 (:batch-size (ex-data e))))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Input validation tests ===
+
+(deftest create-entity-invalid-data-test
+  (testing "create-entity throws when data is not a map"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"data must be a map"
+              (sp/create-entity storage :user "not a map")))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"data must be a map"
+              (sp/create-entity storage :user [:a :vector])))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"data must be a map"
+              (sp/create-entity storage :user 123)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest query-entities-invalid-where-test
+  (testing "query-entities throws when where is not a map"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"where clause must be nil or a map"
+              (sp/query-entities storage :user "not a map")))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"where clause must be nil or a map"
+              (sp/query-entities storage :user [:a :vector])))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"where clause must be nil or a map"
+              (sp/query-entities storage :user 123)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest delete-entities-invalid-ids-test
+  (testing "delete-entities throws when ids is not sequential"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"ids must be a sequential collection or nil"
+              (sp/delete-entities storage :user "not sequential")))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"ids must be a sequential collection or nil"
+              (sp/delete-entities storage :user #{:a :set})))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"ids must be a sequential collection or nil"
+              (sp/delete-entities storage :user 123)))
+        (finally
+          (sp/close storage))))))

@@ -281,15 +281,24 @@
 
 
 (defn- remove-records!
-  "Removes multiple records from state atom. Returns count of removed."
+  "Removes multiple records from state atom. Returns count of removed.
+   ids must be a sequential collection (list, vector, etc.) or nil."
   [state-atom entity-name ids]
-  (let [ids-set (set ids)
-        existing-ids (set (keys (get-entity-data @state-atom entity-name)))
-        to-remove (set/intersection ids-set existing-ids)
-        removed-count (count to-remove)]
-    (swap! state-atom update-in [:data entity-name]
-           (fn [data] (apply dissoc data to-remove)))
-    removed-count))
+  (when (and (some? ids) (not (sequential? ids)))
+    (throw (ex-info "ids must be a sequential collection or nil"
+                    {:type :invalid-args
+                     :entity-name entity-name
+                     :ids ids
+                     :ids-type (type ids)})))
+  (if (empty? ids)
+    0
+    (let [ids-set (set ids)
+          existing-ids (set (keys (get-entity-data @state-atom entity-name)))
+          to-remove (set/intersection ids-set existing-ids)
+          removed-count (count to-remove)]
+      (swap! state-atom update-in [:data entity-name]
+             (fn [data] (apply dissoc data to-remove)))
+      removed-count)))
 
 
 ;; === ConstraintHelpers implementation for Memory storage ===
@@ -564,6 +573,13 @@
 
   (create-entity
     [_this entity-name data]
+    ;; Validate data type before acquiring lock
+    (when-not (map? data)
+      (throw (ex-info "data must be a map"
+                      {:type :invalid-data
+                       :entity-name entity-name
+                       :data data
+                       :data-type (type data)})))
     (sp/with-write-lock rw-lock
                         (fn []
                           (let [id (or (:id data) (random-uuid))
@@ -591,6 +607,12 @@
 
   (query-entities
     [_this entity-name where]
+    ;; Validate where clause type before acquiring lock
+    (when (and (some? where) (not (map? where)))
+      (throw (ex-info "where clause must be nil or a map"
+                      {:type :invalid-where-clause
+                       :where where
+                       :where-type (type where)})))
     (sp/with-read-lock rw-lock
                        (fn []
                          (let [s @state]

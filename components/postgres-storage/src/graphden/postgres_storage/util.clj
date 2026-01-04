@@ -27,15 +27,47 @@
 (def ^:private timeout-fallback-logged? (atom false))
 
 
+;; Cache the resolved var to avoid repeated reflection.
+;; The var reference is resolved once on first access; the var's VALUE
+;; is still read on each call (since *query-timeout-ms* is dynamic).
+;; Uses atom with ::not-cached sentinel to allow reset in tests.
+(def ^:private timeout-var-cache (atom ::not-cached))
+
+
+(defn- resolve-timeout-var
+  "Resolves and caches the timeout var. Returns the var or nil if not found."
+  []
+  (let [cached @timeout-var-cache]
+    (if (= cached ::not-cached)
+      ;; First call - resolve and cache
+      (let [resolved (resolve 'graphden.postgres-storage.core/*query-timeout-ms*)]
+        (reset! timeout-var-cache resolved)
+        resolved)
+      ;; Already cached
+      cached)))
+
+
 (defn get-query-timeout-seconds
   "Returns the current query timeout in seconds for JDBC calls.
    Resolves the dynamic var *query-timeout-ms* from core.clj and converts to seconds.
    Returns 30 seconds if resolution fails (e.g., during test isolation).
 
-   Note: Uses reflection to avoid circular dependency with core.clj.
+   Architecture note:
+   Uses `resolve` (reflection) to avoid circular dependency:
+   - util.clj is required by core.clj, crud.clj, ddl.clj
+   - *query-timeout-ms* is defined in core.clj
+   - If util.clj required core.clj, we'd have a circular dependency
+
+   This is a deliberate trade-off: runtime var resolution vs compile-time
+   circular dependency. The fallback value ensures the system works even
+   if resolution fails (e.g., in test isolation or REPL experiments).
+
+   The var reference is cached (via atom) to avoid repeated reflection;
+   the var's value is still read on each call since it's dynamic.
+
    The timeout is stored in milliseconds but JDBC setQueryTimeout uses seconds."
   []
-  (if-let [timeout-var (resolve 'graphden.postgres-storage.core/*query-timeout-ms*)]
+  (if-let [timeout-var (resolve-timeout-var)]
     (quot (deref timeout-var) 1000)
     (do
       ;; Log warning once to avoid log spam, but alert on potential misconfiguration
@@ -107,6 +139,32 @@
     :else                           :unknown-sql-error))
 
 
+(defn wrap-sql-error
+  "Wraps a SQLException with application-level context.
+   Translates PostgreSQL error codes to meaningful error types.
+   Logs the error with context for debugging.
+   Returns an ex-info with :type, :sql-state, and operation context.
+
+   Parameters:
+   - e: SQLException to wrap
+   - log-prefix: String prefix for log message (e.g., \"Database error\", \"DDL error\")
+   - operation: Keyword describing the operation (e.g., :create-entity, :add-column)
+   - context: Map of additional context (e.g., {:entity-name :user})"
+  [^java.sql.SQLException e log-prefix operation context]
+  (let [error-type (classify-sql-error e)
+        sql-state (java.sql.SQLException/.getSQLState e)
+        message (java.sql.SQLException/.getMessage e)
+        error-data (merge {:type error-type
+                           :operation operation
+                           :sql-state sql-state
+                           :message message}
+                          context)]
+    (log/warn e log-prefix error-data)
+    (ex-info (str log-prefix " during " (name operation) ": " message)
+             error-data
+             e)))
+
+
 ;; === Type mapping ===
 
 (def type->pg
@@ -174,12 +232,27 @@
   #"^[a-z][a-z0-9_]*$")
 
 
+(def ^:private max-sql-identifier-length
+  "Maximum length for PostgreSQL identifiers.
+   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1).
+   We enforce this limit to avoid silent truncation issues."
+  63)
+
+
 (defn validate-sql-identifier!
   "Validates that a string is a safe SQL identifier.
    Prevents SQL injection in DDL statements where parameterization isn't possible.
    Identifiers must be lowercase because PostgreSQL folds unquoted identifiers to lowercase,
-   and using uppercase would create case-sensitivity issues."
+   and using uppercase would create case-sensitivity issues.
+   Also enforces PostgreSQL's 63-character identifier length limit."
   [s context]
+  (when (> (count s) max-sql-identifier-length)
+    (throw (ex-info (str "SQL identifier too long: '" s "' (" (count s) " chars). "
+                         "PostgreSQL limits identifiers to " max-sql-identifier-length " characters.")
+                    {:value s
+                     :length (count s)
+                     :max-length max-sql-identifier-length
+                     :context context})))
   (when-not (re-matches sql-identifier-pattern s)
     (throw (ex-info (str "Invalid SQL identifier: '" s "'. "
                          "Must start with lowercase letter and contain only "

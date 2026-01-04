@@ -3,7 +3,6 @@
    CREATE/ALTER for tables, columns, enums, indexes, and constraints."
   (:require
     [clojure.string :as str]
-    [clojure.tools.logging :as log]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.postgres-storage.util :as util]
     [honey.sql :as sql]
@@ -17,20 +16,9 @@
 
 (defn- wrap-ddl-error
   "Wraps a SQLException with DDL-specific context.
-   Returns an ex-info with :type and operation context."
+   Delegates to shared util/wrap-sql-error with 'DDL error' prefix."
   [^SQLException e operation context]
-  (let [error-type (util/classify-sql-error e)
-        sql-state (SQLException/.getSQLState e)
-        message (SQLException/.getMessage e)
-        error-data (merge {:type error-type
-                           :operation operation
-                           :sql-state sql-state
-                           :message message}
-                          context)]
-    (log/warn e "DDL error" error-data)
-    (ex-info (str "DDL error during " (name operation) ": " message)
-             error-data
-             e)))
+  (util/wrap-sql-error e "DDL error" operation context))
 
 
 (defmacro with-ddl-error-handling

@@ -32,6 +32,25 @@
 ;; :db.type/ref in Datomic, but the original type is stored in graphden.metadata entities.
 
 
+;; === Configuration ===
+
+(def ^:dynamic *query-timeout-ms*
+  "Timeout for Datomic queries in milliseconds. Can be rebound per-thread.
+   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change."
+  30000)
+
+
+(defn with-query-timeout
+  "Executes f with a custom query timeout (in milliseconds).
+
+   Example:
+   (with-query-timeout 60000
+     #(sp/query-entities storage :user {}))"
+  [timeout-ms f]
+  (binding [*query-timeout-ms* timeout-ms]
+    (f)))
+
+
 ;; === Attribute naming ===
 
 (defn- entity-attr
@@ -880,33 +899,36 @@
 ;; === Batch CRUD helpers ===
 
 (defn- create-entities-impl
-  "Creates multiple entities in a single transaction."
+  "Creates multiple entities in a single transaction.
+   Throws :duplicate-ids if duplicate IDs found in batch."
   [conn entity-name data-seq]
   (if (empty? data-seq)
     []
-    (let [db (d/db conn)
-          field-specs (get-fields-with-specs db entity-name)
-          ;; Validate all records first
-          _ (when (seq field-specs)
-              (doseq [data data-seq]
-                (sp/validate-required-fields! entity-name field-specs data)))
-          ;; Prepare transaction data
-          records (map (fn [data]
-                         (let [id (or (:id data) (random-uuid))
-                               temp-id (str "new-entity-" (random-uuid))]
-                           {:id id
-                            :temp-id temp-id
-                            :data (assoc data :id id)}))
-                       data-seq)
-          tx-data (map (fn [{:keys [id temp-id data]}]
-                         (entity->tx entity-name data id temp-id))
-                       records)]
-      (d/transact conn {:tx-data (vec tx-data)})
-      ;; Read back created entities
-      (let [new-db (d/db conn)
-            fields (get-entity-fields new-db entity-name)
-            ids (map :id records)]
-        (keep (fn [id] (pull-entity new-db entity-name id fields)) ids)))))
+    (do
+      (sp/validate-no-duplicate-ids! entity-name data-seq)
+      (let [db (d/db conn)
+            field-specs (get-fields-with-specs db entity-name)
+            ;; Validate all records first
+            _ (when (seq field-specs)
+                (doseq [data data-seq]
+                  (sp/validate-required-fields! entity-name field-specs data)))
+            ;; Prepare transaction data
+            records (map (fn [data]
+                           (let [id (or (:id data) (random-uuid))
+                                 temp-id (str "new-entity-" (random-uuid))]
+                             {:id id
+                              :temp-id temp-id
+                              :data (assoc data :id id)}))
+                         data-seq)
+            tx-data (map (fn [{:keys [id temp-id data]}]
+                           (entity->tx entity-name data id temp-id))
+                         records)]
+        (d/transact conn {:tx-data (vec tx-data)})
+        ;; Read back created entities
+        (let [new-db (d/db conn)
+              fields (get-entity-fields new-db entity-name)
+              ids (map :id records)]
+          (keep (fn [id] (pull-entity new-db entity-name id fields)) ids))))))
 
 
 (defn- read-entities-impl

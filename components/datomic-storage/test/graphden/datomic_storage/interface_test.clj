@@ -1789,3 +1789,25 @@
       ;; If lock wasn't released, we couldn't acquire another write lock
       (is (true? (java.util.concurrent.locks.Lock/.tryLock write-lock)))
       (java.util.concurrent.locks.Lock/.unlock write-lock))))
+
+
+(deftest with-query-timeout-test
+  (testing "with-query-timeout executes function and returns result"
+    (is (= 42 (dat/with-query-timeout 60000 #(+ 40 2)))))
+
+  (testing "with-query-timeout binds timeout value"
+    (is (= 5000
+           (dat/with-query-timeout 5000
+                                   #(deref #'core/*query-timeout-ms*)))))
+
+  (testing "with-query-timeout restores original value after execution"
+    (let [original (deref #'core/*query-timeout-ms*)]
+      (dat/with-query-timeout 99999 #(identity :done))
+      (is (= original (deref #'core/*query-timeout-ms*)))))
+
+  (testing "with-query-timeout restores value after exception"
+    (let [original (deref #'core/*query-timeout-ms*)]
+      (try
+        (dat/with-query-timeout 99999 #(throw (ex-info "test" {})))
+        (catch Exception _))
+      (is (= original (deref #'core/*query-timeout-ms*))))))

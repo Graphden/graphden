@@ -101,7 +101,7 @@
 (defn- validate-provided-arg-type!
   "Validates that a provided argument matches the expected arg-schema type.
    Throws ExceptionInfo if type mismatch detected.
-   Note: This is a runtime check for common type mismatches."
+   Note: This is a runtime check for type mismatches."
   [provided-value arg-schema]
   (when-not (and arg-schema (:type arg-schema))
     (throw (ex-info "Invalid arg-schema: missing type"
@@ -155,7 +155,64 @@
                        :provided-value provided-value
                        :provided-type (type provided-value)}))
 
-      ;; Other types: no strict validation (numeric, jsonb, union, etc.)
+      ;; :numeric type expects a number (int, float, bigdec, ratio, etc.)
+      (and (= arg-type :numeric) (not (number? provided-value)))
+      (throw (ex-info "Provided arg for :numeric type must be a number"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :numeric
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :jsonb type expects a map or vector (serializable Clojure data)
+      (and (= arg-type :jsonb) (not (or (map? provided-value) (vector? provided-value))))
+      (throw (ex-info "Provided arg for :jsonb type must be a map or vector"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :jsonb
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :bytes type expects a byte array
+      (and (= arg-type :bytes) (not (bytes? provided-value)))
+      (throw (ex-info "Provided arg for :bytes type must be a byte array"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :bytes
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :timestamptz type expects an Instant or Date
+      (and (= arg-type :timestamptz)
+           (not (or (instance? java.time.Instant provided-value)
+                    (instance? java.util.Date provided-value))))
+      (throw (ex-info "Provided arg for :timestamptz type must be an Instant or Date"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :timestamptz
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :enum type expects a keyword
+      (and (= arg-type :enum) (not (keyword? provided-value)))
+      (throw (ex-info "Provided arg for :enum type must be a keyword"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :enum
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :uuid type expects a UUID
+      (and (= arg-type :uuid) (not (uuid? provided-value)))
+      (throw (ex-info "Provided arg for :uuid type must be a UUID"
+                      {:type :execution-error/type-mismatch
+                       :arg-name arg-name
+                       :expected-type :uuid
+                       :provided-value provided-value
+                       :provided-type (type provided-value)}))
+
+      ;; :union type - no strict validation, accept any value
+      ;; (union types are complex and would need schema-specific validation)
       :else nil)))
 
 

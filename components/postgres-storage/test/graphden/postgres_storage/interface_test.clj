@@ -2942,17 +2942,36 @@
         (finally
           (sp/close storage)))))
 
-  (testing "create-entities throws wrapped error on unique violation"
+  (testing "create-entities throws validation error on duplicate IDs in batch"
     (let [storage (create-test-storage)
           schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                               :type :text}})]
       (sp/initialize storage schema)
       (try
         (let [id #uuid "11111111-1111-1111-1111-111111111111"]
-          ;; Try to create multiple entities with same id
+          ;; Try to create multiple entities with same id in one batch
           (try
             (sp/create-entities storage :user [{:id id :name "Alice"}
                                                {:id id :name "Bob"}])
+            (is false "Should have thrown")
+            (catch clojure.lang.ExceptionInfo e
+              (is (= :validation-error/duplicate-ids (:type (ex-data e))))
+              (is (= [id] (:duplicate-ids (ex-data e)))))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "create-entities throws SQL error on conflict with existing record"
+    (let [storage (create-test-storage)
+          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                              :type :text}})]
+      (sp/initialize storage schema)
+      (try
+        (let [id #uuid "11111111-1111-1111-1111-111111111111"]
+          ;; First create a record with this ID
+          (sp/create-entity storage :user {:id id :name "Alice"})
+          ;; Try to create another batch with the same ID
+          (try
+            (sp/create-entities storage :user [{:id id :name "Bob"}])
             (is false "Should have thrown")
             (catch clojure.lang.ExceptionInfo e
               (is (= :unique-violation (:type (ex-data e))))

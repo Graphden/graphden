@@ -868,3 +868,382 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Invalid arg-schema: missing type"
             (exec/execute ctx fn-id {bad-arg-schema-id 100}))))))
+
+
+;; === Additional Type Validation Tests ===
+
+(deftest numeric-type-validation-test
+  (testing "throws when :numeric type arg is provided with non-number value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-numeric
+              (fn [{:keys [n]} ctx]
+                (exec/force-value n ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-numeric"
+                                       :returned-type :numeric})
+          n-arg (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id fn-schema)
+                                   :name "n"
+                                   :type :numeric
+                                   :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-numeric"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id n-arg)
+                               :value 3.14})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Provided arg for :numeric type must be a number"
+            (exec/execute ctx (:id fn-rec) {(:id n-arg) "not-a-number"})))
+      (sp/close storage)))
+
+  (testing "accepts valid numeric values"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-numeric
+              (fn [{:keys [n]} ctx]
+                (exec/force-value n ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-numeric"
+                                       :returned-type :numeric})
+          n-arg (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id fn-schema)
+                                   :name "n"
+                                   :type :numeric
+                                   :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-numeric"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id n-arg)
+                               :value 3.14})
+          ctx (exec/create-context {:storage storage})]
+      (is (= 2.718M (exec/execute ctx (:id fn-rec) {(:id n-arg) 2.718M})))
+      (sp/close storage))))
+
+
+(deftest jsonb-type-validation-test
+  (testing "throws when :jsonb type arg is provided with non-map/vector value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-jsonb
+              (fn [{:keys [data]} ctx]
+                (exec/force-value data ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-jsonb"
+                                       :returned-type :jsonb})
+          data-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "data"
+                                      :type :jsonb
+                                      :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-jsonb"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id data-arg)
+                               :value {:a 1}})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Provided arg for :jsonb type must be a map or vector"
+            (exec/execute ctx (:id fn-rec) {(:id data-arg) "not-jsonb"})))
+      (sp/close storage)))
+
+  (testing "accepts valid jsonb values (map)"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-jsonb
+              (fn [{:keys [data]} ctx]
+                (exec/force-value data ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-jsonb"
+                                       :returned-type :jsonb})
+          data-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "data"
+                                      :type :jsonb
+                                      :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-jsonb"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id data-arg)
+                               :value {:a 1}})
+          ctx (exec/create-context {:storage storage})]
+      (is (= {:x 1 :y 2} (exec/execute ctx (:id fn-rec) {(:id data-arg) {:x 1 :y 2}})))
+      (sp/close storage)))
+
+  (testing "accepts valid jsonb values (vector)"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-jsonb
+              (fn [{:keys [data]} ctx]
+                (exec/force-value data ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-jsonb"
+                                       :returned-type :jsonb})
+          data-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "data"
+                                      :type :jsonb
+                                      :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-jsonb"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id data-arg)
+                               :value [1 2 3]})
+          ctx (exec/create-context {:storage storage})]
+      (is (= [4 5 6] (exec/execute ctx (:id fn-rec) {(:id data-arg) [4 5 6]})))
+      (sp/close storage))))
+
+
+(deftest bytes-type-validation-test
+  (testing "throws when :bytes type arg is provided with non-byte-array value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-bytes
+              (fn [{:keys [data]} ctx]
+                (exec/force-value data ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-bytes"
+                                       :returned-type :bytes})
+          data-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "data"
+                                      :type :bytes
+                                      :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-bytes"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id data-arg)
+                               :value (byte-array [1 2 3])})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Provided arg for :bytes type must be a byte array"
+            (exec/execute ctx (:id fn-rec) {(:id data-arg) "not-bytes"})))
+      (sp/close storage)))
+
+  (testing "accepts valid bytes values"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-bytes
+              (fn [{:keys [data]} ctx]
+                (vec (exec/force-value data ctx))))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-bytes"
+                                       :returned-type :jsonb})
+          data-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "data"
+                                      :type :bytes
+                                      :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-bytes"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id data-arg)
+                               :value (byte-array [1 2 3])})
+          ctx (exec/create-context {:storage storage})]
+      (is (= [4 5 6] (exec/execute ctx (:id fn-rec) {(:id data-arg) (byte-array [4 5 6])})))
+      (sp/close storage))))
+
+
+(deftest timestamptz-type-validation-test
+  (testing "throws when :timestamptz type arg is provided with invalid value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-timestamp
+              (fn [{:keys [ts]} ctx]
+                (exec/force-value ts ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-timestamp"
+                                       :returned-type :timestamptz})
+          ts-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id fn-schema)
+                                    :name "ts"
+                                    :type :timestamptz
+                                    :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-timestamp"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id ts-arg)
+                               :value (java.time.Instant/now)})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Provided arg for :timestamptz type must be an Instant or Date"
+            (exec/execute ctx (:id fn-rec) {(:id ts-arg) "not-a-timestamp"})))
+      (sp/close storage)))
+
+  (testing "accepts valid Instant value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-timestamp
+              (fn [{:keys [ts]} ctx]
+                (exec/force-value ts ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-timestamp"
+                                       :returned-type :timestamptz})
+          ts-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id fn-schema)
+                                    :name "ts"
+                                    :type :timestamptz
+                                    :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-timestamp"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id ts-arg)
+                               :value (java.time.Instant/now)})
+          ctx (exec/create-context {:storage storage})
+          test-instant (java.time.Instant/parse "2024-01-01T00:00:00Z")]
+      (is (= test-instant (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-instant})))
+      (sp/close storage)))
+
+  (testing "accepts valid Date value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-timestamp
+              (fn [{:keys [ts]} ctx]
+                (exec/force-value ts ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-timestamp"
+                                       :returned-type :timestamptz})
+          ts-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id fn-schema)
+                                    :name "ts"
+                                    :type :timestamptz
+                                    :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-timestamp"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id ts-arg)
+                               :value (java.util.Date.)})
+          ctx (exec/create-context {:storage storage})
+          test-date (java.util.Date. 0)]
+      (is (= test-date (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-date})))
+      (sp/close storage))))
+
+
+(deftest enum-type-validation-test
+  (testing "throws when :enum type arg is provided with non-keyword value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-enum
+              (fn [{:keys [status]} ctx]
+                (exec/force-value status ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-enum"
+                                       :returned-type :text})
+          status-arg (sp/create-entity storage :arg-schema
+                                       {:fn-schema-id (:id fn-schema)
+                                        :name "status"
+                                        :type :enum
+                                        :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-enum"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id status-arg)
+                               :value :active})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Provided arg for :enum type must be a keyword"
+            (exec/execute ctx (:id fn-rec) {(:id status-arg) "not-a-keyword"})))
+      (sp/close storage)))
+
+  (testing "accepts valid keyword value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-enum
+              (fn [{:keys [status]} ctx]
+                (name (exec/force-value status ctx))))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-enum"
+                                       :returned-type :text})
+          status-arg (sp/create-entity storage :arg-schema
+                                       {:fn-schema-id (:id fn-schema)
+                                        :name "status"
+                                        :type :enum
+                                        :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-enum"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id status-arg)
+                               :value :active})
+          ctx (exec/create-context {:storage storage})]
+      (is (= "pending" (exec/execute ctx (:id fn-rec) {(:id status-arg) :pending})))
+      (sp/close storage))))
+
+
+(deftest uuid-type-validation-test
+  (testing "throws when :uuid type arg is provided with non-UUID value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-uuid
+              (fn [{:keys [id]} ctx]
+                (exec/force-value id ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-uuid"
+                                       :returned-type :uuid})
+          id-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id fn-schema)
+                                    :name "id"
+                                    :type :uuid
+                                    :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-uuid"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id id-arg)
+                               :value (random-uuid)})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Provided arg for :uuid type must be a UUID"
+            (exec/execute ctx (:id fn-rec) {(:id id-arg) "not-a-uuid"})))
+      (sp/close storage)))
+
+  (testing "accepts valid UUID value"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-uuid
+              (fn [{:keys [id]} ctx]
+                (exec/force-value id ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-uuid"
+                                       :returned-type :uuid})
+          id-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id fn-schema)
+                                    :name "id"
+                                    :type :uuid
+                                    :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-uuid"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id id-arg)
+                               :value (random-uuid)})
+          ctx (exec/create-context {:storage storage})
+          test-uuid #uuid "12345678-1234-1234-1234-123456789abc"]
+      (is (= test-uuid (exec/execute ctx (:id fn-rec) {(:id id-arg) test-uuid})))
+      (sp/close storage))))

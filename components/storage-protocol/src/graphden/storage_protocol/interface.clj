@@ -922,3 +922,28 @@
                       {:type :validation-error/required-field-missing
                        :entity entity-name
                        :field field-name})))))
+
+
+(defn validate-no-duplicate-ids!
+  "Validates that there are no duplicate IDs in a batch of records.
+   Throws ExceptionInfo if duplicate IDs are found.
+
+   Arguments:
+   - entity-name: keyword name of the entity
+   - data-seq: sequence of data maps, each may have an :id field
+
+   Throws ExceptionInfo with :type :validation-error/duplicate-ids
+   if duplicate IDs are found in the batch."
+  [entity-name data-seq]
+  (let [explicit-ids (->> data-seq
+                          (map :id)
+                          (filter some?))
+        id-counts (frequencies explicit-ids)
+        duplicates (->> id-counts
+                        (filter (fn [[_ cnt]] (> cnt 1)))
+                        (map first))]
+    (when (seq duplicates)
+      (throw (ex-info (str "Duplicate IDs found in batch: " (pr-str duplicates))
+                      {:type :validation-error/duplicate-ids
+                       :entity entity-name
+                       :duplicate-ids (vec duplicates)})))))

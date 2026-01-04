@@ -4,6 +4,23 @@
     [graphden.datomic-storage.core :as core]))
 
 
+;; Re-export timeout configuration for external use
+(def ^:dynamic *query-timeout-ms*
+  "Timeout for Datomic queries in milliseconds. Can be rebound per-thread.
+   Default is 30000 ms (30 seconds)."
+  core/*query-timeout-ms*)
+
+
+(defn with-query-timeout
+  "Executes f with a custom query timeout (in milliseconds).
+
+   Example:
+   (with-query-timeout 60000
+     #(sp/query-entities storage :user {}))"
+  [timeout-ms f]
+  (core/with-query-timeout timeout-ms f))
+
+
 (def default-local-config
   "Default configuration for Datomic Local with in-memory storage.
    Use this as a base for customization."

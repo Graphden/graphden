@@ -288,37 +288,40 @@
 (defn create-entities
   "Creates multiple entity records in a single transaction.
    Returns a sequence of created records with generated ids.
-   Throws :unique-violation if any unique constraint violated."
+   Throws :unique-violation if any unique constraint violated.
+   Throws :duplicate-ids if duplicate IDs found in batch."
   [ds entity-name data-seq fields]
   (if (empty? data-seq)
     []
-    (let [table-name (keyword (util/kw->snake-case entity-name))
-          jsonb-cols (extract-jsonb-columns fields)
-          ;; Prepare all records with IDs
-          records (map (fn [data]
-                         (when fields
-                           (sp/validate-required-fields! entity-name fields data))
-                         (let [id (or (:id data) (random-uuid))]
-                           (assoc data :id id)))
-                       data-seq)
-          ;; Convert to rows
-          rows (map #(entity->row % jsonb-cols) records)
-          ;; Get consistent column order from first row
-          columns (vec (keys (first rows)))
-          ;; Extract values in column order
-          values (vec (map (fn [row]
-                             (mapv #(get row %) columns))
-                           rows))
-          query (sql/format {:insert-into table-name
-                             :columns columns
-                             :values values
-                             :returning [:*]}
-                            {:quoted true})]
-      (with-sql-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
-        (let [result-rows (jdbc/execute! ds query
-                                         {:builder-fn rs/as-unqualified-lower-maps
-                                          :timeout (get-query-timeout)})]
-          (map row->entity result-rows))))))
+    (do
+      (sp/validate-no-duplicate-ids! entity-name data-seq)
+      (let [table-name (keyword (util/kw->snake-case entity-name))
+            jsonb-cols (extract-jsonb-columns fields)
+            ;; Prepare all records with IDs
+            records (map (fn [data]
+                           (when fields
+                             (sp/validate-required-fields! entity-name fields data))
+                           (let [id (or (:id data) (random-uuid))]
+                             (assoc data :id id)))
+                         data-seq)
+            ;; Convert to rows
+            rows (map #(entity->row % jsonb-cols) records)
+            ;; Get consistent column order from first row
+            columns (vec (keys (first rows)))
+            ;; Extract values in column order
+            values (vec (map (fn [row]
+                               (mapv #(get row %) columns))
+                             rows))
+            query (sql/format {:insert-into table-name
+                               :columns columns
+                               :values values
+                               :returning [:*]}
+                              {:quoted true})]
+        (with-sql-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
+          (let [result-rows (jdbc/execute! ds query
+                                           {:builder-fn rs/as-unqualified-lower-maps
+                                            :timeout (get-query-timeout)})]
+            (map row->entity result-rows)))))))
 
 
 (defn read-entities

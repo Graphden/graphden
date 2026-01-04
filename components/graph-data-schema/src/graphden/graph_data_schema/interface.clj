@@ -12,10 +12,25 @@
 
 
 ;; === Stable UUIDs for schema elements ===
-;; These are cryptographically random RFC 4122 v4 UUIDs.
-;; Generated once with (random-uuid) and fixed forever in code.
-;; UUID is the stable identity of an element - names can change, UUIDs cannot.
-;; This allows storage to detect renames vs delete+create.
+;;
+;; Each schema element (entity, field, enum, enum value) has a stable UUID that
+;; serves as its immutable identity. This enables:
+;;
+;; 1. RENAME DETECTION: When you rename :fn-schema to :function-schema, the storage
+;;    layer sees the same UUID with a different name -> triggers ALTER TABLE RENAME
+;;    instead of DROP + CREATE.
+;;
+;; 2. SAFE MIGRATIONS: Data is never lost during schema evolution because storage
+;;    tracks elements by UUID, not by name.
+;;
+;; 3. CROSS-STORAGE CONSISTENCY: All storage backends (memory, postgres, datomic)
+;;    use the same UUIDs, ensuring schema compatibility.
+;;
+;; Generation: Each UUID below was generated once using (random-uuid) and is now
+;; fixed forever in code. They are RFC 4122 v4 (random) UUIDs.
+;;
+;; IMPORTANT: Never change these UUIDs! Changing a UUID is equivalent to deleting
+;; the old element and creating a new one, which will cause data loss.
 
 ;; Enum UUIDs
 (def ^:private value-kind-enum-uuid

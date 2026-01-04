@@ -182,8 +182,17 @@
             base-query (vec (concat '[:find ?e ?id :where]
                                     field-clauses
                                     [['?e id-attr '?id]]))
-            ;; Execute query
-            results (d/q base-query db)
+            ;; Execute query with error handling
+            results (try
+                      (d/q base-query db)
+                      (catch Exception e
+                        (throw (ex-info "Failed to validate unique constraint"
+                                        {:type :constraint-validation-error
+                                         :entity entity-name
+                                         :fields fields
+                                         :query base-query
+                                         :cause (ex-message e)}
+                                        e))))
             ;; Filter out the exclude-id (for updates)
             conflicting (if exclude-id
                           (filter #(not= (second %) exclude-id) results)
@@ -1148,7 +1157,7 @@
 (defn- resolve-execution-graph-impl
   "Resolves complete execution graph for a function.
    Uses batched BFS to collect all transitively referenced functions.
-   Throws if iteration count exceeds sp/max-graph-iterations.
+   Throws if iteration count exceeds sp/*max-graph-iterations*.
 
    This implementation uses batch queries to minimize database round-trips:
    1. Process pending fn-ids in batches

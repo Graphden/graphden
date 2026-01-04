@@ -578,6 +578,32 @@
           clojure.lang.ExceptionInfo #"Enum value missing :uuid"
           (-> (mds/create-builder)
               (ds/add-enum :status (uuid) [{:value :active}])
+              (ds/build)))))
+
+  (testing "invalid identifier name in enum value throws"
+    ;; Enum value names must be valid SQL identifiers after kebab->snake conversion
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Invalid identifier name"
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) [{:uuid (uuid) :value :123-invalid}])
+              (ds/build))))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Invalid identifier name"
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) [{:uuid (uuid) :value :-starts-with-hyphen}])
+              (ds/build))))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo #"Invalid identifier name"
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) [{:uuid (uuid) :value :ends-with-hyphen-}])
+              (ds/build)))))
+
+  (testing "valid identifier names in enum values work"
+    (is (some?
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) [{:uuid (uuid) :value :active}
+                                           {:uuid (uuid) :value :in-progress}
+                                           {:uuid (uuid) :value :completed123}])
               (ds/build))))))
 
 

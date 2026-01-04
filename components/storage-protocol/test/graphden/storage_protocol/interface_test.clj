@@ -151,7 +151,32 @@
         (is (= :user (:entity (ex-data e))))
         (is (= :email (:field (ex-data e))))
         (is (true? (:old-nullable? (ex-data e))))
-        (is (false? (:new-nullable? (ex-data e))))))))
+        (is (false? (:new-nullable? (ex-data e)))))))
+
+  (testing "corrupted metadata throws specific error"
+    ;; When old-nullable? is not a boolean, it indicates corrupted metadata
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"Corrupted metadata"
+          (storage/check-nullable-change! :user :name 0 false)))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"Corrupted metadata"
+          (storage/check-nullable-change! :user :name "true" false)))
+    (is (thrown-with-msg?
+          clojure.lang.ExceptionInfo
+          #"Corrupted metadata"
+          (storage/check-nullable-change! :user :name :yes false))))
+
+  (testing "corrupted metadata exception has correct data"
+    (try
+      (storage/check-nullable-change! :user :name 42 true)
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :metadata-error/corrupted (:type (ex-data e))))
+        (is (= :user (:entity (ex-data e))))
+        (is (= :name (:field (ex-data e))))
+        (is (= 42 (:old-nullable? (ex-data e))))
+        (is (= :boolean (:expected-type (ex-data e))))))))
 
 
 (deftest build-metadata-from-schema-test
@@ -502,14 +527,14 @@
     (is (nil? (storage/check-graph-iteration-limit! 0 (random-uuid))))
     (is (nil? (storage/check-graph-iteration-limit! 100 (random-uuid))))
     (is (nil? (storage/check-graph-iteration-limit! 9999 (random-uuid))))
-    (is (nil? (storage/check-graph-iteration-limit! storage/max-graph-iterations (random-uuid)))))
+    (is (nil? (storage/check-graph-iteration-limit! storage/*max-graph-iterations* (random-uuid)))))
 
   (testing "over limit throws"
     (let [fn-id (random-uuid)]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
             #"exceeded maximum iterations"
-            (storage/check-graph-iteration-limit! (inc storage/max-graph-iterations) fn-id)))))
+            (storage/check-graph-iteration-limit! (inc storage/*max-graph-iterations*) fn-id)))))
 
   (testing "exception contains correct data"
     (let [fn-id (random-uuid)]
@@ -518,7 +543,7 @@
         (catch clojure.lang.ExceptionInfo e
           (is (= :execution-error/graph-too-large (:type (ex-data e))))
           (is (= fn-id (:fn-id (ex-data e))))
-          (is (= storage/max-graph-iterations (:max-iterations (ex-data e))))
+          (is (= storage/*max-graph-iterations* (:max-iterations (ex-data e))))
           (is (= 10001 (:iteration-count (ex-data e)))))))))
 
 

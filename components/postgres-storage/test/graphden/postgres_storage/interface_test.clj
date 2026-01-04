@@ -59,9 +59,6 @@
     (try
       (binding [*container* container]
         (f))
-      (catch Exception e
-        (println "Test failed:" (Exception/.getMessage e))
-        (throw e))
       (finally
         (PostgreSQLContainer/.stop container)))))
 
@@ -1024,13 +1021,73 @@
     (let [pool (core/create-pool {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
                                   :username (PostgreSQLContainer/.getUsername *container*)
                                   :password (PostgreSQLContainer/.getPassword *container*)
-                                  :pool-size 1})]
+                                  :pool-size 1
+                                  :min-idle 1})]
       ;; First close
       (is (nil? (core/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool)))
       ;; Second close - should not throw
       (is (nil? (core/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool))))))
+
+
+(deftest create-pool-validation-test
+  (let [valid-opts {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
+                    :username (PostgreSQLContainer/.getUsername *container*)
+                    :password (PostgreSQLContainer/.getPassword *container*)}]
+
+    (testing "pool-size must be positive integer"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"pool-size must be a positive integer"
+            (core/create-pool (assoc valid-opts :pool-size 0))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"pool-size must be a positive integer"
+            (core/create-pool (assoc valid-opts :pool-size -1))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"pool-size must be a positive integer"
+            (core/create-pool (assoc valid-opts :pool-size "10")))))
+
+    (testing "min-idle must be positive integer"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"min-idle must be a positive integer"
+            (core/create-pool (assoc valid-opts :min-idle 0))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"min-idle must be a positive integer"
+            (core/create-pool (assoc valid-opts :min-idle -1)))))
+
+    (testing "min-idle cannot exceed pool-size"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"min-idle cannot exceed pool-size"
+            (core/create-pool (assoc valid-opts :pool-size 5 :min-idle 10)))))
+
+    (testing "connection-timeout must be positive integer"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"connection-timeout must be a positive integer"
+            (core/create-pool (assoc valid-opts :connection-timeout 0))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"connection-timeout must be a positive integer"
+            (core/create-pool (assoc valid-opts :connection-timeout -1000)))))))
+
+
+(deftest with-query-timeout-validation-test
+  (testing "timeout must be positive integer"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"must be a positive integer"
+          (pg/with-query-timeout 0 (constantly :ok))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"must be a positive integer"
+          (pg/with-query-timeout -1000 (constantly :ok)))))
+
+  (testing "timeout must be at least 1000ms"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"must be at least 1000ms"
+          (pg/with-query-timeout 500 (constantly :ok))))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"must be at least 1000ms"
+          (pg/with-query-timeout 999 (constantly :ok)))))
+
+  (testing "1000ms is valid minimum"
+    (is (= 42 (pg/with-query-timeout 1000 #(+ 40 2))))))
 
 
 (deftest unknown-pg-type-coverage-test

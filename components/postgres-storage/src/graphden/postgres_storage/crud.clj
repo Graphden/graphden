@@ -12,6 +12,8 @@
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs])
   (:import
+    (com.fasterxml.jackson.core
+      JsonParseException)
     (java.sql
       SQLException)
     (org.postgresql.util
@@ -66,7 +68,9 @@
       (if (= pg-type "jsonb")
         (try
           (json/parse-string pg-value true)
-          (catch Exception e
+          ;; Catch only JSON parsing errors - other exceptions (OOM, connection issues)
+          ;; should propagate as-is to avoid masking infrastructure problems
+          (catch JsonParseException e
             (throw (ex-info "Failed to parse JSONB value"
                             {:type :parse-error/jsonb
                              :raw-value (if (> (count pg-value) 100)
@@ -143,7 +147,8 @@
 
 (defn- maybe-wrap-jsonb
   "Wraps value as JSONB if column is in jsonb-columns set.
-   Returns nil as-is (SQL NULL) rather than converting to JSON null."
+   Returns nil as-is (SQL NULL) rather than converting to JSON null.
+   Note: `false` is correctly wrapped as JSONB since (some? false) => true."
   [jsonb-columns col-name v]
   (if (and (contains? jsonb-columns col-name)
            (some? v)
@@ -495,7 +500,7 @@
 (defn resolve-execution-graph
   "Resolves complete execution graph for a function.
    Uses batched BFS to collect all transitively referenced functions.
-   Throws if iteration count exceeds sp/max-graph-iterations.
+   Throws if iteration count exceeds sp/*max-graph-iterations*.
 
    This implementation uses batch queries to minimize database round-trips:
    1. Process pending fn-ids in batches

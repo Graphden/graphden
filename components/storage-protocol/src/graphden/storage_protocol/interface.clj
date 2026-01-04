@@ -64,12 +64,19 @@
   "Protocol for reading storage state.
    Used by initialize to compute diff with target schema.
 
-   Nil return semantics:
-   - current-entities: returns empty set if storage is empty, never nil
-   - current-fields: returns nil if entity doesn't exist, empty map if no fields
-   - current-enums: returns empty set if no enums, never nil
-   - current-enum-values: returns nil if enum doesn't exist
-   - schema-metadata: returns nil if storage not yet initialized"
+   Return value semantics:
+   Collection queries (list all items):
+   - current-entities: empty set if none exist, never nil
+   - current-enums: empty set if none exist, never nil
+
+   Lookup queries (get specific item):
+   - current-fields: nil if entity not found, empty map if entity has no fields
+   - current-enum-values: nil if enum not found, empty set if enum has no values
+
+   State query:
+   - schema-metadata: nil if storage not yet initialized
+
+   This distinction allows callers to differentiate 'not found' from 'empty'."
 
   (current-entities
     [this]
@@ -92,7 +99,7 @@
   (current-enum-values
     [this enum-name]
     "Returns set of keyword values for enum.
-     Returns nil if enum doesn't exist in storage.")
+     Returns nil if enum doesn't exist, empty set if enum has no values.")
 
   (schema-metadata
     [this]
@@ -169,6 +176,7 @@
 
 (defprotocol StorageBatchCRUD
   "Protocol for batch CRUD operations on stored entities.
+   Companion to StorageCRUD (single-entity operations).
    Provides more efficient operations when working with multiple records.
    Implementations should optimize for bulk operations (batch inserts, IN clauses, etc.).
 
@@ -484,13 +492,6 @@
   10000)
 
 
-;; Keep old name as alias for backward compatibility
-(def max-graph-iterations
-  "Deprecated: Use *max-graph-iterations* instead.
-   Kept for backward compatibility."
-  *max-graph-iterations*)
-
-
 (defn with-max-graph-iterations
   "Executes f with a custom max-graph-iterations limit.
    Useful for testing or for graphs that are known to be large.
@@ -526,6 +527,70 @@
                   (java.util.UUID/fromString v)
                   (catch IllegalArgumentException _ nil))
     :else nil))
+
+
+;; === Canonical Error Types ===
+;;
+;; All storage implementations should use consistent error types in ex-info exceptions.
+;; This enables reliable error handling across different storage backends.
+;;
+;; ## CRUD Errors
+;;
+;; | Error Type               | Meaning                                          |
+;; |--------------------------|--------------------------------------------------|
+;; | :not-found               | Entity with given ID does not exist              |
+;; | :unique-violation        | Unique constraint violated during insert/update  |
+;; | :duplicate-ids           | Batch operation contains duplicate IDs           |
+;; | :constraint-violation/*  | Specific constraint violations (see below)       |
+;;
+;; ## Constraint Violation Errors
+;;
+;; | Error Type                               | Meaning                              |
+;; |------------------------------------------|--------------------------------------|
+;; | :constraint-violation/unique             | Unique constraint violated           |
+;; | :constraint-violation/parent-schema-mismatch | Parent fn has different schema   |
+;; | :constraint-violation/arg-already-defined | Arg already defined in parent chain |
+;; | :constraint-violation/arg-schema-mismatch | Arg schema doesn't belong to fn    |
+;; | :constraint-violation/inheritance-cycle  | Circular inheritance detected        |
+;; | :constraint-violation/dependency-cycle   | Circular dependency detected         |
+;; | :constraint-violation/required-field     | Required field is null/missing       |
+;;
+;; ## Schema/Migration Errors
+;;
+;; | Error Type                  | Meaning                                       |
+;; |-----------------------------|-----------------------------------------------|
+;; | :destructive-change         | Attempted to remove entity/field/enum/value  |
+;; | :metadata-error/corrupted   | Stored metadata is invalid/corrupted          |
+;; | :metadata-error/rollback-failed | Migration rollback failed                  |
+;;
+;; ## Configuration Errors
+;;
+;; | Error Type                      | Meaning                                 |
+;; |---------------------------------|-----------------------------------------|
+;; | :config-error/missing-jdbc-url  | JDBC URL not provided                   |
+;; | :config-error/missing-username  | Database username not provided          |
+;; | :config-error/missing-password  | Database password not provided          |
+;; | :config-error/invalid-pool-size | Invalid connection pool size            |
+;; | :config-error/invalid-pool-config | Pool configuration inconsistent       |
+;; | :config-error/invalid-timeout   | Invalid timeout value                   |
+;;
+;; ## Execution Errors
+;;
+;; | Error Type                       | Meaning                                 |
+;; |----------------------------------|-----------------------------------------|
+;; | :execution-error/fn-not-found    | Function not found in execution graph   |
+;; | :execution-error/fn-schema-not-found | Function schema not found            |
+;; | :execution-error/base-fn-not-found | Base function not in registry         |
+;; | :execution-error/max-depth-exceeded | Maximum recursion depth reached       |
+;; | :execution-error/timeout         | Execution timeout exceeded              |
+;; | :execution-error/type-mismatch   | Argument type doesn't match schema      |
+;; | :execution-error/missing-required-arg | Required argument not provided       |
+;;
+;; ## Parse Errors
+;;
+;; | Error Type          | Meaning                                          |
+;; |---------------------|--------------------------------------------------|
+;; | :parse-error/jsonb  | Failed to parse JSONB value from storage         |
 
 
 ;; === Type System Documentation ===
@@ -725,12 +790,22 @@
    Arguments:
    - entity-name: keyword name of the entity
    - field-name: keyword name of the field
-   - old-nullable?: the current nullable value in storage
+   - old-nullable?: the current nullable value in storage (must be boolean or nil)
    - new-nullable?: the new nullable value in schema
 
    Throws ExceptionInfo with :type :destructive-change if nullable change is unsafe
-   (i.e., changing from nullable to non-nullable)."
+   (i.e., changing from nullable to non-nullable).
+   Throws ExceptionInfo with :type :metadata-error if old-nullable? is not a boolean."
   [entity-name field-name old-nullable? new-nullable?]
+  ;; If old-nullable? is present but not a boolean, metadata is corrupted
+  (when (and (some? old-nullable?) (not (boolean? old-nullable?)))
+    (throw (ex-info "Corrupted metadata: nullable value is not a boolean"
+                    {:type :metadata-error/corrupted
+                     :entity entity-name
+                     :field field-name
+                     :old-nullable? old-nullable?
+                     :expected-type :boolean
+                     :actual-type (type old-nullable?)})))
   (when (and (some? old-nullable?)
              (not (safe-nullable-change? old-nullable? new-nullable?)))
     (throw (ex-info "Destructive change: field changed from nullable to non-nullable"

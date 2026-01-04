@@ -20,17 +20,24 @@
 
 
 (defn register-base-fn!
+  "Registers a base function in the executor registry.
+   fn-name - keyword identifying the function (must match fn-schema name)
+   f - function taking [thunks context] and returning the result"
   [fn-name f]
   (swap! base-fns-registry assoc fn-name f)
   nil)
 
 
 (defn get-base-fn
+  "Retrieves a registered base function by name.
+   Returns the function or nil if not found."
   [fn-name]
   (get @base-fns-registry fn-name))
 
 
 (defn clear-base-fns!
+  "Clears all registered base functions.
+   Primarily used in tests to reset state between test cases."
   []
   (reset! base-fns-registry {})
   nil)
@@ -118,7 +125,7 @@
    :numeric "number (int, float, bigdec, ratio)"
    :jsonb "map or vector"
    :bytes "byte array (byte-array)"
-   :timestamptz "java.time.Instant or java.util.Date"
+   :timestamptz "java.time.Instant, java.time.LocalDateTime, or java.util.Date"
    :enum "keyword (e.g., :active, :pending)"
    :uuid "UUID"})
 
@@ -156,6 +163,7 @@
     :jsonb       (not (or (map? provided-value) (vector? provided-value)))
     :bytes       (not (bytes? provided-value))
     :timestamptz (not (or (instance? java.time.Instant provided-value)
+                          (instance? java.time.LocalDateTime provided-value)
                           (instance? java.util.Date provided-value)))
     :enum        (not (keyword? provided-value))
     :uuid        (not (uuid? provided-value))
@@ -266,7 +274,13 @@
 ;; === Execution ===
 
 (defn- check-limits!
-  "Checks execution limits (depth, timeout). Throws if exceeded."
+  "Checks execution limits (depth, timeout). Throws if exceeded.
+
+   IMPORTANT: Timeout is checked at the START of each function call, not during
+   execution. This means a long-running base function will complete fully even
+   if it exceeds the timeout. The timeout is a best-effort limit, not a hard
+   guarantee. For precise timeout control, base functions should implement
+   their own timeout logic (e.g., using futures with deref timeout)."
   [context]
   (when (> (:depth context) (:max-depth context))
     (throw (ex-info "Maximum recursion depth exceeded"

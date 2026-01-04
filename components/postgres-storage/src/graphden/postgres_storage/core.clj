@@ -39,11 +39,21 @@
 
 (defn with-query-timeout
   "Executes f with a custom query timeout (in milliseconds).
+   Timeout must be a positive integer. Minimum is 1000ms (1 second).
 
    Example:
    (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
   [timeout-ms f]
+  (when-not (pos-int? timeout-ms)
+    (throw (ex-info "Query timeout must be a positive integer (ms)"
+                    {:type :config-error/invalid-timeout
+                     :timeout-ms timeout-ms})))
+  (when (< timeout-ms 1000)
+    (throw (ex-info "Query timeout must be at least 1000ms (1 second)"
+                    {:type :config-error/invalid-timeout
+                     :timeout-ms timeout-ms
+                     :min-timeout-ms 1000})))
   (binding [*query-timeout-ms* timeout-ms]
     (f)))
 
@@ -62,7 +72,22 @@
    - :connection-timeout - connection timeout in ms (default 30000)
    - :idle-timeout - idle connection timeout in ms (default 600000)
    - :max-lifetime - maximum connection lifetime in ms (default 1800000)
-   - :leak-detection-threshold - connection leak detection in ms (default 60000)"
+   - :leak-detection-threshold - connection leak detection in ms (default 60000)
+
+   Tuning Guidelines:
+   - pool-size: Start with (2 * CPU cores) + effective_spindle_count for OLTP workloads.
+     For most cloud databases, 10-20 is a good starting point. Larger pools don't always
+     mean better performance - see HikariCP's 'About Pool Sizing' documentation.
+   - min-idle: Set equal to pool-size for consistent latency, or lower (e.g., 2) to
+     reduce idle resource usage. HikariCP recommends keeping min-idle = pool-size.
+   - connection-timeout: How long to wait for a connection from the pool. 30s is
+     generous; reduce to 5-10s for faster failure detection in high-load scenarios.
+   - idle-timeout: Connections idle longer than this are retired. Must be less than
+     max-lifetime. Set to 0 to never retire idle connections (not recommended).
+   - max-lifetime: Maximum connection lifetime. Should be several minutes less than
+     database/infrastructure timeout (e.g., PostgreSQL wait_timeout, load balancer idle).
+   - leak-detection-threshold: Log warning if connection not returned within this time.
+     Set to 0 to disable. Good for development; consider disabling in production."
   [{:keys [jdbc-url username password pool-size min-idle
            connection-timeout idle-timeout max-lifetime leak-detection-threshold]
     :or {pool-size 10
@@ -80,6 +105,25 @@
   (when-not (and password (seq (str/trim password)))
     (throw (ex-info "password is required and cannot be empty"
                     {:type :config-error/missing-password})))
+  ;; Validate pool size configuration
+  (when-not (pos-int? pool-size)
+    (throw (ex-info "pool-size must be a positive integer"
+                    {:type :config-error/invalid-pool-size
+                     :pool-size pool-size})))
+  (when-not (pos-int? min-idle)
+    (throw (ex-info "min-idle must be a positive integer"
+                    {:type :config-error/invalid-min-idle
+                     :min-idle min-idle})))
+  (when (> min-idle pool-size)
+    (throw (ex-info "min-idle cannot exceed pool-size"
+                    {:type :config-error/invalid-pool-config
+                     :min-idle min-idle
+                     :pool-size pool-size})))
+  ;; Validate timeout values
+  (when-not (pos-int? connection-timeout)
+    (throw (ex-info "connection-timeout must be a positive integer (ms)"
+                    {:type :config-error/invalid-timeout
+                     :connection-timeout connection-timeout})))
   (log/info "Creating PostgreSQL connection pool" {:pool-size pool-size :min-idle min-idle})
   (let [config (HikariConfig.)]
     (HikariConfig/.setJdbcUrl config jdbc-url)

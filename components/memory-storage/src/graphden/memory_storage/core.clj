@@ -139,6 +139,12 @@
     (sp/validate-required-fields! entity-name fields data)))
 
 
+(defn- get-entity-data
+  "Gets all records for an entity from state."
+  [state entity-name]
+  (get-in state [:data entity-name] {}))
+
+
 (defn- find-conflicting-record
   "Finds the first record that conflicts with new-values for the given fields.
    Returns the conflicting record or nil."
@@ -156,7 +162,7 @@
    exclude-id: optional id to exclude from check (for updates)."
   [state entity-name data exclude-id]
   (let [constraints (get-in state [:entities entity-name :constraints])
-        existing-records (vals (get-in state [:data entity-name] {}))]
+        existing-records (vals (get-entity-data state entity-name))]
     (doseq [{:keys [fields] :as constraint} constraints
             :when (= (:type constraint) :unique)
             :let [new-values (mapv #(get data %) fields)]
@@ -168,12 +174,6 @@
                        :entity entity-name
                        :fields fields
                        :values new-values})))))
-
-
-(defn- get-entity-data
-  "Gets all records for an entity from state."
-  [state entity-name]
-  (get-in state [:data entity-name] {}))
 
 
 (defn- validate-entity-exists!
@@ -266,7 +266,7 @@
   "Removes multiple records from state atom. Returns count of removed."
   [state-atom entity-name ids]
   (let [ids-set (set ids)
-        existing-ids (set (keys (get-in @state-atom [:data entity-name])))
+        existing-ids (set (keys (get-entity-data @state-atom entity-name)))
         to-remove (set/intersection ids-set existing-ids)
         removed-count (count to-remove)]
     (swap! state-atom update-in [:data entity-name]
@@ -319,13 +319,16 @@
           arg-values-by-owner (group-by :owner-fn-id (vals (get-entity-data state :arg-value)))
           fns-data (get-entity-data state :fn)]
       (loop [to-visit [owner-fn-id]
-             visited #{}]
+             visited #{}
+             iter-count 0]
+        ;; Check iteration limit to prevent infinite loops
+        (sp/check-graph-iteration-limit! iter-count owner-fn-id)
         (if (empty? to-visit)
           visited
           (let [current-id (first to-visit)
                 rest-to-visit (rest to-visit)]
             (if (contains? visited current-id)
-              (recur rest-to-visit visited)
+              (recur rest-to-visit visited (inc iter-count))
               (let [arg-values (get arg-values-by-owner current-id [])
                     ;; Get fn references from arg-values (UUIDs that are fn refs)
                     ref-fn-ids (->> arg-values
@@ -334,7 +337,8 @@
                                     ;; Check if this UUID is actually a fn
                                     (filter #(contains? fns-data %)))]
                 (recur (concat rest-to-visit ref-fn-ids)
-                       (conj visited current-id))))))))))
+                       (conj visited current-id)
+                       (inc iter-count))))))))))
 
 
 ;; === ExecutionGraph helpers ===
@@ -380,7 +384,7 @@
   "Resolves execution graph starting from fn-id.
    Uses BFS to collect all transitively referenced functions.
    Builds indexes once for O(N+M) performance instead of O(N*M).
-   Throws if iteration count exceeds sp/max-graph-iterations."
+   Throws if iteration count exceeds sp/*max-graph-iterations*."
   [state fn-id]
   ;; Build indexes once for efficient lookups
   (let [arg-values-by-owner (group-by :owner-fn-id (vals (get-entity-data state :arg-value)))

@@ -43,6 +43,33 @@
 
 ;; === Validation helpers ===
 
+(def ^:private identifier-pattern
+  "Pattern for valid identifiers (entity names, field names, enum values).
+   Must start with letter, contain only letters/digits/hyphens, not end with hyphen.
+   This ensures safe conversion to SQL identifiers (kebab-case → snake_case)."
+  #"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
+
+
+(defn- valid-identifier-name?
+  "Returns true if the keyword name is a valid identifier for SQL conversion."
+  [kw]
+  (and (keyword? kw)
+       (re-matches identifier-pattern (name kw))))
+
+
+(defn- validate-identifier-name!
+  "Validates that a keyword is suitable for use as a SQL identifier.
+   Throws if the name would be invalid after kebab-case → snake_case conversion."
+  [context kw]
+  (when-not (valid-identifier-name? kw)
+    (throw (ex-info (str "Invalid identifier name: " kw ". "
+                         "Must start with letter, contain only letters/digits/hyphens.")
+                    {:type :schema-error/invalid-identifier
+                     :context context
+                     :value kw
+                     :pattern (str identifier-pattern)}))))
+
+
 (defn- validate-entity-name
   "Validates entity name is a valid keyword."
   [entity-name]
@@ -443,6 +470,9 @@
   (when-not (keyword? (:value entry))
     (throw (ex-info "Enum value :value must be a keyword"
                     {:enum-name enum-name :entry entry})))
+  ;; Validate enum value name is suitable for SQL identifier conversion
+  (validate-identifier-name! {:enum-name enum-name :enum-value (:value entry)}
+                             (:value entry))
   (check-uuid-uniqueness builder (:uuid entry)
                          (str "enum value " enum-name "/" (:value entry))))
 
@@ -516,35 +546,35 @@
     ;; Check entity UUID uniqueness against existing UUIDs
     (check-uuid-uniqueness this entity-uuid (str "entity " entity-name))
     ;; Validate each field has :uuid and check for duplicates using reduce
-    (let [_field-uuids-in-entity
-          (reduce
-            (fn [seen [field-name field-spec]]
-              (when-not (contains? field-spec :uuid)
-                (throw (ex-info "Field missing :uuid"
-                                {:entity entity-name :field field-name :spec field-spec})))
-              (let [field-uuid (:uuid field-spec)]
-                (validate-uuid {:context "field" :entity entity-name :field field-name}
-                               field-uuid)
-                ;; Check field UUID against entity UUID
-                (when (= field-uuid entity-uuid)
-                  (throw (ex-info "Duplicate UUID"
-                                  {:uuid field-uuid
-                                   :new-location (str "field " entity-name "/" field-name)
-                                   :existing-location (str "entity " entity-name)})))
-                ;; Check field UUID against other fields in this entity
-                (when (contains? seen field-uuid)
-                  (throw (ex-info "Duplicate UUID within entity"
-                                  {:entity entity-name
-                                   :field field-name
-                                   :uuid field-uuid})))
-                ;; Check field UUID uniqueness against existing UUIDs in builder
-                (check-uuid-uniqueness this field-uuid
-                                       (str "field " entity-name "/" field-name))
-                (conj seen field-uuid)))
-            #{}
-            fields)
-          ;; Build new known-uuids map with entity and all field UUIDs
-          new-known-uuids (reduce
+    ;; The reduce accumulator tracks seen UUIDs within this entity for duplicate detection
+    (reduce
+      (fn [seen [field-name field-spec]]
+        (when-not (contains? field-spec :uuid)
+          (throw (ex-info "Field missing :uuid"
+                          {:entity entity-name :field field-name :spec field-spec})))
+        (let [field-uuid (:uuid field-spec)]
+          (validate-uuid {:context "field" :entity entity-name :field field-name}
+                         field-uuid)
+          ;; Check field UUID against entity UUID
+          (when (= field-uuid entity-uuid)
+            (throw (ex-info "Duplicate UUID"
+                            {:uuid field-uuid
+                             :new-location (str "field " entity-name "/" field-name)
+                             :existing-location (str "entity " entity-name)})))
+          ;; Check field UUID against other fields in this entity
+          (when (contains? seen field-uuid)
+            (throw (ex-info "Duplicate UUID within entity"
+                            {:entity entity-name
+                             :field field-name
+                             :uuid field-uuid})))
+          ;; Check field UUID uniqueness against existing UUIDs in builder
+          (check-uuid-uniqueness this field-uuid
+                                 (str "field " entity-name "/" field-name))
+          (conj seen field-uuid)))
+      #{}
+      fields)
+    ;; Build new known-uuids map with entity and all field UUIDs
+    (let [new-known-uuids (reduce
                             (fn [acc [field-name field-spec]]
                               (assoc acc (:uuid field-spec)
                                      (str "field " entity-name "/" field-name)))

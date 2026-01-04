@@ -8,6 +8,34 @@
       SQLException)))
 
 
+;; === Configuration Tests ===
+
+(deftest get-query-timeout-seconds-test
+  (testing "returns timeout from core/*query-timeout-ms* converted to seconds"
+    ;; The actual var exists and should be resolvable in test context
+    ;; Default is 30000ms = 30 seconds
+    (let [result (util/get-query-timeout-seconds)]
+      (is (integer? result))
+      (is (pos? result))))
+
+  (testing "returns fallback 30 seconds when var cannot be resolved"
+    ;; Reset the atom for clean test
+    (reset! @#'util/timeout-fallback-logged? false)
+    (with-redefs [resolve (constantly nil)]
+      (is (= 30 (util/get-query-timeout-seconds)))))
+
+  (testing "logs warning only once when using fallback"
+    ;; Reset the atom for clean test
+    (reset! @#'util/timeout-fallback-logged? false)
+    (with-redefs [resolve (constantly nil)]
+      ;; First call should set logged flag
+      (util/get-query-timeout-seconds)
+      (is (true? @(deref #'util/timeout-fallback-logged?)))
+      ;; Second call should not change anything (already logged)
+      (util/get-query-timeout-seconds)
+      (is (true? @(deref #'util/timeout-fallback-logged?))))))
+
+
 ;; === Helper to create SQLException with specific state ===
 
 (defn- make-sql-exception

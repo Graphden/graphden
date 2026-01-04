@@ -1,11 +1,31 @@
 (ns graphden.postgres-storage.util
   "Shared utilities for PostgreSQL storage.
-   Type mapping, naming conversions, SQL helpers, and configuration."
+   Type mapping, naming conversions, SQL helpers, and configuration.
+
+   SQL Injection Prevention Strategy:
+   ---------------------------------
+   This module uses a defense-in-depth approach to prevent SQL injection:
+
+   1. HoneySQL (honey.sql) - All DML queries (SELECT, INSERT, UPDATE, DELETE) are
+      built using HoneySQL which automatically parameterizes values. Values are
+      never interpolated directly into SQL strings.
+
+   2. Identifier validation - For DDL operations (CREATE TABLE, ALTER, etc.) where
+      parameterization isn't possible, all identifiers (table names, column names,
+      enum values) are validated against a strict alphanumeric pattern via
+      `validate-sql-identifier!`. This prevents injection through identifier names.
+
+   3. Type-safe conversions - The `ident->sql` and related functions ensure that
+      only valid, validated identifiers are used in SQL statements."
   (:require
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [clojure.tools.logging :as log]))
 
 
 ;; === Configuration helpers ===
+
+(def ^:private timeout-fallback-logged? (atom false))
+
 
 (defn get-query-timeout-seconds
   "Returns the current query timeout in seconds for JDBC calls.
@@ -17,7 +37,11 @@
   []
   (if-let [timeout-var (resolve 'graphden.postgres-storage.core/*query-timeout-ms*)]
     (quot (deref timeout-var) 1000)
-    30))
+    (do
+      ;; Log warning once to avoid log spam, but alert on potential misconfiguration
+      (when (compare-and-set! timeout-fallback-logged? false true)
+        (log/warn "Could not resolve *query-timeout-ms* from core.clj, using fallback of 30 seconds"))
+      30)))
 
 
 ;; === Error handling ===

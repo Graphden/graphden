@@ -33,7 +33,14 @@
    - :base-fns - Map of fn-name -> fn for base function lookup (optional)
                  If not provided, uses snapshot of default global registry
    - :max-depth - Maximum recursion depth (default 1000)
+                  Depth is incremented for each nested function call.
+                  Set lower values for tighter control over recursion.
    - :timeout-ms - Maximum execution time in ms (default 30000)
+                   IMPORTANT: This is a best-effort timeout checked at the start
+                   of each function call. A long-running base function will complete
+                   fully even if it exceeds the timeout. For hard timeouts on
+                   individual operations, base functions should use their own
+                   timeout mechanisms (e.g., future with deref timeout).
 
    Example with custom base-fns:
    (create-context {:storage s
@@ -98,7 +105,8 @@
    Arguments:
    - context: Execution context (created with create-context)
    - fn-id: UUID of the function to execute
-   - args: Map of additional arguments to provide
+   - args: Map of additional arguments to provide (optional, can be nil or {})
+           Keys are arg-schema-ids (UUIDs), values override stored arg-values.
 
    Returns the result of the function execution.
 
@@ -108,10 +116,16 @@
    exceeds the timeout. For precise timeout control, base functions should
    implement their own timeout logic (e.g., using futures with deref timeout).
 
+   Example base function with hard timeout:
+   (defn http-request-fn [{:keys [url timeout-ms]} ctx]
+     (let [result (future (http/get (force-value url ctx)))]
+       (deref result (or timeout-ms 5000) {:error :timeout})))
+
    Throws:
    - :execution-error/max-depth-exceeded if recursion limit is reached
    - :execution-error/timeout if execution time limit is exceeded
-   - :execution-error/base-fn-not-found if base function is not registered"
+   - :execution-error/base-fn-not-found if base function is not registered
+   - :execution-error/missing-required-arg if required argument not provided"
   [context fn-id args]
   (core/execute context fn-id args))
 
@@ -135,3 +149,27 @@
    - All errors from execute"
   [context fn-id named-args]
   (core/execute-with-named-args context fn-id named-args))
+
+
+(defn execute-by-name
+  "Executes a function by its name (string).
+   Convenience function that looks up the fn entity by name and executes it.
+
+   Arguments:
+   - context: Execution context (created with create-context)
+   - fn-name: String name of the function to execute (e.g., \"my-add-fn\")
+   - named-args: Map of {arg-name-keyword -> value} (optional, can be nil or {})
+
+   Example:
+   (execute-by-name ctx \"calculate-total\" {:items [1 2 3]})
+
+   This looks up the fn with name \"calculate-total\", then resolves arg names
+   to arg-schema-ids and executes.
+
+   Throws:
+   - :execution-error/fn-not-found if no function with the given name exists
+   - :execution-error/ambiguous-fn-name if multiple functions have the same name
+   - :execution-error/invalid-fn-name if fn-name is not a string
+   - All errors from execute-with-named-args"
+  [context fn-name named-args]
+  (core/execute-by-name context fn-name named-args))

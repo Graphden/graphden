@@ -429,10 +429,10 @@
         registry (:base-fns context)
         base-fn (get registry fn-name)]
     (when-not base-fn
-      (log/warn "Base function not found in registry"
-                {:fn-name fn-name
-                 :fn-id fn-id
-                 :available-fns (keys registry)})
+      (log/error "Base function not found in registry"
+                 {:fn-name fn-name
+                  :fn-id fn-id
+                  :available-fns (keys registry)})
       (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry. "
                            "Available functions: " (pr-str (keys registry)))
                       {:type :execution-error/base-fn-not-found
@@ -503,3 +503,41 @@
           id-based-args (resolve-named-args execution-graph fn-id named-args)
           context-with-graph (assoc context :execution-graph execution-graph)]
       (execute-internal context-with-graph fn-id id-based-args))))
+
+
+(defn execute-by-name
+  "Executes a function by its name (string).
+   Convenience function that looks up the fn entity by name and executes it.
+
+   Arguments:
+   - context: Execution context (created with create-context)
+   - fn-name: String name of the function to execute
+   - named-args: Map of {arg-name-keyword -> value} (optional, can be nil or {})
+
+   Returns the result of the function execution.
+
+   Throws:
+   - :execution-error/fn-not-found if no function with the given name exists
+   - All errors from execute-with-named-args"
+  [context fn-name named-args]
+  (when-not (string? fn-name)
+    (throw (ex-info "fn-name must be a string"
+                    {:type :execution-error/invalid-fn-name
+                     :fn-name fn-name
+                     :fn-name-type (type fn-name)})))
+  (let [storage (:storage context)
+        fns (sp/query-entities storage :fn {:name fn-name})]
+    (cond
+      (empty? fns)
+      (throw (ex-info (str "Function '" fn-name "' not found")
+                      {:type :execution-error/fn-not-found
+                       :fn-name fn-name}))
+
+      (> (count fns) 1)
+      (throw (ex-info (str "Multiple functions found with name '" fn-name "'")
+                      {:type :execution-error/ambiguous-fn-name
+                       :fn-name fn-name
+                       :count (count fns)}))
+
+      :else
+      (execute-with-named-args context (:id (first fns)) named-args))))

@@ -70,10 +70,31 @@
 
 
 ;; === Storage Sync ===
+;;
+;; Base functions are synced to storage with deterministic UUIDs generated
+;; using UUID v5 (RFC 4122 name-based SHA-1). This ensures:
+;;
+;; 1. IDEMPOTENT SYNC: Running sync multiple times produces the same UUIDs,
+;;    so existing records are updated rather than duplicated.
+;;
+;; 2. CROSS-ENVIRONMENT CONSISTENCY: The same base function has the same UUID
+;;    in development, staging, and production environments.
+;;
+;; 3. STABLE REFERENCES: Code can reference base function UUIDs as constants
+;;    knowing they won't change between deployments.
+;;
+;; IMPORTANT: The namespace UUID below is a fixed constant. Changing it would
+;; generate different UUIDs for all base functions, breaking existing data.
+;; If you need to change it (migration scenario), you must:
+;; 1. Export all existing fn-schema/arg-schema mappings
+;; 2. Update the namespace UUID
+;; 3. Create a migration to update all references to the new UUIDs
 
 (def ^:private base-fn-namespace-uuid
   "Namespace UUID for generating deterministic UUIDs for base functions.
-   This is a random UUID used as the namespace for UUID v5 generation."
+   This is a fixed constant used as the namespace for UUID v5 generation.
+   DO NOT CHANGE this value without a migration plan - it would break
+   all existing base function references in storage."
   #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d")
 
 

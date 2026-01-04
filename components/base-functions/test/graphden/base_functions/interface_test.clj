@@ -354,6 +354,10 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Invalid regex pattern"
           (call-base-fn :str-split {:s "test" :sep "[invalid"}))))
 
+  (testing "str-split - empty separator throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"separator cannot be empty"
+          (call-base-fn :str-split {:s "test" :sep ""}))))
+
   (testing "str-join"
     (is (= "a,b,c" (call-base-fn :str-join {:coll ["a" "b" "c"] :sep ","})))
     (is (= "abc" (call-base-fn :str-join {:coll ["a" "b" "c"]})))))
@@ -417,9 +421,13 @@
     (is (= {:a 1 :b 2} (call-base-fn :into {:to {} :from [[:a 1] [:b 2]]}))))
 
   (testing "range"
-    (is (= [0 1 2] (vec (call-base-fn :range {:end 3}))))
-    (is (= [1 2 3] (vec (call-base-fn :range {:start 1 :end 4}))))
-    (is (= [0 2 4] (vec (call-base-fn :range {:start 0 :end 5 :step 2})))))
+    (is (= [0 1 2] (call-base-fn :range {:end 3})))
+    (is (= [1 2 3] (call-base-fn :range {:start 1 :end 4})))
+    (is (= [0 2 4] (call-base-fn :range {:start 0 :end 5 :step 2}))))
+
+  (testing "range - step=0 throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"step cannot be zero"
+          (call-base-fn :range {:start 0 :end 10 :step 0}))))
 
   (testing "repeat"
     (is (= [5 5 5] (call-base-fn :repeat {:n 3 :x 5}))))

@@ -1669,3 +1669,49 @@
                             #"Unknown argument name"
             (exec/execute-with-named-args ctx (:id fn-rec) {:unknown-arg 42})))
       (sp/close storage))))
+
+
+;; === execute-by-name Tests ===
+
+(deftest execute-by-name-test
+  (testing "executes function by name"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 10})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 20})
+          ctx (exec/create-context {:storage storage})]
+      ;; Note: the fn entity is named "my-add", not "add"
+      (is (= 30 (exec/execute-by-name ctx "my-add" nil)))
+      (sp/close storage)))
+
+  (testing "executes function by name with named args"
+    (let [storage (create-test-storage)
+          _ (setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      ;; Note: the fn entity is named "my-add", not "add"
+      (is (= 15 (exec/execute-by-name ctx "my-add" {:a 5 :b 10})))
+      (sp/close storage)))
+
+  (testing "throws when function name not found"
+    (let [storage (create-test-storage)
+          _ (setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Function 'nonexistent' not found"
+            (exec/execute-by-name ctx "nonexistent" nil)))
+      (sp/close storage)))
+
+  (testing "throws when fn-name is not a string"
+    (let [storage (create-test-storage)
+          _ (setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"fn-name must be a string"
+            (exec/execute-by-name ctx :my-add nil)))
+      (sp/close storage))))

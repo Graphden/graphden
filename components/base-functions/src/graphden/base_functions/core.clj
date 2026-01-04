@@ -196,8 +196,13 @@
    :str-split {:args {:s :text, :sep :text}
                :return-type :jsonb
                :impl (fn [{:keys [s sep]} _ctx]
+                       (when (empty? sep)
+                         (throw (ex-info "separator cannot be empty"
+                                         {:type :execution-error/invalid-separator
+                                          :separator sep
+                                          :string s})))
                        (try
-                         (str/split s (re-pattern sep))
+                         (vec (str/split s (re-pattern sep)))
                          (catch java.util.regex.PatternSyntaxException e
                            (throw (ex-info "Invalid regex pattern in separator"
                                            {:type :execution-error/invalid-regex
@@ -269,10 +274,15 @@
                :return-type :jsonb
                :impl (fn [{:keys [to from]} _ctx] (into to from))}
 
-   :range     {:args {:start :int, :end :int, :step :int}
+   :range     {:args {:start :int, :end :int, :step {:type :int :required false}}
                :return-type :jsonb
                :impl (fn [{:keys [start end step]} _ctx]
-                       (range (or start 0) end (or step 1)))}
+                       (let [actual-step (or step 1)]
+                         (when (zero? actual-step)
+                           (throw (ex-info "step cannot be zero (would cause infinite loop)"
+                                           {:type :execution-error/invalid-step
+                                            :start start :end end :step step})))
+                         (vec (range (or start 0) end actual-step))))}
 
    :repeat    {:args {:n :int, :x :any}
                :return-type :jsonb

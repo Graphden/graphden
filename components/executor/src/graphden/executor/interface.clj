@@ -75,6 +75,12 @@
 
    Returns the result of the function execution.
 
+   Timeout semantics:
+   Timeout is checked at the START of each function call, not during execution.
+   This means a long-running base function will complete fully even if it
+   exceeds the timeout. For precise timeout control, base functions should
+   implement their own timeout logic (e.g., using futures with deref timeout).
+
    Throws:
    - :execution-error/max-depth-exceeded if recursion limit is reached
    - :execution-error/timeout if execution time limit is exceeded

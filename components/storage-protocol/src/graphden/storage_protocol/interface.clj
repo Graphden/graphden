@@ -17,6 +17,7 @@
    4. Call (close storage) when done"
   (:require
     [clojure.set :as set]
+    [clojure.tools.logging :as log]
     [graphden.data-schema-protocol.interface :as ds])
   (:import
     (java.util.concurrent.locks
@@ -505,8 +506,17 @@
 
 (defn check-graph-iteration-limit!
   "Checks if iteration count exceeds the limit.
+   Logs warning at 80% of limit to help identify potential runaway graphs.
    Throws ExceptionInfo if limit is exceeded."
   [iteration-count fn-id]
+  (let [warning-threshold (long (* 0.8 *max-graph-iterations*))]
+    (when (and (> iteration-count warning-threshold)
+               (< iteration-count *max-graph-iterations*))
+      (log/warn "Graph resolution approaching iteration limit"
+                {:fn-id fn-id
+                 :iteration-count iteration-count
+                 :max-iterations *max-graph-iterations*
+                 :percent-used (int (* 100 (/ iteration-count *max-graph-iterations*)))})))
   (when (> iteration-count *max-graph-iterations*)
     (throw (ex-info "Execution graph resolution exceeded maximum iterations"
                     {:type :execution-error/graph-too-large
@@ -1018,6 +1028,12 @@
 (defn validate-required-fields!
   "Validates that all required (non-nullable) fields are present and not nil.
    Throws ExceptionInfo if validation fails.
+
+   This is SHAPE-ONLY validation - it checks presence/nil but NOT types.
+   Type validation happens at the storage backend level during actual
+   insert/update operations. This separation allows for:
+   - Fast presence checks before hitting the database
+   - Backend-specific type coercion (e.g., string->UUID in PostgreSQL)
 
    Arguments:
    - entity-name: keyword name of the entity

@@ -1066,7 +1066,34 @@
             (core/create-pool (assoc valid-opts :connection-timeout 0))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"connection-timeout must be a positive integer"
-            (core/create-pool (assoc valid-opts :connection-timeout -1000)))))))
+            (core/create-pool (assoc valid-opts :connection-timeout -1000)))))
+
+    (testing "pool-size cannot exceed 100"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"pool-size exceeds maximum allowed value of 100"
+            (core/create-pool (assoc valid-opts :pool-size 101)))))
+
+    (testing "idle-timeout must be less than max-lifetime"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"idle-timeout must be less than max-lifetime"
+            (core/create-pool (assoc valid-opts
+                                     :idle-timeout 600000
+                                     :max-lifetime 500000))))
+      ;; Equal values should also fail
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"idle-timeout must be less than max-lifetime"
+            (core/create-pool (assoc valid-opts
+                                     :idle-timeout 600000
+                                     :max-lifetime 600000)))))
+
+    (testing "idle-timeout = 0 is allowed (never retire idle connections)"
+      ;; idle-timeout = 0 is a special case meaning "never retire"
+      ;; This should not throw even though 0 < max-lifetime
+      (let [pool (core/create-pool (assoc valid-opts
+                                          :idle-timeout 0
+                                          :max-lifetime 1800000))]
+        (is (some? pool))
+        (core/close-pool pool)))))
 
 
 (deftest with-query-timeout-validation-test

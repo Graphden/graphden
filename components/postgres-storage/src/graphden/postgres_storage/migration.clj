@@ -2,6 +2,7 @@
   "Schema migration logic for PostgreSQL.
    Handles first-time initialization and incremental migrations."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.postgres-storage.ddl :as ddl]
     [graphden.postgres-storage.introspection :as introspection]
@@ -241,10 +242,37 @@
        :enum-values {:created @created-enum-values}})))
 
 
+(defn- log-migration-summary
+  "Logs a summary of migration changes at info level."
+  [changes first-init?]
+  (let [entities-created (count (get-in changes [:entities :created] []))
+        entities-renamed (count (get-in changes [:entities :renamed] {}))
+        fields-created (count (get-in changes [:fields :created] []))
+        fields-renamed (count (get-in changes [:fields :renamed] []))
+        enums-created (count (get-in changes [:enums :created] []))
+        enums-renamed (count (get-in changes [:enums :renamed] {}))
+        enum-values-created (count (get-in changes [:enum-values :created] []))
+        total-changes (+ entities-created entities-renamed
+                         fields-created fields-renamed
+                         enums-created enums-renamed
+                         enum-values-created)]
+    (if (zero? total-changes)
+      (log/info "Schema migration completed: no changes needed")
+      (log/info (if first-init? "Schema initialized" "Schema migrated")
+                {:entities-created entities-created
+                 :entities-renamed entities-renamed
+                 :fields-created fields-created
+                 :fields-renamed fields-renamed
+                 :enums-created enums-created
+                 :enums-renamed enums-renamed
+                 :enum-values-created enum-values-created}))))
+
+
 (defn do-initialize
   "Performs schema initialization/migration.
    All DDL and metadata operations are wrapped in a single transaction
-   to ensure atomicity - either all changes succeed or none do."
+   to ensure atomicity - either all changes succeed or none do.
+   Logs a summary of changes at info level."
   [ds schema]
   ;; Check for snake_case naming collisions before any DDL
   (util/check-snake-case-collisions! {:context "entities"} (ds/entities schema))
@@ -253,8 +281,11 @@
 
   (metadata/ensure-metadata-table! ds)
   (let [metadata-rows (metadata/read-metadata-rows ds)
-        old-metadata (metadata/parse-metadata metadata-rows)]
-    (jdbc/with-transaction [tx ds]
-                           (if (nil? old-metadata)
-                             (do-first-init! tx schema)
-                             (do-migration! tx schema old-metadata)))))
+        old-metadata (metadata/parse-metadata metadata-rows)
+        first-init? (nil? old-metadata)
+        changes (jdbc/with-transaction [tx ds]
+                                       (if first-init?
+                                         (do-first-init! tx schema)
+                                         (do-migration! tx schema old-metadata)))]
+    (log-migration-summary changes first-init?)
+    changes))

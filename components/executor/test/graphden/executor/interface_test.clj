@@ -1406,3 +1406,113 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Maximum recursion depth exceeded"
             (exec/execute ctx (:id fn-a) {})))
       (sp/close storage))))
+
+
+;; === Context Validation Tests ===
+
+(deftest context-validation-test
+  (testing "throws when max-depth exceeds upper limit"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"max-depth exceeds maximum allowed value"
+            (exec/create-context {:storage storage :max-depth 100001})))
+      (sp/close storage)))
+
+  (testing "accepts max-depth at upper limit"
+    (let [storage (create-test-storage)
+          ctx (exec/create-context {:storage storage :max-depth 100000})]
+      (is (some? ctx))
+      (sp/close storage)))
+
+  (testing "throws when max-depth is not a positive integer"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"max-depth must be a positive integer"
+            (exec/create-context {:storage storage :max-depth 0})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"max-depth must be a positive integer"
+            (exec/create-context {:storage storage :max-depth -1})))
+      (sp/close storage))))
+
+
+;; === Additional Timestamp Type Tests ===
+
+(deftest local-date-time-type-validation-test
+  (testing "accepts valid LocalDateTime value for timestamptz"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-timestamp
+              (fn [{:keys [ts]} ctx]
+                (exec/force-value ts ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-timestamp"
+                                       :returned-type :timestamptz})
+          ts-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id fn-schema)
+                                    :name "ts"
+                                    :type :timestamptz
+                                    :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-timestamp"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id ts-arg)
+                               :value (java.time.Instant/now)})
+          ctx (exec/create-context {:storage storage})
+          test-ldt (java.time.LocalDateTime/of 2024 1 1 12 0 0)]
+      (is (= test-ldt (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-ldt})))
+      (sp/close storage))))
+
+
+;; === Timeout Validation Tests ===
+
+(deftest timeout-ms-validation-test
+  (testing "throws when timeout-ms is below minimum (50ms)"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"timeout-ms must be at least 50ms"
+            (exec/create-context {:storage storage :timeout-ms 10})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"timeout-ms must be at least 50ms"
+            (exec/create-context {:storage storage :timeout-ms 49})))
+      (sp/close storage)))
+
+  (testing "accepts timeout-ms at minimum (50ms)"
+    (let [storage (create-test-storage)
+          ctx (exec/create-context {:storage storage :timeout-ms 50})]
+      (is (some? ctx))
+      (sp/close storage))))
+
+
+;; === Unknown Type Validation Tests ===
+
+(deftest unknown-type-validation-test
+  (testing "unknown types are accepted without error (forward compatibility)"
+    ;; When a new type is added to the schema but not yet to known-types,
+    ;; the system should accept any value and log a warning
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-custom
+              (fn [{:keys [data]} ctx]
+                (exec/force-value data ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-custom"
+                                       :returned-type :text})
+          data-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "data"
+                                      :type :custom-future-type  ; Unknown type
+                                      :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-custom"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id data-arg)
+                               :value "default"})
+          ctx (exec/create-context {:storage storage})]
+      ;; Unknown type should accept any value without throwing
+      (is (= "test-value" (exec/execute ctx (:id fn-rec) {(:id data-arg) "test-value"})))
+      (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
+      (sp/close storage))))

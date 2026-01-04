@@ -89,59 +89,68 @@
 (defn- parse-metadata-impl
   "Parses metadata rows into structured format.
    When strict? is true, throws if orphaned entries are detected.
-   When strict? is false, skips orphaned entries silently."
+   When strict? is false, skips orphaned entries with warning and logs summary."
   [rows strict?]
   (when (seq rows)
-    (let [uuid->row (into {} (map (fn [r] [(:uuid r) r]) rows))]
-      (reduce
-        (fn [acc row]
-          (let [uuid (:uuid row)
-                kind (keyword (:kind row))
-                n (keyword (:name row))
-                parent-uuid (:parent_uuid row)
-                parent-row (get uuid->row parent-uuid)
-                extra (parse-extra (:extra row))]
-            (case kind
-              :entity (assoc-in acc [:entities uuid] n)
-              :field (if parent-row
-                       (assoc-in acc [:fields uuid]
-                                 (merge {:entity (keyword (:name parent-row))
-                                         :field n}
-                                        (when extra
-                                          {:type (:type extra)
-                                           :nullable? (:nullable? extra)})))
-                       (if strict?
-                         (throw (ex-info "Orphaned field entry in metadata"
-                                         {:type :metadata-corruption
-                                          :field-uuid uuid
-                                          :field-name n
-                                          :missing-parent-uuid parent-uuid}))
-                         (do
-                           (log/warn "Orphaned field entry in metadata, skipping"
-                                     {:field-uuid uuid
-                                      :field-name n
-                                      :missing-parent-uuid parent-uuid})
-                           acc)))
-              :enum (assoc-in acc [:enums uuid] n)
-              :enum-value (if parent-row
-                            (assoc-in acc [:enum-values uuid]
-                                      {:enum (keyword (:name parent-row))
-                                       :value n})
-                            (if strict?
-                              (throw (ex-info "Orphaned enum-value entry in metadata"
-                                              {:type :metadata-corruption
-                                               :enum-value-uuid uuid
-                                               :value-name n
-                                               :missing-parent-uuid parent-uuid}))
-                              (do
-                                (log/warn "Orphaned enum-value entry in metadata, skipping"
-                                          {:enum-value-uuid uuid
-                                           :value-name n
-                                           :missing-parent-uuid parent-uuid})
-                                acc)))
-              acc)))
-        {:entities {} :fields {} :enums {} :enum-values {}}
-        rows))))
+    (let [uuid->row (into {} (map (fn [r] [(:uuid r) r]) rows))
+          orphaned-count (atom 0)
+          result (reduce
+                   (fn [acc row]
+                     (let [uuid (:uuid row)
+                           kind (keyword (:kind row))
+                           n (keyword (:name row))
+                           parent-uuid (:parent_uuid row)
+                           parent-row (get uuid->row parent-uuid)
+                           extra (parse-extra (:extra row))]
+                       (case kind
+                         :entity (assoc-in acc [:entities uuid] n)
+                         :field (if parent-row
+                                  (assoc-in acc [:fields uuid]
+                                            (merge {:entity (keyword (:name parent-row))
+                                                    :field n}
+                                                   (when extra
+                                                     {:type (:type extra)
+                                                      :nullable? (:nullable? extra)})))
+                                  (if strict?
+                                    (throw (ex-info "Orphaned field entry in metadata"
+                                                    {:type :metadata-corruption
+                                                     :field-uuid uuid
+                                                     :field-name n
+                                                     :missing-parent-uuid parent-uuid}))
+                                    (do
+                                      (swap! orphaned-count inc)
+                                      (log/debug "Orphaned field entry in metadata, skipping"
+                                                 {:field-uuid uuid
+                                                  :field-name n
+                                                  :missing-parent-uuid parent-uuid})
+                                      acc)))
+                         :enum (assoc-in acc [:enums uuid] n)
+                         :enum-value (if parent-row
+                                       (assoc-in acc [:enum-values uuid]
+                                                 {:enum (keyword (:name parent-row))
+                                                  :value n})
+                                       (if strict?
+                                         (throw (ex-info "Orphaned enum-value entry in metadata"
+                                                         {:type :metadata-corruption
+                                                          :enum-value-uuid uuid
+                                                          :value-name n
+                                                          :missing-parent-uuid parent-uuid}))
+                                         (do
+                                           (swap! orphaned-count inc)
+                                           (log/debug "Orphaned enum-value entry in metadata, skipping"
+                                                      {:enum-value-uuid uuid
+                                                       :value-name n
+                                                       :missing-parent-uuid parent-uuid})
+                                           acc)))
+                         acc)))
+                   {:entities {} :fields {} :enums {} :enum-values {}}
+                   rows)]
+      ;; Log summary if any orphaned entries were found
+      (when (pos? @orphaned-count)
+        (log/warn "Metadata parsing found orphaned entries"
+                  {:orphaned-count @orphaned-count
+                   :total-rows (count rows)}))
+      result)))
 
 
 (defn parse-metadata

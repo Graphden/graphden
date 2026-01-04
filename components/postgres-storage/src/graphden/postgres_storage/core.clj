@@ -41,6 +41,11 @@
   "Executes f with a custom query timeout (in milliseconds).
    Timeout must be a positive integer. Minimum is 1000ms (1 second).
 
+   Why 1000ms minimum?
+   - JDBC setQueryTimeout uses seconds (integer), values <1000ms become 0
+   - SQL queries need time for network roundtrip and query parsing
+   - This is different from executor timeout (50ms min) which covers overall execution
+
    Example:
    (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
@@ -110,6 +115,11 @@
     (throw (ex-info "pool-size must be a positive integer"
                     {:type :config-error/invalid-pool-size
                      :pool-size pool-size})))
+  (when (> pool-size 100)
+    (throw (ex-info "pool-size exceeds maximum allowed value of 100"
+                    {:type :config-error/invalid-pool-size
+                     :pool-size pool-size
+                     :max-allowed 100})))
   (when-not (pos-int? min-idle)
     (throw (ex-info "min-idle must be a positive integer"
                     {:type :config-error/invalid-min-idle
@@ -124,7 +134,17 @@
     (throw (ex-info "connection-timeout must be a positive integer (ms)"
                     {:type :config-error/invalid-timeout
                      :connection-timeout connection-timeout})))
+  ;; Validate idle-timeout vs max-lifetime relationship
+  ;; idle-timeout = 0 is special case meaning "never retire idle connections"
+  (when (and (pos? idle-timeout) (>= idle-timeout max-lifetime))
+    (throw (ex-info "idle-timeout must be less than max-lifetime"
+                    {:type :config-error/invalid-pool-config
+                     :idle-timeout idle-timeout
+                     :max-lifetime max-lifetime})))
   (log/info "Creating PostgreSQL connection pool" {:pool-size pool-size :min-idle min-idle})
+  ;; Note: HikariCP validates connectivity on first connection acquisition.
+  ;; Configuration errors (wrong password, unreachable host) will be detected
+  ;; when the first query is executed, not during pool creation.
   (let [config (HikariConfig.)]
     (HikariConfig/.setJdbcUrl config jdbc-url)
     (HikariConfig/.setUsername config username)
@@ -141,12 +161,22 @@
 (defn close-pool
   "Closes a HikariCP connection pool. Idempotent - safe to call multiple times.
    HikariDataSource.close() is itself thread-safe and idempotent.
+
+   Concurrent behavior:
+   - Queries in-flight will complete or fail depending on timing
+   - New connection acquisitions after close() will fail immediately
+   - Connections already checked out will work until returned to pool
+
    Note: When called from PostgresStorage.close(), synchronization is handled
    by the storage's lock. Direct callers should ensure proper synchronization."
   [^HikariDataSource pool]
   (when (and pool (not (HikariDataSource/.isClosed pool)))
     (log/info "Closing PostgreSQL connection pool")
-    (HikariDataSource/.close pool)))
+    (try
+      (HikariDataSource/.close pool)
+      (log/debug "PostgreSQL connection pool closed successfully")
+      (catch Exception e
+        (log/error e "Failed to close PostgreSQL connection pool gracefully")))))
 
 
 ;; === Storage record ===
@@ -157,13 +187,17 @@
    Cache is invalidated on schema changes (initialize).
 
    NOTE: Returns nil without caching if table not found (not initialized yet).
-   This prevents caching stale nil values during initialization race conditions."
+   This prevents caching stale nil values during initialization race conditions.
+
+   Cache safety: reset! only happens after parse-metadata-lenient successfully returns.
+   If parsing throws, cache remains unchanged (Clojure let-binding evaluation order)."
   [pool metadata-cache lock]
   (or @metadata-cache
       (locking lock
         ;; Double-check after acquiring lock
         (or @metadata-cache
             (try
+              ;; Parse first, cache only on success (let ensures order)
               (let [result (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))]
                 (reset! metadata-cache result)
                 result)
@@ -202,6 +236,8 @@
   (close
     [_this]
     (locking lock
+      ;; Clear cache first to prevent memory leak from stale references
+      (reset! metadata-cache nil)
       (close-pool pool))
     nil)
 

@@ -60,25 +60,28 @@
 
 (defn- parse-pgobject
   "Parses PGobject values (like JSONB) to Clojure data.
-   Wraps JSON parsing errors with context information."
+   Wraps JSON parsing errors with context information.
+   Returns nil for null PGobject values (SQL NULL stored in JSONB column)."
   [v]
   (if (instance? PGobject v)
     (let [pg-type (PGobject/.getType v)
           pg-value (PGobject/.getValue v)]
-      (if (= pg-type "jsonb")
-        (try
-          (json/parse-string pg-value true)
-          ;; Catch only JSON parsing errors - other exceptions (OOM, connection issues)
-          ;; should propagate as-is to avoid masking infrastructure problems
-          (catch JsonParseException e
-            (throw (ex-info "Failed to parse JSONB value"
-                            {:type :parse-error/jsonb
-                             :raw-value (if (> (count pg-value) 100)
-                                          (str (subs pg-value 0 100) "...")
-                                          pg-value)
-                             :cause (Throwable/.getMessage e)}
-                            e))))
-        pg-value))
+      ;; Handle NULL values - PGobject can have null value for SQL NULL
+      (when pg-value
+        (if (= pg-type "jsonb")
+          (try
+            (json/parse-string pg-value true)
+            ;; Catch only JSON parsing errors - other exceptions (OOM, connection issues)
+            ;; should propagate as-is to avoid masking infrastructure problems
+            (catch JsonParseException e
+              (throw (ex-info "Failed to parse JSONB value"
+                              {:type :parse-error/jsonb
+                               :raw-value (if (> (count pg-value) 100)
+                                            (str (subs pg-value 0 100) "...")
+                                            pg-value)
+                               :cause (Throwable/.getMessage e)}
+                              e))))
+          pg-value)))
     v))
 
 
@@ -362,15 +365,23 @@
 
 ;; === ExecutionGraph ===
 
+(def ^:private max-parent-chain-depth
+  "Maximum depth for parent chain traversal to prevent runaway recursion.
+   Should match or exceed executor's default max-depth (1000)."
+  1000)
+
+
 (defn- collect-parent-chains-batch
   "Collects parent chains for multiple fns using recursive CTE.
-   Returns {fn-id -> [chain-fn-ids from child to root]}."
+   Returns {fn-id -> [chain-fn-ids from child to root]}.
+   Limits recursion depth to max-parent-chain-depth to prevent runaway queries."
   [ds fn-ids]
   (if (empty? fn-ids)
     {}
     (let [fn-ids-vec (vec fn-ids)
           ;; Use recursive CTE to get all parent chains at once
           ;; The 'origin' column tracks which starting fn-id each chain belongs to
+          ;; depth < max-parent-chain-depth prevents infinite recursion
           query (sql/format
                   {:with-recursive
                    [[:parent_chain
@@ -380,7 +391,8 @@
                         :where [:in :id fn-ids-vec]}
                        {:select [:f.id :f.parent_fn_id :pc.origin [[:+ :pc.depth [:raw "1"]] :depth]]
                         :from [[:fn :f]]
-                        :join [[:parent_chain :pc] [:= :f.id :pc.parent_fn_id]]}]}]]
+                        :join [[:parent_chain :pc] [:= :f.id :pc.parent_fn_id]]
+                        :where [:< :pc.depth max-parent-chain-depth]}]}]]
                    :select [:id :origin :depth]
                    :from [:parent_chain]
                    :order-by [:origin :depth]}
@@ -388,13 +400,20 @@
       (with-sql-error-handling :collect-parent-chains {:fn-count (count fn-ids)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout (get-query-timeout)})]
-          ;; Group by origin and extract ordered chain
-          (->> rows
-               (group-by :origin)
-               (map (fn [[origin chain-rows]]
-                      [origin (mapv :id (sort-by :depth chain-rows))]))
-               (into {})))))))
+                                   :timeout (get-query-timeout)})
+              ;; Group by origin and extract ordered chain
+              result (->> rows
+                          (group-by :origin)
+                          (map (fn [[origin chain-rows]]
+                                 [origin (mapv :id (sort-by :depth chain-rows))]))
+                          (into {}))
+              ;; Warn if any chain reached the depth limit
+              max-depth-found (apply max 0 (map :depth rows))]
+          (when (>= max-depth-found max-parent-chain-depth)
+            (log/warn "Parent chain reached maximum depth limit"
+                      {:max-depth max-parent-chain-depth
+                       :fn-ids fn-ids-vec}))
+          result)))))
 
 
 (defn- load-arg-values-batch

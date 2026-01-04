@@ -1,6 +1,7 @@
 (ns graphden.executor.core
   "Core implementation of the function executor."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -54,14 +55,39 @@
    depth])
 
 
+(def ^:private max-depth-limit
+  "Upper limit for max-depth to prevent accidental resource exhaustion.
+   100000 is generous but prevents typos like 1000000000."
+  100000)
+
+
 (defn create-context
   "Creates initial execution context. Note: execution-graph is populated
-   later when execute is called with a root fn-id."
+   later when execute is called with a root fn-id.
+
+   Validates:
+   - storage is required
+   - timeout-ms must be at least 50ms (allows for fast test cases)
+   - max-depth must be positive and <= 100000"
   [{:keys [storage max-depth timeout-ms]
     :or {max-depth 1000
          timeout-ms 30000}}]
   (when-not storage
     (throw (ex-info "Storage is required" {:type :execution-error/invalid-context})))
+  (when (and timeout-ms (< timeout-ms 50))
+    (throw (ex-info "timeout-ms must be at least 50ms"
+                    {:type :execution-error/invalid-context
+                     :timeout-ms timeout-ms
+                     :min-allowed 50})))
+  (when (and max-depth (not (pos-int? max-depth)))
+    (throw (ex-info "max-depth must be a positive integer"
+                    {:type :execution-error/invalid-context
+                     :max-depth max-depth})))
+  (when (and max-depth (> max-depth max-depth-limit))
+    (throw (ex-info (str "max-depth exceeds maximum allowed value of " max-depth-limit)
+                    {:type :execution-error/invalid-context
+                     :max-depth max-depth
+                     :max-allowed max-depth-limit})))
   (->ExecutionContext storage nil max-depth timeout-ms (System/currentTimeMillis) 0))
 
 
@@ -107,7 +133,10 @@
 
 (defn- truncate-value
   "Truncates large values for error messages to avoid huge exception data.
-   Returns a shortened representation for display purposes."
+   Returns a shortened representation for display purposes.
+
+   Uses pr-str for consistent Clojure-readable output. The max-len parameter
+   controls truncation; callers typically use 100 chars for error context."
   [value max-len]
   (let [s (pr-str value)]
     (if (> (count s) max-len)
@@ -149,9 +178,23 @@
                      :provided-type (type provided-value)}))))
 
 
+(def ^:private known-types
+  "Set of known types for logging purposes."
+  #{:fn :ref :int :bool :text :numeric :jsonb :bytes :timestamptz :enum :uuid :union})
+
+
 (defn- type-mismatch?
   "Returns true if provided-value doesn't match the expected arg-type.
-   Returns false for :union type (accepts any value) and unknown types."
+
+   Type validation rules:
+   - Known types: strict validation based on Clojure predicates
+   - :union type: accepts any value (validation happens at schema level,
+     where union variants are checked against allowed types)
+   - Unknown types: returns false (permissive) to allow forward compatibility
+     with new types added to the schema. Logs a warning for debugging.
+
+   This is a runtime check for user-provided arguments only. Values from
+   the execution graph (arg-values) are assumed to be already validated."
   [arg-type provided-value]
   (case arg-type
     :fn          (not (uuid? provided-value))
@@ -167,14 +210,25 @@
                           (instance? java.util.Date provided-value)))
     :enum        (not (keyword? provided-value))
     :uuid        (not (uuid? provided-value))
-    ;; :union and unknown types - no strict validation
-    false))
+    :union       false  ; Union types accept any value
+    ;; Unknown type - log warning and accept (forward compatibility)
+    (do
+      (when-not (contains? known-types arg-type)
+        (log/warn "Unknown argument type encountered, skipping validation"
+                  {:type arg-type :value-type (type provided-value)}))
+      false)))
 
 
 (defn- validate-provided-arg-type!
   "Validates that a provided argument matches the expected arg-schema type.
    Throws ExceptionInfo with detailed context if type mismatch detected.
-   Note: This is a runtime check for type mismatches."
+
+   Called from build-thunk when a user provides an argument that overrides
+   a stored arg-value. This ensures user-provided values match the expected
+   type before creating a LiteralThunk.
+
+   Note: Stored arg-values from the execution graph are not validated here;
+   they are assumed to be valid from schema-level checks during creation."
   [provided-value arg-schema]
   (when-not (and arg-schema (:type arg-schema))
     (throw (ex-info "Invalid arg-schema: missing type"
@@ -308,6 +362,10 @@
         registry @base-fns-registry
         base-fn (get registry fn-name)]
     (when-not base-fn
+      (log/warn "Base function not found in registry"
+                {:fn-name fn-name
+                 :fn-id fn-id
+                 :available-fns (keys registry)})
       (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry. "
                            "Available functions: " (pr-str (keys registry)))
                       {:type :execution-error/base-fn-not-found

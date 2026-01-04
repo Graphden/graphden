@@ -176,10 +176,16 @@
 
 (defn validate-sql-identifier!
   "Validates that a string is a safe SQL identifier.
-   Prevents SQL injection in DDL statements where parameterization isn't possible."
+   Prevents SQL injection in DDL statements where parameterization isn't possible.
+   Identifiers must be lowercase because PostgreSQL folds unquoted identifiers to lowercase,
+   and using uppercase would create case-sensitivity issues."
   [s context]
   (when-not (re-matches sql-identifier-pattern s)
-    (throw (ex-info "Invalid SQL identifier"
+    (throw (ex-info (str "Invalid SQL identifier: '" s "'. "
+                         "Must start with lowercase letter and contain only "
+                         "lowercase letters, digits, and underscores. "
+                         "Uppercase is not allowed because PostgreSQL folds "
+                         "unquoted identifiers to lowercase.")
                     {:value s
                      :context context
                      :pattern (str sql-identifier-pattern)}))))
@@ -187,9 +193,18 @@
 
 (defn enum-value->sql
   "Converts an enum value keyword to SQL string (snake_case, no quotes wrapper).
-   Validates the result to prevent SQL injection."
+   Validates the result to prevent SQL injection.
+
+   Note: Uppercase letters in keyword will cause validation to fail since
+   PostgreSQL enum values must be lowercase (they are case-sensitive and
+   we use unquoted identifiers which PostgreSQL folds to lowercase)."
   [k]
-  (let [sql-val (str/replace (name k) "-" "_")]
+  (let [kw-name (name k)
+        sql-val (str/replace kw-name "-" "_")]
+    ;; Log warning if keyword contains uppercase (will fail validation anyway)
+    (when (not= kw-name (str/lower-case kw-name))
+      (log/warn "Enum value keyword contains uppercase letters which are not allowed"
+                {:keyword k :would-become sql-val}))
     (validate-sql-identifier! sql-val {:type :enum-value :keyword k})
     sql-val))
 

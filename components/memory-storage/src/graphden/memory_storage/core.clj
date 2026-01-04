@@ -159,7 +159,12 @@
 (defn- validate-unique-constraints!
   "Validates unique constraints for an entity.
    Checks that the data doesn't violate any unique constraints.
-   exclude-id: optional id to exclude from check (for updates)."
+   exclude-id: optional id to exclude from check (for updates).
+
+   NULL handling follows PostgreSQL semantics: NULL values are not considered
+   equal to each other for uniqueness purposes. If ANY field in a unique
+   constraint is NULL, the constraint check is skipped (line with `every? some?`).
+   This means multiple rows can have NULL in unique constraint fields."
   [state entity-name data exclude-id]
   (let [constraints (get-in state [:entities entity-name :constraints])
         existing-records (vals (get-entity-data state entity-name))]
@@ -177,12 +182,13 @@
 
 
 (defn- validate-entity-exists!
-  "Validates that entity exists in schema. Throws :table-not-found if not.
-   This provides consistent behavior with postgres-storage."
+  "Validates that entity exists in schema. Throws :entity-not-in-schema if not.
+   Note: postgres-storage uses :table-not-found (PostgreSQL-specific term),
+   while memory-storage uses :entity-not-in-schema (storage-agnostic term)."
   [state entity-name]
   (when-not (contains? (:entities state) entity-name)
     (throw (ex-info "Entity not found in schema"
-                    {:type :table-not-found
+                    {:type :entity-not-in-schema
                      :entity entity-name}))))
 
 
@@ -238,16 +244,28 @@
 
 (defn- create-records-atomic!
   "Atomically validates and creates multiple records. Returns sequence of records.
-   All validations happen inside swap! to ensure atomicity."
+   All validations happen inside swap! to ensure atomicity.
+   On validation failure, logs which record (by index) failed and includes
+   batch context in the exception data."
   [state-atom entity-name records]
   (swap! state-atom
          (fn [state]
-           (reduce (fn [s record]
-                     (validate-required-fields! s entity-name record)
-                     (validate-unique-constraints! s entity-name record nil)
-                     (assoc-in s [:data entity-name (:id record)] record))
-                   state
-                   records)))
+           (first
+             (reduce (fn [[s idx] record]
+                       (try
+                         (validate-required-fields! s entity-name record)
+                         (validate-unique-constraints! s entity-name record nil)
+                         [(assoc-in s [:data entity-name (:id record)] record) (inc idx)]
+                         (catch clojure.lang.ExceptionInfo e
+                           (log/error "Batch create failed at record index" idx
+                                      {:entity entity-name :record-id (:id record)})
+                           (throw (ex-info (ex-message e)
+                                           (assoc (ex-data e)
+                                                  :batch-index idx
+                                                  :batch-size (count records))
+                                           e)))))
+                     [state 0]
+                     records))))
   records)
 
 

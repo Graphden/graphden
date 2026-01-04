@@ -883,6 +883,58 @@
         (is (zero? deleted-count))))))
 
 
+(deftest batch-create-error-index-test
+  (testing "batch create error includes index of failed record"
+    (let [storage (mem/create-storage)
+          ;; Schema with unique constraint on email
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                             :type :text}
+                                     :name {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                            :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      ;; Insert a record first
+      (sp/create-entity storage :user {:email "existing@example.com" :name "Existing"})
+      ;; Try batch create where 3rd record (index 2) violates unique constraint
+      (let [data [{:email "alice@example.com" :name "Alice"}
+                  {:email "bob@example.com" :name "Bob"}
+                  {:email "existing@example.com" :name "Duplicate"}  ; Will fail
+                  {:email "charlie@example.com" :name "Charlie"}]]
+        (try
+          (sp/create-entities storage :user data)
+          (is false "Should have thrown exception")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :constraint-violation/unique (:type (ex-data e))))
+            (is (= 2 (:batch-index (ex-data e)))
+                "Should indicate record at index 2 failed")
+            (is (= 4 (:batch-size (ex-data e)))
+                "Should indicate total batch size"))))))
+
+  (testing "batch create error at first record has index 0"
+    (let [storage (mem/create-storage)
+          ;; Schema with unique constraint on email
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000011"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                             :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:email "existing@example.com"})
+      ;; First record in batch violates constraint
+      (let [data [{:email "existing@example.com"}  ; Will fail at index 0
+                  {:email "new@example.com"}]]
+        (try
+          (sp/create-entities storage :user data)
+          (is false "Should have thrown exception")
+          (catch clojure.lang.ExceptionInfo e
+            (is (zero? (:batch-index (ex-data e))))
+            (is (= 2 (:batch-size (ex-data e))))))))))
+
+
 ;; === GraphConstraints tests ===
 
 (deftest validate-parent-same-schema-test

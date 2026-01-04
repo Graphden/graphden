@@ -330,14 +330,15 @@
         fn-data (get-fn-data-from-graph execution-graph fn-id)
         fn-schema (:fn-schema fn-data)
         fn-name (keyword (:name fn-schema))
-        base-fn (get-base-fn fn-name)]
+        ;; Read registry once to avoid race between lookup and error message
+        registry @base-fns-registry
+        base-fn (get registry fn-name)]
     (when-not base-fn
-      (let [available-fns (keys @base-fns-registry)]
-        (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry. "
-                             "Available functions: " (pr-str available-fns))
-                        {:type :execution-error/base-fn-not-found
-                         :fn-name fn-name
-                         :available-fns available-fns}))))
+      (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry. "
+                           "Available functions: " (pr-str (keys registry)))
+                      {:type :execution-error/base-fn-not-found
+                       :fn-name fn-name
+                       :available-fns (keys registry)})))
     (let [thunks (build-thunks fn-data provided-args)
           new-context (update context :depth inc)]
       (base-fn thunks new-context))))

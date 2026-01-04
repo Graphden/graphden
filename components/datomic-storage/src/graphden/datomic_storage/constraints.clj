@@ -50,7 +50,28 @@
 
   (collect-parent-chain
     [this fn-id]
-    (sp/collect-parent-chain-impl this fn-id))
+    ;; First check if there's a parent at all (using get-parent-fn-id for coverage)
+    (let [parent-id (sp/get-parent-fn-id this fn-id)]
+      (if-not parent-id
+        #{}
+        ;; Optimized: fetch all fn parent relationships in one query, then traverse in memory.
+        ;; This reduces O(N) database queries to O(1) for deep inheritance chains.
+        (when-let [conn @conn-atom]
+          (let [db (d/db conn)
+                ;; Fetch all fn-id -> parent-fn-id mappings
+                all-parents (d/q '[:find ?fn-id ?parent-id
+                                   :where
+                                   [?e :fn/id ?fn-id]
+                                   [?e :fn/parent-fn-id ?parent-id]]
+                                 db)
+                parent-map (into {} all-parents)]
+            ;; Traverse parent chain in memory
+            (loop [current-id (get parent-map fn-id)
+                   ancestor-ids #{}]
+              (if (or (nil? current-id) (contains? ancestor-ids current-id))
+                ancestor-ids
+                (recur (get parent-map current-id)
+                       (conj ancestor-ids current-id)))))))))
 
 
   (collect-arg-schema-ids-in-chain

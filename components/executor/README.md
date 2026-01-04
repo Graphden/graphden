@@ -50,10 +50,15 @@ Base functions are the primitive operations that thunks eventually execute. They
 (require '[graphden.executor.interface :as exec])
 (require '[graphden.storage-protocol.interface :as sp])
 
-;; Create execution context
+;; Create execution context (uses default global registry)
 (def ctx (exec/create-context {:storage my-storage
                                :max-depth 1000    ; optional
                                :timeout-ms 30000})) ; optional
+
+;; Create context with custom base-fns (for isolation/testing)
+(def ctx (exec/create-context {:storage my-storage
+                               :base-fns {:add my-add-fn
+                                          :if my-if-fn}}))
 
 ;; Execute a function by its UUID
 (def result (exec/execute ctx fn-id {}))

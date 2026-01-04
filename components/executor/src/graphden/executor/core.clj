@@ -17,31 +17,51 @@
 
 ;; === Base Functions Registry ===
 
-(defonce ^:private base-fns-registry (atom {}))
+;; Default global registry for convenience.
+;; For better testability, use :base-fns in create-context.
+(defonce ^:private default-registry (atom {}))
 
 
 (defn register-base-fn!
-  "Registers a base function in the executor registry.
+  "Registers a base function in the default global registry.
    fn-name - keyword identifying the function (must match fn-schema name)
-   f - function taking [thunks context] and returning the result"
+   f - function taking [thunks context] and returning the result
+
+   For better testability, consider using :base-fns in create-context instead."
   [fn-name f]
-  (swap! base-fns-registry assoc fn-name f)
+  (swap! default-registry assoc fn-name f)
   nil)
 
 
 (defn get-base-fn
-  "Retrieves a registered base function by name.
-   Returns the function or nil if not found."
+  "Retrieves a registered base function by name from the default global registry.
+   Returns the function or nil if not found.
+
+   For context-aware lookup, use get-base-fn-from-context."
   [fn-name]
-  (get @base-fns-registry fn-name))
+  (get @default-registry fn-name))
 
 
 (defn clear-base-fns!
-  "Clears all registered base functions.
+  "Clears all registered base functions from the default global registry.
    Primarily used in tests to reset state between test cases."
   []
-  (reset! base-fns-registry {})
+  (reset! default-registry {})
   nil)
+
+
+(defn get-default-registry
+  "Returns the current state of the default global registry.
+   Useful for passing to create-context."
+  []
+  @default-registry)
+
+
+(defn get-base-fn-from-context
+  "Retrieves a base function by name from the context's registry.
+   Returns the function or nil if not found."
+  [context fn-name]
+  (get (:base-fns context) fn-name))
 
 
 ;; === Execution Context ===
@@ -49,6 +69,7 @@
 (defrecord ExecutionContext
   [storage
    execution-graph  ; Cached graph from resolve-execution-graph
+   base-fns         ; Map of fn-name -> fn, for base function lookup
    max-depth
    timeout-ms
    start-time
@@ -65,11 +86,17 @@
   "Creates initial execution context. Note: execution-graph is populated
    later when execute is called with a root fn-id.
 
+   Options:
+   - :storage - Storage instance (required)
+   - :base-fns - Map of fn-name -> fn for base function lookup (optional, uses default registry if not provided)
+   - :max-depth - Maximum recursion depth (default 1000)
+   - :timeout-ms - Maximum execution time in ms (default 30000)
+
    Validates:
    - storage is required
    - timeout-ms must be at least 50ms (allows for fast test cases)
    - max-depth must be positive and <= 100000"
-  [{:keys [storage max-depth timeout-ms]
+  [{:keys [storage base-fns max-depth timeout-ms]
     :or {max-depth sp/default-max-depth
          timeout-ms 30000}}]
   (when-not storage
@@ -88,7 +115,9 @@
                     {:type :execution-error/invalid-context
                      :max-depth max-depth
                      :max-allowed max-depth-limit})))
-  (->ExecutionContext storage nil max-depth timeout-ms (System/currentTimeMillis) 0))
+  ;; Use provided base-fns or snapshot the default registry
+  (let [fns (or base-fns @default-registry)]
+    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0)))
 
 
 ;; === Thunks ===
@@ -353,15 +382,15 @@
 
 (defn- execute-internal
   "Internal execution function with context tracking.
-   Uses the cached execution-graph from context."
+   Uses the cached execution-graph and base-fns from context."
   [context fn-id provided-args]
   (check-limits! context)
   (let [execution-graph (:execution-graph context)
         fn-data (get-fn-data-from-graph execution-graph fn-id)
         fn-schema (:fn-schema fn-data)
         fn-name (keyword (:name fn-schema))
-        ;; Read registry once to avoid race between lookup and error message
-        registry @base-fns-registry
+        ;; Use base-fns from context
+        registry (:base-fns context)
         base-fn (get registry fn-name)]
     (when-not base-fn
       (log/warn "Base function not found in registry"

@@ -1,0 +1,4 @@
+{:paths ["src" "resources"]
+ :deps {graphden/executor {:local/root "../executor"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

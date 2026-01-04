@@ -30,8 +30,14 @@
 
    Options:
    - :storage - Storage instance (required)
+   - :base-fns - Map of fn-name -> fn for base function lookup (optional)
+                 If not provided, uses snapshot of default global registry
    - :max-depth - Maximum recursion depth (default 1000)
-   - :timeout-ms - Maximum execution time in ms (default 30000)"
+   - :timeout-ms - Maximum execution time in ms (default 30000)
+
+   Example with custom base-fns:
+   (create-context {:storage s
+                    :base-fns {:add my-add-fn :if my-if-fn}})"
   [opts]
   (core/create-context opts))
 
@@ -58,9 +64,30 @@
 
 
 (defn clear-base-fns!
-  "Clears all registered base functions. Useful for testing."
+  "Clears all registered base functions from the global registry.
+   Useful for testing."
   []
   (core/clear-base-fns!))
+
+
+(defn get-default-registry
+  "Returns the current state of the default global registry as a map.
+   Useful for passing to create-context.
+
+   Example:
+   (create-context {:storage s
+                    :base-fns (get-default-registry)})"
+  []
+  (core/get-default-registry))
+
+
+(defn get-base-fn-from-context
+  "Gets a base function from the context's registry by name.
+   Returns nil if not found.
+
+   Use this when you need to look up functions from within a base function."
+  [context fn-name]
+  (core/get-base-fn-from-context context fn-name))
 
 
 ;; === Execution ===

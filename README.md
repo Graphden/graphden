@@ -2,7 +2,7 @@
 
 [![Clojure](https://img.shields.io/badge/Clojure-1.12-blue.svg)](https://clojure.org/)
 [![Polylith](https://img.shields.io/badge/architecture-Polylith-purple.svg)](https://polylith.gitbook.io/)
-[![Coverage](https://img.shields.io/badge/coverage-98%25-brightgreen.svg)](#testing)
+[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](#testing)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 **Визуальная среда функционального программирования** — граф функций в базе данных.
@@ -100,7 +100,8 @@ fn: create-user (parent: auth-api)
 
 | Компонент | Описание | README |
 |-----------|----------|--------|
-| [executor](components/executor/) | Исполнитель графа функций (thunks, рекурсия, таймауты) | — |
+| [executor](components/executor/) | Исполнитель графа функций (thunks, рекурсия, таймауты) | [→](components/executor/README.md) |
+| [base-functions](components/base-functions/) | Базовые функции (арифметика, строки, коллекции, HOF) | [→](components/base-functions/README.md) |
 
 ## Документация
 
@@ -177,7 +178,7 @@ bb coverage
 open target/coverage/index.html
 ```
 
-Текущее покрытие: **98% форм / 99% строк**
+Текущее покрытие: **96% форм / 98% строк**
 
 ## Структура проекта
 

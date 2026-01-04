@@ -13,5 +13,6 @@
     "components/memory-storage/test"
     "components/postgres-storage/test"
     "components/storage-protocol/test"
-    "components/executor/test"]}]
+    "components/executor/test"
+    "components/base-functions/test"]}]
  :plugins [:kaocha.plugin/profiling]}

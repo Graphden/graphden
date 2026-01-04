@@ -996,24 +996,24 @@
 
 
 (deftest with-query-timeout-test
-  (testing "with-query-timeout function changes timeout value"
-    (is (= 30 core/*query-timeout-seconds*) "Default should be 30")
-    (pg/with-query-timeout 60
+  (testing "with-query-timeout function changes timeout value (in milliseconds)"
+    (is (= 30000 core/*query-timeout-ms*) "Default should be 30000 ms")
+    (pg/with-query-timeout 60000
                            (fn []
-                             (is (= 60 core/*query-timeout-seconds*) "Should be 60 inside function")))
-    (is (= 30 core/*query-timeout-seconds*) "Should restore to 30 after function"))
+                             (is (= 60000 core/*query-timeout-ms*) "Should be 60000 inside function")))
+    (is (= 30000 core/*query-timeout-ms*) "Should restore to 30000 after function"))
 
   (testing "with-query-timeout returns body result"
-    (is (= 42 (pg/with-query-timeout 10 #(+ 40 2)))))
+    (is (= 42 (pg/with-query-timeout 10000 #(+ 40 2)))))
 
   (testing "nested with-query-timeout works correctly"
-    (pg/with-query-timeout 100
+    (pg/with-query-timeout 100000
                            (fn []
-                             (is (= 100 core/*query-timeout-seconds*))
-                             (pg/with-query-timeout 200
+                             (is (= 100000 core/*query-timeout-ms*))
+                             (pg/with-query-timeout 200000
                                                     (fn []
-                                                      (is (= 200 core/*query-timeout-seconds*))))
-                             (is (= 100 core/*query-timeout-seconds*))))))
+                                                      (is (= 200000 core/*query-timeout-ms*))))
+                             (is (= 100000 core/*query-timeout-ms*))))))
 
 
 (deftest close-pool-idempotency-test

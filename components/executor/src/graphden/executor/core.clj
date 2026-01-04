@@ -98,122 +98,82 @@
 
 ;; === Thunk Building ===
 
+(defn- truncate-value
+  "Truncates large values for error messages to avoid huge exception data.
+   Returns a shortened representation for display purposes."
+  [value max-len]
+  (let [s (pr-str value)]
+    (if (> (count s) max-len)
+      (str (subs s 0 max-len) "...")
+      s)))
+
+
+(def ^:private type-hints
+  "Human-readable hints for expected Clojure types."
+  {:fn "UUID (function reference)"
+   :ref "UUID (entity reference)"
+   :int "integer (e.g., 42, -1)"
+   :bool "boolean (true or false)"
+   :text "string (e.g., \"hello\")"
+   :numeric "number (int, float, bigdec, ratio)"
+   :jsonb "map or vector"
+   :bytes "byte array (byte-array)"
+   :timestamptz "java.time.Instant or java.util.Date"
+   :enum "keyword (e.g., :active, :pending)"
+   :uuid "UUID"})
+
+
+(defn- throw-type-mismatch!
+  "Throws a type mismatch error with detailed context."
+  [arg-schema provided-value]
+  (let [arg-type (:type arg-schema)
+        arg-name (:name arg-schema)
+        arg-schema-id (:id arg-schema)
+        hint (get type-hints arg-type (name arg-type))]
+    (throw (ex-info (str "Type mismatch for argument '" arg-name "': "
+                         "expected " (name arg-type) " (" hint "), "
+                         "got " (-> provided-value class .getSimpleName))
+                    {:type :execution-error/type-mismatch
+                     :arg-name arg-name
+                     :arg-schema-id arg-schema-id
+                     :expected-type arg-type
+                     :expected-hint hint
+                     :provided-value (truncate-value provided-value 100)
+                     :provided-type (type provided-value)}))))
+
+
+(defn- type-mismatch?
+  "Returns true if provided-value doesn't match the expected arg-type.
+   Returns false for :union type (accepts any value) and unknown types."
+  [arg-type provided-value]
+  (case arg-type
+    :fn          (not (uuid? provided-value))
+    :ref         (not (uuid? provided-value))
+    :int         (not (int? provided-value))
+    :bool        (not (boolean? provided-value))
+    :text        (not (string? provided-value))
+    :numeric     (not (number? provided-value))
+    :jsonb       (not (or (map? provided-value) (vector? provided-value)))
+    :bytes       (not (bytes? provided-value))
+    :timestamptz (not (or (instance? java.time.Instant provided-value)
+                          (instance? java.util.Date provided-value)))
+    :enum        (not (keyword? provided-value))
+    :uuid        (not (uuid? provided-value))
+    ;; :union and unknown types - no strict validation
+    false))
+
+
 (defn- validate-provided-arg-type!
   "Validates that a provided argument matches the expected arg-schema type.
-   Throws ExceptionInfo if type mismatch detected.
+   Throws ExceptionInfo with detailed context if type mismatch detected.
    Note: This is a runtime check for type mismatches."
   [provided-value arg-schema]
   (when-not (and arg-schema (:type arg-schema))
     (throw (ex-info "Invalid arg-schema: missing type"
                     {:type :execution-error/invalid-arg-schema
                      :arg-schema arg-schema})))
-  (let [arg-type (:type arg-schema)
-        arg-name (:name arg-schema)]
-    (cond
-      ;; :fn type expects a UUID (function reference)
-      (and (= arg-type :fn) (not (uuid? provided-value)))
-      (throw (ex-info "Provided arg for :fn type must be a UUID (function reference)"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :fn
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :ref type expects a UUID
-      (and (= arg-type :ref) (not (uuid? provided-value)))
-      (throw (ex-info "Provided arg for :ref type must be a UUID"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :ref
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :int type expects an integer
-      (and (= arg-type :int) (not (int? provided-value)))
-      (throw (ex-info "Provided arg for :int type must be an integer"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :int
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :bool type expects a boolean
-      (and (= arg-type :bool) (not (boolean? provided-value)))
-      (throw (ex-info "Provided arg for :bool type must be a boolean"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :bool
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :text type expects a string
-      (and (= arg-type :text) (not (string? provided-value)))
-      (throw (ex-info "Provided arg for :text type must be a string"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :text
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :numeric type expects a number (int, float, bigdec, ratio, etc.)
-      (and (= arg-type :numeric) (not (number? provided-value)))
-      (throw (ex-info "Provided arg for :numeric type must be a number"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :numeric
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :jsonb type expects a map or vector (serializable Clojure data)
-      (and (= arg-type :jsonb) (not (or (map? provided-value) (vector? provided-value))))
-      (throw (ex-info "Provided arg for :jsonb type must be a map or vector"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :jsonb
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :bytes type expects a byte array
-      (and (= arg-type :bytes) (not (bytes? provided-value)))
-      (throw (ex-info "Provided arg for :bytes type must be a byte array"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :bytes
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :timestamptz type expects an Instant or Date
-      (and (= arg-type :timestamptz)
-           (not (or (instance? java.time.Instant provided-value)
-                    (instance? java.util.Date provided-value))))
-      (throw (ex-info "Provided arg for :timestamptz type must be an Instant or Date"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :timestamptz
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :enum type expects a keyword
-      (and (= arg-type :enum) (not (keyword? provided-value)))
-      (throw (ex-info "Provided arg for :enum type must be a keyword"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :enum
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :uuid type expects a UUID
-      (and (= arg-type :uuid) (not (uuid? provided-value)))
-      (throw (ex-info "Provided arg for :uuid type must be a UUID"
-                      {:type :execution-error/type-mismatch
-                       :arg-name arg-name
-                       :expected-type :uuid
-                       :provided-value provided-value
-                       :provided-type (type provided-value)}))
-
-      ;; :union type - no strict validation, accept any value
-      ;; (union types are complex and would need schema-specific validation)
-      :else nil)))
+  (when (type-mismatch? (:type arg-schema) provided-value)
+    (throw-type-mismatch! arg-schema provided-value)))
 
 
 (defn- build-thunk

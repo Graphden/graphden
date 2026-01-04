@@ -30,20 +30,21 @@
 
 ;; === Configuration ===
 
-(def ^:dynamic *query-timeout-seconds*
-  "Timeout for SQL queries in seconds. Can be rebound per-thread.
-   Default is 30 seconds. Use `with-query-timeout` to temporarily change."
-  30)
+(def ^:dynamic *query-timeout-ms*
+  "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
+   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
+   Note: Internally converted to seconds for JDBC calls."
+  30000)
 
 
 (defn with-query-timeout
-  "Executes f with a custom query timeout (in seconds).
+  "Executes f with a custom query timeout (in milliseconds).
 
    Example:
-   (with-query-timeout 60
+   (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
-  [timeout-seconds f]
-  (binding [*query-timeout-seconds* timeout-seconds]
+  [timeout-ms f]
+  (binding [*query-timeout-ms* timeout-ms]
     (f)))
 
 

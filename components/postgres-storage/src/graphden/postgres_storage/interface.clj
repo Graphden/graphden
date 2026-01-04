@@ -5,20 +5,20 @@
 
 
 ;; Re-export timeout configuration for external use
-(def ^:dynamic *query-timeout-seconds*
-  "Timeout for SQL queries in seconds. Can be rebound per-thread.
-   Default is 30 seconds."
-  core/*query-timeout-seconds*)
+(def ^:dynamic *query-timeout-ms*
+  "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
+   Default is 30000 ms (30 seconds)."
+  core/*query-timeout-ms*)
 
 
 (defn with-query-timeout
-  "Executes f with a custom query timeout (in seconds).
+  "Executes f with a custom query timeout (in milliseconds).
 
    Example:
-   (with-query-timeout 60
+   (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
-  [timeout-seconds f]
-  (core/with-query-timeout timeout-seconds f))
+  [timeout-ms f]
+  (core/with-query-timeout timeout-ms f))
 
 
 (defn create-storage

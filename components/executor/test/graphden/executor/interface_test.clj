@@ -1,5 +1,6 @@
 (ns graphden.executor.interface-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.graph-storage-memory.interface :as gsm]
@@ -532,7 +533,7 @@
           ctx (exec/create-context {:storage storage})]
       ;; Provide a string instead of UUID for :fn type
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :fn type must be a UUID"
+                            #"Type mismatch for argument 'f': expected fn"
             (exec/execute ctx (:id fn-rec) {(:id f-arg) "not-a-uuid"})))
       (sp/close storage)))
 
@@ -559,7 +560,7 @@
                                :value (random-uuid)})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :ref type must be a UUID"
+                            #"Type mismatch for argument 'r': expected ref"
             (exec/execute ctx (:id fn-rec) {(:id r-arg) 12345})))
       (sp/close storage)))
 
@@ -577,7 +578,7 @@
           ctx (exec/create-context {:storage storage})]
       ;; Provide a string instead of int
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :int type must be an integer"
+                            #"Type mismatch for argument 'a': expected int"
             (exec/execute ctx (:id fn-rec) {(:id arg-a) "not-an-int"})))
       (sp/close storage)))
 
@@ -604,7 +605,7 @@
                                :value true})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :bool type must be a boolean"
+                            #"Type mismatch for argument 'flag': expected bool"
             (exec/execute ctx (:id fn-rec) {(:id flag-arg) "true"})))
       (sp/close storage)))
 
@@ -631,7 +632,7 @@
                                :value "hello"})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :text type must be a string"
+                            #"Type mismatch for argument 'msg': expected text"
             (exec/execute ctx (:id fn-rec) {(:id msg-arg) 12345})))
       (sp/close storage)))
 
@@ -896,7 +897,7 @@
                                :value 3.14})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :numeric type must be a number"
+                            #"Type mismatch for argument 'n': expected numeric"
             (exec/execute ctx (:id fn-rec) {(:id n-arg) "not-a-number"})))
       (sp/close storage)))
 
@@ -950,7 +951,7 @@
                                :value {:a 1}})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :jsonb type must be a map or vector"
+                            #"Type mismatch for argument 'data': expected jsonb"
             (exec/execute ctx (:id fn-rec) {(:id data-arg) "not-jsonb"})))
       (sp/close storage)))
 
@@ -1029,7 +1030,7 @@
                                :value (byte-array [1 2 3])})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :bytes type must be a byte array"
+                            #"Type mismatch for argument 'data': expected bytes"
             (exec/execute ctx (:id fn-rec) {(:id data-arg) "not-bytes"})))
       (sp/close storage)))
 
@@ -1083,7 +1084,7 @@
                                :value (java.time.Instant/now)})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :timestamptz type must be an Instant or Date"
+                            #"Type mismatch for argument 'ts': expected timestamptz"
             (exec/execute ctx (:id fn-rec) {(:id ts-arg) "not-a-timestamp"})))
       (sp/close storage)))
 
@@ -1164,7 +1165,7 @@
                                :value :active})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :enum type must be a keyword"
+                            #"Type mismatch for argument 'status': expected enum"
             (exec/execute ctx (:id fn-rec) {(:id status-arg) "not-a-keyword"})))
       (sp/close storage)))
 
@@ -1218,7 +1219,7 @@
                                :value (random-uuid)})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Provided arg for :uuid type must be a UUID"
+                            #"Type mismatch for argument 'id': expected uuid"
             (exec/execute ctx (:id fn-rec) {(:id id-arg) "not-a-uuid"})))
       (sp/close storage)))
 
@@ -1287,6 +1288,46 @@
 ;; - nil arg-value: build-thunks checks for nil before calling build-thunk
 ;; - nil arg-schema: build-thunks iterates over arg-schemas map, not arg-values
 ;; The guards protect against future code changes that might bypass these checks.
+
+
+;; === Large Value Truncation Tests ===
+
+(deftest large-value-truncation-in-error-test
+  (testing "large values are truncated in type mismatch errors"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-int
+              (fn [{:keys [n]} ctx]
+                (exec/force-value n ctx)))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-int"
+                                       :returned-type :int})
+          n-arg (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id fn-schema)
+                                   :name "n"
+                                   :type :int
+                                   :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-int"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id n-arg)
+                               :value 42})
+          ctx (exec/create-context {:storage storage})
+          ;; Create a very large string (> 100 chars) that will be truncated
+          large-string (str/join (repeat 200 "x"))]
+      (try
+        (exec/execute ctx (:id fn-rec) {(:id n-arg) large-string})
+        (is false "Should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)
+                truncated-value (:provided-value data)]
+            ;; The truncated value should end with "..."
+            (is (clojure.string/ends-with? truncated-value "..."))
+            ;; And should be around 103 chars (100 + "...")
+            (is (<= (count truncated-value) 105)))))
+      (sp/close storage))))
 
 
 ;; === Deep Nesting Tests ===

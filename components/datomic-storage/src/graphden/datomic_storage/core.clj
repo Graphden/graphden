@@ -453,8 +453,11 @@
         (try
           (log/debug "Asserting new metadata" {:count (count tx-data)})
           (d/transact conn {:tx-data (vec tx-data)})
+          ;; Note: We intentionally catch broad Exception here because:
+          ;; 1. Datomic can throw various exception types (ExceptionInfo, RuntimeException, etc.)
+          ;; 2. ANY transaction failure should trigger a rollback attempt
+          ;; 3. We re-throw the original exception after rollback attempt
           (catch Exception e
-            ;; Attempt to restore old metadata
             (log/error e "Failed to save new metadata, attempting rollback")
             (if (seq old-metadata)
               (try
@@ -462,6 +465,7 @@
                 (let [restore-data (mapv #(dissoc % :db/id) old-metadata)]
                   (d/transact conn {:tx-data restore-data})
                   (log/info "Successfully restored old metadata after failure"))
+                ;; Rollback can also fail with various exception types
                 (catch Exception restore-ex
                   (log/error restore-ex "Failed to restore old metadata")
                   ;; Throw combined exception so caller knows DB may be inconsistent
@@ -1237,14 +1241,12 @@
                             (reset! client-atom client)
                             ;; Store schema for multi-field constraint validation
                             (reset! schema-atom schema)
-                            ;; Create database if it doesn't exist (idempotent)
-                            ;; Note: Datomic doesn't provide a specific exception type for "already exists",
-                            ;; so we catch Exception and check the message. Other errors are re-thrown.
-                            (try
-                              (d/create-database client {:db-name db-name})
-                              (catch Exception e
-                                (when-not (str/includes? (ex-message e) "already exists")
-                                  (throw e))))
+                            ;; Create database if it doesn't exist
+                            ;; Use list-databases to check existence first, avoiding fragile
+                            ;; string-based error detection
+                            (let [existing-dbs (set (d/list-databases client {}))]
+                              (when-not (contains? existing-dbs db-name)
+                                (d/create-database client {:db-name db-name})))
                             (let [conn (d/connect client {:db-name db-name})]
                               (reset! conn-atom conn)
                               (do-initialize conn schema))))))

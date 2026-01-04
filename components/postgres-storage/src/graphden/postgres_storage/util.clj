@@ -1,8 +1,23 @@
 (ns graphden.postgres-storage.util
   "Shared utilities for PostgreSQL storage.
-   Type mapping, naming conversions, and SQL helpers."
+   Type mapping, naming conversions, SQL helpers, and configuration."
   (:require
     [clojure.string :as str]))
+
+
+;; === Configuration helpers ===
+
+(defn get-query-timeout-seconds
+  "Returns the current query timeout in seconds for JDBC calls.
+   Resolves the dynamic var *query-timeout-ms* from core.clj and converts to seconds.
+   Returns 30 seconds if resolution fails (e.g., during test isolation).
+
+   Note: Uses reflection to avoid circular dependency with core.clj.
+   The timeout is stored in milliseconds but JDBC setQueryTimeout uses seconds."
+  []
+  (if-let [timeout-var (resolve 'graphden.postgres-storage.core/*query-timeout-ms*)]
+    (quot (deref timeout-var) 1000)
+    30))
 
 
 ;; === Error handling ===

@@ -3,22 +3,27 @@
    Validates graph integrity constraints using SQL queries.
    Uses shared validation logic from storage-protocol."
   (:require
+    [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))
 
 
-;; Forward declare to avoid circular dependency with core.clj
-;; The actual value comes from graphden.postgres-storage.core/*query-timeout-seconds*
-(defn- get-query-timeout
-  []
-  (if-let [timeout (resolve 'graphden.postgres-storage.core/*query-timeout-seconds*)]
-    (deref timeout)
-    30))
+;; Use shared timeout utility from util.clj
+(def ^:private get-query-timeout util/get-query-timeout-seconds)
 
 
 ;; === ConstraintHelpers implementation for PostgreSQL ===
+;;
+;; This record implements the ConstraintHelpers protocol for PostgreSQL.
+;; It uses optimized SQL queries with recursive CTEs to minimize database
+;; round-trips when validating graph constraints (parent chains, cycles, etc.).
+;;
+;; Key optimizations:
+;; - collect-parent-chain: Uses recursive CTE instead of N queries
+;; - collect-arg-schema-ids-in-chain: Single CTE + JOIN instead of N+1 queries
+;; - collect-dependency-chain: Recursive CTE with automatic cycle prevention via UNION
 
 (defrecord PostgresConstraintHelpers
   [ds]
@@ -194,7 +199,14 @@
 
 
 (defn create-helpers
-  "Creates a ConstraintHelpers instance for PostgreSQL."
+  "Creates a ConstraintHelpers instance for PostgreSQL.
+   The helpers instance provides optimized SQL queries for constraint validation.
+
+   Parameters:
+   - ds: A JDBC datasource (connection pool or connection)
+
+   Returns:
+   A PostgresConstraintHelpers record implementing the ConstraintHelpers protocol."
   [ds]
   (->PostgresConstraintHelpers ds))
 

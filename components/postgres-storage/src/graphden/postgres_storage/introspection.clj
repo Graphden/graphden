@@ -12,13 +12,8 @@
 (def ^:private metadata-table-name "_schema_metadata")
 
 
-;; Forward declare to avoid circular dependency with core.clj
-;; The actual value comes from graphden.postgres-storage.core/*query-timeout-seconds*
-(defn- get-query-timeout
-  []
-  (if-let [timeout (resolve 'graphden.postgres-storage.core/*query-timeout-seconds*)]
-    (deref timeout)
-    30))
+;; Use shared timeout utility from util.clj
+(def ^:private get-query-timeout util/get-query-timeout-seconds)
 
 
 (defn current-tables

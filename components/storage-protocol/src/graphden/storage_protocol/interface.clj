@@ -170,7 +170,20 @@
 (defprotocol StorageBatchCRUD
   "Protocol for batch CRUD operations on stored entities.
    Provides more efficient operations when working with multiple records.
-   Implementations should optimize for bulk operations (batch inserts, IN clauses, etc.)."
+   Implementations should optimize for bulk operations (batch inserts, IN clauses, etc.).
+
+   ATOMICITY GUARANTEES:
+   - create-entities: All-or-nothing. If any record fails validation or
+     constraint check, NO records are created.
+   - read-entities: Isolation depends on storage backend. Results represent
+     a consistent snapshot at some point during the read.
+   - delete-entities: All-or-nothing. If any deletion would violate referential
+     integrity, NO records are deleted.
+
+   ORDERING:
+   - create-entities: Returns records in same order as input data-seq.
+   - read-entities: Returns a map (unordered). Use (map result ids) if order matters.
+   - delete-entities: Order of deletion is not guaranteed."
 
   (create-entities
     [this entity-name data-seq]
@@ -181,31 +194,33 @@
      - entity-name: keyword name of the entity (e.g., :fn-schema, :fn)
      - data-seq: sequence of maps, each representing a record to create
 
-     Returns a sequence of created records with :id fields.
+     Returns a sequence of created records with :id fields, in input order.
      Throws ExceptionInfo if validation fails or constraints are violated.
      On failure, no records are created (atomic operation).")
 
   (read-entities
     [this entity-name ids]
-    "Reads multiple entity records by IDs.
+    "Reads multiple entity records by IDs in a single operation.
 
      Arguments:
      - entity-name: keyword name of the entity
      - ids: sequence of UUIDs
 
      Returns a map of {id -> record} for found records.
-     Records not found are simply not included in the result.")
+     Records not found are simply not included in the result.
+     Note: To preserve order, use (map result ids) after calling.")
 
   (delete-entities
     [this entity-name ids]
-    "Deletes multiple entity records by IDs.
+    "Deletes multiple entity records by IDs in a single operation.
 
      Arguments:
      - entity-name: keyword name of the entity
      - ids: sequence of UUIDs to delete
 
      Returns the count of actually deleted records.
-     Throws ExceptionInfo if referential integrity would be violated."))
+     Throws ExceptionInfo if referential integrity would be violated.
+     On failure, no records are deleted (atomic operation)."))
 
 
 (defprotocol GraphConstraints

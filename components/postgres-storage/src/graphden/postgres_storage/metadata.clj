@@ -5,6 +5,7 @@
     [cheshire.core :as json]
     [clojure.tools.logging :as log]
     [graphden.data-schema-protocol.interface :as ds]
+    [graphden.postgres-storage.util :as util]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs])
@@ -16,13 +17,8 @@
 (def ^:private metadata-table-name "_schema_metadata")
 
 
-;; Forward declare to avoid circular dependency with core.clj
-;; The actual value comes from graphden.postgres-storage.core/*query-timeout-seconds*
-(defn- get-query-timeout
-  []
-  (if-let [timeout (resolve 'graphden.postgres-storage.core/*query-timeout-seconds*)]
-    (deref timeout)
-    30))
+;; Use shared timeout utility from util.clj
+(def ^:private get-query-timeout util/get-query-timeout-seconds)
 
 
 ;; === Table management ===

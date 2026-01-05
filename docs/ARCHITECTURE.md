@@ -13,7 +13,8 @@
 4. [Data Schema](#part-4-data-schema) - Entity definitions
 5. [Execution Model](#part-5-execution-model) - Lazy evaluation with thunks
 6. [System Limitations](#part-6-system-limitations) - Known constraints and mitigations
-7. [Appendices](#appendix-a-component-dependency-graph) - Reference material
+7. [Distributed Execution](#part-7-distributed-execution-future) - Parallelization and distribution
+8. [Appendices](#appendix-a-component-dependency-graph) - Reference material
 
 ---
 
@@ -526,6 +527,99 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 1. Aggressive caching of resolved graphs (implemented)
 2. Transactions for atomicity (implemented)
 3. Monitoring and alerts for deep/long executions (planned)
+
+---
+
+## Part 7: Distributed Execution (Future)
+
+### Overview
+
+Graphden's graph-based representation enables automatic parallelization and distribution of computations. Since functions are stored as a dependency graph rather than sequential text, the executor can:
+
+1. **Identify independent subgraphs** — arguments without mutual dependencies can be computed in parallel
+2. **Distribute computation** — large subgraphs can be offloaded to remote executors
+3. **Optimize data transfer** — only transfer necessary intermediate results between executors
+
+### Why Graph Structure Enables This
+
+Traditional text-based code requires explicit parallelization (threads, async/await, futures). In graphden:
+
+```
+fn: report
+  arg1: ref<calculate-sales>      ← Independent
+  arg2: ref<calculate-expenses>   ← Independent
+  arg3: ref<calculate-inventory>  ← Independent
+
+  // All three can execute in parallel automatically
+  // No explicit parallel constructs needed
+```
+
+The executor can analyze the graph and determine that `calculate-sales`, `calculate-expenses`, and `calculate-inventory` have no dependencies on each other — they can run concurrently.
+
+### Distributed Execution Model (Planned)
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Coordinator                              │
+│  - Receives execution request                               │
+│  - Analyzes graph for parallelization opportunities         │
+│  - Partitions subgraphs across available executors          │
+│  - Aggregates results                                       │
+└─────────────────────────────────────────────────────────────┘
+         │                    │                    │
+         v                    v                    v
+┌─────────────┐      ┌─────────────┐      ┌─────────────┐
+│  Executor 1 │      │  Executor 2 │      │  Executor 3 │
+│  (subgraph) │      │  (subgraph) │      │  (subgraph) │
+└─────────────┘      └─────────────┘      └─────────────┘
+```
+
+### Key Design Questions
+
+**1. Data Transfer Between Executors**
+
+When a subgraph on Executor 2 depends on a result from Executor 1:
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| Direct transfer (E1 → E2) | Low latency | Complex networking, failure handling |
+| Via Coordinator | Simple topology | Coordinator bottleneck |
+| Via shared storage | Fault tolerant, resumable | Higher latency |
+| Hybrid (small via coordinator, large via storage) | Balanced | Complexity |
+
+**2. Granularity of Distribution**
+
+- **Coarse-grained**: Distribute entire independent branches
+- **Fine-grained**: Distribute individual function calls
+- **Adaptive**: Start coarse, subdivide based on execution time
+
+**3. State and Side Effects**
+
+Pure functions (no I/O) can be distributed freely. Functions with side effects need:
+- Explicit ordering guarantees
+- Transaction boundaries
+- Idempotency for retry safety
+
+**4. Failure Handling**
+
+- Retry failed subgraphs
+- Checkpoint intermediate results
+- Fallback to local execution
+
+### Implementation Phases
+
+1. **Local parallelism** — Execute independent args in parallel threads (same JVM)
+2. **Worker pool** — Offload to worker processes on same machine
+3. **Distributed workers** — Remote executors with network transport
+4. **Smart partitioning** — Cost-based optimizer for graph partitioning
+
+### Relevant Existing Components
+
+| Component | Role in Distribution |
+|-----------|---------------------|
+| `executor` | Base execution, will need parallel/distributed modes |
+| `resolve-execution-graph` | Graph analysis for dependency detection |
+| `storage` | Shared state, potential intermediate result store |
 
 ---
 

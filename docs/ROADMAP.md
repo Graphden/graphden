@@ -150,6 +150,31 @@
 
 ## Future Work
 
+### Distributed Execution
+
+**Goal**: Automatic parallelization and distribution of computations across multiple executors.
+
+**Why it's possible**: Graph structure explicitly represents dependencies. Independent subgraphs can be identified and computed in parallel without manual annotation.
+
+**Phases:**
+
+| Phase | Description | Complexity |
+|-------|-------------|------------|
+| 6.1 Local Parallelism | Execute independent args in parallel threads (same JVM) | Medium |
+| 6.2 Worker Pool | Offload to worker processes on same machine | Medium |
+| 6.3 Distributed Workers | Remote executors with network transport | High |
+| 6.4 Smart Partitioning | Cost-based optimizer for graph partitioning | High |
+
+**Key decisions needed:**
+- Data transfer strategy between executors (direct, via coordinator, via storage)
+- Granularity of distribution (coarse vs fine-grained)
+- Handling side effects and ordering guarantees
+- Failure handling and retry strategy
+
+**See:** [ARCHITECTURE.md - Distributed Execution](ARCHITECTURE.md#part-7-distributed-execution-future)
+
+---
+
 ### Type System (Type Algebra)
 
 **Goal**: Static type checking, UI hints, automatic type inference.

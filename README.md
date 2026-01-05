@@ -5,7 +5,7 @@
 [![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](#testing)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-**Visual functional programming environment** — a function graph stored in a database.
+**Visual functional programming environment and distributed execution runtime** — a function graph stored in a database.
 
 ## Vision
 
@@ -15,8 +15,11 @@ Graphden is an experimental platform where:
 - **Visual Editing** — graphical interface instead of text
 - **Currying via Inheritance** — partial function application through parent chains
 - **Lazy Execution** — only computes what's needed
+- **Distributed Execution** — automatic parallelization and distribution of computations across multiple executors
 
-**Goal**: Test the hypothesis that graph-based visual programming can be simpler and more readable than text code for high-level logic.
+**Goals**:
+1. Test the hypothesis that graph-based visual programming can be simpler and more readable than text code for high-level logic
+2. Leverage the graph structure for automatic parallelization — independent subgraphs can be computed concurrently on different executors
 
 See [Architecture](docs/ARCHITECTURE.md) for detailed design decisions and technical documentation.
 

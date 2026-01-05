@@ -1,5 +1,22 @@
 # Graphden: Visual Functional Programming System
 
+> **Last updated:** 2026-01-05
+>
+> This document describes the technical architecture of graphden.
+> For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
+
+## Table of Contents
+
+1. [Critical Model Analysis](#part-1-critical-model-analysis) - Design decisions and alternatives
+2. [Constraints Protocol](#part-2-constraints-protocol-graphconstraints) - Graph integrity
+3. [Recursion and Cycles](#part-3-recursion-and-cycles) - Handling recursive patterns
+4. [Data Schema](#part-4-data-schema) - Entity definitions
+5. [Execution Model](#part-5-execution-model) - Lazy evaluation with thunks
+6. [System Limitations](#part-6-system-limitations) - Known constraints and mitigations
+7. [Appendices](#appendix-a-component-dependency-graph) - Reference material
+
+---
+
 ## Part 1: Critical Model Analysis
 
 ### The "Argument Override" Problem
@@ -138,7 +155,9 @@ arg-value:
 
 ## Part 2: Constraints Protocol (GraphConstraints)
 
-### New Protocol
+### Protocol Definition
+
+**File:** `components/storage-protocol/src/graphden/storage_protocol/interface.clj`
 
 ```clojure
 (defprotocol GraphConstraints
@@ -177,59 +196,39 @@ arg-value:
      Throws: :constraint-violation/dependency-cycle"))
 ```
 
-### Contract Tests
+### Implementation Architecture
 
-Create a set of tests that EVERY storage must pass:
+The implementation uses a **shared validation logic** pattern with pluggable helpers:
 
 ```clojure
-(defn constraint-tests [create-storage-fn]
-  (testing "parent-same-schema constraint"
-    (let [storage (create-storage-fn)]
-      ;; Setup: create fn-schema-1, fn-schema-2, fn-a (schema-1)
-      ;; Test: create fn-b (schema-2) with parent = fn-a
-      ;; Expected: throws :constraint-violation/parent-schema-mismatch
-      ))
+;; ConstraintHelpers protocol - each storage implements this
+(defprotocol ConstraintHelpers
+  (get-fn-schema-id [this fn-id])
+  (get-parent-fn-id [this fn-id])
+  (get-arg-schema-fn-schema-id [this arg-schema-id])
+  (arg-defined-for-fn? [this fn-id arg-schema-id])
+  (get-dependency-targets [this fn-id]))
 
-  (testing "no-arg-override constraint"
-    (let [storage (create-storage-fn)]
-      ;; Setup: fn-a with arg-value for :x, fn-b (parent: fn-a)
-      ;; Test: create arg-value for :x on fn-b
-      ;; Expected: throws :constraint-violation/arg-already-defined
-      ))
-
-  ;; ... remaining tests
-  )
+;; Shared implementations use helpers
+(defn validate-parent-same-schema-impl [storage fn-id parent-fn-id]
+  (let [fn-schema (get-fn-schema-id storage fn-id)
+        parent-schema (get-fn-schema-id storage parent-fn-id)]
+    (when (not= fn-schema parent-schema)
+      (throw ...))))
 ```
+
+**Benefits of this approach:**
+- Code reuse across all storage backends
+- Each backend optimizes its helpers (SQL CTEs, Datomic queries, in-memory traversal)
+- Consistent error messages and behavior
 
 ### Implementation in Each Storage
 
-| Storage | Where implemented | How |
-|---------|-------------------|-----|
-| memory | On write to atom | Clojure code with state queries |
-| postgres | TRIGGER + Clojure fallback | SQL trigger for performance, Clojure for complex cases |
-| datomic | Transaction function | `:db/txFn` with Datomic queries |
-
-### README for Each Storage
-
-Each storage component will have a README.md describing:
-
-```markdown
-# memory-storage
-
-## Implemented GraphConstraints
-
-| Constraint | Implementation | File |
-|------------|----------------|------|
-| parent-same-schema | Check at `create-fn` | `core.clj:45` |
-| no-arg-override | DFS through parent chain | `constraints.clj:12` |
-| arg-schema-belongs-to-fn | Join check | `constraints.clj:28` |
-| no-inheritance-cycle | DFS | `constraints.clj:35` |
-| no-dependency-cycle | DFS through arg-values | `constraints.clj:52` |
-
-## Tests
-
-All contract tests pass: `bb test:memory-storage`
-```
+| Storage | Implementation | Optimization |
+|---------|----------------|--------------|
+| memory | `memory-storage/core.clj` | In-memory maps, O(1) lookups |
+| postgres | `postgres-storage/constraints.clj` | SQL recursive CTEs |
+| datomic | `datomic-storage/constraints.clj` | Datomic query batching |
 
 ---
 
@@ -259,12 +258,10 @@ fn: factorial
 
 **Danger**: Infinite recursion when there's no base case.
 
-**Solutions:**
-1. **Depth limit** - executor has max-depth (e.g., 1000)
-2. **Timeout** - maximum execution time
-3. **Runtime detection** - track call stack
-
-**Recommendation**: All three. This is standard practice (JVM has StackOverflowError, browsers have timeouts).
+**Solutions (all implemented):**
+1. **Depth limit** - executor has max-depth (default: 1000)
+2. **Timeout** - maximum execution time (default: 30000ms)
+3. **Runtime detection** - deferred (depth/timeout is sufficient)
 
 ### Cyclic Dependencies (Not Recursion)
 
@@ -282,30 +279,13 @@ fn: B
 
 **Difference from recursion**: Recursion is one function calling itself (controlled). Cycle is two functions calling each other (uncontrolled).
 
-**Solution**: Forbid cycles when creating arg-value.
+**Solution**: Forbid cycles when creating arg-value via `validate-no-dependency-cycle!`.
 
 | Storage | Implementation |
 |---------|----------------|
-| PostgreSQL | Trigger + recursive CTE for cycle detection |
-| Datomic | Transaction function + query |
+| PostgreSQL | Recursive CTE for cycle detection |
+| Datomic | Datalog query traversal |
 | Memory | DFS on write |
-
-**This is complex**, but necessary. Without this, the system can hang.
-
-**Alternative**: Runtime detection (during execution). Easier to implement, but error is discovered later.
-
-**Recommendation**: Detection on write + runtime protection (in case of races or bugs).
-
-### What Algorithms Are IMPOSSIBLE Without Recursion?
-
-**Short answer**: Almost all non-trivial ones.
-
-- Tree/graph traversal
-- Sorting (quicksort, mergesort)
-- Parsing recursive structures
-- Many numerical methods
-
-**Conclusion**: Recursion is MANDATORY. Need to allow it with protective mechanisms.
 
 ### Mutual Recursion
 
@@ -324,7 +304,7 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 
 ---
 
-## Part 4: Final Data Schema
+## Part 4: Data Schema
 
 ### Entities
 
@@ -382,36 +362,14 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | 2 | fn.name is unique | UNIQUE constraint | :db/unique | Set in index |
 | 3 | arg-schema is unique within fn-schema | UNIQUE(fn-schema-id, name) | Composite tuple + unique | Map<[fn-schema-id, name], id> |
 | 4 | arg-value is unique within fn | UNIQUE(owner-fn-id, arg-schema-id) | Composite tuple + unique | Map<[fn-id, arg-schema-id], id> |
-| 5 | arg-value.arg-schema-id matches owner-fn.fn-schema-id | TRIGGER or CHECK with subquery | :db.attr/preds | Validation on write |
-| 6 | No cycles in fn graph through arg-value | TRIGGER + recursive CTE | Transaction function | DFS on write |
+| 5 | arg-value.arg-schema-id matches owner-fn.fn-schema-id | Clojure validation | Clojure validation | Clojure validation |
+| 6 | No cycles in fn graph through arg-value | Recursive CTE | Datalog query | DFS |
 
 ### Constraint #5 in Detail
 
 **Problem**: arg-value references arg-schema, which belongs to fn-schema. owner-fn also references fn-schema. They must match.
 
-```sql
--- PostgreSQL: CHECK constraint (slow, but declarative)
-ALTER TABLE arg_value
-ADD CONSTRAINT arg_value_schema_match CHECK (
-  (SELECT fn_schema_id FROM arg_schema WHERE id = arg_schema_id) =
-  (SELECT fn_schema_id FROM fn WHERE id = owner_fn_id)
-);
-
--- Or TRIGGER (faster, but imperative)
-CREATE FUNCTION check_arg_value_schema() RETURNS TRIGGER AS $$
-BEGIN
-  IF (SELECT fn_schema_id FROM arg_schema WHERE id = NEW.arg_schema_id) !=
-     (SELECT fn_schema_id FROM fn WHERE id = NEW.owner_fn_id) THEN
-    RAISE EXCEPTION 'arg-schema does not belong to fn schema';
-  END IF;
-  RETURN NEW;
-END;
-$$ LANGUAGE plpgsql;
-```
-
-**Datomic**: `:db.attr/preds` with validation function.
-
-**Memory**: Check in code on insert/update.
+**Implementation**: All storage backends use shared Clojure validation via `validate-arg-schema-belongs-to-fn!`.
 
 ### Constraint #6 in Detail (Cycles)
 
@@ -421,26 +379,15 @@ $$ LANGUAGE plpgsql;
 2. Recursively collect all fn that target-fn references through arg-values
 3. If owner-fn-id is in this set -> REJECT (cycle)
 
-```sql
--- PostgreSQL: recursive CTE
-WITH RECURSIVE deps AS (
-  -- Base case: target fn
-  SELECT target_fn_id AS fn_id
-  UNION
-  -- Recursion: all fn referenced by arg-values
-  SELECT (av.value->>'ref')::uuid
-  FROM deps d
-  JOIN arg_value av ON av.owner_fn_id = d.fn_id
-  WHERE av.value->>'type' = 'ref'
-)
-SELECT EXISTS (SELECT 1 FROM deps WHERE fn_id = owner_fn_id);
-```
+**Implementation**: `validate-no-dependency-cycle!` with backend-specific optimizations.
 
 ---
 
 ## Part 5: Execution Model
 
 ### Laziness and Thunks
+
+**File:** `components/executor/src/graphden/executor/core.clj`
 
 ```clojure
 (defprotocol IThunk
@@ -453,7 +400,7 @@ SELECT EXISTS (SELECT 1 FROM deps WHERE fn_id = owner_fn_id);
 (defrecord FnRefThunk [fn-id provided-args]
   IThunk
   (force-value [_ context]
-    (execute-fn fn-id provided-args context)))
+    (execute-internal context fn-id provided-args)))
 
 (defrecord LazyFnThunk [fn-id]
   ;; For arguments of type :fn - don't evaluate, pass as-is
@@ -472,47 +419,66 @@ SELECT EXISTS (SELECT 1 FROM deps WHERE fn_id = owner_fn_id);
 ### Base Functions and Their Types
 
 ```clojure
-;; Regular function - all arguments are evaluated
-(defn base-add [{:keys [a b]}]
-  (+ (force a) (force b)))
+;; Regular function - all arguments are evaluated before call
+(def add-def
+  {:args {:nums :jsonb}
+   :return-type :numeric
+   :impl (fn [{:keys [nums]} _ctx]
+           (apply + nums))})
 
-;; Conditional - lazy branches
-(defn base-if [{:keys [condition then else]}]
-  (if (force condition)
-    (force then)
-    (force else)))
+;; Conditional - lazy branches via :lazy-args
+(def if-def
+  {:args {:condition :bool, :then :any, :else :any}
+   :lazy-args #{:then :else}
+   :return-type :any
+   :impl (fn [{:keys [condition then else]} ctx]
+           (if condition
+             (exec/force-value then ctx)
+             (exec/force-value else ctx)))})
 
-;; HOF - f is passed as fn-id
-(defn base-map [{:keys [f coll]} context]
-  (let [coll-value (force coll)
-        f-id (force f)]  ; This is fn-id, not the result!
-    (mapv (fn [item]
-            (execute-fn f-id {:item item} context))
-          coll-value)))
+;; HOF - f is passed as fn-id (type :fn)
+(def map-def
+  {:args {:f :fn, :coll :jsonb}
+   :return-type :jsonb
+   :impl (fn [{:keys [f coll]} ctx]
+           (mapv (fn [item]
+                   (exec/execute-with-named-args ctx f {:item item}))
+                 coll))})
 ```
 
 ### Execution Context
 
 ```clojure
 (defrecord ExecutionContext
-  [depth         ; Current depth (for infinite recursion protection)
-   max-depth     ; Maximum depth
-   start-time    ; Start time (for timeout)
-   timeout-ms    ; Maximum time
-   call-stack])  ; Call stack (for debugging)
+  [storage          ; Storage instance for graph resolution
+   execution-graph  ; Cached graph data (performance optimization)
+   base-fns         ; Registry of base function implementations
+   max-depth        ; Maximum recursion depth
+   timeout-ms       ; Maximum execution time
+   start-time       ; Execution start time
+   depth])          ; Current recursion depth
+```
 
-(defn execute-fn [fn-id provided-args context]
-  ;; Safety checks
+**Key design decisions:**
+1. **`execution-graph` caching** - Graph resolved once at top level, reused for all nested calls
+2. **`base-fns` registry** - Direct access to implementations without global state
+3. **`storage` reference** - Enables `ExecutionGraph` protocol calls if needed
+
+### Limit Checking
+
+```clojure
+(defn- check-limits! [context]
   (when (> (:depth context) (:max-depth context))
-    (throw (ex-info "Max recursion depth exceeded" {:depth (:depth context)})))
-  (when (> (- (System/currentTimeMillis) (:start-time context)) (:timeout-ms context))
-    (throw (ex-info "Execution timeout" {})))
-
-  ;; Execution
-  (let [graph (resolve-fn fn-id)
-        thunks (build-thunks graph provided-args)
-        new-context (update context :depth inc)]
-    (call-base-fn (:base-fn-name graph) thunks new-context)))
+    (throw (ex-info "Max recursion depth exceeded"
+                    {:type :execution-error/max-depth-exceeded
+                     :depth (:depth context)
+                     :max-depth (:max-depth context)})))
+  (let [elapsed (- (System/currentTimeMillis) (:start-time context))]
+    (when (> elapsed (:timeout-ms context))
+      (throw (ex-info "Execution timeout"
+                      {:type :execution-error/timeout
+                       :elapsed-ms elapsed
+                       :timeout-ms (:timeout-ms context)})))))
 ```
 
 ### Addressing Free Arguments
@@ -534,281 +500,122 @@ SELECT EXISTS (SELECT 1 FROM deps WHERE fn_id = owner_fn_id);
         [arg-value-2-id x-of-B-id] 200}} ; x for second B
 ```
 
-**Implementation**:
-
-When building thunks for A:
-1. For arg1-of-A create FnRefThunk with fn-id=B and provided-args filtered by arg-value-1-id
-2. For arg2-of-A create FnRefThunk with fn-id=B and provided-args filtered by arg-value-2-id
-
 ---
 
-## Part 6: Implementation Plan
-
-### Phase 0: Documentation
-
-**0.1 Main Project README.md**
-
-File: `README.md`
-
-Contents:
-- Project vision (visual functional programming)
-- System architecture (function graph in DB)
-- Key concepts (fn-schema, fn, arg-value, inheritance)
-- Execution model (laziness, thunks)
-- Links to component READMEs
-
-**0.2 README for Each Component**
-
-| Component | Description |
-|-----------|-------------|
-| `storage-protocol` | Storage, StorageCRUD, GraphConstraints protocols |
-| `data-schema-protocol` | DataSchema protocol, field types |
-| `field-types` | Supported data types |
-| `malli-data-schema` | Malli schema implementation |
-| `graph-data-schema` | Function graph schema (fn-schema, fn, arg-value) |
-| `memory-storage` | In-memory implementation + constraints |
-| `postgres-storage` | PostgreSQL implementation + constraints |
-| `datomic-storage` | Datomic implementation + constraints |
-
-Each README contains:
-- Component purpose
-- Dependencies
-- Main functions/protocols
-- Usage examples
-- For storage: constraint implementation table
-
----
-
-### Phase 1: Data Schema and Constraints
-
-**1.1 Update graph-data-schema**
-
-File: `components/graph-data-schema/src/graphden/graph_data_schema/interface.clj`
-
-- Add `parent-fn-id` to `:fn`
-- Add `required` to `:arg-schema`
-- Add `base-fn-name` to `:fn-schema`
-
-**1.2 GraphConstraints Protocol**
-
-File: `components/storage-protocol/src/graphden/storage_protocol/interface.clj`
-
-```clojure
-(defprotocol GraphConstraints
-  (validate-parent-same-schema! [this fn-id parent-fn-id])
-  (validate-no-arg-override! [this fn-id arg-schema-id])
-  (validate-arg-schema-belongs-to-fn! [this fn-id arg-schema-id])
-  (validate-no-inheritance-cycle! [this fn-id parent-fn-id])
-  (validate-no-dependency-cycle! [this owner-fn-id target-fn-id]))
-```
-
-**1.3 Contract Tests for GraphConstraints**
-
-File: `components/storage-protocol/test/graphden/storage_protocol/constraint_contract_test.clj`
-
-**1.4 Implement Constraints in Each Storage**
-
----
-
-### Phase 2: CRUD Operations
-
-**2.1 StorageCRUD Protocol**
-
-File: `components/storage-protocol/src/graphden/storage_protocol/interface.clj`
-
-```clojure
-(defprotocol StorageCRUD
-  (create [this entity-name data])      ; -> id
-  (read-by-id [this entity-name id])    ; -> data | nil
-  (update-by-id [this entity-name id data]) ; -> data
-  (delete-by-id [this entity-name id])  ; -> boolean
-  (query [this entity-name where]))     ; -> [data...]
-```
-
-**2.2 Implement CRUD in Each Storage**
-
-| Storage | Files |
-|---------|-------|
-| memory | `components/memory-storage/src/graphden/memory_storage/crud.clj` |
-| postgres | `components/postgres-storage/src/graphden/postgres_storage/crud.clj` |
-| datomic | `components/datomic-storage/src/graphden/datomic_storage/crud.clj` |
-
-### Phase 3: Executor
-
-**3.1 graph-resolver** - new component
-
-File: `components/graph-resolver/src/graphden/graph_resolver/interface.clj`
-
-- `resolve-fn [storage fn-id]` -> collect graph with arg-values and parents
-
-**3.2 thunk-builder**
-
-File: `components/executor/src/graphden/executor/thunks.clj`
-
-- Create LiteralThunk, FnRefThunk, LazyFnThunk
-
-**3.3 executor**
-
-File: `components/executor/src/graphden/executor/interface.clj`
-
-- `execute [storage fn-id args context]` -> result
-- Protection: max-depth, timeout
-
-**3.4 base-functions** - registry of base functions
-
-File: `components/base-functions/src/graphden/base_functions/interface.clj`
-
----
-
-### Phase 4: Base Functions
-
-**4.1 Arithmetic and Strings**
-- +, -, *, /, mod
-- str, subs, str/join, etc.
-
-**4.2 Collections**
-- first, rest, cons, conj
-- get, assoc, dissoc
-
-**4.3 Conditionals and HOF**
-- if, cond
-- map, filter, reduce
-
-**4.4 I/O (Client)**
-- http-request (http-kit client)
-- file operations
-
-**4.5 I/O (Server)**
-- http-server (http-kit server)
-
-**Running Long-lived Services:**
-
-Problem: http-server must run continuously, not "compute and return result".
-
-Solution: **Service Manager** - separate component for managing long-lived processes.
-
-```clojure
-(defprotocol ServiceManager
-  (start-service [this service-fn-id])   ; -> service-instance-id
-  (stop-service [this instance-id])      ; -> boolean
-  (list-services [this])                 ; -> [{:id :fn-id :status :started-at}]
-  (service-status [this instance-id]))   ; -> {:status :logs :metrics}
-```
-
-HTTP-server as a base function:
-```clojure
-;; base-fn-name: "graphden/http-server"
-;; args: {:port int, :handler fn}
-;;
-;; This function does NOT return a result, but registers a service
-(defn base-http-server [{:keys [port handler]} context]
-  (let [server (http-kit/run-server
-                 (fn [req] (execute-fn handler {:request req} context))
-                 {:port (force port)})]
-    ;; Return handle for stopping
-    {:stop-fn server
-     :type :http-server
-     :port (force port)}))
-```
-
-Service Manager stores running services and provides API for management.
-
----
-
-### Phase 5: UI/API
-
-**5.1 REST API**
-- CRUD endpoints for all entities
-- POST /execute - run function
-
-**5.2 Web Interface**
-- Function list
-- Graph editor
-- Execute button
-
----
-
-## Part 7: Future Plans
-
-### Type System (Type Algebra)
-
-**Goal**: Static type checking, UI hints, automatic type inference.
-
-**What's needed:**
-- Types for fn-schema (input types -> output type)
-- Parametric polymorphism (List[T], Map[K,V])
-- Type inference for compositions (Hindley-Milner or subset)
-- Types for HOF: `map : (a -> b) -> List[a] -> List[b]`
-
-**Complexity**: High. This is a separate large project.
-
----
-
-### Git-like Versioning
-
-**Goal**: Change history, rollback, branches, merge.
-
-**Model:**
-- Each fn/arg-value change is a commit
-- Can rollback to any version
-- Branches for experiments
-- Merge to combine changes
-
-**Implementation:**
-- Either event sourcing (store all changes)
-- Or snapshot + diff
-- Integration with real git for export/import
-
----
-
-### User and Permission System
-
-**Goal**: Access control.
-
-**Permission Model:**
-```
-User:
-  id, name, email
-
-Role:
-  id, name
-
-Permission:
-  - view(fn-id)      - see function
-  - edit(fn-id)      - edit
-  - execute(fn-id)   - execute
-  - admin(fn-id)     - manage permissions
-
-UserRole:
-  user-id, role-id
-
-RolePermission:
-  role-id, permission
-```
-
-**Application:**
-- On CRUD operations - permission check
-- On execution - execute permission check
-- In UI - filter visible functions
-
----
-
-## Part 8: Honest System Limitations
+## Part 6: System Limitations
 
 ### What CANNOT Be Done Elegantly
 
-1. **Constraints #5 and #6** require triggers/code - no declarative way in SQL/Datomic
+1. **Constraints #5 and #6** require code - no pure declarative way in SQL/Datomic
+   - *Mitigation*: Shared validation logic reduces duplication
 2. **Mutual recursion** - cannot distinguish "good" from "bad" statically
+   - *Mitigation*: Runtime depth/timeout protection
 3. **Full type inference** - this is a separate large task
+   - *Mitigation*: Start with explicit types, add inference later
 
 ### What Can Break
 
 1. **Infinite recursion** - protection via depth/timeout, but error at runtime
 2. **Races during cycle detection** - if two processes create arg-values simultaneously
+   - *Mitigation*: PostgreSQL uses transactions; Datomic is inherently serialized
 3. **Performance on deep graphs** - many DB queries
+   - *Mitigation*: Execution graph caching (implemented)
 
-### Mitigation
+### Mitigation Summary
 
-1. Aggressive caching of resolved graphs
-2. Transactions for atomicity
-3. Monitoring and alerts for deep/long executions
+1. Aggressive caching of resolved graphs (implemented)
+2. Transactions for atomicity (implemented)
+3. Monitoring and alerts for deep/long executions (planned)
+
+---
+
+## Appendix A: Component Dependency Graph
+
+```
+                    ┌─────────────────────┐
+                    │   field-types       │
+                    └──────────┬──────────┘
+                               │
+           ┌───────────────────┼───────────────────┐
+           │                   │                   │
+           v                   v                   v
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│ data-schema-     │ │ storage-protocol │ │ malli-data-      │
+│ protocol         │ │                  │ │ schema           │
+└────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
+         │                    │                    │
+         └────────────────────┼────────────────────┘
+                              │
+         ┌────────────────────┼────────────────────┐
+         │                    │                    │
+         v                    v                    v
+┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
+│ memory-storage   │ │ postgres-storage │ │ datomic-storage  │
+└────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
+         │                    │                    │
+         │        ┌───────────┴───────────┐        │
+         │        │                       │        │
+         │        v                       │        │
+         │ ┌──────────────────┐           │        │
+         │ │ graph-data-      │           │        │
+         │ │ schema           │           │        │
+         │ └────────┬─────────┘           │        │
+         │          │                     │        │
+         └──────────┼─────────────────────┼────────┘
+                    │                     │
+         ┌──────────┼─────────────────────┼──────────┐
+         │          │                     │          │
+         v          v                     v          v
+┌────────────────────┐ ┌────────────────────┐ ┌────────────────────┐
+│ graph-storage-     │ │ graph-storage-     │ │ graph-storage-     │
+│ memory             │ │ postgres           │ │ datomic            │
+└────────┬───────────┘ └────────┬───────────┘ └────────┬───────────┘
+         │                      │                      │
+         │           ┌──────────┴──────────┐           │
+         │           │                     │           │
+         │           v                     │           │
+         │    ┌──────────────┐             │           │
+         │    │   executor   │<────────────┼───────────┤
+         │    └──────┬───────┘             │           │
+         │           │                     │           │
+         │           v                     │           │
+         │    ┌──────────────┐             │           │
+         │    │ base-        │             │           │
+         │    │ functions    │             │           │
+         │    └──────┬───────┘             │           │
+         │           │                     │           │
+         │           v                     │           │
+         │    ┌──────────────┐             │           │
+         │    │ fn-registry  │             │           │
+         │    └──────┬───────┘             │           │
+         │           │                     │           │
+         └───────────┼─────────────────────┼───────────┘
+                     │                     │
+         ┌───────────┼─────────────────────┼───────────┐
+         │           │                     │           │
+         v           v                     v           v
+┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
+│ graph-with-base-    │ │ graph-with-base-    │ │ graph-with-base-    │
+│ fns-memory          │ │ fns-postgres        │ │ fns-datomic         │
+└─────────────────────┘ └─────────────────────┘ └─────────────────────┘
+```
+
+---
+
+## Appendix B: Error Types
+
+All errors use canonical `:type` keys for programmatic handling:
+
+| Error Type | Description |
+|------------|-------------|
+| `:constraint-violation/parent-schema-mismatch` | Parent fn has different schema |
+| `:constraint-violation/arg-already-defined` | Arg already defined in parent chain |
+| `:constraint-violation/arg-schema-mismatch` | Arg schema doesn't belong to fn schema |
+| `:constraint-violation/inheritance-cycle` | Circular inheritance detected |
+| `:constraint-violation/dependency-cycle` | Circular dependency detected |
+| `:execution-error/max-depth-exceeded` | Recursion limit reached |
+| `:execution-error/timeout` | Execution time limit reached |
+| `:execution-error/invalid-args` | Invalid arguments to base function |
+| `:execution-error/division-by-zero` | Division by zero |
+| `:execution-error/index-out-of-bounds` | Index out of bounds |
+| `:storage-error/*` | Storage-specific errors |

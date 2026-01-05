@@ -1,99 +1,99 @@
-# Graphden: Система визуального функционального программирования
+# Graphden: Visual Functional Programming System
 
-## Часть 1: Критический анализ модели
+## Part 1: Critical Model Analysis
 
-### Проблема "переопределения аргументов"
+### The "Argument Override" Problem
 
-**Текущий подход (наследование через parent-fn-id):**
+**Current approach (inheritance via parent-fn-id):**
 
 ```
 fn: A (parent: null)
   arg-values: {x: 1}
 
 fn: B (parent: A)
-  arg-values: {y: 2}  ← OK
+  arg-values: {y: 2}  <- OK
 
 fn: C (parent: B)
-  arg-values: {x: 5}  ← ЗАПРЕЩЕНО: x уже определён в A
+  arg-values: {x: 5}  <- FORBIDDEN: x is already defined in A
 ```
 
-**Как это проверить?**
+**How to enforce this?**
 
-| Storage | Реализация | Проблемы |
-|---------|------------|----------|
-| PostgreSQL | Trigger + рекурсивный CTE | Сложно, медленно на глубоких цепочках |
-| Datomic | Transaction function + query | Сложно, нужен дополнительный запрос |
-| Memory | Код при записи | Дублирование логики |
+| Storage | Implementation | Issues |
+|---------|----------------|--------|
+| PostgreSQL | Trigger + recursive CTE | Complex, slow on deep chains |
+| Datomic | Transaction function + query | Complex, requires additional query |
+| Memory | Code at write time | Logic duplication |
 
-**Это ПЛОХО** — constraint не декларативный, требует кода, легко сломать.
+**This is BAD** - the constraint is not declarative, requires code, easy to break.
 
 ---
 
-### Альтернатива 1: Иммутабельность + Копирование
+### Alternative 1: Immutability + Copying
 
-**Идея**: Отказаться от "живого" наследования. При создании fn копировать arg-values из "базы".
+**Idea**: Abandon "live" inheritance. When creating fn, copy arg-values from the "base".
 
 ```
 fn: A
   arg-values: {x: 1}
 
 fn: B (based-on: A)
-  // При создании скопировали x: 1 из A
+  // When created, copied x: 1 from A
   arg-values: {x: 1, y: 2}
 
 fn: C (based-on: B)
-  // При создании скопировали x: 1, y: 2 из B
+  // When created, copied x: 1, y: 2 from B
   arg-values: {x: 1, y: 2, z: 3}
 ```
 
-**Плюсы:**
-- Нет parent-fn-id → нет рекурсивных проверок
-- Каждая fn — самодостаточна
-- Constraint "один arg-schema-id на fn" = простой unique(owner-fn-id, arg-schema-id)
+**Pros:**
+- No parent-fn-id -> no recursive checks
+- Each fn is self-contained
+- Constraint "one arg-schema-id per fn" = simple unique(owner-fn-id, arg-schema-id)
 
-**Минусы:**
-- Нет "живого" обновления: изменил A → B и C не обновятся
-- Дублирование данных
+**Cons:**
+- No "live" updates: changed A -> B and C won't update
+- Data duplication
 
-**Митигация минусов:**
-- "Живое" обновление редко нужно на практике
-- Можно добавить операцию "обновить из базы" если нужно
-- Дублирование — не проблема для небольших значений
+**Mitigating cons:**
+- "Live" updates are rarely needed in practice
+- Can add "update from base" operation if needed
+- Duplication is not a problem for small values
 
 ---
 
-### Альтернатива 2: Версионирование
+### Alternative 2: Versioning
 
-**Идея**: Каждая fn иммутабельна, изменение = новая версия.
+**Idea**: Each fn is immutable, change = new version.
 
 ```
 fn: base-api@v1 {url: "https://old.api"}
 fn: base-api@v2 {url: "https://new.api"}
 
 fn: create-user (based-on: base-api@v1)
-  // Привязан к конкретной версии
+  // Bound to a specific version
 ```
 
-**Плюсы:**
-- Полная предсказуемость
-- История изменений
-- Можно откатиться
+**Pros:**
+- Complete predictability
+- Change history
+- Can rollback
 
-**Минусы:**
-- Сложнее UX
-- Больше данных
+**Cons:**
+- More complex UX
+- More data
 
 ---
 
-### Альтернатива 3: Граф без наследования
+### Alternative 3: Graph Without Inheritance
 
-**Идея**: Отказаться от концепции "наследования". Каждая fn полностью определяет свои аргументы.
+**Idea**: Abandon the "inheritance" concept. Each fn fully defines its arguments.
 
 ```
 fn: create-user
   fn-schema: http-request
   arg-values: {
-    url: "https://api.example.com",  // Можно скопировать из другой fn через UI
+    url: "https://api.example.com",  // Can copy from another fn via UI
     method: "POST",
     headers: {...},
     body: {...},
@@ -101,28 +101,28 @@ fn: create-user
   }
 ```
 
-**Плюсы:**
-- Максимальная простота
-- Нет проблемы переопределения вообще
+**Pros:**
+- Maximum simplicity
+- No override problem at all
 
-**Минусы:**
-- Дублирование при ручном создании
-- Потеря концепции "частичного применения"
+**Cons:**
+- Duplication when manually creating
+- Loss of "partial application" concept
 
-**Но**: UI может предлагать "создать на основе" = копирование с возможностью изменить.
+**However**: UI can offer "create based on" = copying with ability to change.
 
 ---
 
-### Выбранный подход: Живое наследование + Явные ограничения
+### Chosen Approach: Live Inheritance + Explicit Constraints
 
-**Схема с наследованием:**
+**Schema with inheritance:**
 
 ```
 fn:
   id: uuid (PK)
   name: text (UNIQUE)
   fn-schema-id: ref<fn-schema>
-  parent-fn-id: ref<fn> (nullable)  // Живое наследование
+  parent-fn-id: ref<fn> (nullable)  // Live inheritance
 
 arg-value:
   id: uuid (PK)
@@ -132,54 +132,54 @@ arg-value:
   UNIQUE(owner-fn-id, arg-schema-id)
 ```
 
-**Ограничения вынесены в явный протокол** — каждый storage ОБЯЗАН их реализовать.
+**Constraints are extracted into an explicit protocol** - each storage MUST implement them.
 
 ---
 
-## Часть 2: Протокол ограничений (GraphConstraints)
+## Part 2: Constraints Protocol (GraphConstraints)
 
-### Новый протокол
+### New Protocol
 
 ```clojure
 (defprotocol GraphConstraints
-  "Ограничения целостности графа функций.
-   Каждый storage ОБЯЗАН реализовать этот протокол.
-   Нарушение любого ограничения = выброс исключения."
+  "Function graph integrity constraints.
+   Each storage MUST implement this protocol.
+   Violation of any constraint = exception thrown."
 
   (validate-parent-same-schema!
     [this fn-id parent-fn-id]
-    "Ограничение: parent-fn должен иметь тот же fn-schema-id, что и fn.
-     Вызывается при создании/изменении fn с parent-fn-id.
+    "Constraint: parent-fn must have the same fn-schema-id as fn.
+     Called when creating/modifying fn with parent-fn-id.
      Throws: :constraint-violation/parent-schema-mismatch")
 
   (validate-no-arg-override!
     [this fn-id arg-schema-id]
-    "Ограничение: arg-schema-id не должен быть уже определён в цепочке родителей.
-     Вызывается при создании arg-value.
+    "Constraint: arg-schema-id must not already be defined in the parent chain.
+     Called when creating arg-value.
      Throws: :constraint-violation/arg-already-defined")
 
   (validate-arg-schema-belongs-to-fn!
     [this fn-id arg-schema-id]
-    "Ограничение: arg-schema должен принадлежать fn-schema этой fn.
-     Вызывается при создании arg-value.
+    "Constraint: arg-schema must belong to this fn's fn-schema.
+     Called when creating arg-value.
      Throws: :constraint-violation/arg-schema-mismatch")
 
   (validate-no-inheritance-cycle!
     [this fn-id parent-fn-id]
-    "Ограничение: установка parent-fn-id не должна создавать цикл наследования.
-     Вызывается при создании/изменении fn с parent-fn-id.
+    "Constraint: setting parent-fn-id must not create an inheritance cycle.
+     Called when creating/modifying fn with parent-fn-id.
      Throws: :constraint-violation/inheritance-cycle")
 
   (validate-no-dependency-cycle!
     [this owner-fn-id target-fn-id]
-    "Ограничение: ссылка на target-fn не должна создавать цикл зависимостей.
-     Вызывается при создании arg-value с value = ref<fn>.
+    "Constraint: reference to target-fn must not create a dependency cycle.
+     Called when creating arg-value with value = ref<fn>.
      Throws: :constraint-violation/dependency-cycle"))
 ```
 
 ### Contract Tests
 
-Создаём набор тестов, которые КАЖДЫЙ storage должен пройти:
+Create a set of tests that EVERY storage must pass:
 
 ```clojure
 (defn constraint-tests [create-storage-fn]
@@ -197,78 +197,78 @@ arg-value:
       ;; Expected: throws :constraint-violation/arg-already-defined
       ))
 
-  ;; ... остальные тесты
+  ;; ... remaining tests
   )
 ```
 
-### Реализация в каждом storage
+### Implementation in Each Storage
 
-| Storage | Где реализовано | Как |
-|---------|-----------------|-----|
-| memory | При записи в atom | Clojure код с запросами к state |
-| postgres | TRIGGER + Clojure fallback | SQL trigger для производительности, Clojure для сложных случаев |
-| datomic | Transaction function | `:db/txFn` с Datomic queries |
+| Storage | Where implemented | How |
+|---------|-------------------|-----|
+| memory | On write to atom | Clojure code with state queries |
+| postgres | TRIGGER + Clojure fallback | SQL trigger for performance, Clojure for complex cases |
+| datomic | Transaction function | `:db/txFn` with Datomic queries |
 
-### README для каждого storage
+### README for Each Storage
 
-Каждый storage-компонент получит README.md с описанием:
+Each storage component will have a README.md describing:
 
 ```markdown
 # memory-storage
 
-## Реализованные ограничения GraphConstraints
+## Implemented GraphConstraints
 
-| Ограничение | Реализация | Файл |
-|-------------|------------|------|
-| parent-same-schema | Проверка при `create-fn` | `core.clj:45` |
-| no-arg-override | DFS по parent chain | `constraints.clj:12` |
+| Constraint | Implementation | File |
+|------------|----------------|------|
+| parent-same-schema | Check at `create-fn` | `core.clj:45` |
+| no-arg-override | DFS through parent chain | `constraints.clj:12` |
 | arg-schema-belongs-to-fn | Join check | `constraints.clj:28` |
 | no-inheritance-cycle | DFS | `constraints.clj:35` |
-| no-dependency-cycle | DFS по arg-values | `constraints.clj:52` |
+| no-dependency-cycle | DFS through arg-values | `constraints.clj:52` |
 
-## Тесты
+## Tests
 
-Все contract tests проходят: `bb test:memory-storage`
+All contract tests pass: `bb test:memory-storage`
 ```
 
 ---
 
-## Часть 3: Рекурсия и циклы
+## Part 3: Recursion and Cycles
 
-### Рекурсия
+### Recursion
 
-**Проблема**: Функция может ссылаться на саму себя.
+**Problem**: A function can reference itself.
 
 ```
 fn: factorial
   arg-values: {
-    n: <входной аргумент>,
-    recursive-call: ref<factorial>  // Ссылка на себя
+    n: <input argument>,
+    recursive-call: ref<factorial>  // Reference to itself
   }
 ```
 
-**При ленивом исполнении это работает**, если есть базовый случай:
+**With lazy execution this works**, if there's a base case:
 
 ```clojure
-;; Базовая функция factorial
+;; Base factorial function
 (defn base-factorial [{:keys [n recursive-call]}]
   (if (<= n 1)
     1
     (* n (execute-fn recursive-call {:n (dec n)}))))
 ```
 
-**Опасность**: Бесконечная рекурсия при отсутствии базового случая.
+**Danger**: Infinite recursion when there's no base case.
 
-**Решения:**
-1. **Ограничение глубины** — executor имеет max-depth (например, 1000)
-2. **Таймаут** — максимальное время исполнения
-3. **Детекция в runtime** — отслеживать стек вызовов
+**Solutions:**
+1. **Depth limit** - executor has max-depth (e.g., 1000)
+2. **Timeout** - maximum execution time
+3. **Runtime detection** - track call stack
 
-**Рекомендация**: Все три. Это стандартная практика (JVM имеет StackOverflowError, браузеры имеют таймауты).
+**Recommendation**: All three. This is standard practice (JVM has StackOverflowError, browsers have timeouts).
 
-### Циклические зависимости (не рекурсия)
+### Cyclic Dependencies (Not Recursion)
 
-**Проблема:**
+**Problem:**
 
 ```
 fn: A
@@ -278,126 +278,126 @@ fn: B
   arg1: ref<A>
 ```
 
-**При попытке вычислить A** → нужен B → нужен A → бесконечность.
+**When trying to compute A** -> need B -> need A -> infinity.
 
-**Отличие от рекурсии**: Рекурсия — это одна функция вызывает себя (контролируемо). Цикл — две функции вызывают друг друга (неконтролируемо).
+**Difference from recursion**: Recursion is one function calling itself (controlled). Cycle is two functions calling each other (uncontrolled).
 
-**Решение**: Запретить циклы при создании arg-value.
+**Solution**: Forbid cycles when creating arg-value.
 
-| Storage | Реализация |
-|---------|------------|
-| PostgreSQL | Trigger + рекурсивный CTE для детекции цикла |
+| Storage | Implementation |
+|---------|----------------|
+| PostgreSQL | Trigger + recursive CTE for cycle detection |
 | Datomic | Transaction function + query |
-| Memory | DFS при записи |
+| Memory | DFS on write |
 
-**Это сложно**, но необходимо. Без этого система может зависнуть.
+**This is complex**, but necessary. Without this, the system can hang.
 
-**Альтернатива**: Детекция в runtime (при исполнении). Проще реализовать, но ошибка обнаружится позже.
+**Alternative**: Runtime detection (during execution). Easier to implement, but error is discovered later.
 
-**Рекомендация**: Детекция при записи + защита в runtime (на случай гонок или багов).
+**Recommendation**: Detection on write + runtime protection (in case of races or bugs).
 
-### Какие алгоритмы НЕВОЗМОЖНЫ без рекурсии?
+### What Algorithms Are IMPOSSIBLE Without Recursion?
 
-**Короткий ответ**: Почти все нетривиальные.
+**Short answer**: Almost all non-trivial ones.
 
-- Обход деревьев/графов
-- Сортировки (quicksort, mergesort)
-- Парсинг рекурсивных структур
-- Многие численные методы
+- Tree/graph traversal
+- Sorting (quicksort, mergesort)
+- Parsing recursive structures
+- Many numerical methods
 
-**Вывод**: Рекурсия ОБЯЗАТЕЛЬНА. Нужно разрешить её с защитными механизмами.
+**Conclusion**: Recursion is MANDATORY. Need to allow it with protective mechanisms.
 
-### Взаимная рекурсия
+### Mutual Recursion
 
 ```
-fn: is-even (n) → if n=0 then true else is-odd(n-1)
-fn: is-odd (n) → if n=0 then false else is-even(n-1)
+fn: is-even (n) -> if n=0 then true else is-odd(n-1)
+fn: is-odd (n) -> if n=0 then false else is-even(n-1)
 ```
 
-Технически это цикл (A→B→A), но это ВАЛИДНЫЙ паттерн.
+Technically this is a cycle (A->B->A), but this is a VALID pattern.
 
-**Как отличить от "плохого" цикла?**
-- Плохой цикл: A нужен результат B, B нужен результат A (deadlock)
-- Хороший цикл: A вызывает B с ДРУГИМИ аргументами
+**How to distinguish from a "bad" cycle?**
+- Bad cycle: A needs result of B, B needs result of A (deadlock)
+- Good cycle: A calls B with DIFFERENT arguments
 
-**Решение**: Не запрещать на уровне схемы. Защита только в runtime (глубина, таймаут).
+**Solution**: Don't forbid at schema level. Protection only at runtime (depth, timeout).
 
 ---
 
-## Часть 4: Итоговая схема данных
+## Part 4: Final Data Schema
 
-### Сущности
+### Entities
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│ fn-schema (схема функции)                                       │
-├─────────────────────────────────────────────────────────────────┤
-│ id: uuid (PK)                                                   │
-│ name: text (UNIQUE)                                             │
-│ returned-type: enum<value-kind>                                 │
-│ base-fn-name: text (nullable) — имя Clojure-функции            │
-│                                 null = составная функция        │
-└─────────────────────────────────────────────────────────────────┘
-         │
-         │ 1:N
-         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ arg-schema (схема аргумента)                                    │
-├─────────────────────────────────────────────────────────────────┤
-│ id: uuid (PK)                                                   │
-│ fn-schema-id: ref<fn-schema>                                    │
-│ name: text                                                      │
-│ type: enum<value-kind>                                          │
-│ required: bool (default true)                                   │
-│ UNIQUE(fn-schema-id, name)                                      │
-└─────────────────────────────────────────────────────────────────┘
++------------------------------------------------------------------+
+| fn-schema (function schema)                                       |
++------------------------------------------------------------------+
+| id: uuid (PK)                                                     |
+| name: text (UNIQUE)                                               |
+| returned-type: enum<value-kind>                                   |
+| base-fn-name: text (nullable) - Clojure function name            |
+|                                 null = composite function         |
++------------------------------------------------------------------+
+         |
+         | 1:N
+         v
++------------------------------------------------------------------+
+| arg-schema (argument schema)                                      |
++------------------------------------------------------------------+
+| id: uuid (PK)                                                     |
+| fn-schema-id: ref<fn-schema>                                      |
+| name: text                                                        |
+| type: enum<value-kind>                                            |
+| required: bool (default true)                                     |
+| UNIQUE(fn-schema-id, name)                                        |
++------------------------------------------------------------------+
 
-┌─────────────────────────────────────────────────────────────────┐
-│ fn (экземпляр функции)                                          │
-├─────────────────────────────────────────────────────────────────┤
-│ id: uuid (PK)                                                   │
-│ name: text (UNIQUE)                                             │
-│ fn-schema-id: ref<fn-schema>                                    │
-│ parent-fn-id: ref<fn> (nullable) — живое наследование          │
-└─────────────────────────────────────────────────────────────────┘
-         │
-         │ 1:N
-         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ arg-value (значение аргумента)                                  │
-├─────────────────────────────────────────────────────────────────┤
-│ id: uuid (PK)                                                   │
-│ owner-fn-id: ref<fn>                                            │
-│ arg-schema-id: ref<arg-schema>                                  │
-│ value: union<ref<fn> | literal-types...>                        │
-│ UNIQUE(owner-fn-id, arg-schema-id)                              │
-└─────────────────────────────────────────────────────────────────┘
++------------------------------------------------------------------+
+| fn (function instance)                                            |
++------------------------------------------------------------------+
+| id: uuid (PK)                                                     |
+| name: text (UNIQUE)                                               |
+| fn-schema-id: ref<fn-schema>                                      |
+| parent-fn-id: ref<fn> (nullable) - live inheritance              |
++------------------------------------------------------------------+
+         |
+         | 1:N
+         v
++------------------------------------------------------------------+
+| arg-value (argument value)                                        |
++------------------------------------------------------------------+
+| id: uuid (PK)                                                     |
+| owner-fn-id: ref<fn>                                              |
+| arg-schema-id: ref<arg-schema>                                    |
+| value: union<ref<fn> | literal-types...>                          |
+| UNIQUE(owner-fn-id, arg-schema-id)                                |
++------------------------------------------------------------------+
 ```
 
-### Ограничения и их реализация
+### Constraints and Their Implementation
 
-| # | Ограничение | PostgreSQL | Datomic | Memory |
-|---|-------------|------------|---------|--------|
-| 1 | fn-schema.name уникален | UNIQUE constraint | :db/unique :db.unique/identity | Set в индексе |
-| 2 | fn.name уникален | UNIQUE constraint | :db/unique | Set в индексе |
-| 3 | arg-schema уникален в рамках fn-schema | UNIQUE(fn-schema-id, name) | Composite tuple + unique | Map<[fn-schema-id, name], id> |
-| 4 | arg-value уникален в рамках fn | UNIQUE(owner-fn-id, arg-schema-id) | Composite tuple + unique | Map<[fn-id, arg-schema-id], id> |
-| 5 | arg-value.arg-schema-id соответствует owner-fn.fn-schema-id | TRIGGER или CHECK с subquery | :db.attr/preds | Валидация при записи |
-| 6 | Нет циклов в графе fn через arg-value | TRIGGER + рекурсивный CTE | Transaction function | DFS при записи |
+| # | Constraint | PostgreSQL | Datomic | Memory |
+|---|------------|------------|---------|--------|
+| 1 | fn-schema.name is unique | UNIQUE constraint | :db/unique :db.unique/identity | Set in index |
+| 2 | fn.name is unique | UNIQUE constraint | :db/unique | Set in index |
+| 3 | arg-schema is unique within fn-schema | UNIQUE(fn-schema-id, name) | Composite tuple + unique | Map<[fn-schema-id, name], id> |
+| 4 | arg-value is unique within fn | UNIQUE(owner-fn-id, arg-schema-id) | Composite tuple + unique | Map<[fn-id, arg-schema-id], id> |
+| 5 | arg-value.arg-schema-id matches owner-fn.fn-schema-id | TRIGGER or CHECK with subquery | :db.attr/preds | Validation on write |
+| 6 | No cycles in fn graph through arg-value | TRIGGER + recursive CTE | Transaction function | DFS on write |
 
-### Ограничение #5 подробнее
+### Constraint #5 in Detail
 
-**Проблема**: arg-value ссылается на arg-schema, который принадлежит fn-schema. owner-fn тоже ссылается на fn-schema. Они должны совпадать.
+**Problem**: arg-value references arg-schema, which belongs to fn-schema. owner-fn also references fn-schema. They must match.
 
 ```sql
--- PostgreSQL: CHECK constraint (медленно, но декларативно)
+-- PostgreSQL: CHECK constraint (slow, but declarative)
 ALTER TABLE arg_value
 ADD CONSTRAINT arg_value_schema_match CHECK (
   (SELECT fn_schema_id FROM arg_schema WHERE id = arg_schema_id) =
   (SELECT fn_schema_id FROM fn WHERE id = owner_fn_id)
 );
 
--- Или TRIGGER (быстрее, но императивно)
+-- Or TRIGGER (faster, but imperative)
 CREATE FUNCTION check_arg_value_schema() RETURNS TRIGGER AS $$
 BEGIN
   IF (SELECT fn_schema_id FROM arg_schema WHERE id = NEW.arg_schema_id) !=
@@ -409,25 +409,25 @@ END;
 $$ LANGUAGE plpgsql;
 ```
 
-**Datomic**: `:db.attr/preds` с функцией валидации.
+**Datomic**: `:db.attr/preds` with validation function.
 
-**Memory**: Проверка в коде при insert/update.
+**Memory**: Check in code on insert/update.
 
-### Ограничение #6 подробнее (циклы)
+### Constraint #6 in Detail (Cycles)
 
-**При создании arg-value с value = ref<fn>:**
+**When creating arg-value with value = ref<fn>:**
 
-1. Получить target-fn-id из value
-2. Рекурсивно собрать все fn, на которые ссылается target-fn через arg-values
-3. Если owner-fn-id в этом множестве → REJECT (цикл)
+1. Get target-fn-id from value
+2. Recursively collect all fn that target-fn references through arg-values
+3. If owner-fn-id is in this set -> REJECT (cycle)
 
 ```sql
--- PostgreSQL: рекурсивный CTE
+-- PostgreSQL: recursive CTE
 WITH RECURSIVE deps AS (
-  -- Базовый случай: target fn
+  -- Base case: target fn
   SELECT target_fn_id AS fn_id
   UNION
-  -- Рекурсия: все fn, на которые ссылаются arg-values
+  -- Recursion: all fn referenced by arg-values
   SELECT (av.value->>'ref')::uuid
   FROM deps d
   JOIN arg_value av ON av.owner_fn_id = d.fn_id
@@ -438,9 +438,9 @@ SELECT EXISTS (SELECT 1 FROM deps WHERE fn_id = owner_fn_id);
 
 ---
 
-## Часть 5: Модель исполнения
+## Part 5: Execution Model
 
-### Ленивость и thunks
+### Laziness and Thunks
 
 ```clojure
 (defprotocol IThunk
@@ -456,142 +456,142 @@ SELECT EXISTS (SELECT 1 FROM deps WHERE fn_id = owner_fn_id);
     (execute-fn fn-id provided-args context)))
 
 (defrecord LazyFnThunk [fn-id]
-  ;; Для аргументов типа :fn — не вычисляем, передаём как есть
+  ;; For arguments of type :fn - don't evaluate, pass as-is
   IThunk
-  (force-value [_ _] fn-id))  ; Возвращаем fn-id, не результат
+  (force-value [_ _] fn-id))  ; Return fn-id, not the result
 ```
 
-### Типы аргументов и их обработка
+### Argument Types and Their Handling
 
-| type в arg-schema | Значение в arg-value | Thunk | Поведение |
-|-------------------|---------------------|-------|-----------|
-| :int, :text, etc. | Литерал | LiteralThunk | force → литерал |
-| :int, :text, etc. | ref<fn> | FnRefThunk | force → execute fn |
-| :fn | ref<fn> | LazyFnThunk | force → fn-id (для HOF) |
+| type in arg-schema | Value in arg-value | Thunk | Behavior |
+|--------------------|-------------------|-------|----------|
+| :int, :text, etc. | Literal | LiteralThunk | force -> literal |
+| :int, :text, etc. | ref<fn> | FnRefThunk | force -> execute fn |
+| :fn | ref<fn> | LazyFnThunk | force -> fn-id (for HOF) |
 
-### Базовые функции и их типы
+### Base Functions and Their Types
 
 ```clojure
-;; Обычная функция — все аргументы вычисляются
+;; Regular function - all arguments are evaluated
 (defn base-add [{:keys [a b]}]
   (+ (force a) (force b)))
 
-;; Условие — ленивые ветки
+;; Conditional - lazy branches
 (defn base-if [{:keys [condition then else]}]
   (if (force condition)
     (force then)
     (force else)))
 
-;; HOF — f передаётся как fn-id
+;; HOF - f is passed as fn-id
 (defn base-map [{:keys [f coll]} context]
   (let [coll-value (force coll)
-        f-id (force f)]  ; Это fn-id, не результат!
+        f-id (force f)]  ; This is fn-id, not the result!
     (mapv (fn [item]
             (execute-fn f-id {:item item} context))
           coll-value)))
 ```
 
-### Контекст исполнения
+### Execution Context
 
 ```clojure
 (defrecord ExecutionContext
-  [depth         ; Текущая глубина (для защиты от бесконечной рекурсии)
-   max-depth     ; Максимальная глубина
-   start-time    ; Время начала (для таймаута)
-   timeout-ms    ; Максимальное время
-   call-stack])  ; Стек вызовов (для отладки)
+  [depth         ; Current depth (for infinite recursion protection)
+   max-depth     ; Maximum depth
+   start-time    ; Start time (for timeout)
+   timeout-ms    ; Maximum time
+   call-stack])  ; Call stack (for debugging)
 
 (defn execute-fn [fn-id provided-args context]
-  ;; Проверки безопасности
+  ;; Safety checks
   (when (> (:depth context) (:max-depth context))
     (throw (ex-info "Max recursion depth exceeded" {:depth (:depth context)})))
   (when (> (- (System/currentTimeMillis) (:start-time context)) (:timeout-ms context))
     (throw (ex-info "Execution timeout" {})))
 
-  ;; Исполнение
+  ;; Execution
   (let [graph (resolve-fn fn-id)
         thunks (build-thunks graph provided-args)
         new-context (update context :depth inc)]
     (call-base-fn (:base-fn-name graph) thunks new-context)))
 ```
 
-### Адресация свободных аргументов
+### Addressing Free Arguments
 
-**Проблема**: fn A использует fn B дважды. У B есть свободный аргумент x. Как передать разные значения x?
+**Problem**: fn A uses fn B twice. B has a free argument x. How to pass different values of x?
 
-**Решение**: Путь через arg-value-id.
+**Solution**: Path through arg-value-id.
 
 ```clojure
-;; В БД:
+;; In DB:
 ;; arg-value-1: {owner: A, arg-schema: arg1-of-A, value: ref<B>}
 ;; arg-value-2: {owner: A, arg-schema: arg2-of-A, value: ref<B>}
 ;;
-;; У B есть свободный arg-schema: x-of-B
+;; B has a free arg-schema: x-of-B
 
-;; Запрос на исполнение A:
+;; Request to execute A:
 {:fn-id A-id
- :args {[arg-value-1-id x-of-B-id] 100   ; x для первого B
-        [arg-value-2-id x-of-B-id] 200}} ; x для второго B
+ :args {[arg-value-1-id x-of-B-id] 100   ; x for first B
+        [arg-value-2-id x-of-B-id] 200}} ; x for second B
 ```
 
-**Реализация**:
+**Implementation**:
 
-При сборке thunks для A:
-1. Для arg1-of-A создаём FnRefThunk с fn-id=B и provided-args, отфильтрованными по arg-value-1-id
-2. Для arg2-of-A создаём FnRefThunk с fn-id=B и provided-args, отфильтрованными по arg-value-2-id
-
----
-
-## Часть 6: План реализации
-
-### Фаза 0: Документация
-
-**0.1 Основной README.md проекта**
-
-Файл: `README.md`
-
-Содержание:
-- Видение проекта (визуальное функциональное программирование)
-- Архитектура системы (граф функций в БД)
-- Ключевые концепции (fn-schema, fn, arg-value, наследование)
-- Модель исполнения (ленивость, thunks)
-- Ссылки на README компонентов
-
-**0.2 README для каждого компонента**
-
-| Компонент | Описание |
-|-----------|----------|
-| `storage-protocol` | Протоколы Storage, StorageCRUD, GraphConstraints |
-| `data-schema-protocol` | Протокол DataSchema, типы полей |
-| `field-types` | Поддерживаемые типы данных |
-| `malli-data-schema` | Malli-реализация схемы |
-| `graph-data-schema` | Схема графа функций (fn-schema, fn, arg-value) |
-| `memory-storage` | In-memory реализация + ограничения |
-| `postgres-storage` | PostgreSQL реализация + ограничения |
-| `datomic-storage` | Datomic реализация + ограничения |
-
-Каждый README содержит:
-- Назначение компонента
-- Зависимости
-- Основные функции/протоколы
-- Примеры использования
-- Для storage: таблица реализации ограничений
+When building thunks for A:
+1. For arg1-of-A create FnRefThunk with fn-id=B and provided-args filtered by arg-value-1-id
+2. For arg2-of-A create FnRefThunk with fn-id=B and provided-args filtered by arg-value-2-id
 
 ---
 
-### Фаза 1: Схема данных и ограничения
+## Part 6: Implementation Plan
 
-**1.1 Обновить graph-data-schema**
+### Phase 0: Documentation
 
-Файл: `components/graph-data-schema/src/graphden/graph_data_schema/interface.clj`
+**0.1 Main Project README.md**
 
-- Добавить `parent-fn-id` в `:fn`
-- Добавить `required` в `:arg-schema`
-- Добавить `base-fn-name` в `:fn-schema`
+File: `README.md`
 
-**1.2 GraphConstraints протокол**
+Contents:
+- Project vision (visual functional programming)
+- System architecture (function graph in DB)
+- Key concepts (fn-schema, fn, arg-value, inheritance)
+- Execution model (laziness, thunks)
+- Links to component READMEs
 
-Файл: `components/storage-protocol/src/graphden/storage_protocol/interface.clj`
+**0.2 README for Each Component**
+
+| Component | Description |
+|-----------|-------------|
+| `storage-protocol` | Storage, StorageCRUD, GraphConstraints protocols |
+| `data-schema-protocol` | DataSchema protocol, field types |
+| `field-types` | Supported data types |
+| `malli-data-schema` | Malli schema implementation |
+| `graph-data-schema` | Function graph schema (fn-schema, fn, arg-value) |
+| `memory-storage` | In-memory implementation + constraints |
+| `postgres-storage` | PostgreSQL implementation + constraints |
+| `datomic-storage` | Datomic implementation + constraints |
+
+Each README contains:
+- Component purpose
+- Dependencies
+- Main functions/protocols
+- Usage examples
+- For storage: constraint implementation table
+
+---
+
+### Phase 1: Data Schema and Constraints
+
+**1.1 Update graph-data-schema**
+
+File: `components/graph-data-schema/src/graphden/graph_data_schema/interface.clj`
+
+- Add `parent-fn-id` to `:fn`
+- Add `required` to `:arg-schema`
+- Add `base-fn-name` to `:fn-schema`
+
+**1.2 GraphConstraints Protocol**
+
+File: `components/storage-protocol/src/graphden/storage_protocol/interface.clj`
 
 ```clojure
 (defprotocol GraphConstraints
@@ -602,170 +602,170 @@ SELECT EXISTS (SELECT 1 FROM deps WHERE fn_id = owner_fn_id);
   (validate-no-dependency-cycle! [this owner-fn-id target-fn-id]))
 ```
 
-**1.3 Contract tests для GraphConstraints**
+**1.3 Contract Tests for GraphConstraints**
 
-Файл: `components/storage-protocol/test/graphden/storage_protocol/constraint_contract_test.clj`
+File: `components/storage-protocol/test/graphden/storage_protocol/constraint_contract_test.clj`
 
-**1.4 Реализовать ограничения в каждом storage**
+**1.4 Implement Constraints in Each Storage**
 
 ---
 
-### Фаза 2: CRUD операции
+### Phase 2: CRUD Operations
 
-**2.1 StorageCRUD протокол**
+**2.1 StorageCRUD Protocol**
 
-Файл: `components/storage-protocol/src/graphden/storage_protocol/interface.clj`
+File: `components/storage-protocol/src/graphden/storage_protocol/interface.clj`
 
 ```clojure
 (defprotocol StorageCRUD
-  (create [this entity-name data])      ; → id
-  (read-by-id [this entity-name id])    ; → data | nil
-  (update-by-id [this entity-name id data]) ; → data
-  (delete-by-id [this entity-name id])  ; → boolean
-  (query [this entity-name where]))     ; → [data...]
+  (create [this entity-name data])      ; -> id
+  (read-by-id [this entity-name id])    ; -> data | nil
+  (update-by-id [this entity-name id data]) ; -> data
+  (delete-by-id [this entity-name id])  ; -> boolean
+  (query [this entity-name where]))     ; -> [data...]
 ```
 
-**2.2 Реализовать CRUD в каждом storage**
+**2.2 Implement CRUD in Each Storage**
 
-| Storage | Файлы |
+| Storage | Files |
 |---------|-------|
 | memory | `components/memory-storage/src/graphden/memory_storage/crud.clj` |
 | postgres | `components/postgres-storage/src/graphden/postgres_storage/crud.clj` |
 | datomic | `components/datomic-storage/src/graphden/datomic_storage/crud.clj` |
 
-### Фаза 3: Исполнитель
+### Phase 3: Executor
 
-**3.1 graph-resolver** — новый компонент
+**3.1 graph-resolver** - new component
 
-Файл: `components/graph-resolver/src/graphden/graph_resolver/interface.clj`
+File: `components/graph-resolver/src/graphden/graph_resolver/interface.clj`
 
-- `resolve-fn [storage fn-id]` → собрать граф с arg-values и родителями
+- `resolve-fn [storage fn-id]` -> collect graph with arg-values and parents
 
 **3.2 thunk-builder**
 
-Файл: `components/executor/src/graphden/executor/thunks.clj`
+File: `components/executor/src/graphden/executor/thunks.clj`
 
-- Создание LiteralThunk, FnRefThunk, LazyFnThunk
+- Create LiteralThunk, FnRefThunk, LazyFnThunk
 
 **3.3 executor**
 
-Файл: `components/executor/src/graphden/executor/interface.clj`
+File: `components/executor/src/graphden/executor/interface.clj`
 
-- `execute [storage fn-id args context]` → результат
-- Защита: max-depth, timeout
+- `execute [storage fn-id args context]` -> result
+- Protection: max-depth, timeout
 
-**3.4 base-functions** — реестр базовых функций
+**3.4 base-functions** - registry of base functions
 
-Файл: `components/base-functions/src/graphden/base_functions/interface.clj`
+File: `components/base-functions/src/graphden/base_functions/interface.clj`
 
 ---
 
-### Фаза 4: Базовые функции
+### Phase 4: Base Functions
 
-**4.1 Арифметика и строки**
+**4.1 Arithmetic and Strings**
 - +, -, *, /, mod
 - str, subs, str/join, etc.
 
-**4.2 Коллекции**
+**4.2 Collections**
 - first, rest, cons, conj
 - get, assoc, dissoc
 
-**4.3 Условия и HOF**
+**4.3 Conditionals and HOF**
 - if, cond
 - map, filter, reduce
 
-**4.4 I/O (клиент)**
+**4.4 I/O (Client)**
 - http-request (http-kit client)
 - file operations
 
-**4.5 I/O (сервер)**
+**4.5 I/O (Server)**
 - http-server (http-kit server)
 
-**Запуск долгоживущих сервисов:**
+**Running Long-lived Services:**
 
-Проблема: http-server должен работать постоянно, а не "вычислиться и вернуть результат".
+Problem: http-server must run continuously, not "compute and return result".
 
-Решение: **Service Manager** — отдельный компонент для управления долгоживущими процессами.
+Solution: **Service Manager** - separate component for managing long-lived processes.
 
 ```clojure
 (defprotocol ServiceManager
-  (start-service [this service-fn-id])   ; → service-instance-id
-  (stop-service [this instance-id])      ; → boolean
-  (list-services [this])                 ; → [{:id :fn-id :status :started-at}]
-  (service-status [this instance-id]))   ; → {:status :logs :metrics}
+  (start-service [this service-fn-id])   ; -> service-instance-id
+  (stop-service [this instance-id])      ; -> boolean
+  (list-services [this])                 ; -> [{:id :fn-id :status :started-at}]
+  (service-status [this instance-id]))   ; -> {:status :logs :metrics}
 ```
 
-HTTP-server как базовая функция:
+HTTP-server as a base function:
 ```clojure
 ;; base-fn-name: "graphden/http-server"
 ;; args: {:port int, :handler fn}
 ;;
-;; Эта функция НЕ возвращает результат, а регистрирует сервис
+;; This function does NOT return a result, but registers a service
 (defn base-http-server [{:keys [port handler]} context]
   (let [server (http-kit/run-server
                  (fn [req] (execute-fn handler {:request req} context))
                  {:port (force port)})]
-    ;; Возвращаем handle для остановки
+    ;; Return handle for stopping
     {:stop-fn server
      :type :http-server
      :port (force port)}))
 ```
 
-Service Manager хранит запущенные сервисы и предоставляет API для управления.
+Service Manager stores running services and provides API for management.
 
 ---
 
-### Фаза 5: UI/API
+### Phase 5: UI/API
 
 **5.1 REST API**
-- CRUD endpoints для всех сущностей
-- POST /execute — запуск функции
+- CRUD endpoints for all entities
+- POST /execute - run function
 
-**5.2 Веб-интерфейс**
-- Список функций
-- Редактор графа
-- Кнопка выполнения
-
----
-
-## Часть 7: Планы на будущее
-
-### Система типов (алгебра типов)
-
-**Цель**: Статическая проверка типов, подсказки в UI, автоматический вывод типов.
-
-**Что нужно:**
-- Типы для fn-schema (входные типы → выходной тип)
-- Параметрический полиморфизм (List[T], Map[K,V])
-- Вывод типов для композиций (Hindley-Milner или подмножество)
-- Типы для HOF: `map : (a -> b) -> List[a] -> List[b]`
-
-**Сложность**: Высокая. Это отдельный большой проект.
+**5.2 Web Interface**
+- Function list
+- Graph editor
+- Execute button
 
 ---
 
-### Git-like версионирование
+## Part 7: Future Plans
 
-**Цель**: История изменений, откат, ветки, merge.
+### Type System (Type Algebra)
 
-**Модель:**
-- Каждое изменение fn/arg-value — это commit
-- Можно откатиться к любой версии
-- Ветки для экспериментов
-- Merge для объединения изменений
+**Goal**: Static type checking, UI hints, automatic type inference.
 
-**Реализация:**
-- Либо event sourcing (хранить все изменения)
-- Либо snapshot + diff
-- Интеграция с реальным git для экспорта/импорта
+**What's needed:**
+- Types for fn-schema (input types -> output type)
+- Parametric polymorphism (List[T], Map[K,V])
+- Type inference for compositions (Hindley-Milner or subset)
+- Types for HOF: `map : (a -> b) -> List[a] -> List[b]`
+
+**Complexity**: High. This is a separate large project.
 
 ---
 
-### Система пользователей и прав
+### Git-like Versioning
 
-**Цель**: Разграничение доступа.
+**Goal**: Change history, rollback, branches, merge.
 
-**Модель прав:**
+**Model:**
+- Each fn/arg-value change is a commit
+- Can rollback to any version
+- Branches for experiments
+- Merge to combine changes
+
+**Implementation:**
+- Either event sourcing (store all changes)
+- Or snapshot + diff
+- Integration with real git for export/import
+
+---
+
+### User and Permission System
+
+**Goal**: Access control.
+
+**Permission Model:**
 ```
 User:
   id, name, email
@@ -774,10 +774,10 @@ Role:
   id, name
 
 Permission:
-  - view(fn-id)      — видеть функцию
-  - edit(fn-id)      — редактировать
-  - execute(fn-id)   — выполнять
-  - admin(fn-id)     — управлять правами
+  - view(fn-id)      - see function
+  - edit(fn-id)      - edit
+  - execute(fn-id)   - execute
+  - admin(fn-id)     - manage permissions
 
 UserRole:
   user-id, role-id
@@ -786,29 +786,29 @@ RolePermission:
   role-id, permission
 ```
 
-**Применение:**
-- При CRUD операциях — проверка прав
-- При выполнении — проверка execute permission
-- В UI — фильтрация видимых функций
+**Application:**
+- On CRUD operations - permission check
+- On execution - execute permission check
+- In UI - filter visible functions
 
 ---
 
-## Часть 8: Честные ограничения системы
+## Part 8: Honest System Limitations
 
-### Что НЕ получится сделать элегантно
+### What CANNOT Be Done Elegantly
 
-1. **Constraint #5 и #6** требуют тригеров/кода — нет декларативного способа в SQL/Datomic
-2. **Взаимная рекурсия** — нельзя отличить "хорошую" от "плохой" статически
-3. **Полный вывод типов** — это отдельная большая задача
+1. **Constraints #5 and #6** require triggers/code - no declarative way in SQL/Datomic
+2. **Mutual recursion** - cannot distinguish "good" from "bad" statically
+3. **Full type inference** - this is a separate large task
 
-### Что может сломаться
+### What Can Break
 
-1. **Бесконечная рекурсия** — защита через depth/timeout, но ошибка в runtime
-2. **Гонки при детекции циклов** — если два процесса создают arg-values одновременно
-3. **Производительность на глубоких графах** — много запросов к БД
+1. **Infinite recursion** - protection via depth/timeout, but error at runtime
+2. **Races during cycle detection** - if two processes create arg-values simultaneously
+3. **Performance on deep graphs** - many DB queries
 
-### Митигация
+### Mitigation
 
-1. Агрессивное кэширование resolved graphs
-2. Транзакции для атомарности
-3. Мониторинг и алерты на глубокие/долгие исполнения
+1. Aggressive caching of resolved graphs
+2. Transactions for atomicity
+3. Monitoring and alerts for deep/long executions

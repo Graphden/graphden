@@ -1,65 +1,65 @@
 # graph-storage-datomic
 
-Datomic storage, предварительно инициализированный схемой графа функций.
+Datomic storage pre-initialized with the function graph schema.
 
-## Назначение
+## Purpose
 
-Datomic-based storage для работы с графом функций. Объединяет:
-- `datomic-storage` — Datomic хранилище
-- `graph-data-schema` — схема fn-schema, arg-schema, fn, arg-value
+Datomic-based storage for working with the function graph. Combines:
+- `datomic-storage` — Datomic storage
+- `graph-data-schema` — fn-schema, arg-schema, fn, arg-value schema
 
-Не требует ручного вызова `sp/initialize`.
+No manual `sp/initialize` call required.
 
-## Зависимости
+## Dependencies
 
-- `datomic-storage` — реализация storage
-- `graph-data-schema` — схема данных
-- `malli-data-schema` — builder для схемы
-- `storage-protocol` — протоколы
+- `datomic-storage` — storage implementation
+- `graph-data-schema` — data schema
+- `malli-data-schema` — schema builder
+- `storage-protocol` — protocols
 
 ## API
 
 ### create-storage
 
-Создаёт готовый к работе storage:
+Creates a ready-to-use storage:
 
 ```clojure
 (require '[graphden.graph-storage-datomic.interface :as gsd]
          '[graphden.storage-protocol.interface :as sp])
 
-;; Без параметров — auto-generated db-name
+;; Without parameters — auto-generated db-name
 (let [storage (gsd/create-storage)]
   (sp/current-entities storage)
   ;; => #{:fn-schema :arg-schema :fn :arg-value}
   (sp/close storage))
 
-;; С указанием db-name
+;; With db-name specified
 (let [storage (gsd/create-storage {:db-name "my-graph"})]
   ;; ...
   (sp/close storage))
 ```
 
-### Параметры
+### Parameters
 
-| Параметр | Тип | По умолчанию | Описание |
-|----------|-----|--------------|----------|
-| `:db-name` | string | auto-generated | Имя базы данных |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `:db-name` | string | auto-generated | Database name |
 
-## Автогенерация имени БД
+## Auto-generated DB Name
 
-При вызове без параметров создаётся уникальное имя:
+When called without parameters, a unique name is created:
 
 ```clojure
 (str "graph-" (System/currentTimeMillis) "-" (rand-int 10000))
 ;; => "graph-1703936400000-4521"
 ```
 
-Это удобно для:
-- Изолированных тестов
-- Параллельного запуска
-- Ephemeral окружений
+This is useful for:
+- Isolated tests
+- Parallel execution
+- Ephemeral environments
 
-## Создаваемые атрибуты
+## Created Attributes
 
 ```clojure
 ;; fn-schema
@@ -84,12 +84,12 @@ Datomic-based storage для работы с графом функций. Объ
 :value-kind.value/null
 :value-kind.value/uuid
 :value-kind.value/text
-;; ... и т.д.
+;; ... etc.
 ```
 
-## Обработка ошибок
+## Error Handling
 
-При ошибке инициализации storage закрывается:
+On initialization error, storage is closed:
 
 ```clojure
 (try
@@ -100,25 +100,25 @@ Datomic-based storage для работы с графом функций. Объ
     (throw e)))
 ```
 
-## Использование для тестов
+## Usage for Tests
 
 ```clojure
 (deftest graph-operations-test
-  (let [storage (gsd/create-storage)]  ; Уникальная БД для теста
+  (let [storage (gsd/create-storage)]  ; Unique DB for test
     (try
-      ;; Тесты...
+      ;; Tests...
       (finally
-        (sp/close storage)))))  ; Удаляет БД
+        (sp/close storage)))))  ; Deletes DB
 ```
 
-## Преимущества Datomic
+## Datomic Advantages
 
-- **Иммутабельная история** — все изменения сохраняются
-- **Временные запросы** — можно смотреть состояние на любой момент
-- **ACID** — полные транзакции
-- **Datalog** — мощный язык запросов
+- **Immutable history** — all changes are preserved
+- **Time queries** — view state at any point in time
+- **ACID** — full transactions
+- **Datalog** — powerful query language
 
-## Тесты
+## Tests
 
 ```bash
 bb test

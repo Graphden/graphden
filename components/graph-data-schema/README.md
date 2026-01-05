@@ -1,91 +1,91 @@
 # graph-data-schema
 
-Схема данных для графа функций.
+Data schema for the function graph.
 
-## Назначение
+## Purpose
 
-Определяет схему сущностей для визуальной среды функционального программирования:
+Defines entity schema for the visual functional programming environment:
 
-- **fn-schema** — схема функции (сигнатура)
-- **arg-schema** — схема аргумента функции
-- **fn** — экземпляр функции
-- **arg-value** — значение аргумента (литерал или ссылка)
+- **fn-schema** — function schema (signature)
+- **arg-schema** — function argument schema
+- **fn** — function instance
+- **arg-value** — argument value (literal or reference)
 
-## Зависимости
+## Dependencies
 
-- `data-schema-protocol` — протоколы DataSchema и DataSchemaBuilder
-- `field-types` — поддерживаемые типы данных
+- `data-schema-protocol` — DataSchema and DataSchemaBuilder protocols
+- `field-types` — supported data types
 
-## Сущности
+## Entities
 
 ### fn-schema
 
-Схема функции — определяет сигнатуру:
+Function schema — defines the signature:
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `id` | uuid | Первичный ключ (неявный) |
-| `name` | text | Уникальное имя функции |
-| `returned-type` | enum:value-kind | Тип возвращаемого значения |
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | uuid | Primary key (implicit) |
+| `name` | text | Unique function name |
+| `returned-type` | enum:value-kind | Return type |
 
 **Constraints:** `UNIQUE(name)`
 
 ### arg-schema
 
-Схема аргумента — определяет параметр функции:
+Argument schema — defines a function parameter:
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `id` | uuid | Первичный ключ (неявный) |
-| `fn-schema-id` | ref:fn-schema | К какой функции относится |
-| `name` | text | Имя аргумента |
-| `type` | enum:value-kind | Тип аргумента |
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | uuid | Primary key (implicit) |
+| `fn-schema-id` | ref:fn-schema | Which function this belongs to |
+| `name` | text | Argument name |
+| `type` | enum:value-kind | Argument type |
 
 **Constraints:** `UNIQUE(fn-schema-id, name)`
 
 ### fn
 
-Экземпляр функции — конкретное применение схемы:
+Function instance — concrete application of a schema:
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `id` | uuid | Первичный ключ (неявный) |
-| `name` | text | Уникальное имя экземпляра |
-| `fn-schema-id` | ref:fn-schema | Какую схему реализует |
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | uuid | Primary key (implicit) |
+| `name` | text | Unique instance name |
+| `fn-schema-id` | ref:fn-schema | Which schema it implements |
 
 **Constraints:** `UNIQUE(name)`
 
 ### arg-value
 
-Значение аргумента для экземпляра функции:
+Argument value for a function instance:
 
-| Поле | Тип | Описание |
-|------|-----|----------|
-| `id` | uuid | Первичный ключ (неявный) |
-| `owner-fn-id` | ref:fn | Какой fn принадлежит |
-| `arg-schema-id` | ref:arg-schema | Какой аргумент |
-| `value` | union | Значение (см. ниже) |
+| Field | Type | Description |
+|-------|------|-------------|
+| `id` | uuid | Primary key (implicit) |
+| `owner-fn-id` | ref:fn | Which fn it belongs to |
+| `arg-schema-id` | ref:arg-schema | Which argument |
+| `value` | union | Value (see below) |
 
 **Constraints:** `UNIQUE(owner-fn-id, arg-schema-id)`
 
-## Union type для value
+## Union Type for Value
 
-Поле `value` может содержать:
+The `value` field can contain:
 
-1. **ref:fn** — ссылка на другую функцию (результат будет вычислен)
-2. **Литералы** — uuid, text, int, bool, numeric, timestamptz, jsonb, bytes
+1. **ref:fn** — reference to another function (result will be computed)
+2. **Literals** — uuid, text, int, bool, numeric, timestamptz, jsonb, bytes
 
 ```clojure
-;; Литерал
+;; Literal
 {:value 42}
 
-;; Ссылка на функцию
+;; Function reference
 {:value #uuid "fn-id-here"}
 ```
 
 ## Enum value-kind
 
-Перечисление поддерживаемых типов:
+Enumeration of supported types:
 
 ```clojure
 #{:null          ; void/nil
@@ -99,9 +99,9 @@
   :bytes}        ; Binary
 ```
 
-`:null` используется для функций без возвращаемого значения (side-effects).
+`:null` is used for functions without return value (side-effects).
 
-## Пример графа
+## Example Graph
 
 ```
 fn-schema: http-request
@@ -118,7 +118,7 @@ fn: get-users (schema: http-request)
 
 fn: create-user (schema: http-request)
   arg-values:
-    - url: ref<get-users>  ; Используем URL из другой fn
+    - url: ref<get-users>  ; Use URL from another fn
     - method: "POST"
     - body: {...}
 ```
@@ -127,7 +127,7 @@ fn: create-user (schema: http-request)
 
 ### build-schema
 
-Строит схему графа используя предоставленный builder:
+Builds the graph schema using a provided builder:
 
 ```clojure
 (require '[graphden.graph-data-schema.interface :as graph]
@@ -136,7 +136,7 @@ fn: create-user (schema: http-request)
 (def schema
   (graph/build-schema (mds/create-builder)))
 
-;; Проверка
+;; Check
 (ds/entities schema)
 ;; => (:fn-schema :arg-schema :fn :arg-value)
 
@@ -144,12 +144,12 @@ fn: create-user (schema: http-request)
 ;; => {:value-kind {:uuid #uuid "..." :values {...}}}
 ```
 
-## Стабильные UUID
+## Stable UUIDs
 
-Каждый элемент схемы имеет фиксированный UUID, сгенерированный один раз:
+Each schema element has a fixed UUID, generated once:
 
 ```clojure
-;; Сущности
+;; Entities
 fn-schema-entity-uuid  = #uuid "dc2df695-..."
 arg-schema-entity-uuid = #uuid "946c1f9c-..."
 fn-entity-uuid         = #uuid "986e8a2a-..."
@@ -159,18 +159,18 @@ arg-value-entity-uuid  = #uuid "afb02fb7-..."
 value-kind-enum-uuid   = #uuid "b79e6e8b-..."
 ```
 
-Это позволяет storage-бэкендам отслеживать переименования через UUID.
+This allows storage backends to track renames via UUID.
 
-## Расширения (в разработке)
+## Extensions (in development)
 
-### parent-fn-id для наследования
+### parent-fn-id for Inheritance
 
 ```clojure
 fn:
   parent-fn-id: ref<fn> (nullable)
 ```
 
-Позволит наследовать arg-values от родительской функции:
+Allows inheriting arg-values from a parent function:
 
 ```
 fn: base-api
@@ -178,33 +178,33 @@ fn: base-api
 
 fn: auth-api (parent: base-api)
   arg-values: {headers: {"Authorization": "..."}}
-  ; Наследует: url, timeout
+  ; Inherits: url, timeout
 ```
 
-### base-fn-name для базовых функций
+### base-fn-name for Base Functions
 
 ```clojure
 fn-schema:
   base-fn-name: text (nullable)
 ```
 
-Имя Clojure-функции для выполнения. `null` означает составную функцию.
+Clojure function name for execution. `null` means composite function.
 
-### required для аргументов
+### required for Arguments
 
 ```clojure
 arg-schema:
   required: bool (default true)
 ```
 
-## Тесты
+## Tests
 
 ```bash
 bb test
 ```
 
-Тесты покрывают:
-- Наличие всех сущностей
-- Наличие enum value-kind
-- Корректность полей каждой сущности
-- Валидацию данных
+Tests cover:
+- Presence of all entities
+- Presence of enum value-kind
+- Correctness of each entity's fields
+- Data validation

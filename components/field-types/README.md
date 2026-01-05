@@ -1,24 +1,24 @@
 # field-types
 
-Централизованное определение поддерживаемых типов полей.
+Centralized definition of supported field types.
 
-## Назначение
+## Purpose
 
-Единый источник истины для типов данных, поддерживаемых всеми компонентами системы. Это гарантирует консистентность между:
+Single source of truth for data types supported by all system components. This ensures consistency between:
 
-- `data-schema-protocol` — определение схем
-- `malli-data-schema` — валидация
-- `*-storage` — хранение в БД
+- `data-schema-protocol` — schema definitions
+- `malli-data-schema` — validation
+- `*-storage` — database storage
 
-## Зависимости
+## Dependencies
 
-Нет внешних зависимостей (листовой компонент).
+No external dependencies (leaf component).
 
 ## API
 
 ### types
 
-Map с метаданными каждого типа:
+Map with metadata for each type:
 
 ```clojure
 (def types
@@ -34,17 +34,17 @@ Map с метаданными каждого типа:
 
 ### supported-types
 
-Set поддерживаемых типов:
+Set of supported types:
 
 ```clojure
 (def supported-types
   #{:uuid :text :int :bool :numeric :timestamptz :jsonb :bytes})
 ```
 
-## Типы данных
+## Data Types
 
-| Тип | Clojure | PostgreSQL | Datomic |
-|-----|---------|------------|---------|
+| Type | Clojure | PostgreSQL | Datomic |
+|------|---------|------------|---------|
 | `:uuid` | `java.util.UUID` | `uuid` | `:db.type/uuid` |
 | `:text` | `String` | `text` | `:db.type/string` |
 | `:int` | `Long` | `bigint` | `:db.type/long` |
@@ -54,46 +54,46 @@ Set поддерживаемых типов:
 | `:jsonb` | Clojure data | `jsonb` | EDN string |
 | `:bytes` | `byte[]` | `bytea` | `:db.type/bytes` |
 
-## Специальные типы (не в этом компоненте)
+## Special Types (not in this component)
 
-Следующие типы определены в `data-schema-protocol`, но не входят в `field-types`:
+The following types are defined in `data-schema-protocol`, but not in `field-types`:
 
-| Тип | Описание | Хранение |
-|-----|----------|----------|
-| `:ref` | Ссылка на сущность | UUID |
-| `:enum` | Перечисление | Зависит от storage |
-| `:union` | Один из типов | JSONB |
+| Type | Description | Storage |
+|------|-------------|---------|
+| `:ref` | Entity reference | UUID |
+| `:enum` | Enumeration | Depends on storage |
+| `:union` | One of types | JSONB |
 
-## Пример использования
+## Usage Example
 
 ```clojure
 (require '[graphden.field-types.interface :as ft])
 
-;; Проверка поддержки типа
+;; Check type support
 (contains? ft/supported-types :text) ; => true
 (contains? ft/supported-types :xml)  ; => false
 
-;; Получение описания
+;; Get description
 (:description (get ft/types :uuid))
 ; => "UUID identifier"
 
-;; Итерация по типам
+;; Iterate over types
 (doseq [[type-kw info] ft/types]
   (println type-kw "->" (:description info)))
 ```
 
-## Расширение типов
+## Extending Types
 
-Для добавления нового типа:
+To add a new type:
 
-1. Добавить в `types` map в этом компоненте
-2. Добавить Malli-схему в `malli-data-schema`
-3. Добавить маппинг в каждом storage (`memory`, `postgres`, `datomic`)
+1. Add to `types` map in this component
+2. Add Malli schema in `malli-data-schema`
+3. Add mapping in each storage (`memory`, `postgres`, `datomic`)
 
-## Тесты
+## Tests
 
 ```bash
 bb test
 ```
 
-Тесты проверяют консистентность между `types` и `supported-types`.
+Tests verify consistency between `types` and `supported-types`.

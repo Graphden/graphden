@@ -1,21 +1,21 @@
 # malli-data-schema
 
-Реализация протокола DataSchema на основе [Malli](https://github.com/metosin/malli).
+DataSchema protocol implementation based on [Malli](https://github.com/metosin/malli).
 
-## Назначение
+## Purpose
 
-Предоставляет конкретную реализацию `DataSchemaBuilder` и `DataSchema` протоколов с использованием Malli для валидации данных.
+Provides concrete implementation of `DataSchemaBuilder` and `DataSchema` protocols using Malli for data validation.
 
-## Зависимости
+## Dependencies
 
-- `data-schema-protocol` — протоколы DataSchema и DataSchemaBuilder
-- `metosin/malli` — библиотека валидации
+- `data-schema-protocol` — DataSchema and DataSchemaBuilder protocols
+- `metosin/malli` — validation library
 
 ## API
 
 ### create-builder
 
-Создаёт новый builder для построения схемы:
+Creates a new builder for schema construction:
 
 ```clojure
 (require '[graphden.malli-data-schema.interface :as mds])
@@ -25,7 +25,7 @@
 
 ### schema->malli
 
-Возвращает Malli-схему для сущности (для продвинутой интроспекции):
+Returns Malli schema for an entity (for advanced introspection):
 
 ```clojure
 (mds/schema->malli schema :user)
@@ -35,7 +35,7 @@
 ;;     ...]
 ```
 
-## Маппинг типов
+## Type Mapping
 
 | field-types | Malli |
 |-------------|-------|
@@ -45,15 +45,15 @@
 | `:bool` | `:boolean` |
 | `:numeric` | `[:or :int :double]` |
 | `:timestamptz` | `inst?` |
-| `:jsonb` | Рекурсивная JSON-схема |
+| `:jsonb` | Recursive JSON schema |
 | `:bytes` | `bytes?` |
-| `:ref` | `:uuid` (хранится как UUID) |
+| `:ref` | `:uuid` (stored as UUID) |
 | `:enum` | `[:enum :val1 :val2 ...]` |
 | `:union` | `[:or schema1 schema2 ...]` |
 
-## JSONB схема
+## JSONB Schema
 
-Для типа `:jsonb` используется рекурсивная Malli-схема:
+For type `:jsonb` a recursive Malli schema is used:
 
 ```clojure
 [:or
@@ -66,35 +66,35 @@
  [:map-of :string [:ref ::json]]]
 ```
 
-## Валидации при построении
+## Build-time Validations
 
-### Проверки add-enum
+### add-enum Checks
 
-- `enum-name` должен быть keyword
-- `enum-uuid` должен быть UUID
-- `values` — непустой вектор `{:uuid ... :value ...}`
-- Нет дублирующихся имён или UUID
+- `enum-name` must be keyword
+- `enum-uuid` must be UUID
+- `values` — non-empty vector of `{:uuid ... :value ...}`
+- No duplicate names or UUIDs
 
-### Проверки add-entity
+### add-entity Checks
 
-- `entity-name` должен быть keyword
-- `:id` зарезервирован
-- Каждое поле должно иметь `:uuid` и `:type`
-- Нет дублирующихся UUID (глобально)
+- `entity-name` must be keyword
+- `:id` is reserved
+- Each field must have `:uuid` and `:type`
+- No duplicate UUIDs (globally)
 
-### Проверки add-constraint
+### add-constraint Checks
 
-- `:type` должен быть известным (`:unique`)
-- `:fields` — непустой вектор keywords
-- Нет дублирующихся constraints
+- `:type` must be known (`:unique`)
+- `:fields` — non-empty vector of keywords
+- No duplicate constraints
 
-### Проверки build
+### build Checks
 
-- Все `:ref-entity` ссылаются на существующие сущности
-- Все `:enum-name` ссылаются на существующие enum
-- Union variants не пустые и не дублируются
+- All `:ref-entity` references point to existing entities
+- All `:enum-name` references point to existing enums
+- Union variants are non-empty and not duplicated
 
-## Пример полного использования
+## Full Usage Example
 
 ```clojure
 (require '[graphden.malli-data-schema.interface :as mds]
@@ -122,7 +122,7 @@
       ;; Build
       ds/build))
 
-;; Использование
+;; Usage
 (ds/entities schema)
 ;; => (:user)
 
@@ -139,29 +139,29 @@
 ;; => {:errors {:name ["missing required key"]}}
 ```
 
-## Union типы
+## Union Types
 
 ```clojure
 (ds/add-entity builder :arg-value #uuid "..."
   {:value {:uuid #uuid "..."
            :type :union
-           :variants [{:type :ref :ref-entity :fn}  ; Ссылка на функцию
-                      {:type :int}                   ; Литерал int
-                      {:type :text}                  ; Литерал text
-                      {:type :bool}]}})              ; Литерал bool
+           :variants [{:type :ref :ref-entity :fn}  ; Function reference
+                      {:type :int}                   ; int literal
+                      {:type :text}                  ; text literal
+                      {:type :bool}]}})              ; bool literal
 ```
 
-Варианты union не могут иметь `:nullable?` или `:uuid` — это атрибуты только для top-level полей.
+Union variants cannot have `:nullable?` or `:uuid` — these are attributes only for top-level fields.
 
-## Тесты
+## Tests
 
 ```bash
 bb test
 ```
 
-Тесты покрывают:
-- Маппинг типов
-- Валидацию данных
-- Ошибки построения (дубликаты, неверные ссылки)
-- Union типы
+Tests cover:
+- Type mapping
+- Data validation
+- Build errors (duplicates, invalid references)
+- Union types
 - Constraints

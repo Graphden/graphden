@@ -1,32 +1,32 @@
 # storage-protocol
 
-Протоколы для реализации storage-бэкендов.
+Protocols for implementing storage backends.
 
-## Назначение
+## Purpose
 
-Определяет интерфейсы, которые должны реализовать все storage-бэкенды (memory, PostgreSQL, Datomic). Обеспечивает:
+Defines interfaces that all storage backends (memory, PostgreSQL, Datomic) must implement. Provides:
 
-- Единый контракт для всех хранилищ
-- UUID-based миграции (детекция переименований)
-- Безопасные изменения схемы (запрет деструктивных)
-- Утилиты для вычисления diff между схемами
+- Unified contract for all storage backends
+- UUID-based migrations (rename detection)
+- Safe schema changes (destructive operations forbidden)
+- Utilities for computing schema diffs
 
-## Зависимости
+## Dependencies
 
-- `data-schema-protocol` — протокол DataSchema для чтения схемы
+- `data-schema-protocol` — DataSchema protocol for reading schema
 
-## Протоколы
+## Protocols
 
 ### Storage
 
 ```clojure
 (defprotocol Storage
   (initialize [this schema]
-    "Синхронизирует storage с DataSchema.
-     Возвращает map изменений или бросает исключение на деструктивных.")
+    "Synchronizes storage with DataSchema.
+     Returns map of changes or throws on destructive operations.")
 
   (close [this]
-    "Освобождает ресурсы (соединения, хэндлы)."))
+    "Releases resources (connections, handles)."))
 ```
 
 ### StorageIntrospection
@@ -34,46 +34,46 @@
 ```clojure
 (defprotocol StorageIntrospection
   (current-entities [this]
-    "Возвращает set имён сущностей в storage.")
+    "Returns set of entity names in storage.")
 
   (current-fields [this entity-name]
-    "Возвращает map полей сущности: {field-name {:type :text ...}}")
+    "Returns map of entity fields: {field-name {:type :text ...}}")
 
   (current-enums [this]
-    "Возвращает set имён enum-типов.")
+    "Returns set of enum type names.")
 
   (current-enum-values [this enum-name]
-    "Возвращает set значений enum.")
+    "Returns set of enum values.")
 
   (schema-metadata [this]
-    "Возвращает сохранённые UUID→name маппинги."))
+    "Returns stored UUID->name mappings."))
 ```
 
-## Безопасность миграций
+## Migration Safety
 
-### Разрешённые изменения
+### Allowed Changes
 
-| Изменение | Пример |
-|-----------|--------|
-| Добавление сущности | Новая таблица |
-| Добавление поля | Новая колонка |
-| Переименование | UUID остаётся, имя меняется |
-| Расширение типа | `int` → `numeric`, `text` → `jsonb` |
-| Nullable: false→true | Разрешение NULL |
+| Change | Example |
+|--------|---------|
+| Add entity | New table |
+| Add field | New column |
+| Rename | UUID stays, name changes |
+| Widen type | `int` -> `numeric`, `text` -> `jsonb` |
+| Nullable: false->true | Allow NULL |
 
-### Запрещённые изменения (бросают исключение)
+### Forbidden Changes (throw exception)
 
-| Изменение | Причина |
-|-----------|---------|
-| Удаление сущности | Потеря данных |
-| Удаление поля | Потеря данных |
-| Сужение типа | `text` → `int` — невозможная конверсия |
-| Nullable: true→false | Существующие NULL станут невалидными |
+| Change | Reason |
+|--------|--------|
+| Remove entity | Data loss |
+| Remove field | Data loss |
+| Narrow type | `text` -> `int` — impossible conversion |
+| Nullable: true->false | Existing NULLs become invalid |
 
-## Типы и эквивалентность
+## Types and Equivalence
 
 ```clojure
-;; Расширение типов (без потери данных)
+;; Type widening (no data loss)
 (def type-widening
   {:int #{:numeric :text :jsonb}
    :bool #{:text :jsonb}
@@ -82,15 +82,15 @@
    :uuid #{:text}
    :timestamptz #{:text}})
 
-;; Эквивалентные типы (хранятся одинаково)
+;; Equivalent types (stored the same way)
 (def type-equivalents
-  #{#{:uuid :ref}      ; :ref хранится как UUID
-    #{:jsonb :union}}) ; :union хранится как JSONB
+  #{#{:uuid :ref}      ; :ref stored as UUID
+    #{:jsonb :union}}) ; :union stored as JSONB
 ```
 
-## Утилиты
+## Utilities
 
-### Проверка безопасности изменений
+### Safety Checks
 
 ```clojure
 (safe-type-change? :int :numeric)   ; => true
@@ -100,7 +100,7 @@
 (safe-nullable-change? true false)  ; => false
 ```
 
-### Проверка с выбросом исключений
+### Checks with Exceptions
 
 ```clojure
 (check-type-change! :user :email :text :int)
@@ -110,7 +110,7 @@
 ;; => throws if any UUID removed
 ```
 
-### Вычисление diff
+### Computing Diff
 
 ```clojure
 (build-metadata-from-schema schema)
@@ -127,30 +127,30 @@
 ;;     :renamed [{:entity :e :old-field :o :new-field :n}]}
 ```
 
-## Пример использования
+## Usage Example
 
 ```clojure
 (require '[graphden.storage-protocol.interface :as sp])
 
-;; Имплементация создаёт storage
+;; Implementation creates storage
 (def storage (create-my-storage))
 
-;; Инициализация/миграция
+;; Initialize/migrate
 (let [changes (sp/initialize storage my-schema)]
   (println "Created entities:" (get-in changes [:entities :created]))
   (println "Renamed fields:" (get-in changes [:fields :renamed])))
 
-;; Интроспекция
+;; Introspection
 (sp/current-entities storage)     ; => #{:user :post}
 (sp/current-fields storage :user) ; => {:name {:type :text} ...}
 
-;; Закрытие
+;; Close
 (sp/close storage)
 ```
 
-## Планируемые расширения
+## Planned Extensions
 
-### StorageCRUD (в разработке)
+### StorageCRUD (in development)
 
 ```clojure
 (defprotocol StorageCRUD
@@ -161,9 +161,9 @@
   (query [this entity-name where]))
 ```
 
-### GraphConstraints (в разработке)
+### GraphConstraints (in development)
 
-Протокол для ограничений целостности графа функций:
+Protocol for function graph integrity constraints:
 
 ```clojure
 (defprotocol GraphConstraints
@@ -174,20 +174,20 @@
   (validate-no-dependency-cycle! [this owner-fn-id target-fn-id]))
 ```
 
-## Реализации
+## Implementations
 
-- [memory-storage](../memory-storage/) — In-memory (для тестов и разработки)
+- [memory-storage](../memory-storage/) — In-memory (for tests and development)
 - [postgres-storage](../postgres-storage/) — PostgreSQL
 - [datomic-storage](../datomic-storage/) — Datomic
 
-## Тесты
+## Tests
 
 ```bash
 bb test
 ```
 
-Тесты покрывают:
-- Проверку безопасности типов (`safe-type-change?`, `safe-nullable-change?`)
-- Утилиты проверки (`check-type-change!`, `check-nullable-change!`)
-- Построение metadata (`build-metadata-from-schema`)
-- Вычисление изменений (`build-first-init-changes`, `check-all-removals!`)
+Tests cover:
+- Type safety checks (`safe-type-change?`, `safe-nullable-change?`)
+- Validation utilities (`check-type-change!`, `check-nullable-change!`)
+- Metadata building (`build-metadata-from-schema`)
+- Change computation (`build-first-init-changes`, `check-all-removals!`)

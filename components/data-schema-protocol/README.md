@@ -1,108 +1,108 @@
 # data-schema-protocol
 
-Протокол для определения схемы данных.
+Protocol for defining data schemas.
 
-## Назначение
+## Purpose
 
-Определяет абстрактный интерфейс для описания сущностей, их полей и ограничений. Схема используется storage-бэкендами для создания таблиц/коллекций.
+Defines an abstract interface for describing entities, their fields, and constraints. Schema is used by storage backends to create tables/collections.
 
-## Зависимости
+## Dependencies
 
-Нет внешних зависимостей (базовый протокол).
+No external dependencies (base protocol).
 
-## Протоколы
+## Protocols
 
 ### DataSchema
 
-Протокол для чтения схемы данных:
+Protocol for reading data schema:
 
 ```clojure
 (defprotocol DataSchema
   (entities [this]
-    "Возвращает последовательность имён сущностей.")
+    "Returns sequence of entity names.")
 
   (entity-uuid [this entity-name]
-    "Возвращает UUID сущности (для детекции переименований).")
+    "Returns entity UUID (for rename detection).")
 
   (entity-fields [this entity-name]
-    "Возвращает map полей: {field-name {:uuid ... :type ... :nullable? ...}}")
+    "Returns map of fields: {field-name {:uuid ... :type ... :nullable? ...}}")
 
   (enums [this]
-    "Возвращает map enum-типов: {enum-name {:uuid ... :values {...}}}")
+    "Returns map of enum types: {enum-name {:uuid ... :values {...}}}")
 
   (enum-uuid [this enum-name]
-    "Возвращает UUID enum-типа.")
+    "Returns enum type UUID.")
 
   (validate-entity [this entity-name data]
-    "Валидирует данные. Возвращает nil или {:errors {...}}")
+    "Validates data. Returns nil or {:errors {...}}")
 
   (entity-constraints [this entity-name]
-    "Возвращает вектор ограничений: [{:type :unique :fields [:f1 :f2]}]"))
+    "Returns vector of constraints: [{:type :unique :fields [:f1 :f2]}]"))
 ```
 
 ### DataSchemaBuilder
 
-Протокол для построения схемы:
+Protocol for building schema:
 
 ```clojure
 (defprotocol DataSchemaBuilder
   (add-enum [this enum-name enum-uuid values]
-    "Добавляет enum-тип.")
+    "Adds enum type.")
 
   (add-entity [this entity-name entity-uuid fields]
-    "Добавляет сущность с полями.")
+    "Adds entity with fields.")
 
   (add-constraint [this entity-name constraint]
-    "Добавляет ограничение к сущности.")
+    "Adds constraint to entity.")
 
   (build [this]
-    "Строит и валидирует финальную DataSchema."))
+    "Builds and validates final DataSchema."))
 ```
 
-## Типы полей
+## Field Types
 
-### Базовые типы
+### Base Types
 
-| Тип | Описание | Атрибуты |
-|-----|----------|----------|
-| `:uuid` | UUID идентификатор | `:uuid`, `:type`, `:nullable?` |
-| `:text` | Строка | `:uuid`, `:type`, `:nullable?` |
-| `:int` | Целое число | `:uuid`, `:type`, `:nullable?` |
+| Type | Description | Attributes |
+|------|-------------|------------|
+| `:uuid` | UUID identifier | `:uuid`, `:type`, `:nullable?` |
+| `:text` | String | `:uuid`, `:type`, `:nullable?` |
+| `:int` | Integer number | `:uuid`, `:type`, `:nullable?` |
 | `:bool` | Boolean | `:uuid`, `:type`, `:nullable?` |
-| `:numeric` | Число (int или double) | `:uuid`, `:type`, `:nullable?` |
-| `:timestamptz` | Timestamp с timezone | `:uuid`, `:type`, `:nullable?` |
-| `:jsonb` | JSON данные | `:uuid`, `:type`, `:nullable?` |
-| `:bytes` | Бинарные данные | `:uuid`, `:type`, `:nullable?` |
+| `:numeric` | Number (int or double) | `:uuid`, `:type`, `:nullable?` |
+| `:timestamptz` | Timestamp with timezone | `:uuid`, `:type`, `:nullable?` |
+| `:jsonb` | JSON data | `:uuid`, `:type`, `:nullable?` |
+| `:bytes` | Binary data | `:uuid`, `:type`, `:nullable?` |
 
-### Специальные типы
+### Special Types
 
-| Тип | Описание | Дополнительные атрибуты |
-|-----|----------|------------------------|
-| `:ref` | Ссылка на другую сущность | `:ref-entity` (имя сущности) |
-| `:enum` | Перечисление | `:enum-name` (имя enum-типа) |
-| `:union` | Один из нескольких типов | `:variants` (вектор спецификаций) |
+| Type | Description | Additional Attributes |
+|------|-------------|----------------------|
+| `:ref` | Reference to another entity | `:ref-entity` (entity name) |
+| `:enum` | Enumeration | `:enum-name` (enum type name) |
+| `:union` | One of several types | `:variants` (vector of specs) |
 
-## Неявное поле :id
+## Implicit :id Field
 
-Каждая сущность автоматически получает поле `:id` типа `:uuid` — первичный ключ.
+Each entity automatically gets an `:id` field of type `:uuid` — the primary key.
 
-## UUID для идентификации
+## UUID for Identification
 
-Каждый элемент схемы имеет стабильный UUID:
+Each schema element has a stable UUID:
 
-- **Сущности** — `entity-uuid`
-- **Поля** — `:uuid` в спецификации поля
-- **Enum-типы** — `:uuid` в описании enum
-- **Enum-значения** — UUID для каждого значения
+- **Entities** — `entity-uuid`
+- **Fields** — `:uuid` in field spec
+- **Enum types** — `:uuid` in enum description
+- **Enum values** — UUID for each value
 
-UUID позволяет storage-бэкендам отличать переименование от удаления/создания.
+UUID allows storage backends to distinguish renames from deletions/creations.
 
-## Пример использования
+## Usage Example
 
 ```clojure
 (require '[graphden.data-schema-protocol.interface :as ds])
 
-;; Чтение схемы
+;; Reading schema
 (ds/entities schema)
 ;; => [:user :post :comment]
 
@@ -116,45 +116,45 @@ UUID позволяет storage-бэкендам отличать переиме
 ;;                 :values {:admin #uuid "..."
 ;;                          :user #uuid "..."}}}
 
-;; Валидация
+;; Validation
 (ds/validate-entity schema :user {:id (random-uuid) :name "Alice"})
 ;; => nil (valid)
 
 (ds/validate-entity schema :user {:id (random-uuid)})
 ;; => {:errors {:name ["missing required key"]}}
 
-;; Ограничения
+;; Constraints
 (ds/entity-constraints schema :user)
 ;; => [{:type :unique :fields [:email]}]
 ```
 
-## Построение схемы
+## Building Schema
 
 ```clojure
 (require '[graphden.data-schema-protocol.interface :as ds])
 
 (-> builder
-    ;; Сначала enum-типы
+    ;; First enum types
     (ds/add-enum :user-role #uuid "..."
                  [{:uuid #uuid "..." :value :admin}
                   {:uuid #uuid "..." :value :user}])
 
-    ;; Затем сущности
+    ;; Then entities
     (ds/add-entity :user #uuid "..."
                    {:name {:uuid #uuid "..." :type :text}
                     :role {:uuid #uuid "..." :type :enum :enum-name :user-role}})
 
-    ;; Ограничения
+    ;; Constraints
     (ds/add-constraint :user {:type :unique :fields [:name]})
 
-    ;; Построение
+    ;; Build
     ds/build)
 ```
 
-## Реализации
+## Implementations
 
-- [malli-data-schema](../malli-data-schema/) — реализация на основе Malli
+- [malli-data-schema](../malli-data-schema/) — Malli-based implementation
 
-## Тесты
+## Tests
 
-Contract tests находятся в реализациях (например, `malli-data-schema`).
+Contract tests are in implementations (e.g., `malli-data-schema`).

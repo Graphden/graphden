@@ -5,31 +5,31 @@
 [![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](#testing)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
-**Визуальная среда функционального программирования** — граф функций в базе данных.
+**Visual functional programming environment** — a function graph stored in a database.
 
-## Видение
+## Vision
 
-Graphden — это экспериментальная платформа, где:
+Graphden is an experimental platform where:
 
-1. **Код = граф в БД** — функции и их композиции хранятся как структурированные данные
-2. **Визуальное редактирование** — вместо текста используется графический интерфейс
-3. **Каррирование через наследование** — частичное применение функций через цепочку родителей
-4. **Ленивое исполнение** — вычисляется только то, что нужно
+1. **Code = Graph in DB** — functions and their compositions are stored as structured data
+2. **Visual Editing** — graphical interface instead of text
+3. **Currying via Inheritance** — partial function application through parent chains
+4. **Lazy Execution** — only computes what's needed
 
-**Цель**: Проверить гипотезу, что визуальное программирование на основе графов может быть проще и читабельнее текстового кода для высокоуровневой логики.
+**Goal**: Test the hypothesis that graph-based visual programming can be simpler and more readable than text code for high-level logic.
 
-## Ключевые концепции
+## Key Concepts
 
-### Сущности
+### Entities
 
-| Сущность | Описание |
-|----------|----------|
-| `fn-schema` | Схема функции (имя, типы аргументов, возвращаемый тип) |
-| `arg-schema` | Схема аргумента функции |
-| `fn` | Экземпляр функции (может наследоваться от родителя) |
-| `arg-value` | Значение аргумента (литерал или ссылка на другую fn) |
+| Entity | Description |
+|--------|-------------|
+| `fn-schema` | Function schema (name, argument types, return type) |
+| `arg-schema` | Function argument schema |
+| `fn` | Function instance (can inherit from a parent) |
+| `arg-value` | Argument value (literal or reference to another fn) |
 
-### Наследование
+### Inheritance
 
 ```
 fn-schema: http-request
@@ -40,25 +40,25 @@ fn: base-api (parent: null)
 
 fn: auth-api (parent: base-api)
   arg-values: {headers: {"Authorization": "..."}}
-  → наследует: url, timeout
+  -> inherits: url, timeout
 
 fn: create-user (parent: auth-api)
   arg-values: {method: "POST", body: {...}}
-  → наследует: url, timeout, headers
+  -> inherits: url, timeout, headers
 ```
 
-### Модель исполнения
+### Execution Model
 
-- **Ленивость** — аргументы оборачиваются в thunks, вычисляются по требованию
-- **HOF поддержка** — функции типа `map`, `filter` получают fn-id, а не результат
-- **Защита** — ограничение глубины рекурсии и таймаут
+- **Laziness** — arguments are wrapped in thunks, evaluated on demand
+- **HOF Support** — functions like `map`, `filter` receive fn-id, not the result
+- **Protection** — recursion depth limit and timeout
 
-## Архитектура
+## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    graph-storage-*                          │
-│  (memory, postgres, datomic) — готовые к использованию     │
+│  (memory, postgres, datomic) — ready to use                │
 ├─────────────────────────────────────────────────────────────┤
 │                   graph-data-schema                         │
 │  (fn-schema, arg-schema, fn, arg-value)                    │
@@ -68,58 +68,58 @@ fn: create-user (parent: auth-api)
 └─────────────────┴─────────────────┴─────────────────────────┘
 ```
 
-## Компоненты
+## Components
 
-### Протоколы и схемы
+### Protocols and Schemas
 
-| Компонент | Описание | README |
-|-----------|----------|--------|
-| [storage-protocol](components/storage-protocol/) | Протоколы Storage, StorageCRUD, GraphConstraints | [→](components/storage-protocol/README.md) |
-| [data-schema-protocol](components/data-schema-protocol/) | Протокол DataSchema, типы полей | [→](components/data-schema-protocol/README.md) |
-| [field-types](components/field-types/) | Поддерживаемые типы данных | [→](components/field-types/README.md) |
-| [malli-data-schema](components/malli-data-schema/) | Malli-реализация схемы | [→](components/malli-data-schema/README.md) |
-| [graph-data-schema](components/graph-data-schema/) | Схема графа функций | [→](components/graph-data-schema/README.md) |
+| Component | Description | README |
+|-----------|-------------|--------|
+| [storage-protocol](components/storage-protocol/) | Storage, StorageCRUD, GraphConstraints protocols | [->](components/storage-protocol/README.md) |
+| [data-schema-protocol](components/data-schema-protocol/) | DataSchema protocol, field types | [->](components/data-schema-protocol/README.md) |
+| [field-types](components/field-types/) | Supported data types | [->](components/field-types/README.md) |
+| [malli-data-schema](components/malli-data-schema/) | Malli schema implementation | [->](components/malli-data-schema/README.md) |
+| [graph-data-schema](components/graph-data-schema/) | Function graph schema | [->](components/graph-data-schema/README.md) |
 
-### Storage реализации
+### Storage Implementations
 
-| Компонент | Описание | README |
-|-----------|----------|--------|
-| [memory-storage](components/memory-storage/) | In-memory storage | [→](components/memory-storage/README.md) |
-| [postgres-storage](components/postgres-storage/) | PostgreSQL storage | [→](components/postgres-storage/README.md) |
-| [datomic-storage](components/datomic-storage/) | Datomic storage | [→](components/datomic-storage/README.md) |
+| Component | Description | README |
+|-----------|-------------|--------|
+| [memory-storage](components/memory-storage/) | In-memory storage | [->](components/memory-storage/README.md) |
+| [postgres-storage](components/postgres-storage/) | PostgreSQL storage | [->](components/postgres-storage/README.md) |
+| [datomic-storage](components/datomic-storage/) | Datomic storage | [->](components/datomic-storage/README.md) |
 
-### Готовые комбинации (storage + graph-data-schema)
+### Ready-to-use Combinations (storage + graph-data-schema)
 
-| Компонент | Описание | README |
-|-----------|----------|--------|
-| [graph-storage-memory](components/graph-storage-memory/) | In-memory, готовый к работе | [→](components/graph-storage-memory/README.md) |
-| [graph-storage-postgres](components/graph-storage-postgres/) | PostgreSQL, готовый к работе | [→](components/graph-storage-postgres/README.md) |
-| [graph-storage-datomic](components/graph-storage-datomic/) | Datomic, готовый к работе | [→](components/graph-storage-datomic/README.md) |
+| Component | Description | README |
+|-----------|-------------|--------|
+| [graph-storage-memory](components/graph-storage-memory/) | In-memory, ready to use | [->](components/graph-storage-memory/README.md) |
+| [graph-storage-postgres](components/graph-storage-postgres/) | PostgreSQL, ready to use | [->](components/graph-storage-postgres/README.md) |
+| [graph-storage-datomic](components/graph-storage-datomic/) | Datomic, ready to use | [->](components/graph-storage-datomic/README.md) |
 
-### Исполнение
+### Execution
 
-| Компонент | Описание | README |
-|-----------|----------|--------|
-| [executor](components/executor/) | Исполнитель графа функций (thunks, рекурсия, таймауты) | [→](components/executor/README.md) |
-| [base-functions](components/base-functions/) | Базовые функции (арифметика, строки, коллекции, HOF) | [→](components/base-functions/README.md) |
+| Component | Description | README |
+|-----------|-------------|--------|
+| [executor](components/executor/) | Function graph executor (thunks, recursion, timeouts) | [->](components/executor/README.md) |
+| [base-functions](components/base-functions/) | Base functions (arithmetic, strings, collections, HOF) | [->](components/base-functions/README.md) |
 
-## Документация
+## Documentation
 
-- **[Архитектура](docs/ARCHITECTURE.md)** — детальное описание системы, решений и ограничений
+- **[Architecture](docs/ARCHITECTURE.md)** — detailed system description, decisions, and limitations
 
-## Требования
+## Requirements
 
 - Java 21+
 - Clojure 1.12+
 - [Babashka](https://github.com/babashka/babashka)
 
-### Опционально (для линтеров)
+### Optional (for linters)
 
 ```bash
 brew install clj-kondo cljstyle
 ```
 
-## Быстрый старт
+## Quick Start
 
 ```bash
 # Start REPL
@@ -135,42 +135,42 @@ bb test
 bb coverage
 ```
 
-## Разработка
+## Development
 
-### Доступные задачи
-
-```bash
-bb tasks  # Показать все задачи
-```
-
-| Задача | Описание |
-|--------|----------|
-| `bb check` | Все линтеры + все тесты (параллельно) |
-| `bb lint` | Только линтеры |
-| `bb test` | Только тесты |
-| `bb coverage` | Тесты с отчётом покрытия |
-| `bb repl` | Запустить nREPL |
-
-### Линтеры
+### Available Tasks
 
 ```bash
-bb kondo [path]     # Статический анализ (clj-kondo)
-bb splint [path]    # Стиль и идиомы
-bb cljstyle [path]  # Форматирование
-bb fix [path]       # Авто-исправление форматирования
+bb tasks  # Show all tasks
 ```
 
-### Утилиты
+| Task | Description |
+|------|-------------|
+| `bb check` | All linters + all tests (parallel) |
+| `bb lint` | Linters only |
+| `bb test` | Tests only |
+| `bb coverage` | Tests with coverage report |
+| `bb repl` | Start nREPL |
+
+### Linters
 
 ```bash
-bb outdated   # Проверить устаревшие зависимости
-bb security   # Сканировать CVE
-bb clean      # Очистить сгенерированные файлы
-bb info       # Информация о Polylith workspace
-bb deps       # Зависимости компонентов
+bb kondo [path]     # Static analysis (clj-kondo)
+bb splint [path]    # Style and idioms
+bb cljstyle [path]  # Formatting
+bb fix [path]       # Auto-fix formatting
 ```
 
-## Тестирование
+### Utilities
+
+```bash
+bb outdated   # Check outdated dependencies
+bb security   # Scan for CVEs
+bb clean      # Clean generated files
+bb info       # Polylith workspace info
+bb deps       # Component dependencies
+```
+
+## Testing
 
 ```bash
 bb test
@@ -178,17 +178,17 @@ bb coverage
 open target/coverage/index.html
 ```
 
-Текущее покрытие: **96% форм / 98% строк**
+Current coverage: **96% forms / 98% lines**
 
-## Структура проекта
+## Project Structure
 
 ```
 graphden/
-├── bb.edn                 # Babashka задачи
-├── deps.edn               # Clojure зависимости
-├── workspace.edn          # Polylith конфигурация
+├── bb.edn                 # Babashka tasks
+├── deps.edn               # Clojure dependencies
+├── workspace.edn          # Polylith configuration
 ├── docs/
-│   └── ARCHITECTURE.md    # Архитектурная документация
+│   └── ARCHITECTURE.md    # Architecture documentation
 ├── components/
 │   ├── storage-protocol/
 │   ├── data-schema-protocol/
@@ -198,41 +198,41 @@ graphden/
 │   ├── memory-storage/
 │   ├── postgres-storage/
 │   ├── datomic-storage/
-│   └── graph-storage-*/   # Готовые комбинации
+│   └── graph-storage-*/   # Ready-to-use combinations
 └── development/           # Development project
 ```
 
-## Статус разработки
+## Development Status
 
-### Реализовано
+### Implemented
 
-- [x] Протокол Storage (инициализация, интроспекция)
-- [x] Протокол DataSchema (сущности, поля, валидация)
-- [x] Malli-реализация схемы
-- [x] Схема графа функций (fn-schema, fn, arg-value)
+- [x] Storage protocol (initialization, introspection)
+- [x] DataSchema protocol (entities, fields, validation)
+- [x] Malli schema implementation
+- [x] Function graph schema (fn-schema, fn, arg-value)
 - [x] Memory storage
 - [x] PostgreSQL storage
 - [x] Datomic storage
-- [x] CRUD операции (StorageCRUD протокол)
-- [x] Протокол GraphConstraints (валидация ограничений графа)
-- [x] Наследование (parent-fn-id, цепочка родителей)
-- [x] Исполнитель (executor с thunks, защитой от рекурсии и таймаутами)
+- [x] CRUD operations (StorageCRUD protocol)
+- [x] GraphConstraints protocol (graph constraint validation)
+- [x] Inheritance (parent-fn-id, parent chain)
+- [x] Executor (with thunks, recursion protection, and timeouts)
 
-### В разработке
+### In Progress
 
-- [ ] Базовые функции (add, if, map, filter и т.д.)
+- [ ] Base functions (add, if, map, filter, etc.)
 - [ ] REST API
-- [ ] Веб-интерфейс
+- [ ] Web interface
 
-### Планы на будущее
+### Future Plans
 
-- [ ] Система типов (алгебра типов)
-- [ ] Git-like версионирование
-- [ ] Система пользователей и прав
+- [ ] Type system (type algebra)
+- [ ] Git-like versioning
+- [ ] User and permission system
 
-## Лицензия
+## License
 
 GNU Affero General Public License v3.0 (AGPL-3.0).
-См. [LICENSE](LICENSE).
+See [LICENSE](LICENSE).
 
-Для коммерческого лицензирования: licensing@graphden.dev
+For commercial licensing: licensing@graphden.dev

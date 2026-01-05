@@ -1,32 +1,32 @@
 # postgres-storage
 
-PostgreSQL реализация протоколов Storage и StorageIntrospection.
+PostgreSQL implementation of Storage and StorageIntrospection protocols.
 
-## Назначение
+## Purpose
 
-Production-ready хранилище на базе PostgreSQL с:
+Production-ready storage based on PostgreSQL with:
 - Connection pooling (HikariCP)
-- DDL-миграциями
-- Поддержкой всех типов полей
-- Кэшированием метаданных
+- DDL migrations
+- Support for all field types
+- Metadata caching
 
-## Зависимости
+## Dependencies
 
-- `storage-protocol` — протоколы Storage и StorageIntrospection
-- `data-schema-protocol` — протокол DataSchema
+- `storage-protocol` — Storage and StorageIntrospection protocols
+- `data-schema-protocol` — DataSchema protocol
 - PostgreSQL 12+
 
-### Clojure зависимости
+### Clojure Dependencies
 
 - `com.zaxxer/HikariCP` — connection pool
-- `org.postgresql/postgresql` — JDBC драйвер
-- `com.github.seancorfield/next.jdbc` — JDBC обёртка
+- `org.postgresql/postgresql` — JDBC driver
+- `com.github.seancorfield/next.jdbc` — JDBC wrapper
 
 ## API
 
 ### create-storage
 
-Создаёт новый экземпляр PostgreSQL storage:
+Creates a new PostgreSQL storage instance:
 
 ```clojure
 (require '[graphden.postgres-storage.interface :as pg]
@@ -39,26 +39,26 @@ Production-ready хранилище на базе PostgreSQL с:
 
 (sp/initialize storage my-schema)
 
-;; Использование...
+;; Usage...
 
 (sp/close storage)
 ```
 
-### Параметры подключения
+### Connection Parameters
 
-| Параметр | Тип | По умолчанию | Описание |
-|----------|-----|--------------|----------|
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
 | `:jdbc-url` | string | (required) | JDBC URL |
-| `:username` | string | (required) | Имя пользователя |
-| `:password` | string | (required) | Пароль |
-| `:pool-size` | int | 10 | Размер пула |
-| `:min-idle` | int | 2 | Минимум idle соединений |
-| `:connection-timeout` | ms | 30000 | Таймаут подключения |
-| `:idle-timeout` | ms | 600000 | Таймаут простоя |
-| `:max-lifetime` | ms | 1800000 | Макс. время жизни соединения |
-| `:leak-detection-threshold` | ms | 60000 | Детекция утечек |
+| `:username` | string | (required) | Username |
+| `:password` | string | (required) | Password |
+| `:pool-size` | int | 10 | Pool size |
+| `:min-idle` | int | 2 | Min idle connections |
+| `:connection-timeout` | ms | 30000 | Connection timeout |
+| `:idle-timeout` | ms | 600000 | Idle timeout |
+| `:max-lifetime` | ms | 1800000 | Max connection lifetime |
+| `:leak-detection-threshold` | ms | 60000 | Leak detection |
 
-## Маппинг типов
+## Type Mapping
 
 | field-types | PostgreSQL |
 |-------------|------------|
@@ -74,9 +74,9 @@ Production-ready хранилище на базе PostgreSQL с:
 | `:enum` | PostgreSQL ENUM |
 | `:union` | `jsonb` |
 
-## DDL операции
+## DDL Operations
 
-### Создание таблицы
+### Create Table
 
 ```sql
 CREATE TABLE IF NOT EXISTS user (
@@ -87,67 +87,67 @@ CREATE TABLE IF NOT EXISTS user (
 );
 ```
 
-### Создание enum
+### Create Enum
 
 ```sql
 CREATE TYPE user_role AS ENUM ('admin', 'user', 'guest');
 ```
 
-### Добавление поля
+### Add Field
 
 ```sql
 ALTER TABLE user ADD COLUMN bio text;
 ```
 
-### Переименование
+### Rename
 
 ```sql
 ALTER TABLE old_name RENAME TO new_name;
 ALTER TABLE user RENAME COLUMN old_field TO new_field;
 ```
 
-## Метаданные
+## Metadata
 
-Хранятся в таблице `_schema_metadata`:
+Stored in `_schema_metadata` table:
 
 ```sql
 CREATE TABLE _schema_metadata (
   uuid uuid PRIMARY KEY,
   kind text NOT NULL,        -- 'entity', 'field', 'enum', 'enum_value'
   name text NOT NULL,
-  parent_uuid uuid,          -- для field: entity uuid
-  field_type text,           -- для field: тип поля
-  field_nullable boolean     -- для field: nullable?
+  parent_uuid uuid,          -- for field: entity uuid
+  field_type text,           -- for field: field type
+  field_nullable boolean     -- for field: nullable?
 );
 ```
 
-## Потокобезопасность
+## Thread Safety
 
-- Connection pool управляется HikariCP
-- Метаданные кэшируются с блокировкой
-- `initialize` инвалидирует кэш
+- Connection pool managed by HikariCP
+- Metadata cached with locking
+- `initialize` invalidates cache
 
-## Миграции
+## Migrations
 
-### Поддерживаемые изменения
+### Supported Changes
 
-| Операция | DDL |
-|----------|-----|
-| Добавление сущности | `CREATE TABLE` |
-| Добавление поля | `ALTER TABLE ADD COLUMN` |
-| Переименование сущности | `ALTER TABLE RENAME` |
-| Переименование поля | `ALTER TABLE RENAME COLUMN` |
-| Расширение типа | `ALTER TABLE ALTER COLUMN TYPE` |
-| Nullable: false→true | `ALTER TABLE ALTER COLUMN DROP NOT NULL` |
+| Operation | DDL |
+|-----------|-----|
+| Add entity | `CREATE TABLE` |
+| Add field | `ALTER TABLE ADD COLUMN` |
+| Rename entity | `ALTER TABLE RENAME` |
+| Rename field | `ALTER TABLE RENAME COLUMN` |
+| Widen type | `ALTER TABLE ALTER COLUMN TYPE` |
+| Nullable: false->true | `ALTER TABLE ALTER COLUMN DROP NOT NULL` |
 
-### Проверки перед миграцией
+### Pre-migration Checks
 
-- Удаление сущности → ошибка
-- Удаление поля → ошибка
-- Сужение типа → ошибка
-- Nullable: true→false → ошибка
+- Remove entity -> error
+- Remove field -> error
+- Narrow type -> error
+- Nullable: true->false -> error
 
-## Пример полного использования
+## Full Usage Example
 
 ```clojure
 (require '[graphden.postgres-storage.interface :as pg]
@@ -155,16 +155,16 @@ CREATE TABLE _schema_metadata (
          '[graphden.graph-data-schema.interface :as graph]
          '[graphden.malli-data-schema.interface :as mds])
 
-;; Создаём схему графа
+;; Create graph schema
 (def schema (graph/build-schema (mds/create-builder)))
 
-;; Создаём storage
+;; Create storage
 (def storage
   (pg/create-storage {:jdbc-url "jdbc:postgresql://localhost:5432/graphden"
                       :username "graphden"
                       :password "secret"}))
 
-;; Инициализируем (создаём таблицы)
+;; Initialize (create tables)
 (try
   (let [changes (sp/initialize storage schema)]
     (println "Created entities:" (get-in changes [:entities :created]))
@@ -173,95 +173,95 @@ CREATE TABLE _schema_metadata (
     (sp/close storage)))
 ```
 
-## Интроспекция
+## Introspection
 
 ```clojure
-;; Текущие сущности (таблицы)
+;; Current entities (tables)
 (sp/current-entities storage)
 ;; => #{:fn-schema :arg-schema :fn :arg-value}
 
-;; Поля сущности
+;; Entity fields
 (sp/current-fields storage :fn-schema)
 ;; => {:name {:type :text :nullable? false}
 ;;     :returned-type {:type :enum :nullable? false}}
 
-;; Enum типы
+;; Enum types
 (sp/current-enums storage)
 ;; => #{:value-kind}
 
-;; Значения enum
+;; Enum values
 (sp/current-enum-values storage :value-kind)
 ;; => #{:null :uuid :text :int :bool :numeric :timestamptz :jsonb :bytes}
 ```
 
-## Структура модулей
+## Module Structure
 
-| Модуль | Назначение |
-|--------|------------|
-| `core.clj` | Основной Storage record, pool management |
-| `util.clj` | Маппинг типов, SQL helpers |
-| `metadata.clj` | Операции с `_schema_metadata` |
-| `introspection.clj` | Чтение структуры БД |
-| `ddl.clj` | DDL операции |
-| `migration.clj` | Логика миграции |
+| Module | Purpose |
+|--------|---------|
+| `core.clj` | Main Storage record, pool management |
+| `util.clj` | Type mapping, SQL helpers |
+| `metadata.clj` | `_schema_metadata` operations |
+| `introspection.clj` | DB structure reading |
+| `ddl.clj` | DDL operations |
+| `migration.clj` | Migration logic |
 
-## Ограничения именования
+## Naming Restrictions
 
-### Kebab-case → Snake_case
+### Kebab-case -> Snake_case
 
-Все идентификаторы (имена сущностей, полей, enum-ов) преобразуются
-из kebab-case (`:my-field`) в snake_case (`my_field`) для SQL.
+All identifiers (entity names, fields, enums) are converted
+from kebab-case (`:my-field`) to snake_case (`my_field`) for SQL.
 
-**Коллизии запрещены:**
+**Collisions are forbidden:**
 
 ```clojure
-;; Эти имена дадут одинаковый SQL идентификатор
-:my-field  ; → my_field
-:my_field  ; → my_field (коллизия!)
+;; These names produce the same SQL identifier
+:my-field  ; -> my_field
+:my_field  ; -> my_field (collision!)
 
-;; При попытке использовать оба:
+;; When trying to use both:
 (sp/initialize storage schema) ; => throws "Snake_case naming collision"
 ```
 
-### Валидные SQL идентификаторы
+### Valid SQL Identifiers
 
-Имена должны соответствовать паттерну `^[a-z][a-z0-9_]*$`:
-- Начинаются с буквы a-z
-- Содержат только буквы, цифры и подчёркивания
-- Максимальная длина — 63 символа (PostgreSQL ограничение)
+Names must match pattern `^[a-z][a-z0-9_]*$`:
+- Start with letter a-z
+- Contain only letters, digits, and underscores
+- Max length — 63 characters (PostgreSQL limit)
 
-**Примеры:**
+**Examples:**
 
 ```clojure
-;; Валидные
+;; Valid
 :user
 :user-profile
 :user_profile
 :item123
 
-;; Невалидные (вызовут ошибку)
-:123user      ; начинается с цифры
-:User         ; заглавные буквы
-:user-name!   ; специальные символы
+;; Invalid (will error)
+:123user      ; starts with digit
+:User         ; uppercase letters
+:user-name!   ; special characters
 ```
 
-## Требования
+## Requirements
 
-- PostgreSQL 12+ (для `gen_random_uuid()`)
-- Права на CREATE TABLE, CREATE TYPE, ALTER TABLE
+- PostgreSQL 12+ (for `gen_random_uuid()`)
+- CREATE TABLE, CREATE TYPE, ALTER TABLE permissions
 
-## Тесты
+## Tests
 
 ```bash
-# Требуется запущенный PostgreSQL
+# Requires running PostgreSQL
 docker run -d -p 5432:5432 -e POSTGRES_PASSWORD=test postgres:15
 
 bb test
 ```
 
-Тесты покрывают:
+Tests cover:
 - Connection pool
-- DDL операции
-- Миграции
-- Интроспекция
-- Метаданные
+- DDL operations
+- Migrations
+- Introspection
+- Metadata

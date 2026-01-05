@@ -1,59 +1,59 @@
 # datomic-storage
 
-Datomic реализация протоколов Storage и StorageIntrospection.
+Datomic implementation of Storage and StorageIntrospection protocols.
 
-## Назначение
+## Purpose
 
-Storage на базе Datomic с:
-- Иммутабельной историей
-- EAVT моделью данных
-- Поддержкой Datomic Local и Pro
+Storage based on Datomic with:
+- Immutable history
+- EAVT data model
+- Support for Datomic Local and Pro
 
-## Зависимости
+## Dependencies
 
-- `storage-protocol` — протоколы Storage и StorageIntrospection
-- `data-schema-protocol` — протокол DataSchema
-- Datomic Local или Datomic Pro/Cloud
+- `storage-protocol` — Storage and StorageIntrospection protocols
+- `data-schema-protocol` — DataSchema protocol
+- Datomic Local or Datomic Pro/Cloud
 
-### Clojure зависимости
+### Clojure Dependencies
 
-- `com.datomic/local` — Datomic Local (для разработки)
-- `com.datomic/client-cloud` — Datomic Cloud (опционально)
+- `com.datomic/local` — Datomic Local (for development)
+- `com.datomic/client-cloud` — Datomic Cloud (optional)
 
 ## API
 
 ### create-storage
 
-Создаёт новый экземпляр Datomic storage:
+Creates a new Datomic storage instance:
 
 ```clojure
 (require '[graphden.datomic-storage.interface :as datomic]
          '[graphden.storage-protocol.interface :as sp])
 
-;; In-memory (по умолчанию)
+;; In-memory (default)
 (def storage (datomic/create-storage {:db-name "my-db"}))
 
 (sp/initialize storage my-schema)
 
-;; Использование...
+;; Usage...
 
 (sp/close storage)
 ```
 
-### Параметры
+### Parameters
 
-| Параметр | Тип | По умолчанию | Описание |
-|----------|-----|--------------|----------|
-| `:db-name` | string | "graphden" | Имя базы данных |
-| `:client-config` | map | in-memory | Конфигурация клиента |
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `:db-name` | string | "graphden" | Database name |
+| `:client-config` | map | in-memory | Client configuration |
 
-### Конфигурации
+### Configurations
 
 ```clojure
-;; In-memory (для тестов и разработки)
+;; In-memory (for tests and development)
 (datomic/create-storage {:db-name "test-db"})
 
-;; Файловое хранилище
+;; File storage
 (datomic/create-storage
   {:db-name "my-db"
    :client-config {:server-type :datomic-local
@@ -71,7 +71,7 @@ Storage на базе Datomic с:
 
 ### default-local-config
 
-Предопределённая конфигурация для разработки:
+Predefined configuration for development:
 
 ```clojure
 datomic/default-local-config
@@ -80,7 +80,7 @@ datomic/default-local-config
 ;;     :system "graphden-dev"}
 ```
 
-## Маппинг типов
+## Type Mapping
 
 | field-types | Datomic |
 |-------------|---------|
@@ -96,82 +96,82 @@ datomic/default-local-config
 | `:enum` | `:db.type/ref` (idents) |
 | `:union` | `:db.type/string` (EDN) |
 
-### Ограничения типов
+### Type Limitations
 
-**Byte arrays (`:bytes`)**: Datomic имеет ограничение на размер byte array значений.
-Для Datomic Local это ~10MB. Попытка сохранить больший массив приведёт к ошибке
-`:datomic-error` с сообщением о превышении лимита. Валидация размера на стороне
-приложения пока не реализована — ошибка возникнет при транзакции.
+**Byte arrays (`:bytes`)**: Datomic has a size limit for byte array values.
+For Datomic Local this is ~10MB. Attempting to save a larger array will result in
+`:datomic-error` with a message about exceeding the limit. Size validation on the
+application side is not yet implemented — error occurs during transaction.
 
-## Схема атрибутов
+## Attribute Schema
 
-### Именование
+### Naming
 
-Атрибуты именуются как `entity/field`:
-
-```clojure
-:user/name      ; поле name сущности user
-:user/email     ; поле email сущности user
-```
-
-### Enum значения
-
-Enum значения создаются как idents:
+Attributes are named as `entity/field`:
 
 ```clojure
-:status.value/active    ; значение :active enum :status
-:status.value/inactive  ; значение :inactive enum :status
+:user/name      ; name field of user entity
+:user/email     ; email field of user entity
 ```
 
-### Метаданные
+### Enum Values
 
-Метаданные хранятся в атрибутах `graphden.metadata/*`:
+Enum values are created as idents:
+
+```clojure
+:status.value/active    ; :active value of :status enum
+:status.value/inactive  ; :inactive value of :status enum
+```
+
+### Metadata
+
+Metadata stored in `graphden.metadata/*` attributes:
 
 ```clojure
 {:graphden.metadata/uuid #uuid "..."
  :graphden.metadata/kind :entity    ; :entity, :field, :enum, :enum-value
  :graphden.metadata/name :user
- :graphden.metadata/parent-uuid #uuid "..."     ; для field/enum-value
- :graphden.metadata/field-type :text            ; для field
- :graphden.metadata/field-nullable false}       ; для field
+ :graphden.metadata/parent-uuid #uuid "..."     ; for field/enum-value
+ :graphden.metadata/field-type :text            ; for field
+ :graphden.metadata/field-nullable false}       ; for field
 ```
 
-## Unique constraints
+## Unique Constraints
 
-Поддерживаются только single-field unique constraints:
+Only single-field unique constraints are supported:
 
 ```clojure
-;; Работает
+;; Works
 (ds/add-constraint :user {:type :unique :fields [:email]})
 ;; => :db/unique :db.unique/value
 
-;; Composite unique НЕ поддерживается напрямую
+;; Composite unique NOT directly supported
 (ds/add-constraint :user {:type :unique :fields [:tenant-id :name]})
-;; => Игнорируется (требует application-level проверки)
+;; => Ignored (requires application-level check)
 ```
 
-## Миграции
+## Migrations
 
-### Поддерживаемые изменения
+### Supported Changes
 
-| Операция | Реализация |
-|----------|------------|
-| Добавление сущности | Добавление атрибутов |
-| Добавление поля | `d/transact` нового атрибута |
-| Добавление enum значения | Создание нового ident |
-| Переименование | Через метаданные (атрибуты не переименовываются) |
+| Operation | Implementation |
+|-----------|----------------|
+| Add entity | Add attributes |
+| Add field | `d/transact` new attribute |
+| Add enum value | Create new ident |
+| Rename | Via metadata (attributes are not renamed) |
 
-### Особенности Datomic
+### Datomic Specifics
 
-В Datomic атрибуты нельзя удалить или переименовать напрямую. Переименования отслеживаются через метаданные.
+In Datomic attributes cannot be deleted or renamed directly. Renames are tracked via metadata.
 
-## Потокобезопасность
+## Thread Safety
 
-- Все операции защищены блокировкой
-- Connection создаётся при `initialize`
-- Client и connection хранятся в атомах
+- All operations protected by lock
+- Connection created at `initialize`
+- Client and connection stored in atoms
 
-## Пример полного использования
+## Full Usage Example
 
 ```clojure
 (require '[graphden.datomic-storage.interface :as datomic]
@@ -179,13 +179,13 @@ Enum значения создаются как idents:
          '[graphden.graph-data-schema.interface :as graph]
          '[graphden.malli-data-schema.interface :as mds])
 
-;; Создаём схему графа
+;; Create graph schema
 (def schema (graph/build-schema (mds/create-builder)))
 
-;; Создаём storage
+;; Create storage
 (def storage (datomic/create-storage {:db-name "graphden-dev"}))
 
-;; Инициализируем
+;; Initialize
 (try
   (let [changes (sp/initialize storage schema)]
     (println "Created:" (get-in changes [:entities :created])))
@@ -193,59 +193,59 @@ Enum значения создаются как idents:
     (sp/close storage)))
 ```
 
-## Интроспекция
+## Introspection
 
 ```clojure
-;; Текущие сущности (namespaces атрибутов)
+;; Current entities (attribute namespaces)
 (sp/current-entities storage)
 ;; => #{:fn-schema :arg-schema :fn :arg-value}
 
-;; Поля сущности (из метаданных)
+;; Entity fields (from metadata)
 (sp/current-fields storage :fn-schema)
 ;; => {:name {:type :text :nullable? false}
 ;;     :returned-type {:type :enum :nullable? false}}
 
-;; Enum типы (из .value namespaces)
+;; Enum types (from .value namespaces)
 (sp/current-enums storage)
 ;; => #{:value-kind}
 
-;; Значения enum
+;; Enum values
 (sp/current-enum-values storage :value-kind)
 ;; => #{:null :uuid :text :int :bool :numeric :timestamptz :jsonb :bytes}
 ```
 
-## Особенности close
+## Close Behavior
 
-`sp/close` удаляет базу данных. Это сделано для:
-- Очистки тестовых данных
-- Идемпотентности в dev-окружении
+`sp/close` deletes the database. This is done for:
+- Cleaning up test data
+- Idempotency in dev environment
 
-Для продакшена с персистентностью используйте отдельную стратегию управления БД.
+For production with persistence use a separate DB management strategy.
 
-## Ограничения
+## Limitations
 
-- Composite unique constraints не поддерживаются (Datomic ограничение)
-- `:jsonb` и `:union` хранятся как EDN строки (не нативный JSON)
-- Переименования требуют обновления метаданных, не атрибутов
-- **Неатомарное обновление метаданных**: При обновлении схемы метаданные обновляются
-  в двух транзакциях (retract старых, assert новых), т.к. Datomic не позволяет
-  retract и assert одного unique значения в одной транзакции.
-  В случае сбоя между транзакциями метаданные могут быть потеряны.
+- Composite unique constraints not supported (Datomic limitation)
+- `:jsonb` and `:union` stored as EDN strings (not native JSON)
+- Renames require metadata update, not attribute update
+- **Non-atomic metadata update**: When updating schema, metadata is updated
+  in two transactions (retract old, assert new), as Datomic doesn't allow
+  retract and assert of the same unique value in one transaction.
+  In case of failure between transactions, metadata may be lost.
 
-## Тесты
+## Tests
 
 ```bash
 bb test
 ```
 
-Тесты покрывают:
-- Инициализацию с in-memory storage
-- Создание схемы атрибутов
-- Интроспекция
-- Миграции (добавление полей/значений)
-- Метаданные
+Tests cover:
+- Initialization with in-memory storage
+- Attribute schema creation
+- Introspection
+- Migrations (adding fields/values)
+- Metadata
 
-## Требования
+## Requirements
 
 - Java 11+
-- Datomic Local (включён) или Datomic Pro license
+- Datomic Local (included) or Datomic Pro license

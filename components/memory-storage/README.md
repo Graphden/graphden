@@ -1,26 +1,26 @@
 # memory-storage
 
-In-memory реализация протоколов Storage и StorageIntrospection.
+In-memory implementation of Storage and StorageIntrospection protocols.
 
-## Назначение
+## Purpose
 
-Хранилище в памяти для:
-- Разработки и отладки
-- Юнит-тестов
-- Прототипирования
+In-memory storage for:
+- Development and debugging
+- Unit tests
+- Prototyping
 
-Данные теряются при завершении процесса.
+Data is lost when the process terminates.
 
-## Зависимости
+## Dependencies
 
-- `storage-protocol` — протоколы Storage и StorageIntrospection
-- `data-schema-protocol` — протокол DataSchema
+- `storage-protocol` — Storage and StorageIntrospection protocols
+- `data-schema-protocol` — DataSchema protocol
 
 ## API
 
 ### create-storage
 
-Создаёт новый экземпляр in-memory storage:
+Creates a new in-memory storage instance:
 
 ```clojure
 (require '[graphden.memory-storage.interface :as mem]
@@ -28,18 +28,18 @@ In-memory реализация протоколов Storage и StorageIntrospect
 
 (def storage (mem/create-storage))
 
-;; Инициализация схемы
+;; Initialize schema
 (sp/initialize storage my-schema)
 
-;; Использование...
+;; Usage...
 
-;; Закрытие (очистка данных)
+;; Close (clear data)
 (sp/close storage)
 ```
 
-## Внутреннее устройство
+## Internal Structure
 
-### Структура состояния
+### State Structure
 
 ```clojure
 {:entities {:user {:fields {:name {:type :text :nullable? false}
@@ -53,56 +53,56 @@ In-memory реализация протоколов Storage и StorageIntrospect
                id-2 {:id id-2 :name "Bob" :email "bob@example.com"}}}}
 ```
 
-### Потокобезопасность
+### Thread Safety
 
-Использует атом для хранения состояния. Все операции атомарны.
+Uses an atom for state storage. All operations are atomic.
 
-## Миграции
+## Migrations
 
-### Поддерживаемые изменения
+### Supported Changes
 
-| Операция | Поддержка |
-|----------|-----------|
-| Добавление сущности | Да |
-| Добавление поля | Да |
-| Переименование сущности | Да (по UUID) |
-| Переименование поля | Да (по UUID) |
-| Расширение типа | Да (int→numeric) |
-| Nullable: false→true | Да |
+| Operation | Support |
+|-----------|---------|
+| Add entity | Yes |
+| Add field | Yes |
+| Rename entity | Yes (by UUID) |
+| Rename field | Yes (by UUID) |
+| Widen type | Yes (int->numeric) |
+| Nullable: false->true | Yes |
 
-### Миграция данных при переименовании
+### Data Migration on Rename
 
-При переименовании сущности или поля данные автоматически мигрируются:
+When renaming an entity or field, data is automatically migrated:
 
 ```clojure
-;; До: {:user {:name "Alice"}}
-;; После переименования :name → :full-name
-;; Данные: {:user {:full-name "Alice"}}
+;; Before: {:user {:name "Alice"}}
+;; After renaming :name -> :full-name
+;; Data: {:user {:full-name "Alice"}}
 ```
 
-### Запрещённые изменения
+### Forbidden Changes
 
-| Операция | Причина |
-|----------|---------|
-| Удаление сущности | Потеря данных |
-| Удаление поля | Потеря данных |
-| Сужение типа | Невозможная конверсия |
-| Nullable: true→false | Существующие NULL |
+| Operation | Reason |
+|-----------|--------|
+| Remove entity | Data loss |
+| Remove field | Data loss |
+| Narrow type | Impossible conversion |
+| Nullable: true->false | Existing NULLs |
 
-## Проверки типов
+## Type Checks
 
-Использует утилиты из `storage-protocol`:
+Uses utilities from `storage-protocol`:
 
 ```clojure
-;; Безопасные изменения
+;; Safe changes
 (sp/safe-type-change? :int :numeric)  ; => true
 (sp/safe-type-change? :text :jsonb)   ; => true
 
-;; Небезопасные изменения
+;; Unsafe changes
 (sp/safe-type-change? :text :int)     ; => false
 ```
 
-## Пример полного использования
+## Full Usage Example
 
 ```clojure
 (require '[graphden.memory-storage.interface :as mem]
@@ -110,44 +110,44 @@ In-memory реализация протоколов Storage и StorageIntrospect
          '[graphden.malli-data-schema.interface :as mds]
          '[graphden.data-schema-protocol.interface :as ds])
 
-;; Создаём схему
+;; Create schema
 (def schema
   (-> (mds/create-builder)
       (ds/add-entity :user #uuid "..."
                      {:name {:uuid #uuid "..." :type :text}})
       ds/build))
 
-;; Создаём storage и инициализируем
+;; Create storage and initialize
 (def storage (mem/create-storage))
 (def changes (sp/initialize storage schema))
 
-;; Проверяем результат
+;; Check result
 (:created (:entities changes))  ; => [:user]
 
-;; Интроспекция
+;; Introspection
 (sp/current-entities storage)   ; => #{:user}
 (sp/current-fields storage :user) ; => {:name {:type :text :nullable? false}}
 
-;; Закрытие
+;; Close
 (sp/close storage)
 ```
 
-## Ограничения
+## Limitations
 
-- Нет персистентности (данные в памяти)
-- Нет транзакций (атомарные операции только на уровне atom)
-- Нет индексов (линейный поиск)
+- No persistence (data in memory)
+- No transactions (atomic operations only at atom level)
+- No indexes (linear search)
 
-Для продакшена используйте `postgres-storage` или `datomic-storage`.
+For production use `postgres-storage` or `datomic-storage`.
 
-## Тесты
+## Tests
 
 ```bash
 bb test
 ```
 
-Тесты покрывают:
-- Инициализацию схемы
-- Интроспекцию
-- Миграции (переименование, добавление полей)
-- Проверку деструктивных изменений
+Tests cover:
+- Schema initialization
+- Introspection
+- Migrations (renaming, adding fields)
+- Destructive change validation

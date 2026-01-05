@@ -38,6 +38,12 @@
    - :fn type args: force-value returns fn-id, impl receives fn-id
    - :lazy-args: impl receives thunk, must call force-value manually"
   [{:keys [args impl lazy-args] :or {lazy-args #{}}}]
+  ;; Validate that all lazy-args exist in args
+  (when-let [unknown-lazy-args (seq (remove #(contains? args %) lazy-args))]
+    (throw (ex-info "lazy-args contains unknown argument names"
+                    {:type :invalid-lazy-args
+                     :unknown-args (set unknown-lazy-args)
+                     :valid-args (set (keys args))})))
   (fn [thunks ctx]
     (let [processed-args
           (reduce-kv
@@ -168,9 +174,15 @@
 
     (map? arg-spec)
     (if-let [arg-type (:type arg-spec)]
-      (do
+      (let [required-val (get arg-spec :required true)]
+        (when-not (boolean? required-val)
+          (throw (ex-info ":required must be a boolean"
+                          {:type :invalid-arg-spec
+                           :arg-name arg-name
+                           :arg-spec arg-spec
+                           :required-value required-val})))
         (validate-arg-type! arg-name arg-type)
-        {:arg-type arg-type :required (get arg-spec :required true)})
+        {:arg-type arg-type :required required-val})
       (throw (ex-info "arg-spec map must contain :type key"
                       {:type :invalid-arg-spec
                        :arg-name arg-name

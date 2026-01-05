@@ -29,6 +29,10 @@
    :sub {:args {:nums :jsonb}
          :return-type :numeric
          :impl (fn [{:keys [nums]} _ctx]
+                 (when (empty? nums)
+                   (throw (ex-info "Subtraction requires at least one number"
+                                   {:type :execution-error/invalid-args
+                                    :nums nums})))
                  (apply - nums))}
 
    :mul {:args {:nums :jsonb}
@@ -39,6 +43,12 @@
    :div {:args {:nums :jsonb}
          :return-type :numeric
          :impl (fn [{:keys [nums]} _ctx]
+                 (when (empty? nums)
+                   (throw (ex-info "Division requires at least one number"
+                                   {:type :execution-error/invalid-args
+                                    :nums nums})))
+                 ;; Check all divisors (rest nums) for zero
+                 ;; (/ a b c) = (/ (/ a b) c), so b and c must be non-zero
                  (when-let [zero-divisor (some #(when (zero? %) %) (rest nums))]
                    (throw (ex-info "Division by zero"
                                    {:type :execution-error/division-by-zero

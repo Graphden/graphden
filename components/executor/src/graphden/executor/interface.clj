@@ -168,7 +168,6 @@
 
    Throws:
    - :execution-error/fn-not-found if no function with the given name exists
-   - :execution-error/ambiguous-fn-name if multiple functions have the same name
    - :execution-error/invalid-fn-name if fn-name is not a string
    - All errors from execute-with-named-args"
   [context fn-name named-args]

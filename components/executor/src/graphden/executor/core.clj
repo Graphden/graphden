@@ -291,37 +291,26 @@
    - If value is a UUID and arg-schema type is :fn -> LazyFnThunk
    - Otherwise -> LiteralThunk
 
-   Validates that arg-value and arg-schema are not nil."
-  [arg-value arg-schema provided-args]
-  (when-not arg-value
-    (throw (ex-info "arg-value cannot be nil"
-                    {:type :execution-error/nil-arg-value})))
-  (when-not arg-schema
-    (throw (ex-info "arg-schema cannot be nil"
-                    {:type :execution-error/nil-arg-schema})))
+   NOTE: This function is only called from build-thunks when a stored arg-value
+   exists AND no provided-arg override was found for this arg-schema-id.
+   The provided-args check happens in build-thunks before calling this function."
+  [arg-value arg-schema]
   ;; Note: :value can be nil for optional args with null values.
   ;; arg-values from storage are assumed to have :value key present.
   (let [value (:value arg-value)
-        arg-type (:type arg-schema)
-        arg-schema-id (:id arg-schema)]
-    ;; Check if there's a provided arg that overrides this
-    (if-let [provided-value (get provided-args arg-schema-id)]
-      (do
-        (validate-provided-arg-type! provided-value arg-schema)
-        (->LiteralThunk provided-value))
-      ;; No override, use the stored value
-      (cond
-        ;; UUID value means reference to another fn
-        (uuid? value)
-        (if (= arg-type :fn)
-          ;; For :fn type args, don't execute, just pass fn-id
-          (->LazyFnThunk value)
-          ;; For other types, execute the referenced fn
-          (->FnRefThunk value {}))
+        arg-type (:type arg-schema)]
+    (cond
+      ;; UUID value means reference to another fn
+      (uuid? value)
+      (if (= arg-type :fn)
+        ;; For :fn type args, don't execute, just pass fn-id
+        (->LazyFnThunk value)
+        ;; For other types, execute the referenced fn
+        (->FnRefThunk value {}))
 
-        ;; Literal value
-        :else
-        (->LiteralThunk value)))))
+      ;; Literal value
+      :else
+      (->LiteralThunk value))))
 
 
 (defn- get-fn-data-from-graph
@@ -358,7 +347,7 @@
 
    Priority:
    1. If provided-args has a value for this schema-id, use it directly
-   2. Else if arg-values has a value, use build-thunk (which may also check provided-args)
+   2. Else if arg-values has a value, use build-thunk
    3. Else if required, throw error
    4. Else skip (optional arg with no value)"
   [fn-data provided-args]
@@ -377,7 +366,7 @@
 
             ;; 2. Stored arg-value exists - use build-thunk
             arg-value
-            (assoc acc (keyword arg-name) (build-thunk arg-value arg-schema provided-args))
+            (assoc acc (keyword arg-name) (build-thunk arg-value arg-schema))
 
             ;; 3. Required arg with no value - error
             (:required arg-schema)
@@ -518,6 +507,7 @@
 
    Throws:
    - :execution-error/fn-not-found if no function with the given name exists
+   - :execution-error/invalid-fn-name if fn-name is not a string
    - All errors from execute-with-named-args"
   [context fn-name named-args]
   (when-not (string? fn-name)
@@ -526,18 +516,10 @@
                      :fn-name fn-name
                      :fn-name-type (type fn-name)})))
   (let [storage (:storage context)
+        ;; NOTE: :fn entity has UNIQUE constraint on :name, so query returns 0 or 1 result
         fns (sp/query-entities storage :fn {:name fn-name})]
-    (cond
-      (empty? fns)
+    (if (empty? fns)
       (throw (ex-info (str "Function '" fn-name "' not found")
                       {:type :execution-error/fn-not-found
                        :fn-name fn-name}))
-
-      (> (count fns) 1)
-      (throw (ex-info (str "Multiple functions found with name '" fn-name "'")
-                      {:type :execution-error/ambiguous-fn-name
-                       :fn-name fn-name
-                       :count (count fns)}))
-
-      :else
       (execute-with-named-args context (:id (first fns)) named-args))))

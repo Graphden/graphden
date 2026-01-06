@@ -11,7 +11,24 @@
    - HOF: map, filter, reduce, some, every?, find-first, group-by, sort-by, apply
 
    Registration and storage sync should be done by consuming components
-   using fn-registry."
+   using fn-registry.
+
+   ## Defining Custom Base Functions
+
+   Use the `defbase` macro from `graphden.fn-registry.interface` for
+   convenient definition with automatic argument handling.
+
+   Quick example:
+   ```clojure
+   (require '[graphden.fn-registry.interface :refer [defbase]])
+
+   (defbase double-it
+     {:args {:n :int}
+      :return-type :int}
+     (* n 2))
+   ```
+
+   See `graphden.fn-registry.macros` for full documentation."
   (:require
     [graphden.base-functions.core :as core]))
 

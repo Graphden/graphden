@@ -3,24 +3,24 @@
 
    Executes functions stored in the graph by:
    1. Resolving the function with its arg-values and parent chain
-   2. Building thunks for lazy evaluation
-   3. Calling the base function with thunks
+   2. Building delays for lazy evaluation
+   3. Calling the base function with delays
+
+   Arguments are passed to base functions as Clojure `delay` objects.
+   Use @ (deref) to get the value:
+     (+ @a @b)           ; for regular args
+     (f {:item x})       ; for :fn args (f is a callable after deref)
+
+   Use the defbase macro from fn-registry for convenient function definitions
+   with automatic argument dereferencing.
 
    Supports:
-   - Lazy evaluation (thunks)
+   - Lazy evaluation (delays)
    - Recursion protection (max-depth)
    - Timeout protection
    - Base function registry"
   (:require
     [graphden.executor.core :as core]))
-
-
-;; === Re-export Thunk Protocol ===
-
-(def force-value
-  "Forces evaluation of a thunk, returning the value.
-   Context contains execution state (storage, depth, etc)."
-  core/force-value)
 
 
 ;; === Execution Context ===
@@ -56,9 +56,18 @@
    fn-name is a keyword (e.g. :add, :if, :map).
    f is a function that takes [args context] and returns a value.
 
+   Arguments are passed as delays. Use @ (deref) to get values:
+
    Example:
    (register-base-fn! :add (fn [{:keys [a b]} ctx]
-                             (+ (force-value a ctx) (force-value b ctx))))"
+                             (+ @a @b)))
+
+   For :fn type args, deref returns a callable:
+   (register-base-fn! :map (fn [{:keys [f coll]} ctx]
+                             (mapv (fn [x] (@f {:item x})) @coll)))
+
+   Consider using the defbase macro from fn-registry instead for
+   automatic argument dereferencing."
   [fn-name f]
   (core/register-base-fn! fn-name f))
 

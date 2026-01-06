@@ -33,12 +33,11 @@
   "Sets up an 'add' function that adds two numbers.
    Returns {:fn-schema fn-schema :arg-a arg-schema-a :arg-b arg-schema-b :fn fn-rec}"
   [storage]
-  ;; Register the base function
+  ;; Register the base function (args are delays, use @ to deref)
   (exec/register-base-fn!
     :add
-    (fn [{:keys [a b]} ctx]
-      (+ (exec/force-value a ctx)
-         (exec/force-value b ctx))))
+    (fn [{:keys [a b]} _ctx]
+      (+ @a @b)))
 
   ;; Create fn-schema
   (let [fn-schema (sp/create-entity storage :fn-schema
@@ -163,8 +162,8 @@
           ;; Register a constant function
           _ (exec/register-base-fn!
               :const
-              (fn [{:keys [value]} ctx]
-                (exec/force-value value ctx)))
+              (fn [{:keys [value]} _ctx]
+                @value))
           ;; Create const fn-schema
           const-schema (sp/create-entity storage :fn-schema
                                          {:name "const"
@@ -212,8 +211,8 @@
           ;; Register identity function
           _ (exec/register-base-fn!
               :identity
-              (fn [{:keys [x]} ctx]
-                (exec/force-value x ctx)))
+              (fn [{:keys [x]} _ctx]
+                @x))
           ;; Create identity fn-schema
           id-schema (sp/create-entity storage :fn-schema
                                       {:name "identity"
@@ -294,9 +293,9 @@
           ;; Register a slow function that sleeps and calls another fn
           _ (exec/register-base-fn!
               :slow-fn
-              (fn [{:keys [x]} ctx]
+              (fn [{:keys [x]} _ctx]
                 (Thread/sleep 50) ; Sleep for 50ms
-                (exec/force-value x ctx)))
+                @x))
           ;; Create slow fn-schema
           slow-schema (sp/create-entity storage :fn-schema
                                         {:name "slow-fn"
@@ -336,23 +335,23 @@
       (sp/close storage))))
 
 
-(deftest lazy-fn-thunk-test
-  (testing "HOF: fn-type arg returns fn-id instead of executing"
+(deftest lazy-fn-callable-test
+  (testing "HOF: fn-type arg returns a callable, not fn-id"
     (let [storage (create-test-storage)
           ;; Register a higher-order function that receives another fn
           _ (exec/register-base-fn!
               :apply-fn
-              (fn [{:keys [f value]} ctx]
-                ;; f should be a fn-id (not executed), value is literal
-                (let [fn-id (exec/force-value f ctx)
-                      v (exec/force-value value ctx)]
-                  ;; For this test, just return the fn-id to verify it wasn't executed
-                  {:fn-id fn-id :value v})))
+              (fn [{:keys [f value]} _ctx]
+                ;; f is now a callable (not a UUID), call it directly
+                (let [callable @f
+                      v @value]
+                  ;; The callable expects named args, call it with {:x v}
+                  (callable {:x v}))))
           ;; Register a simple function
           _ (exec/register-base-fn!
               :double
-              (fn [{:keys [x]} ctx]
-                (* 2 (exec/force-value x ctx))))
+              (fn [{:keys [x]} _ctx]
+                (* 2 @x)))
           ;; Create apply-fn schema
           apply-schema (sp/create-entity storage :fn-schema
                                          {:name "apply-fn"
@@ -360,7 +359,7 @@
           apply-f-arg (sp/create-entity storage :arg-schema
                                         {:fn-schema-id (:id apply-schema)
                                          :name "f"
-                                         :type :fn  ; This is HOF - should return fn-id, not execute
+                                         :type :fn  ; This is HOF - returns a callable
                                          :required true})
           apply-value-arg (sp/create-entity storage :arg-schema
                                             {:fn-schema-id (:id apply-schema)
@@ -376,7 +375,7 @@
                                         :name "x"
                                         :type :int
                                         :required true})
-          ;; Create double fn instance
+          ;; Create double fn instance (with default value 10, but we'll override)
           double-fn (sp/create-entity storage :fn
                                       {:name "my-double"
                                        :fn-schema-id (:id double-schema)})
@@ -398,9 +397,8 @@
                                :value 5})
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id apply-fn) {})]
-      ;; The f arg should return fn-id (not execute double-fn)
-      (is (= (:id double-fn) (:fn-id result)))
-      (is (= 5 (:value result)))
+      ;; The f arg is a callable, so calling it with {:x 5} should return 10 (5 * 2)
+      (is (= 10 result))
       (sp/close storage))))
 
 
@@ -410,9 +408,9 @@
           ;; Register a function that uses optional args
           _ (exec/register-base-fn!
               :greet
-              (fn [{:keys [the-name suffix]} ctx]
-                (let [n (exec/force-value the-name ctx)
-                      s (when suffix (exec/force-value suffix ctx))]
+              (fn [{:keys [the-name suffix]} _ctx]
+                (let [n @the-name
+                      s (when suffix @suffix)]
                   (if s
                     (str "Hello, " n s)
                     (str "Hello, " n)))))
@@ -492,8 +490,8 @@
           ;; Register identity function that forces its arg
           _ (exec/register-base-fn!
               :identity
-              (fn [{:keys [x]} ctx]
-                (exec/force-value x ctx)))
+              (fn [{:keys [x]} _ctx]
+                @x))
           ;; Create identity fn-schema
           id-schema (sp/create-entity storage :fn-schema
                                       {:name "identity"
@@ -529,8 +527,8 @@
           ;; Register HOF that takes a function
           _ (exec/register-base-fn!
               :apply-fn
-              (fn [{:keys [f]} ctx]
-                (exec/force-value f ctx)))
+              (fn [{:keys [f]} _ctx]
+                @f))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "apply-fn"
                                        :returned-type :int})
@@ -558,8 +556,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-ref
-              (fn [{:keys [r]} ctx]
-                (exec/force-value r ctx)))
+              (fn [{:keys [r]} _ctx]
+                @r))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-ref"
                                        :returned-type :int})
@@ -603,8 +601,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-bool
-              (fn [{:keys [flag]} ctx]
-                (if (exec/force-value flag ctx) "yes" "no")))
+              (fn [{:keys [flag]} _ctx]
+                (if @flag "yes" "no")))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-bool"
                                        :returned-type :text})
@@ -630,8 +628,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-text
-              (fn [{:keys [msg]} ctx]
-                (str "Message: " (exec/force-value msg ctx))))
+              (fn [{:keys [msg]} _ctx]
+                (str "Message: " @msg)))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-text"
                                        :returned-type :text})
@@ -675,8 +673,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-numeric
-              (fn [{:keys [n]} ctx]
-                (exec/force-value n ctx)))
+              (fn [{:keys [n]} _ctx]
+                @n))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-numeric"
                                        :returned-type :numeric})
@@ -706,15 +704,15 @@
     ;; This tests that functions referencing each other (A -> B, B -> A)
     ;; are correctly resolved without infinite loops in graph resolution
     (let [storage (create-test-storage)
-          ;; Register base functions that return their :fn type args
-          ;; (demonstrating that LazyFnThunk works for mutual refs)
+          ;; Register base functions that use :fn type args as callables
+          ;; :fn type args return callables (closures), not fn-ids
           _ (exec/register-base-fn!
               :get-partner
-              (fn [{:keys [n partner]} ctx]
-                (let [n-val (exec/force-value n ctx)
-                      ;; partner is a LazyFnThunk - forcing returns fn-id, not result
-                      partner-id (exec/force-value partner ctx)]
-                  {:n n-val :partner-id partner-id})))
+              (fn [{:keys [n partner]} _ctx]
+                (let [n-val @n
+                      ;; partner is now a callable - verify it's a function
+                      partner-callable @partner]
+                  {:n n-val :partner-is-callable (fn? partner-callable)})))
 
           ;; Create fn-schemas
           fn-schema (sp/create-entity storage :fn-schema
@@ -728,7 +726,7 @@
           arg-partner (sp/create-entity storage :arg-schema
                                         {:fn-schema-id (:id fn-schema)
                                          :name "partner"
-                                         :type :fn  ; :fn type means lazy reference
+                                         :type :fn  ; :fn type means callable reference
                                          :required true})
 
           ;; Create two fn instances that reference each other
@@ -758,31 +756,31 @@
           ctx (exec/create-context {:storage storage})]
 
       (try
-        ;; Execute fn-a - should get its own n and fn-b's id as partner
+        ;; Execute fn-a - partner should be a callable
         (let [result-a (exec/execute ctx (:id fn-a) {})]
           (is (= 1 (:n result-a)))
-          (is (= (:id fn-b) (:partner-id result-a))))
+          (is (true? (:partner-is-callable result-a))))
 
-        ;; Execute fn-b - should get its own n and fn-a's id as partner
+        ;; Execute fn-b - partner should be a callable
         (let [result-b (exec/execute ctx (:id fn-b) {})]
           (is (= 2 (:n result-b)))
-          (is (= (:id fn-a) (:partner-id result-b))))
+          (is (true? (:partner-is-callable result-b))))
         (finally
           (sp/close storage))))))
 
 
 (deftest self-reference-test
   (testing "function with self-reference via :fn type arg"
-    ;; A function can reference itself. The self-ref is a LazyFnThunk
-    ;; so forcing it returns the fn-id, not causing infinite execution
+    ;; A function can reference itself. The self-ref is now a callable
+    ;; so forcing it returns a callable, not causing infinite execution
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :with-self
-              (fn [{:keys [n self-ref]} ctx]
-                (let [n-val (exec/force-value n ctx)
-                      ;; self-ref is LazyFnThunk - forcing returns fn-id
-                      self-id (exec/force-value self-ref ctx)]
-                  {:n n-val :self-id self-id})))
+              (fn [{:keys [n self-ref]} _ctx]
+                (let [n-val @n
+                      ;; self-ref is a callable (closure)
+                      self-callable @self-ref]
+                  {:n n-val :self-is-callable (fn? self-callable)})))
 
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "with-self"
@@ -818,7 +816,7 @@
       (try
         (let [result (exec/execute ctx (:id fn-rec) {})]
           (is (= 42 (:n result)))
-          (is (= (:id fn-rec) (:self-id result))))
+          (is (true? (:self-is-callable result))))
         (finally
           (sp/close storage))))))
 
@@ -895,8 +893,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-numeric
-              (fn [{:keys [n]} ctx]
-                (exec/force-value n ctx)))
+              (fn [{:keys [n]} _ctx]
+                @n))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-numeric"
                                        :returned-type :numeric})
@@ -922,8 +920,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-numeric
-              (fn [{:keys [n]} ctx]
-                (exec/force-value n ctx)))
+              (fn [{:keys [n]} _ctx]
+                @n))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-numeric"
                                        :returned-type :numeric})
@@ -949,8 +947,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-jsonb
-              (fn [{:keys [data]} ctx]
-                (exec/force-value data ctx)))
+              (fn [{:keys [data]} _ctx]
+                @data))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-jsonb"
                                        :returned-type :jsonb})
@@ -976,8 +974,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-jsonb
-              (fn [{:keys [data]} ctx]
-                (exec/force-value data ctx)))
+              (fn [{:keys [data]} _ctx]
+                @data))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-jsonb"
                                        :returned-type :jsonb})
@@ -1001,8 +999,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-jsonb
-              (fn [{:keys [data]} ctx]
-                (exec/force-value data ctx)))
+              (fn [{:keys [data]} _ctx]
+                @data))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-jsonb"
                                        :returned-type :jsonb})
@@ -1028,8 +1026,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-bytes
-              (fn [{:keys [data]} ctx]
-                (exec/force-value data ctx)))
+              (fn [{:keys [data]} _ctx]
+                @data))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-bytes"
                                        :returned-type :bytes})
@@ -1055,8 +1053,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-bytes
-              (fn [{:keys [data]} ctx]
-                (vec (exec/force-value data ctx))))
+              (fn [{:keys [data]} _ctx]
+                (vec @data)))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-bytes"
                                        :returned-type :jsonb})
@@ -1082,8 +1080,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-timestamp
-              (fn [{:keys [ts]} ctx]
-                (exec/force-value ts ctx)))
+              (fn [{:keys [ts]} _ctx]
+                @ts))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-timestamp"
                                        :returned-type :timestamptz})
@@ -1109,8 +1107,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-timestamp
-              (fn [{:keys [ts]} ctx]
-                (exec/force-value ts ctx)))
+              (fn [{:keys [ts]} _ctx]
+                @ts))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-timestamp"
                                        :returned-type :timestamptz})
@@ -1135,8 +1133,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-timestamp
-              (fn [{:keys [ts]} ctx]
-                (exec/force-value ts ctx)))
+              (fn [{:keys [ts]} _ctx]
+                @ts))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-timestamp"
                                        :returned-type :timestamptz})
@@ -1163,8 +1161,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-enum
-              (fn [{:keys [status]} ctx]
-                (exec/force-value status ctx)))
+              (fn [{:keys [status]} _ctx]
+                @status))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-enum"
                                        :returned-type :text})
@@ -1190,8 +1188,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-enum
-              (fn [{:keys [status]} ctx]
-                (name (exec/force-value status ctx))))
+              (fn [{:keys [status]} _ctx]
+                (name @status)))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-enum"
                                        :returned-type :text})
@@ -1217,8 +1215,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-uuid
-              (fn [{:keys [id]} ctx]
-                (exec/force-value id ctx)))
+              (fn [{:keys [id]} _ctx]
+                @id))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-uuid"
                                        :returned-type :uuid})
@@ -1244,8 +1242,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-uuid
-              (fn [{:keys [id]} ctx]
-                (exec/force-value id ctx)))
+              (fn [{:keys [id]} _ctx]
+                @id))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-uuid"
                                        :returned-type :uuid})
@@ -1274,8 +1272,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-union
-              (fn [{:keys [data]} ctx]
-                (exec/force-value data ctx)))
+              (fn [{:keys [data]} _ctx]
+                @data))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-union"
                                        :returned-type :union})
@@ -1314,8 +1312,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-int
-              (fn [{:keys [n]} ctx]
-                (exec/force-value n ctx)))
+              (fn [{:keys [n]} _ctx]
+                @n))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-int"
                                        :returned-type :int})
@@ -1355,8 +1353,8 @@
           ;; Register identity function that forces its arg
           _ (exec/register-base-fn!
               :identity
-              (fn [{:keys [x]} ctx]
-                (exec/force-value x ctx)))
+              (fn [{:keys [x]} _ctx]
+                @x))
           ;; Create identity fn-schema
           id-schema (sp/create-entity storage :fn-schema
                                       {:name "identity"
@@ -1393,8 +1391,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :identity
-              (fn [{:keys [x]} ctx]
-                (exec/force-value x ctx)))
+              (fn [{:keys [x]} _ctx]
+                @x))
           id-schema (sp/create-entity storage :fn-schema
                                       {:name "identity"
                                        :returned-type :int})
@@ -1459,8 +1457,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-timestamp
-              (fn [{:keys [ts]} ctx]
-                (exec/force-value ts ctx)))
+              (fn [{:keys [ts]} _ctx]
+                @ts))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-timestamp"
                                        :returned-type :timestamptz})
@@ -1554,8 +1552,8 @@
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-custom
-              (fn [{:keys [data]} ctx]
-                (exec/force-value data ctx)))
+              (fn [{:keys [data]} _ctx]
+                @data))
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "use-custom"
                                        :returned-type :text})

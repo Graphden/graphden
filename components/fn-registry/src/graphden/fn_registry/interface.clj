@@ -2,37 +2,35 @@
   "Infrastructure for base function registration and storage sync.
 
    This component provides the shared infrastructure for defining base functions:
-   - Automatic argument forcing via wrap-base-fn
-   - Storage synchronization via sync-defs-to-storage!
+   - `defbase` macro for convenient function definitions with auto-deref
+   - Storage synchronization via `sync-defs-to-storage!`
    - Deterministic UUID generation for idempotent sync
+
+   ## Defining Base Functions
+
+   Use the `defbase` macro for convenient definition:
+
+   ```clojure
+   (require '[graphden.fn-registry.interface :refer [defbase]])
+
+   (defbase my-add
+     {:args {:a :int, :b :int}
+      :return-type :int}
+     (+ a b))
+   ```
+
+   See `graphden.fn-registry.macros` for full documentation.
 
    Base function implementations (arithmetic, strings, etc.) are in the
    base-functions component which uses this infrastructure."
   (:require
     [graphden.base-functions.interface :as bf]
     [graphden.fn-registry.core :as core]
+    [graphden.fn-registry.macros :as macros]
     [graphden.storage-protocol.interface :as sp]))
 
 
-;; === Function Definition ===
-
-(defn wrap-base-fn
-  "Wraps a base function implementation to handle argument forcing.
-
-   Takes a function definition map with:
-   - :args - map of {arg-name -> type}
-   - :impl - the implementation function (receives processed args and ctx)
-   - :lazy-args - (optional) set of arg names that receive thunks
-
-   Returns a wrapped function suitable for registration.
-
-   Behavior:
-   - Regular args: pre-forced, impl receives plain values
-   - :fn type args: force-value returns fn-id, impl receives fn-id
-   - :lazy-args: impl receives thunk, must call force-value manually"
-  [fn-def]
-  (core/wrap-base-fn fn-def))
-
+;; === Function Registration ===
 
 (defn register-base-fns!
   "Registers base functions from a definitions map.
@@ -43,8 +41,10 @@
    Each fn-def should have:
    - :args - map of {arg-name -> type}
    - :return-type - keyword for return type
-   - :impl - implementation function
-   - :lazy-args - (optional) set of lazy arg names"
+   - :impl - implementation function (receives delays, uses @ to deref)
+   - :lazy - (optional) set of arg names NOT to auto-deref
+
+   Use defbase macro to create fn-defs with automatic arg handling."
   [defs]
   (core/register-base-fns! defs))
 
@@ -115,3 +115,44 @@
     (catch Exception e
       (sp/close storage)
       (throw e))))
+
+
+;; === Macro for Defining Base Functions ===
+
+(defmacro defbase
+  "Defines a base function with automatic argument handling.
+
+   All arguments are automatically dereferenced (from delay) EXCEPT
+   those listed in `:lazy`. Use `@arg` to manually deref lazy args.
+
+   Arguments:
+   - name: Symbol for the function definition
+   - docstring: Optional documentation string
+   - opts: Map with :args, :return-type, and optional :lazy set
+   - body: Function body expressions
+
+   Example:
+   ```clojure
+   ;; Simple function - args auto-deref'd
+   (defbase add
+     {:args {:a :int, :b :int}
+      :return-type :int}
+     (+ a b))
+
+   ;; Lazy args for conditional evaluation
+   (defbase my-if
+     {:args {:cond :bool, :then :any, :else :any}
+      :lazy #{:then :else}
+      :return-type :any}
+     (if cond @then @else))
+
+   ;; HOF - :fn args become callables
+   (defbase my-map
+     {:args {:f :fn, :coll :jsonb}
+      :return-type :jsonb}
+     (mapv (fn [item] (f {:item item})) coll))
+   ```
+
+   See `graphden.fn-registry.macros` for full documentation."
+  [fn-name & args]
+  `(macros/defbase ~fn-name ~@args))

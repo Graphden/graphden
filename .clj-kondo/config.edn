@@ -1,6 +1,9 @@
 {;; clj-kondo configuration
  ;; https://github.com/clj-kondo/clj-kondo/blob/master/doc/config.md
 
+ :hooks
+ {:analyze-call {graphden.fn-registry.macros/defbase hooks.defbase/defbase}}
+
  :linters
  {;; Critical - these indicate real bugs or dead code
   :unused-binding {:level :error}

@@ -104,32 +104,44 @@ Core library of base functions for the graphden executor. Provides fundamental o
 ```clojure
 (require '[graphden.base-functions.interface :as bf])
 
-;; Register all functions
-(bf/register-all!)
-
-;; Or register by category
-(bf/register-arithmetic!)
-(bf/register-comparison!)
-(bf/register-logic!)
-(bf/register-conditionals!)
-(bf/register-strings!)
-(bf/register-collections!)
-(bf/register-hof!)
+;; Get all function definitions
+(bf/get-all-defs)
 ```
+
+## Defining Custom Base Functions
+
+See `fn-registry` component for the `defbase` macro and infrastructure.
+
+Quick example:
+
+```clojure
+(require '[graphden.fn-registry.interface :refer [defbase]])
+
+;; Simple function - arguments auto-deref'd
+(defbase double-it
+  {:args {:n :int}
+   :return-type :int}
+  (* n 2))
+```
+
+See `graphden.fn-registry.macros` for full documentation.
 
 ## HOF Semantics
 
-Higher-order functions receive `fn-id` as the `:f` or `:pred` argument. They use `exec/execute` to call the referenced function.
+Higher-order functions receive callables (not fn-ids). They invoke them with named arguments.
 
 For `:map`:
-- Input: `{:f fn-id :coll [1 2 3]}`
-- The function `f` must accept `{:item x}` argument
-- Output: `[(f 1) (f 2) (f 3)]`
+- Input: `{:f callable :coll [1 2 3]}`
+- Calls: `(f {:item 1})`, `(f {:item 2})`, `(f {:item 3})`
+- Output: `[result1 result2 result3]`
 
 For `:reduce`:
-- Input: `{:f fn-id :init initial :coll [1 2 3]}`
-- The function `f` must accept `{:acc a :item x}` arguments
-- Output: `(f (f (f init 1) 2) 3)`
+- Input: `{:f callable :init 0 :coll [1 2 3]}`
+- Calls: `(f {:acc 0 :item 1})` → `(f {:acc r1 :item 2})` → `(f {:acc r2 :item 3})`
+- Output: final accumulator value
+
+**Note**: The user function's argument names don't need to match `item`/`acc`.
+The UI creates bindings when connecting nodes (e.g., `item → n` for a function with arg `n`).
 
 ## Error Handling
 

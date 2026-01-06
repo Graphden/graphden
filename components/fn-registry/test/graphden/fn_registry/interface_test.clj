@@ -1,7 +1,6 @@
 (ns graphden.fn-registry.interface-test
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.executor.core :as exec-core]
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.core :as core]
     [graphden.fn-registry.interface :as registry]
@@ -28,78 +27,32 @@
 
 ;; === Helper Functions ===
 
-(defn literal-thunk
-  "Creates a literal thunk for testing."
+(defn literal-delay
+  "Creates a delay wrapping a literal value for testing."
   [value]
-  (reify exec-core/IThunk
-    (force-value [_ _] value)))
-
-
-;; === Wrapper Tests ===
-
-(deftest wrap-base-fn-test
-  (testing "wrap-base-fn wraps a simple function"
-    (let [fn-def {:args {:a :numeric :b :numeric}
-                  :return-type :numeric
-                  :impl (fn [{:keys [a b]} _ctx] (+ a b))}
-          wrapped (registry/wrap-base-fn fn-def)
-          result (wrapped {:a (literal-thunk 3) :b (literal-thunk 4)} nil)]
-      (is (= 7 result))))
-
-  (testing "wrap-base-fn handles lazy-args"
-    (let [call-count (atom 0)
-          lazy-thunk (reify exec-core/IThunk
-                       (force-value
-                         [_ _]
-                         (swap! call-count inc)
-                         42))
-          fn-def {:args {:a :bool :b :any}
-                  :lazy-args #{:b}
-                  :return-type :any
-                  :impl (fn [{:keys [a b]} ctx]
-                          (if a
-                            (exec/force-value b ctx)
-                            :skipped))}
-          wrapped (registry/wrap-base-fn fn-def)]
-      ;; When a is false, b should not be forced
-      (reset! call-count 0)
-      (is (= :skipped (wrapped {:a (literal-thunk false) :b lazy-thunk} nil)))
-      (is (zero? @call-count))
-
-      ;; When a is true, b should be forced
-      (reset! call-count 0)
-      (is (= 42 (wrapped {:a (literal-thunk true) :b lazy-thunk} nil)))
-      (is (= 1 @call-count))))
-
-  (testing "wrap-base-fn handles missing optional args"
-    (let [fn-def {:args {:required :numeric :optional {:type :numeric :required false}}
-                  :return-type :numeric
-                  :impl (fn [{:keys [required optional]} _ctx]
-                          (+ required (or optional 0)))}
-          wrapped (registry/wrap-base-fn fn-def)]
-      (is (= 5 (wrapped {:required (literal-thunk 5)} nil)))
-      (is (= 8 (wrapped {:required (literal-thunk 5) :optional (literal-thunk 3)} nil))))))
+  (delay value))
 
 
 ;; === Registration Tests ===
 
 (deftest register-base-fns-test
   (testing "register-base-fns! registers functions"
+    ;; impl functions receive delays, use @ to deref
     (let [defs {:test-add {:args {:a :numeric :b :numeric}
                            :return-type :numeric
-                           :impl (fn [{:keys [a b]} _ctx] (+ a b))}
+                           :impl (fn [{:keys [a b]} _ctx] (+ @a @b))}
                 :test-sub {:args {:a :numeric :b :numeric}
                            :return-type :numeric
-                           :impl (fn [{:keys [a b]} _ctx] (- a b))}}]
+                           :impl (fn [{:keys [a b]} _ctx] (- @a @b))}}]
       (registry/register-base-fns! defs)
       (is (some? (exec/get-base-fn :test-add)))
       (is (some? (exec/get-base-fn :test-sub)))
 
-      ;; Test that they work
+      ;; Test that they work with delays
       (let [add-fn (exec/get-base-fn :test-add)
             sub-fn (exec/get-base-fn :test-sub)]
-        (is (= 7 (add-fn {:a (literal-thunk 3) :b (literal-thunk 4)} nil)))
-        (is (= -1 (sub-fn {:a (literal-thunk 3) :b (literal-thunk 4)} nil)))))))
+        (is (= 7 (add-fn {:a (literal-delay 3) :b (literal-delay 4)} nil)))
+        (is (= -1 (sub-fn {:a (literal-delay 3) :b (literal-delay 4)} nil)))))))
 
 
 ;; === UUID Generation Tests ===
@@ -562,36 +515,5 @@
           (sp/close storage))))))
 
 
-(deftest wrap-base-fn-edge-cases-test
-  (testing "wrap-base-fn handles empty args map"
-    (let [fn-def {:args {}
-                  :return-type :text
-                  :impl (fn [_ _] "no args")}
-          wrapped (registry/wrap-base-fn fn-def)
-          result (wrapped {} nil)]
-      (is (= "no args" result))))
-
-  (testing "wrap-base-fn handles nil thunk gracefully"
-    (let [fn-def {:args {:a :numeric :b :numeric}
-                  :return-type :numeric
-                  :impl (fn [{:keys [a b]} _ctx]
-                          (+ (or a 0) (or b 0)))}
-          wrapped (registry/wrap-base-fn fn-def)
-          result (wrapped {:a (literal-thunk 5)} nil)]  ; b is nil
-      (is (= 5 result))))
-
-  (testing "wrap-base-fn with all lazy args"
-    (let [force-count (atom 0)
-          fn-def {:args {:a :any :b :any}
-                  :lazy-args #{:a :b}
-                  :return-type :any
-                  :impl (fn [{:keys [a]} ctx]
-                          ;; Only force a, not b (b is intentionally not used to test lazy behavior)
-                          (exec/force-value a ctx))}
-          thunk-a (reify exec-core/IThunk
-                    (force-value [_ _] (swap! force-count inc) 1))
-          thunk-b (reify exec-core/IThunk
-                    (force-value [_ _] (swap! force-count inc) 2))
-          wrapped (registry/wrap-base-fn fn-def)]
-      (wrapped {:a thunk-a :b thunk-b} nil)
-      (is (= 1 @force-count) "Only a should be forced"))))
+;; wrap-base-fn was removed - base functions now receive delays directly
+;; and use @ to deref. The defbase macro handles this automatically.

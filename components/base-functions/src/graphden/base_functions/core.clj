@@ -10,396 +10,540 @@
    - Collections: first, rest, cons, conj, get, assoc, dissoc, count, empty?, etc.
    - HOF: map, filter, reduce, some, every?, find-first, group-by, sort-by, apply
 
+   All functions are defined using the defbase macro which handles
+   automatic argument dereferencing. Arguments are passed as delays
+   and automatically deref'd unless marked as :lazy.
+
    Registration and storage sync should be done by consuming components
    using fn-registry."
   (:require
     [clojure.string :as str]
-    [graphden.executor.interface :as exec]))
+    [graphden.fn-registry.macros :refer [defbase]]))
 
 
 ;; === Arithmetic ===
 ;; Note: add, sub, mul, div accept lists like Clojure's +, -, *, /
 
+(defbase add-fn
+  {:args {:nums :jsonb}
+   :return-type :numeric}
+  (apply + nums))
+
+
+(defbase sub-fn
+  {:args {:nums :jsonb}
+   :return-type :numeric}
+  (when (empty? nums)
+    (throw (ex-info "Subtraction requires at least one number"
+                    {:type :execution-error/invalid-args
+                     :nums nums})))
+  (apply - nums))
+
+
+(defbase mul-fn
+  {:args {:nums :jsonb}
+   :return-type :numeric}
+  (apply * nums))
+
+
+(defbase div-fn
+  {:args {:nums :jsonb}
+   :return-type :numeric}
+  (when (empty? nums)
+    (throw (ex-info "Division requires at least one number"
+                    {:type :execution-error/invalid-args
+                     :nums nums})))
+  ;; Check all divisors (rest nums) for zero
+  ;; (/ a b c) = (/ (/ a b) c), so b and c must be non-zero
+  (when-let [zero-divisor (some #(when (zero? %) %) (rest nums))]
+    (throw (ex-info "Division by zero"
+                    {:type :execution-error/division-by-zero
+                     :nums nums
+                     :zero-at zero-divisor})))
+  (apply / nums))
+
+
+(defbase mod-fn
+  {:args {:a :numeric, :b :numeric}
+   :return-type :numeric}
+  (when (zero? b)
+    (throw (ex-info "Modulo by zero"
+                    {:type :execution-error/modulo-by-zero
+                     :a a :b b})))
+  (mod a b))
+
+
+(defbase neg-fn
+  {:args {:n :numeric}
+   :return-type :numeric}
+  (- n))
+
+
+(defbase abs-fn
+  {:args {:n :numeric}
+   :return-type :numeric}
+  (abs n))
+
+
 (def arithmetic-defs
-  {:add {:args {:nums :jsonb}
-         :return-type :numeric
-         :impl (fn [{:keys [nums]} _ctx]
-                 (apply + nums))}
-
-   :sub {:args {:nums :jsonb}
-         :return-type :numeric
-         :impl (fn [{:keys [nums]} _ctx]
-                 (when (empty? nums)
-                   (throw (ex-info "Subtraction requires at least one number"
-                                   {:type :execution-error/invalid-args
-                                    :nums nums})))
-                 (apply - nums))}
-
-   :mul {:args {:nums :jsonb}
-         :return-type :numeric
-         :impl (fn [{:keys [nums]} _ctx]
-                 (apply * nums))}
-
-   :div {:args {:nums :jsonb}
-         :return-type :numeric
-         :impl (fn [{:keys [nums]} _ctx]
-                 (when (empty? nums)
-                   (throw (ex-info "Division requires at least one number"
-                                   {:type :execution-error/invalid-args
-                                    :nums nums})))
-                 ;; Check all divisors (rest nums) for zero
-                 ;; (/ a b c) = (/ (/ a b) c), so b and c must be non-zero
-                 (when-let [zero-divisor (some #(when (zero? %) %) (rest nums))]
-                   (throw (ex-info "Division by zero"
-                                   {:type :execution-error/division-by-zero
-                                    :nums nums
-                                    :zero-at zero-divisor})))
-                 (apply / nums))}
-
-   :mod {:args {:a :numeric, :b :numeric}
-         :return-type :numeric
-         :impl (fn [{:keys [a b]} _ctx]
-                 (when (zero? b)
-                   (throw (ex-info "Modulo by zero"
-                                   {:type :execution-error/modulo-by-zero
-                                    :a a :b b})))
-                 (mod a b))}
-
-   :neg {:args {:n :numeric}
-         :return-type :numeric
-         :impl (fn [{:keys [n]} _ctx] (- n))}
-
-   :abs {:args {:n :numeric}
-         :return-type :numeric
-         :impl (fn [{:keys [n]} _ctx] (abs n))}})
+  {:add add-fn
+   :sub sub-fn
+   :mul mul-fn
+   :div div-fn
+   :mod mod-fn
+   :neg neg-fn
+   :abs abs-fn})
 
 
 ;; === Comparison ===
 ;; Note: comparison functions accept lists like Clojure's =, <, >, etc.
 ;; (eq [1 1 1]) => true, (lt [1 2 3]) => true (ascending)
 
+(defbase eq-fn
+  {:args {:values :jsonb}
+   :return-type :bool}
+  (apply = values))
+
+
+(defbase neq-fn
+  {:args {:values :jsonb}
+   :return-type :bool}
+  (apply not= values))
+
+
+(defbase lt-fn
+  {:args {:nums :jsonb}
+   :return-type :bool}
+  (apply < nums))
+
+
+(defbase lte-fn
+  {:args {:nums :jsonb}
+   :return-type :bool}
+  (apply <= nums))
+
+
+(defbase gt-fn
+  {:args {:nums :jsonb}
+   :return-type :bool}
+  (apply > nums))
+
+
+(defbase gte-fn
+  {:args {:nums :jsonb}
+   :return-type :bool}
+  (apply >= nums))
+
+
 (def comparison-defs
-  {:eq  {:args {:values :jsonb}
-         :return-type :bool
-         :impl (fn [{:keys [values]} _ctx]
-                 (apply = values))}
-
-   :neq {:args {:values :jsonb}
-         :return-type :bool
-         :impl (fn [{:keys [values]} _ctx]
-                 (apply not= values))}
-
-   :lt  {:args {:nums :jsonb}
-         :return-type :bool
-         :impl (fn [{:keys [nums]} _ctx]
-                 (apply < nums))}
-
-   :lte {:args {:nums :jsonb}
-         :return-type :bool
-         :impl (fn [{:keys [nums]} _ctx]
-                 (apply <= nums))}
-
-   :gt  {:args {:nums :jsonb}
-         :return-type :bool
-         :impl (fn [{:keys [nums]} _ctx]
-                 (apply > nums))}
-
-   :gte {:args {:nums :jsonb}
-         :return-type :bool
-         :impl (fn [{:keys [nums]} _ctx]
-                 (apply >= nums))}})
+  {:eq eq-fn
+   :neq neq-fn
+   :lt lt-fn
+   :lte lte-fn
+   :gt gt-fn
+   :gte gte-fn})
 
 
 ;; === Logic ===
-;; Note: and/or need lazy evaluation for short-circuit behavior
+;; Short-circuit works naturally - deref happens at usage sites
+
+(defbase and-fn
+  {:args {:a :bool, :b :bool}
+   :return-type :bool}
+  (and a b))
+
+
+(defbase or-fn
+  {:args {:a :bool, :b :bool}
+   :return-type :bool}
+  (or a b))
+
+
+(defbase not-fn
+  {:args {:x :bool}
+   :return-type :bool}
+  (not x))
+
 
 (def logic-defs
-  {:and {:args {:a :bool, :b :bool}
-         :lazy-args #{:b}  ; b is lazy for short-circuit
-         :return-type :bool
-         :impl (fn [{:keys [a b]} ctx]
-                 (and a (exec/force-value b ctx)))}
-
-   :or  {:args {:a :bool, :b :bool}
-         :lazy-args #{:b}  ; b is lazy for short-circuit
-         :return-type :bool
-         :impl (fn [{:keys [a b]} ctx]
-                 (or a (exec/force-value b ctx)))}
-
-   :not {:args {:x :bool}
-         :return-type :bool
-         :impl (fn [{:keys [x]} _ctx] (not x))}})
+  {:and and-fn
+   :or or-fn
+   :not not-fn})
 
 
 ;; === Conditionals ===
-;; Note: if needs lazy evaluation - only one branch is evaluated
+;; Short-circuit works naturally - deref happens at usage sites
+
+(defbase if-fn
+  {:args {:condition :bool, :then :any, :else :any}
+   :return-type :any}
+  (if condition then else))
+
+
+(defbase cond-fn
+  {:args {:pairs :jsonb, :default :any}
+   :return-type :any}
+  ;; pairs is a vector of {:pred bool :result value}
+  (loop [ps pairs]
+    (if (empty? ps)
+      default
+      (let [{:keys [pred result]} (first ps)]
+        (if pred result (recur (rest ps)))))))
+
 
 (def conditional-defs
-  {:if   {:args {:condition :bool, :then :any, :else :any}
-          :lazy-args #{:then :else}
-          :return-type :any
-          :impl (fn [{:keys [condition then else]} ctx]
-                  (if condition
-                    (exec/force-value then ctx)
-                    (exec/force-value else ctx)))}
-
-   :cond {:args {:pairs :jsonb, :default :any}
-          :lazy-args #{:default}
-          :return-type :any
-          :impl (fn [{:keys [pairs default]} ctx]
-                  ;; pairs is a vector of {:pred bool :result value}
-                  (loop [ps pairs]
-                    (if (empty? ps)
-                      (when default (exec/force-value default ctx))
-                      (let [{:keys [pred result]} (first ps)]
-                        (if pred result (recur (rest ps)))))))}})
+  {:if if-fn
+   :cond cond-fn})
 
 
 ;; === Strings ===
 
+(defbase str-fn
+  {:args {:args :jsonb}
+   :return-type :text}
+  (str/join args))
+
+
+(defbase subs-fn
+  {:args {:s :text, :start :int, :end {:type :int :required false}}
+   :return-type :text}
+  (let [len (count s)]
+    (when (neg? start)
+      (throw (ex-info "start index cannot be negative"
+                      {:type :execution-error/invalid-index
+                       :start start :string-length len})))
+    (when (> start len)
+      (throw (ex-info "start index out of bounds"
+                      {:type :execution-error/index-out-of-bounds
+                       :start start :string-length len})))
+    (if end
+      (do
+        (when (< end start)
+          (throw (ex-info "end index cannot be less than start"
+                          {:type :execution-error/invalid-index
+                           :start start :end end})))
+        (when (> end len)
+          (throw (ex-info "end index out of bounds"
+                          {:type :execution-error/index-out-of-bounds
+                           :end end :string-length len})))
+        (subs s start end))
+      (subs s start))))
+
+
+(defbase str-len-fn
+  {:args {:s :text}
+   :return-type :int}
+  (count s))
+
+
+(defbase str-upper-fn
+  {:args {:s :text}
+   :return-type :text}
+  (str/upper-case s))
+
+
+(defbase str-lower-fn
+  {:args {:s :text}
+   :return-type :text}
+  (str/lower-case s))
+
+
+(defbase str-trim-fn
+  {:args {:s :text}
+   :return-type :text}
+  (str/trim s))
+
+
+(defbase str-split-fn
+  {:args {:s :text, :sep :text}
+   :return-type :jsonb}
+  (when (empty? sep)
+    (throw (ex-info "separator cannot be empty"
+                    {:type :execution-error/invalid-separator
+                     :separator sep
+                     :string s})))
+  (try
+    (vec (str/split s (re-pattern sep)))
+    (catch java.util.regex.PatternSyntaxException e
+      (throw (ex-info "Invalid regex pattern in separator"
+                      {:type :execution-error/invalid-regex
+                       :separator sep
+                       :cause (Throwable/.getMessage e)})))))
+
+
+(defbase str-join-fn
+  {:args {:coll :jsonb, :sep {:type :text :required false}}
+   :return-type :text}
+  (str/join (or sep "") coll))
+
+
 (def string-defs
-  {:str       {:args {:args :jsonb}
-               :return-type :text
-               :impl (fn [{:keys [args]} _ctx] (str/join args))}
-
-   :subs      {:args {:s :text, :start :int, :end {:type :int :required false}}
-               :return-type :text
-               :impl (fn [{:keys [s start end]} _ctx]
-                       (let [len (count s)]
-                         (when (neg? start)
-                           (throw (ex-info "start index cannot be negative"
-                                           {:type :execution-error/invalid-index
-                                            :start start :string-length len})))
-                         (when (> start len)
-                           (throw (ex-info "start index out of bounds"
-                                           {:type :execution-error/index-out-of-bounds
-                                            :start start :string-length len})))
-                         (if end
-                           (do
-                             (when (< end start)
-                               (throw (ex-info "end index cannot be less than start"
-                                               {:type :execution-error/invalid-index
-                                                :start start :end end})))
-                             (when (> end len)
-                               (throw (ex-info "end index out of bounds"
-                                               {:type :execution-error/index-out-of-bounds
-                                                :end end :string-length len})))
-                             (subs s start end))
-                           (subs s start))))}
-
-   :str-len   {:args {:s :text}
-               :return-type :int
-               :impl (fn [{:keys [s]} _ctx] (count s))}
-
-   :str-upper {:args {:s :text}
-               :return-type :text
-               :impl (fn [{:keys [s]} _ctx] (str/upper-case s))}
-
-   :str-lower {:args {:s :text}
-               :return-type :text
-               :impl (fn [{:keys [s]} _ctx] (str/lower-case s))}
-
-   :str-trim  {:args {:s :text}
-               :return-type :text
-               :impl (fn [{:keys [s]} _ctx] (str/trim s))}
-
-   :str-split {:args {:s :text, :sep :text}
-               :return-type :jsonb
-               :impl (fn [{:keys [s sep]} _ctx]
-                       (when (empty? sep)
-                         (throw (ex-info "separator cannot be empty"
-                                         {:type :execution-error/invalid-separator
-                                          :separator sep
-                                          :string s})))
-                       (try
-                         (vec (str/split s (re-pattern sep)))
-                         (catch java.util.regex.PatternSyntaxException e
-                           (throw (ex-info "Invalid regex pattern in separator"
-                                           {:type :execution-error/invalid-regex
-                                            :separator sep
-                                            :cause (Throwable/.getMessage e)})))))}
-
-   :str-join  {:args {:coll :jsonb, :sep {:type :text :required false}}
-               :return-type :text
-               :impl (fn [{:keys [coll sep]} _ctx]
-                       (str/join (or sep "") coll))}})
+  {:str str-fn
+   :subs subs-fn
+   :str-len str-len-fn
+   :str-upper str-upper-fn
+   :str-lower str-lower-fn
+   :str-trim str-trim-fn
+   :str-split str-split-fn
+   :str-join str-join-fn})
 
 
 ;; === Collections ===
 
+(defbase first-fn
+  {:args {:coll :jsonb}
+   :return-type :any}
+  (first coll))
+
+
+(defbase rest-fn
+  {:args {:coll :jsonb}
+   :return-type :jsonb}
+  (rest coll))
+
+
+(defbase cons-fn
+  {:args {:x :any, :coll :jsonb}
+   :return-type :jsonb}
+  (cons x coll))
+
+
+(defbase conj-fn
+  {:args {:coll :jsonb, :x :any}
+   :return-type :jsonb}
+  (conj coll x))
+
+
+(defbase get-fn
+  {:args {:coll :jsonb, :k :any, :default :any}
+   :return-type :any}
+  (get coll k default))
+
+
+(defbase assoc-fn
+  {:args {:m :jsonb, :k :any, :v :any}
+   :return-type :jsonb}
+  (assoc m k v))
+
+
+(defbase dissoc-fn
+  {:args {:m :jsonb, :k :any}
+   :return-type :jsonb}
+  (dissoc m k))
+
+
+(defbase count-fn
+  {:args {:coll :jsonb}
+   :return-type :int}
+  (count coll))
+
+
+(defbase empty?-fn
+  {:args {:coll :jsonb}
+   :return-type :bool}
+  (empty? coll))
+
+
+(defbase contains?-fn
+  {:args {:coll :jsonb, :k :any}
+   :return-type :bool}
+  (contains? coll k))
+
+
+(defbase keys-fn
+  {:args {:m :jsonb}
+   :return-type :jsonb}
+  (keys m))
+
+
+(defbase vals-fn
+  {:args {:m :jsonb}
+   :return-type :jsonb}
+  (vals m))
+
+
+(defbase merge-fn
+  {:args {:maps :jsonb}
+   :return-type :jsonb}
+  (apply merge maps))
+
+
+(defbase into-fn
+  {:args {:to :jsonb, :from :jsonb}
+   :return-type :jsonb}
+  (into to from))
+
+
+(defbase range-fn
+  {:args {:start {:type :int :required false}, :end :int, :step {:type :int :required false}}
+   :return-type :jsonb}
+  (let [actual-step (or step 1)
+        actual-start (or start 0)]
+    (when (zero? actual-step)
+      (throw (ex-info "step cannot be zero (would cause infinite loop)"
+                      {:type :execution-error/invalid-step
+                       :start actual-start :end end :step step})))
+    (vec (range actual-start end actual-step))))
+
+
+(defbase repeat-fn
+  {:args {:n :int, :x :any}
+   :return-type :jsonb}
+  (vec (repeat n x)))
+
+
+(defbase take-fn
+  {:args {:n :int, :coll :jsonb}
+   :return-type :jsonb}
+  (vec (take n coll)))
+
+
+(defbase drop-fn
+  {:args {:n :int, :coll :jsonb}
+   :return-type :jsonb}
+  (vec (drop n coll)))
+
+
+(defbase reverse-fn
+  {:args {:coll :jsonb}
+   :return-type :jsonb}
+  (vec (reverse coll)))
+
+
+(defbase sort-fn
+  {:args {:coll :jsonb}
+   :return-type :jsonb}
+  (vec (sort coll)))
+
+
+(defbase concat-fn
+  {:args {:colls :jsonb}
+   :return-type :jsonb}
+  (vec (apply concat colls)))
+
+
+(defbase flatten-fn
+  {:args {:coll :jsonb}
+   :return-type :jsonb}
+  (vec (flatten coll)))
+
+
+(defbase distinct-fn
+  {:args {:coll :jsonb}
+   :return-type :jsonb}
+  (vec (distinct coll)))
+
+
 (def collection-defs
-  {:first     {:args {:coll :jsonb}
-               :return-type :any
-               :impl (fn [{:keys [coll]} _ctx] (first coll))}
-
-   :rest      {:args {:coll :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [coll]} _ctx] (rest coll))}
-
-   :cons      {:args {:x :any, :coll :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [x coll]} _ctx] (cons x coll))}
-
-   :conj      {:args {:coll :jsonb, :x :any}
-               :return-type :jsonb
-               :impl (fn [{:keys [coll x]} _ctx] (conj coll x))}
-
-   :get       {:args {:coll :jsonb, :k :any, :default :any}
-               :return-type :any
-               :impl (fn [{:keys [coll k default]} _ctx] (get coll k default))}
-
-   :assoc     {:args {:m :jsonb, :k :any, :v :any}
-               :return-type :jsonb
-               :impl (fn [{:keys [m k v]} _ctx] (assoc m k v))}
-
-   :dissoc    {:args {:m :jsonb, :k :any}
-               :return-type :jsonb
-               :impl (fn [{:keys [m k]} _ctx] (dissoc m k))}
-
-   :count     {:args {:coll :jsonb}
-               :return-type :int
-               :impl (fn [{:keys [coll]} _ctx] (count coll))}
-
-   :empty?    {:args {:coll :jsonb}
-               :return-type :bool
-               :impl (fn [{:keys [coll]} _ctx] (empty? coll))}
-
-   :contains? {:args {:coll :jsonb, :k :any}
-               :return-type :bool
-               :impl (fn [{:keys [coll k]} _ctx] (contains? coll k))}
-
-   :keys      {:args {:m :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [m]} _ctx] (keys m))}
-
-   :vals      {:args {:m :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [m]} _ctx] (vals m))}
-
-   :merge     {:args {:maps :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [maps]} _ctx] (apply merge maps))}
-
-   :into      {:args {:to :jsonb, :from :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [to from]} _ctx] (into to from))}
-
-   :range     {:args {:start :int, :end :int, :step {:type :int :required false}}
-               :return-type :jsonb
-               :impl (fn [{:keys [start end step]} _ctx]
-                       (let [actual-step (or step 1)]
-                         (when (zero? actual-step)
-                           (throw (ex-info "step cannot be zero (would cause infinite loop)"
-                                           {:type :execution-error/invalid-step
-                                            :start start :end end :step step})))
-                         (vec (range (or start 0) end actual-step))))}
-
-   :repeat    {:args {:n :int, :x :any}
-               :return-type :jsonb
-               :impl (fn [{:keys [n x]} _ctx] (vec (repeat n x)))}
-
-   :take      {:args {:n :int, :coll :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [n coll]} _ctx] (vec (take n coll)))}
-
-   :drop      {:args {:n :int, :coll :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [n coll]} _ctx] (vec (drop n coll)))}
-
-   :reverse   {:args {:coll :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [coll]} _ctx] (vec (reverse coll)))}
-
-   :sort      {:args {:coll :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [coll]} _ctx] (vec (sort coll)))}
-
-   :concat    {:args {:colls :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [colls]} _ctx] (vec (apply concat colls)))}
-
-   :flatten   {:args {:coll :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [coll]} _ctx] (vec (flatten coll)))}
-
-   :distinct  {:args {:coll :jsonb}
-               :return-type :jsonb
-               :impl (fn [{:keys [coll]} _ctx] (vec (distinct coll)))}})
+  {:first first-fn
+   :rest rest-fn
+   :cons cons-fn
+   :conj conj-fn
+   :get get-fn
+   :assoc assoc-fn
+   :dissoc dissoc-fn
+   :count count-fn
+   :empty? empty?-fn
+   :contains? contains?-fn
+   :keys keys-fn
+   :vals vals-fn
+   :merge merge-fn
+   :into into-fn
+   :range range-fn
+   :repeat repeat-fn
+   :take take-fn
+   :drop drop-fn
+   :reverse reverse-fn
+   :sort sort-fn
+   :concat concat-fn
+   :flatten flatten-fn
+   :distinct distinct-fn})
 
 
 ;; === Higher-Order Functions ===
-;; Note: :fn type args receive fn-id (from LazyFnThunk.force-value)
+;; Note: :fn type args are callables (invoke with named args map)
+
+(defbase map-fn
+  {:args {:f :fn, :coll :jsonb}
+   :return-type :jsonb}
+  (mapv (fn [item] (f {:item item})) coll))
+
+
+(defbase filter-fn
+  {:args {:pred :fn, :coll :jsonb}
+   :return-type :jsonb}
+  (filterv (fn [item] (pred {:item item})) coll))
+
+
+(defbase reduce-fn
+  {:args {:f :fn, :init :any, :coll :jsonb}
+   :return-type :any}
+  (reduce (fn [acc item] (f {:acc acc :item item})) init coll))
+
+
+(defbase some-base-fn
+  {:args {:pred :fn, :coll :jsonb}
+   :return-type :any}
+  (some (fn [item]
+          (when-let [result (pred {:item item})]
+            result))
+        coll))
+
+
+(defbase every?-fn
+  {:args {:pred :fn, :coll :jsonb}
+   :return-type :bool}
+  (every? (fn [item] (pred {:item item})) coll))
+
+
+(defbase find-first-fn
+  {:args {:pred :fn, :coll :jsonb}
+   :return-type :any}
+  (first (filter (fn [item] (pred {:item item})) coll)))
+
+
+(defbase group-by-fn
+  {:args {:key-fn :fn, :coll :jsonb}
+   :return-type :jsonb}
+  (group-by (fn [item] (key-fn {:item item})) coll))
+
+
+(defbase sort-by-fn
+  {:args {:key-fn :fn, :coll :jsonb}
+   :return-type :jsonb}
+  (vec (sort-by (fn [item] (key-fn {:item item})) coll)))
+
+
+(defbase apply-fn
+  {:args {:f :fn, :args :jsonb}
+   :return-type :any}
+  (f args))
+
+
+(defbase identity-fn
+  {:args {:x :any}
+   :return-type :any}
+  x)
+
+
+(defbase constantly-fn
+  {:args {:x :any}
+   :return-type :any}
+  x)
+
 
 (def hof-defs
-  {:map        {:args {:f :fn, :coll :jsonb}
-                :return-type :jsonb
-                :impl (fn [{:keys [f coll]} ctx]
-                        (mapv (fn [item]
-                                (exec/execute-with-named-args ctx f {:item item}))
-                              coll))}
-
-   :filter     {:args {:pred :fn, :coll :jsonb}
-                :return-type :jsonb
-                :impl (fn [{:keys [pred coll]} ctx]
-                        (filterv (fn [item]
-                                   (exec/execute-with-named-args ctx pred {:item item}))
-                                 coll))}
-
-   :reduce     {:args {:f :fn, :init :any, :coll :jsonb}
-                :return-type :any
-                :impl (fn [{:keys [f init coll]} ctx]
-                        (reduce (fn [acc item]
-                                  (exec/execute-with-named-args ctx f {:acc acc :item item}))
-                                init coll))}
-
-   :some       {:args {:pred :fn, :coll :jsonb}
-                :return-type :any
-                :impl (fn [{:keys [pred coll]} ctx]
-                        (some (fn [item]
-                                (when-let [result (exec/execute-with-named-args ctx pred {:item item})]
-                                  result))
-                              coll))}
-
-   :every?     {:args {:pred :fn, :coll :jsonb}
-                :return-type :bool
-                :impl (fn [{:keys [pred coll]} ctx]
-                        (every? (fn [item]
-                                  (exec/execute-with-named-args ctx pred {:item item}))
-                                coll))}
-
-   :find-first {:args {:pred :fn, :coll :jsonb}
-                :return-type :any
-                :impl (fn [{:keys [pred coll]} ctx]
-                        (first (filter (fn [item]
-                                         (exec/execute-with-named-args ctx pred {:item item}))
-                                       coll)))}
-
-   :group-by   {:args {:key-fn :fn, :coll :jsonb}
-                :return-type :jsonb
-                :impl (fn [{:keys [key-fn coll]} ctx]
-                        (group-by (fn [item]
-                                    (exec/execute-with-named-args ctx key-fn {:item item}))
-                                  coll))}
-
-   :sort-by    {:args {:key-fn :fn, :coll :jsonb}
-                :return-type :jsonb
-                :impl (fn [{:keys [key-fn coll]} ctx]
-                        (vec (sort-by (fn [item]
-                                        (exec/execute-with-named-args ctx key-fn {:item item}))
-                                      coll)))}
-
-   :apply      {:args {:f :fn, :args :jsonb}
-                :return-type :any
-                :impl (fn [{:keys [f args]} ctx]
-                        (exec/execute-with-named-args ctx f args))}
-
-   :identity   {:args {:x :any}
-                :return-type :any
-                :impl (fn [{:keys [x]} _ctx] x)}
-
-   :constantly {:args {:x :any}
-                :return-type :any
-                :impl (fn [{:keys [x]} _ctx] x)}})
+  {:map map-fn
+   :filter filter-fn
+   :reduce reduce-fn
+   :some some-base-fn
+   :every? every?-fn
+   :find-first find-first-fn
+   :group-by group-by-fn
+   :sort-by sort-by-fn
+   :apply apply-fn
+   :identity identity-fn
+   :constantly constantly-fn})
 
 
 ;; === Introspection ===

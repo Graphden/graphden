@@ -5,14 +5,19 @@
     [graphden.storage-protocol.interface :as sp]))
 
 
-;; === Thunk Protocol ===
-
-(defprotocol IThunk
-  "Protocol for lazy values (thunks)."
-
-  (force-value
-    [this context]
-    "Forces evaluation of the thunk, returning the value."))
+;; === Lazy Arguments ===
+;;
+;; Arguments are passed to base functions as Clojure `delay` objects.
+;; This enables lazy evaluation - values are only computed when dereferenced.
+;;
+;; For :fn type arguments, the delay contains a callable (a Clojure function)
+;; that can be invoked with a map of named arguments.
+;;
+;; Base functions should use @ (deref) to get values:
+;;   (+ @a @b)           ; for regular args
+;;   (f {:item x})       ; for :fn args (f is already a callable after deref)
+;;
+;; The defbase macro in fn-registry handles this automatically.
 
 
 ;; === Base Functions Registry ===
@@ -138,37 +143,8 @@
     (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0)))
 
 
-;; === Thunks ===
-
-(defrecord LiteralThunk
-  [value])
-
-
-(defrecord FnRefThunk
-  [fn-id provided-args])
-
-
-(defrecord LazyFnThunk
-  [fn-id])
-
-
 ;; Forward declaration for mutual recursion
 (declare execute-internal)
-
-
-(extend-protocol IThunk
-  LiteralThunk
-  (force-value [this _context]
-    (:value this))
-
-  FnRefThunk
-  (force-value [this context]
-    (execute-internal context (:fn-id this) (:provided-args this)))
-
-  LazyFnThunk
-  (force-value [this _context]
-    ;; For HOF: return fn-id, not the result
-    (:fn-id this)))
 
 
 ;; === Graph Resolution ===
@@ -285,34 +261,6 @@
     (throw-type-mismatch! arg-schema provided-value)))
 
 
-(defn- build-thunk
-  "Builds a thunk for an arg-value.
-   - If value is a UUID and arg-schema type is not :fn -> FnRefThunk
-   - If value is a UUID and arg-schema type is :fn -> LazyFnThunk
-   - Otherwise -> LiteralThunk
-
-   NOTE: This function is only called from build-thunks when a stored arg-value
-   exists AND no provided-arg override was found for this arg-schema-id.
-   The provided-args check happens in build-thunks before calling this function."
-  [arg-value arg-schema]
-  ;; Note: :value can be nil for optional args with null values.
-  ;; arg-values from storage are assumed to have :value key present.
-  (let [value (:value arg-value)
-        arg-type (:type arg-schema)]
-    (cond
-      ;; UUID value means reference to another fn
-      (uuid? value)
-      (if (= arg-type :fn)
-        ;; For :fn type args, don't execute, just pass fn-id
-        (->LazyFnThunk value)
-        ;; For other types, execute the referenced fn
-        (->FnRefThunk value {}))
-
-      ;; Literal value
-      :else
-      (->LiteralThunk value))))
-
-
 (defn- get-fn-data-from-graph
   "Gets function data from the cached execution graph.
    Returns {:fn fn-rec :fn-schema fn-schema-rec :arg-schemas {...} :arg-values {...}}"
@@ -341,32 +289,94 @@
          :arg-values arg-values}))))
 
 
-(defn- build-thunks
-  "Builds thunks for all arg-schemas.
-   Returns a map of {arg-name -> thunk}.
+(defn- make-callable
+  "Creates a callable function that executes a graph function with named args.
+   Used for :fn type arguments in HOF."
+  [context fn-id]
+  (fn [named-args]
+    (let [{:keys [arg-schemas]} (get-fn-data-from-graph (:execution-graph context) fn-id)
+          ;; Convert named-args to schema-id based args
+          name->schema-id (reduce-kv
+                            (fn [acc schema-id schema]
+                              (assoc acc (keyword (:name schema)) schema-id))
+                            {}
+                            arg-schemas)
+          id-based-args (reduce-kv
+                          (fn [acc arg-name value]
+                            (if-let [schema-id (get name->schema-id arg-name)]
+                              (assoc acc schema-id value)
+                              (throw (ex-info (str "Unknown argument name: " arg-name)
+                                              {:type :execution-error/unknown-arg-name
+                                               :arg-name arg-name
+                                               :fn-id fn-id
+                                               :available-args (keys name->schema-id)}))))
+                          {}
+                          named-args)]
+      (execute-internal context fn-id id-based-args))))
+
+
+(defn- build-delay
+  "Builds a delay for an arg-value.
+   - If value is a UUID and arg-schema type is :fn -> delay with callable
+   - If value is a UUID and arg-schema type is not :fn -> delay that executes fn
+   - Otherwise -> delay with literal value
+
+   NOTE: This function is only called from build-arg-delays when a stored arg-value
+   exists AND no provided-arg override was found for this arg-schema-id.
+   The provided-args check happens in build-arg-delays before calling this function."
+  [context arg-value arg-schema]
+  ;; Note: :value can be nil for optional args with null values.
+  ;; arg-values from storage are assumed to have :value key present.
+  (let [value (:value arg-value)
+        arg-type (:type arg-schema)]
+    (cond
+      ;; UUID value means reference to another fn
+      (uuid? value)
+      (if (= arg-type :fn)
+        ;; For :fn type args, create a callable
+        (delay (make-callable context value))
+        ;; For other types, execute the referenced fn
+        (delay (execute-internal context value {})))
+
+      ;; Literal value - wrap in delay
+      :else
+      (delay value))))
+
+
+(defn- build-arg-delays
+  "Builds delays for all arg-schemas.
+   Returns a map of {arg-name-keyword -> delay}.
+
+   All arguments are wrapped in delay for lazy evaluation.
+   Base functions receive delays and use @ (deref) to get values.
 
    Priority:
-   1. If provided-args has a value for this schema-id, use it directly
-   2. Else if arg-values has a value, use build-thunk
+   1. If provided-args has a value for this schema-id, wrap in delay
+   2. Else if arg-values has a value, use build-delay
    3. Else if required, throw error
    4. Else skip (optional arg with no value)"
-  [fn-data provided-args]
+  [context fn-data provided-args]
   (let [{:keys [arg-schemas arg-values]} fn-data]
     (reduce-kv
       (fn [acc arg-schema-id arg-schema]
         (let [arg-name (:name arg-schema)
+              arg-type (:type arg-schema)
               provided-value (get provided-args arg-schema-id)
               arg-value (get arg-values arg-schema-id)]
           (cond
-            ;; 1. Direct provided value - create LiteralThunk
+            ;; 1. Direct provided value - wrap in delay
             (some? provided-value)
             (do
               (validate-provided-arg-type! provided-value arg-schema)
-              (assoc acc (keyword arg-name) (->LiteralThunk provided-value)))
+              (if (= arg-type :fn)
+                ;; For :fn type, provided-value should be a fn-id, create callable
+                (assoc acc (keyword arg-name) (delay (make-callable context provided-value)))
+                ;; For other types, just wrap the value
+                (assoc acc (keyword arg-name) (delay provided-value))))
 
-            ;; 2. Stored arg-value exists - use build-thunk
+            ;; 2. Stored arg-value exists - use build-delay
             arg-value
-            (assoc acc (keyword arg-name) (build-thunk arg-value arg-schema))
+            (assoc acc (keyword arg-name) (build-delay context arg-value arg-schema))
 
             ;; 3. Required arg with no value - error
             (:required arg-schema)
@@ -407,7 +417,10 @@
 
 (defn- execute-internal
   "Internal execution function with context tracking.
-   Uses the cached execution-graph and base-fns from context."
+   Uses the cached execution-graph and base-fns from context.
+
+   Arguments are passed to base functions as delays for lazy evaluation.
+   Base functions should use @ (deref) to get values."
   [context fn-id provided-args]
   (check-limits! context)
   (let [execution-graph (:execution-graph context)
@@ -427,9 +440,9 @@
                       {:type :execution-error/base-fn-not-found
                        :fn-name fn-name
                        :available-fns (keys registry)})))
-    (let [thunks (build-thunks fn-data provided-args)
-          new-context (update context :depth inc)]
-      (base-fn thunks new-context))))
+    (let [new-context (update context :depth inc)
+          arg-delays (build-arg-delays new-context fn-data provided-args)]
+      (base-fn arg-delays new-context))))
 
 
 (defn execute

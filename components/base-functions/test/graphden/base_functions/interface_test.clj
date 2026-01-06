@@ -3,7 +3,6 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.base-functions.core :as core]
     [graphden.base-functions.interface :as bf]
-    [graphden.executor.core :as exec-core]
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.interface :as registry]
     [graphden.graph-storage-memory.interface :as gsm]
@@ -26,18 +25,17 @@
 
 ;; === Helper Functions ===
 
-(defn literal-thunk
-  "Creates a literal thunk for testing."
+(defn literal-delay
+  "Creates a delay for testing. Replaces literal-thunk."
   [value]
-  (reify exec-core/IThunk
-    (force-value [_ _] value)))
+  (delay value))
 
 
 (defn call-base-fn
-  "Calls a base function with literal values."
+  "Calls a base function with literal values wrapped in delays."
   [fn-name args]
-  (let [thunks (into {} (map (fn [[k v]] [k (literal-thunk v)]) args))]
-    ((exec/get-base-fn fn-name) thunks nil)))
+  (let [delays (into {} (map (fn [[k v]] [k (delay v)]) args))]
+    ((exec/get-base-fn fn-name) delays nil)))
 
 
 ;; === Registration Helpers ===
@@ -240,30 +238,20 @@
   (testing "and short-circuits on false - second arg not evaluated"
     ;; Clojure's 'and' macro short-circuits, so when a is false, b is never evaluated
     (let [call-count (atom 0)
-          tracking-thunk (reify exec-core/IThunk
-                           (force-value
-                             [_ _]
-                             (swap! call-count inc)
-                             true))
-          false-thunk (reify exec-core/IThunk
-                        (force-value [_ _] false))
+          tracking-delay (delay (do (swap! call-count inc) true))
+          false-delay (delay false)
           and-fn (exec/get-base-fn :and)]
-      (and-fn {:a false-thunk :b tracking-thunk} nil)
+      (and-fn {:a false-delay :b tracking-delay} nil)
       ;; Short-circuit: b is never evaluated when a is false
       (is (zero? @call-count) "and short-circuits - second arg not evaluated")))
 
   (testing "or short-circuits on true - second arg not evaluated"
     ;; Clojure's 'or' macro short-circuits, so when a is true, b is never evaluated
     (let [call-count (atom 0)
-          tracking-thunk (reify exec-core/IThunk
-                           (force-value
-                             [_ _]
-                             (swap! call-count inc)
-                             false))
-          true-thunk (reify exec-core/IThunk
-                       (force-value [_ _] true))
+          tracking-delay (delay (do (swap! call-count inc) false))
+          true-delay (delay true)
           or-fn (exec/get-base-fn :or)]
-      (or-fn {:a true-thunk :b tracking-thunk} nil)
+      (or-fn {:a true-delay :b tracking-delay} nil)
       ;; Short-circuit: b is never evaluated when a is true
       (is (zero? @call-count) "or short-circuits - second arg not evaluated"))))
 
@@ -461,7 +449,8 @@
 ;; We create helper functions and register them as base-fns for testing.
 
 (defn- setup-hof-storage
-  "Creates storage with helper functions for HOF tests."
+  "Creates storage with helper functions for HOF tests.
+   Returns callables (not UUIDs) for use in HOF base function tests."
   []
   (let [storage (gsm/create-storage)]
     (register-all!)
@@ -475,9 +464,9 @@
                                :name "item"
                                :type :int
                                :required true})
-          double-fn (sp/create-entity storage :fn
-                                      {:name "my-double"
-                                       :fn-schema-id (:id double-schema)})
+          _double-fn (sp/create-entity storage :fn
+                                       {:name "my-double"
+                                        :fn-schema-id (:id double-schema)})
 
           ;; Create 'gt2' predicate: item -> item > 2
           gt2-schema (sp/create-entity storage :fn-schema
@@ -488,9 +477,9 @@
                                :name "item"
                                :type :int
                                :required true})
-          gt2-fn (sp/create-entity storage :fn
-                                   {:name "my-gt2"
-                                    :fn-schema-id (:id gt2-schema)})
+          _gt2-fn (sp/create-entity storage :fn
+                                    {:name "my-gt2"
+                                     :fn-schema-id (:id gt2-schema)})
 
           ;; Create 'add-reducer' function: (acc, item) -> acc + item
           add-schema (sp/create-entity storage :fn-schema
@@ -506,9 +495,9 @@
                                :name "item"
                                :type :int
                                :required true})
-          add-fn (sp/create-entity storage :fn
-                                   {:name "my-add-reducer"
-                                    :fn-schema-id (:id add-schema)})
+          _add-fn (sp/create-entity storage :fn
+                                    {:name "my-add-reducer"
+                                     :fn-schema-id (:id add-schema)})
 
           ;; Create 'get-category' function: item -> :small/:large
           cat-schema (sp/create-entity storage :fn-schema
@@ -519,205 +508,197 @@
                                :name "item"
                                :type :int
                                :required true})
-          cat-fn (sp/create-entity storage :fn
-                                   {:name "my-get-category"
-                                    :fn-schema-id (:id cat-schema)})]
+          _cat-fn (sp/create-entity storage :fn
+                                    {:name "my-get-category"
+                                     :fn-schema-id (:id cat-schema)})]
 
-      ;; Register base function implementations
+      ;; Register base function implementations (using delays - deref with @)
       (exec/register-base-fn! :double
-                              (fn [{:keys [item]} ctx]
-                                (* 2 (exec/force-value item ctx))))
+                              (fn [{:keys [item]} _ctx]
+                                (* 2 @item)))
 
       (exec/register-base-fn! :gt2
-                              (fn [{:keys [item]} ctx]
-                                (> (exec/force-value item ctx) 2)))
+                              (fn [{:keys [item]} _ctx]
+                                (> @item 2)))
 
       (exec/register-base-fn! :add-reducer
-                              (fn [{:keys [acc item]} ctx]
-                                (+ (exec/force-value acc ctx)
-                                   (exec/force-value item ctx))))
+                              (fn [{:keys [acc item]} _ctx]
+                                (+ @acc @item)))
 
       (exec/register-base-fn! :get-category
-                              (fn [{:keys [item]} ctx]
-                                (if (> (exec/force-value item ctx) 5)
+                              (fn [{:keys [item]} _ctx]
+                                (if (> @item 5)
                                   :large
                                   :small)))
 
+      ;; Return callables (functions that match HOF expected interface: {:item x})
+      ;; instead of UUIDs. The HOF base functions call (f {:item item}) directly.
       {:storage storage
-       :double-fn-id (:id double-fn)
-       :gt2-fn-id (:id gt2-fn)
-       :add-fn-id (:id add-fn)
-       :cat-fn-id (:id cat-fn)})))
+       :double-callable (fn [{:keys [item]}] (* 2 item))
+       :gt2-callable (fn [{:keys [item]}] (> item 2))
+       :add-callable (fn [{:keys [acc item]}] (+ acc item))
+       :cat-callable (fn [{:keys [item]}] (if (> item 5) :large :small))})))
 
 
 (deftest hof-map-test
-  (let [{:keys [storage double-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage double-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            map-fn (exec/get-base-fn :map)
-            f-thunk (literal-thunk double-fn-id)
-            coll-thunk (literal-thunk [1 2 3 4 5])]
+      (let [map-fn (exec/get-base-fn :map)
+            f-delay (literal-delay double-callable)
+            coll-delay (literal-delay [1 2 3 4 5])]
 
         (testing "map doubles each element"
-          (is (= [2 4 6 8 10] (map-fn {:f f-thunk :coll coll-thunk} ctx))))
+          (is (= [2 4 6 8 10] (map-fn {:f f-delay :coll coll-delay} nil))))
 
         (testing "map on empty collection"
-          (is (= [] (map-fn {:f f-thunk :coll (literal-thunk [])} ctx)))))
+          (is (= [] (map-fn {:f f-delay :coll (literal-delay [])} nil)))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-filter-test
-  (let [{:keys [storage gt2-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage gt2-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            filter-fn (exec/get-base-fn :filter)
-            pred-thunk (literal-thunk gt2-fn-id)
-            coll-thunk (literal-thunk [1 2 3 4 5])]
+      (let [filter-fn (exec/get-base-fn :filter)
+            pred-delay (literal-delay gt2-callable)
+            coll-delay (literal-delay [1 2 3 4 5])]
 
         (testing "filter keeps elements > 2"
-          (is (= [3 4 5] (filter-fn {:pred pred-thunk :coll coll-thunk} ctx))))
+          (is (= [3 4 5] (filter-fn {:pred pred-delay :coll coll-delay} nil))))
 
         (testing "filter on empty collection"
-          (is (= [] (filter-fn {:pred pred-thunk :coll (literal-thunk [])} ctx))))
+          (is (= [] (filter-fn {:pred pred-delay :coll (literal-delay [])} nil))))
 
         (testing "filter with no matches"
-          (is (= [] (filter-fn {:pred pred-thunk :coll (literal-thunk [1 2])} ctx)))))
+          (is (= [] (filter-fn {:pred pred-delay :coll (literal-delay [1 2])} nil)))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-reduce-test
-  (let [{:keys [storage add-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage add-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            reduce-fn (exec/get-base-fn :reduce)
-            f-thunk (literal-thunk add-fn-id)
-            init-thunk (literal-thunk 0)
-            coll-thunk (literal-thunk [1 2 3 4 5])]
+      (let [reduce-fn (exec/get-base-fn :reduce)
+            f-delay (literal-delay add-callable)
+            init-delay (literal-delay 0)
+            coll-delay (literal-delay [1 2 3 4 5])]
 
         (testing "reduce sums all elements"
-          (is (= 15 (reduce-fn {:f f-thunk :init init-thunk :coll coll-thunk} ctx))))
+          (is (= 15 (reduce-fn {:f f-delay :init init-delay :coll coll-delay} nil))))
 
         (testing "reduce with different initial value"
-          (is (= 25 (reduce-fn {:f f-thunk :init (literal-thunk 10) :coll coll-thunk} ctx))))
+          (is (= 25 (reduce-fn {:f f-delay :init (literal-delay 10) :coll coll-delay} nil))))
 
         (testing "reduce on empty collection returns init"
-          (is (zero? (reduce-fn {:f f-thunk :init init-thunk :coll (literal-thunk [])} ctx)))))
+          (is (zero? (reduce-fn {:f f-delay :init init-delay :coll (literal-delay [])} nil)))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-some-test
-  (let [{:keys [storage gt2-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage gt2-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            base-some (exec/get-base-fn :some)
-            pred-thunk (literal-thunk gt2-fn-id)]
+      (let [base-some (exec/get-base-fn :some)
+            pred-delay (literal-delay gt2-callable)]
 
         (testing "some finds first truthy result"
-          (is (true? (base-some {:pred pred-thunk :coll (literal-thunk [1 2 3 4])} ctx))))
+          (is (true? (base-some {:pred pred-delay :coll (literal-delay [1 2 3 4])} nil))))
 
         (testing "some returns nil when no match"
-          (is (nil? (base-some {:pred pred-thunk :coll (literal-thunk [1 2])} ctx))))
+          (is (nil? (base-some {:pred pred-delay :coll (literal-delay [1 2])} nil))))
 
         (testing "some on empty collection"
-          (is (nil? (base-some {:pred pred-thunk :coll (literal-thunk [])} ctx)))))
+          (is (nil? (base-some {:pred pred-delay :coll (literal-delay [])} nil)))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-every?-test
-  (let [{:keys [storage gt2-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage gt2-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            every?-fn (exec/get-base-fn :every?)
-            pred-thunk (literal-thunk gt2-fn-id)]
+      (let [every?-fn (exec/get-base-fn :every?)
+            pred-delay (literal-delay gt2-callable)]
 
         (testing "every? returns true when all match"
-          (is (true? (every?-fn {:pred pred-thunk :coll (literal-thunk [3 4 5])} ctx))))
+          (is (true? (every?-fn {:pred pred-delay :coll (literal-delay [3 4 5])} nil))))
 
         (testing "every? returns false when some don't match"
-          (is (false? (every?-fn {:pred pred-thunk :coll (literal-thunk [1 3 5])} ctx))))
+          (is (false? (every?-fn {:pred pred-delay :coll (literal-delay [1 3 5])} nil))))
 
         (testing "every? on empty collection returns true"
-          (is (true? (every?-fn {:pred pred-thunk :coll (literal-thunk [])} ctx)))))
+          (is (true? (every?-fn {:pred pred-delay :coll (literal-delay [])} nil)))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-find-first-test
-  (let [{:keys [storage gt2-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage gt2-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            find-first-fn (exec/get-base-fn :find-first)
-            pred-thunk (literal-thunk gt2-fn-id)]
+      (let [find-first-fn (exec/get-base-fn :find-first)
+            pred-delay (literal-delay gt2-callable)]
 
         (testing "find-first returns first matching element"
-          (is (= 3 (find-first-fn {:pred pred-thunk :coll (literal-thunk [1 2 3 4 5])} ctx))))
+          (is (= 3 (find-first-fn {:pred pred-delay :coll (literal-delay [1 2 3 4 5])} nil))))
 
         (testing "find-first returns nil when no match"
-          (is (nil? (find-first-fn {:pred pred-thunk :coll (literal-thunk [1 2])} ctx))))
+          (is (nil? (find-first-fn {:pred pred-delay :coll (literal-delay [1 2])} nil))))
 
         (testing "find-first on empty collection"
-          (is (nil? (find-first-fn {:pred pred-thunk :coll (literal-thunk [])} ctx)))))
+          (is (nil? (find-first-fn {:pred pred-delay :coll (literal-delay [])} nil)))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-group-by-test
-  (let [{:keys [storage cat-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage cat-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            group-by-fn (exec/get-base-fn :group-by)
-            key-fn-thunk (literal-thunk cat-fn-id)]
+      (let [group-by-fn (exec/get-base-fn :group-by)
+            key-fn-delay (literal-delay cat-callable)]
 
         (testing "group-by groups by category"
-          (let [result (group-by-fn {:key-fn key-fn-thunk
-                                     :coll (literal-thunk [1 3 6 8 2 10])}
-                                    ctx)]
+          (let [result (group-by-fn {:key-fn key-fn-delay
+                                     :coll (literal-delay [1 3 6 8 2 10])}
+                                    nil)]
             (is (= [1 3 2] (:small result)))
             (is (= [6 8 10] (:large result)))))
 
         (testing "group-by on empty collection"
-          (is (= {} (group-by-fn {:key-fn key-fn-thunk :coll (literal-thunk [])} ctx)))))
+          (is (= {} (group-by-fn {:key-fn key-fn-delay :coll (literal-delay [])} nil)))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-sort-by-test
-  (let [{:keys [storage double-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage double-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            sort-by-fn (exec/get-base-fn :sort-by)
+      (let [sort-by-fn (exec/get-base-fn :sort-by)
             ;; Sort by doubled value (effectively same order for positive ints)
-            key-fn-thunk (literal-thunk double-fn-id)]
+            key-fn-delay (literal-delay double-callable)]
 
         (testing "sort-by sorts by key function result"
-          (is (= [1 1 2 3 4 5] (sort-by-fn {:key-fn key-fn-thunk
-                                            :coll (literal-thunk [3 1 4 1 5 2])}
-                                           ctx))))
+          (is (= [1 1 2 3 4 5] (sort-by-fn {:key-fn key-fn-delay
+                                            :coll (literal-delay [3 1 4 1 5 2])}
+                                           nil))))
 
         (testing "sort-by on empty collection"
-          (is (= [] (sort-by-fn {:key-fn key-fn-thunk :coll (literal-thunk [])} ctx)))))
+          (is (= [] (sort-by-fn {:key-fn key-fn-delay :coll (literal-delay [])} nil)))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-apply-test
-  (let [{:keys [storage add-fn-id]} (setup-hof-storage)]
+  (let [{:keys [storage add-callable]} (setup-hof-storage)]
     (try
-      (let [ctx (exec/create-context {:storage storage})
-            apply-fn (exec/get-base-fn :apply)]
+      (let [apply-fn (exec/get-base-fn :apply)]
 
         (testing "apply calls function with args map"
-          (is (= 7 (apply-fn {:f (literal-thunk add-fn-id)
-                              :args (literal-thunk {:acc 3 :item 4})}
-                             ctx))))
+          (is (= 7 (apply-fn {:f (literal-delay add-callable)
+                              :args (literal-delay {:acc 3 :item 4})}
+                             nil))))
         (testing "apply with different args"
-          (is (= 15 (apply-fn {:f (literal-thunk add-fn-id)
-                               :args (literal-thunk {:acc 10 :item 5})}
-                              ctx)))))
+          (is (= 15 (apply-fn {:f (literal-delay add-callable)
+                               :args (literal-delay {:acc 10 :item 5})}
+                              nil)))))
       (finally
         (sp/close storage)))))
 

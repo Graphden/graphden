@@ -2,20 +2,17 @@
   "Core infrastructure for base function registration and storage sync.
 
    Provides:
-   - Function definition wrapping with automatic arg forcing
+   - Base function registration to executor
    - Storage synchronization for fn-schema and arg-schema
    - Deterministic UUID generation for idempotent sync
 
    Each base function is defined with metadata:
    - :args - map of {arg-name -> type} (or {:type :T :required false} for optional)
    - :return-type - the type returned by the function
-   - :impl - the implementation function
-   - :lazy-args - (optional) set of arg names that receive thunks
+   - :impl - the implementation function (receives delays, uses @ to deref)
+   - :lazy - (optional) set of arg names that should NOT be auto-deref'd
 
-   The wrapper automatically forces args based on their type:
-   - :fn type args return fn-id (via LazyFnThunk.force-value)
-   - :lazy-args receive thunks for manual forcing
-   - All other args are forced to their values"
+   Use the defbase macro to define functions with automatic argument handling."
   (:require
     [graphden.executor.interface :as exec]
     [graphden.field-types.interface :as ft]
@@ -29,50 +26,19 @@
       UUID)))
 
 
-;; === Function Wrapper ===
-
-(defn wrap-base-fn
-  "Wraps a base function implementation to handle argument forcing.
-
-   - Regular args: pre-forced, impl receives plain values
-   - :fn type args: force-value returns fn-id, impl receives fn-id
-   - :lazy-args: impl receives thunk, must call force-value manually"
-  [{:keys [args impl lazy-args] :or {lazy-args #{}}}]
-  ;; Validate that all lazy-args exist in args
-  (when-let [unknown-lazy-args (seq (remove #(contains? args %) lazy-args))]
-    (throw (ex-info "lazy-args contains unknown argument names"
-                    {:type :invalid-lazy-args
-                     :unknown-args (set unknown-lazy-args)
-                     :valid-args (set (keys args))})))
-  (fn [thunks ctx]
-    (let [processed-args
-          (reduce-kv
-            (fn [acc arg-name _arg-type]
-              (let [thunk (get thunks arg-name)]
-                (cond
-                  ;; Lazy arg - pass thunk as-is for manual forcing
-                  (contains? lazy-args arg-name)
-                  (assoc acc arg-name thunk)
-
-                  ;; No thunk provided - skip
-                  (nil? thunk)
-                  acc
-
-                  ;; Normal arg - force value
-                  ;; Note: for :fn type, LazyFnThunk.force-value returns fn-id
-                  :else
-                  (assoc acc arg-name (exec/force-value thunk ctx)))))
-            {}
-            args)]
-      (impl processed-args ctx))))
-
-
 (defn register-base-fns!
   "Registers base functions from a definitions map.
-   Each definition should have :args, :return-type, :impl, and optionally :lazy-args."
+
+   Each definition should have:
+   - :args - map of argument names to types
+   - :return-type - the return type
+   - :impl - function that takes [{:keys [arg1 arg2 ...]} ctx]
+
+   The :impl function receives arguments as delays. Use defbase macro
+   to automatically handle dereferencing."
   [defs]
   (doseq [[fn-name fn-def] defs]
-    (exec/register-base-fn! fn-name (wrap-base-fn fn-def))))
+    (exec/register-base-fn! fn-name (:impl fn-def))))
 
 
 ;; === Storage Sync ===

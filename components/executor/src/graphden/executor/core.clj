@@ -78,7 +78,9 @@
    max-depth
    timeout-ms
    start-time
-   depth])
+   depth
+   path-args        ; Map of {path -> value} for runtime args by path
+   current-path])   ; Current path in the execution tree (vector of arg-name keywords)
 
 
 (def ^:private max-depth-limit
@@ -114,14 +116,19 @@
    - :base-fns - Map of fn-name -> fn for base function lookup (optional, uses default registry if not provided)
    - :max-depth - Maximum recursion depth (default 1000)
    - :timeout-ms - Maximum execution time in ms (default 30000)
+   - :path-args - Map of {path -> value} for runtime args by path (optional)
+                  Path is a vector of arg-name keywords from root, e.g. [:a :b :x]
+                  Only args NOT defined in DB can be set this way
 
    Validates:
    - storage is required
    - timeout-ms must be at least 50ms (allows for fast test cases)
-   - max-depth must be positive and <= 100000"
-  [{:keys [storage base-fns max-depth timeout-ms]
+   - max-depth must be positive and <= 100000
+   - path-args must be a map if provided"
+  [{:keys [storage base-fns max-depth timeout-ms path-args]
     :or {max-depth sp/default-max-depth
-         timeout-ms default-timeout-ms}}]
+         timeout-ms default-timeout-ms
+         path-args {}}}]
   (when-not storage
     (throw (ex-info "Storage is required" {:type :execution-error/invalid-context})))
   (when (and timeout-ms (< timeout-ms min-timeout-ms))
@@ -138,9 +145,14 @@
                     {:type :execution-error/invalid-context
                      :max-depth max-depth
                      :max-allowed max-depth-limit})))
+  (when (and (some? path-args) (not (map? path-args)))
+    (throw (ex-info "path-args must be a map"
+                    {:type :execution-error/invalid-context
+                     :path-args path-args
+                     :path-args-type (type path-args)})))
   ;; Use provided base-fns or snapshot the default registry
   (let [fns (or base-fns @default-registry)]
-    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0)))
+    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0 (or path-args {}) [])))
 
 
 ;; Forward declaration for mutual recursion
@@ -323,24 +335,40 @@
 
    NOTE: This function is only called from build-arg-delays when a stored arg-value
    exists AND no provided-arg override was found for this arg-schema-id.
-   The provided-args check happens in build-arg-delays before calling this function."
-  [context arg-value arg-schema]
+   The provided-args check happens in build-arg-delays before calling this function.
+
+   The arg-name is used to extend current-path when executing child functions,
+   enabling path-based argument resolution for nested calls."
+  [context arg-value arg-schema arg-name]
   ;; Note: :value can be nil for optional args with null values.
   ;; arg-values from storage are assumed to have :value key present.
   (let [value (:value arg-value)
-        arg-type (:type arg-schema)]
+        arg-type (:type arg-schema)
+        ;; Extend the path with this arg-name for child execution
+        child-path (conj (:current-path context) (keyword arg-name))
+        child-context (assoc context :current-path child-path)]
     (cond
       ;; UUID value means reference to another fn
       (uuid? value)
       (if (= arg-type :fn)
-        ;; For :fn type args, create a callable
-        (delay (make-callable context value))
-        ;; For other types, execute the referenced fn
-        (delay (execute-internal context value {})))
+        ;; For :fn type args, create a callable with extended path
+        (delay (make-callable child-context value))
+        ;; For other types, execute the referenced fn with extended path
+        (delay (execute-internal child-context value nil)))
 
       ;; Literal value - wrap in delay
       :else
       (delay value))))
+
+
+(defn- get-path-arg
+  "Gets a runtime argument value by path from context.
+   Returns the value or nil if not found."
+  [context arg-name]
+  (let [current-path (:current-path context)
+        full-path (conj current-path (keyword arg-name))
+        path-args (:path-args context)]
+    (get path-args full-path)))
 
 
 (defn- build-arg-delays
@@ -351,41 +379,71 @@
    Base functions receive delays and use @ (deref) to get values.
 
    Priority:
-   1. If provided-args has a value for this schema-id, wrap in delay
+   1. If path-args has a value for this arg at current path:
+      - If arg-value also exists in DB -> warning, use DB value (no override)
+      - Else -> use path-arg value
    2. Else if arg-values has a value, use build-delay
    3. Else if required, throw error
    4. Else skip (optional arg with no value)"
   [context fn-data provided-args]
-  (let [{:keys [arg-schemas arg-values]} fn-data]
+  (let [{:keys [arg-schemas arg-values]} fn-data
+        current-path (:current-path context)]
     (reduce-kv
       (fn [acc arg-schema-id arg-schema]
         (let [arg-name (:name arg-schema)
+              arg-name-kw (keyword arg-name)
               arg-type (:type arg-schema)
+              ;; Legacy provided-args (for HOF callable calls)
               provided-value (get provided-args arg-schema-id)
-              arg-value (get arg-values arg-schema-id)]
+              ;; Path-based arg from context
+              path-arg-value (get-path-arg context arg-name)
+              ;; Stored arg-value from DB
+              arg-value (get arg-values arg-schema-id)
+              ;; Extend path for child functions
+              child-path (conj current-path arg-name-kw)
+              child-context (assoc context :current-path child-path)]
           (cond
-            ;; 1. Direct provided value - wrap in delay
+            ;; 1. Direct provided value (from HOF callable) - wrap in delay
             (some? provided-value)
             (do
               (validate-provided-arg-type! provided-value arg-schema)
               (if (= arg-type :fn)
                 ;; For :fn type, provided-value should be a fn-id, create callable
-                (assoc acc (keyword arg-name) (delay (make-callable context provided-value)))
+                (assoc acc arg-name-kw (delay (make-callable child-context provided-value)))
                 ;; For other types, just wrap the value
-                (assoc acc (keyword arg-name) (delay provided-value))))
+                (assoc acc arg-name-kw (delay provided-value))))
 
-            ;; 2. Stored arg-value exists - use build-delay
+            ;; 2. Path-arg value exists
+            (some? path-arg-value)
+            (if arg-value
+              ;; DB value exists - warn and use DB value (no override allowed)
+              (do
+                (log/warn "Path-arg ignored: argument already defined in DB"
+                          {:path (conj current-path arg-name-kw)
+                           :arg-name arg-name
+                           :db-value (:value arg-value)
+                           :provided-value path-arg-value})
+                (assoc acc arg-name-kw (build-delay context arg-value arg-schema arg-name)))
+              ;; No DB value - use path-arg
+              (do
+                (validate-provided-arg-type! path-arg-value arg-schema)
+                (if (= arg-type :fn)
+                  (assoc acc arg-name-kw (delay (make-callable child-context path-arg-value)))
+                  (assoc acc arg-name-kw (delay path-arg-value)))))
+
+            ;; 3. Stored arg-value exists - use build-delay
             arg-value
-            (assoc acc (keyword arg-name) (build-delay context arg-value arg-schema))
+            (assoc acc arg-name-kw (build-delay context arg-value arg-schema arg-name))
 
-            ;; 3. Required arg with no value - error
+            ;; 4. Required arg with no value - error
             (:required arg-schema)
             (throw (ex-info (str "Required argument '" arg-name "' not provided")
                             {:type :execution-error/missing-required-arg
                              :arg-schema-id arg-schema-id
-                             :arg-name arg-name}))
+                             :arg-name arg-name
+                             :path (conj current-path arg-name-kw)}))
 
-            ;; 4. Optional arg with no value - skip
+            ;; 5. Optional arg with no value - skip
             :else acc)))
       {}
       arg-schemas)))

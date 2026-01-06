@@ -41,10 +41,19 @@
                    fully even if it exceeds the timeout. For hard timeouts on
                    individual operations, base functions should use their own
                    timeout mechanisms (e.g., future with deref timeout).
+   - :path-args - Map of {path -> value} for runtime args by path (optional)
+                  Path is a vector of arg-name keywords from root function.
+                  Only args NOT already defined in DB can be set this way.
+                  Attempts to override DB-defined args will log a warning and be ignored.
 
    Example with custom base-fns:
    (create-context {:storage s
-                    :base-fns {:add my-add-fn :if my-if-fn}})"
+                    :base-fns {:add my-add-fn :if my-if-fn}})
+
+   Example with path-args (providing runtime arg 'x' to nested function via path):
+   ;; If function A uses B at arg :b, and B has free arg :x
+   (create-context {:storage s
+                    :path-args {[:b :x] 10}})  ; sets :x arg of B to 10"
   [opts]
   (core/create-context opts))
 

@@ -1713,3 +1713,182 @@
                             #"fn-name must be a string"
             (exec/execute-by-name ctx :my-add nil)))
       (sp/close storage))))
+
+
+;; === Path-Args Tests ===
+
+(deftest path-args-basic-test
+  (testing "path-args provides values for free arguments"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a]} (setup-add-function! storage)
+          ;; Only provide :a, leave :b as free arg
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 10})
+          ;; Use path-args to provide :b
+          ctx (exec/create-context {:storage storage
+                                    :path-args {[:b] 20}})]
+      (is (= 30 (exec/execute ctx (:id fn-rec) nil)))
+      (sp/close storage)))
+
+  (testing "path-args ignores override of DB-defined args with warning"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
+          ;; Both args defined in DB
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 10})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 20})
+          ;; Try to override :a via path-args - should be ignored
+          ctx (exec/create-context {:storage storage
+                                    :path-args {[:a] 100}})]
+      ;; Should use DB value (10) not path-arg (100)
+      (is (= 30 (exec/execute ctx (:id fn-rec) nil)))
+      (sp/close storage)))
+
+  (testing "path-args throws error for missing required arg"
+    (let [storage (create-test-storage)
+          {:keys [fn-rec arg-a]} (setup-add-function! storage)
+          ;; Only provide :a, leave :b as free required arg
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 10})
+          ;; Don't provide :b via path-args
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Required argument 'b' not provided"
+            (exec/execute ctx (:id fn-rec) nil)))
+      (sp/close storage))))
+
+
+(deftest path-args-nested-test
+  (testing "path-args provides values for nested function arguments"
+    (let [storage (create-test-storage)
+          ;; Register identity function
+          _ (exec/register-base-fn!
+              :identity
+              (fn [{:keys [x]} _ctx]
+                @x))
+          ;; Create identity fn-schema
+          id-schema (sp/create-entity storage :fn-schema
+                                      {:name "identity"
+                                       :returned-type :int})
+          id-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id id-schema)
+                                    :name "x"
+                                    :type :int
+                                    :required true})
+          ;; Create outer fn that wraps identity
+          outer-fn (sp/create-entity storage :fn
+                                     {:name "outer"
+                                      :fn-schema-id (:id id-schema)})
+          ;; Create inner fn with free arg
+          inner-fn (sp/create-entity storage :fn
+                                     {:name "inner"
+                                      :fn-schema-id (:id id-schema)})
+          ;; outer's x -> inner (function reference, not :fn type - so it executes inner)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id outer-fn)
+                               :arg-schema-id (:id id-arg)
+                               :value (:id inner-fn)})
+          ;; inner's x is free - provide via path-args
+          ;; Path: [:x] from root (outer) -> inner's x at [:x :x]
+          ctx (exec/create-context {:storage storage
+                                    :path-args {[:x :x] 42}})]
+      (is (= 42 (exec/execute ctx (:id outer-fn) nil)))
+      (sp/close storage)))
+
+  (testing "path-args with different paths for same nested function"
+    (let [storage (create-test-storage)
+          ;; A function that takes two args and adds them
+          _ (exec/register-base-fn!
+              :add
+              (fn [{:keys [a b]} _ctx]
+                (+ @a @b)))
+          ;; identity fn for passthrough
+          _ (exec/register-base-fn!
+              :identity
+              (fn [{:keys [x]} _ctx]
+                @x))
+          ;; Create add fn-schema
+          add-schema (sp/create-entity storage :fn-schema
+                                       {:name "add"
+                                        :returned-type :int})
+          add-arg-a (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id add-schema)
+                                       :name "a"
+                                       :type :int
+                                       :required true})
+          add-arg-b (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id add-schema)
+                                       :name "b"
+                                       :type :int
+                                       :required true})
+          ;; Create identity fn-schema
+          id-schema (sp/create-entity storage :fn-schema
+                                      {:name "identity"
+                                       :returned-type :int})
+          _id-arg (sp/create-entity storage :arg-schema
+                                    {:fn-schema-id (:id id-schema)
+                                     :name "x"
+                                     :type :int
+                                     :required true})
+          ;; Create the identity function instance
+          id-fn (sp/create-entity storage :fn
+                                  {:name "id-fn"
+                                   :fn-schema-id (:id id-schema)})
+          ;; id-fn's x is free - will be provided via different paths
+          ;; Create add function instance
+          add-fn (sp/create-entity storage :fn
+                                   {:name "add-fn"
+                                    :fn-schema-id (:id add-schema)})
+          ;; add-fn's a and b both reference id-fn
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id add-fn)
+                               :arg-schema-id (:id add-arg-a)
+                               :value (:id id-fn)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id add-fn)
+                               :arg-schema-id (:id add-arg-b)
+                               :value (:id id-fn)})
+          ;; Provide different values for id-fn's x via different paths
+          ;; add-fn -> a -> id-fn -> x = 10
+          ;; add-fn -> b -> id-fn -> x = 32
+          ctx (exec/create-context {:storage storage
+                                    :path-args {[:a :x] 10
+                                                [:b :x] 32}})]
+      (is (= 42 (exec/execute ctx (:id add-fn) nil)))
+      (sp/close storage))))
+
+
+(deftest path-args-context-validation-test
+  (testing "throws when path-args is not a map"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"path-args must be a map"
+            (exec/create-context {:storage storage
+                                  :path-args "not a map"})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"path-args must be a map"
+            (exec/create-context {:storage storage
+                                  :path-args [[:a] 10]})))
+      (sp/close storage)))
+
+  (testing "accepts empty path-args map"
+    (let [storage (create-test-storage)
+          ctx (exec/create-context {:storage storage
+                                    :path-args {}})]
+      (is (some? ctx))
+      (sp/close storage)))
+
+  (testing "accepts nil path-args (defaults to empty)"
+    (let [storage (create-test-storage)
+          ctx (exec/create-context {:storage storage})]
+      (is (some? ctx))
+      (sp/close storage))))

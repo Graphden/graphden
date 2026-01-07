@@ -97,7 +97,7 @@ Core library of base functions for the graphden executor. Provides fundamental o
 | `:sort-by` | `{:key-fn :coll}` | Sort by key |
 | `:apply` | `{:f :args}` | Apply f to args |
 | `:identity` | `{:x}` | Return x unchanged |
-| `:constantly` | `{:x}` | Return x |
+| `:constantly` | `{:x, :item?}` | Return x (ignoring optional item) |
 
 ## Usage
 

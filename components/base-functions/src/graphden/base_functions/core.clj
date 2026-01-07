@@ -20,6 +20,7 @@
    Registration and storage sync should be done by consuming components
    using fn-registry."
   (:require
+    [clojure.math :as math]
     [clojure.string :as str]
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.macros :refer [defbase]]))
@@ -378,6 +379,12 @@
   (into to from))
 
 
+(def ^:private max-range-size
+  "Maximum number of elements allowed in range to prevent memory exhaustion.
+   Default: 1 million elements."
+  1000000)
+
+
 (defbase range-fn
   {:args {:start {:type :int :required false}, :end :int, :step {:type :int :required false}}
    :return-type :jsonb}
@@ -387,12 +394,33 @@
       (throw (ex-info "step cannot be zero (would cause infinite loop)"
                       {:type :execution-error/invalid-step
                        :start actual-start :end end :step step})))
-    (vec (range actual-start end actual-step))))
+    ;; Calculate range size to check against limit
+    (let [range-size (if (or (and (pos? actual-step) (< actual-start end))
+                             (and (neg? actual-step) (> actual-start end)))
+                       (long (math/ceil (/ (abs (double (- end actual-start)))
+                                           (abs (double actual-step)))))
+                       0)]
+      (when (> range-size max-range-size)
+        (throw (ex-info (str "range would produce " range-size " elements, max allowed is " max-range-size)
+                        {:type :execution-error/range-too-large
+                         :start actual-start :end end :step actual-step
+                         :range-size range-size :max-size max-range-size})))
+      (vec (range actual-start end actual-step)))))
+
+
+(def ^:private max-repeat-size
+  "Maximum number of elements allowed in repeat to prevent memory exhaustion.
+   Default: 1 million elements."
+  1000000)
 
 
 (defbase repeat-fn
   {:args {:n :int, :x :any}
    :return-type :jsonb}
+  (when (> n max-repeat-size)
+    (throw (ex-info (str "repeat count " n " exceeds max allowed " max-repeat-size)
+                    {:type :execution-error/repeat-too-large
+                     :n n :max-size max-repeat-size})))
   (vec (repeat n x)))
 
 
@@ -470,23 +498,17 @@
 ;; This means user functions must have exactly 1 required argument (any name).
 ;; For reduce, user function takes a single arg which receives [acc item] vector.
 
-(defn- make-hof-callable
-  "Creates a callable for HOF from fn-id."
-  [execution-ctx fn-id]
-  (exec/make-single-arg-callable execution-ctx fn-id))
-
-
 (defbase map-fn
   {:args {:f :fn, :coll :jsonb}
    :return-type :jsonb}
-  (let [callable (make-hof-callable ctx f)]
+  (let [callable (exec/make-single-arg-callable ctx f)]
     (mapv callable coll)))
 
 
 (defbase filter-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :jsonb}
-  (let [callable (make-hof-callable ctx pred)]
+  (let [callable (exec/make-single-arg-callable ctx pred)]
     (filterv callable coll)))
 
 
@@ -494,14 +516,14 @@
   {:args {:f :fn, :init :any, :coll :jsonb}
    :return-type :any}
   ;; reduce passes [acc item] as single vector to the function
-  (let [callable (make-hof-callable ctx f)]
+  (let [callable (exec/make-single-arg-callable ctx f)]
     (reduce (fn [acc item] (callable [acc item])) init coll)))
 
 
 (defbase some-base-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :any}
-  (let [callable (make-hof-callable ctx pred)]
+  (let [callable (exec/make-single-arg-callable ctx pred)]
     (some (fn [item]
             (when-let [result (callable item)]
               result))
@@ -511,35 +533,35 @@
 (defbase every?-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :bool}
-  (let [callable (make-hof-callable ctx pred)]
+  (let [callable (exec/make-single-arg-callable ctx pred)]
     (every? callable coll)))
 
 
 (defbase find-first-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :any}
-  (let [callable (make-hof-callable ctx pred)]
+  (let [callable (exec/make-single-arg-callable ctx pred)]
     (first (filter callable coll))))
 
 
 (defbase group-by-fn
   {:args {:key-fn :fn, :coll :jsonb}
    :return-type :jsonb}
-  (let [callable (make-hof-callable ctx key-fn)]
+  (let [callable (exec/make-single-arg-callable ctx key-fn)]
     (group-by callable coll)))
 
 
 (defbase sort-by-fn
   {:args {:key-fn :fn, :coll :jsonb}
    :return-type :jsonb}
-  (let [callable (make-hof-callable ctx key-fn)]
+  (let [callable (exec/make-single-arg-callable ctx key-fn)]
     (vec (sort-by callable coll))))
 
 
 (defbase apply-fn
   {:args {:f :fn, :args :jsonb}
    :return-type :any}
-  (let [callable (make-hof-callable ctx f)]
+  (let [callable (exec/make-single-arg-callable ctx f)]
     (callable args)))
 
 
@@ -550,7 +572,14 @@
 
 
 (defbase constantly-fn
-  {:args {:x :any}
+  "Returns x, ignoring the optional _item argument.
+   When used with HOF (map, filter, etc.), always returns x regardless of input.
+
+   Examples:
+   - Direct: (constantly {:x 42}) => 42
+   - With map: (map {:f constantly, :coll [1 2 3]}) where constantly has x=42 => [42 42 42]"
+  {:args {:x :any
+          :_item {:type :any :required false}}
    :return-type :any}
   x)
 
@@ -571,13 +600,18 @@
 
 ;; === Introspection ===
 
+(defonce ^:private all-defs-cache
+  (delay (merge arithmetic-defs
+                comparison-defs
+                logic-defs
+                conditional-defs
+                string-defs
+                collection-defs
+                hof-defs)))
+
+
 (defn get-all-defs
-  "Returns all base function definitions with metadata."
+  "Returns all base function definitions with metadata.
+   Result is cached on first call."
   []
-  (merge arithmetic-defs
-         comparison-defs
-         logic-defs
-         conditional-defs
-         string-defs
-         collection-defs
-         hof-defs))
+  @all-defs-cache)

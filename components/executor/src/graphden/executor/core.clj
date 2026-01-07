@@ -109,6 +109,12 @@
   100)
 
 
+(def ^:private log-value-truncation-length
+  "Maximum length for values in log messages.
+   Shorter than error messages to reduce sensitive data exposure in logs."
+  20)
+
+
 (defn create-context
   "Creates initial execution context. Note: execution-graph is populated
    later when execute is called with a root fn-id.
@@ -483,8 +489,8 @@
                           {:arg-schema-id arg-schema-id
                            :current-frv-id current-frv-id
                            :arg-name arg-name
-                           :db-value (truncate-value (:value arg-value) 50)
-                           :provided-value (truncate-value path-arg-value 50)})
+                           :db-value (truncate-value (:value arg-value) log-value-truncation-length)
+                           :provided-value (truncate-value path-arg-value log-value-truncation-length)})
                 (assoc acc arg-name-kw (build-delay context arg-value arg-schema)))
               ;; No DB value - use path-arg
               (do

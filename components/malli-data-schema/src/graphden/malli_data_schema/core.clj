@@ -2,6 +2,7 @@
   "Malli-based implementation of DataSchema protocol."
   (:require
     [graphden.data-schema-protocol.interface :as ds]
+    [graphden.field-types.interface :as ft]
     [malli.core :as m]
     [malli.error :as me]))
 
@@ -33,11 +34,11 @@
 
 (def ^:private known-field-types
   "All valid field types.
-   Includes storage types from malli-type-mapping plus semantic types:
+   Includes storage types from field-types plus semantic types:
    - :ref, :enum, :union - structural types
    - :any - polymorphic type (accepts any value)
    - :fn - function reference type (stored as UUID)"
-  (into #{:ref :enum :union :any :fn} (keys malli-type-mapping)))
+  (into #{:ref :enum :union :any :fn} ft/supported-types))
 
 
 (def ^:private known-constraint-types

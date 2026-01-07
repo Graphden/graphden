@@ -1718,17 +1718,17 @@
 ;; === Path-Args Tests ===
 
 (deftest path-args-basic-test
-  (testing "path-args provides values for free arguments"
+  (testing "path-args provides values for free arguments (root function)"
     (let [storage (create-test-storage)
-          {:keys [fn-rec arg-a]} (setup-add-function! storage)
+          {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
           ;; Only provide :a, leave :b as free arg
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-rec)
                                :arg-schema-id (:id arg-a)
                                :value 10})
-          ;; Use path-args to provide :b
+          ;; Use path-args to provide :b by arg-schema-id (root function format)
           ctx (exec/create-context {:storage storage
-                                    :path-args {[:b] 20}})]
+                                    :path-args {(:id arg-b) 20}})]
       (is (= 30 (exec/execute ctx (:id fn-rec) nil)))
       (sp/close storage)))
 
@@ -1746,7 +1746,7 @@
                                :value 20})
           ;; Try to override :a via path-args - should be ignored
           ctx (exec/create-context {:storage storage
-                                    :path-args {[:a] 100}})]
+                                    :path-args {(:id arg-a) 100}})]
       ;; Should use DB value (10) not path-arg (100)
       (is (= 30 (exec/execute ctx (:id fn-rec) nil)))
       (sp/close storage)))
@@ -1768,7 +1768,7 @@
 
 
 (deftest path-args-nested-test
-  (testing "path-args provides values for nested function arguments"
+  (testing "path-args provides values for nested function via fn-result-value"
     (let [storage (create-test-storage)
           ;; Register identity function
           _ (exec/register-base-fn!
@@ -1792,19 +1792,21 @@
           inner-fn (sp/create-entity storage :fn
                                      {:name "inner"
                                       :fn-schema-id (:id id-schema)})
-          ;; outer's x -> inner (function reference, not :fn type - so it executes inner)
+          ;; Create fn-result-value for inner
+          inner-frv (sp/create-entity storage :fn-result-value
+                                      {:fn-id (:id inner-fn)})
+          ;; outer's x -> fn-result-value (which points to inner)
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id outer-fn)
                                :arg-schema-id (:id id-arg)
-                               :value (:id inner-fn)})
-          ;; inner's x is free - provide via path-args
-          ;; Path: [:x] from root (outer) -> inner's x at [:x :x]
+                               :value (:id inner-frv)})
+          ;; inner's x is free - provide via path-args using [frv-id arg-schema-id]
           ctx (exec/create-context {:storage storage
-                                    :path-args {[:x :x] 42}})]
+                                    :path-args {[(:id inner-frv) (:id id-arg)] 42}})]
       (is (= 42 (exec/execute ctx (:id outer-fn) nil)))
       (sp/close storage)))
 
-  (testing "path-args with different paths for same nested function"
+  (testing "path-args with different fn-result-values for same function"
     (let [storage (create-test-storage)
           ;; A function that takes two args and adds them
           _ (exec/register-base-fn!
@@ -1834,36 +1836,112 @@
           id-schema (sp/create-entity storage :fn-schema
                                       {:name "identity"
                                        :returned-type :int})
-          _id-arg (sp/create-entity storage :arg-schema
-                                    {:fn-schema-id (:id id-schema)
-                                     :name "x"
-                                     :type :int
-                                     :required true})
+          id-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id id-schema)
+                                    :name "x"
+                                    :type :int
+                                    :required true})
           ;; Create the identity function instance
           id-fn (sp/create-entity storage :fn
                                   {:name "id-fn"
                                    :fn-schema-id (:id id-schema)})
-          ;; id-fn's x is free - will be provided via different paths
+          ;; Create TWO fn-result-values for same id-fn (different computations)
+          frv-a (sp/create-entity storage :fn-result-value
+                                  {:fn-id (:id id-fn)})
+          frv-b (sp/create-entity storage :fn-result-value
+                                  {:fn-id (:id id-fn)})
           ;; Create add function instance
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
-          ;; add-fn's a and b both reference id-fn
+          ;; add-fn's a -> frv-a, b -> frv-b
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id add-fn)
                                :arg-schema-id (:id add-arg-a)
-                               :value (:id id-fn)})
+                               :value (:id frv-a)})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id add-fn)
                                :arg-schema-id (:id add-arg-b)
-                               :value (:id id-fn)})
-          ;; Provide different values for id-fn's x via different paths
-          ;; add-fn -> a -> id-fn -> x = 10
-          ;; add-fn -> b -> id-fn -> x = 32
+                               :value (:id frv-b)})
+          ;; Provide different values for id-fn's x via different fn-result-values
+          ;; frv-a's x = 10, frv-b's x = 32
           ctx (exec/create-context {:storage storage
-                                    :path-args {[:a :x] 10
-                                                [:b :x] 32}})]
+                                    :path-args {[(:id frv-a) (:id id-arg)] 10
+                                                [(:id frv-b) (:id id-arg)] 32}})]
       (is (= 42 (exec/execute ctx (:id add-fn) nil)))
+      (sp/close storage)))
+
+  (testing "HOF functions (direct fn refs) cannot receive path-args"
+    ;; This test verifies that direct fn refs with type=:fn do not get path-args
+    (let [storage (create-test-storage)
+          call-args (atom [])
+          ;; A map-like function that calls f with each item
+          _ (exec/register-base-fn!
+              :my-map
+              (fn [{:keys [f coll]} _ctx]
+                (mapv (fn [item] (@f {:item item})) @coll)))
+          ;; An identity function that records what it receives
+          _ (exec/register-base-fn!
+              :recorder
+              (fn [{:keys [item extra]} _ctx]
+                (swap! call-args conj {:item @item :extra (when extra @extra)})
+                @item))
+          ;; Create my-map fn-schema
+          map-schema (sp/create-entity storage :fn-schema
+                                       {:name "my-map"
+                                        :returned-type :jsonb})
+          map-arg-f (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id map-schema)
+                                       :name "f"
+                                       :type :fn  ; HOF!
+                                       :required true})
+          map-arg-coll (sp/create-entity storage :arg-schema
+                                         {:fn-schema-id (:id map-schema)
+                                          :name "coll"
+                                          :type :jsonb
+                                          :required true})
+          ;; Create recorder fn-schema
+          rec-schema (sp/create-entity storage :fn-schema
+                                       {:name "recorder"
+                                        :returned-type :int})
+          _rec-arg-item (sp/create-entity storage :arg-schema
+                                          {:fn-schema-id (:id rec-schema)
+                                           :name "item"
+                                           :type :int
+                                           :required true})
+          rec-arg-extra (sp/create-entity storage :arg-schema
+                                          {:fn-schema-id (:id rec-schema)
+                                           :name "extra"
+                                           :type :int
+                                           :required false})  ; Optional!
+          ;; Create recorder fn instance
+          rec-fn (sp/create-entity storage :fn
+                                   {:name "rec-fn"
+                                    :fn-schema-id (:id rec-schema)})
+          ;; Create my-map fn instance
+          map-fn (sp/create-entity storage :fn
+                                   {:name "map-fn"
+                                    :fn-schema-id (:id map-schema)})
+          ;; map-fn's f -> rec-fn (direct ref, HOF)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id map-fn)
+                               :arg-schema-id (:id map-arg-f)
+                               :value (:id rec-fn)})
+          ;; map-fn's coll -> [1 2 3]
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id map-fn)
+                               :arg-schema-id (:id map-arg-coll)
+                               :value [1 2 3]})
+          ;; Try to provide path-args for rec-fn's extra - but this should NOT work
+          ;; because rec-fn is accessed via direct fn ref (HOF), not fn-result-value
+          ;; We use some random UUID as "fake frv-id" to ensure it won't match
+          fake-frv-id (random-uuid)
+          ctx (exec/create-context {:storage storage
+                                    :path-args {[fake-frv-id (:id rec-arg-extra)] 999}})]
+      ;; Execute - rec-fn's extra should be nil (not 999) because HOF doesn't get path-args
+      (is (= [1 2 3] (exec/execute ctx (:id map-fn) nil)))
+      ;; Verify extra was nil in all calls
+      (is (every? #(nil? (:extra %)) @call-args))
       (sp/close storage))))
 
 

@@ -41,19 +41,30 @@
                    fully even if it exceeds the timeout. For hard timeouts on
                    individual operations, base functions should use their own
                    timeout mechanisms (e.g., future with deref timeout).
-   - :path-args - Map of {path -> value} for runtime args by path (optional)
-                  Path is a vector of arg-name keywords from root function.
+   - :path-args - Map of runtime args for free arguments (optional):
+                  * For root function: {arg-schema-id -> value}
+                  * For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
                   Only args NOT already defined in DB can be set this way.
                   Attempts to override DB-defined args will log a warning and be ignored.
+
+                  IMPORTANT: Direct fn refs (HOF, type=:fn) cannot receive path-args.
+                  HOF functions are 'black boxes' controlled by map/reduce/etc.
+                  Only functions referenced via fn-result-value can have their
+                  free args set via path-args.
 
    Example with custom base-fns:
    (create-context {:storage s
                     :base-fns {:add my-add-fn :if my-if-fn}})
 
-   Example with path-args (providing runtime arg 'x' to nested function via path):
-   ;; If function A uses B at arg :b, and B has free arg :x
+   Example with path-args for root function:
+   ;; Root function has free arg with schema-id x-schema-id
    (create-context {:storage s
-                    :path-args {[:b :x] 10}})  ; sets :x arg of B to 10"
+                    :path-args {x-schema-id 42}})
+
+   Example with path-args for nested function via fn-result-value:
+   ;; fn-result-value frv-1 references function B, which has free arg with schema-id y-schema-id
+   (create-context {:storage s
+                    :path-args {[frv-1 y-schema-id] 100}})"
   [opts]
   (core/create-context opts))
 

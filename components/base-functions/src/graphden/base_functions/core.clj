@@ -12,17 +12,14 @@
 
    All functions are defined using the defbase macro which handles
    automatic argument dereferencing. Arguments are passed as delays
-   and automatically deref'd unless marked as :lazy.
-
-   HOF functions receive fn-id (not callable) for :fn type args and use
-   make-single-arg-callable to create appropriate callables.
+   and automatically deref'd. Arguments with :fn type are automatically
+   wrapped as callables via make-single-arg-callable.
 
    Registration and storage sync should be done by consuming components
    using fn-registry."
   (:require
     [clojure.math :as math]
     [clojure.string :as str]
-    [graphden.executor.interface :as exec]
     [graphden.fn-registry.macros :refer [defbase]]))
 
 
@@ -493,76 +490,66 @@
 
 
 ;; === Higher-Order Functions ===
-;; Note: :fn type args return fn-id (UUID) after deref.
-;; HOF use exec/make-single-arg-callable to create callables that accept single values.
-;; This means user functions must have exactly 1 required argument (any name).
+;; Note: :fn type args are automatically wrapped as callables by defbase.
+;; User functions must have exactly 1 required argument (any name).
 ;; For reduce, user function takes a single arg which receives [acc item] vector.
 
 (defbase map-fn
   {:args {:f :fn, :coll :jsonb}
    :return-type :jsonb}
-  (let [callable (exec/make-single-arg-callable ctx f)]
-    (mapv callable coll)))
+  (mapv f coll))
 
 
 (defbase filter-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :jsonb}
-  (let [callable (exec/make-single-arg-callable ctx pred)]
-    (filterv callable coll)))
+  (filterv pred coll))
 
 
 (defbase reduce-fn
   {:args {:f :fn, :init :any, :coll :jsonb}
    :return-type :any}
   ;; reduce passes [acc item] as single vector to the function
-  (let [callable (exec/make-single-arg-callable ctx f)]
-    (reduce (fn [acc item] (callable [acc item])) init coll)))
+  (reduce (fn [acc item] (f [acc item])) init coll))
 
 
 (defbase some-base-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :any}
-  (let [callable (exec/make-single-arg-callable ctx pred)]
-    (some (fn [item]
-            (when-let [result (callable item)]
-              result))
-          coll)))
+  (some (fn [item]
+          (when-let [result (pred item)]
+            result))
+        coll))
 
 
 (defbase every?-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :bool}
-  (let [callable (exec/make-single-arg-callable ctx pred)]
-    (every? callable coll)))
+  (every? pred coll))
 
 
 (defbase find-first-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :any}
-  (let [callable (exec/make-single-arg-callable ctx pred)]
-    (first (filter callable coll))))
+  (first (filter pred coll)))
 
 
 (defbase group-by-fn
   {:args {:key-fn :fn, :coll :jsonb}
    :return-type :jsonb}
-  (let [callable (exec/make-single-arg-callable ctx key-fn)]
-    (group-by callable coll)))
+  (group-by key-fn coll))
 
 
 (defbase sort-by-fn
   {:args {:key-fn :fn, :coll :jsonb}
    :return-type :jsonb}
-  (let [callable (exec/make-single-arg-callable ctx key-fn)]
-    (vec (sort-by callable coll))))
+  (vec (sort-by key-fn coll)))
 
 
 (defbase apply-fn
   {:args {:f :fn, :args :jsonb}
    :return-type :any}
-  (let [callable (exec/make-single-arg-callable ctx f)]
-    (callable args)))
+  (f args))
 
 
 (defbase identity-fn

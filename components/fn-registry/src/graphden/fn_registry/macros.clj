@@ -47,9 +47,10 @@
    |----------|---------|
    | `:int`, `:text`, `:bool`, etc. | Use directly: `(+ a b)` → `(+ @a @b)` |
    | `:jsonb` | Use directly: `(first coll)` → `(first @coll)` |
-   | `:fn` | Callable: `(f {:item x})` → `(@f {:item x})` |
+   | `:fn` | Auto-callable: `(f item)` → `((make-callable @f) item)` |
 
-   All arguments are automatically dereferenced at their usage sites.
+   Arguments with `:fn` type are automatically wrapped as callables that
+   accept a single argument. This eliminates boilerplate in HOF definitions.
 
    ## Examples
 
@@ -74,14 +75,15 @@
    ;; Only one of @then or @else is evaluated!
    ```
 
-   ### Higher-order functions
+   ### Higher-order functions (automatic callable)
 
    ```clojure
    (defbase map-fn
      {:args {:f :fn, :coll :jsonb}
       :return-type :jsonb}
-     (mapv (fn [item] (f {:item item})) coll))
-   ;; Body becomes: (mapv (fn [item] (@f {:item item})) @coll)
+     (mapv f coll))
+   ;; Body becomes: (mapv (make-callable @f) @coll)
+   ;; No need to manually call make-single-arg-callable!
    ```
 
    ## Manual Definition (without macro)
@@ -89,18 +91,31 @@
    If you need full control, define functions manually:
 
    ```clojure
+   ;; Simple function - deref args manually
    (def my-fn
      {:args {:a :int, :b :int}
       :return-type :int
       :impl (fn [{:keys [a b]} ctx]
               (+ @a @b))})
+
+   ;; HOF with :fn arg - create callable manually
+   (require '[graphden.executor.interface :as exec])
+
+   (def my-map
+     {:args {:f :fn, :coll :jsonb}
+      :return-type :jsonb
+      :impl (fn [{:keys [f coll]} ctx]
+              (let [callable (exec/make-single-arg-callable ctx @f)]
+                (mapv callable @coll)))})
    ```
 
    ## Context Parameter
 
    The execution context `ctx` is available in the function body but rarely
    needed. It's primarily used for advanced scenarios like nested execution
-   or accessing storage directly.")
+   or accessing storage directly."
+  (:require
+    [graphden.executor.interface :as exec]))
 
 
 (defn- binding-form?
@@ -151,52 +166,67 @@
       :else #{})))
 
 
+(defn- get-arg-type
+  "Extracts type from arg spec. Handles both keyword shorthand and map form."
+  [arg-spec]
+  (if (map? arg-spec)
+    (:type arg-spec)
+    arg-spec))
+
+
 (defn- transform-body
-  "Walks the body and replaces argument symbols with (deref arg) calls.
-   Handles nil args safely with (when arg (deref arg)) pattern.
+  "Walks the body and replaces argument symbols with appropriate transforms:
+   - Regular args: (when arg (deref arg))
+   - :fn type args: (exec/make-single-arg-callable ctx (deref arg))
+
    Respects lexical scope - does not replace symbols that are shadowed
    by local bindings (fn params, let bindings, etc.)."
-  [body arg-syms]
+  [body arg-syms fn-arg-syms]
   (letfn [(transform
-            [form active-args]
+            [form active-args active-fn-args]
             (cond
               ;; If no active args to replace, return as-is
-              (empty? active-args)
+              (and (empty? active-args) (empty? active-fn-args))
               form
 
-              ;; Symbol that should be replaced
+              ;; Symbol that is a :fn type arg - wrap as callable
+              (and (symbol? form) (active-fn-args form))
+              `(exec/make-single-arg-callable ~'ctx (deref ~form))
+
+              ;; Symbol that should be replaced with deref
               (and (symbol? form) (active-args form))
               `(when ~form (deref ~form))
 
-              ;; Binding form - remove shadowed symbols from active set
+              ;; Binding form - remove shadowed symbols from active sets
               (binding-form? form)
               (let [bound (extract-bound-symbols form)
-                    new-active (apply disj active-args bound)]
-                ;; Recursively transform children with updated active set
-                (apply list (map #(transform % new-active) form)))
+                    new-active (apply disj active-args bound)
+                    new-fn-active (apply disj active-fn-args bound)]
+                ;; Recursively transform children with updated active sets
+                (apply list (map #(transform % new-active new-fn-active) form)))
 
               ;; Other sequences - transform children
               (seq? form)
-              (apply list (map #(transform % active-args) form))
+              (apply list (map #(transform % active-args active-fn-args) form))
 
               ;; Vectors
               (vector? form)
-              (mapv #(transform % active-args) form)
+              (mapv #(transform % active-args active-fn-args) form)
 
               ;; Maps
               (map? form)
               (into {} (map (fn [[k v]]
-                              [(transform k active-args)
-                               (transform v active-args)])
+                              [(transform k active-args active-fn-args)
+                               (transform v active-args active-fn-args)])
                             form))
 
               ;; Sets
               (set? form)
-              (set (map #(transform % active-args) form))
+              (set (map #(transform % active-args active-fn-args) form))
 
               ;; Everything else - return as-is
               :else form))]
-    (transform body (set arg-syms))))
+    (transform body (set arg-syms) (set fn-arg-syms))))
 
 
 (defmacro defbase
@@ -211,7 +241,8 @@
    - body: Function body expressions
 
    Behavior:
-   - All argument symbols in body are replaced with (deref arg)
+   - Regular argument symbols in body are replaced with (when arg (deref arg))
+   - :fn type arguments are auto-wrapped as callables via make-single-arg-callable
    - Deref happens at usage site, preserving short-circuit evaluation
    - The symbol `ctx` is bound to execution context in body
 
@@ -223,6 +254,12 @@
       :return-type :int}
      (+ a b))
    ;; Body becomes: (+ @a @b)
+
+   (defbase map-fn
+     {:args {:f :fn, :coll :jsonb}
+      :return-type :jsonb}
+     (mapv f coll))
+   ;; Body becomes: (mapv (make-single-arg-callable ctx @f) @coll)
    ```"
   {:arglists '([name docstring? opts & body])}
   [fn-name & macro-args]
@@ -230,13 +267,24 @@
                                   macro-args
                                   (cons nil macro-args))
         {:keys [args return-type]} opts
-        ;; Convert keyword arg names to symbols for use in generated code
-        arg-syms (for [[k _v] args]
-                   (if (keyword? k) (symbol (clojure.core/name k)) k))
-        ;; Transform body to add deref at usage sites
-        transformed-body (map #(transform-body % arg-syms) body)
+        ;; Separate :fn type args from regular args
+        fn-type-args (into {}
+                           (filter (fn [[_k v]] (= :fn (get-arg-type v)))
+                                   args))
+        regular-args (into {}
+                           (remove (fn [[_k v]] (= :fn (get-arg-type v)))
+                                   args))
+        ;; Convert keyword arg names to symbols
+        all-arg-syms (for [[k _v] args]
+                       (if (keyword? k) (symbol (clojure.core/name k)) k))
+        fn-arg-syms (for [[k _v] fn-type-args]
+                      (if (keyword? k) (symbol (clojure.core/name k)) k))
+        regular-arg-syms (for [[k _v] regular-args]
+                           (if (keyword? k) (symbol (clojure.core/name k)) k))
+        ;; Transform body to add deref/callable at usage sites
+        transformed-body (map #(transform-body % regular-arg-syms fn-arg-syms) body)
         ;; Build the impl function
-        impl-fn `(fn [{:keys [~@arg-syms]} ~'ctx]
+        impl-fn `(fn [{:keys [~@all-arg-syms]} ~'ctx]
                    ~@transformed-body)]
     `(def ~fn-name
        ~@(when docstring [docstring])

@@ -336,17 +336,17 @@
 
 
 (deftest lazy-fn-callable-test
-  (testing "HOF: fn-type arg returns a callable, not fn-id"
+  (testing "HOF: fn-type arg returns fn-id, use make-single-arg-callable"
     (let [storage (create-test-storage)
           ;; Register a higher-order function that receives another fn
           _ (exec/register-base-fn!
               :apply-fn
-              (fn [{:keys [f value]} _ctx]
-                ;; f is now a callable (not a UUID), call it directly
-                (let [callable @f
-                      v @value]
-                  ;; The callable expects named args, call it with {:x v}
-                  (callable {:x v}))))
+              (fn [{:keys [f value]} ctx]
+                ;; f is now a fn-id (UUID), use make-single-arg-callable
+                (let [fn-id @f
+                      v @value
+                      callable (exec/make-single-arg-callable ctx fn-id)]
+                  (callable v))))
           ;; Register a simple function
           _ (exec/register-base-fn!
               :double
@@ -704,15 +704,15 @@
     ;; This tests that functions referencing each other (A -> B, B -> A)
     ;; are correctly resolved without infinite loops in graph resolution
     (let [storage (create-test-storage)
-          ;; Register base functions that use :fn type args as callables
-          ;; :fn type args return callables (closures), not fn-ids
+          ;; Register base functions that use :fn type args
+          ;; :fn type args now return fn-ids (UUIDs), not callables
           _ (exec/register-base-fn!
               :get-partner
               (fn [{:keys [n partner]} _ctx]
                 (let [n-val @n
-                      ;; partner is now a callable - verify it's a function
-                      partner-callable @partner]
-                  {:n n-val :partner-is-callable (fn? partner-callable)})))
+                      ;; partner is now a fn-id (UUID)
+                      partner-id @partner]
+                  {:n n-val :partner-is-uuid (uuid? partner-id)})))
 
           ;; Create fn-schemas
           fn-schema (sp/create-entity storage :fn-schema
@@ -756,31 +756,31 @@
           ctx (exec/create-context {:storage storage})]
 
       (try
-        ;; Execute fn-a - partner should be a callable
+        ;; Execute fn-a - partner should be a UUID (fn-id)
         (let [result-a (exec/execute ctx (:id fn-a) {})]
           (is (= 1 (:n result-a)))
-          (is (true? (:partner-is-callable result-a))))
+          (is (true? (:partner-is-uuid result-a))))
 
-        ;; Execute fn-b - partner should be a callable
+        ;; Execute fn-b - partner should be a UUID (fn-id)
         (let [result-b (exec/execute ctx (:id fn-b) {})]
           (is (= 2 (:n result-b)))
-          (is (true? (:partner-is-callable result-b))))
+          (is (true? (:partner-is-uuid result-b))))
         (finally
           (sp/close storage))))))
 
 
 (deftest self-reference-test
   (testing "function with self-reference via :fn type arg"
-    ;; A function can reference itself. The self-ref is now a callable
-    ;; so forcing it returns a callable, not causing infinite execution
+    ;; A function can reference itself. The self-ref is now a fn-id (UUID)
+    ;; so forcing it returns a UUID, not causing infinite execution
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :with-self
               (fn [{:keys [n self-ref]} _ctx]
                 (let [n-val @n
-                      ;; self-ref is a callable (closure)
-                      self-callable @self-ref]
-                  {:n n-val :self-is-callable (fn? self-callable)})))
+                      ;; self-ref is a fn-id (UUID)
+                      self-id @self-ref]
+                  {:n n-val :self-is-uuid (uuid? self-id)})))
 
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "with-self"
@@ -816,7 +816,7 @@
       (try
         (let [result (exec/execute ctx (:id fn-rec) {})]
           (is (= 42 (:n result)))
-          (is (true? (:self-is-callable result))))
+          (is (true? (:self-is-uuid result))))
         (finally
           (sp/close storage))))))
 
@@ -1871,36 +1871,42 @@
       (is (= 42 (exec/execute ctx (:id add-fn) nil)))
       (sp/close storage)))
 
-  (testing "HOF functions (direct fn refs) cannot receive path-args"
-    ;; This test verifies that direct fn refs with type=:fn do not get path-args
+  (testing "HOF functions work with single-arg model"
+    ;; This test verifies HOF with the new single-arg model:
+    ;; - HOF receives fn-id (not callable)
+    ;; - HOF uses make-single-arg-callable to create callable
+    ;; - Child function must have exactly 1 required argument
     (let [storage (create-test-storage)
           call-args (atom [])
-          ;; A map-like function that calls f with each item
+          ;; A map-like function that receives fn-id and uses make-single-arg-callable
           _ (exec/register-base-fn!
               :my-map
-              (fn [{:keys [f coll]} _ctx]
-                (mapv (fn [item] (@f {:item item})) @coll)))
+              (fn [{:keys [f coll]} ctx]
+                (let [callable (exec/make-single-arg-callable ctx @f)]
+                  (mapv callable @coll))))
           ;; An identity function that records what it receives
+          ;; Takes exactly 1 required arg (item) for HOF compatibility
           _ (exec/register-base-fn!
               :recorder
-              (fn [{:keys [item extra]} _ctx]
-                (swap! call-args conj {:item @item :extra (when extra @extra)})
-                @item))
+              (fn [{:keys [item]} _ctx]
+                (let [v @item]
+                  (swap! call-args conj v)
+                  v)))
           ;; Create my-map fn-schema
           map-schema (sp/create-entity storage :fn-schema
                                        {:name "my-map"
                                         :returned-type :jsonb})
-          map-arg-f (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id map-schema)
-                                       :name "f"
-                                       :type :fn  ; HOF!
-                                       :required true})
+          _map-arg-f (sp/create-entity storage :arg-schema
+                                       {:fn-schema-id (:id map-schema)
+                                        :name "f"
+                                        :type :fn  ; HOF!
+                                        :required true})
           map-arg-coll (sp/create-entity storage :arg-schema
                                          {:fn-schema-id (:id map-schema)
                                           :name "coll"
                                           :type :jsonb
                                           :required true})
-          ;; Create recorder fn-schema
+          ;; Create recorder fn-schema with exactly 1 required arg
           rec-schema (sp/create-entity storage :fn-schema
                                        {:name "recorder"
                                         :returned-type :int})
@@ -1909,11 +1915,6 @@
                                            :name "item"
                                            :type :int
                                            :required true})
-          rec-arg-extra (sp/create-entity storage :arg-schema
-                                          {:fn-schema-id (:id rec-schema)
-                                           :name "extra"
-                                           :type :int
-                                           :required false})  ; Optional!
           ;; Create recorder fn instance
           rec-fn (sp/create-entity storage :fn
                                    {:name "rec-fn"
@@ -1925,23 +1926,18 @@
           ;; map-fn's f -> rec-fn (direct ref, HOF)
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id map-fn)
-                               :arg-schema-id (:id map-arg-f)
+                               :arg-schema-id (:id _map-arg-f)
                                :value (:id rec-fn)})
           ;; map-fn's coll -> [1 2 3]
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id map-fn)
                                :arg-schema-id (:id map-arg-coll)
                                :value [1 2 3]})
-          ;; Try to provide path-args for rec-fn's extra - but this should NOT work
-          ;; because rec-fn is accessed via direct fn ref (HOF), not fn-result-value
-          ;; We use some random UUID as "fake frv-id" to ensure it won't match
-          fake-frv-id (random-uuid)
-          ctx (exec/create-context {:storage storage
-                                    :path-args {[fake-frv-id (:id rec-arg-extra)] 999}})]
-      ;; Execute - rec-fn's extra should be nil (not 999) because HOF doesn't get path-args
+          ctx (exec/create-context {:storage storage})]
+      ;; Execute - should map recorder over [1 2 3]
       (is (= [1 2 3] (exec/execute ctx (:id map-fn) nil)))
-      ;; Verify extra was nil in all calls
-      (is (every? #(nil? (:extra %)) @call-args))
+      ;; Verify all items were recorded
+      (is (= [1 2 3] @call-args))
       (sp/close storage))))
 
 

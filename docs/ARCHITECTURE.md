@@ -474,13 +474,13 @@ fn: report
              (exec/force-value else ctx)))})
 
 ;; HOF - f is passed as fn-id (type :fn)
+;; The target function must have exactly 1 required argument (any name)
 (def map-def
   {:args {:f :fn, :coll :jsonb}
    :return-type :jsonb
    :impl (fn [{:keys [f coll]} ctx]
-           (mapv (fn [item]
-                   (exec/execute-with-named-args ctx f {:item item}))
-                 coll))})
+           (let [callable (exec/make-single-arg-callable ctx f)]
+             (mapv callable coll)))})
 ```
 
 ### Execution Context
@@ -558,6 +558,77 @@ fn: report
 ```
 
 **Important**: Direct fn refs (HOF with type=:fn) cannot receive path-args. They are "black boxes" controlled by map/reduce/filter. Only functions referenced via `fn-result-value` can have their free args set externally.
+
+### HOF Single-Argument Model
+
+Higher-order functions (map, filter, reduce, etc.) use a **single-argument model** for the functions they invoke:
+
+**Key principle**: Functions passed to HOF must have exactly **one required argument** (any name).
+
+```clojure
+;; Function for map/filter - one required arg
+(defbase is-positive
+  {:args {:n :int}   ; exactly 1 required arg
+   :return-type :bool}
+  (> n 0))
+
+;; Function for reduce - one required arg receiving [acc item] vector
+(defbase sum-pair
+  {:args {:pair :jsonb}  ; exactly 1 required arg
+   :return-type :int}
+  (let [[acc item] pair]
+    (+ acc item)))
+```
+
+**How HOF works internally:**
+
+1. HOF receives `fn-id` (UUID) for the `:fn` type argument
+2. HOF calls `exec/make-single-arg-callable` to create a callable
+3. `make-single-arg-callable` finds the single required arg-schema and creates a function that passes values to it
+
+```clojure
+;; Inside map implementation
+(defbase map-fn
+  {:args {:f :fn, :coll :jsonb}
+   :return-type :jsonb}
+  (let [callable (exec/make-single-arg-callable ctx f)]
+    (mapv callable coll)))
+
+;; Inside reduce implementation
+(defbase reduce-fn
+  {:args {:f :fn, :init :any, :coll :jsonb}
+   :return-type :any}
+  (let [callable (exec/make-single-arg-callable ctx f)]
+    (reduce (fn [acc item] (callable [acc item])) init coll)))
+```
+
+**Why single-arg model:**
+
+1. **No naming convention** — user can name their argument anything (`n`, `x`, `value`, etc.)
+2. **Simple API** — HOF doesn't need to know argument names
+3. **Consistent behavior** — all HOF work the same way
+4. **Explicit for reduce** — `[acc item]` vector makes it clear what the function receives
+
+**Usage example in graph:**
+
+```
+;; 1. Create function for doubling
+fn-schema: double-fn-schema
+  arg-schema: x (type: :int, required: true)  ← exactly 1 required arg
+  returned-type: :int
+
+fn: double-fn
+  fn-schema-id: double-fn-schema
+
+;; 2. Use in map
+fn: map-doubles
+  fn-schema-id: map-schema
+  arg-value: f -> ref<double-fn>      ← fn reference
+  arg-value: coll -> [1, 2, 3]        ← literal
+
+;; 3. Execute: map calls double-fn with each element
+;; Result: [2, 4, 6]
+```
 
 ---
 

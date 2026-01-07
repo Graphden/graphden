@@ -14,10 +14,14 @@
    automatic argument dereferencing. Arguments are passed as delays
    and automatically deref'd unless marked as :lazy.
 
+   HOF functions receive fn-id (not callable) for :fn type args and use
+   make-single-arg-callable to create appropriate callables.
+
    Registration and storage sync should be done by consuming components
    using fn-registry."
   (:require
     [clojure.string :as str]
+    [graphden.executor.interface :as exec]
     [graphden.fn-registry.macros :refer [defbase]]))
 
 
@@ -461,63 +465,106 @@
 
 
 ;; === Higher-Order Functions ===
-;; Note: :fn type args are callables (invoke with named args map)
+;; Note: :fn type args return fn-id (UUID) after deref.
+;; HOF use exec/make-single-arg-callable to create callables that accept single values.
+;; This means user functions must have exactly 1 required argument (any name).
+;; For reduce, user function takes a single arg which receives [acc item] vector.
+
+(defn- make-hof-callable
+  "Creates a callable for HOF. If f is already a function (for testing),
+   wraps it to accept single value. If f is a UUID (fn-id), uses executor."
+  [execution-ctx f]
+  (if (fn? f)
+    ;; Legacy/testing mode: f is already a Clojure function
+    ;; Wrap it to accept single value instead of {:item item}
+    (fn [value] (f {:item value}))
+    ;; Production mode: f is fn-id, create callable via executor
+    (exec/make-single-arg-callable execution-ctx f)))
+
+
+(defn- make-reduce-callable
+  "Creates a callable for reduce. If f is already a function (for testing),
+   wraps it. If f is a UUID (fn-id), uses executor."
+  [execution-ctx f]
+  (if (fn? f)
+    ;; Legacy/testing mode: f accepts {:acc a :item b}
+    (fn [[acc item]] (f {:acc acc :item item}))
+    ;; Production mode: f is fn-id, function takes single arg [acc item]
+    (exec/make-single-arg-callable execution-ctx f)))
+
 
 (defbase map-fn
   {:args {:f :fn, :coll :jsonb}
    :return-type :jsonb}
-  (mapv (fn [item] (f {:item item})) coll))
+  (let [callable (make-hof-callable ctx f)]
+    (mapv callable coll)))
 
 
 (defbase filter-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :jsonb}
-  (filterv (fn [item] (pred {:item item})) coll))
+  (let [callable (make-hof-callable ctx pred)]
+    (filterv callable coll)))
 
 
 (defbase reduce-fn
   {:args {:f :fn, :init :any, :coll :jsonb}
    :return-type :any}
-  (reduce (fn [acc item] (f {:acc acc :item item})) init coll))
+  ;; reduce passes [acc item] as single vector to the function
+  (let [callable (make-reduce-callable ctx f)]
+    (reduce (fn [acc item] (callable [acc item])) init coll)))
 
 
 (defbase some-base-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :any}
-  (some (fn [item]
-          (when-let [result (pred {:item item})]
-            result))
-        coll))
+  (let [callable (make-hof-callable ctx pred)]
+    (some (fn [item]
+            (when-let [result (callable item)]
+              result))
+          coll)))
 
 
 (defbase every?-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :bool}
-  (every? (fn [item] (pred {:item item})) coll))
+  (let [callable (make-hof-callable ctx pred)]
+    (every? callable coll)))
 
 
 (defbase find-first-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :any}
-  (first (filter (fn [item] (pred {:item item})) coll)))
+  (let [callable (make-hof-callable ctx pred)]
+    (first (filter callable coll))))
 
 
 (defbase group-by-fn
   {:args {:key-fn :fn, :coll :jsonb}
    :return-type :jsonb}
-  (group-by (fn [item] (key-fn {:item item})) coll))
+  (let [callable (make-hof-callable ctx key-fn)]
+    (group-by callable coll)))
 
 
 (defbase sort-by-fn
   {:args {:key-fn :fn, :coll :jsonb}
    :return-type :jsonb}
-  (vec (sort-by (fn [item] (key-fn {:item item})) coll)))
+  (let [callable (make-hof-callable ctx key-fn)]
+    (vec (sort-by callable coll))))
 
 
 (defbase apply-fn
   {:args {:f :fn, :args :jsonb}
    :return-type :any}
-  (f args))
+  ;; apply passes the args directly to the function
+  ;; For legacy/testing (Clojure fn): call with args as-is
+  ;; For production (UUID): use make-single-arg-callable
+  (if (fn? f)
+    ;; Legacy mode: f is already a Clojure fn expecting args directly
+    (f args)
+    ;; Production mode: f is fn-id, create callable
+    (let [callable (exec/make-single-arg-callable ctx f)]
+      (callable args))))
 
 
 (defbase identity-fn

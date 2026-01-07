@@ -305,30 +305,54 @@
          :arg-values arg-values}))))
 
 
-(defn- make-callable
-  "Creates a callable function that executes a graph function with named args.
-   Used for :fn type arguments in HOF."
+(defn- get-required-arg-schemas
+  "Returns a sequence of required arg-schemas for a function.
+   Used by HOF helpers to find function's required arguments."
+  [execution-graph fn-id]
+  (let [{:keys [arg-schemas]} (get-fn-data-from-graph execution-graph fn-id)]
+    (->> arg-schemas
+         vals
+         (filter #(:required % true)))))  ; default required=true
+
+
+(defn get-single-required-arg
+  "Gets the single required arg-schema for a function.
+   Used by HOF (map, filter, etc.) to find the target argument.
+
+   Returns {:id arg-schema-id :name arg-name :type arg-type}
+
+   Throws if the function doesn't have exactly one required argument."
   [context fn-id]
-  (fn [named-args]
-    (let [{:keys [arg-schemas]} (get-fn-data-from-graph (:execution-graph context) fn-id)
-          ;; Convert named-args to schema-id based args
-          name->schema-id (reduce-kv
-                            (fn [acc schema-id schema]
-                              (assoc acc (keyword (:name schema)) schema-id))
-                            {}
-                            arg-schemas)
-          id-based-args (reduce-kv
-                          (fn [acc arg-name value]
-                            (if-let [schema-id (get name->schema-id arg-name)]
-                              (assoc acc schema-id value)
-                              (throw (ex-info (str "Unknown argument name: " arg-name)
-                                              {:type :execution-error/unknown-arg-name
-                                               :arg-name arg-name
-                                               :fn-id fn-id
-                                               :available-args (keys name->schema-id)}))))
-                          {}
-                          named-args)]
-      (execute-internal context fn-id id-based-args))))
+  (let [required-args (get-required-arg-schemas (:execution-graph context) fn-id)
+        count-required (count required-args)]
+    (when (not= count-required 1)
+      (throw (ex-info (str "HOF function requires exactly 1 required argument, got " count-required)
+                      {:type :execution-error/invalid-hof-function
+                       :fn-id fn-id
+                       :required-arg-count count-required
+                       :required-args (mapv #(select-keys % [:id :name :type]) required-args)})))
+    (let [arg-schema (first required-args)]
+      {:id (:id arg-schema)
+       :name (:name arg-schema)
+       :type (:type arg-schema)})))
+
+
+(defn make-single-arg-callable
+  "Creates a callable for a function with exactly one required argument.
+   The callable accepts a single value (not a map) and passes it to that argument.
+
+   Used by HOF (map, filter, etc.) to call user functions without requiring
+   specific argument names.
+
+   Example:
+   ;; User function 'double' has one arg :x
+   ;; (callable 5) calls double with {:x-schema-id 5}
+
+   Returns a function: value -> result"
+  [context fn-id]
+  (let [arg-schema-id (:id (get-single-required-arg context fn-id))]
+    (fn [value]
+      (execute-internal context fn-id {arg-schema-id value}))))
 
 
 (defn- execute-fn-result-value
@@ -389,10 +413,10 @@
 
         ;; It's a direct fn reference with :fn type -> HOF
         (= arg-type :fn)
-        ;; HOF: create callable WITHOUT path-args (clear current-frv-id)
-        ;; HOF functions are "black boxes" - their free args cannot be set from outside
-        (let [hof-context (assoc context :current-frv-id nil)]
-          (delay (make-callable hof-context value)))
+        ;; HOF: return fn-id directly (not callable)
+        ;; HOF functions use get-single-required-arg or make-single-arg-callable
+        ;; to create appropriate callables based on their needs
+        (delay value)
 
         :else
         ;; Direct fn ref with non-:fn type: execute (legacy behavior, no path-args)
@@ -444,7 +468,6 @@
       (fn [acc arg-schema-id arg-schema]
         (let [arg-name (:name arg-schema)
               arg-name-kw (keyword arg-name)
-              arg-type (:type arg-schema)
               ;; Legacy provided-args (for HOF callable calls)
               provided-value (get provided-args arg-schema-id)
               ;; Path-based arg from context (uses new [frv-id arg-schema-id] or arg-schema-id key)
@@ -456,13 +479,9 @@
             (some? provided-value)
             (do
               (validate-provided-arg-type! provided-value arg-schema)
-              (if (= arg-type :fn)
-                ;; For :fn type, provided-value should be a fn-id, create callable
-                ;; HOF context: clear current-frv-id (no path-args for HOF)
-                (let [hof-context (assoc context :current-frv-id nil)]
-                  (assoc acc arg-name-kw (delay (make-callable hof-context provided-value))))
-                ;; For other types, just wrap the value
-                (assoc acc arg-name-kw (delay provided-value))))
+              ;; For :fn type, provided-value is fn-id, just wrap it
+              ;; HOF will use make-single-arg-callable to create appropriate callable
+              (assoc acc arg-name-kw (delay provided-value)))
 
             ;; 2. Path-arg value exists
             (some? path-arg-value)
@@ -479,11 +498,9 @@
               ;; No DB value - use path-arg
               (do
                 (validate-provided-arg-type! path-arg-value arg-schema)
-                (if (= arg-type :fn)
-                  ;; HOF context: clear current-frv-id
-                  (let [hof-context (assoc context :current-frv-id nil)]
-                    (assoc acc arg-name-kw (delay (make-callable hof-context path-arg-value))))
-                  (assoc acc arg-name-kw (delay path-arg-value)))))
+                ;; For :fn type, path-arg-value is fn-id, just wrap it
+                ;; HOF will use make-single-arg-callable to create appropriate callable
+                (assoc acc arg-name-kw (delay path-arg-value))))
 
             ;; 3. Stored arg-value exists - use build-delay
             arg-value

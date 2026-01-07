@@ -201,3 +201,50 @@
    - All errors from execute-with-named-args"
   [context fn-name named-args]
   (core/execute-by-name context fn-name named-args))
+
+
+;; === HOF Helpers ===
+
+(defn get-single-required-arg
+  "Gets the single required arg-schema for a function.
+   Used by HOF (map, filter, etc.) to find the target argument.
+
+   Arguments:
+   - context: Execution context with execution-graph populated
+   - fn-id: UUID of the function to inspect
+
+   Returns {:id arg-schema-id :name arg-name :type arg-type}
+
+   Throws :execution-error/invalid-hof-function if the function doesn't have
+   exactly one required argument.
+
+   Example:
+   ;; In a map implementation:
+   (let [{:keys [id]} (get-single-required-arg ctx fn-id)]
+     (mapv (fn [item] (execute ctx fn-id {id item})) coll))"
+  [context fn-id]
+  (core/get-single-required-arg context fn-id))
+
+
+(defn make-single-arg-callable
+  "Creates a callable for a function with exactly one required argument.
+   The callable accepts a single value (not a map) and passes it to that argument.
+
+   Used by HOF (map, filter, etc.) to call user functions without requiring
+   specific argument names.
+
+   Arguments:
+   - context: Execution context with execution-graph populated
+   - fn-id: UUID of the function (must have exactly 1 required arg)
+
+   Returns a function: value -> result
+
+   Example:
+   ;; User function 'double' has one arg :x (any name works)
+   (let [callable (make-single-arg-callable ctx fn-id)]
+     (mapv callable [1 2 3]))  ; => [2 4 6]
+
+   Throws :execution-error/invalid-hof-function if the function doesn't have
+   exactly one required argument."
+  [context fn-id]
+  (core/make-single-arg-callable context fn-id))

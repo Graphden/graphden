@@ -92,19 +92,50 @@ Arguments are passed as thunks (lazy values). Use `force-value` to get the actua
 
 ### Higher-Order Functions
 
-For `:fn` type arguments, `force-value` returns the fn-id without executing:
+For `:fn` type arguments, `force-value` returns the fn-id (UUID) without executing.
+
+**Single-Argument Model**: Functions passed to HOF must have exactly **one required argument** (any name). This eliminates naming convention problems — users don't need to know that `map` expects `:item` or `reduce` expects `:acc`.
+
+Use `make-single-arg-callable` to create a callable that automatically finds the single required argument:
+
+```clojure
+(exec/register-base-fn!
+  :my-map
+  (fn [{:keys [f coll]} ctx]
+    ;; f is a :fn type - forcing returns fn-id (UUID)
+    (let [fn-id (exec/force-value f ctx)
+          items (exec/force-value coll ctx)
+          ;; Create callable that passes value to the single required arg
+          callable (exec/make-single-arg-callable ctx fn-id)]
+      (mapv callable items))))
+```
+
+For `reduce`-like operations, the function receives a vector `[acc item]` as its single argument:
+
+```clojure
+(exec/register-base-fn!
+  :my-reduce
+  (fn [{:keys [f init coll]} ctx]
+    (let [fn-id (exec/force-value f ctx)
+          initial (exec/force-value init ctx)
+          items (exec/force-value coll ctx)
+          callable (exec/make-single-arg-callable ctx fn-id)]
+      ;; Pass [acc item] as single value
+      (reduce (fn [acc item] (callable [acc item])) initial items))))
+```
+
+**Legacy apply-twice example** (manual arg-schema lookup):
 
 ```clojure
 (exec/register-base-fn!
   :apply-twice
   (fn [{:keys [f x]} ctx]
-    ;; f is a :fn type - forcing returns fn-id
-    (let [f-id (exec/force-value f ctx)
+    (let [fn-id (exec/force-value f ctx)
           x-val (exec/force-value x ctx)
-          ;; Execute f with x
-          result1 (exec/execute ctx f-id {arg-schema-id x-val})
-          ;; Execute f again with result
-          result2 (exec/execute ctx f-id {arg-schema-id result1})]
+          ;; Use single-arg callable
+          callable (exec/make-single-arg-callable ctx fn-id)
+          result1 (callable x-val)
+          result2 (callable result1)]
       result2)))
 ```
 

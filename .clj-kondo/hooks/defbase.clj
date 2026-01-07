@@ -46,12 +46,21 @@
         ;; Build destructuring map
         keys-vec (api/vector-node (vec arg-syms))
         destructure-map (api/map-node [(api/keyword-node :keys) keys-vec])
-        ;; Build fn form (use _ctx to avoid unused binding warning)
+        ;; Build fn form with ctx parameter
+        ;; We also bind ctx to itself in let to avoid "unused" warnings when ctx is used
+        ;; For clj-kondo, ctx is always "used" because it's referenced in the let
+        ctx-let (api/list-node
+                  (list (api/token-node 'let)
+                        (api/vector-node [(api/token-node 'ctx) (api/token-node 'ctx)])
+                        ;; Wrap body in do if multiple forms
+                        (if (= 1 (count body))
+                          (first body)
+                          (api/list-node (cons (api/token-node 'do) body)))))
         fn-form (api/list-node
-                  (list*
+                  (list
                     (api/token-node 'fn)
-                    (api/vector-node [destructure-map (api/token-node '_ctx)])
-                    body))
+                    (api/vector-node [destructure-map (api/token-node 'ctx)])
+                    ctx-let))
         ;; Build def form
         new-node (api/list-node
                    (list

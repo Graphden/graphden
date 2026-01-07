@@ -40,6 +40,10 @@
    - :validation-error/required-field-missing   - Required field not provided
    - :validation-error/duplicate-ids            - Duplicate IDs in batch
    - :validation-error/constraint-check-failed  - Constraint validation query failed
+   - :validation-error/naming-collision         - Multiple names map to same SQL identifier
+   - :validation-error/identifier-too-long      - SQL identifier exceeds length limit
+   - :validation-error/invalid-identifier       - Invalid SQL identifier format
+   - :validation-error/invalid-pg-type          - Invalid PostgreSQL type specification
 
    ### Configuration Errors (prefix :config-error/)
    - :config-error/invalid-timeout  - Invalid timeout value

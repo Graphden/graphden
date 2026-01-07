@@ -385,6 +385,31 @@
 ;; extract-refs-from-arg-values replaced by sp/extract-uuid-refs-from-arg-values
 
 
+(defn- classify-refs
+  "Classifies UUID references as fn refs or fn-result-value refs.
+   Returns {:fn-refs #{...} :frv-refs #{...} :frvs {...}}."
+  [all-refs fns-data fn-result-values-data]
+  (reduce (fn [acc ref-id]
+            (condp contains? ref-id
+              ;; Direct fn reference
+              fns-data
+              (update acc :fn-refs conj ref-id)
+
+              ;; fn-result-value reference
+              fn-result-values-data
+              (let [frv (get fn-result-values-data ref-id)]
+                (-> acc
+                    (update :frv-refs conj ref-id)
+                    (update :frvs assoc ref-id frv)
+                    ;; Also visit the fn that frv points to
+                    (update :fn-refs conj (:fn-id frv))))
+
+              ;; Unknown UUID - skip
+              acc))
+          {:fn-refs #{} :frv-refs #{} :frvs {}}
+          all-refs))
+
+
 (defn- resolve-execution-graph-impl
   "Resolves execution graph starting from fn-id.
    Uses BFS to collect all transitively referenced functions and fn-result-values.
@@ -437,30 +462,11 @@
                       merged-args (sp/merge-arg-values-for-chain chain-arg-values chain)
                       ;; Extract all UUID refs from arg-values
                       all-refs (sp/extract-uuid-refs-from-arg-values merged-args)
-                      ;; Classify refs: fn vs fn-result-value
-                      ;; For each UUID, check if it's a fn or fn-result-value
+                      ;; Classify refs using extracted helper
                       {new-fn-refs :fn-refs
                        _new-frv-refs :frv-refs
                        new-frvs :frvs}
-                      (reduce (fn [acc ref-id]
-                                (condp contains? ref-id
-                                  ;; It's a direct fn reference
-                                  fns-data
-                                  (update acc :fn-refs conj ref-id)
-
-                                  ;; It's a fn-result-value reference
-                                  fn-result-values-data
-                                  (let [frv (get fn-result-values-data ref-id)]
-                                    (-> acc
-                                        (update :frv-refs conj ref-id)
-                                        (update :frvs assoc ref-id frv)
-                                        ;; Also need to visit the fn that frv points to
-                                        (update :fn-refs conj (:fn-id frv))))
-
-                                  ;; Unknown UUID - skip
-                                  acc))
-                              {:fn-refs #{} :frv-refs #{} :frvs {}}
-                              all-refs)
+                      (classify-refs all-refs fns-data fn-result-values-data)
                       new-to-visit (set/difference new-fn-refs visited)]
                   (recur (set/union rest-to-visit new-to-visit)
                          (conj visited current-fn-id)

@@ -233,7 +233,8 @@
                          snake->originals)]
     (when (seq collisions)
       (throw (ex-info "Snake_case naming collision detected"
-                      (merge context {:collisions collisions}))))))
+                      (merge context {:type :validation-error/naming-collision
+                                      :collisions collisions}))))))
 
 
 (defn ident->sql
@@ -279,7 +280,8 @@
   (when (> (count s) max-sql-identifier-length)
     (throw (ex-info (str "SQL identifier too long: '" s "' (" (count s) " chars). "
                          "PostgreSQL limits identifiers to " max-sql-identifier-length " characters.")
-                    {:value s
+                    {:type :validation-error/identifier-too-long
+                     :value s
                      :length (count s)
                      :max-length max-sql-identifier-length
                      :context context})))
@@ -289,7 +291,8 @@
                          "lowercase letters, digits, and underscores. "
                          "Uppercase is not allowed because PostgreSQL folds "
                          "unquoted identifiers to lowercase.")
-                    {:value s
+                    {:type :validation-error/invalid-identifier
+                     :value s
                      :context context
                      :pattern (str sql-identifier-pattern)}))))
 
@@ -331,4 +334,6 @@
                 ;; Quoted identifier pattern: \"snake_case_name\"
                 (re-matches #"^\"[a-z][a-z0-9_]*\"$" type-str))
     (throw (ex-info "Invalid PostgreSQL type specification"
-                    {:type type-str :context context}))))
+                    {:type :validation-error/invalid-pg-type
+                     :pg-type type-str
+                     :context context}))))

@@ -13,8 +13,6 @@
   (:import
     (com.fasterxml.jackson.core
       JsonParseException)
-    (java.sql
-      SQLException)
     (org.postgresql.util
       PGobject)))
 
@@ -23,25 +21,12 @@
 (def ^:private get-query-timeout util/get-query-timeout-seconds)
 
 
-(defn- wrap-sql-error
-  "Wraps a SQLException with application-level context for CRUD operations.
-   Delegates to shared util/wrap-sql-error with 'Database error' prefix."
-  [^SQLException e operation context]
-  (util/wrap-sql-error e "Database error" operation context))
-
-
-(defmacro with-sql-error-handling
-  "Wraps body with SQLException handling.
-   Catches SQLException and rethrows with application context.
-
-   Usage:
-   (with-sql-error-handling :create-entity {:entity-name name}
-     (jdbc/execute! ...))"
+;; Use shared macro from util.clj with CRUD-specific prefix
+(defmacro ^:private with-crud-error-handling
+  "Wraps CRUD operation body with SQLException handling.
+   Uses 'Database error' prefix for log messages."
   [operation context & body]
-  `(try
-     (do ~@body)
-     (catch SQLException e#
-       (throw (wrap-sql-error e# ~operation ~context)))))
+  `(util/with-sql-error-handling "Database error" ~operation ~context ~@body))
 
 
 (defn- parse-pgobject
@@ -209,7 +194,7 @@
                            :values [values]
                            :returning [:*]}
                           {:quoted true})]
-    (with-sql-error-handling :create-entity {:entity-name entity-name :id id}
+    (with-crud-error-handling :create-entity {:entity-name entity-name :id id}
       (-> (jdbc/execute-one! ds query
                              {:builder-fn rs/as-unqualified-lower-maps
                               :timeout (get-query-timeout)})
@@ -225,7 +210,7 @@
                            :from [table-name]
                            :where [:= :id id]}
                           {:quoted true})]
-    (with-sql-error-handling :read-entity {:entity-name entity-name :id id}
+    (with-crud-error-handling :read-entity {:entity-name entity-name :id id}
       (-> (jdbc/execute-one! ds query
                              {:builder-fn rs/as-unqualified-lower-maps
                               :timeout (get-query-timeout)})
@@ -256,7 +241,7 @@
                                :where [:= :id id]
                                :returning [:*]}
                               {:quoted true})]
-        (with-sql-error-handling :update-entity {:entity-name entity-name :id id}
+        (with-crud-error-handling :update-entity {:entity-name entity-name :id id}
           (-> (jdbc/execute-one! ds query
                                  {:builder-fn rs/as-unqualified-lower-maps
                                   :timeout (get-query-timeout)})
@@ -271,7 +256,7 @@
         query (sql/format {:delete-from table-name
                            :where [:= :id id]}
                           {:quoted true})]
-    (with-sql-error-handling :delete-entity {:entity-name entity-name :id id}
+    (with-crud-error-handling :delete-entity {:entity-name entity-name :id id}
       (pos? (:next.jdbc/update-count
               (jdbc/execute-one! ds query {:timeout (get-query-timeout)}))))))
 
@@ -298,7 +283,7 @@
                                    :from [table-name]}
                             where-clause (assoc :where where-clause))
                           {:quoted true})]
-    (with-sql-error-handling :query-entities {:entity-name entity-name :where where}
+    (with-crud-error-handling :query-entities {:entity-name entity-name :where where}
       (let [rows (jdbc/execute! ds query
                                 {:builder-fn rs/as-unqualified-lower-maps
                                  :timeout (get-query-timeout)})]
@@ -340,7 +325,7 @@
                                :values values
                                :returning [:*]}
                               {:quoted true})]
-        (with-sql-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
+        (with-crud-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
           (let [result-rows (jdbc/execute! ds query
                                            {:builder-fn rs/as-unqualified-lower-maps
                                             :timeout (get-query-timeout)})
@@ -367,7 +352,7 @@
                              :from [table-name]
                              :where [:in :id (vec ids)]}
                             {:quoted true})]
-      (with-sql-error-handling :read-entities {:entity-name entity-name :count (count ids)}
+      (with-crud-error-handling :read-entities {:entity-name entity-name :count (count ids)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
                                    :timeout (get-query-timeout)})]
@@ -387,7 +372,7 @@
           query (sql/format {:delete-from table-name
                              :where [:in :id (vec ids)]}
                             {:quoted true})]
-      (with-sql-error-handling :delete-entities {:entity-name entity-name :count (count ids)}
+      (with-crud-error-handling :delete-entities {:entity-name entity-name :count (count ids)}
         (:next.jdbc/update-count
           (jdbc/execute-one! ds query {:timeout (get-query-timeout)}))))))
 
@@ -426,7 +411,7 @@
                    :from [:parent_chain]
                    :order-by [:origin :depth]}
                   {:quoted true})]
-      (with-sql-error-handling :collect-parent-chains {:fn-count (count fn-ids)}
+      (with-crud-error-handling :collect-parent-chains {:fn-count (count fn-ids)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
                                    :timeout (get-query-timeout)})
@@ -455,7 +440,7 @@
                              :from [:arg_value]
                              :where [:in :owner_fn_id (vec fn-ids)]}
                             {:quoted true})]
-      (with-sql-error-handling :load-arg-values {:fn-count (count fn-ids)}
+      (with-crud-error-handling :load-arg-values {:fn-count (count fn-ids)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
                                    :timeout (get-query-timeout)})]
@@ -508,7 +493,7 @@
                                  :from [:fn_result_value]
                                  :where [:in :id uuids-vec]}
                                 {:quoted true})]
-      (with-sql-error-handling :classify-uuid-refs {:candidate-count (count uuid-candidates)}
+      (with-crud-error-handling :classify-uuid-refs {:candidate-count (count uuid-candidates)}
         (let [fn-rows (jdbc/execute! ds fn-query
                                      {:builder-fn rs/as-unqualified-lower-maps
                                       :timeout (get-query-timeout)})
@@ -536,7 +521,7 @@
                              :from [table]
                              :where [:in key-column (vec values)]}
                             {:quoted true})]
-      (with-sql-error-handling :load-entities-batch {:table table :count (count values)}
+      (with-crud-error-handling :load-entities-batch {:table table :count (count values)}
         (let [rows (jdbc/execute! ds query
                                   {:builder-fn rs/as-unqualified-lower-maps
                                    :timeout (get-query-timeout)})]

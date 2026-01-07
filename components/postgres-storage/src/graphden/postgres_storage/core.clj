@@ -29,6 +29,9 @@
 
 
 ;; === Configuration ===
+;; Re-export timeout var from config for backward compatibility.
+;; Note: This is the SAME var (via def), not a copy. Bindings on config/*query-timeout-ms*
+;; will be visible here and vice versa.
 
 (def ^:dynamic *query-timeout-ms*
   "Timeout for SQL queries in milliseconds. Can be rebound per-thread.

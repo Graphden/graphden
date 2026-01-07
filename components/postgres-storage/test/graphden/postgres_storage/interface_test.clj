@@ -3194,10 +3194,9 @@
 
 (deftest wrap-sql-error-logging-test
   (testing "wrap-sql-error includes all context in exception"
-    (let [wrap-sql-error #'crud/wrap-sql-error
-          sql-ex (SQLException. "duplicate key value" "23505")
+    (let [sql-ex (SQLException. "duplicate key value" "23505")
           context {:entity-name :user :id #uuid "11111111-1111-1111-1111-111111111111"}
-          wrapped (wrap-sql-error sql-ex :create-entity context)
+          wrapped (util/wrap-sql-error sql-ex "Database error" :create-entity context)
           data (ex-data wrapped)]
       (is (= :unique-violation (:type data)))
       (is (= :create-entity (:operation data)))

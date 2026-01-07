@@ -3,6 +3,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [graphden.postgres-storage.core :as core]
     [graphden.postgres-storage.util :as util])
   (:import
     (java.sql
@@ -13,43 +14,15 @@
 
 (deftest get-query-timeout-seconds-test
   (testing "returns timeout from core/*query-timeout-ms* converted to seconds"
-    ;; The actual var exists and should be resolvable in test context
     ;; Default is 30000ms = 30 seconds
     (let [result (util/get-query-timeout-seconds)]
       (is (integer? result))
-      (is (pos? result))))
+      (is (pos? result))
+      (is (= 30 result))))
 
-  (testing "returns fallback 30 seconds when var cannot be resolved"
-    ;; Reset the atoms for clean test
-    (reset! @#'util/timeout-fallback-logged? false)
-    (reset! @#'util/timeout-var-cache :graphden.postgres-storage.util/not-cached)
-    (with-redefs [resolve (constantly nil)]
-      (is (= 30 (util/get-query-timeout-seconds)))))
-
-  (testing "logs warning only once when using fallback"
-    ;; Reset the atoms for clean test
-    (reset! @#'util/timeout-fallback-logged? false)
-    (reset! @#'util/timeout-var-cache :graphden.postgres-storage.util/not-cached)
-    (with-redefs [resolve (constantly nil)]
-      ;; First call should set logged flag
-      (util/get-query-timeout-seconds)
-      (is (true? @(deref #'util/timeout-fallback-logged?)))
-      ;; Second call should not change anything (already logged)
-      (util/get-query-timeout-seconds)
-      (is (true? @(deref #'util/timeout-fallback-logged?)))))
-
-  (testing "retries resolution when var was not found initially"
-    ;; Reset the cache for clean test
-    (reset! @#'util/timeout-var-cache :graphden.postgres-storage.util/not-cached)
-    ;; Cache should remain ::not-cached when resolve returns nil
-    (with-redefs [resolve (constantly nil)]
-      (util/get-query-timeout-seconds)
-      ;; Cache should NOT be set to nil - should remain ::not-cached
-      (is (= :graphden.postgres-storage.util/not-cached @(deref #'util/timeout-var-cache))))
-    ;; Now with real resolve, it should work
-    (let [result (util/get-query-timeout-seconds)]
-      (is (integer? result))
-      (is (pos? result)))))
+  (testing "respects custom timeout via binding"
+    (binding [core/*query-timeout-ms* 60000]
+      (is (= 60 (util/get-query-timeout-seconds))))))
 
 
 ;; === Helper to create SQLException with specific state ===

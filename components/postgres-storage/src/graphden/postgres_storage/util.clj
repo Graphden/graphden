@@ -169,6 +169,26 @@
              e)))
 
 
+(defmacro with-sql-error-handling
+  "Wraps body with SQLException handling.
+   Catches SQLException and rethrows with application context.
+
+   Parameters:
+   - log-prefix: String prefix for log message (e.g., \"Database error\", \"DDL error\")
+   - operation: Keyword describing the operation (e.g., :create-entity, :add-column)
+   - context: Map of additional context
+   - body: Forms to execute
+
+   Usage:
+   (with-sql-error-handling \"Database error\" :create-entity {:entity-name name}
+     (jdbc/execute! ...))"
+  [log-prefix operation context & body]
+  `(try
+     (do ~@body)
+     (catch java.sql.SQLException e#
+       (throw (wrap-sql-error e# ~log-prefix ~operation ~context)))))
+
+
 ;; === Type mapping ===
 
 (def type->pg

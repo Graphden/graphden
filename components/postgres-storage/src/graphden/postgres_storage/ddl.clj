@@ -6,35 +6,37 @@
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.postgres-storage.util :as util]
     [honey.sql :as sql]
-    [next.jdbc :as jdbc])
-  (:import
-    (java.sql
-      SQLException)))
+    [next.jdbc :as jdbc]))
 
 
 ;; === Error handling ===
 
-(defn- wrap-ddl-error
-  "Wraps a SQLException with DDL-specific context.
-   Delegates to shared util/wrap-sql-error with 'DDL error' prefix."
-  [^SQLException e operation context]
-  (util/wrap-sql-error e "DDL error" operation context))
-
-
-(defmacro with-ddl-error-handling
+;; Use shared macro from util.clj with DDL-specific prefix
+(defmacro ^:private with-ddl-error-handling
   "Wraps DDL operation body with SQLException handling.
-   Catches SQLException and rethrows with application context."
+   Uses 'DDL error' prefix for log messages."
   [operation context & body]
-  `(try
-     (do ~@body)
-     (catch SQLException e#
-       (throw (wrap-ddl-error e# ~operation ~context)))))
+  `(util/with-sql-error-handling "DDL error" ~operation ~context ~@body))
 
 
 ;; === Enum operations ===
+;;
+;; NOTE on SQL injection safety:
+;; These functions use string concatenation for DDL statements because PostgreSQL
+;; doesn't support parameterized DDL. All identifiers and values are validated
+;; through util.clj functions before inclusion:
+;; - util/ident->sql: Validates and quotes identifiers (only lowercase alphanumeric + underscore)
+;; - util/enum-value->sql: Validates enum values (same rules as identifiers)
+;; - util/validate-sql-identifier!: Called by the above, throws on invalid input
+;;
+;; This provides defense-in-depth: even if an attacker somehow bypasses higher-level
+;; checks, the validation here will reject malicious input.
 
 (defn create-enum!
-  "Creates a PostgreSQL enum type."
+  "Creates a PostgreSQL enum type.
+
+   Security: enum-name and values are validated via util/ident->sql and util/enum-value->sql
+   which only allow lowercase alphanumeric characters and underscores."
   [ds enum-name values]
   (with-ddl-error-handling :create-enum {:enum-name enum-name}
     (let [sql-name (util/ident->sql enum-name)
@@ -43,7 +45,9 @@
 
 
 (defn add-enum-value!
-  "Adds a value to an existing PostgreSQL enum type."
+  "Adds a value to an existing PostgreSQL enum type.
+
+   Security: enum-name and value are validated via util/ident->sql and util/enum-value->sql."
   [ds enum-name value]
   (with-ddl-error-handling :add-enum-value {:enum-name enum-name :value value}
     (jdbc/execute! ds [(str "ALTER TYPE " (util/ident->sql enum-name)
@@ -51,7 +55,9 @@
 
 
 (defn rename-enum!
-  "Renames a PostgreSQL enum type."
+  "Renames a PostgreSQL enum type.
+
+   Security: old-name and new-name are validated via util/ident->sql."
   [ds old-name new-name]
   (with-ddl-error-handling :rename-enum {:old-name old-name :new-name new-name}
     (jdbc/execute! ds [(str "ALTER TYPE " (util/ident->sql old-name)

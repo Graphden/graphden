@@ -180,6 +180,36 @@ When providing arguments via the `args` map, the executor validates types:
 └─────────────────────────────────────────────────────────────┘
 ```
 
+## Testing Best Practices
+
+### Use Explicit `:base-fns` for Test Isolation
+
+The executor maintains a global registry of base functions via `register-base-fn!`. For tests, always use explicit `:base-fns` in `create-context` to ensure isolation:
+
+```clojure
+;; GOOD: Explicit base-fns for test isolation
+(let [ctx (exec/create-context {:storage test-storage
+                                 :base-fns {:add my-test-add
+                                            :mul my-test-mul}})]
+  (is (= 42 (exec/execute ctx fn-id {}))))
+
+;; BAD: Relies on global registry state (tests may interfere)
+(exec/register-base-fn! :add my-add)
+(let [ctx (exec/create-context {:storage test-storage})]
+  ...)
+```
+
+If you must use the global registry, use the `with-clean-registry` pattern:
+
+```clojure
+(defn with-clean-registry [f]
+  (exec/clear-base-fns!)
+  (try
+    (f)
+    (finally
+      (exec/clear-base-fns!))))
+```
+
 ## Dependencies
 
 - `storage-protocol` - Storage protocol for graph resolution

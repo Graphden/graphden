@@ -217,11 +217,6 @@
                      :provided-type (type provided-value)}))))
 
 
-(def ^:private known-types
-  "Set of known types for logging purposes."
-  #{:fn :ref :int :bool :text :numeric :jsonb :bytes :timestamptz :enum :uuid :union})
-
-
 (defn- type-mismatch?
   "Returns true if provided-value doesn't match the expected arg-type.
 
@@ -252,9 +247,8 @@
     :union       false  ; Union types accept any value
     ;; Unknown type - log warning and accept (forward compatibility)
     (do
-      (when-not (contains? known-types arg-type)
-        (log/warn "Unknown argument type encountered, skipping validation"
-                  {:type arg-type :value-type (type provided-value)}))
+      (log/warn "Unknown argument type encountered, skipping validation"
+                {:type arg-type :value-type (type provided-value)})
       false)))
 
 
@@ -393,7 +387,7 @@
    IMPORTANT: Direct fn refs (HOF, type=:fn) do NOT receive path-args - they are
    'black boxes' controlled by map/reduce/etc. Only fn-result-value refs can have
    their free args set via path-args."
-  [context arg-value arg-schema _arg-name]
+  [context arg-value arg-schema]
   ;; Note: :value can be nil for optional args with null values.
   ;; arg-values from storage are assumed to have :value key present.
   (let [value (:value arg-value)
@@ -489,9 +483,9 @@
                           {:arg-schema-id arg-schema-id
                            :current-frv-id current-frv-id
                            :arg-name arg-name
-                           :db-value (:value arg-value)
-                           :provided-value path-arg-value})
-                (assoc acc arg-name-kw (build-delay context arg-value arg-schema arg-name)))
+                           :db-value (truncate-value (:value arg-value) 50)
+                           :provided-value (truncate-value path-arg-value 50)})
+                (assoc acc arg-name-kw (build-delay context arg-value arg-schema)))
               ;; No DB value - use path-arg
               (do
                 (validate-provided-arg-type! path-arg-value arg-schema)
@@ -501,7 +495,7 @@
 
             ;; 3. Stored arg-value exists - use build-delay
             arg-value
-            (assoc acc arg-name-kw (build-delay context arg-value arg-schema arg-name))
+            (assoc acc arg-name-kw (build-delay context arg-value arg-schema))
 
             ;; 4. Required arg with no value - error
             (:required arg-schema)
@@ -560,12 +554,11 @@
       (log/error "Base function not found in registry"
                  {:fn-name fn-name
                   :fn-id fn-id
-                  :available-fns (keys registry)})
-      (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry. "
-                           "Available functions: " (pr-str (keys registry)))
+                  :registry-size (count registry)})
+      (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry")
                       {:type :execution-error/base-fn-not-found
                        :fn-name fn-name
-                       :available-fns (keys registry)})))
+                       :registry-size (count registry)})))
     (let [new-context (update context :depth inc)
           arg-delays (build-arg-delays new-context fn-data provided-args)]
       (base-fn arg-delays new-context))))

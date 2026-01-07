@@ -36,7 +36,20 @@
       (is (true? @(deref #'util/timeout-fallback-logged?)))
       ;; Second call should not change anything (already logged)
       (util/get-query-timeout-seconds)
-      (is (true? @(deref #'util/timeout-fallback-logged?))))))
+      (is (true? @(deref #'util/timeout-fallback-logged?)))))
+
+  (testing "retries resolution when var was not found initially"
+    ;; Reset the cache for clean test
+    (reset! @#'util/timeout-var-cache :graphden.postgres-storage.util/not-cached)
+    ;; Cache should remain ::not-cached when resolve returns nil
+    (with-redefs [resolve (constantly nil)]
+      (util/get-query-timeout-seconds)
+      ;; Cache should NOT be set to nil - should remain ::not-cached
+      (is (= :graphden.postgres-storage.util/not-cached @(deref #'util/timeout-var-cache))))
+    ;; Now with real resolve, it should work
+    (let [result (util/get-query-timeout-seconds)]
+      (is (integer? result))
+      (is (pos? result)))))
 
 
 ;; === Helper to create SQLException with specific state ===

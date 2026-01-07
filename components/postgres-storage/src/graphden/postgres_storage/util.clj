@@ -35,15 +35,19 @@
 
 
 (defn- resolve-timeout-var
-  "Resolves and caches the timeout var. Returns the var or nil if not found."
+  "Resolves and caches the timeout var. Returns the var or nil if not found.
+   If resolution fails (returns nil), does NOT cache the result, so subsequent
+   calls will retry. This handles the case where util.clj is loaded before
+   core.clj - the first call returns nil but later calls succeed."
   []
   (let [cached @timeout-var-cache]
     (if (= cached ::not-cached)
-      ;; First call - resolve and cache
+      ;; First call - resolve and cache only if successful
       (let [resolved (resolve 'graphden.postgres-storage.core/*query-timeout-ms*)]
-        (reset! timeout-var-cache resolved)
+        (when resolved
+          (reset! timeout-var-cache resolved))
         resolved)
-      ;; Already cached
+      ;; Already cached (and must be non-nil since we only cache successful resolutions)
       cached)))
 
 
@@ -183,6 +187,12 @@
   "Converts a keyword to snake_case string (unquoted)."
   [k]
   (str/replace (name k) "-" "_"))
+
+
+(defn snake->kw
+  "Converts a snake_case string to kebab-case keyword."
+  [s]
+  (keyword (str/replace s "_" "-")))
 
 
 (defn check-snake-case-collisions!

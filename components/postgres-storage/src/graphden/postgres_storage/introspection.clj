@@ -47,7 +47,7 @@
                              :timeout (get-query-timeout)})]
     (into {}
           (map (fn [row]
-                 (let [col-name (keyword (str/replace (:column_name row) "_" "-"))
+                 (let [col-name (util/snake->kw (:column_name row))
                        data-type (:data_type row)
                        pg-type (cond
                                  (= data-type "USER-DEFINED") :enum

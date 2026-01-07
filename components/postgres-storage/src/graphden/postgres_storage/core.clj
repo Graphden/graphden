@@ -250,7 +250,7 @@
 
   (current-entities
     [_this]
-    (set (map (comp keyword #(str/replace % "_" "-"))
+    (set (map util/snake->kw
               (introspection/current-tables pool))))
 
 
@@ -269,7 +269,7 @@
 
   (current-enums
     [_this]
-    (set (map (comp keyword #(str/replace % "_" "-"))
+    (set (map util/snake->kw
               (introspection/current-pg-enums pool))))
 
 

@@ -4,7 +4,6 @@
   (:require
     [cheshire.core :as json]
     [clojure.set :as set]
-    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]
@@ -79,7 +78,7 @@
   [row]
   (when row
     (reduce-kv (fn [acc k v]
-                 (let [new-key (keyword (str/replace (name k) "_" "-"))
+                 (let [new-key (util/snake->kw (name k))
                        parsed-v (parse-pgobject v)]
                    (assoc acc new-key parsed-v)))
                {}
@@ -179,7 +178,7 @@
    Wraps JSONB column values appropriately based on fields metadata."
   [entity jsonb-columns enum-columns]
   (reduce-kv (fn [acc k v]
-               (let [new-key (keyword (str/replace (name k) "-" "_"))
+               (let [new-key (keyword (util/kw->snake-case k))
                      enum-v (maybe-convert-enum enum-columns k v)
                      wrapped-v (maybe-wrap-jsonb jsonb-columns k enum-v)]
                  (assoc acc new-key wrapped-v)))

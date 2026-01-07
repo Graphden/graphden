@@ -2,6 +2,7 @@
   "Core implementation of the function executor."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.field-types.interface :as ft]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -227,7 +228,7 @@
   "Returns true if provided-value doesn't match the expected arg-type.
 
    Type validation rules:
-   - Known types: strict validation based on Clojure predicates
+   - Known types: strict validation based on Clojure predicates (from field-types)
    - :union type: accepts any value (validation happens at schema level,
      where union variants are checked against allowed types)
    - Unknown types: returns false (permissive) to allow forward compatibility
@@ -236,21 +237,8 @@
    This is a runtime check for user-provided arguments only. Values from
    the execution graph (arg-values) are assumed to be already validated."
   [arg-type provided-value]
-  (case arg-type
-    :fn          (not (uuid? provided-value))
-    :ref         (not (uuid? provided-value))
-    :int         (not (int? provided-value))
-    :bool        (not (boolean? provided-value))
-    :text        (not (string? provided-value))
-    :numeric     (not (number? provided-value))
-    :jsonb       (not (or (map? provided-value) (vector? provided-value)))
-    :bytes       (not (bytes? provided-value))
-    :timestamptz (not (or (instance? java.time.Instant provided-value)
-                          (instance? java.time.LocalDateTime provided-value)
-                          (instance? java.util.Date provided-value)))
-    :enum        (not (keyword? provided-value))
-    :uuid        (not (uuid? provided-value))
-    :union       false  ; Union types accept any value
+  (if (contains? ft/type-validators arg-type)
+    (not (ft/valid-type? arg-type provided-value))
     ;; Unknown type - log warning and accept (forward compatibility)
     (do
       (log/warn "Unknown argument type encountered, skipping validation"

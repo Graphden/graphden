@@ -1126,32 +1126,10 @@
            rows))))
 
 
-(defn- merge-arg-values-for-chain
-  "Gets merged arg-values for a parent chain (child overrides parent).
-   Uses pre-loaded arg-values to avoid additional queries.
-   Returns {arg-schema-id -> arg-value-map}."
-  [all-arg-values chain]
-  (when (seq chain)
-    (let [chain-set (set chain)
-          chain-pos (zipmap chain (range))
-          ;; Filter arg-values belonging to this chain
-          chain-arg-values (filter #(chain-set (:owner-fn-id %)) all-arg-values)]
-      ;; Group by arg-schema-id, pick the one with lowest chain position (closest to target fn)
-      (->> chain-arg-values
-           (group-by :arg-schema-id)
-           (map (fn [[arg-schema-id avs]]
-                  [arg-schema-id (apply min-key #(get chain-pos (:owner-fn-id %) Integer/MAX_VALUE) avs)]))
-           (into {})))))
+;; merge-arg-values-for-chain moved to storage-protocol/interface as shared utility
 
 
-(defn- extract-potential-fn-refs
-  "Extracts potential fn-id references from arg-values.
-   Returns set of UUIDs that might be fn references."
-  [arg-values-map]
-  (->> (vals arg-values-map)
-       (map :value)
-       (keep sp/try-parse-uuid)
-       (set)))
+;; extract-potential-fn-refs replaced by sp/extract-uuid-refs-from-arg-values
 
 
 (defn- classify-uuid-refs
@@ -1342,13 +1320,13 @@
               ;; Merge arg-values for each fn
               merged-args-batch (into {}
                                       (map (fn [fid]
-                                             [fid (merge-arg-values-for-chain
+                                             [fid (sp/merge-arg-values-for-chain
                                                     all-arg-values
                                                     (get chains fid [fid]))]))
                                       batch)
               ;; Extract all potential refs (UUIDs)
               all-potential-refs (->> (vals merged-args-batch)
-                                      (mapcat extract-potential-fn-refs)
+                                      (mapcat sp/extract-uuid-refs-from-arg-values)
                                       (set))
               ;; Remove already visited
               new-candidates (set/difference all-potential-refs new-visited)

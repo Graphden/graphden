@@ -1,4 +1,5 @@
 {:paths ["src" "resources"]
- :deps {graphden/data-schema-protocol {:local/root "../data-schema-protocol"}}
+ :deps {graphden/data-schema-protocol {:local/root "../data-schema-protocol"}
+        graphden/field-types {:local/root "../field-types"}}
  :aliases {:test {:extra-paths ["test"]
                   :extra-deps {}}}}

@@ -2973,7 +2973,7 @@
 
 (deftest merge-arg-values-unknown-owner-test
   (testing "merge-arg-values handles arg-value with owner not in chain"
-    ;; This tests the Integer/MAX_VALUE fallback in min-key
+    ;; This tests the Long/MAX_VALUE fallback in min-key
     ;; when an arg-value has an owner not in the chain
     (let [fn-id (random-uuid)
           unknown-owner-id (random-uuid)
@@ -2988,8 +2988,8 @@
                        :arg-schema-id arg-schema-id
                        :value 999}]
           chain [fn-id]
-          merge-arg-values-fn #'crud/merge-arg-values-for-chain
-          result (merge-arg-values-fn arg-values chain)]
+          ;; Use sp/merge-arg-values-for-chain (moved to storage-protocol)
+          result (sp/merge-arg-values-for-chain arg-values chain)]
       ;; The arg-value with known owner should win (lower chain position)
       (is (= 42 (:value (get result arg-schema-id)))))))
 
@@ -3253,8 +3253,8 @@
           (sp/close storage)))))
 
   (testing "merge-arg-values-for-chain returns nil for empty chain"
-    (let [merge-fn #'crud/merge-arg-values-for-chain
-          result (merge-fn [] [])]
+    ;; Use sp/merge-arg-values-for-chain (moved to storage-protocol)
+    (let [result (sp/merge-arg-values-for-chain [] [])]
       (is (nil? result)))))
 
 

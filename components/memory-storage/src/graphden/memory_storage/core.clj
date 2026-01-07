@@ -381,32 +381,8 @@
         (recur (:parent-fn-id fn-rec) (conj chain current-id))))))
 
 
-(defn- merge-arg-values-from-chain
-  "Merges arg-values from parent chain, child values override parent.
-   Requires pre-built arg-values-by-owner index for O(N+M) performance.
-   Returns {arg-schema-id -> arg-value-record}."
-  [state fn-id arg-values-by-owner]
-  (let [chain (collect-fn-parent-chain state fn-id)]
-    ;; Process from root to leaf so child overrides parent
-    (reduce (fn [acc chain-fn-id]
-              (let [arg-values (get arg-values-by-owner chain-fn-id [])]
-                (reduce (fn [a av]
-                          (assoc a (:arg-schema-id av) av))
-                        acc
-                        arg-values)))
-            {}
-            (reverse chain))))
-
-
-(defn- extract-refs-from-arg-values
-  "Extracts UUIDs referenced in arg-values.
-   Returns {:fn-refs #{...} :fn-result-value-refs #{...}}
-   Classification happens later based on what entity the UUID belongs to."
-  [arg-values-map]
-  (->> (vals arg-values-map)
-       (map :value)
-       (filter uuid?)
-       (set)))
+;; merge-arg-values-from-chain replaced by sp/merge-arg-values-for-chain
+;; extract-refs-from-arg-values replaced by sp/extract-uuid-refs-from-arg-values
 
 
 (defn- resolve-execution-graph-impl
@@ -454,10 +430,13 @@
                                         (->> (get arg-schemas-by-fn-schema fn-schema-id [])
                                              (map (juxt :id identity))
                                              (into {})))
-                      ;; Merge arg-values from parent chain using pre-built index
-                      merged-args (merge-arg-values-from-chain state current-fn-id arg-values-by-owner)
+                      ;; Merge arg-values from parent chain
+                      chain (collect-fn-parent-chain state current-fn-id)
+                      ;; Get all arg-values for chain members from pre-built index
+                      chain-arg-values (mapcat #(get arg-values-by-owner % []) chain)
+                      merged-args (sp/merge-arg-values-for-chain chain-arg-values chain)
                       ;; Extract all UUID refs from arg-values
-                      all-refs (extract-refs-from-arg-values merged-args)
+                      all-refs (sp/extract-uuid-refs-from-arg-values merged-args)
                       ;; Classify refs: fn vs fn-result-value
                       ;; For each UUID, check if it's a fn or fn-result-value
                       {new-fn-refs :fn-refs

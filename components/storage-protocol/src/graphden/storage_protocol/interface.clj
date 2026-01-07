@@ -80,7 +80,8 @@
   (:require
     [clojure.set :as set]
     [clojure.tools.logging :as log]
-    [graphden.data-schema-protocol.interface :as ds])
+    [graphden.data-schema-protocol.interface :as ds]
+    [graphden.field-types.interface :as ft])
   (:import
     (java.util.concurrent.locks
       Lock
@@ -758,52 +759,31 @@
 
 
 ;; === Type compatibility ===
+;; Re-export from field-types for backwards compatibility
 
 (def type-mappings
   "Complete type mapping reference for all storage backends.
-   Keys are abstract types, values are maps of backend -> concrete type.
-
-   Usage:
-     (get-in type-mappings [:uuid :postgres]) ;=> \"UUID\"
-     (get-in type-mappings [:int :datomic])   ;=> :db.type/long"
-  {:uuid        {:postgres "UUID"        :datomic :db.type/uuid    :memory :any}
-   :text        {:postgres "TEXT"        :datomic :db.type/string  :memory :any}
-   :int         {:postgres "BIGINT"      :datomic :db.type/long    :memory :any}
-   :bool        {:postgres "BOOLEAN"     :datomic :db.type/boolean :memory :any}
-   :numeric     {:postgres "NUMERIC"     :datomic :db.type/bigdec  :memory :any}
-   :timestamptz {:postgres "TIMESTAMPTZ" :datomic :db.type/instant :memory :any}
-   :jsonb       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}
-   :bytes       {:postgres "BYTEA"       :datomic :db.type/bytes   :memory :any}
-   :ref         {:postgres "UUID"        :datomic :db.type/ref     :memory :any}
-   :enum        {:postgres :custom       :datomic :db.type/ref     :memory :any}
-   :union       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}})
+   See graphden.field-types.interface/type-mappings for details."
+  ft/type-mappings)
 
 
 (def type-widening
   "Map of type→set of types it can safely widen to.
-   Widening means no data loss is possible.
-   Types not in this map cannot be widened (only same-type allowed)."
-  {:int #{:numeric :text :jsonb}
-   :bool #{:text :jsonb}
-   :numeric #{:text :jsonb}
-   :text #{:jsonb}
-   :uuid #{:text}
-   :timestamptz #{:text}})
+   See graphden.field-types.interface/type-widening for details."
+  ft/type-widening)
 
 
 (def type-equivalents
   "Types that are equivalent (stored the same way in storage).
-   Used for comparison to avoid false 'incompatible type' errors."
-  #{#{:uuid :ref}    ; :ref is stored as UUID
-    #{:jsonb :union}})  ; :union is stored as JSONB
+   See graphden.field-types.interface/type-equivalents for details."
+  ft/type-equivalents)
 
 
 (defn types-equivalent?
   "Returns true if two types are equivalent (stored the same way).
-   For example, :ref is stored as :uuid, and :union is stored as :jsonb.
-   This is used to avoid false 'incompatible type' errors during migration."
+   Delegates to graphden.field-types.interface/types-equivalent?."
   [t1 t2]
-  (some #(and (contains? % t1) (contains? % t2)) type-equivalents))
+  (ft/types-equivalent? t1 t2))
 
 
 (defn safe-type-change?
@@ -1185,6 +1165,53 @@
                     {:type :invalid-where-clause
                      :where where
                      :where-type (type where)}))))
+
+
+;; === Execution Graph Utilities ===
+;;
+;; Shared utilities for execution graph resolution across storage implementations.
+
+(defn merge-arg-values-for-chain
+  "Merges arg-values from a parent chain where child overrides parent.
+   Given a chain [child grandparent great-grandparent ...] and all arg-values,
+   returns {arg-schema-id -> arg-value-record} with closest-to-child values winning.
+
+   Arguments:
+   - all-arg-values: sequence of arg-value records with :owner-fn-id and :arg-schema-id
+   - chain: vector of fn-ids ordered from child to root [child parent grandparent ...]
+
+   Returns map of {arg-schema-id -> arg-value-record} or nil if chain is empty.
+
+   Example:
+   If grandparent defines :x=1 and child defines :x=2,
+   the result will have :x=2 (child wins)."
+  [all-arg-values chain]
+  (when (seq chain)
+    (let [chain-set (set chain)
+          chain-pos (zipmap chain (range))
+          ;; Filter arg-values belonging to this chain
+          chain-arg-values (filter #(chain-set (:owner-fn-id %)) all-arg-values)]
+      ;; Group by arg-schema-id, pick the one with lowest chain position (closest to target fn)
+      (->> chain-arg-values
+           (group-by :arg-schema-id)
+           (map (fn [[arg-schema-id avs]]
+                  [arg-schema-id (apply min-key #(get chain-pos (:owner-fn-id %) Long/MAX_VALUE) avs)]))
+           (into {})))))
+
+
+(defn extract-uuid-refs-from-arg-values
+  "Extracts UUIDs referenced in arg-values.
+   Returns set of UUIDs that could be fn or fn-result-value references.
+
+   Arguments:
+   - arg-values-map: map of {arg-schema-id -> arg-value-record} with :value field
+
+   Returns set of UUIDs found in :value fields."
+  [arg-values-map]
+  (->> (vals arg-values-map)
+       (map :value)
+       (keep try-parse-uuid)
+       (set)))
 
 
 ;; === Read-Write Lock Utilities ===

@@ -178,6 +178,50 @@
 
 ---
 
+### Free Argument Aliases (UI-friendly names)
+
+**Goal**: Human-readable names for free arguments in execution forms.
+
+**Problem**: When executing a function with free arguments via UI, users see technical identifiers (UUIDs). We need human-readable aliases.
+
+**Solution**: New entity `free-arg-alias` linking `fn-result-value` + `arg-schema` to a display name.
+
+**Schema:**
+```
+free-arg-alias:
+  id: uuid (PK)
+  fn-result-value-id: ref<fn-result-value>
+  arg-schema-id: ref<arg-schema>
+  alias: text (human-readable name)
+  UNIQUE(fn-result-value-id, arg-schema-id)
+```
+
+**Lifecycle:**
+- Created manually via UI when naming free arguments
+- **Auto-deleted** when the argument gets a value:
+  - When arg-value is created for the referenced function
+  - When arg-value is created in any parent function (inheritance chain)
+- This ensures aliases only exist for truly "free" arguments
+
+**UI Usage:**
+```
+Execute function: calculate-report
+┌─────────────────────────────────────┐
+│ Sales Region: [_______________]     │  ← alias for frv-1 + region-arg
+│ Start Date:   [_______________]     │  ← alias for frv-2 + date-arg
+│ Currency:     [USD v]               │  ← alias for frv-1 + currency-arg
+└─────────────────────────────────────┘
+```
+
+**Implementation notes:**
+- Storage constraint: validate that arg is actually free (no value in fn or parent chain)
+- Cascade delete via trigger/transaction function when arg-value is created
+- Root function free args don't need aliases — they already have human-readable names via `arg-schema.name`
+
+**Complexity**: Low-Medium.
+
+---
+
 ### Type System (Type Algebra)
 
 **Goal**: Static type checking, UI hints, automatic type inference.

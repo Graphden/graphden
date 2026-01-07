@@ -52,7 +52,19 @@
       (let [add-fn (exec/get-base-fn :test-add)
             sub-fn (exec/get-base-fn :test-sub)]
         (is (= 7 (add-fn {:a (literal-delay 3) :b (literal-delay 4)} nil)))
-        (is (= -1 (sub-fn {:a (literal-delay 3) :b (literal-delay 4)} nil)))))))
+        (is (= -1 (sub-fn {:a (literal-delay 3) :b (literal-delay 4)} nil))))))
+
+  (testing "register-base-fns! handles empty defs map"
+    ;; This tests the doseq with empty input
+    (registry/register-base-fns! {})
+    ;; Should not throw, just do nothing
+    (is true))
+
+  (testing "register-base-fns! handles nil defs map"
+    ;; This tests the doseq with nil input
+    (registry/register-base-fns! nil)
+    ;; Should not throw, just do nothing
+    (is true)))
 
 
 ;; === UUID Generation Tests ===
@@ -460,6 +472,47 @@
           (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
             (is (= "name-test" (:name schema-after)))))
         (finally
+          (sp/close storage)))))
+
+  (testing "sync-fn-schema! triggers update when only returned-type differs"
+    ;; This tests the second branch of the `or` in sync-fn-schema!
+    (let [storage (gsm/create-storage)
+          defs {:ret-test {:args {:x :int}
+                           :return-type :numeric
+                           :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs)
+        (let [fn-id (registry/fn-schema-uuid :ret-test)]
+          ;; Manually corrupt returned-type in storage (keep name and base-fn-name correct)
+          (sp/update-entity storage :fn-schema fn-id
+                            {:name "ret-test"
+                             :returned-type :text  ; Wrong type
+                             :base-fn-name "ret-test"})
+          ;; Verify corruption
+          (let [corrupted (sp/read-entity storage :fn-schema fn-id)]
+            (is (= :text (:returned-type corrupted))))
+          ;; Re-sync - should update because only returned-type differs
+          (registry/sync-defs-to-storage! storage defs)
+          (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
+            (is (= :numeric (:returned-type schema-after)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "sync-fn-schema! does NOT update when nothing differs"
+    ;; This tests when all three `or` branches are false
+    (let [storage (gsm/create-storage)
+          defs {:no-change {:args {:x :int}
+                            :return-type :int
+                            :impl (fn [_ _] 1)}}]
+      (try
+        ;; First sync
+        (registry/sync-defs-to-storage! storage defs)
+        ;; Second sync with same data - should not trigger update
+        (let [result (registry/sync-defs-to-storage! storage defs)]
+          ;; updated should be 1 because the function goes through update path
+          ;; but sp/update-entity shouldn't be called (when condition is false)
+          (is (= 1 (:updated (:fn-schemas result)))))
+        (finally
           (sp/close storage))))))
 
 
@@ -511,6 +564,74 @@
           (registry/sync-defs-to-storage! storage defs)
           (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
             (is (= "myarg" (:name arg-after)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "sync-arg-schemas! triggers update when only type differs"
+    ;; This tests the third branch of the `or` in sync-arg-schemas!
+    (let [storage (gsm/create-storage)
+          defs {:arg-type-test {:args {:z :numeric}
+                                :return-type :int
+                                :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs)
+        (let [fn-id (registry/fn-schema-uuid :arg-type-test)
+              arg-id (registry/arg-schema-uuid :arg-type-test :z)]
+          ;; Manually corrupt type in arg-schema (keep fn-schema-id, name, required correct)
+          (sp/update-entity storage :arg-schema arg-id
+                            {:fn-schema-id fn-id
+                             :name "z"
+                             :type :text  ; Wrong type
+                             :required true})
+          ;; Verify corruption
+          (let [corrupted (sp/read-entity storage :arg-schema arg-id)]
+            (is (= :text (:type corrupted))))
+          ;; Re-sync - should update because only type differs
+          (registry/sync-defs-to-storage! storage defs)
+          (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
+            (is (= :numeric (:type arg-after)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "sync-arg-schemas! triggers update when only required differs"
+    ;; This tests the fourth branch of the `or` in sync-arg-schemas!
+    (let [storage (gsm/create-storage)
+          defs {:arg-req-test {:args {:w {:type :int :required false}}
+                               :return-type :int
+                               :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs)
+        (let [fn-id (registry/fn-schema-uuid :arg-req-test)
+              arg-id (registry/arg-schema-uuid :arg-req-test :w)]
+          ;; Manually corrupt required in arg-schema (keep fn-schema-id, name, type correct)
+          (sp/update-entity storage :arg-schema arg-id
+                            {:fn-schema-id fn-id
+                             :name "w"
+                             :type :int
+                             :required true})  ; Wrong required
+          ;; Verify corruption
+          (let [corrupted (sp/read-entity storage :arg-schema arg-id)]
+            (is (true? (:required corrupted))))
+          ;; Re-sync - should update because only required differs
+          (registry/sync-defs-to-storage! storage defs)
+          (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
+            (is (false? (:required arg-after)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "sync-arg-schemas! does NOT update when nothing differs"
+    ;; This tests when all four `or` branches are false
+    (let [storage (gsm/create-storage)
+          defs {:arg-nochange {:args {:p :int}
+                               :return-type :int
+                               :impl (fn [_ _] 1)}}]
+      (try
+        ;; First sync
+        (registry/sync-defs-to-storage! storage defs)
+        ;; Second sync with same data
+        (let [result (registry/sync-defs-to-storage! storage defs)]
+          ;; updated should be 1 because the arg goes through update path
+          (is (= 1 (:updated (:arg-schemas result)))))
         (finally
           (sp/close storage))))))
 

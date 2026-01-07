@@ -3,7 +3,6 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.postgres-storage.core :as core]
     [graphden.postgres-storage.util :as util])
   (:import
     (java.sql
@@ -13,7 +12,7 @@
 ;; === Configuration Tests ===
 
 (deftest get-query-timeout-seconds-test
-  (testing "returns timeout from core/*query-timeout-ms* converted to seconds"
+  (testing "returns timeout from util/*query-timeout-ms* converted to seconds"
     ;; Default is 30000ms = 30 seconds
     (let [result (util/get-query-timeout-seconds)]
       (is (integer? result))
@@ -21,7 +20,7 @@
       (is (= 30 result))))
 
   (testing "respects custom timeout via binding"
-    (binding [core/*query-timeout-ms* 60000]
+    (binding [util/*query-timeout-ms* 60000]
       (is (= 60 (util/get-query-timeout-seconds))))))
 
 

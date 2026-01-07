@@ -54,7 +54,7 @@
         ;; Verify column exists in database
         (when (and (seq old-db-fields) (nil? old-db-field))
           (throw (ex-info "Metadata/DB inconsistency: field exists in metadata but not in database"
-                          {:type :metadata-inconsistency
+                          {:type :metadata-error/inconsistency
                            :entity entity-name
                            :field field-name
                            :expected-column (util/kw->snake-case old-field-name)})))

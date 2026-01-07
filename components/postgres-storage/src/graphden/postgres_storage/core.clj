@@ -29,41 +29,15 @@
 
 
 ;; === Configuration ===
-;; Re-export timeout var from config for backward compatibility.
-;; Note: This is the SAME var (via def), not a copy. Bindings on config/*query-timeout-ms*
-;; will be visible here and vice versa.
+;; Re-export timeout from util for backward compatibility.
+;; The canonical definition is now in util.clj to avoid circular dependency.
+;; Use util/*query-timeout-ms* for bindings since Clojure def doesn't create var aliases.
 
-(def ^:dynamic *query-timeout-ms*
-  "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
-   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
-   Note: Internally converted to seconds for JDBC calls."
-  30000)
-
-
-(defn with-query-timeout
+(def with-query-timeout
   "Executes f with a custom query timeout (in milliseconds).
    Timeout must be a positive integer. Minimum is 1000ms (1 second).
-
-   Why 1000ms minimum?
-   - JDBC setQueryTimeout uses seconds (integer), values <1000ms become 0
-   - SQL queries need time for network roundtrip and query parsing
-   - This is different from executor timeout (50ms min) which covers overall execution
-
-   Example:
-   (with-query-timeout 60000
-     #(sp/query-entities storage :user {}))"
-  [timeout-ms f]
-  (when-not (pos-int? timeout-ms)
-    (throw (ex-info "Query timeout must be a positive integer (ms)"
-                    {:type :config-error/invalid-timeout
-                     :timeout-ms timeout-ms})))
-  (when (< timeout-ms 1000)
-    (throw (ex-info "Query timeout must be at least 1000ms (1 second)"
-                    {:type :config-error/invalid-timeout
-                     :timeout-ms timeout-ms
-                     :min-timeout-ms 1000})))
-  (binding [*query-timeout-ms* timeout-ms]
-    (f)))
+   Delegates to util/with-query-timeout."
+  util/with-query-timeout)
 
 
 ;; === Connection pool ===

@@ -447,12 +447,6 @@
           (map row->entity rows))))))
 
 
-;; merge-arg-values-for-chain moved to storage-protocol/interface as shared utility
-
-
-;; extract-potential-fn-refs replaced by sp/extract-uuid-refs-from-arg-values
-
-
 (defn- classify-uuid-refs
   "Classifies UUID references as either fn refs or fn-result-value refs.
    Returns {:fn-ids #{...} :frv-ids #{...}}.

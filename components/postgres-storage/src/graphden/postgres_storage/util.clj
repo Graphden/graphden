@@ -22,62 +22,47 @@
     [clojure.tools.logging :as log]))
 
 
-;; === Configuration helpers ===
+;; === Configuration ===
 
-(def ^:private timeout-fallback-logged? (atom false))
-
-
-;; Cache the resolved var to avoid repeated reflection.
-;; The var reference is resolved once on first access; the var's VALUE
-;; is still read on each call (since *query-timeout-ms* is dynamic).
-;; Uses atom with ::not-cached sentinel to allow reset in tests.
-(def ^:private timeout-var-cache (atom ::not-cached))
+(def ^:dynamic *query-timeout-ms*
+  "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
+   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
+   Note: Internally converted to seconds for JDBC calls."
+  30000)
 
 
-(defn- resolve-timeout-var
-  "Resolves and caches the timeout var. Returns the var or nil if not found.
-   If resolution fails (returns nil), does NOT cache the result, so subsequent
-   calls will retry. This handles the case where util.clj is loaded before
-   core.clj - the first call returns nil but later calls succeed."
-  []
-  (let [cached @timeout-var-cache]
-    (if (= cached ::not-cached)
-      ;; First call - resolve and cache only if successful
-      (let [resolved (resolve 'graphden.postgres-storage.core/*query-timeout-ms*)]
-        (when resolved
-          (reset! timeout-var-cache resolved))
-        resolved)
-      ;; Already cached (and must be non-nil since we only cache successful resolutions)
-      cached)))
+(defn with-query-timeout
+  "Executes f with a custom query timeout (in milliseconds).
+   Timeout must be a positive integer. Minimum is 1000ms (1 second).
+
+   Why 1000ms minimum?
+   - JDBC setQueryTimeout uses seconds (integer), values <1000ms become 0
+   - SQL queries need time for network roundtrip and query parsing
+   - This is different from executor timeout (50ms min) which covers overall execution
+
+   Example:
+   (with-query-timeout 60000
+     #(sp/query-entities storage :user {}))"
+  [timeout-ms f]
+  (when-not (pos-int? timeout-ms)
+    (throw (ex-info "Query timeout must be a positive integer (ms)"
+                    {:type :config-error/invalid-timeout
+                     :timeout-ms timeout-ms})))
+  (when (< timeout-ms 1000)
+    (throw (ex-info "Query timeout must be at least 1000ms (1 second)"
+                    {:type :config-error/invalid-timeout
+                     :timeout-ms timeout-ms
+                     :min-timeout-ms 1000})))
+  (binding [*query-timeout-ms* timeout-ms]
+    (f)))
 
 
 (defn get-query-timeout-seconds
   "Returns the current query timeout in seconds for JDBC calls.
-   Resolves the dynamic var *query-timeout-ms* from core.clj and converts to seconds.
-   Returns 30 seconds if resolution fails (e.g., during test isolation).
-
-   Architecture note:
-   Uses `resolve` (reflection) to avoid circular dependency:
-   - util.clj is required by core.clj, crud.clj, ddl.clj
-   - *query-timeout-ms* is defined in core.clj
-   - If util.clj required core.clj, we'd have a circular dependency
-
-   This is a deliberate trade-off: runtime var resolution vs compile-time
-   circular dependency. The fallback value ensures the system works even
-   if resolution fails (e.g., in test isolation or REPL experiments).
-
-   The var reference is cached (via atom) to avoid repeated reflection;
-   the var's value is still read on each call since it's dynamic.
-
+   Reads the dynamic var *query-timeout-ms* and converts to seconds.
    The timeout is stored in milliseconds but JDBC setQueryTimeout uses seconds."
   []
-  (if-let [timeout-var (resolve-timeout-var)]
-    (quot (deref timeout-var) 1000)
-    (do
-      ;; Log warning once to avoid log spam, but alert on potential misconfiguration
-      (when (compare-and-set! timeout-fallback-logged? false true)
-        (log/warn "Could not resolve *query-timeout-ms* from core.clj, using fallback of 30 seconds"))
-      30)))
+  (quot *query-timeout-ms* 1000))
 
 
 ;; === Error handling ===
@@ -189,6 +174,49 @@
        (throw (wrap-sql-error e# ~log-prefix ~operation ~context)))))
 
 
+;; === SQL validation ===
+;;
+;; NOTE: These are defined early because they're used by type mapping functions below.
+
+(def ^:private sql-identifier-pattern
+  "Pattern for valid SQL identifiers (snake_case, alphanumeric + underscore)."
+  #"^[a-z][a-z0-9_]*$")
+
+
+(def ^:private max-sql-identifier-length
+  "Maximum length for PostgreSQL identifiers.
+   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1).
+   We enforce this limit to avoid silent truncation issues."
+  63)
+
+
+(defn validate-sql-identifier!
+  "Validates that a string is a safe SQL identifier.
+   Prevents SQL injection in DDL statements where parameterization isn't possible.
+   Identifiers must be lowercase because PostgreSQL folds unquoted identifiers to lowercase,
+   and using uppercase would create case-sensitivity issues.
+   Also enforces PostgreSQL's 63-character identifier length limit."
+  [s context]
+  (when (> (count s) max-sql-identifier-length)
+    (throw (ex-info (str "SQL identifier too long: '" s "' (" (count s) " chars). "
+                         "PostgreSQL limits identifiers to " max-sql-identifier-length " characters.")
+                    {:type :validation-error/identifier-too-long
+                     :value s
+                     :length (count s)
+                     :max-length max-sql-identifier-length
+                     :context context})))
+  (when-not (re-matches sql-identifier-pattern s)
+    (throw (ex-info (str "Invalid SQL identifier: '" s "'. "
+                         "Must start with lowercase letter and contain only "
+                         "lowercase letters, digits, and underscores. "
+                         "Uppercase is not allowed because PostgreSQL folds "
+                         "unquoted identifiers to lowercase.")
+                    {:type :validation-error/invalid-identifier
+                     :value s
+                     :context context
+                     :pattern (str sql-identifier-pattern)}))))
+
+
 ;; === Type mapping ===
 
 (def type->pg
@@ -239,9 +267,14 @@
 
 (defn ident->sql
   "Converts a keyword identifier to quoted SQL-safe name (snake_case).
-   Uses double quotes to handle reserved words like 'order', 'user', etc."
+   Validates the result to prevent SQL injection in DDL operations.
+   Uses double quotes to handle reserved words like 'order', 'user', etc.
+
+   Throws if the keyword would produce an invalid SQL identifier."
   [k]
-  (str "\"" (kw->snake-case k) "\""))
+  (let [sql-name (kw->snake-case k)]
+    (validate-sql-identifier! sql-name {:type :identifier :keyword k})
+    (str "\"" sql-name "\"")))
 
 
 (defn field-type->pg
@@ -254,47 +287,6 @@
       :enum (ident->sql (:enum-name field-spec))
       :union "JSONB"
       (get type->pg t "TEXT"))))
-
-
-;; === SQL validation ===
-
-(def ^:private sql-identifier-pattern
-  "Pattern for valid SQL identifiers (snake_case, alphanumeric + underscore)."
-  #"^[a-z][a-z0-9_]*$")
-
-
-(def ^:private max-sql-identifier-length
-  "Maximum length for PostgreSQL identifiers.
-   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1).
-   We enforce this limit to avoid silent truncation issues."
-  63)
-
-
-(defn validate-sql-identifier!
-  "Validates that a string is a safe SQL identifier.
-   Prevents SQL injection in DDL statements where parameterization isn't possible.
-   Identifiers must be lowercase because PostgreSQL folds unquoted identifiers to lowercase,
-   and using uppercase would create case-sensitivity issues.
-   Also enforces PostgreSQL's 63-character identifier length limit."
-  [s context]
-  (when (> (count s) max-sql-identifier-length)
-    (throw (ex-info (str "SQL identifier too long: '" s "' (" (count s) " chars). "
-                         "PostgreSQL limits identifiers to " max-sql-identifier-length " characters.")
-                    {:type :validation-error/identifier-too-long
-                     :value s
-                     :length (count s)
-                     :max-length max-sql-identifier-length
-                     :context context})))
-  (when-not (re-matches sql-identifier-pattern s)
-    (throw (ex-info (str "Invalid SQL identifier: '" s "'. "
-                         "Must start with lowercase letter and contain only "
-                         "lowercase letters, digits, and underscores. "
-                         "Uppercase is not allowed because PostgreSQL folds "
-                         "unquoted identifiers to lowercase.")
-                    {:type :validation-error/invalid-identifier
-                     :value s
-                     :context context
-                     :pattern (str sql-identifier-pattern)}))))
 
 
 (defn enum-value->sql

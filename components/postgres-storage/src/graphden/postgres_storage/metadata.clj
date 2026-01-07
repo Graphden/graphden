@@ -115,7 +115,7 @@
                                                        (assoc :enum-name (:enum-name extra))))))
                                   (if strict?
                                     (throw (ex-info "Orphaned field entry in metadata"
-                                                    {:type :metadata-corruption
+                                                    {:type :metadata-error/corrupted
                                                      :field-uuid uuid
                                                      :field-name n
                                                      :missing-parent-uuid parent-uuid}))
@@ -133,7 +133,7 @@
                                                   :value n})
                                        (if strict?
                                          (throw (ex-info "Orphaned enum-value entry in metadata"
-                                                         {:type :metadata-corruption
+                                                         {:type :metadata-error/corrupted
                                                           :enum-value-uuid uuid
                                                           :value-name n
                                                           :missing-parent-uuid parent-uuid}))

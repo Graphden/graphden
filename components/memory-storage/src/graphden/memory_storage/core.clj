@@ -286,7 +286,7 @@
   [state-atom entity-name ids]
   (when (and (some? ids) (not (sequential? ids)))
     (throw (ex-info "ids must be a sequential collection or nil"
-                    {:type :invalid-args
+                    {:type :invalid-data
                      :entity-name entity-name
                      :ids ids
                      :ids-type (type ids)})))
@@ -379,10 +379,6 @@
       chain
       (let [fn-rec (get-record state :fn current-id)]
         (recur (:parent-fn-id fn-rec) (conj chain current-id))))))
-
-
-;; merge-arg-values-from-chain replaced by sp/merge-arg-values-for-chain
-;; extract-refs-from-arg-values replaced by sp/extract-uuid-refs-from-arg-values
 
 
 (defn- classify-refs

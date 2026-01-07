@@ -558,7 +558,7 @@
         ;; Check for metadata/DB inconsistency
         (when-not attr-exists?
           (throw (ex-info "Metadata/DB inconsistency: field exists in metadata but not in database"
-                          {:type :metadata-inconsistency
+                          {:type :metadata-error/inconsistency
                            :entity (keyword (namespace old-attr))
                            :field field-name
                            :expected-attr old-attr})))
@@ -1124,12 +1124,6 @@
               :arg-schema-id arg-schema-id
               :value value})
            rows))))
-
-
-;; merge-arg-values-for-chain moved to storage-protocol/interface as shared utility
-
-
-;; extract-potential-fn-refs replaced by sp/extract-uuid-refs-from-arg-values
 
 
 (defn- classify-uuid-refs

@@ -1,24 +1,26 @@
 (ns graphden.postgres-storage.interface
   "Public interface for PostgreSQL storage implementation."
   (:require
-    [graphden.postgres-storage.core :as core]))
+    [graphden.postgres-storage.core :as core]
+    [graphden.postgres-storage.util :as util]))
 
 
-;; Re-export timeout configuration for external use
+;; Re-export timeout configuration from util (canonical location).
+;; Using the var reference directly since Clojure def doesn't create aliases.
 (def ^:dynamic *query-timeout-ms*
   "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
-   Default is 30000 ms (30 seconds)."
-  core/*query-timeout-ms*)
+   Default is 30000 ms (30 seconds).
+   Note: For bindings, use graphden.postgres-storage.util/*query-timeout-ms*."
+  util/*query-timeout-ms*)
 
 
-(defn with-query-timeout
+(def with-query-timeout
   "Executes f with a custom query timeout (in milliseconds).
 
    Example:
    (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
-  [timeout-ms f]
-  (core/with-query-timeout timeout-ms f))
+  util/with-query-timeout)
 
 
 (defn create-storage

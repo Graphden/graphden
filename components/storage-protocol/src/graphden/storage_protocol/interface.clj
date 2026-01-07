@@ -51,12 +51,18 @@
    - :config-error/invalid-pool-*   - Pool configuration issues
 
    ### Migration Errors
-   - :destructive-change         - Attempt to remove entity/field/enum
-   - :metadata-inconsistency     - Metadata doesn't match DB state
-   - :metadata-corruption        - Metadata is corrupted
+   - :destructive-change              - Attempt to remove entity/field/enum
+
+   ### Metadata Errors (prefix :metadata-error/)
+   - :metadata-error/inconsistency    - Metadata doesn't match DB state
+   - :metadata-error/corrupted        - Metadata is corrupted
+   - :metadata-error/rollback-failed  - Migration rollback failed
+
+   ### Execution Errors (prefix :execution-error/)
+   - :execution-error/graph-too-large - Graph resolution exceeded max iterations
 
    ### Storage State Errors
-   - :storage-not-initialized    - CRUD attempted before initialize
+   - :storage-not-initialized         - CRUD attempted before initialize
 
    ## Logging Level Policy
 
@@ -552,6 +558,54 @@
      5. For fn-result-value references, look up in :fn-result-values
 
      Throws ExceptionInfo with :type :not-found if fn-id doesn't exist."))
+
+
+;; === ExecutionGraphResult record ===
+
+(defrecord ExecutionGraphResult
+  [fns fn-schemas arg-schemas resolved-args fn-result-values]
+  ;; defrecord already implements ILookup with keyword field access,
+  ;; so (:fns graph) works automatically.
+  ;; This record provides:
+  ;; - Type safety: clear field names and structure
+  ;; - Documentation: named fields vs opaque map
+  ;; - Efficiency: direct field access vs map lookup
+  )
+
+
+(defn ->execution-graph
+  "Creates an ExecutionGraphResult record from a map.
+   Validates that all required keys are present.
+
+   Expected shape:
+   {:fns {fn-id -> fn-record ...}
+    :fn-schemas {fn-schema-id -> fn-schema-record ...}
+    :arg-schemas {arg-schema-id -> arg-schema-record ...}
+    :resolved-args {fn-id -> {arg-schema-id -> arg-value-record} ...}
+    :fn-result-values {fn-result-value-id -> fn-result-value-record ...}}
+
+   Throws if required keys are missing."
+  [{:keys [fns fn-schemas arg-schemas resolved-args fn-result-values]
+    :or {fn-result-values {}}}]
+  (when-not (map? fns)
+    (throw (ex-info "ExecutionGraphResult requires :fns map"
+                    {:type :invalid-data :received (type fns)})))
+  (when-not (map? fn-schemas)
+    (throw (ex-info "ExecutionGraphResult requires :fn-schemas map"
+                    {:type :invalid-data :received (type fn-schemas)})))
+  (when-not (map? arg-schemas)
+    (throw (ex-info "ExecutionGraphResult requires :arg-schemas map"
+                    {:type :invalid-data :received (type arg-schemas)})))
+  (when-not (map? resolved-args)
+    (throw (ex-info "ExecutionGraphResult requires :resolved-args map"
+                    {:type :invalid-data :received (type resolved-args)})))
+  (->ExecutionGraphResult fns fn-schemas arg-schemas resolved-args fn-result-values))
+
+
+(defn execution-graph?
+  "Returns true if x is an ExecutionGraphResult record."
+  [x]
+  (instance? ExecutionGraphResult x))
 
 
 ;; === Execution graph limits ===

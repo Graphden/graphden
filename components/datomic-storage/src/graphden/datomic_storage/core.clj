@@ -1154,18 +1154,52 @@
        (set)))
 
 
-(defn- verify-fn-refs-batch
-  "Verifies which UUIDs actually exist as fns.
-   Returns set of valid fn-ids."
+(defn- classify-uuid-refs
+  "Classifies UUID references as either fn refs or fn-result-value refs.
+   Returns {:fn-ids #{...} :frv-ids #{...}}.
+   Gracefully handles missing fn-result-value attribute (returns empty frv-ids)."
   [db uuid-candidates]
   (if (empty? uuid-candidates)
-    #{}
-    (let [results (d/q '[:find ?fn-id
-                         :in $ [?fn-id ...]
-                         :where
-                         [?e :fn/id ?fn-id]]
-                       db (vec uuid-candidates))]
-      (set (map first results)))))
+    {:fn-ids #{} :frv-ids #{}}
+    (let [uuids-vec (vec uuid-candidates)
+          fn-results (d/q '[:find ?fn-id
+                            :in $ [?fn-id ...]
+                            :where
+                            [?e :fn/id ?fn-id]]
+                          db uuids-vec)
+          ;; Try to query fn-result-value, handle missing attribute gracefully
+          frv-results (try
+                        (d/q '[:find ?frv-id
+                               :in $ [?frv-id ...]
+                               :where
+                               [?e :fn-result-value/id ?frv-id]]
+                             db uuids-vec)
+                        (catch clojure.lang.ExceptionInfo e
+                          ;; :db.error/not-an-entity means attribute doesn't exist
+                          (if (= :db.error/not-an-entity (:db/error (ex-data e)))
+                            []
+                            (throw e))))]
+      {:fn-ids (set (map first fn-results))
+       :frv-ids (set (map first frv-results))})))
+
+
+(defn- load-fn-result-values-batch
+  "Loads fn-result-values by their IDs.
+   Returns {fn-result-value-id -> fn-result-value-record}."
+  [db frv-ids]
+  (if (empty? frv-ids)
+    {}
+    (let [rows (d/q '[:find ?id ?fn-id
+                      :in $ [?id ...]
+                      :where
+                      [?e :fn-result-value/id ?id]
+                      [?e :fn-result-value/fn-id ?fn-id]]
+                    db (vec frv-ids))]
+      (->> rows
+           (map (fn [[id fn-id]]
+                  [id {:id id
+                       :fn-id fn-id}]))
+           (into {})))))
 
 
 (defn- load-fns-batch
@@ -1244,15 +1278,15 @@
 
 (defn- resolve-execution-graph-impl
   "Resolves complete execution graph for a function.
-   Uses batched BFS to collect all transitively referenced functions.
+   Uses batched BFS to collect all transitively referenced functions and fn-result-values.
    Throws if iteration count exceeds sp/*max-graph-iterations*.
 
    This implementation uses batch queries to minimize database round-trips:
    1. Process pending fn-ids in batches
    2. Batch load parent chains
    3. Batch load arg-values for all chain members
-   4. Extract fn-refs and continue until graph is complete
-   5. Final batch load of all fns, fn-schemas, arg-schemas"
+   4. Extract fn-refs and fn-result-value refs, continue until graph is complete
+   5. Final batch load of all fns, fn-schemas, arg-schemas, fn-result-values"
   [conn fn-id]
   (let [db (d/db conn)
         ;; Check if fn exists
@@ -1265,12 +1299,13 @@
       (throw (ex-info "Function not found"
                       {:type :not-found
                        :fn-id fn-id})))
-    ;; Phase 1: Discover all fn-ids in the graph using batched BFS
+    ;; Phase 1: Discover all fn-ids and fn-result-values in the graph using batched BFS
     (loop [to-visit #{fn-id}
            visited #{}
            ;; Accumulate: fn-id -> parent-chain, fn-id -> merged-args
            all-chains {}
            all-merged-args {}
+           all-frv-ids #{}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
@@ -1285,11 +1320,14 @@
               ;; Load all fn-schemas
               fn-schemas (load-fn-schemas-batch db fn-schema-ids)
               ;; Load all arg-schemas
-              arg-schemas (load-arg-schemas-batch db fn-schema-ids)]
+              arg-schemas (load-arg-schemas-batch db fn-schema-ids)
+              ;; Load all fn-result-values
+              fn-result-values (load-fn-result-values-batch db all-frv-ids)]
           {:fns fns
            :fn-schemas fn-schemas
            :arg-schemas arg-schemas
-           :resolved-args all-merged-args})
+           :resolved-args all-merged-args
+           :fn-result-values fn-result-values})
         ;; Process batch of pending fn-ids
         (let [batch (vec to-visit)
               new-visited (into visited batch)
@@ -1308,18 +1346,25 @@
                                                     all-arg-values
                                                     (get chains fid [fid]))]))
                                       batch)
-              ;; Extract all potential fn-refs
+              ;; Extract all potential refs (UUIDs)
               all-potential-refs (->> (vals merged-args-batch)
                                       (mapcat extract-potential-fn-refs)
                                       (set))
               ;; Remove already visited
               new-candidates (set/difference all-potential-refs new-visited)
-              ;; Verify which candidates are actual fns
-              verified-refs (verify-fn-refs-batch db new-candidates)]
-          (recur verified-refs
+              ;; Classify refs as fn or fn-result-value
+              {:keys [fn-ids frv-ids]} (classify-uuid-refs db new-candidates)
+              ;; Load fn-result-values to get their fn-ids
+              new-frvs (load-fn-result-values-batch db frv-ids)
+              ;; Add fn-ids from fn-result-values to visit set
+              frv-fn-ids (set (map :fn-id (vals new-frvs)))
+              ;; Combine direct fn refs + fn refs from fn-result-values
+              all-new-fn-refs (set/union fn-ids (set/difference frv-fn-ids new-visited))]
+          (recur all-new-fn-refs
                  new-visited
                  (merge all-chains chains)
                  (merge all-merged-args merged-args-batch)
+                 (set/union all-frv-ids frv-ids)
                  (+ iter-count (count batch))))))))
 
 

@@ -512,6 +512,7 @@
    - All fn-schema records
    - All arg-schema records
    - All resolved arg-values (merged from parent chains)
+   - All fn-result-values referenced by arg-values
 
    Each storage implementation can optimize this differently:
    - memory: simple recursive traversal (fast for in-memory data)
@@ -526,7 +527,8 @@
      {:fns {fn-id -> fn-record ...}
       :fn-schemas {fn-schema-id -> fn-schema-record ...}
       :arg-schemas {arg-schema-id -> arg-schema-record ...}
-      :resolved-args {fn-id -> {arg-schema-id -> arg-value-record} ...}}
+      :resolved-args {fn-id -> {arg-schema-id -> arg-value-record} ...}
+      :fn-result-values {fn-result-value-id -> fn-result-value-record ...}}
 
      Where:
      - :fns contains the target fn and all transitively referenced fns
@@ -534,12 +536,15 @@
      - :arg-schemas contains all arg-schemas for those fn-schemas
      - :resolved-args contains merged arg-values (child overrides parent)
        for each fn, keyed by arg-schema-id
+     - :fn-result-values contains all fn-result-value records referenced
+       by arg-values (for cached computation results)
 
      The executor can then:
      1. Look up fn by id in :fns
      2. Look up its fn-schema in :fn-schemas
      3. Look up arg-schemas in :arg-schemas
      4. Get resolved arg-values from :resolved-args
+     5. For fn-result-value references, look up in :fn-result-values
 
      Throws ExceptionInfo with :type :not-found if fn-id doesn't exist."))
 

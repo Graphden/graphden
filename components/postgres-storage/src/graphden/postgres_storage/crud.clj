@@ -491,21 +491,40 @@
        (set)))
 
 
-(defn- verify-fn-refs-batch
-  "Verifies which UUIDs actually exist as fns.
-   Returns set of valid fn-ids."
+(defn- classify-uuid-refs
+  "Classifies UUID references as either fn refs or fn-result-value refs.
+   Returns {:fn-ids #{...} :frv-ids #{...}}.
+   Gracefully handles missing fn_result_value table (returns empty frv-ids)."
   [ds uuid-candidates]
   (if (empty? uuid-candidates)
-    #{}
-    (let [query (sql/format {:select [:id]
-                             :from [:fn]
-                             :where [:in :id (vec uuid-candidates)]}
-                            {:quoted true})]
-      (with-sql-error-handling :verify-fn-refs {:candidate-count (count uuid-candidates)}
-        (let [rows (jdbc/execute! ds query
-                                  {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout (get-query-timeout)})]
-          (set (map :id rows)))))))
+    {:fn-ids #{} :frv-ids #{}}
+    (let [uuids-vec (vec uuid-candidates)
+          ;; Query fn table
+          fn-query (sql/format {:select [:id]
+                                :from [:fn]
+                                :where [:in :id uuids-vec]}
+                               {:quoted true})
+          ;; Query fn_result_value table (may not exist in older schemas)
+          frv-query (sql/format {:select [:id]
+                                 :from [:fn_result_value]
+                                 :where [:in :id uuids-vec]}
+                                {:quoted true})]
+      (with-sql-error-handling :classify-uuid-refs {:candidate-count (count uuid-candidates)}
+        (let [fn-rows (jdbc/execute! ds fn-query
+                                     {:builder-fn rs/as-unqualified-lower-maps
+                                      :timeout (get-query-timeout)})
+              ;; Try to query fn_result_value, but handle table-not-found gracefully
+              frv-rows (try
+                         (jdbc/execute! ds frv-query
+                                        {:builder-fn rs/as-unqualified-lower-maps
+                                         :timeout (get-query-timeout)})
+                         (catch java.sql.SQLException e
+                           ;; 42P01 = undefined_table in PostgreSQL
+                           (if (= "42P01" (java.sql.SQLException/.getSQLState e))
+                             []
+                             (throw e))))]
+          {:fn-ids (set (map :id fn-rows))
+           :frv-ids (set (map :id frv-rows))})))))
 
 
 (defn- load-entities-batch
@@ -546,29 +565,37 @@
   (load-entities-batch ds :arg_schema :fn_schema_id fn-schema-ids))
 
 
+(defn- load-fn-result-values-batch
+  "Loads fn-result-values by their IDs.
+   Returns {fn-result-value-id -> fn-result-value-record}."
+  [ds frv-ids]
+  (load-entities-batch ds :fn_result_value :id frv-ids))
+
+
 (defn resolve-execution-graph
   "Resolves complete execution graph for a function.
-   Uses batched BFS to collect all transitively referenced functions.
+   Uses batched BFS to collect all transitively referenced functions and fn-result-values.
    Throws if iteration count exceeds sp/*max-graph-iterations*.
 
    This implementation uses batch queries to minimize database round-trips:
    1. Process pending fn-ids in batches
    2. Batch load parent chains using recursive CTE
    3. Batch load arg-values for all chain members
-   4. Extract fn-refs and continue until graph is complete
-   5. Final batch load of all fns, fn-schemas, arg-schemas"
+   4. Extract fn-refs and fn-result-value refs, continue until graph is complete
+   5. Final batch load of all fns, fn-schemas, arg-schemas, fn-result-values"
   [ds fn-id]
   (let [root-fn (read-entity ds :fn fn-id)]
     (when-not root-fn
       (throw (ex-info "Function not found"
                       {:type :not-found
                        :fn-id fn-id})))
-    ;; Phase 1: Discover all fn-ids in the graph using batched BFS
+    ;; Phase 1: Discover all fn-ids and fn-result-values in the graph using batched BFS
     (loop [to-visit #{fn-id}
            visited #{}
            ;; Accumulate: fn-id -> parent-chain, fn-id -> merged-args
            all-chains {}
            all-merged-args {}
+           all-frv-ids #{}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
@@ -583,11 +610,14 @@
               ;; Load all fn-schemas
               fn-schemas (load-fn-schemas-batch ds fn-schema-ids)
               ;; Load all arg-schemas
-              arg-schemas (load-arg-schemas-batch ds fn-schema-ids)]
+              arg-schemas (load-arg-schemas-batch ds fn-schema-ids)
+              ;; Load all fn-result-values
+              fn-result-values (load-fn-result-values-batch ds all-frv-ids)]
           {:fns fns
            :fn-schemas fn-schemas
            :arg-schemas arg-schemas
-           :resolved-args all-merged-args})
+           :resolved-args all-merged-args
+           :fn-result-values fn-result-values})
         ;; Process batch of pending fn-ids
         (let [batch (vec to-visit)
               new-visited (into visited batch)
@@ -606,16 +636,23 @@
                                                     all-arg-values
                                                     (get chains fid [fid]))]))
                                       batch)
-              ;; Extract all potential fn-refs
+              ;; Extract all potential refs (UUIDs)
               all-potential-refs (->> (vals merged-args-batch)
                                       (mapcat extract-potential-fn-refs)
                                       (set))
               ;; Remove already visited
               new-candidates (set/difference all-potential-refs new-visited)
-              ;; Verify which candidates are actual fns
-              verified-refs (verify-fn-refs-batch ds new-candidates)]
-          (recur verified-refs
+              ;; Classify refs as fn or fn-result-value
+              {:keys [fn-ids frv-ids]} (classify-uuid-refs ds new-candidates)
+              ;; Load fn-result-values to get their fn-ids
+              new-frvs (load-fn-result-values-batch ds frv-ids)
+              ;; Add fn-ids from fn-result-values to visit set
+              frv-fn-ids (set (map :fn-id (vals new-frvs)))
+              ;; Combine direct fn refs + fn refs from fn-result-values
+              all-new-fn-refs (set/union fn-ids (set/difference frv-fn-ids new-visited))]
+          (recur all-new-fn-refs
                  new-visited
                  (merge all-chains chains)
                  (merge all-merged-args merged-args-batch)
+                 (set/union all-frv-ids frv-ids)
                  (+ iter-count (count batch))))))))

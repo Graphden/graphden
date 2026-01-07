@@ -14,7 +14,7 @@
 
 (deftest entities-test
   (testing "schema contains all expected entities"
-    (is (= #{:fn-schema :arg-schema :fn :arg-value}
+    (is (= #{:fn-schema :arg-schema :fn :fn-result-value :arg-value}
            (set (ds/entities schema))))))
 
 
@@ -52,9 +52,14 @@
   (testing "arg-value has union type for value"
     (let [fields (ds/entity-fields schema :arg-value)]
       (is (= :union (get-in fields [:value :type])))
-      ;; Variants: 1 ref + :any + :fn + all literal types = 3 + count(supported-types)
-      (is (= (+ 3 (count ft/supported-types))
-             (count (get-in fields [:value :variants])))))))
+      ;; Variants: 2 refs (fn, fn-result-value) + :any + :fn + all literal types = 4 + count(supported-types)
+      (is (= (+ 4 (count ft/supported-types))
+             (count (get-in fields [:value :variants]))))))
+
+  (testing "fn-result-value has expected fields"
+    (let [fields (ds/entity-fields schema :fn-result-value)]
+      (is (= :ref (get-in fields [:fn-id :type])))
+      (is (= :fn (get-in fields [:fn-id :ref-entity]))))))
 
 
 (deftest validation-test

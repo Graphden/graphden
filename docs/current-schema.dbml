@@ -1,0 +1,63 @@
+Enum value_kind {
+  null
+  bool
+  int
+  numeric
+  text
+  uuid
+  timestamptz
+  jsonb
+  bytes
+  fn
+  ref
+  any
+  union
+}
+
+Table fn_schema {
+  id uuid [primary key]
+  name text [not null, unique]
+  returned_type value_kind [not null]
+}
+
+Table arg_schema {
+  id uuid [primary key]
+  fn_schema_id uuid [not null, ref: > fn_schema.id]
+  name text [not null]
+  type value_kind [not null]
+  required bool [not null, default: true]
+
+  indexes {
+    (fn_schema_id, name) [unique]
+  }
+}
+
+Table fn {
+  id uuid [primary key]
+  name text [not null, unique]
+  fn_schema_id uuid [not null, ref: > fn_schema.id]
+  parent_fn_id uuid [ref: > fn.id]
+}
+
+// Represents a cached computation result of a function.
+// Multiple arg-values can reference the same fn-result-value
+// to reuse the computed value instead of re-executing the function.
+Table fn_result_value {
+  id uuid [primary key]
+  fn_id uuid [not null, ref: > fn.id]
+}
+
+Table arg_value {
+  id uuid [primary key]
+  owner_fn_id uuid [not null, ref: > fn.id]
+  arg_schema_id uuid [not null, ref: > arg_schema.id]
+  // value can be:
+  // - literal (int, text, bool, etc.)
+  // - UUID referencing fn (for HOF - pass function as object)
+  // - UUID referencing fn_result_value (for computed values - execute & cache)
+  value jsonb
+
+  indexes {
+    (owner_fn_id, arg_schema_id) [unique]
+  }
+}

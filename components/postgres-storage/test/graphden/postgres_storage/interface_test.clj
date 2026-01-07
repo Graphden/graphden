@@ -3236,9 +3236,9 @@
       (try
         (sp/initialize storage (make-graph-schema))
         (let [pool (:pool storage)
-              verify-fn #'crud/verify-fn-refs-batch
-              result (verify-fn pool #{})]
-          (is (= #{} result)))
+              classify-fn #'crud/classify-uuid-refs
+              result (classify-fn pool #{})]
+          (is (= {:fn-ids #{} :frv-ids #{}} result)))
         (finally
           (sp/close storage)))))
 
@@ -3350,17 +3350,17 @@
             (is (= :query-timeout (:type (ex-data e))))
             (is (= :load-arg-values (:operation (ex-data e)))))))))
 
-  (testing "verify-fn-refs-batch throws wrapped error on SQLException"
-    (let [verify-fn #'crud/verify-fn-refs-batch
+  (testing "classify-uuid-refs throws wrapped error on SQLException"
+    (let [classify-fn #'crud/classify-uuid-refs
           not-null-ex (SQLException. "not null violation" "23502")]
       (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
                                     (throw not-null-ex))]
         (try
-          (verify-fn nil #{(random-uuid)})
+          (classify-fn nil #{(random-uuid)})
           (is false "Should have thrown")
           (catch clojure.lang.ExceptionInfo e
             (is (= :not-null-violation (:type (ex-data e))))
-            (is (= :verify-fn-refs (:operation (ex-data e)))))))))
+            (is (= :classify-uuid-refs (:operation (ex-data e)))))))))
 
   (testing "load-entities-batch throws wrapped error on SQLException"
     (let [load-fn #'crud/load-entities-batch

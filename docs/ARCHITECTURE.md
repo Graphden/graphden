@@ -1,6 +1,6 @@
 # Graphden: Visual Functional Programming System
 
-> **Last updated:** 2026-01-05
+> **Last updated:** 2026-01-07
 >
 > This document describes the technical architecture of graphden.
 > For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
@@ -345,12 +345,22 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
          | 1:N
          v
 +------------------------------------------------------------------+
+| fn-result-value (cached computation reference)                    |
++------------------------------------------------------------------+
+| id: uuid (PK)                                                     |
+| fn-id: ref<fn> - function to execute and cache                   |
++------------------------------------------------------------------+
+| Multiple arg-values can reference the same fn-result-value       |
+| to share the cached computation result.                          |
++------------------------------------------------------------------+
+
++------------------------------------------------------------------+
 | arg-value (argument value)                                        |
 +------------------------------------------------------------------+
 | id: uuid (PK)                                                     |
 | owner-fn-id: ref<fn>                                              |
 | arg-schema-id: ref<arg-schema>                                    |
-| value: union<ref<fn> | literal-types...>                          |
+| value: union<ref<fn> | ref<fn-result-value> | literal-types...>   |
 | UNIQUE(owner-fn-id, arg-schema-id)                                |
 +------------------------------------------------------------------+
 ```
@@ -414,8 +424,34 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | type in arg-schema | Value in arg-value | Thunk | Behavior |
 |--------------------|-------------------|-------|----------|
 | :int, :text, etc. | Literal | LiteralThunk | force -> literal |
-| :int, :text, etc. | ref<fn> | FnRefThunk | force -> execute fn |
+| :int, :text, etc. | ref<fn> | FnRefThunk | force -> execute fn (each time) |
+| :int, :text, etc. | ref<fn-result-value> | FnResultValueThunk | force -> execute fn (cached) |
 | :fn | ref<fn> | LazyFnThunk | force -> fn-id (for HOF) |
+
+### fn-result-value: Cached Computation
+
+The `fn-result-value` entity enables **caching of function results** within a single execution:
+
+```
+fn: report
+  sales: ref<fn-result-value:A>     ← A points to calculate-sales
+  summary: ref<fn-result-value:A>   ← Same A, result is cached
+
+// calculate-sales executes ONCE, result shared between sales and summary
+```
+
+**Use cases:**
+1. **Expensive computations** — compute once, reuse result
+2. **Consistent snapshots** — same value for multiple consumers
+3. **Explicit caching** — user controls what gets cached
+
+**Comparison with direct fn reference:**
+
+| Reference type | Behavior |
+|---------------|----------|
+| `ref<fn>` with type=:fn | HOF: pass function as value, don't execute |
+| `ref<fn>` with other type | Execute function each time arg is forced |
+| `ref<fn-result-value>` | Execute function once, cache and reuse result |
 
 ### Base Functions and Their Types
 
@@ -457,13 +493,15 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
    max-depth        ; Maximum recursion depth
    timeout-ms       ; Maximum execution time
    start-time       ; Execution start time
-   depth])          ; Current recursion depth
+   depth            ; Current recursion depth
+   result-cache])   ; Atom: {fn-result-value-id -> computed-result}
 ```
 
 **Key design decisions:**
 1. **`execution-graph` caching** - Graph resolved once at top level, reused for all nested calls
 2. **`base-fns` registry** - Direct access to implementations without global state
 3. **`storage` reference** - Enables `ExecutionGraph` protocol calls if needed
+4. **`result-cache`** - Shared cache for `fn-result-value` computations within execution
 
 ### Limit Checking
 

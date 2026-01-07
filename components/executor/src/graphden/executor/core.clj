@@ -80,7 +80,8 @@
    start-time
    depth
    path-args        ; Map of {path -> value} for runtime args by path
-   current-path])   ; Current path in the execution tree (vector of arg-name keywords)
+   current-path     ; Current path in the execution tree (vector of arg-name keywords)
+   result-cache])   ; Atom: {fn-result-value-id -> computed-value} for caching
 
 
 (def ^:private max-depth-limit
@@ -152,7 +153,7 @@
                      :path-args-type (type path-args)})))
   ;; Use provided base-fns or snapshot the default registry
   (let [fns (or base-fns @default-registry)]
-    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0 (or path-args {}) [])))
+    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0 (or path-args {}) [] (atom {}))))
 
 
 ;; Forward declaration for mutual recursion
@@ -327,10 +328,35 @@
       (execute-internal context fn-id id-based-args))))
 
 
+(defn- execute-fn-result-value
+  "Executes a fn-result-value, using cache for memoization.
+   If the fn-result-value-id is already in cache, returns cached value.
+   Otherwise executes the underlying fn, caches the result, and returns it."
+  [context fn-result-value-id]
+  (let [result-cache (:result-cache context)
+        cached (get @result-cache fn-result-value-id)]
+    (if (some? cached)
+      ;; Cache hit - return cached value
+      cached
+      ;; Cache miss - execute and cache
+      (let [execution-graph (:execution-graph context)
+            fn-result-values (:fn-result-values execution-graph)
+            frv (get fn-result-values fn-result-value-id)]
+        (when-not frv
+          (throw (ex-info "fn-result-value not found in execution graph"
+                          {:type :execution-error/fn-result-value-not-found
+                           :fn-result-value-id fn-result-value-id})))
+        (let [fn-id (:fn-id frv)
+              result (execute-internal context fn-id nil)]
+          (swap! result-cache assoc fn-result-value-id result)
+          result)))))
+
+
 (defn- build-delay
   "Builds a delay for an arg-value.
-   - If value is a UUID and arg-schema type is :fn -> delay with callable
-   - If value is a UUID and arg-schema type is not :fn -> delay that executes fn
+   - If value is a UUID referencing fn-result-value -> delay with cached execution
+   - If value is a UUID referencing fn and arg-schema type is :fn -> delay with callable
+   - If value is a UUID referencing fn and arg-schema type is not :fn -> delay that executes fn
    - Otherwise -> delay with literal value
 
    NOTE: This function is only called from build-arg-delays when a stored arg-value
@@ -346,13 +372,26 @@
         arg-type (:type arg-schema)
         ;; Extend the path with this arg-name for child execution
         child-path (conj (:current-path context) (keyword arg-name))
-        child-context (assoc context :current-path child-path)]
+        child-context (assoc context :current-path child-path)
+        ;; Check if this UUID is a fn-result-value
+        execution-graph (:execution-graph context)
+        fn-result-values (:fn-result-values execution-graph)]
     (cond
-      ;; UUID value means reference to another fn
+      ;; UUID value means reference to fn or fn-result-value
       (uuid? value)
-      (if (= arg-type :fn)
+      (cond
+        ;; Check if it's a fn-result-value reference
+        (contains? fn-result-values value)
+        ;; fn-result-value: execute with caching (NOT affected by arg-type :fn)
+        ;; Note: fn-result-value is always "compute and cache", never "pass as callable"
+        (delay (execute-fn-result-value child-context value))
+
+        ;; It's a direct fn reference
+        (= arg-type :fn)
         ;; For :fn type args, create a callable with extended path
         (delay (make-callable child-context value))
+
+        :else
         ;; For other types, execute the referenced fn with extended path
         (delay (execute-internal child-context value nil)))
 

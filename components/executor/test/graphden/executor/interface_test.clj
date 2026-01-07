@@ -1892,3 +1892,180 @@
           ctx (exec/create-context {:storage storage})]
       (is (some? ctx))
       (sp/close storage))))
+
+
+;; === fn-result-value Tests ===
+
+(deftest fn-result-value-basic-test
+  (testing "fn-result-value is executed and cached"
+    (let [storage (create-test-storage)
+          call-count (atom 0)
+          ;; Register a function that tracks how many times it's called
+          _ (exec/register-base-fn!
+              :counter
+              (fn [_args _ctx]
+                (swap! call-count inc)))
+          ;; Create counter fn-schema
+          counter-schema (sp/create-entity storage :fn-schema
+                                           {:name "counter"
+                                            :returned-type :int})
+          ;; Create counter fn instance
+          counter-fn (sp/create-entity storage :fn
+                                       {:name "counter-fn"
+                                        :fn-schema-id (:id counter-schema)})
+          ;; Create fn-result-value for counter-fn
+          counter-result (sp/create-entity storage :fn-result-value
+                                           {:fn-id (:id counter-fn)})
+          ;; Create add fn-schema that takes two int args
+          _ (exec/register-base-fn!
+              :add
+              (fn [{:keys [a b]} _ctx]
+                (+ @a @b)))
+          add-schema (sp/create-entity storage :fn-schema
+                                       {:name "add"
+                                        :returned-type :int})
+          add-arg-a (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id add-schema)
+                                       :name "a"
+                                       :type :int
+                                       :required true})
+          add-arg-b (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id add-schema)
+                                       :name "b"
+                                       :type :int
+                                       :required true})
+          ;; Create add fn that uses counter-result for BOTH args
+          add-fn (sp/create-entity storage :fn
+                                   {:name "add-fn"
+                                    :fn-schema-id (:id add-schema)})
+          ;; Both args reference the SAME fn-result-value
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id add-fn)
+                               :arg-schema-id (:id add-arg-a)
+                               :value (:id counter-result)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id add-fn)
+                               :arg-schema-id (:id add-arg-b)
+                               :value (:id counter-result)})
+          ctx (exec/create-context {:storage storage})]
+      ;; Execute add-fn
+      (exec/execute ctx (:id add-fn) nil)
+      ;; counter should be called only ONCE, even though it's used twice
+      (is (= 1 @call-count) "fn-result-value should be cached and only executed once")
+      (sp/close storage)))
+
+  (testing "different fn-result-values for same fn are computed separately"
+    (let [storage (create-test-storage)
+          call-count (atom 0)
+          ;; Register a function that tracks calls and returns incremented count
+          _ (exec/register-base-fn!
+              :incrementer
+              (fn [_args _ctx]
+                (swap! call-count inc)))
+          ;; Create incrementer fn-schema
+          inc-schema (sp/create-entity storage :fn-schema
+                                       {:name "incrementer"
+                                        :returned-type :int})
+          ;; Create incrementer fn instance
+          inc-fn (sp/create-entity storage :fn
+                                   {:name "inc-fn"
+                                    :fn-schema-id (:id inc-schema)})
+          ;; Create TWO different fn-result-values for the same fn
+          result-1 (sp/create-entity storage :fn-result-value
+                                     {:fn-id (:id inc-fn)})
+          result-2 (sp/create-entity storage :fn-result-value
+                                     {:fn-id (:id inc-fn)})
+          ;; Create add fn that uses result-1 and result-2
+          _ (exec/register-base-fn!
+              :add
+              (fn [{:keys [a b]} _ctx]
+                (+ @a @b)))
+          add-schema (sp/create-entity storage :fn-schema
+                                       {:name "add"
+                                        :returned-type :int})
+          add-arg-a (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id add-schema)
+                                       :name "a"
+                                       :type :int
+                                       :required true})
+          add-arg-b (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id add-schema)
+                                       :name "b"
+                                       :type :int
+                                       :required true})
+          add-fn (sp/create-entity storage :fn
+                                   {:name "add-fn"
+                                    :fn-schema-id (:id add-schema)})
+          ;; a -> result-1, b -> result-2
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id add-fn)
+                               :arg-schema-id (:id add-arg-a)
+                               :value (:id result-1)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id add-fn)
+                               :arg-schema-id (:id add-arg-b)
+                               :value (:id result-2)})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id add-fn) nil)]
+      ;; incrementer should be called TWICE (once for each fn-result-value)
+      (is (= 2 @call-count) "Different fn-result-values should each execute separately")
+      ;; Result should be 1 + 2 = 3
+      (is (= 3 result))
+      (sp/close storage)))
+
+  (testing "fn-result-value vs direct fn reference"
+    (let [storage (create-test-storage)
+          call-count (atom 0)
+          ;; Register a function that tracks calls
+          _ (exec/register-base-fn!
+              :counter
+              (fn [_args _ctx]
+                (swap! call-count inc)))
+          ;; Create counter fn-schema
+          counter-schema (sp/create-entity storage :fn-schema
+                                           {:name "counter"
+                                            :returned-type :int})
+          counter-fn (sp/create-entity storage :fn
+                                       {:name "counter-fn"
+                                        :fn-schema-id (:id counter-schema)})
+          ;; Create fn-result-value
+          counter-result (sp/create-entity storage :fn-result-value
+                                           {:fn-id (:id counter-fn)})
+          ;; Create add fn
+          _ (exec/register-base-fn!
+              :add
+              (fn [{:keys [a b]} _ctx]
+                (+ @a @b)))
+          add-schema (sp/create-entity storage :fn-schema
+                                       {:name "add"
+                                        :returned-type :int})
+          add-arg-a (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id add-schema)
+                                       :name "a"
+                                       :type :int
+                                       :required true})
+          add-arg-b (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id add-schema)
+                                       :name "b"
+                                       :type :int
+                                       :required true})
+          add-fn (sp/create-entity storage :fn
+                                   {:name "add-fn"
+                                    :fn-schema-id (:id add-schema)})
+          ;; a -> fn-result-value (cached)
+          ;; b -> direct fn reference (not cached)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id add-fn)
+                               :arg-schema-id (:id add-arg-a)
+                               :value (:id counter-result)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id add-fn)
+                               :arg-schema-id (:id add-arg-b)
+                               :value (:id counter-fn)})
+          ctx (exec/create-context {:storage storage})]
+      (exec/execute ctx (:id add-fn) nil)
+      ;; counter should be called TWICE:
+      ;; - once for fn-result-value (cached)
+      ;; - once for direct fn reference (not cached)
+      (is (= 2 @call-count) "Direct fn ref and fn-result-value should execute separately")
+      (sp/close storage))))

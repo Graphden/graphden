@@ -216,7 +216,33 @@ The default graph schema includes these entities:
 | `fn-schema` | id, name, returned-type | Function type definition |
 | `arg-schema` | id, fn-schema-id, name, type, required | Argument definition |
 | `fn` | id, name, fn-schema-id, parent-fn-id | Function instance |
+| `fn-result-value` | id, fn-id | Cached computation reference |
 | `arg-value` | id, owner-fn-id, arg-schema-id, value | Argument value |
+
+### fn-result-value Entity
+
+The `fn-result-value` entity enables caching of function results within a single execution:
+
+```clojure
+;; Create a fn-result-value that points to a function
+(let [frv (sp/create-entity storage :fn-result-value
+                            {:fn-id (:id my-expensive-fn)})]
+  ;; Multiple arg-values can reference the same fn-result-value
+  ;; The function will execute once and the result will be cached
+  (sp/create-entity storage :arg-value
+                    {:owner-fn-id (:id fn-a)
+                     :arg-schema-id (:id arg-schema-x)
+                     :value (:id frv)})
+  (sp/create-entity storage :arg-value
+                    {:owner-fn-id (:id fn-b)
+                     :arg-schema-id (:id arg-schema-y)
+                     :value (:id frv)}))
+```
+
+**When to use:**
+- Expensive computations that should run once
+- Values that need to be consistent across multiple consumers
+- Explicit control over caching behavior
 
 ### Customizing the Schema
 

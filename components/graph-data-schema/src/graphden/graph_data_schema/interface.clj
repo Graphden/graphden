@@ -69,6 +69,10 @@
   #uuid "afb02fb7-0174-496b-9b21-a61063de0c04")
 
 
+(def ^:private fn-result-value-entity-uuid
+  #uuid "d4f8a2b1-7c3e-4d9f-a5b6-8e1c2f3d4a5b")
+
+
 ;; Field UUIDs for :fn-schema entity
 (def ^:private fn-schema-name-field-uuid
   #uuid "abe8475e-9130-4647-a2bf-be0cb07099b7")
@@ -125,6 +129,11 @@
   #uuid "b6780ba3-d050-4162-aba8-5f68ac17bcb8")
 
 
+;; Field UUIDs for :fn-result-value entity
+(def ^:private fn-result-value-fn-id-field-uuid
+  #uuid "e5a9b3c2-8d4f-5e0a-b6c7-9f2d3e4a5b6c")
+
+
 (defn- value-kind-enum-values
   "Generates enum values for :value-kind.
    Includes :null (void), :any, :fn plus all supported field types."
@@ -138,9 +147,14 @@
 
 (defn- value-variants
   "Generates union variants for arg-value.
-   First variant is fn reference, then :any/:fn types, rest are literal types."
+   Variants:
+   - ref to fn: for HOF (passing function as first-class value)
+   - ref to fn-result-value: for computed values (execute fn, cache result)
+   - :any/:fn types
+   - literal types"
   []
   (into [{:type :ref :ref-entity :fn}
+         {:type :ref :ref-entity :fn-result-value}
          {:type :any}
          {:type :fn}]
         (map (fn [t] {:type t}) ft/supported-types)))
@@ -187,8 +201,14 @@
                                      :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
+      ;; fn_result_value: represents a cached computation result of a function
+      ;; Multiple arg-values can reference the same fn-result-value to reuse computed value
+      (ds/add-entity :fn-result-value fn-result-value-entity-uuid
+                     {:fn-id {:uuid fn-result-value-fn-id-field-uuid
+                              :type :ref :ref-entity :fn}})
+
       ;; arg_value: argument values for function instances
-      ;; value is a union: either a reference to another fn, or a literal value
+      ;; value is a union: ref to fn (HOF), ref to fn-result-value (computed), or literal
       (ds/add-entity :arg-value arg-value-entity-uuid
                      {:owner-fn-id {:uuid arg-value-owner-fn-id-field-uuid
                                     :type :ref :ref-entity :fn}

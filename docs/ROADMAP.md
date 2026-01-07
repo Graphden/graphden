@@ -1,6 +1,6 @@
 # Graphden Roadmap
 
-> **Last updated:** 2026-01-05
+> **Last updated:** 2026-01-07
 >
 > This document tracks implementation status and future plans.
 > For technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -39,7 +39,8 @@
 - `fn-schema` with `base-fn-name`
 - `arg-schema` with `required`
 - `fn` with `parent-fn-id`
-- `arg-value` with union types
+- `fn-result-value` for cached computation results
+- `arg-value` with union types (including refs to fn-result-value)
 
 **1.2 GraphConstraints protocol** - All 5 validators
 
@@ -80,9 +81,10 @@
 ```
 
 **3.2 Thunk types:**
-- LiteralThunk
-- FnRefThunk
-- LazyFnThunk
+- LiteralThunk - literal values
+- FnRefThunk - direct function references (execute each time)
+- FnResultValueThunk - cached computation references (execute once)
+- LazyFnThunk - HOF function references (pass as value)
 
 **3.3 Executor:**
 - `execute` - Main entry point

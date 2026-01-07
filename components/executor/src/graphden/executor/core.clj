@@ -419,8 +419,7 @@
         (delay value)
 
         :else
-        ;; Direct fn ref with non-:fn type: execute (legacy behavior, no path-args)
-        ;; This case is rare - users should use fn-result-value for computed values
+        ;; Direct fn ref with non-:fn type: execute immediately
         (delay (execute-internal context value nil)))
 
       ;; Literal value - wrap in delay
@@ -468,9 +467,7 @@
       (fn [acc arg-schema-id arg-schema]
         (let [arg-name (:name arg-schema)
               arg-name-kw (keyword arg-name)
-              ;; Legacy provided-args (for HOF callable calls)
               provided-value (get provided-args arg-schema-id)
-              ;; Path-based arg from context (uses new [frv-id arg-schema-id] or arg-schema-id key)
               path-arg-value (get-path-arg context arg-schema-id)
               ;; Stored arg-value from DB
               arg-value (get arg-values arg-schema-id)]

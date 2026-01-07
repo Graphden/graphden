@@ -471,26 +471,9 @@
 ;; For reduce, user function takes a single arg which receives [acc item] vector.
 
 (defn- make-hof-callable
-  "Creates a callable for HOF. If f is already a function (for testing),
-   wraps it to accept single value. If f is a UUID (fn-id), uses executor."
-  [execution-ctx f]
-  (if (fn? f)
-    ;; Legacy/testing mode: f is already a Clojure function
-    ;; Wrap it to accept single value instead of {:item item}
-    (fn [value] (f {:item value}))
-    ;; Production mode: f is fn-id, create callable via executor
-    (exec/make-single-arg-callable execution-ctx f)))
-
-
-(defn- make-reduce-callable
-  "Creates a callable for reduce. If f is already a function (for testing),
-   wraps it. If f is a UUID (fn-id), uses executor."
-  [execution-ctx f]
-  (if (fn? f)
-    ;; Legacy/testing mode: f accepts {:acc a :item b}
-    (fn [[acc item]] (f {:acc acc :item item}))
-    ;; Production mode: f is fn-id, function takes single arg [acc item]
-    (exec/make-single-arg-callable execution-ctx f)))
+  "Creates a callable for HOF from fn-id."
+  [execution-ctx fn-id]
+  (exec/make-single-arg-callable execution-ctx fn-id))
 
 
 (defbase map-fn
@@ -511,7 +494,7 @@
   {:args {:f :fn, :init :any, :coll :jsonb}
    :return-type :any}
   ;; reduce passes [acc item] as single vector to the function
-  (let [callable (make-reduce-callable ctx f)]
+  (let [callable (make-hof-callable ctx f)]
     (reduce (fn [acc item] (callable [acc item])) init coll)))
 
 
@@ -556,15 +539,8 @@
 (defbase apply-fn
   {:args {:f :fn, :args :jsonb}
    :return-type :any}
-  ;; apply passes the args directly to the function
-  ;; For legacy/testing (Clojure fn): call with args as-is
-  ;; For production (UUID): use make-single-arg-callable
-  (if (fn? f)
-    ;; Legacy mode: f is already a Clojure fn expecting args directly
-    (f args)
-    ;; Production mode: f is fn-id, create callable
-    (let [callable (exec/make-single-arg-callable ctx f)]
-      (callable args))))
+  (let [callable (make-hof-callable ctx f)]
+    (callable args)))
 
 
 (defbase identity-fn

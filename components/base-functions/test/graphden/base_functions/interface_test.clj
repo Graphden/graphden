@@ -26,7 +26,7 @@
 ;; === Helper Functions ===
 
 (defn literal-delay
-  "Creates a delay for testing. Replaces literal-thunk."
+  "Creates a delay wrapping a literal value."
   [value]
   (delay value))
 
@@ -445,260 +445,293 @@
 
 
 ;; === HOF Tests ===
-;; HOF functions require a storage context because they execute fn-ids.
-;; We create helper functions and register them as base-fns for testing.
+;; HOF functions use executor with fn-ids. Tests create complete function graphs
+;; with map/filter/etc calling helper functions via fn-result-value.
 
 (defn- setup-hof-storage
   "Creates storage with helper functions for HOF tests.
-   Returns callables (not UUIDs) for use in HOF base function tests."
+   Returns fn-ids for use in HOF tests via executor."
   []
   (let [storage (gsm/create-storage)]
     (register-all!)
+    ;; Sync base function schemas to storage so HOF can be found
+    (registry/sync-defs-to-storage! storage (bf/get-all-defs))
 
-    ;; Create 'double' function: item -> item * 2
+    ;; Create 'double' function: x -> x * 2 (single required arg)
     (let [double-schema (sp/create-entity storage :fn-schema
                                           {:name "double"
                                            :returned-type :int})
           _ (sp/create-entity storage :arg-schema
                               {:fn-schema-id (:id double-schema)
-                               :name "item"
+                               :name "x"
                                :type :int
                                :required true})
-          _double-fn (sp/create-entity storage :fn
-                                       {:name "my-double"
-                                        :fn-schema-id (:id double-schema)})
+          double-fn (sp/create-entity storage :fn
+                                      {:name "my-double"
+                                       :fn-schema-id (:id double-schema)})
 
-          ;; Create 'gt2' predicate: item -> item > 2
+          ;; Create 'gt2' predicate: x -> x > 2 (single required arg)
           gt2-schema (sp/create-entity storage :fn-schema
                                        {:name "gt2"
                                         :returned-type :bool})
           _ (sp/create-entity storage :arg-schema
                               {:fn-schema-id (:id gt2-schema)
-                               :name "item"
+                               :name "x"
                                :type :int
                                :required true})
-          _gt2-fn (sp/create-entity storage :fn
-                                    {:name "my-gt2"
-                                     :fn-schema-id (:id gt2-schema)})
+          gt2-fn (sp/create-entity storage :fn
+                                   {:name "my-gt2"
+                                    :fn-schema-id (:id gt2-schema)})
 
-          ;; Create 'add-reducer' function: (acc, item) -> acc + item
+          ;; Create 'add-reducer' function: pair -> pair[0] + pair[1] (single required arg)
+          ;; Takes [acc item] as single argument
           add-schema (sp/create-entity storage :fn-schema
                                        {:name "add-reducer"
                                         :returned-type :int})
           _ (sp/create-entity storage :arg-schema
                               {:fn-schema-id (:id add-schema)
-                               :name "acc"
-                               :type :int
+                               :name "pair"
+                               :type :jsonb
                                :required true})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id add-schema)
-                               :name "item"
-                               :type :int
-                               :required true})
-          _add-fn (sp/create-entity storage :fn
-                                    {:name "my-add-reducer"
-                                     :fn-schema-id (:id add-schema)})
+          add-fn (sp/create-entity storage :fn
+                                   {:name "my-add-reducer"
+                                    :fn-schema-id (:id add-schema)})
 
-          ;; Create 'get-category' function: item -> :small/:large
+          ;; Create 'get-category' function: x -> :small/:large (single required arg)
           cat-schema (sp/create-entity storage :fn-schema
                                        {:name "get-category"
-                                        :returned-type :enum})
+                                        :returned-type :text})
           _ (sp/create-entity storage :arg-schema
                               {:fn-schema-id (:id cat-schema)
-                               :name "item"
+                               :name "x"
                                :type :int
                                :required true})
-          _cat-fn (sp/create-entity storage :fn
-                                    {:name "my-get-category"
-                                     :fn-schema-id (:id cat-schema)})]
+          cat-fn (sp/create-entity storage :fn
+                                   {:name "my-get-category"
+                                    :fn-schema-id (:id cat-schema)})]
 
-      ;; Register base function implementations (using delays - deref with @)
+      ;; Register base function implementations
       (exec/register-base-fn! :double
-                              (fn [{:keys [item]} _ctx]
-                                (* 2 @item)))
+                              (fn [{:keys [x]} _ctx]
+                                (* 2 @x)))
 
       (exec/register-base-fn! :gt2
-                              (fn [{:keys [item]} _ctx]
-                                (> @item 2)))
+                              (fn [{:keys [x]} _ctx]
+                                (> @x 2)))
 
       (exec/register-base-fn! :add-reducer
-                              (fn [{:keys [acc item]} _ctx]
-                                (+ @acc @item)))
+                              (fn [{:keys [pair]} _ctx]
+                                (let [[acc item] @pair]
+                                  (+ acc item))))
 
       (exec/register-base-fn! :get-category
-                              (fn [{:keys [item]} _ctx]
-                                (if (> @item 5)
-                                  :large
-                                  :small)))
+                              (fn [{:keys [x]} _ctx]
+                                (if (> @x 5) "large" "small")))
 
-      ;; Return callables (functions that match HOF expected interface: {:item x})
-      ;; instead of UUIDs. The HOF base functions call (f {:item item}) directly.
       {:storage storage
-       :double-callable (fn [{:keys [item]}] (* 2 item))
-       :gt2-callable (fn [{:keys [item]}] (> item 2))
-       :add-callable (fn [{:keys [acc item]}] (+ acc item))
-       :cat-callable (fn [{:keys [item]}] (if (> item 5) :large :small))})))
+       :double-fn-id (:id double-fn)
+       :gt2-fn-id (:id gt2-fn)
+       :add-fn-id (:id add-fn)
+       :cat-fn-id (:id cat-fn)})))
+
+
+(defn- create-hof-caller
+  "Creates a function that calls a HOF (map/filter/etc) with given fn-id and collection.
+   Returns the result of executing the HOF."
+  [storage hof-name f-arg-name fn-id coll]
+  (let [;; Get HOF fn-schema
+        hof-schema (first (sp/query-entities storage :fn-schema {:name hof-name}))
+        hof-arg-schemas (sp/query-entities storage :arg-schema {:fn-schema-id (:id hof-schema)})
+        f-arg (first (filter #(= f-arg-name (:name %)) hof-arg-schemas))
+        coll-arg (first (filter #(= "coll" (:name %)) hof-arg-schemas))
+        ;; Create HOF instance with unique name
+        hof-fn (sp/create-entity storage :fn
+                                 {:name (str "test-" hof-name "-" (random-uuid))
+                                  :fn-schema-id (:id hof-schema)})
+        ;; Set :f/:pred/:key-fn arg to fn-id
+        _ (sp/create-entity storage :arg-value
+                            {:owner-fn-id (:id hof-fn)
+                             :arg-schema-id (:id f-arg)
+                             :value fn-id})
+        ;; Set :coll arg
+        _ (sp/create-entity storage :arg-value
+                            {:owner-fn-id (:id hof-fn)
+                             :arg-schema-id (:id coll-arg)
+                             :value coll})
+        ctx (exec/create-context {:storage storage})]
+    (exec/execute ctx (:id hof-fn) nil)))
+
+
+(defn- create-reduce-caller
+  "Creates a function that calls reduce with given fn-id, init value and collection."
+  [storage fn-id init coll]
+  (let [reduce-schema (first (sp/query-entities storage :fn-schema {:name "reduce"}))
+        reduce-arg-schemas (sp/query-entities storage :arg-schema {:fn-schema-id (:id reduce-schema)})
+        f-arg (first (filter #(= "f" (:name %)) reduce-arg-schemas))
+        init-arg (first (filter #(= "init" (:name %)) reduce-arg-schemas))
+        coll-arg (first (filter #(= "coll" (:name %)) reduce-arg-schemas))
+        reduce-fn (sp/create-entity storage :fn
+                                    {:name (str "test-reduce-" (random-uuid))
+                                     :fn-schema-id (:id reduce-schema)})
+        _ (sp/create-entity storage :arg-value
+                            {:owner-fn-id (:id reduce-fn)
+                             :arg-schema-id (:id f-arg)
+                             :value fn-id})
+        _ (sp/create-entity storage :arg-value
+                            {:owner-fn-id (:id reduce-fn)
+                             :arg-schema-id (:id init-arg)
+                             :value init})
+        _ (sp/create-entity storage :arg-value
+                            {:owner-fn-id (:id reduce-fn)
+                             :arg-schema-id (:id coll-arg)
+                             :value coll})
+        ctx (exec/create-context {:storage storage})]
+    (exec/execute ctx (:id reduce-fn) nil)))
+
+
+(defn- create-apply-caller
+  "Creates a function that calls apply with given fn-id and args."
+  [storage fn-id args]
+  (let [apply-schema (first (sp/query-entities storage :fn-schema {:name "apply"}))
+        apply-arg-schemas (sp/query-entities storage :arg-schema {:fn-schema-id (:id apply-schema)})
+        f-arg (first (filter #(= "f" (:name %)) apply-arg-schemas))
+        args-arg (first (filter #(= "args" (:name %)) apply-arg-schemas))
+        apply-fn (sp/create-entity storage :fn
+                                   {:name (str "test-apply-" (random-uuid))
+                                    :fn-schema-id (:id apply-schema)})
+        _ (sp/create-entity storage :arg-value
+                            {:owner-fn-id (:id apply-fn)
+                             :arg-schema-id (:id f-arg)
+                             :value fn-id})
+        _ (sp/create-entity storage :arg-value
+                            {:owner-fn-id (:id apply-fn)
+                             :arg-schema-id (:id args-arg)
+                             :value args})
+        ctx (exec/create-context {:storage storage})]
+    (exec/execute ctx (:id apply-fn) nil)))
 
 
 (deftest hof-map-test
-  (let [{:keys [storage double-callable]} (setup-hof-storage)]
+  (let [{:keys [storage double-fn-id]} (setup-hof-storage)]
     (try
-      (let [map-fn (exec/get-base-fn :map)
-            f-delay (literal-delay double-callable)
-            coll-delay (literal-delay [1 2 3 4 5])]
+      (testing "map doubles each element"
+        (is (= [2 4 6 8 10] (create-hof-caller storage "map" "f" double-fn-id [1 2 3 4 5]))))
 
-        (testing "map doubles each element"
-          (is (= [2 4 6 8 10] (map-fn {:f f-delay :coll coll-delay} nil))))
-
-        (testing "map on empty collection"
-          (is (= [] (map-fn {:f f-delay :coll (literal-delay [])} nil)))))
+      (testing "map on empty collection"
+        (is (= [] (create-hof-caller storage "map" "f" double-fn-id []))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-filter-test
-  (let [{:keys [storage gt2-callable]} (setup-hof-storage)]
+  (let [{:keys [storage gt2-fn-id]} (setup-hof-storage)]
     (try
-      (let [filter-fn (exec/get-base-fn :filter)
-            pred-delay (literal-delay gt2-callable)
-            coll-delay (literal-delay [1 2 3 4 5])]
+      (testing "filter keeps elements > 2"
+        (is (= [3 4 5] (create-hof-caller storage "filter" "pred" gt2-fn-id [1 2 3 4 5]))))
 
-        (testing "filter keeps elements > 2"
-          (is (= [3 4 5] (filter-fn {:pred pred-delay :coll coll-delay} nil))))
+      (testing "filter on empty collection"
+        (is (= [] (create-hof-caller storage "filter" "pred" gt2-fn-id []))))
 
-        (testing "filter on empty collection"
-          (is (= [] (filter-fn {:pred pred-delay :coll (literal-delay [])} nil))))
-
-        (testing "filter with no matches"
-          (is (= [] (filter-fn {:pred pred-delay :coll (literal-delay [1 2])} nil)))))
+      (testing "filter with no matches"
+        (is (= [] (create-hof-caller storage "filter" "pred" gt2-fn-id [1 2]))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-reduce-test
-  (let [{:keys [storage add-callable]} (setup-hof-storage)]
+  (let [{:keys [storage add-fn-id]} (setup-hof-storage)]
     (try
-      (let [reduce-fn (exec/get-base-fn :reduce)
-            f-delay (literal-delay add-callable)
-            init-delay (literal-delay 0)
-            coll-delay (literal-delay [1 2 3 4 5])]
+      (testing "reduce sums all elements"
+        (is (= 15 (create-reduce-caller storage add-fn-id 0 [1 2 3 4 5]))))
 
-        (testing "reduce sums all elements"
-          (is (= 15 (reduce-fn {:f f-delay :init init-delay :coll coll-delay} nil))))
+      (testing "reduce with different initial value"
+        (is (= 25 (create-reduce-caller storage add-fn-id 10 [1 2 3 4 5]))))
 
-        (testing "reduce with different initial value"
-          (is (= 25 (reduce-fn {:f f-delay :init (literal-delay 10) :coll coll-delay} nil))))
-
-        (testing "reduce on empty collection returns init"
-          (is (zero? (reduce-fn {:f f-delay :init init-delay :coll (literal-delay [])} nil)))))
+      (testing "reduce on empty collection returns init"
+        (is (zero? (create-reduce-caller storage add-fn-id 0 []))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-some-test
-  (let [{:keys [storage gt2-callable]} (setup-hof-storage)]
+  (let [{:keys [storage gt2-fn-id]} (setup-hof-storage)]
     (try
-      (let [base-some (exec/get-base-fn :some)
-            pred-delay (literal-delay gt2-callable)]
+      (testing "some finds first truthy result"
+        (is (true? (create-hof-caller storage "some" "pred" gt2-fn-id [1 2 3 4]))))
 
-        (testing "some finds first truthy result"
-          (is (true? (base-some {:pred pred-delay :coll (literal-delay [1 2 3 4])} nil))))
+      (testing "some returns nil when no match"
+        (is (nil? (create-hof-caller storage "some" "pred" gt2-fn-id [1 2]))))
 
-        (testing "some returns nil when no match"
-          (is (nil? (base-some {:pred pred-delay :coll (literal-delay [1 2])} nil))))
-
-        (testing "some on empty collection"
-          (is (nil? (base-some {:pred pred-delay :coll (literal-delay [])} nil)))))
+      (testing "some on empty collection"
+        (is (nil? (create-hof-caller storage "some" "pred" gt2-fn-id []))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-every?-test
-  (let [{:keys [storage gt2-callable]} (setup-hof-storage)]
+  (let [{:keys [storage gt2-fn-id]} (setup-hof-storage)]
     (try
-      (let [every?-fn (exec/get-base-fn :every?)
-            pred-delay (literal-delay gt2-callable)]
+      (testing "every? returns true when all match"
+        (is (true? (create-hof-caller storage "every?" "pred" gt2-fn-id [3 4 5]))))
 
-        (testing "every? returns true when all match"
-          (is (true? (every?-fn {:pred pred-delay :coll (literal-delay [3 4 5])} nil))))
+      (testing "every? returns false when some don't match"
+        (is (false? (create-hof-caller storage "every?" "pred" gt2-fn-id [1 3 5]))))
 
-        (testing "every? returns false when some don't match"
-          (is (false? (every?-fn {:pred pred-delay :coll (literal-delay [1 3 5])} nil))))
-
-        (testing "every? on empty collection returns true"
-          (is (true? (every?-fn {:pred pred-delay :coll (literal-delay [])} nil)))))
+      (testing "every? on empty collection returns true"
+        (is (true? (create-hof-caller storage "every?" "pred" gt2-fn-id []))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-find-first-test
-  (let [{:keys [storage gt2-callable]} (setup-hof-storage)]
+  (let [{:keys [storage gt2-fn-id]} (setup-hof-storage)]
     (try
-      (let [find-first-fn (exec/get-base-fn :find-first)
-            pred-delay (literal-delay gt2-callable)]
+      (testing "find-first returns first matching element"
+        (is (= 3 (create-hof-caller storage "find-first" "pred" gt2-fn-id [1 2 3 4 5]))))
 
-        (testing "find-first returns first matching element"
-          (is (= 3 (find-first-fn {:pred pred-delay :coll (literal-delay [1 2 3 4 5])} nil))))
+      (testing "find-first returns nil when no match"
+        (is (nil? (create-hof-caller storage "find-first" "pred" gt2-fn-id [1 2]))))
 
-        (testing "find-first returns nil when no match"
-          (is (nil? (find-first-fn {:pred pred-delay :coll (literal-delay [1 2])} nil))))
-
-        (testing "find-first on empty collection"
-          (is (nil? (find-first-fn {:pred pred-delay :coll (literal-delay [])} nil)))))
+      (testing "find-first on empty collection"
+        (is (nil? (create-hof-caller storage "find-first" "pred" gt2-fn-id []))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-group-by-test
-  (let [{:keys [storage cat-callable]} (setup-hof-storage)]
+  (let [{:keys [storage cat-fn-id]} (setup-hof-storage)]
     (try
-      (let [group-by-fn (exec/get-base-fn :group-by)
-            key-fn-delay (literal-delay cat-callable)]
+      (testing "group-by groups by category"
+        (let [result (create-hof-caller storage "group-by" "key-fn" cat-fn-id [1 3 6 8 2 10])]
+          (is (= [1 3 2] (get result "small")))
+          (is (= [6 8 10] (get result "large")))))
 
-        (testing "group-by groups by category"
-          (let [result (group-by-fn {:key-fn key-fn-delay
-                                     :coll (literal-delay [1 3 6 8 2 10])}
-                                    nil)]
-            (is (= [1 3 2] (:small result)))
-            (is (= [6 8 10] (:large result)))))
-
-        (testing "group-by on empty collection"
-          (is (= {} (group-by-fn {:key-fn key-fn-delay :coll (literal-delay [])} nil)))))
+      (testing "group-by on empty collection"
+        (is (= {} (create-hof-caller storage "group-by" "key-fn" cat-fn-id []))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-sort-by-test
-  (let [{:keys [storage double-callable]} (setup-hof-storage)]
+  (let [{:keys [storage double-fn-id]} (setup-hof-storage)]
     (try
-      (let [sort-by-fn (exec/get-base-fn :sort-by)
-            ;; Sort by doubled value (effectively same order for positive ints)
-            key-fn-delay (literal-delay double-callable)]
+      (testing "sort-by sorts by key function result"
+        (is (= [1 1 2 3 4 5] (create-hof-caller storage "sort-by" "key-fn" double-fn-id [3 1 4 1 5 2]))))
 
-        (testing "sort-by sorts by key function result"
-          (is (= [1 1 2 3 4 5] (sort-by-fn {:key-fn key-fn-delay
-                                            :coll (literal-delay [3 1 4 1 5 2])}
-                                           nil))))
-
-        (testing "sort-by on empty collection"
-          (is (= [] (sort-by-fn {:key-fn key-fn-delay :coll (literal-delay [])} nil)))))
+      (testing "sort-by on empty collection"
+        (is (= [] (create-hof-caller storage "sort-by" "key-fn" double-fn-id []))))
       (finally
         (sp/close storage)))))
 
 
 (deftest hof-apply-test
-  (let [{:keys [storage add-callable]} (setup-hof-storage)]
+  (let [{:keys [storage double-fn-id]} (setup-hof-storage)]
     (try
-      (let [apply-fn (exec/get-base-fn :apply)]
+      (testing "apply calls function with single arg"
+        (is (= 10 (create-apply-caller storage double-fn-id 5))))
 
-        (testing "apply calls function with args map"
-          (is (= 7 (apply-fn {:f (literal-delay add-callable)
-                              :args (literal-delay {:acc 3 :item 4})}
-                             nil))))
-        (testing "apply with different args"
-          (is (= 15 (apply-fn {:f (literal-delay add-callable)
-                               :args (literal-delay {:acc 10 :item 5})}
-                              nil)))))
+      (testing "apply with different value"
+        (is (= 20 (create-apply-caller storage double-fn-id 10))))
       (finally
         (sp/close storage)))))
 

@@ -517,3 +517,64 @@
 
 ;; wrap-base-fn was removed - base functions now receive delays directly
 ;; and use @ to deref. The defbase macro handles this automatically.
+
+
+;; === initialize-with-base-fns! Tests ===
+
+(deftest initialize-with-base-fns-test
+  (testing "initializes storage with all base functions"
+    (let [storage (gsm/create-storage)]
+      (try
+        (let [result (registry/initialize-with-base-fns! storage)]
+          ;; Should return the same storage
+          (is (= storage result))
+          ;; Base functions should be registered in executor
+          (is (some? (exec/get-base-fn :add)))
+          (is (some? (exec/get-base-fn :map)))
+          ;; fn-schemas should be in storage
+          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :add))))
+          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :map)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "can execute functions after initialization"
+    (let [storage (gsm/create-storage)]
+      (try
+        (registry/initialize-with-base-fns! storage)
+        ;; Create a function that uses :add
+        (let [add-schema (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :add))
+              add-args (sp/query-entities storage :arg-schema {:fn-schema-id (:id add-schema)})
+              nums-arg (first (filter #(= "nums" (:name %)) add-args))
+              my-fn (sp/create-entity storage :fn
+                                      {:name "test-add"
+                                       :fn-schema-id (:id add-schema)})
+              _ (sp/create-entity storage :arg-value
+                                  {:owner-fn-id (:id my-fn)
+                                   :arg-schema-id (:id nums-arg)
+                                   :value [1 2 3 4 5]})
+              ctx (exec/create-context {:storage storage})]
+          (is (= 15 (exec/execute ctx (:id my-fn) nil))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === parse-arg-spec Error Case Tests ===
+
+(deftest parse-arg-spec-required-validation-test
+  (testing "throws when :required is not a boolean"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":required must be a boolean"
+          (#'core/parse-arg-spec :x {:type :int :required "true"})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":required must be a boolean"
+          (#'core/parse-arg-spec :x {:type :int :required 1})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":required must be a boolean"
+          (#'core/parse-arg-spec :x {:type :int :required nil}))))
+
+  (testing "accepts valid boolean :required values"
+    (is (= {:arg-type :int :required true}
+           (#'core/parse-arg-spec :x {:type :int :required true})))
+    (is (= {:arg-type :int :required false}
+           (#'core/parse-arg-spec :x {:type :int :required false}))))
+
+  (testing ":required defaults to true when not specified"
+    (is (= {:arg-type :int :required true}
+           (#'core/parse-arg-spec :x {:type :int})))))

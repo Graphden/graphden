@@ -124,7 +124,7 @@ For `reduce`-like operations, the function receives a vector `[acc item]` as its
       (reduce (fn [acc item] (callable [acc item])) initial items))))
 ```
 
-**Legacy apply-twice example** (manual arg-schema lookup):
+**Example: apply-twice**
 
 ```clojure
 (exec/register-base-fn!
@@ -132,7 +132,6 @@ For `reduce`-like operations, the function receives a vector `[acc item]` as its
   (fn [{:keys [f x]} ctx]
     (let [fn-id (exec/force-value f ctx)
           x-val (exec/force-value x ctx)
-          ;; Use single-arg callable
           callable (exec/make-single-arg-callable ctx fn-id)
           result1 (callable x-val)
           result2 (callable result1)]

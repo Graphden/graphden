@@ -494,6 +494,9 @@ fn: report
    timeout-ms       ; Maximum execution time
    start-time       ; Execution start time
    depth            ; Current recursion depth
+   path-args        ; Runtime args: {arg-schema-id -> value} for root,
+                    ;               {[fn-result-value-id arg-schema-id] -> value} for nested
+   current-frv-id   ; Current fn-result-value-id (nil for root function)
    result-cache])   ; Atom: {fn-result-value-id -> computed-result}
 ```
 
@@ -502,6 +505,8 @@ fn: report
 2. **`base-fns` registry** - Direct access to implementations without global state
 3. **`storage` reference** - Enables `ExecutionGraph` protocol calls if needed
 4. **`result-cache`** - Shared cache for `fn-result-value` computations within execution
+5. **`path-args`** - Runtime values for free arguments, keyed by arg-schema-id or [frv-id arg-schema-id]
+6. **`current-frv-id`** - Tracks which fn-result-value is being evaluated (for path-args lookup)
 
 ### Limit Checking
 
@@ -520,24 +525,39 @@ fn: report
                        :timeout-ms (:timeout-ms context)})))))
 ```
 
-### Addressing Free Arguments
+### Addressing Free Arguments (path-args)
 
-**Problem**: fn A uses fn B twice. B has a free argument x. How to pass different values of x?
+**Problem**: A function may have "free" arguments — arguments without defined values in the database. These must be provided at runtime.
 
-**Solution**: Path through arg-value-id.
+**Solution**: Use `path-args` in the execution context with fixed-length keys.
+
+**Key format:**
+- **For root function**: `{arg-schema-id -> value}` — direct arg-schema-id lookup
+- **For nested functions via fn-result-value**: `{[fn-result-value-id arg-schema-id] -> value}`
 
 ```clojure
-;; In DB:
-;; arg-value-1: {owner: A, arg-schema: arg1-of-A, value: ref<B>}
-;; arg-value-2: {owner: A, arg-schema: arg2-of-A, value: ref<B>}
-;;
-;; B has a free arg-schema: x-of-B
+;; Example 1: Root function with free argument
+;; fn A has free arg with schema-id x-schema-id
+(create-context {:storage s
+                 :path-args {x-schema-id 42}})
+(execute ctx A-id {})
 
-;; Request to execute A:
-{:fn-id A-id
- :args {[arg-value-1-id x-of-B-id] 100   ; x for first B
-        [arg-value-2-id x-of-B-id] 200}} ; x for second B
+;; Example 2: Nested function via fn-result-value
+;; fn A uses fn B via fn-result-value (frv-1)
+;; fn B has free arg with schema-id y-schema-id
+(create-context {:storage s
+                 :path-args {[frv-1-id y-schema-id] 100}})
+(execute ctx A-id {})
+
+;; Example 3: Same function used twice with different values
+;; fn A references fn B via two fn-result-values: frv-1 and frv-2
+;; B has a free arg with schema-id x-schema-id
+(create-context {:storage s
+                 :path-args {[frv-1-id x-schema-id] 100   ; x for first use of B
+                             [frv-2-id x-schema-id] 200}}) ; x for second use of B
 ```
+
+**Important**: Direct fn refs (HOF with type=:fn) cannot receive path-args. They are "black boxes" controlled by map/reduce/filter. Only functions referenced via `fn-result-value` can have their free args set externally.
 
 ---
 

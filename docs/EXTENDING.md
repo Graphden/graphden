@@ -119,6 +119,28 @@ For `:fn` type arguments, `force-value` returns the fn-id without executing:
    :timeout-ms 30000})  ; Execution timeout in ms (default: 30000)
 ```
 
+### Runtime Free Arguments (path-args)
+
+Functions may have "free" arguments — arguments without defined values in the database. These must be provided at runtime via `path-args`:
+
+```clojure
+;; For root function with free arg
+(exec/create-context
+  {:storage storage
+   :path-args {arg-schema-id 42}})
+
+;; For nested function via fn-result-value
+(exec/create-context
+  {:storage storage
+   :path-args {[fn-result-value-id arg-schema-id] 100}})
+```
+
+**Key format:**
+- **Root function**: `{arg-schema-id -> value}` — direct lookup by arg-schema-id
+- **Nested function**: `{[fn-result-value-id arg-schema-id] -> value}` — lookup by fn-result-value + arg-schema-id
+
+**Note:** Direct fn refs (HOF with type=:fn) cannot receive path-args. Only functions referenced via `fn-result-value` can have their free args set externally.
+
 ### Error Handling
 
 Common execution errors:

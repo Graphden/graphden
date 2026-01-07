@@ -91,6 +91,7 @@
 - `execute-with-named-args` - Execute with named arguments
 - `execute-by-name` - Execute by function name
 - Depth/timeout protection
+- `path-args` for runtime free argument values (keyed by arg-schema-id or [fn-result-value-id arg-schema-id])
 
 **3.4 fn-registry component:**
 - `register-base-fns!` - Register implementations

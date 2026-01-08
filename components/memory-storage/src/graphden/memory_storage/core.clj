@@ -13,6 +13,37 @@
 ;; === Internal helpers ===
 
 
+(def ^:private sensitive-field-patterns
+  "Regex patterns for identifying sensitive field names that should be redacted."
+  [#"(?i)password"
+   #"(?i)secret"
+   #"(?i)token"
+   #"(?i)api[_-]?key"
+   #"(?i)auth"
+   #"(?i)credential"
+   #"(?i)private[_-]?key"])
+
+
+(defn- sensitive-field?
+  "Returns true if field name matches known sensitive patterns."
+  [field-name]
+  (when field-name
+    (let [name-str (if (keyword? field-name) (name field-name) (str field-name))]
+      (when (seq name-str)
+        (some #(re-find % name-str) sensitive-field-patterns)))))
+
+
+(defn- redact-values-by-fields
+  "Redacts values in a vector based on corresponding field names.
+   Used when logging constraint violations to avoid exposing sensitive data."
+  [fields values]
+  (mapv (fn [field value]
+          (if (sensitive-field? field)
+            "[REDACTED]"
+            value))
+        fields values))
+
+
 (defn- build-entities-structure
   "Builds :entities structure from DataSchema."
   [schema]
@@ -69,8 +100,9 @@
 
 
 (defn- rename-row-fields
-  "Renames fields in a single row using the renames map."
-  [renames row]
+  "Renames fields in a single row using the renames map.
+   Type hints for hot-path performance (JIT optimization)."
+  ^clojure.lang.IPersistentMap [^clojure.lang.IPersistentMap renames ^clojure.lang.IPersistentMap row]
   (persistent!
     (reduce-kv (fn [acc k v]
                  (assoc! acc (get renames k k) v))
@@ -198,11 +230,12 @@
                 {:entity entity-name
                  :fields fields
                  :value-count (count new-values)})
+      ;; Exception includes redacted values to prevent sensitive data leakage
       (throw (ex-info "Unique constraint violation"
                       {:type :constraint-violation/unique
                        :entity entity-name
                        :fields fields
-                       :values new-values})))))
+                       :values (redact-values-by-fields fields new-values)})))))
 
 
 (defn- validate-entity-exists!
@@ -370,26 +403,27 @@
           arg-values-by-owner (group-by :owner-fn-id (vals (get-entity-data state :arg-value)))
           fns-data (get-entity-data state :fn)]
       (loop [to-visit [owner-fn-id]
-             visited #{}
+             visited #{owner-fn-id}  ; Mark as visited when added to queue
              iter-count 0]
         ;; Check iteration limit to prevent infinite loops
         (sp/check-graph-iteration-limit! iter-count owner-fn-id)
         (if (empty? to-visit)
           visited
           (let [current-id (first to-visit)
-                rest-to-visit (rest to-visit)]
-            (if (contains? visited current-id)
-              (recur rest-to-visit visited (inc iter-count))
-              (let [arg-values (get arg-values-by-owner current-id [])
-                    ;; Get fn references from arg-values (UUIDs that are fn refs)
-                    ref-fn-ids (->> arg-values
-                                    (map :value)
-                                    (filter uuid?)
-                                    ;; Check if this UUID is actually a fn
-                                    (filter #(contains? fns-data %)))]
-                (recur (concat rest-to-visit ref-fn-ids)
-                       (conj visited current-id)
-                       (inc iter-count))))))))))
+                rest-to-visit (rest to-visit)
+                arg-values (get arg-values-by-owner current-id [])
+                ;; Get fn references from arg-values (UUIDs that are fn refs)
+                ref-fn-ids (->> arg-values
+                                (map :value)
+                                (filter uuid?)
+                                ;; Check if this UUID is actually a fn
+                                (filter #(contains? fns-data %))
+                                ;; Filter out already visited
+                                (remove visited))
+                new-visited (into visited ref-fn-ids)]
+            (recur (into (vec rest-to-visit) ref-fn-ids)
+                   new-visited
+                   (inc iter-count))))))))
 
 
 ;; === ExecutionGraph helpers ===
@@ -469,7 +503,8 @@
   "Resolves execution graph starting from fn-id.
    Uses BFS to collect all transitively referenced functions and fn-result-values.
    Builds indexes once for O(N+M) performance instead of O(N*M).
-   Throws if iteration count exceeds sp/*max-graph-iterations*."
+   Throws if iteration count exceeds sp/*max-graph-iterations*.
+   Optimization: visited check at insertion time, not extraction time."
   [state fn-id]
   (let [indexes {:arg-values-by-owner (group-by :owner-fn-id (vals (get-entity-data state :arg-value)))
                  :arg-schemas-by-fn-schema (group-by :fn-schema-id (vals (get-entity-data state :arg-schema)))
@@ -478,23 +513,23 @@
         init-graph {:fns {} :fn-schemas {} :arg-schemas {}
                     :resolved-args {} :fn-result-values {}}]
     (loop [to-visit #{fn-id}
-           visited #{}
+           visited #{fn-id}  ; Mark as visited when added to queue
            graph init-graph
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
         graph
         (let [current-fn-id (first to-visit)
-              rest-to-visit (disj to-visit current-fn-id)]
-          (if (contains? visited current-fn-id)
-            (recur rest-to-visit visited graph (inc iter-count))
-            (let [{:keys [graph new-fn-refs]}
-                  (process-fn-node state indexes current-fn-id graph)
-                  new-to-visit (set/difference new-fn-refs visited)]
-              (recur (set/union rest-to-visit new-to-visit)
-                     (conj visited current-fn-id)
-                     graph
-                     (inc iter-count)))))))))
+              rest-to-visit (disj to-visit current-fn-id)
+              {:keys [graph new-fn-refs]}
+              (process-fn-node state indexes current-fn-id graph)
+              ;; Only add truly new nodes (not yet visited)
+              new-to-visit (set/difference new-fn-refs visited)
+              new-visited (set/union visited new-to-visit)]
+          (recur (set/union rest-to-visit new-to-visit)
+                 new-visited
+                 graph
+                 (inc iter-count)))))))
 
 
 (defn- do-initialize

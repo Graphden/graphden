@@ -72,7 +72,10 @@
 
 (defn- uuid-v5
   "Generates a UUID v5 (name-based SHA-1) from namespace UUID and name string.
-   Returns a deterministic UUID for the same namespace+name combination."
+   Returns a deterministic UUID for the same namespace+name combination.
+
+   Optimized: creates byte array directly instead of using intermediate ByteBuffer
+   for namespace UUID, reducing object allocations."
   [namespace-uuid name-str]
   (when-not (instance? UUID namespace-uuid)
     (throw (ex-info "namespace-uuid must be a UUID"
@@ -82,12 +85,15 @@
     (throw (ex-info "name-str must be a string"
                     {:type :invalid-argument
                      :name-str name-str})))
-  (let [ns-buf (doto (java.nio.ByteBuffer/allocate 16)
-                 (java.nio.ByteBuffer/.putLong (UUID/.getMostSignificantBits namespace-uuid))
-                 (java.nio.ByteBuffer/.putLong (UUID/.getLeastSignificantBits namespace-uuid)))
+  (let [;; Convert namespace UUID to bytes directly (avoids intermediate ByteBuffer)
+        ns-bytes (let [arr (byte-array 16)
+                       buf (java.nio.ByteBuffer/wrap arr)]
+                   (java.nio.ByteBuffer/.putLong buf (UUID/.getMostSignificantBits namespace-uuid))
+                   (java.nio.ByteBuffer/.putLong buf (UUID/.getLeastSignificantBits namespace-uuid))
+                   arr)
         name-bytes (String/.getBytes name-str StandardCharsets/UTF_8)
         digest (doto (MessageDigest/getInstance "SHA-1")
-                 (MessageDigest/.update (java.nio.ByteBuffer/.array ns-buf))
+                 (MessageDigest/.update ns-bytes)
                  (MessageDigest/.update name-bytes))
         hash-bytes (MessageDigest/.digest digest)]
     ;; Set version to 5 (name-based SHA-1)

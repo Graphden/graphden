@@ -26,10 +26,29 @@
 ;; === Arithmetic ===
 ;; Note: add, sub, mul, div accept lists like Clojure's +, -, *, /
 
+(defn- check-numeric-result!
+  "Validates that result is not Infinity or NaN.
+   These can occur from operations on very large numbers.
+   Throws :execution-error/numeric-overflow on invalid result."
+  [result operation nums]
+  (when (and (number? result)
+             (double? result)
+             (or (Double/isInfinite result)
+                 (Double/isNaN result)))
+    (throw (ex-info (if (Double/isNaN result)
+                      "Arithmetic result is NaN (Not a Number)"
+                      "Arithmetic overflow: result is infinite")
+                    {:type :execution-error/numeric-overflow
+                     :operation operation
+                     :result (str result)
+                     :num-count (count nums)})))
+  result)
+
+
 (defbase add-fn
   {:args {:nums :jsonb}
    :return-type :numeric}
-  (apply + nums))
+  (check-numeric-result! (apply + nums) :add nums))
 
 
 (defbase sub-fn
@@ -39,13 +58,13 @@
     (throw (ex-info "Subtraction requires at least one number"
                     {:type :execution-error/invalid-args
                      :nums nums})))
-  (apply - nums))
+  (check-numeric-result! (apply - nums) :sub nums))
 
 
 (defbase mul-fn
   {:args {:nums :jsonb}
    :return-type :numeric}
-  (apply * nums))
+  (check-numeric-result! (apply * nums) :mul nums))
 
 
 (defbase div-fn
@@ -62,7 +81,7 @@
                     {:type :execution-error/division-by-zero
                      :nums nums
                      :zero-at zero-divisor})))
-  (apply / nums))
+  (check-numeric-result! (apply / nums) :div nums))
 
 
 (defbase mod-fn

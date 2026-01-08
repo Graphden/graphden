@@ -476,8 +476,10 @@
 
    IMPORTANT: Direct fn refs (HOF, type=:fn) do NOT receive path-args - they are
    'black boxes' controlled by map/reduce/etc. Only fn-result-value refs can have
-   their free args set via path-args."
-  [context arg-value arg-schema]
+   their free args set via path-args.
+
+   Type hints for hot-path performance."
+  ^clojure.lang.Delay [^ExecutionContext context ^clojure.lang.IPersistentMap arg-value ^clojure.lang.IPersistentMap arg-schema]
   ;; Note: :value can be nil for optional args with null values.
   ;; arg-values from storage are assumed to have :value key present.
   (let [value (:value arg-value)
@@ -657,7 +659,9 @@
       (throw (ex-info "Execution timeout exceeded"
                       {:type :execution-error/timeout
                        :elapsed-ms elapsed
-                       :timeout-ms (:timeout-ms context)})))))
+                       :timeout-ms (:timeout-ms context)
+                       :depth (:depth context)
+                       :hint "Consider increasing timeout-ms or optimizing the graph"})))))
 
 
 (defn- execute-internal

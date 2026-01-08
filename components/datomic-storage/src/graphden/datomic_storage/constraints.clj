@@ -11,11 +11,13 @@
 ;; === Helper for connection validation ===
 
 (defn- get-conn!
-  "Gets connection from atom, throws if nil."
+  "Gets connection from atom, throws if nil.
+   Used by ConstraintHelpers - throws generic error for internal helper use."
   [conn-atom]
   (or @conn-atom
       (throw (ex-info "Storage not initialized"
-                      {:type :storage-not-initialized}))))
+                      {:type :storage-not-initialized
+                       :hint "Call initialize before using storage operations"}))))
 
 
 ;; === ConstraintHelpers implementation for Datomic ===

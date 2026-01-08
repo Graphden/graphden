@@ -283,7 +283,14 @@
     (is (contains? (:sigs storage/GraphConstraints) :validate-no-arg-override!))
     (is (contains? (:sigs storage/GraphConstraints) :validate-arg-schema-belongs-to-fn!))
     (is (contains? (:sigs storage/GraphConstraints) :validate-no-inheritance-cycle!))
-    (is (contains? (:sigs storage/GraphConstraints) :validate-no-dependency-cycle!))))
+    (is (contains? (:sigs storage/GraphConstraints) :validate-no-dependency-cycle!)))
+
+  (testing "StorageValueCodec protocol is defined"
+    (is (some? storage/StorageValueCodec))
+    (is (contains? (:sigs storage/StorageValueCodec) :encode-value))
+    (is (contains? (:sigs storage/StorageValueCodec) :decode-value))
+    (is (contains? (:sigs storage/StorageValueCodec) :encode-row))
+    (is (contains? (:sigs storage/StorageValueCodec) :decode-row))))
 
 
 ;; === check-removed! tests ===
@@ -1138,6 +1145,39 @@
                           k3 {:value 42}}
           result (storage/extract-uuid-refs-from-arg-values arg-values-map)]
       (is (= #{uuid1} result)))))
+
+
+;; === needs-special-encoding? tests ===
+
+(deftest needs-special-encoding?-test
+  (testing "returns true for JSONB type"
+    (is (true? (storage/needs-special-encoding? :jsonb))))
+
+  (testing "returns true for union type"
+    (is (true? (storage/needs-special-encoding? :union))))
+
+  (testing "returns true for enum type"
+    (is (true? (storage/needs-special-encoding? :enum))))
+
+  (testing "returns false for basic types"
+    (is (false? (storage/needs-special-encoding? :text)))
+    (is (false? (storage/needs-special-encoding? :int)))
+    (is (false? (storage/needs-special-encoding? :bool)))
+    (is (false? (storage/needs-special-encoding? :uuid)))
+    (is (false? (storage/needs-special-encoding? :ref)))
+    (is (false? (storage/needs-special-encoding? :numeric)))
+    (is (false? (storage/needs-special-encoding? :timestamptz)))
+    (is (false? (storage/needs-special-encoding? :bytes)))))
+
+
+;; === default-query-timeout-ms tests ===
+
+(deftest default-query-timeout-ms-test
+  (testing "default timeout is 30 seconds"
+    (is (= 30000 storage/default-query-timeout-ms)))
+
+  (testing "timeout is a positive number"
+    (is (pos? storage/default-query-timeout-ms))))
 
 
 ;; === validate-no-dependency-cycle-impl tests ===

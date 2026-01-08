@@ -100,8 +100,8 @@
 
 (def ^:private default-timeout-ms
   "Default execution timeout in milliseconds.
-   30 seconds is generous for most operations."
-  30000)
+   Uses the shared constant from storage-protocol for consistency."
+  sp/default-query-timeout-ms)
 
 
 (def ^:private error-value-truncation-length

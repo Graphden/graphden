@@ -37,7 +37,7 @@
 (def ^:dynamic *query-timeout-ms*
   "Timeout for Datomic queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change."
-  30000)
+  sp/default-query-timeout-ms)
 
 
 (defn with-query-timeout

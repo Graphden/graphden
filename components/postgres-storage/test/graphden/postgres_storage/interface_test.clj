@@ -22,8 +22,6 @@
     (java.util.concurrent
       CountDownLatch
       TimeUnit)
-    (org.postgresql.util
-      PGobject)
     (org.testcontainers.containers
       PostgreSQLContainer)))
 
@@ -2245,50 +2243,8 @@
           (sp/close storage))))))
 
 
-;; === JSONB parsing error tests ===
-
-(deftest jsonb-parsing-error-test
-  (testing "parse-pgobject throws with context on invalid JSON (short value)"
-    (let [parse-pgobject #'crud/parse-pgobject
-          invalid-pg (doto (PGobject.)
-                       (PGobject/.setType "jsonb")
-                       (PGobject/.setValue "{invalid json}"))]
-      (try
-        (parse-pgobject invalid-pg)
-        (is false "Should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :parse-error/jsonb (:type (ex-data e))))
-          (is (= "{invalid json}" (:raw-value (ex-data e))))
-          (is (some? (:cause (ex-data e))))))))
-
-  (testing "parse-pgobject truncates long values in error"
-    (let [parse-pgobject #'crud/parse-pgobject
-          ;; Create a string longer than 100 characters
-          long-invalid-value (str "{" (str/join (repeat 150 "x")) "}")
-          invalid-pg (doto (PGobject.)
-                       (PGobject/.setType "jsonb")
-                       (PGobject/.setValue long-invalid-value))]
-      (try
-        (parse-pgobject invalid-pg)
-        (is false "Should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :parse-error/jsonb (:type (ex-data e))))
-          ;; Should be truncated to 100 chars + "..."
-          (is (= 103 (count (:raw-value (ex-data e)))))
-          (is (str/ends-with? (:raw-value (ex-data e)) "..."))))))
-
-  (testing "parse-pgobject returns value for non-jsonb PGobject"
-    (let [parse-pgobject #'crud/parse-pgobject
-          text-pg (doto (PGobject.)
-                    (PGobject/.setType "text")
-                    (PGobject/.setValue "hello"))]
-      (is (= "hello" (parse-pgobject text-pg)))))
-
-  (testing "parse-pgobject returns non-PGobject values unchanged"
-    (let [parse-pgobject #'crud/parse-pgobject]
-      (is (= "plain string" (parse-pgobject "plain string")))
-      (is (= 42 (parse-pgobject 42)))
-      (is (nil? (parse-pgobject nil))))))
+;; NOTE: JSONB parsing error tests moved to codec_test.clj
+;; The parse-pgobject function was extracted to the codec module.
 
 
 ;; === GraphConstraints tests ===

@@ -19,7 +19,8 @@
       only valid, validated identifiers are used in SQL statements."
   (:require
     [clojure.string :as str]
-    [clojure.tools.logging :as log]))
+    [clojure.tools.logging :as log]
+    [graphden.storage-protocol.interface :as sp]))
 
 
 ;; === Configuration ===
@@ -28,7 +29,14 @@
   "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
    Note: Internally converted to seconds for JDBC calls."
-  30000)
+  sp/default-query-timeout-ms)
+
+
+(def min-query-timeout-ms
+  "Minimum allowed query timeout in milliseconds.
+   1000ms (1 second) minimum because JDBC setQueryTimeout uses seconds,
+   and sub-second values would round to 0 (no timeout)."
+  1000)
 
 
 (defn with-query-timeout
@@ -48,11 +56,11 @@
     (throw (ex-info "Query timeout must be a positive integer (ms)"
                     {:type :config-error/invalid-timeout
                      :timeout-ms timeout-ms})))
-  (when (< timeout-ms 1000)
-    (throw (ex-info "Query timeout must be at least 1000ms (1 second)"
+  (when (< timeout-ms min-query-timeout-ms)
+    (throw (ex-info (str "Query timeout must be at least " min-query-timeout-ms "ms (1 second)")
                     {:type :config-error/invalid-timeout
                      :timeout-ms timeout-ms
-                     :min-timeout-ms 1000})))
+                     :min-timeout-ms min-query-timeout-ms})))
   (binding [*query-timeout-ms* timeout-ms]
     (f)))
 

@@ -12,6 +12,36 @@
     [next.jdbc :as jdbc]))
 
 
+;; === Migration context ===
+;; A mutable context for collecting migration changes during the migration process.
+;; Using a single context object reduces parameter passing and centralizes state.
+
+(defn- create-migration-context
+  "Creates a mutable context for tracking migration changes.
+   All tracking atoms are centralized here for cleaner code."
+  []
+  {:created-enums (atom [])
+   :renamed-enums (atom {})
+   :created-enum-values (atom [])
+   :created-entities (atom [])
+   :renamed-entities (atom {})
+   :created-fields (atom [])
+   :renamed-fields (atom [])
+   :columns-cache (atom {})})
+
+
+(defn- context->changes
+  "Extracts the final changes map from migration context."
+  [ctx]
+  {:entities {:created @(:created-entities ctx)
+              :renamed @(:renamed-entities ctx)}
+   :fields {:created @(:created-fields ctx)
+            :renamed @(:renamed-fields ctx)}
+   :enums {:created @(:created-enums ctx)
+           :renamed @(:renamed-enums ctx)}
+   :enum-values {:created @(:created-enum-values ctx)}})
+
+
 ;; === Collision checks ===
 ;; Note: These run in O(total_fields) time, not O(n²).
 ;; Each entity's fields are checked separately for meaningful error context.
@@ -84,51 +114,58 @@
 
 (defn- process-existing-enum-value!
   "Adds a new value to existing enum if not present in old metadata."
-  [ds old-metadata enum-name value-kw value-uuid created-enum-values]
+  [ds old-metadata enum-name value-kw value-uuid ctx]
   (when-not (get (:enum-values old-metadata) value-uuid)
     (ddl/add-enum-value! ds enum-name value-kw)
-    (swap! created-enum-values conj {:enum enum-name :value value-kw})))
+    (swap! (:created-enum-values ctx) conj {:enum enum-name :value value-kw})))
 
 
 (defn- process-single-enum!
   "Processes a single enum during migration (rename or create)."
-  [ds old-metadata enum-name {:keys [uuid values]} created-enums renamed-enums created-enum-values]
+  [ds old-metadata enum-name {:keys [uuid values]} ctx]
   (if-let [old-enum-name (get (:enums old-metadata) uuid)]
     (do
       ;; Existing enum - check for rename
       (when (not= old-enum-name enum-name)
         (ddl/rename-enum! ds old-enum-name enum-name)
-        (swap! renamed-enums assoc old-enum-name enum-name))
+        (swap! (:renamed-enums ctx) assoc old-enum-name enum-name))
       ;; Add new values
       (run! (fn [[value-kw value-uuid]]
-              (process-existing-enum-value! ds old-metadata enum-name value-kw value-uuid created-enum-values))
+              (process-existing-enum-value! ds old-metadata enum-name value-kw value-uuid ctx))
             values))
     ;; New enum - values sorted alphabetically for deterministic ordering
     (do
       (ddl/create-enum! ds enum-name (sort (keys values)))
-      (swap! created-enums conj enum-name)
-      (run! (fn [[v _]] (swap! created-enum-values conj {:enum enum-name :value v}))
+      (swap! (:created-enums ctx) conj enum-name)
+      (run! (fn [[v _]] (swap! (:created-enum-values ctx) conj {:enum enum-name :value v}))
             values))))
 
 
 ;; === Field migration ===
 
+(defn- get-cached-columns
+  "Gets columns from cache or loads them from database."
+  [ds table-name ctx]
+  (let [cache (:columns-cache ctx)]
+    (or (get @cache table-name)
+        (let [cols (introspection/current-columns ds table-name)]
+          (swap! cache assoc table-name cols)
+          cols))))
+
+
 (defn- process-existing-field!
   "Processes an existing field during migration (rename or type widening).
    Uses columns-cache to avoid redundant database queries."
-  [ds entity-name field-name field-spec old-field-info renamed-fields columns-cache]
+  [ds entity-name field-name field-spec old-field-info ctx]
   ;; Check for rename
   (when (not= (:field old-field-info) field-name)
     (ddl/rename-column! ds entity-name (:field old-field-info) field-name)
-    (swap! renamed-fields conj {:entity entity-name
-                                :old-field (:field old-field-info)
-                                :new-field field-name}))
+    (swap! (:renamed-fields ctx) conj {:entity entity-name
+                                       :old-field (:field old-field-info)
+                                       :new-field field-name}))
   ;; Check for type widening - use cached columns
   (let [table-name (util/kw->snake-case entity-name)
-        old-fields (or (get @columns-cache table-name)
-                       (let [cols (introspection/current-columns ds table-name)]
-                         (swap! columns-cache assoc table-name cols)
-                         cols))
+        old-fields (get-cached-columns ds table-name ctx)
         old-type (:type (get old-fields field-name))
         new-type (:type field-spec)]
     (when (and old-type
@@ -140,50 +177,47 @@
 
 (defn- process-single-field!
   "Processes a single field during migration."
-  [ds old-metadata entity-name field-name field-spec created-fields renamed-fields columns-cache]
+  [ds old-metadata entity-name field-name field-spec ctx]
   (let [field-uuid (:uuid field-spec)
         old-field-info (get (:fields old-metadata) field-uuid)]
     (if old-field-info
-      (process-existing-field! ds entity-name field-name field-spec old-field-info renamed-fields columns-cache)
+      (process-existing-field! ds entity-name field-name field-spec old-field-info ctx)
       ;; New field - add column and index if ref
       (do
         (ddl/add-column! ds entity-name field-name field-spec)
         (when (= :ref (:type field-spec))
           (ddl/create-ref-index! ds entity-name field-name))
-        (swap! created-fields conj {:entity entity-name :field field-name})))))
+        (swap! (:created-fields ctx) conj {:entity entity-name :field field-name})))))
 
 
 ;; === Entity migration ===
 
 (defn- process-existing-entity!
   "Processes an existing entity during migration."
-  [ds schema old-metadata entity-name old-entity-name
-   renamed-entities created-fields renamed-fields columns-cache]
+  [ds schema old-metadata entity-name old-entity-name ctx]
   ;; Check for rename
   (when (not= old-entity-name entity-name)
     (ddl/rename-table! ds old-entity-name entity-name)
-    (swap! renamed-entities assoc old-entity-name entity-name))
+    (swap! (:renamed-entities ctx) assoc old-entity-name entity-name))
   ;; Process fields
   (run! (fn [[field-name field-spec]]
-          (process-single-field! ds old-metadata entity-name field-name field-spec
-                                 created-fields renamed-fields columns-cache))
+          (process-single-field! ds old-metadata entity-name field-name field-spec ctx))
         (ds/entity-fields schema entity-name)))
 
 
 (defn- process-single-entity!
   "Processes a single entity during migration (existing or new)."
-  [ds schema old-metadata entity-name created-entities renamed-entities created-fields renamed-fields columns-cache]
+  [ds schema old-metadata entity-name ctx]
   (let [entity-uuid (ds/entity-uuid schema entity-name)
         old-entity-name (get (:entities old-metadata) entity-uuid)]
     (if old-entity-name
-      (process-existing-entity! ds schema old-metadata entity-name old-entity-name
-                                renamed-entities created-fields renamed-fields columns-cache)
+      (process-existing-entity! ds schema old-metadata entity-name old-entity-name ctx)
       ;; New entity
       (do
         (ddl/create-table! ds entity-name (ds/entity-fields schema entity-name))
         (ddl/create-entity-constraints! ds schema entity-name)
-        (swap! created-entities conj entity-name)
-        (run! (fn [[f _]] (swap! created-fields conj {:entity entity-name :field f}))
+        (swap! (:created-entities ctx) conj entity-name)
+        (run! (fn [[f _]] (swap! (:created-fields ctx) conj {:entity entity-name :field f}))
               (ds/entity-fields schema entity-name))))))
 
 
@@ -212,34 +246,22 @@
   ;; Check type compatibility
   (run! #(check-entity-fields-type! tx schema old-metadata %) (ds/entities schema))
 
-  ;; Apply enum changes
-  (let [created-enums (atom [])
-        renamed-enums (atom {})
-        created-enum-values (atom [])]
+  ;; Create migration context to track all changes
+  (let [ctx (create-migration-context)]
+    ;; Apply enum changes
     (run! (fn [[enum-name enum-def]]
-            (process-single-enum! tx old-metadata enum-name enum-def
-                                  created-enums renamed-enums created-enum-values))
+            (process-single-enum! tx old-metadata enum-name enum-def ctx))
           (ds/enums schema))
 
     ;; Apply entity/field changes
-    (let [created-entities (atom [])
-          renamed-entities (atom {})
-          created-fields (atom [])
-          renamed-fields (atom [])
-          columns-cache (atom {})]
-      (run! #(process-single-entity! tx schema old-metadata %
-                                     created-entities renamed-entities
-                                     created-fields renamed-fields columns-cache)
-            (ds/entities schema))
+    (run! #(process-single-entity! tx schema old-metadata % ctx)
+          (ds/entities schema))
 
-      ;; Save metadata
-      (metadata/save-metadata-in-tx! tx schema)
+    ;; Save metadata
+    (metadata/save-metadata-in-tx! tx schema)
 
-      ;; Return changes
-      {:entities {:created @created-entities :renamed @renamed-entities}
-       :fields {:created @created-fields :renamed @renamed-fields}
-       :enums {:created @created-enums :renamed @renamed-enums}
-       :enum-values {:created @created-enum-values}})))
+    ;; Return changes
+    (context->changes ctx)))
 
 
 (defn- log-migration-summary

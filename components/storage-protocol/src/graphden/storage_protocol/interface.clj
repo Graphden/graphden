@@ -513,6 +513,52 @@
                          :value-fn-id value-fn-id}))))))
 
 
+;; === Value Codec Protocol ===
+
+(defprotocol StorageValueCodec
+  "Protocol for encoding/decoding values between Clojure and storage backend.
+   Each storage implementation has different serialization requirements:
+   - PostgreSQL: JSONB for complex types, PGobject for enums
+   - Datomic: EDN strings for union types, refs for enums
+   - Memory: No transformation needed
+
+   Implementations should handle:
+   - :jsonb/:union types -> backend-specific format
+   - :enum types -> backend-specific enum representation
+   - :ref types -> UUID handling
+   - nil values -> NULL representation"
+
+  (encode-value
+    [this value field-spec]
+    "Encodes a Clojure value for storage.
+     field-spec contains {:type :jsonb/:enum/:ref/... :enum-name :foo (optional)}
+     Returns backend-specific value (e.g., PGobject for PostgreSQL).")
+
+  (decode-value
+    [this value field-spec]
+    "Decodes a storage value to Clojure.
+     Returns Clojure data structure.")
+
+  (encode-row
+    [this row field-specs]
+    "Encodes all values in a row map for storage.
+     field-specs is {field-name {:type ... :enum-name ...}}
+     Returns row with encoded values.")
+
+  (decode-row
+    [this row field-specs]
+    "Decodes all values in a storage row to Clojure.
+     Returns row with decoded values and kebab-case keys."))
+
+
+;; === Default codec helpers ===
+
+(defn needs-special-encoding?
+  "Returns true if field type requires special encoding (not passthrough)."
+  [field-type]
+  (contains? #{:jsonb :union :enum} field-type))
+
+
 (defprotocol ExecutionGraph
   "Protocol for retrieving complete execution graph for a function.
    Implementations should optimize for efficient retrieval - using JOINs,
@@ -606,6 +652,18 @@
   "Returns true if x is an ExecutionGraphResult record."
   [x]
   (instance? ExecutionGraphResult x))
+
+
+;; === Shared constants ===
+
+(def default-query-timeout-ms
+  "Default timeout for storage queries in milliseconds.
+   Used by PostgreSQL (via JDBC setQueryTimeout) and Datomic backends.
+   Value: 30000ms (30 seconds) - reasonable default for most queries.
+
+   Note: This is a shared constant for consistency across backends.
+   Each backend may provide its own dynamic var for runtime overrides."
+  30000)
 
 
 ;; === Execution graph limits ===

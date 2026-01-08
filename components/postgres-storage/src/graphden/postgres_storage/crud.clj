@@ -2,19 +2,14 @@
   "CRUD operations for PostgreSQL storage.
    Generic entity operations for create, read, update, delete, query."
   (:require
-    [cheshire.core :as json]
     [clojure.set :as set]
     [clojure.tools.logging :as log]
+    [graphden.postgres-storage.codec :as codec]
     [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
-    [next.jdbc.result-set :as rs])
-  (:import
-    (com.fasterxml.jackson.core
-      JsonParseException)
-    (org.postgresql.util
-      PGobject)))
+    [next.jdbc.result-set :as rs]))
 
 
 ;; Use shared timeout utility from util.clj
@@ -29,146 +24,22 @@
   `(util/with-sql-error-handling "Database error" ~operation ~context ~@body))
 
 
-(defn- parse-pgobject
-  "Parses PGobject values (like JSONB) to Clojure data.
-   Wraps JSON parsing errors with context information.
-   Returns nil for null PGobject values (SQL NULL stored in JSONB column)."
-  [v]
-  (if (instance? PGobject v)
-    (let [pg-type (PGobject/.getType v)
-          pg-value (PGobject/.getValue v)]
-      ;; Handle NULL values - PGobject can have null value for SQL NULL
-      (when pg-value
-        (if (= pg-type "jsonb")
-          (try
-            (json/parse-string pg-value true)
-            ;; Catch only JSON parsing errors - other exceptions (OOM, connection issues)
-            ;; should propagate as-is to avoid masking infrastructure problems
-            (catch JsonParseException e
-              (throw (ex-info "Failed to parse JSONB value"
-                              {:type :parse-error/jsonb
-                               :raw-value (if (> (count pg-value) 100)
-                                            (str (subs pg-value 0 100) "...")
-                                            pg-value)
-                               :cause (Throwable/.getMessage e)}
-                              e))))
-          pg-value)))
-    v))
-
+;; === Value encoding/decoding ===
+;; Delegated to codec module for cleaner separation
 
 (defn- row->entity
   "Converts a database row to entity map.
-   Converts snake_case column names to kebab-case keywords.
-   Parses JSONB values to Clojure data."
+   Delegates to codec for value decoding."
   [row]
   (when row
-    (reduce-kv (fn [acc k v]
-                 (let [new-key (util/snake->kw (name k))
-                       parsed-v (parse-pgobject v)]
-                   (assoc acc new-key parsed-v)))
-               {}
-               row)))
-
-
-(defn- value->jsonb
-  "Wraps a value as JSONB PGobject for PostgreSQL."
-  [v]
-  (doto (PGobject.)
-    (PGobject/.setType "jsonb")
-    (PGobject/.setValue (json/generate-string v))))
-
-
-(defn- jsonb-column?
-  "Returns true if field type should be stored as JSONB."
-  [field-type]
-  (contains? #{:jsonb :union} field-type))
-
-
-;; === Fallback JSONB columns ===
-;;
-;; These columns are always treated as JSONB, even when field metadata is not available.
-;; This is a safety mechanism for:
-;;
-;; 1. Direct CRUD calls without schema context - some internal operations may call
-;;    create-entity/update-entity without the full field metadata
-;;
-;; 2. Specific entity types with known JSONB fields - the :value field in arg_value
-;;    entities stores polymorphic values (refs, literals) as JSONB
-;;
-;; IMPORTANT: If you add new entities with JSONB fields that might be accessed
-;; without field metadata, add them here. However, the preferred approach is to
-;; always pass field metadata to CRUD operations.
-;;
-;; Current fallbacks:
-;; - :value - Used in arg_value entity for polymorphic value storage (:union type)
-(def ^:private fallback-jsonb-columns
-  #{:value})
-
-
-(defn- extract-jsonb-columns
-  "Extracts set of column names that should be stored as JSONB from fields map.
-   Falls back to known JSONB columns when fields is nil."
-  [fields]
-  (if (nil? fields)
-    fallback-jsonb-columns
-    (let [from-schema (->> fields
-                           (filter (fn [[_ spec]] (jsonb-column? (:type spec))))
-                           (map first)
-                           (set))]
-      ;; Merge with fallback to ensure known JSONB columns are always included
-      (into from-schema fallback-jsonb-columns))))
-
-
-(defn- extract-enum-columns
-  "Extracts map of {field-name -> enum-name} for enum fields.
-   Returns empty map when fields is nil."
-  [fields]
-  (if (nil? fields)
-    {}
-    (->> fields
-         (filter (fn [[_ spec]] (= (:type spec) :enum)))
-         (map (fn [[field-name spec]] [field-name (:enum-name spec)]))
-         (into {}))))
-
-
-(defn- maybe-wrap-jsonb
-  "Wraps value as JSONB if column is in jsonb-columns set.
-   Returns nil as-is (SQL NULL) rather than converting to JSON null.
-   Note: `false` is correctly wrapped as JSONB since (some? false) => true."
-  [jsonb-columns col-name v]
-  (if (and (contains? jsonb-columns col-name)
-           (some? v)
-           (not (instance? PGobject v)))
-    (value->jsonb v)
-    v))
-
-
-(defn- maybe-convert-enum
-  "Converts enum value (keyword) to PGobject for PostgreSQL enum columns.
-   Returns nil as-is. Non-keyword values pass through unchanged."
-  [enum-columns col-name v]
-  (if-let [enum-name (get enum-columns col-name)]
-    (if (keyword? v)
-      (doto (PGobject.)
-        (PGobject/.setType (util/kw->snake-case enum-name))
-        (PGobject/.setValue (util/enum-value->sql v)))
-      v)
-    v))
+    (codec/decode-row row nil)))
 
 
 (defn- entity->row
   "Converts entity map to database row.
-   Converts kebab-case keywords to snake_case column names.
-   Converts enum values (keywords) to snake_case strings.
-   Wraps JSONB column values appropriately based on fields metadata."
-  [entity jsonb-columns enum-columns]
-  (reduce-kv (fn [acc k v]
-               (let [new-key (keyword (util/kw->snake-case k))
-                     enum-v (maybe-convert-enum enum-columns k v)
-                     wrapped-v (maybe-wrap-jsonb jsonb-columns k enum-v)]
-                 (assoc acc new-key wrapped-v)))
-             {}
-             entity))
+   Delegates to codec for value encoding."
+  [entity fields]
+  (codec/encode-row entity fields))
 
 
 (defn create-entity
@@ -182,11 +53,9 @@
   (when fields
     (sp/validate-required-fields! entity-name fields data))
   (let [table-name (keyword (util/kw->snake-case entity-name))
-        jsonb-cols (extract-jsonb-columns fields)
-        enum-cols (extract-enum-columns fields)
         id (or (:id data) (random-uuid))
         record (assoc data :id id)
-        row (entity->row record jsonb-cols enum-cols)
+        row (entity->row record fields)
         columns (keys row)
         values (vals row)
         query (sql/format {:insert-into table-name
@@ -224,8 +93,6 @@
    Validates required fields if fields metadata is provided."
   [ds entity-name id data fields]
   (let [table-name (keyword (util/kw->snake-case entity-name))
-        jsonb-cols (extract-jsonb-columns fields)
-        enum-cols (extract-enum-columns fields)
         existing (read-entity ds entity-name id)]
     (when-not existing
       (throw (ex-info "Entity not found"
@@ -235,7 +102,7 @@
     (let [updated (merge existing data {:id id})]
       (when fields
         (sp/validate-required-fields! entity-name fields updated))
-      (let [row (entity->row (dissoc updated :id) jsonb-cols enum-cols)
+      (let [row (entity->row (dissoc updated :id) fields)
             query (sql/format {:update table-name
                                :set row
                                :where [:= :id id]
@@ -303,8 +170,6 @@
     (do
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name (keyword (util/kw->snake-case entity-name))
-            jsonb-cols (extract-jsonb-columns fields)
-            enum-cols (extract-enum-columns fields)
             ;; Prepare all records with IDs
             records (map (fn [data]
                            (when fields
@@ -312,8 +177,8 @@
                            (let [id (or (:id data) (random-uuid))]
                              (assoc data :id id)))
                          data-seq)
-            ;; Convert to rows
-            rows (map #(entity->row % jsonb-cols enum-cols) records)
+            ;; Convert to rows using codec
+            rows (map #(entity->row % fields) records)
             ;; Get consistent column order from first row
             columns (vec (keys (first rows)))
             ;; Extract values in column order

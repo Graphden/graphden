@@ -1,5 +1,19 @@
 (ns graphden.datomic-storage.core
-  "Datomic Local implementation of Storage protocol."
+  "Datomic Local implementation of Storage protocol.
+
+   ## Module Structure (Future Refactoring Roadmap)
+
+   This file is large (~1600 LOC) and could be split similarly to postgres-storage:
+
+   - core.clj       - Storage record, initialization, connection management
+   - schema.clj     - Type mapping, attribute naming, schema builders
+   - crud.clj       - CRUD operations, batch operations
+   - migration.clj  - Migration helpers, destructive change detection
+   - graph.clj      - ExecutionGraph resolution, dependency traversal
+   - introspection.clj - current-entities, current-fields, current-enums
+
+   For comparison, postgres-storage is split into ~10 files with clear separation.
+   This refactoring would improve readability and maintainability."
   (:require
     [clojure.set :as set]
     [clojure.string :as str]
@@ -721,36 +735,11 @@
       (d/transact conn {:tx-data (vec all-schema)}))
     ;; Save metadata
     (save-metadata! conn schema)
-    ;; Return changes
-    {:entities {:created (vec (ds/entities schema)) :renamed {}}
-     :fields {:created (sp/collect-created-fields schema) :renamed []}
-     :enums {:created (vec (keys (ds/enums schema))) :renamed {}}
-     :enum-values {:created (sp/collect-created-enum-values schema)}}))
+    ;; Return changes using shared function
+    (sp/build-first-init-changes schema)))
 
 
-(defn- check-destructive-changes!
-  "Validates that no entities/fields/enums have been removed.
-   Throws if destructive changes detected."
-  [old-metadata schema]
-  (let [old-entity-uuids (set (keys (:entities old-metadata)))
-        new-entity-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))]
-    (sp/check-removed! "entities" old-entity-uuids new-entity-uuids
-                       #(get (:entities old-metadata) %)))
-
-  (let [old-field-uuids (set (keys (:fields old-metadata)))
-        new-field-uuids (sp/collect-field-uuids schema)]
-    (sp/check-removed! "fields" old-field-uuids new-field-uuids
-                       #(get (:fields old-metadata) %)))
-
-  (let [old-enum-uuids (set (keys (:enums old-metadata)))
-        new-enum-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) (ds/enums schema)))]
-    (sp/check-removed! "enums" old-enum-uuids new-enum-uuids
-                       #(get (:enums old-metadata) %)))
-
-  (let [old-value-uuids (set (keys (:enum-values old-metadata)))
-        new-value-uuids (sp/collect-enum-value-uuids schema)]
-    (sp/check-removed! "enum values" old-value-uuids new-value-uuids
-                       #(get (:enum-values old-metadata) %))))
+;; Use sp/check-all-removals! from storage-protocol for destructive change validation
 
 
 (defn- create-migration-context
@@ -780,7 +769,7 @@
    Returns changes map with created/renamed entities/fields/enums."
   [conn db old-metadata schema]
   ;; Validate no destructive changes
-  (check-destructive-changes! old-metadata schema)
+  (sp/check-all-removals! old-metadata schema)
   ;; Check type compatibility
   (run! #(check-entity-fields-type! db old-metadata schema %) (ds/entities schema))
 

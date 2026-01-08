@@ -162,36 +162,38 @@
                        :server-type server-type
                        :valid-types valid-server-types})))
     ;; Server-type specific validation
-    (case server-type
-      :datomic-local
-      (do
-        (when-not (:system config)
-          (throw (ex-info "datomic-local requires :system in client-config"
-                          {:type :config-error/missing-system
-                           :config (dissoc config :secret :access-key)})))
-        (when-not (:storage-dir config)
-          (throw (ex-info "datomic-local requires :storage-dir in client-config"
-                          {:type :config-error/missing-storage-dir
-                           :config (dissoc config :secret :access-key)}))))
+    ;; Redact config once for all error messages (security: prevent credential leakage)
+    (let [safe-config (sp/redact-sensitive-deep config)]
+      (case server-type
+        :datomic-local
+        (do
+          (when-not (:system config)
+            (throw (ex-info "datomic-local requires :system in client-config"
+                            {:type :config-error/missing-system
+                             :config safe-config})))
+          (when-not (:storage-dir config)
+            (throw (ex-info "datomic-local requires :storage-dir in client-config"
+                            {:type :config-error/missing-storage-dir
+                             :config safe-config}))))
 
-      :peer-server
-      (do
-        (when-not (:endpoint config)
-          (throw (ex-info "peer-server requires :endpoint in client-config"
-                          {:type :config-error/missing-endpoint})))
-        (when-not (:access-key config)
-          (throw (ex-info "peer-server requires :access-key in client-config"
-                          {:type :config-error/missing-access-key})))
-        (when-not (:secret config)
-          (throw (ex-info "peer-server requires :secret in client-config"
-                          {:type :config-error/missing-secret}))))
+        :peer-server
+        (do
+          (when-not (:endpoint config)
+            (throw (ex-info "peer-server requires :endpoint in client-config"
+                            {:type :config-error/missing-endpoint})))
+          (when-not (:access-key config)
+            (throw (ex-info "peer-server requires :access-key in client-config"
+                            {:type :config-error/missing-access-key})))
+          (when-not (:secret config)
+            (throw (ex-info "peer-server requires :secret in client-config"
+                            {:type :config-error/missing-secret}))))
 
-      ;; :ion and :cloud have complex configs, just warn if empty
-      (:ion :cloud)
-      (when (< (count config) 2)
-        (log/warn "Datomic ion/cloud config seems minimal, may fail to connect"
-                  {:server-type server-type
-                   :config-keys (keys config)})))))
+        ;; :ion and :cloud have complex configs, just warn if empty
+        (:ion :cloud)
+        (when (< (count config) 2)
+          (log/warn "Datomic ion/cloud config seems minimal, may fail to connect"
+                    {:server-type server-type
+                     :config-keys (keys config)}))))))
 
 
 ;; === Schema operations ===
@@ -1492,8 +1494,12 @@
                                   (throw e))))
                             (let [conn (d/connect client {:db-name db-name})]
                               (reset! conn-atom conn)
-                              ;; Perform initialization, then invalidate metadata cache on success
-                              ;; This prevents cache invalidation on failed migrations.
+                              ;; Perform initialization, then invalidate metadata cache on success.
+                              ;; Cache invalidation is intentionally AFTER do-initialize completes:
+                              ;; - If do-initialize throws, cache stays nil (safe: fresh start on retry)
+                              ;; - If do-initialize succeeds, cache is reset to nil (forces refresh)
+                              ;; Note: try-finally is NOT needed here because cache starts as nil,
+                              ;; so failed initialization leaves system in consistent state.
                               (let [result (do-initialize conn schema)]
                                 (reset! metadata-cache nil)
                                 result))))))

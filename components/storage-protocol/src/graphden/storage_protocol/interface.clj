@@ -743,6 +743,58 @@
      convenience for external consumers of the protocol."))
 
 
+(defn make-error-context
+  "Creates a canonical error context map for storage errors.
+   Use this helper in backend implementations to ensure consistent error structure.
+
+   Required keys:
+   - type: canonical error type keyword (e.g., :unique-violation, :table-not-found)
+   - operation: keyword describing the operation (e.g., :create-entity, :update-entity)
+   - message: human-readable error message string
+
+   Optional keys (passed in context map):
+   - entity-name: keyword of the entity type
+   - sql-state: backend-specific error code (e.g., PostgreSQL SQLSTATE)
+   - query: the query that failed (for debugging, will be redacted in logs)
+   - Any other backend-specific context
+
+   Example:
+   (make-error-context :unique-violation :create-entity \"Duplicate key\"
+                       {:entity-name :user :sql-state \"23505\"})"
+  [error-type operation message context]
+  (merge {:type error-type
+          :operation operation
+          :message message}
+         context))
+
+
+(defn make-storage-error
+  "Creates a storage error ex-info with canonical structure.
+   Combines make-error-context with ex-info creation.
+
+   Arguments:
+   - error-type: canonical error type keyword
+   - operation: keyword describing the operation
+   - message: human-readable error message
+   - context: map of additional context (entity-name, sql-state, etc.)
+   - cause: optional root cause exception
+
+   The context is redacted for logging safety but preserved in full in the exception.
+
+   Example:
+   (throw (make-storage-error :unique-violation :create-entity
+                              \"Duplicate user email\"
+                              {:entity-name :user :fields [:email]}
+                              sql-exception))"
+  ([error-type operation message context]
+   (make-storage-error error-type operation message context nil))
+  ([error-type operation message context cause]
+   (let [error-context (make-error-context error-type operation message context)]
+     (if cause
+       (ex-info message error-context cause)
+       (ex-info message error-context)))))
+
+
 (defprotocol ExecutionGraph
   "Protocol for retrieving complete execution graph for a function.
    Implementations should optimize for efficient retrieval - using JOINs,

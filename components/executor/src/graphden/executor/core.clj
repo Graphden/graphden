@@ -115,21 +115,36 @@
 (def ^:private max-unknown-types-per-execution
   "Maximum number of unknown types allowed per execution before throwing.
    Acts as circuit breaker in forward compatibility mode to prevent silent
-   schema mismatch issues from going unnoticed."
+   schema mismatch issues from going unnoticed.
+
+   Why 10? A single missing enum value or new field type shouldn't fail execution
+   (forward compatibility), but 10+ unknown types suggests a serious schema version
+   mismatch that warrants investigation. This balances graceful degradation with
+   early detection of configuration drift."
   10)
 
 
 (def ^:private result-cache-size-warning-threshold
   "Threshold for result-cache size that triggers a warning log.
    Large caches indicate potentially unbounded execution graphs.
-   When exceeded, a warning is logged to help diagnose memory issues."
+   When exceeded, a warning is logged to help diagnose memory issues.
+
+   Why 1000? Typical function graphs have <100 nodes. 1000 unique fn-result-value
+   entries indicates either a very deep recursion, infinite loop, or exponential
+   branching. This threshold is high enough to avoid false positives in legitimate
+   large graphs while catching runaway executions before they exhaust memory."
   1000)
 
 
 (def ^:private timeout-warning-window-ms
   "Window size in milliseconds for timeout warning logs.
    Used to avoid repeated warnings when execution is near timeout threshold.
-   Warning fires once when elapsed time enters [threshold, threshold+window) range."
+   Warning fires once when elapsed time enters [threshold, threshold+window) range.
+
+   Why 100ms? This window should be small enough to give timely warning (not too
+   far before actual timeout) but large enough to account for timing jitter in
+   time checks. 100ms is ~0.3% of the default 30s timeout - negligible but
+   sufficient to deduplicate warnings across multiple function calls."
   100)
 
 
@@ -141,7 +156,12 @@
 
 (def ^:private error-value-truncation-length
   "Maximum length for values in error messages.
-   Prevents huge exception data for large values."
+   Prevents huge exception data for large values.
+
+   Why 100 chars? Long enough to show meaningful context (e.g., first part of
+   a string, several collection items) but short enough to keep exception data
+   readable in logs and stack traces. Error messages are typically viewed in
+   full, so slightly more verbose is acceptable."
   100)
 
 

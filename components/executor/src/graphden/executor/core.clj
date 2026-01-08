@@ -65,7 +65,9 @@
 
 (defn get-base-fn-from-context
   "Retrieves a base function by name from the context's registry.
-   Returns the function or nil if not found."
+   Returns the function or nil if not found.
+
+   Note: The returned function expects arguments as delay objects."
   [context fn-name]
   (get (:base-fns context) fn-name))
 

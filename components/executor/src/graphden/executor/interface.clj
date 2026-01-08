@@ -126,7 +126,15 @@
   "Gets a base function from the context's registry by name.
    Returns nil if not found.
 
-   Use this when you need to look up functions from within a base function."
+   Use this when you need to look up functions from within a base function.
+
+   IMPORTANT: The returned function expects arguments as Clojure delay objects,
+   just like regular base functions. When calling a dynamically-looked-up
+   function, wrap argument values with `delay`:
+
+   Example:
+   (let [other-fn (get-base-fn-from-context ctx :other)]
+     (other-fn {:x (delay 42) :y (delay \"hello\")} ctx))"
   [context fn-name]
   (core/get-base-fn-from-context context fn-name))
 

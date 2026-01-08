@@ -1546,9 +1546,8 @@
 ;; === Unknown Type Validation Tests ===
 
 (deftest unknown-type-validation-test
-  (testing "unknown types are accepted without error (forward compatibility)"
-    ;; When a new type is added to the schema but not yet to known-types,
-    ;; the system should accept any value and log a warning
+  (testing "unknown types throw error in strict mode (default)"
+    ;; By default, strict-type-validation? is true to catch schema mismatches early
     (let [storage (create-test-storage)
           _ (exec/register-base-fn!
               :use-custom
@@ -1570,7 +1569,37 @@
                                :arg-schema-id (:id data-arg)
                                :value "default"})
           ctx (exec/create-context {:storage storage})]
-      ;; Unknown type should accept any value without throwing
+      ;; Strict mode: unknown type should throw
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown argument type encountered"
+            (exec/execute ctx (:id fn-rec) {(:id data-arg) "test-value"})))
+      (sp/close storage)))
+
+  (testing "unknown types are accepted in non-strict mode (forward compatibility)"
+    ;; When strict-type-validation? is false, unknown types are accepted
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn!
+              :use-custom
+              (fn [{:keys [data]} _ctx]
+                @data))
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "use-custom"
+                                       :returned-type :text})
+          data-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id fn-schema)
+                                      :name "data"
+                                      :type :custom-future-type  ; Unknown type
+                                      :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-use-custom"
+                                    :fn-schema-id (:id fn-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id data-arg)
+                               :value "default"})
+          ctx (exec/create-context {:storage storage
+                                    :strict-type-validation? false})]
+      ;; Non-strict mode: unknown type should accept any value
       (is (= "test-value" (exec/execute ctx (:id fn-rec) {(:id data-arg) "test-value"})))
       (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
       (sp/close storage))))

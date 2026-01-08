@@ -175,17 +175,44 @@
 
 
 (defn- transform-body
-  "Walks the body and replaces argument symbols with appropriate transforms:
-   - Regular args: (when arg (deref arg))
-   - :fn type args: (exec/make-single-arg-callable ctx (deref arg))
+  "AST walker that transforms argument symbols to delayed evaluation.
 
-   Respects lexical scope - does not replace symbols that are shadowed
-   by local bindings (fn params, let bindings, etc.)."
+   Algorithm:
+   1. Recursively walks the AST (body) maintaining sets of 'active' symbols
+   2. When encountering a symbol in active-args → replace with (when sym (deref sym))
+   3. When encountering a symbol in active-fn-args → wrap as callable
+   4. When encountering binding forms (let, fn, loop, etc.) → remove bound symbols
+      from active sets for nested forms (lexical scoping)
+
+   Transforms applied:
+   - Regular args: (when arg (deref arg))
+     The `when` handles optional args (nil when not provided).
+     Delay object is always truthy, so this correctly derefs present args.
+   - :fn type args: (exec/make-single-arg-callable ctx (deref arg))
+     Creates a callable wrapper for higher-order function arguments.
+
+   Lexical scoping:
+   When a binding form shadows an argument name, the shadow takes precedence:
+   (defbase foo {:args {:x :int}} (let [x 5] x))  ; x=5, not deref'd
+   This is achieved by removing bound symbols from active-args before
+   recursing into the binding form's body.
+
+   Handles all Clojure data structures:
+   - Lists/sequences: transform each element
+   - Vectors: transform each element, preserve vector type
+   - Maps: transform both keys and values
+   - Sets: transform each element, preserve set type
+   - Atoms (symbols, keywords, etc.): transform if in active set
+
+   Parameters:
+   - body: The form to transform
+   - arg-syms: Sequence of regular argument symbols
+   - fn-arg-syms: Sequence of :fn type argument symbols"
   [body arg-syms fn-arg-syms]
   (letfn [(transform
             [form active-args active-fn-args]
             (cond
-              ;; If no active args to replace, return as-is
+              ;; Optimization: if no active args to replace, return as-is
               (and (empty? active-args) (empty? active-fn-args))
               form
 
@@ -194,37 +221,38 @@
               `(exec/make-single-arg-callable ~'ctx (deref ~form))
 
               ;; Symbol that should be replaced with deref
+              ;; Note: (when delay (deref delay)) works because delays are always truthy
               (and (symbol? form) (active-args form))
               `(when ~form (deref ~form))
 
               ;; Binding form - remove shadowed symbols from active sets
+              ;; This implements lexical scoping: local bindings shadow args
               (binding-form? form)
               (let [bound (extract-bound-symbols form)
                     new-active (apply disj active-args bound)
                     new-fn-active (apply disj active-fn-args bound)]
-                ;; Recursively transform children with updated active sets
                 (apply list (map #(transform % new-active new-fn-active) form)))
 
               ;; Other sequences - transform children
               (seq? form)
               (apply list (map #(transform % active-args active-fn-args) form))
 
-              ;; Vectors
+              ;; Vectors - preserve type
               (vector? form)
               (mapv #(transform % active-args active-fn-args) form)
 
-              ;; Maps
+              ;; Maps - transform both keys and values
               (map? form)
               (into {} (map (fn [[k v]]
                               [(transform k active-args active-fn-args)
                                (transform v active-args active-fn-args)])
                             form))
 
-              ;; Sets
+              ;; Sets - preserve type
               (set? form)
               (set (map #(transform % active-args active-fn-args) form))
 
-              ;; Everything else - return as-is
+              ;; Everything else (numbers, strings, keywords, etc.) - return as-is
               :else form))]
     (transform body (set arg-syms) (set fn-arg-syms))))
 

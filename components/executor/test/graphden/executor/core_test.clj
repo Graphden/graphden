@@ -83,7 +83,32 @@
     ;; If we truncate at 4, we get "\"a\\" + "..." which may look odd but is safe
     (let [result (#'core/truncate-value "a\nb" 4)]
       (is (= 7 (count result)))  ; 4 + "..."
-      (is (str/ends-with? result "...")))))
+      (is (str/ends-with? result "..."))))
+
+  (testing "redacts sensitive keys in maps"
+    (is (str/includes? (#'core/truncate-value {:password "secret123"} 100) "[REDACTED]"))
+    (is (str/includes? (#'core/truncate-value {:api-key "abc123"} 100) "[REDACTED]"))
+    (is (str/includes? (#'core/truncate-value {:auth-token "xyz"} 100) "[REDACTED]"))
+    (is (str/includes? (#'core/truncate-value {:secret "hidden"} 100) "[REDACTED]"))
+    (is (str/includes? (#'core/truncate-value {:private-key "key"} 100) "[REDACTED]"))
+    (is (str/includes? (#'core/truncate-value {:credential "cred"} 100) "[REDACTED]")))
+
+  (testing "redacts nested sensitive keys"
+    (let [nested {:config {:db {:password "secret"}} :name "test"}
+          result (#'core/truncate-value nested 200)]
+      (is (str/includes? result "[REDACTED]"))
+      (is (str/includes? result ":name"))
+      (is (str/includes? result "\"test\""))))
+
+  (testing "preserves non-sensitive keys"
+    (let [result (#'core/truncate-value {:username "john" :email "john@test.com"} 100)]
+      (is (str/includes? result "john"))
+      (is (str/includes? result "john@test.com"))))
+
+  (testing "redacts sensitive values in sequences"
+    (let [result (#'core/truncate-value [{:password "p1"} {:password "p2"}] 100)]
+      (is (str/includes? result "[REDACTED]"))
+      (is (not (str/includes? result "p1"))))))
 
 
 ;; === create-context validation tests ===

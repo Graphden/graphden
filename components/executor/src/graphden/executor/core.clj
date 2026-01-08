@@ -83,7 +83,8 @@
    path-args        ; Map of runtime args: {arg-schema-id -> value} for root fn,
    ;; {[fn-result-value-id arg-schema-id] -> value} for nested fns
    current-frv-id   ; Current fn-result-value-id (nil for root function)
-   result-cache])   ; Atom: {fn-result-value-id -> computed-value} for caching
+   result-cache     ; Atom: {fn-result-value-id -> computed-value} for caching
+   strict-type-validation?])  ; If true, throw on unknown types; if false, warn and accept
 
 
 (def ^:private max-depth-limit
@@ -123,30 +124,19 @@
   20)
 
 
-(defn create-context
-  "Creates initial execution context. Note: execution-graph is populated
-   later when execute is called with a root fn-id.
+(defn- valid-path-arg-key?
+  "Returns true if key is a valid path-arg key format.
+   Valid formats: UUID or [UUID UUID] vector."
+  [k]
+  (or (uuid? k)
+      (and (vector? k)
+           (= 2 (count k))
+           (every? uuid? k))))
 
-   Options:
-   - :storage - Storage instance (required)
-   - :base-fns - Map of fn-name -> fn for base function lookup (optional, uses default registry if not provided)
-   - :max-depth - Maximum recursion depth (default 1000)
-   - :timeout-ms - Maximum execution time in ms (default 30000)
-   - :path-args - Map of runtime args (optional):
-                  For root function: {arg-schema-id -> value}
-                  For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
-                  Only args NOT defined in DB can be set this way.
-                  Direct fn refs (HOF) cannot receive path-args.
 
-   Validates:
-   - storage is required
-   - timeout-ms must be at least 50ms (allows for fast test cases)
-   - max-depth must be positive and <= 100000
-   - path-args must be a map if provided"
-  [{:keys [storage base-fns max-depth timeout-ms path-args]
-    :or {max-depth sp/default-max-depth
-         timeout-ms default-timeout-ms
-         path-args {}}}]
+(defn- validate-context-options!
+  "Validates context creation options. Throws on invalid options."
+  [storage timeout-ms max-depth path-args]
   (when-not storage
     (throw (ex-info "Storage is required" {:type :execution-error/invalid-context})))
   (when (and timeout-ms (< timeout-ms min-timeout-ms))
@@ -169,20 +159,46 @@
                      :path-args path-args
                      :path-args-type (type path-args)})))
   ;; Validate path-args keys format for security
-  ;; Keys must be either UUID (for root fn args) or [UUID UUID] (for nested fn-result-value args)
-  (when (seq path-args)
-    (doseq [[k _v] path-args]
-      (when-not (or (uuid? k)
-                    (and (vector? k)
-                         (= 2 (count k))
-                         (every? uuid? k)))
-        (throw (ex-info "path-args keys must be UUID or [UUID UUID] vector"
-                        {:type :execution-error/invalid-path-args-key
-                         :invalid-key k
-                         :key-type (type k)})))))
-  ;; Use provided base-fns or snapshot the default registry
+  (doseq [[k _v] path-args]
+    (when-not (valid-path-arg-key? k)
+      (throw (ex-info "path-args keys must be UUID or [UUID UUID] vector"
+                      {:type :execution-error/invalid-path-args-key
+                       :invalid-key k
+                       :key-type (type k)})))))
+
+
+(defn create-context
+  "Creates initial execution context. Note: execution-graph is populated
+   later when execute is called with a root fn-id.
+
+   Options:
+   - :storage - Storage instance (required)
+   - :base-fns - Map of fn-name -> fn for base function lookup (optional, uses default registry if not provided)
+   - :max-depth - Maximum recursion depth (default 1000)
+   - :timeout-ms - Maximum execution time in ms (default 30000)
+   - :path-args - Map of runtime args (optional):
+                  For root function: {arg-schema-id -> value}
+                  For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
+                  IMPORTANT: path-args can only set args that have NO value in DB.
+                  If arg-value exists in DB, path-arg is ignored (warning logged).
+                  To override DB values, use provided-args in execute call instead.
+   - :strict-type-validation? - If true (default), throw on unknown types.
+                                If false, warn and accept (forward compatibility mode).
+
+   Validates:
+   - storage is required
+   - timeout-ms must be at least 50ms (allows for fast test cases)
+   - max-depth must be positive and <= 100000
+   - path-args must be a map if provided"
+  [{:keys [storage base-fns max-depth timeout-ms path-args strict-type-validation?]
+    :or {max-depth sp/default-max-depth
+         timeout-ms default-timeout-ms
+         path-args {}
+         strict-type-validation? true}}]
+  (validate-context-options! storage timeout-ms max-depth path-args)
   (let [fns (or base-fns @default-registry)]
-    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0 (or path-args {}) nil (atom {}))))
+    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0
+                        (or path-args {}) nil (atom {}) strict-type-validation?)))
 
 
 ;; Forward declaration for mutual recursion
@@ -196,14 +212,55 @@
 
 ;; === Thunk Building ===
 
+(def ^:private sensitive-key-patterns
+  "Regex patterns for identifying sensitive keys that should be redacted.
+   Matches common credential/secret naming patterns."
+  [#"(?i)password"
+   #"(?i)secret"
+   #"(?i)token"
+   #"(?i)api[_-]?key"
+   #"(?i)auth"
+   #"(?i)credential"
+   #"(?i)private[_-]?key"])
+
+
+(defn- sensitive-key?
+  "Returns true if the key name matches known sensitive patterns."
+  [k]
+  (when k
+    (let [key-str (if (keyword? k) (name k) (str k))]
+      (some #(re-find % key-str) sensitive-key-patterns))))
+
+
+(defn- redact-sensitive-values
+  "Recursively redacts values for keys matching sensitive patterns.
+   Preserves structure but replaces sensitive values with [REDACTED]."
+  [data]
+  (cond
+    (map? data)
+    (into {}
+          (map (fn [[k v]]
+                 [k (if (sensitive-key? k)
+                      "[REDACTED]"
+                      (redact-sensitive-values v))])
+               data))
+
+    (sequential? data)
+    (mapv redact-sensitive-values data)
+
+    :else data))
+
+
 (defn- truncate-value
   "Truncates large values for error messages to avoid huge exception data.
    Returns a shortened representation for display purposes.
+   Redacts sensitive data (passwords, tokens, etc.) before truncation.
 
    Uses pr-str for consistent Clojure-readable output. The max-len parameter
    controls truncation; callers typically use 100 chars for error context."
   [value max-len]
-  (let [s (pr-str value)]
+  (let [redacted (redact-sensitive-values value)
+        s (pr-str redacted)]
     (if (> (count s) max-len)
       (str (subs s 0 max-len) "...")
       s)))
@@ -250,19 +307,26 @@
    - Known types: strict validation based on Clojure predicates (from field-types)
    - :union type: accepts any value (validation happens at schema level,
      where union variants are checked against allowed types)
-   - Unknown types: returns false (permissive) to allow forward compatibility
-     with new types added to the schema. Logs a warning for debugging.
+   - Unknown types: behavior depends on strict? flag:
+     - strict?=true (default): throws exception to catch schema mismatches early
+     - strict?=false: returns false (permissive) for forward compatibility
 
    This is a runtime check for user-provided arguments only. Values from
    the execution graph (arg-values) are assumed to be already validated."
-  [arg-type provided-value]
+  [arg-type provided-value strict?]
   (if (contains? ft/type-validators arg-type)
     (not (ft/valid-type? arg-type provided-value))
-    ;; Unknown type - log warning and accept (forward compatibility)
-    (do
-      (log/warn "Unknown argument type encountered, skipping validation"
-                {:type arg-type :value-type (type provided-value)})
-      false)))
+    ;; Unknown type - behavior depends on strict mode
+    (if strict?
+      (throw (ex-info "Unknown argument type encountered"
+                      {:type :execution-error/unknown-arg-type
+                       :arg-type arg-type
+                       :value-type (type provided-value)
+                       :hint "Set :strict-type-validation? false in context for forward compatibility"}))
+      (do
+        (log/warn "Unknown argument type encountered, skipping validation"
+                  {:type arg-type :value-type (type provided-value)})
+        false))))
 
 
 (defn- validate-provided-arg-type!
@@ -275,12 +339,12 @@
 
    Note: Stored arg-values from the execution graph are not validated here;
    they are assumed to be valid from schema-level checks during creation."
-  [provided-value arg-schema]
+  [provided-value arg-schema strict?]
   (when-not (and arg-schema (:type arg-schema))
     (throw (ex-info "Invalid arg-schema: missing type"
                     {:type :execution-error/invalid-arg-schema
                      :arg-schema arg-schema})))
-  (when (type-mismatch? (:type arg-schema) provided-value)
+  (when (type-mismatch? (:type arg-schema) provided-value strict?)
     (throw-type-mismatch! arg-schema provided-value)))
 
 
@@ -460,27 +524,36 @@
 
 (defn- handle-provided-arg
   "Handles case when direct provided value exists (from HOF callable)."
-  [provided-value arg-schema]
-  (validate-provided-arg-type! provided-value arg-schema)
+  [provided-value arg-schema strict?]
+  (validate-provided-arg-type! provided-value arg-schema strict?)
   (delay provided-value))
 
 
 (defn- handle-path-arg-with-db-value
-  "Handles case when path-arg exists but DB value takes precedence."
+  "Handles case when path-arg exists but DB value takes precedence.
+
+   Design Decision: DB values always win over path-args.
+   This prevents accidental override of validated stored data.
+   If you need to override a stored arg-value:
+   1. Use `provided-args` in `execute` call (for HOF callables)
+   2. Or update the arg-value in the database first
+
+   Logs warning at WARN level to help debugging when override doesn't work."
   [context arg-value arg-schema arg-schema-id arg-name path-arg-value]
-  (log/warn "Path-arg ignored: argument already defined in DB"
+  (log/warn "Path-arg ignored: argument already defined in DB (DB value takes precedence)"
             {:arg-schema-id arg-schema-id
              :current-frv-id (:current-frv-id context)
              :arg-name arg-name
              :db-value (truncate-value (:value arg-value) log-value-truncation-length)
-             :provided-value (truncate-value path-arg-value log-value-truncation-length)})
+             :provided-value (truncate-value path-arg-value log-value-truncation-length)
+             :hint "Use provided-args in execute call or update DB arg-value to override"})
   (build-delay context arg-value arg-schema))
 
 
 (defn- handle-path-arg-only
   "Handles case when path-arg exists and no DB value."
-  [path-arg-value arg-schema]
-  (validate-provided-arg-type! path-arg-value arg-schema)
+  [path-arg-value arg-schema strict?]
+  (validate-provided-arg-type! path-arg-value arg-schema strict?)
   (delay path-arg-value))
 
 
@@ -512,7 +585,8 @@
    5. Optional arg with no value -> skip"
   [context fn-data provided-args]
   (let [{:keys [arg-schemas arg-values]} fn-data
-        current-frv-id (:current-frv-id context)]
+        current-frv-id (:current-frv-id context)
+        strict? (:strict-type-validation? context)]
     (reduce-kv
       (fn [acc arg-schema-id arg-schema]
         (let [arg-name (:name arg-schema)
@@ -523,7 +597,7 @@
           (cond
             ;; 1. Direct provided value (from HOF callable)
             (some? provided-value)
-            (assoc acc arg-name-kw (handle-provided-arg provided-value arg-schema))
+            (assoc acc arg-name-kw (handle-provided-arg provided-value arg-schema strict?))
 
             ;; 2. Path-arg value exists
             (some? path-arg-value)
@@ -533,7 +607,7 @@
                      (handle-path-arg-with-db-value context arg-value arg-schema
                                                     arg-schema-id arg-name path-arg-value)
                      ;; No DB value - use path-arg
-                     (handle-path-arg-only path-arg-value arg-schema)))
+                     (handle-path-arg-only path-arg-value arg-schema strict?)))
 
             ;; 3. Stored arg-value exists
             arg-value

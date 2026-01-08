@@ -44,8 +44,13 @@
    - :path-args - Map of runtime args for free arguments (optional):
                   * For root function: {arg-schema-id -> value}
                   * For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
-                  Only args NOT already defined in DB can be set this way.
-                  Attempts to override DB-defined args will log a warning and be ignored.
+
+                  OVERRIDE BEHAVIOR (by design):
+                  - Path-args can only set args that have NO value stored in DB
+                  - If an arg-value exists in DB, path-arg is IGNORED (warning logged)
+                  - This prevents accidental override of validated stored data
+                  - To override a stored arg: use `provided-args` in `execute` call,
+                    or update the arg-value in the database first
 
                   IMPORTANT: Direct fn refs (HOF, type=:fn) cannot receive path-args.
                   HOF functions are 'black boxes' controlled by map/reduce/etc.

@@ -157,13 +157,25 @@
   10000)
 
 
+(def ^:private nested-path-arg-key-length
+  "Length of path-arg key tuple for nested functions.
+   Format: [fn-result-value-id arg-schema-id]
+   - fn-result-value-id: identifies which fn-result-value references the function
+   - arg-schema-id: identifies which argument within that function"
+  2)
+
+
 (defn- valid-path-arg-key?
   "Returns true if key is a valid path-arg key format.
-   Valid formats: UUID or [UUID UUID] vector."
+
+   Valid formats:
+   - UUID: for root function arguments (looked up by arg-schema-id directly)
+   - [UUID UUID]: for nested function arguments via fn-result-value
+     Format is [fn-result-value-id arg-schema-id]"
   [k]
   (or (uuid? k)
       (and (vector? k)
-           (= 2 (count k))
+           (= nested-path-arg-key-length (count k))
            (every? uuid? k))))
 
 
@@ -647,11 +659,13 @@
 ;; - Testability: individual functions can be tested in isolation if needed
 
 
-(defn- handle-provided-arg
-  "Handles case when direct provided value exists (from HOF callable)."
-  [provided-value arg-schema strict? arg-name unknown-type-counter]
-  (validate-provided-arg-type! provided-value arg-schema strict? unknown-type-counter)
-  (wrap-delay-with-context arg-name :provided-arg #(identity provided-value)))
+(defn- handle-validated-arg
+  "Validates and wraps a user-provided argument value in a delay.
+   Used for both direct provided args (from HOF) and path-args.
+   The source parameter identifies the origin for debugging."
+  [value arg-schema strict? arg-name unknown-type-counter source]
+  (validate-provided-arg-type! value arg-schema strict? unknown-type-counter)
+  (wrap-delay-with-context arg-name source #(identity value)))
 
 
 (defn- handle-path-arg-with-db-value
@@ -673,13 +687,6 @@
              :provided-value (truncate-value path-arg-value log-value-truncation-length)
              :hint "Use provided-args in execute call or update DB arg-value to override"})
   (build-delay context arg-value arg-schema))
-
-
-(defn- handle-path-arg-only
-  "Handles case when path-arg exists and no DB value."
-  [path-arg-value arg-schema strict? arg-name unknown-type-counter]
-  (validate-provided-arg-type! path-arg-value arg-schema strict? unknown-type-counter)
-  (wrap-delay-with-context arg-name :path-arg #(identity path-arg-value)))
 
 
 (defn- throw-missing-required-arg!
@@ -740,7 +747,7 @@
           (cond
             ;; 1. Direct provided value (from HOF callable)
             (some? provided-value)
-            (assoc acc arg-name-kw (handle-provided-arg provided-value arg-schema strict? arg-name unknown-type-counter))
+            (assoc acc arg-name-kw (handle-validated-arg provided-value arg-schema strict? arg-name unknown-type-counter :provided-arg))
 
             ;; 2. Path-arg value exists
             (some? path-arg-value)
@@ -750,7 +757,7 @@
                      (handle-path-arg-with-db-value context arg-value arg-schema
                                                     arg-schema-id arg-name path-arg-value)
                      ;; No DB value - use path-arg
-                     (handle-path-arg-only path-arg-value arg-schema strict? arg-name unknown-type-counter)))
+                     (handle-validated-arg path-arg-value arg-schema strict? arg-name unknown-type-counter :path-arg)))
 
             ;; 3. Stored arg-value exists
             arg-value

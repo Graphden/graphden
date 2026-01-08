@@ -113,7 +113,80 @@
 
    The execution context `ctx` is available in the function body but rarely
    needed. It's primarily used for advanced scenarios like nested execution
-   or accessing storage directly."
+   or accessing storage directly.
+
+   ## Edge Cases and Important Notes
+
+   ### Lexical Scoping (Shadowing)
+
+   Local bindings shadow macro arguments - they won't be dereferenced:
+
+   ```clojure
+   (defbase with-shadow
+     {:args {:x :int}
+      :return-type :int}
+     (let [x 5]     ; x shadows the arg
+       (+ x 10)))   ; Uses local x=5, NOT @x from args
+   ;; Body becomes: (let [x 5] (+ x 10)) - no deref!
+   ```
+
+   This follows Clojure's lexical scoping rules. The same applies to
+   `fn`, `loop`, `for`, `doseq`, `catch`, and other binding forms.
+
+   ### Optional Arguments (nil handling)
+
+   Arguments are wrapped with `(when arg (deref arg))` to handle optional
+   args that may be nil. Delay objects are always truthy, so this correctly
+   distinguishes between 'arg not provided' (nil) and 'arg provided with value'.
+
+   ```clojure
+   (defbase maybe-double
+     {:args {:x {:type :int, :optional? true}}
+      :return-type :any}
+     (if x (* x 2) 0))
+   ;; Body becomes: (if (when x @x) (* (when x @x) 2) 0)
+   ```
+
+   ### Error Handling
+
+   Exceptions thrown during argument evaluation propagate naturally:
+
+   ```clojure
+   (defbase safe-div
+     {:args {:a :int, :b :int}
+      :return-type :numeric}
+     (try
+       (/ a b)
+       (catch ArithmeticException _ 0)))
+   ;; If b=0, ArithmeticException is caught and 0 is returned
+   ```
+
+   ### Performance Considerations
+
+   - Macro expansion happens at compile time - no runtime overhead
+   - Each argument reference generates a deref call; for heavily-used args
+     in tight loops, consider binding to a local once:
+
+   ```clojure
+   (defbase sum-list
+     {:args {:nums :jsonb}
+      :return-type :numeric}
+     (let [ns nums]  ; Deref once, bind to local
+       (reduce + 0 ns)))
+   ;; More efficient than (reduce + 0 nums) if nums appears multiple times
+   ```
+
+   ### Multi-arity and Variadic Functions
+
+   `defbase` generates single-arity functions. For variadic behavior,
+   accept a collection:
+
+   ```clojure
+   (defbase sum-all
+     {:args {:nums :jsonb}  ; Accept vector of numbers
+      :return-type :numeric}
+     (apply + nums))
+   ```"
   (:require
     [graphden.executor.interface :as exec]))
 

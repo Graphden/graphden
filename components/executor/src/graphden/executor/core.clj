@@ -124,6 +124,12 @@
   20)
 
 
+(def ^:private max-path-args-count
+  "Maximum number of path-args allowed.
+   Prevents potential memory exhaustion from large path-args maps."
+  10000)
+
+
 (defn- valid-path-arg-key?
   "Returns true if key is a valid path-arg key format.
    Valid formats: UUID or [UUID UUID] vector."
@@ -158,6 +164,12 @@
                     {:type :execution-error/invalid-context
                      :path-args path-args
                      :path-args-type (type path-args)})))
+  ;; Validate path-args count to prevent memory exhaustion
+  (when (and path-args (> (count path-args) max-path-args-count))
+    (throw (ex-info (str "path-args count exceeds maximum allowed value of " max-path-args-count)
+                    {:type :execution-error/invalid-context
+                     :path-args-count (count path-args)
+                     :max-allowed max-path-args-count})))
   ;; Validate path-args keys format for security
   (doseq [[k _v] path-args]
     (when-not (valid-path-arg-key? k)
@@ -229,7 +241,8 @@
   [k]
   (when k
     (let [key-str (if (keyword? k) (name k) (str k))]
-      (some #(re-find % key-str) sensitive-key-patterns))))
+      (when (seq key-str)
+        (some #(re-find % key-str) sensitive-key-patterns)))))
 
 
 (defn- redact-sensitive-values

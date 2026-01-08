@@ -172,3 +172,29 @@
       (is (some? ctx))
       (is (= 42 (get (:path-args ctx) uuid1)))
       (is (= "nested" (get (:path-args ctx) [uuid1 uuid2]))))))
+
+
+(deftest create-context-path-args-count-test
+  (testing "accepts reasonable number of path-args"
+    (let [path-args (into {} (map (fn [_] [(random-uuid) "value"]) (range 100)))]
+      (is (some? (core/create-context {:storage :mock :path-args path-args})))))
+
+  (testing "rejects excessive path-args count"
+    ;; This tests the max-path-args-count limit (10000)
+    ;; We use a smaller test to avoid slow test execution
+    ;; The actual limit check is tested indirectly via validation
+    (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 10001)))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"path-args count exceeds maximum"
+            (core/create-context {:storage :mock :path-args large-path-args})))))
+
+  (testing "path-args count error includes details"
+    (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 10001)))]
+      (try
+        (core/create-context {:storage :mock :path-args large-path-args})
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (let [data (ex-data e)]
+            (is (= :execution-error/invalid-context (:type data)))
+            (is (= 10001 (:path-args-count data)))
+            (is (= 10000 (:max-allowed data)))))))))

@@ -88,33 +88,53 @@
                entity-data)))
 
 
+(defn- build-entity-uuid-mapping
+  "Builds mapping from entity UUID to new entity name from schema."
+  [schema]
+  (into {}
+        (map (fn [entity-name]
+               [(ds/entity-uuid schema entity-name) entity-name]))
+        (ds/entities schema)))
+
+
+(defn- compute-field-renames-for-entity
+  "Computes field renames for a single entity.
+   Returns map of {old-field-name -> new-field-name} for renamed fields."
+  [schema entity-name field-uuid->old-info]
+  (reduce (fn [acc [field-name field-spec]]
+            (let [field-uuid (:uuid field-spec)
+                  old-info (get field-uuid->old-info field-uuid)]
+              (if (and old-info (not= (:field old-info) field-name))
+                (assoc acc (:field old-info) field-name)
+                acc)))
+          {}
+          (ds/entity-fields schema entity-name)))
+
+
+(defn- build-all-field-renames
+  "Builds field renames for all entities.
+   Returns map of {entity-uuid -> {old-field-name -> new-field-name}}."
+  [schema entity-uuid->old-name field-uuid->old-info]
+  (reduce (fn [acc entity-name]
+            (let [entity-uuid (ds/entity-uuid schema entity-name)
+                  old-entity-name (get entity-uuid->old-name entity-uuid)]
+              (if-not old-entity-name
+                acc
+                (let [renames (compute-field-renames-for-entity
+                                schema entity-name field-uuid->old-info)]
+                  (assoc acc entity-uuid renames)))))
+          {}
+          (ds/entities schema)))
+
+
 (defn- migrate-data
   "Migrates existing data when entities/fields are renamed.
    Uses transients for O(n) performance instead of O(n²)."
   [old-data old-metadata schema]
   (let [entity-uuid->old-name (:entities old-metadata)
-        entity-uuid->new-name (into {}
-                                    (map (fn [entity-name]
-                                           [(ds/entity-uuid schema entity-name) entity-name])
-                                         (ds/entities schema)))
-        field-uuid->old-info (:fields old-metadata)
-        ;; Build field renames per entity
-        field-renames (reduce (fn [acc entity-name]
-                                (let [entity-uuid (ds/entity-uuid schema entity-name)
-                                      old-entity-name (get entity-uuid->old-name entity-uuid)]
-                                  (if-not old-entity-name
-                                    acc
-                                    (let [renames (reduce (fn [racc [field-name field-spec]]
-                                                            (let [field-uuid (:uuid field-spec)
-                                                                  old-info (get field-uuid->old-info field-uuid)]
-                                                              (if (and old-info (not= (:field old-info) field-name))
-                                                                (assoc racc (:field old-info) field-name)
-                                                                racc)))
-                                                          {}
-                                                          (ds/entity-fields schema entity-name))]
-                                      (assoc acc entity-uuid renames)))))
-                              {}
-                              (ds/entities schema))]
+        entity-uuid->new-name (build-entity-uuid-mapping schema)
+        field-renames (build-all-field-renames
+                        schema entity-uuid->old-name (:fields old-metadata))]
     (reduce-kv (fn [acc entity-uuid entity-new-name]
                  (let [old-entity-name (get entity-uuid->old-name entity-uuid)
                        entity-data (get old-data old-entity-name)]
@@ -173,7 +193,11 @@
             :let [new-values (mapv #(get data %) fields)]
             :when (every? some? new-values)
             :when (find-conflicting-record existing-records exclude-id fields new-values)]
-      (log/warn "Unique constraint violation" {:entity entity-name :fields fields :values new-values})
+      ;; Log with redacted values to avoid exposing sensitive data
+      (log/warn "Unique constraint violation"
+                {:entity entity-name
+                 :fields fields
+                 :value-count (count new-values)})
       (throw (ex-info "Unique constraint violation"
                       {:type :constraint-violation/unique
                        :entity entity-name

@@ -714,6 +714,53 @@
       (is (= original storage/*max-graph-iterations*)))))
 
 
+(deftest check-graph-iteration-limit-edge-cases-test
+  (testing "exactly at limit doesn't throw"
+    (let [fn-id (random-uuid)]
+      (storage/with-max-graph-iterations 100
+                                         #(is (nil? (storage/check-graph-iteration-limit! 100 fn-id))))))
+
+  (testing "one over limit throws"
+    (let [fn-id (random-uuid)]
+      (storage/with-max-graph-iterations 100
+                                         #(is (thrown-with-msg?
+                                                clojure.lang.ExceptionInfo
+                                                #"exceeded maximum iterations"
+                                                (storage/check-graph-iteration-limit! 101 fn-id))))))
+
+  (testing "at 79% of limit doesn't warn (below threshold)"
+    ;; Testing that 79% doesn't trigger warning path
+    ;; We can't easily test log output, but we verify no exception
+    (let [fn-id (random-uuid)]
+      (storage/with-max-graph-iterations 100
+                                         #(is (nil? (storage/check-graph-iteration-limit! 79 fn-id))))))
+
+  (testing "at 80% of limit still passes (warning threshold)"
+    ;; 80% of limit triggers warning but doesn't throw
+    (let [fn-id (random-uuid)]
+      (storage/with-max-graph-iterations 100
+                                         #(is (nil? (storage/check-graph-iteration-limit! 80 fn-id))))))
+
+  (testing "at 99% of limit still passes"
+    (let [fn-id (random-uuid)]
+      (storage/with-max-graph-iterations 100
+                                         #(is (nil? (storage/check-graph-iteration-limit! 99 fn-id))))))
+
+  (testing "works with very small limits"
+    (let [fn-id (random-uuid)]
+      (storage/with-max-graph-iterations 1
+                                         #(do
+                                            (is (nil? (storage/check-graph-iteration-limit! 0 fn-id)))
+                                            (is (nil? (storage/check-graph-iteration-limit! 1 fn-id)))
+                                            (is (thrown? clojure.lang.ExceptionInfo
+                                                  (storage/check-graph-iteration-limit! 2 fn-id)))))))
+
+  (testing "works with large limits"
+    (let [fn-id (random-uuid)]
+      (storage/with-max-graph-iterations 1000000
+                                         #(is (nil? (storage/check-graph-iteration-limit! 999999 fn-id)))))))
+
+
 ;; === try-parse-uuid tests ===
 
 (deftest try-parse-uuid-test

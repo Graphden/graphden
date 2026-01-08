@@ -1314,6 +1314,46 @@
 
 ;; === validate-no-dependency-cycle-impl tests ===
 
+;; === Error helpers tests ===
+
+(deftest make-error-context-test
+  (testing "creates error context with required fields"
+    (let [ctx (storage/make-error-context :test-error :create "Test message" {:entity :user})]
+      (is (= :test-error (:type ctx)))
+      (is (= :create (:operation ctx)))
+      (is (= "Test message" (:message ctx)))
+      (is (= :user (:entity ctx)))))
+
+  (testing "merges additional context"
+    (let [ctx (storage/make-error-context :error-type :read "msg" {:id 123 :extra "data"})]
+      (is (= :error-type (:type ctx)))
+      (is (= :read (:operation ctx)))
+      (is (= 123 (:id ctx)))
+      (is (= "data" (:extra ctx))))))
+
+
+(deftest make-storage-error-test
+  (testing "creates storage error without cause"
+    (let [err (storage/make-storage-error :test-error :create "Test message" {:entity :user})]
+      (is (instance? clojure.lang.ExceptionInfo err))
+      (is (= "Test message" (ex-message err)))
+      (is (= :test-error (:type (ex-data err))))
+      (is (= :create (:operation (ex-data err))))
+      (is (= :user (:entity (ex-data err))))
+      (is (nil? (ex-cause err)))))
+
+  (testing "creates storage error with cause"
+    (let [cause (ex-info "Original error" {:original true})
+          err (storage/make-storage-error :wrapped-error :update "Wrapped" {:id 42} cause)]
+      (is (instance? clojure.lang.ExceptionInfo err))
+      (is (= "Wrapped" (ex-message err)))
+      (is (= :wrapped-error (:type (ex-data err))))
+      (is (= :update (:operation (ex-data err))))
+      (is (= 42 (:id (ex-data err))))
+      (is (= cause (ex-cause err)))
+      (is (= "Original error" (ex-message (ex-cause err)))))))
+
+
 (deftest validate-no-dependency-cycle-impl-test
   (testing "nil value-fn-id doesn't throw"
     (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
@@ -1346,3 +1386,87 @@
           (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
           (is (= fn-a (:owner-fn-id (ex-data e))))
           (is (= fn-b (:value-fn-id (ex-data e)))))))))
+
+
+;; === ExecutionGraphResult validation tests ===
+
+(deftest execution-graph-validation-test
+  (let [fn-id (random-uuid)
+        fn-schema-id (random-uuid)
+        arg-schema-id (random-uuid)
+        valid-fns {fn-id {:id fn-id :fn-schema-id fn-schema-id}}
+        valid-fn-schemas {fn-schema-id {:id fn-schema-id :name "test-fn"}}
+        valid-arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id}}]
+
+    (testing "creates valid result with all required fields"
+      (let [result (storage/->execution-graph
+                     {:fns valid-fns
+                      :fn-schemas valid-fn-schemas
+                      :arg-schemas valid-arg-schemas
+                      :resolved-args {}})]
+        (is (storage/execution-graph? result))
+        (is (= valid-fns (:fns result)))
+        (is (= valid-fn-schemas (:fn-schemas result)))))
+
+    (testing "throws when :fns is not a map"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :fns map"
+            (storage/->execution-graph
+              {:fns "not-a-map"
+               :fn-schemas valid-fn-schemas
+               :arg-schemas valid-arg-schemas
+               :resolved-args {}}))))
+
+    (testing "throws when :fns is empty"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":fns must contain at least"
+            (storage/->execution-graph
+              {:fns {}
+               :fn-schemas valid-fn-schemas
+               :arg-schemas valid-arg-schemas
+               :resolved-args {}}))))
+
+    (testing "throws when :fn-schemas is not a map"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :fn-schemas map"
+            (storage/->execution-graph
+              {:fns valid-fns
+               :fn-schemas []
+               :arg-schemas valid-arg-schemas
+               :resolved-args {}}))))
+
+    (testing "throws when :fn-schemas is empty"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":fn-schemas must contain at least"
+            (storage/->execution-graph
+              {:fns valid-fns
+               :fn-schemas {}
+               :arg-schemas valid-arg-schemas
+               :resolved-args {}}))))
+
+    (testing "throws when :arg-schemas is not a map"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :arg-schemas map"
+            (storage/->execution-graph
+              {:fns valid-fns
+               :fn-schemas valid-fn-schemas
+               :arg-schemas "invalid"
+               :resolved-args {}}))))
+
+    (testing "throws when :resolved-args is not a map"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :resolved-args map"
+            (storage/->execution-graph
+              {:fns valid-fns
+               :fn-schemas valid-fn-schemas
+               :arg-schemas valid-arg-schemas
+               :resolved-args []}))))))
+
+
+(deftest execution-graph?-test
+  (testing "returns true for ExecutionGraphResult"
+    (let [result (storage/->execution-graph
+                   {:fns {(random-uuid) {:id (random-uuid)}}
+                    :fn-schemas {(random-uuid) {:id (random-uuid)}}
+                    :arg-schemas {}
+                    :resolved-args {}})]
+      (is (true? (storage/execution-graph? result)))))
+
+  (testing "returns false for other types"
+    (is (false? (storage/execution-graph? {})))
+    (is (false? (storage/execution-graph? nil)))
+    (is (false? (storage/execution-graph? "string")))))

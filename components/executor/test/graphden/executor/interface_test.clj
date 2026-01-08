@@ -2210,3 +2210,135 @@
 ;; to be used INSIDE HOF base functions during execution (when the execution
 ;; graph is populated). They are tested indirectly via lazy-fn-callable-test
 ;; and other HOF tests that exercise the full execution flow.
+
+
+;; === Base Function Registry Tests ===
+
+(deftest get-base-fn-test
+  (testing "returns nil for non-existent function"
+    (is (nil? (exec/get-base-fn :non-existent-fn-12345)))))
+
+
+(deftest get-default-registry-test
+  (testing "returns current registry state"
+    (exec/register-base-fn! :test-registry-fn (fn [_ _] 42))
+    (let [registry (exec/get-default-registry)]
+      (is (map? registry))
+      (is (contains? registry :test-registry-fn))
+      (is (fn? (:test-registry-fn registry))))))
+
+
+(deftest get-base-fn-from-context-test
+  (testing "returns function from context registry"
+    (let [storage (create-test-storage)
+          test-fn (fn [_ _] 123)
+          _ (exec/register-base-fn! :ctx-test-fn test-fn)
+          ctx (exec/create-context {:storage storage})]
+      (is (= test-fn (exec/get-base-fn-from-context ctx :ctx-test-fn)))
+      (sp/close storage)))
+
+  (testing "returns nil for non-existent function"
+    (let [storage (create-test-storage)
+          ctx (exec/create-context {:storage storage})]
+      (is (nil? (exec/get-base-fn-from-context ctx :does-not-exist-xyz)))
+      (sp/close storage))))
+
+
+;; === execute-by-name Error Path Tests ===
+
+(deftest execute-by-name-error-test
+  (testing "executes function by string name"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn! :const-42 (fn [_ _] 42))
+          schema (sp/create-entity storage :fn-schema
+                                   {:name "const-42" :returned-type :int})
+          _ (sp/create-entity storage :fn
+                              {:name "my-const-fn"
+                               :fn-schema-id (:id schema)})
+          ctx (exec/create-context {:storage storage})]
+      (is (= 42 (exec/execute-by-name ctx "my-const-fn" nil)))
+      (sp/close storage)))
+
+  (testing "throws for non-string fn-name"
+    (let [storage (create-test-storage)
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"fn-name must be a string"
+            (exec/execute-by-name ctx :keyword-name nil)))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"fn-name must be a string"
+            (exec/execute-by-name ctx 123 nil)))
+      (sp/close storage)))
+
+  (testing "throws for non-existent function name"
+    (let [storage (create-test-storage)
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"not found"
+            (exec/execute-by-name ctx "non-existent-function" nil)))
+      (sp/close storage))))
+
+
+;; === execute-with-named-args Error Path Tests ===
+
+(deftest execute-with-named-args-error-test
+  (testing "executes with named args"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn! :add-named (fn [{:keys [a b]} _] (+ @a @b)))
+          schema (sp/create-entity storage :fn-schema
+                                   {:name "add-named" :returned-type :int})
+          _ (sp/create-entity storage :arg-schema
+                              {:fn-schema-id (:id schema)
+                               :name "a"
+                               :type :int
+                               :required true})
+          _ (sp/create-entity storage :arg-schema
+                              {:fn-schema-id (:id schema)
+                               :name "b"
+                               :type :int
+                               :required true})
+          the-fn (sp/create-entity storage :fn
+                                   {:name "my-add-named"
+                                    :fn-schema-id (:id schema)})
+          ctx (exec/create-context {:storage storage})]
+      (is (= 7 (exec/execute-with-named-args ctx (:id the-fn) {:a 3 :b 4})))
+      (sp/close storage)))
+
+  (testing "throws for unknown arg name"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn! :single-arg (fn [{:keys [x]} _] @x))
+          schema (sp/create-entity storage :fn-schema
+                                   {:name "single-arg" :returned-type :int})
+          _ (sp/create-entity storage :arg-schema
+                              {:fn-schema-id (:id schema)
+                               :name "x"
+                               :type :int
+                               :required true})
+          the-fn (sp/create-entity storage :fn
+                                   {:name "my-single-arg"
+                                    :fn-schema-id (:id schema)})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown argument name"
+            (exec/execute-with-named-args ctx (:id the-fn) {:y 42})))
+      (sp/close storage))))
+
+
+;; === with-clean-registry Tests ===
+
+(deftest with-clean-registry-test
+  (testing "clears registry before and after"
+    (exec/register-base-fn! :before-clean (fn [_ _] 1))
+    (is (some? (exec/get-base-fn :before-clean)))
+
+    (exec/with-clean-registry
+      (fn []
+        ;; Should be cleared
+        (is (nil? (exec/get-base-fn :before-clean)))
+        ;; Register during test
+        (exec/register-base-fn! :during-clean (fn [_ _] 2))
+        (is (some? (exec/get-base-fn :during-clean)))))
+
+    ;; After cleanup, both should be gone
+    (is (nil? (exec/get-base-fn :before-clean)))
+    (is (nil? (exec/get-base-fn :during-clean)))))

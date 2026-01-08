@@ -1147,3 +1147,103 @@
   (testing "handles nil defs"
     (core/validate-all-defs! nil)
     (is true)))
+
+
+;; === parse-arg-spec Error Path Tests ===
+
+(deftest parse-arg-spec-error-test
+  (testing "parses keyword type (shorthand)"
+    (let [result (#'core/parse-arg-spec :x :int)]
+      (is (= :int (:arg-type result)))
+      (is (true? (:required result)))))
+
+  (testing "parses map with :type and :required true"
+    (let [result (#'core/parse-arg-spec :x {:type :text :required true})]
+      (is (= :text (:arg-type result)))
+      (is (true? (:required result)))))
+
+  (testing "parses map with :type and :required false"
+    (let [result (#'core/parse-arg-spec :x {:type :int :required false})]
+      (is (= :int (:arg-type result)))
+      (is (false? (:required result)))))
+
+  (testing "defaults :required to true when not specified in map"
+    (let [result (#'core/parse-arg-spec :x {:type :bool})]
+      (is (= :bool (:arg-type result)))
+      (is (true? (:required result)))))
+
+  (testing "rejects map without :type key"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must contain :type key"
+          (#'core/parse-arg-spec :x {:required false}))))
+
+  (testing "rejects non-boolean :required"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":required must be a boolean"
+          (#'core/parse-arg-spec :x {:type :int :required "yes"})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #":required must be a boolean"
+          (#'core/parse-arg-spec :x {:type :int :required 1}))))
+
+  (testing "rejects invalid arg-spec type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword or map"
+          (#'core/parse-arg-spec :x "string")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword or map"
+          (#'core/parse-arg-spec :x 123)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword or map"
+          (#'core/parse-arg-spec :x [:int]))))
+
+  (testing "error data includes arg info"
+    (try
+      (#'core/parse-arg-spec :my-arg {:required false})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-arg-spec (:type (ex-data e))))
+        (is (= :my-arg (:arg-name (ex-data e))))
+        (is (= {:required false} (:arg-spec (ex-data e))))))))
+
+
+;; === register-base-fns! Core Path Tests ===
+
+(deftest register-base-fns-core-test
+  (testing "registers multiple base functions"
+    (let [called (atom #{})
+          defs {:fn1 {:args {:x :int}
+                      :return-type :int
+                      :impl (fn [_ _] (swap! called conj :fn1) 1)}
+                :fn2 {:args {:y :text}
+                      :return-type :text
+                      :impl (fn [_ _] (swap! called conj :fn2) "ok")}}]
+      (core/register-base-fns! defs)
+      ;; Verify functions are registered
+      (is (some? (exec/get-base-fn :fn1)))
+      (is (some? (exec/get-base-fn :fn2)))
+      ;; Call them to verify impl is correct
+      ((exec/get-base-fn :fn1) {} nil)
+      ((exec/get-base-fn :fn2) {} nil)
+      (is (= #{:fn1 :fn2} @called))))
+
+  (testing "handles empty defs"
+    (core/register-base-fns! {})
+    (is true)))
+
+
+;; === memoized-uuid-v5 Tests ===
+
+(deftest memoized-uuid-v5-test
+  (testing "returns same UUID for same input"
+    (let [uuid1 (core/fn-schema-uuid :test-fn)
+          uuid2 (core/fn-schema-uuid :test-fn)]
+      (is (= uuid1 uuid2))))
+
+  (testing "returns different UUIDs for different inputs"
+    (let [uuid1 (core/fn-schema-uuid :fn-a)
+          uuid2 (core/fn-schema-uuid :fn-b)]
+      (is (not= uuid1 uuid2))))
+
+  (testing "arg-schema-uuid is different from fn-schema-uuid"
+    (let [fn-uuid (core/fn-schema-uuid :my-fn)
+          arg-uuid (core/arg-schema-uuid :my-fn :x)]
+      (is (not= fn-uuid arg-uuid))))
+
+  (testing "same arg-name on different functions produces different UUIDs"
+    (let [uuid1 (core/arg-schema-uuid :fn-a :x)
+          uuid2 (core/arg-schema-uuid :fn-b :x)]
+      (is (not= uuid1 uuid2)))))

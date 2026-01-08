@@ -2454,3 +2454,70 @@
               (sp/delete-entities storage :user 123)))
         (finally
           (sp/close storage))))))
+
+
+;; === Error handling tests ===
+
+(deftest classify-error-test
+  (testing "classifies ExceptionInfo with :type in ex-data"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (let [ex (ex-info "Test error" {:type :test-error-type})]
+          (is (= :test-error-type (sp/classify-error storage ex))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "returns :unknown-memory-error for ExceptionInfo without :type"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (let [ex (ex-info "Test error" {:some-other-key "value"})]
+          (is (= :unknown-memory-error (sp/classify-error storage ex))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "returns :unknown-memory-error for non-ExceptionInfo"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (let [ex (Exception. "Test error")]
+          (is (= :unknown-memory-error (sp/classify-error storage ex))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest wrap-error-test
+  (testing "wraps exception with storage context"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (let [original-ex (ex-info "Original error" {:type :original-error})
+              wrapped (sp/wrap-error storage original-ex :create {:entity :user})]
+          (is (instance? clojure.lang.ExceptionInfo wrapped))
+          (is (re-find #"Memory storage error during create" (ex-message wrapped)))
+          (is (= :original-error (:type (ex-data wrapped))))
+          (is (= :create (:operation (ex-data wrapped))))
+          (is (= :user (:entity (ex-data wrapped))))
+          (is (= original-ex (ex-cause wrapped))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "wraps plain exception"
+    (let [storage (mem/create-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (try
+        (let [original-ex (Exception. "Plain error")
+              wrapped (sp/wrap-error storage original-ex :read {:id #uuid "00000000-0000-0000-0000-000000000001"})]
+          (is (instance? clojure.lang.ExceptionInfo wrapped))
+          (is (re-find #"Memory storage error during read" (ex-message wrapped)))
+          (is (= :unknown-memory-error (:type (ex-data wrapped))))
+          (is (= :read (:operation (ex-data wrapped))))
+          (is (= original-ex (ex-cause wrapped))))
+        (finally
+          (sp/close storage))))))

@@ -142,6 +142,14 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Division by zero"
           (call-base-fn :div {:nums [10 2 0 5]}))))
 
+  (testing "sub with empty list throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Subtraction requires at least one number"
+          (call-base-fn :sub {:nums []}))))
+
+  (testing "div with empty list throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Division requires at least one number"
+          (call-base-fn :div {:nums []}))))
+
   (testing "mul - overflow to Infinity throws"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"overflow.*infinite"
           (call-base-fn :mul {:nums [Double/MAX_VALUE 2.0]}))))
@@ -427,8 +435,24 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"step cannot be zero"
           (call-base-fn :range {:start 0 :end 10 :step 0}))))
 
+  (testing "range - negative step"
+    (is (= [10 8 6 4 2] (call-base-fn :range {:start 10 :end 1 :step -2})))
+    (is (= [5 4 3 2 1] (call-base-fn :range {:start 5 :end 0 :step -1}))))
+
+  (testing "range - too large throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"range would produce.*max allowed"
+          (call-base-fn :range {:start 0 :end 2000000 :step 1}))))
+
   (testing "repeat"
     (is (= [5 5 5] (call-base-fn :repeat {:n 3 :x 5}))))
+
+  (testing "repeat - negative count throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"repeat count cannot be negative"
+          (call-base-fn :repeat {:n -1 :x 5}))))
+
+  (testing "repeat - too large throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"repeat count.*exceeds max allowed"
+          (call-base-fn :repeat {:n 2000000 :x 5}))))
 
   (testing "take"
     (is (= [1 2] (call-base-fn :take {:n 2 :coll [1 2 3 4]}))))

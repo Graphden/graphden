@@ -2381,6 +2381,53 @@
       (let [result (exec/get-single-required-arg ctx-with-graph (:id the-fn))]
         (is (= (:id arg-schema) (:id result)))
         (is (= "x" (:name result))))
+      (sp/close storage)))
+
+  (testing "throws when HOF function has more than 1 required argument"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn! :multi-arg-fn (fn [{:keys [a b]} _] (+ @a @b)))
+          schema (sp/create-entity storage :fn-schema
+                                   {:name "multi-arg-fn" :returned-type :int})
+          _ (sp/create-entity storage :arg-schema
+                              {:fn-schema-id (:id schema)
+                               :name "a"
+                               :type :int
+                               :required true})
+          _ (sp/create-entity storage :arg-schema
+                              {:fn-schema-id (:id schema)
+                               :name "b"
+                               :type :int
+                               :required true})
+          the-fn (sp/create-entity storage :fn
+                                   {:name "my-multi"
+                                    :fn-schema-id (:id schema)})
+          ctx (exec/create-context {:storage storage})
+          graph (sp/resolve-execution-graph storage (:id the-fn))
+          ctx-with-graph (assoc ctx :execution-graph graph)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"HOF function requires exactly 1 required argument"
+            (exec/get-single-required-arg ctx-with-graph (:id the-fn))))
+      (sp/close storage)))
+
+  (testing "throws when HOF function has 0 required arguments"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn! :no-req-fn (fn [{:keys [x]} _] (or @x 0)))
+          schema (sp/create-entity storage :fn-schema
+                                   {:name "no-req-fn" :returned-type :int})
+          _ (sp/create-entity storage :arg-schema
+                              {:fn-schema-id (:id schema)
+                               :name "x"
+                               :type :int
+                               :required false})  ; optional, not required
+          the-fn (sp/create-entity storage :fn
+                                   {:name "my-optional"
+                                    :fn-schema-id (:id schema)})
+          ctx (exec/create-context {:storage storage})
+          graph (sp/resolve-execution-graph storage (:id the-fn))
+          ctx-with-graph (assoc ctx :execution-graph graph)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"HOF function requires exactly 1 required argument"
+            (exec/get-single-required-arg ctx-with-graph (:id the-fn))))
       (sp/close storage))))
 
 

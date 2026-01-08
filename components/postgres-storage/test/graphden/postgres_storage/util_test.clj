@@ -319,3 +319,22 @@
   (testing "creates PostgresErrorClassifier instance"
     (let [classifier (util/create-error-classifier)]
       (is (instance? graphden.postgres_storage.util.PostgresErrorClassifier classifier)))))
+
+
+(deftest query-opts-test
+  (testing "returns default query options without arguments"
+    (let [opts (util/query-opts)]
+      (is (map? opts))
+      (is (contains? opts :timeout))
+      (is (= 30 (:timeout opts)))))
+
+  (testing "merges extra options when provided"
+    (let [opts (util/query-opts {:return-keys true :custom-key "value"})]
+      (is (map? opts))
+      (is (contains? opts :timeout))
+      (is (true? (:return-keys opts)))
+      (is (= "value" (:custom-key opts)))))
+
+  (testing "extra options override defaults"
+    (let [opts (util/query-opts {:timeout 999})]
+      (is (= 999 (:timeout opts))))))

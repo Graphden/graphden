@@ -312,3 +312,20 @@
           (is (= 11 (:unknown-type-count (ex-data e))))
           (is (= 10 (:max-allowed (ex-data e))))
           (is (= :my-custom-type (:last-unknown-type (ex-data e)))))))))
+
+
+;; === Multiple validation errors test ===
+
+(deftest create-context-multiple-errors-test
+  (testing "multiple validation errors produces combined message"
+    (try
+      ;; Trigger multiple errors: bad timeout AND bad max-depth
+      (core/create-context {:storage (->MockStorage)
+                            :timeout-ms 10    ; too low
+                            :max-depth 0})    ; invalid
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :execution-error/invalid-context (:type (ex-data e))))
+        (let [errors (:validation-errors (ex-data e))]
+          (is (>= (count errors) 2))
+          (is (re-find #"Multiple validation errors" (ex-message e))))))))

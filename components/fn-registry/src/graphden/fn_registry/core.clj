@@ -167,6 +167,34 @@
                      :arg-spec arg-spec}))))
 
 
+(defn validate-fn-def!
+  "Validates a function definition before syncing to storage.
+   Validates all arg specs and return type upfront to fail fast.
+   Throws ExceptionInfo if validation fails.
+
+   This allows validation to be performed separately from sync,
+   enabling better error messages with full context."
+  [fn-name {:keys [args return-type]}]
+  (when-not (keyword? fn-name)
+    (throw (ex-info "fn-name must be a keyword"
+                    {:type :invalid-fn-def
+                     :fn-name fn-name
+                     :fn-name-type (type fn-name)})))
+  (when-not return-type
+    (throw (ex-info "Function definition must include :return-type"
+                    {:type :invalid-fn-def
+                     :fn-name fn-name})))
+  (when-not (contains? valid-arg-types return-type)
+    (throw (ex-info (str "Unknown return type: " return-type)
+                    {:type :invalid-return-type
+                     :fn-name fn-name
+                     :return-type return-type
+                     :valid-types valid-arg-types})))
+  ;; Validate all args upfront
+  (doseq [[arg-name arg-spec] args]
+    (parse-arg-spec arg-name arg-spec)))
+
+
 (defn- sync-fn-schema!
   "Syncs a single fn-schema to storage. Creates or updates."
   [storage fn-name {:keys [return-type]}]
@@ -217,10 +245,26 @@
                            :required required})))))
 
 
+(defn validate-all-defs!
+  "Validates all function definitions before syncing.
+   Fails fast on first invalid definition.
+   Call this before sync-defs-to-storage! for better error reporting.
+
+   Throws ExceptionInfo with :type :invalid-fn-def, :invalid-arg-spec,
+   :invalid-arg-type, or :invalid-return-type if validation fails."
+  [defs]
+  (doseq [[fn-name fn-def] defs]
+    (validate-fn-def! fn-name fn-def)))
+
+
 (defn sync-defs-to-storage!
   "Syncs function definitions to storage.
    Creates fn-schema and arg-schema entries for each function.
    Uses deterministic UUIDs so syncing is idempotent.
+
+   IMPORTANT: Validates all definitions before syncing.
+   This ensures atomic behavior - either all definitions are valid and synced,
+   or none are synced if any validation fails.
 
    Arguments:
    - storage: a storage instance that implements StorageCRUD
@@ -230,6 +274,8 @@
    {:fn-schemas {:created n :updated m}
     :arg-schemas {:created n :updated m}}"
   [storage defs]
+  ;; Validate all definitions upfront for fail-fast behavior
+  (validate-all-defs! defs)
   (let [fn-schema-stats (atom {:created 0 :updated 0})
         arg-schema-stats (atom {:created 0 :updated 0})]
     (doseq [[fn-name fn-def] defs]

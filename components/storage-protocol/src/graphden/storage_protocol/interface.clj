@@ -923,18 +923,14 @@
 
 (defn try-parse-uuid
   "Attempts to parse value as UUID. Returns UUID or nil.
-   Handles UUIDs, UUID strings, and returns nil for non-UUID values.
-
-   Optional context parameter is used for logging/debugging when parsing fails.
-   Context is ignored in normal operation but helps trace issues."
-  ([v] (try-parse-uuid v nil))
-  ([v _context]
-   (cond
-     (uuid? v) v
-     (string? v) (try
-                   (java.util.UUID/fromString v)
-                   (catch IllegalArgumentException _ nil))
-     :else nil)))
+   Handles UUIDs, UUID strings, and returns nil for non-UUID values."
+  [v]
+  (cond
+    (uuid? v) v
+    (string? v) (try
+                  (java.util.UUID/fromString v)
+                  (catch IllegalArgumentException _ nil))
+    :else nil))
 
 
 ;; === Sensitive Data Redaction ===

@@ -36,8 +36,8 @@
           [enum-name {:values (set (keys values))}])))
 
 
-(defn- check-single-field-change
-  "Checks a single field for type/nullable changes. Throws on unsafe change."
+(defn- validate-single-field-change!
+  "Validates a single field for type/nullable changes. Throws on unsafe change."
   [entity-name field-name field-spec old-fields old-metadata]
   (let [field-uuid (:uuid field-spec)
         old-field-info (get (:fields old-metadata) field-uuid)]
@@ -51,22 +51,22 @@
         (sp/check-nullable-change! entity-name field-name old-nullable? new-nullable?)))))
 
 
-(defn- check-entity-type-changes
-  "Checks all field type changes for a single entity. Throws on unsafe change."
+(defn- validate-entity-type-changes!
+  "Validates all field type changes for a single entity. Throws on unsafe change."
   [entity-name old-state old-metadata schema]
   (let [entity-uuid (ds/entity-uuid schema entity-name)
         old-entity-name (get (:entities old-metadata) entity-uuid)
         old-fields (get-in old-state [:entities old-entity-name :fields])]
     (when old-fields
       (run! (fn [[field-name field-spec]]
-              (check-single-field-change entity-name field-name field-spec old-fields old-metadata))
+              (validate-single-field-change! entity-name field-name field-spec old-fields old-metadata))
             (ds/entity-fields schema entity-name)))))
 
 
-(defn- check-type-changes
-  "Checks that all field type changes are safe. Throws on unsafe change."
+(defn- validate-type-changes!
+  "Validates that all field type changes are safe. Throws on unsafe change."
   [old-state old-metadata schema]
-  (run! #(check-entity-type-changes % old-state old-metadata schema)
+  (run! #(validate-entity-type-changes! % old-state old-metadata schema)
         (ds/entities schema)))
 
 
@@ -523,7 +523,7 @@
       (do
         ;; Check for destructive changes
         (sp/check-all-removals! old-metadata schema)
-        (check-type-changes old-state old-metadata schema)
+        (validate-type-changes! old-state old-metadata schema)
         ;; Compute changes
         (let [entity-changes (sp/compute-entity-changes old-metadata schema)
               field-changes (sp/compute-field-changes old-metadata schema)

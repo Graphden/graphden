@@ -438,13 +438,18 @@
 (defn- execute-fn-result-value
   "Executes a fn-result-value, using cache for memoization.
    If the fn-result-value-id is already in cache, returns cached value.
-   Otherwise executes the underlying fn, caches the result, and returns it."
+   Otherwise executes the underlying fn, caches the result, and returns it.
+   Logs debug info for cache performance monitoring."
   [context fn-result-value-id]
   (let [result-cache (:result-cache context)
         cached (get @result-cache fn-result-value-id)]
     (if (some? cached)
       ;; Cache hit - return cached value
-      cached
+      (do
+        (log/debug "fn-result-value cache hit"
+                   {:fn-result-value-id fn-result-value-id
+                    :cache-size (count @result-cache)})
+        cached)
       ;; Cache miss - execute and cache
       (let [execution-graph (:execution-graph context)
             fn-result-values (:fn-result-values execution-graph)
@@ -453,6 +458,9 @@
           (throw (ex-info "fn-result-value not found in execution graph"
                           {:type :execution-error/fn-result-value-not-found
                            :fn-result-value-id fn-result-value-id})))
+        (log/debug "fn-result-value cache miss, executing"
+                   {:fn-result-value-id fn-result-value-id
+                    :fn-id (:fn-id frv)})
         (let [fn-id (:fn-id frv)
               result (execute-internal context fn-id nil)]
           (swap! result-cache assoc fn-result-value-id result)
@@ -653,8 +661,14 @@
 
 ;; === Execution ===
 
+(def ^:private warning-threshold-ratio
+  "Ratio of limit at which to log warning. 0.8 = warn at 80% of limit."
+  0.8)
+
+
 (defn- check-limits!
   "Checks execution limits (depth, timeout). Throws if exceeded.
+   Logs warning when approaching limits (80% threshold).
 
    IMPORTANT: Timeout is checked at the START of each function call, not during
    execution. This means a long-running base function will complete fully even
@@ -662,17 +676,36 @@
    guarantee. For precise timeout control, base functions should implement
    their own timeout logic (e.g., using futures with deref timeout)."
   [context]
-  (when (> (:depth context) (:max-depth context))
-    (throw (ex-info "Maximum recursion depth exceeded"
-                    {:type :execution-error/max-depth-exceeded
-                     :depth (:depth context)
-                     :max-depth (:max-depth context)})))
-  (let [elapsed (- (System/currentTimeMillis) (:start-time context))]
-    (when (> elapsed (:timeout-ms context))
+  (let [depth (:depth context)
+        max-depth (:max-depth context)
+        depth-threshold (long (* max-depth warning-threshold-ratio))]
+    ;; Warn when approaching depth limit (only once at threshold)
+    (when (= depth depth-threshold)
+      (log/warn "Approaching max recursion depth"
+                {:depth depth
+                 :max-depth max-depth
+                 :threshold-ratio warning-threshold-ratio}))
+    (when (> depth max-depth)
+      (throw (ex-info "Maximum recursion depth exceeded"
+                      {:type :execution-error/max-depth-exceeded
+                       :depth depth
+                       :max-depth max-depth}))))
+  (let [elapsed (- (System/currentTimeMillis) (:start-time context))
+        timeout-ms (:timeout-ms context)
+        timeout-threshold (long (* timeout-ms warning-threshold-ratio))]
+    ;; Warn when approaching timeout (check range to avoid repeated warnings)
+    (when (and (>= elapsed timeout-threshold)
+               (< elapsed (+ timeout-threshold 100)))  ; 100ms window to avoid spam
+      (log/warn "Approaching execution timeout"
+                {:elapsed-ms elapsed
+                 :timeout-ms timeout-ms
+                 :threshold-ratio warning-threshold-ratio
+                 :depth (:depth context)}))
+    (when (> elapsed timeout-ms)
       (throw (ex-info "Execution timeout exceeded"
                       {:type :execution-error/timeout
                        :elapsed-ms elapsed
-                       :timeout-ms (:timeout-ms context)
+                       :timeout-ms timeout-ms
                        :depth (:depth context)
                        :hint "Consider increasing timeout-ms or optimizing the graph"})))))
 

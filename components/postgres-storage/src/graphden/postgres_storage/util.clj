@@ -162,6 +162,40 @@
              e)))
 
 
+;; === StorageErrorClassifier implementation ===
+
+(defrecord PostgresErrorClassifier
+  []
+
+  sp/StorageErrorClassifier
+
+  (classify-error
+    [_this exception]
+    (if (instance? java.sql.SQLException exception)
+      (classify-sql-error exception)
+      :unknown-sql-error))
+
+
+  (wrap-error
+    [_this exception operation context]
+    (if (instance? java.sql.SQLException exception)
+      (wrap-sql-error exception "Database error" operation context)
+      (let [error-data (merge {:type :unknown-sql-error
+                               :operation operation
+                               :message (str exception)}
+                              context)]
+        (log/warn exception "Unknown error" error-data)
+        (ex-info (str "Error during " (name operation) ": " exception)
+                 error-data
+                 exception)))))
+
+
+(defn create-error-classifier
+  "Creates a PostgreSQL error classifier instance."
+  []
+  (->PostgresErrorClassifier))
+
+
 (defmacro with-sql-error-handling
   "Wraps body with SQLException handling.
    Catches SQLException and rethrows with application context.

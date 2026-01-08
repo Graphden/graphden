@@ -432,6 +432,45 @@
       (get path-args arg-schema-id))))
 
 
+;; === Argument resolution helpers ===
+;; These helpers handle specific cases in build-arg-delays.
+
+(defn- handle-provided-arg
+  "Handles case when direct provided value exists (from HOF callable)."
+  [provided-value arg-schema]
+  (validate-provided-arg-type! provided-value arg-schema)
+  (delay provided-value))
+
+
+(defn- handle-path-arg-with-db-value
+  "Handles case when path-arg exists but DB value takes precedence."
+  [context arg-value arg-schema arg-schema-id arg-name path-arg-value]
+  (log/warn "Path-arg ignored: argument already defined in DB"
+            {:arg-schema-id arg-schema-id
+             :current-frv-id (:current-frv-id context)
+             :arg-name arg-name
+             :db-value (truncate-value (:value arg-value) log-value-truncation-length)
+             :provided-value (truncate-value path-arg-value log-value-truncation-length)})
+  (build-delay context arg-value arg-schema))
+
+
+(defn- handle-path-arg-only
+  "Handles case when path-arg exists and no DB value."
+  [path-arg-value arg-schema]
+  (validate-provided-arg-type! path-arg-value arg-schema)
+  (delay path-arg-value))
+
+
+(defn- throw-missing-required-arg!
+  "Throws error for required arg with no value."
+  [arg-schema-id arg-name current-frv-id]
+  (throw (ex-info (str "Required argument '" arg-name "' not provided")
+                  {:type :execution-error/missing-required-arg
+                   :arg-schema-id arg-schema-id
+                   :arg-name arg-name
+                   :current-frv-id current-frv-id})))
+
+
 (defn- build-arg-delays
   "Builds delays for all arg-schemas.
    Returns a map of {arg-name-keyword -> delay}.
@@ -457,49 +496,31 @@
               arg-name-kw (keyword arg-name)
               provided-value (get provided-args arg-schema-id)
               path-arg-value (get-path-arg context arg-schema-id)
-              ;; Stored arg-value from DB
               arg-value (get arg-values arg-schema-id)]
           (cond
-            ;; 1. Direct provided value (from HOF callable) - wrap in delay
+            ;; 1. Direct provided value (from HOF callable)
             (some? provided-value)
-            (do
-              (validate-provided-arg-type! provided-value arg-schema)
-              ;; For :fn type, provided-value is fn-id, just wrap it
-              ;; HOF will use make-single-arg-callable to create appropriate callable
-              (assoc acc arg-name-kw (delay provided-value)))
+            (assoc acc arg-name-kw (handle-provided-arg provided-value arg-schema))
 
             ;; 2. Path-arg value exists
             (some? path-arg-value)
-            (if arg-value
-              ;; DB value exists - warn and use DB value (no override allowed)
-              (do
-                (log/warn "Path-arg ignored: argument already defined in DB"
-                          {:arg-schema-id arg-schema-id
-                           :current-frv-id current-frv-id
-                           :arg-name arg-name
-                           :db-value (truncate-value (:value arg-value) log-value-truncation-length)
-                           :provided-value (truncate-value path-arg-value log-value-truncation-length)})
-                (assoc acc arg-name-kw (build-delay context arg-value arg-schema)))
-              ;; No DB value - use path-arg
-              (do
-                (validate-provided-arg-type! path-arg-value arg-schema)
-                ;; For :fn type, path-arg-value is fn-id, just wrap it
-                ;; HOF will use make-single-arg-callable to create appropriate callable
-                (assoc acc arg-name-kw (delay path-arg-value))))
+            (assoc acc arg-name-kw
+                   (if arg-value
+                     ;; DB value takes precedence
+                     (handle-path-arg-with-db-value context arg-value arg-schema
+                                                    arg-schema-id arg-name path-arg-value)
+                     ;; No DB value - use path-arg
+                     (handle-path-arg-only path-arg-value arg-schema)))
 
-            ;; 3. Stored arg-value exists - use build-delay
+            ;; 3. Stored arg-value exists
             arg-value
             (assoc acc arg-name-kw (build-delay context arg-value arg-schema))
 
-            ;; 4. Required arg with no value - error
+            ;; 4. Required arg with no value -> error
             (:required arg-schema)
-            (throw (ex-info (str "Required argument '" arg-name "' not provided")
-                            {:type :execution-error/missing-required-arg
-                             :arg-schema-id arg-schema-id
-                             :arg-name arg-name
-                             :current-frv-id current-frv-id}))
+            (throw-missing-required-arg! arg-schema-id arg-name current-frv-id)
 
-            ;; 5. Optional arg with no value - skip
+            ;; 5. Optional arg with no value -> skip
             :else acc)))
       {}
       arg-schemas)))

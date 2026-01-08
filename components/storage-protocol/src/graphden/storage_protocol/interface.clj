@@ -559,6 +559,48 @@
   (contains? #{:jsonb :union :enum} field-type))
 
 
+;; === Storage Error Classification ===
+
+(def storage-error-types
+  "Canonical storage error types across all backends.
+   Each backend maps its native errors to these types."
+  #{:unique-violation
+    :foreign-key-violation
+    :not-null-violation
+    :check-constraint-violation
+    :table-not-found
+    :connection-error
+    :query-timeout
+    :parse-error
+    :unknown-sql-error})
+
+
+(defprotocol StorageErrorClassifier
+  "Protocol for classifying storage-specific errors.
+   Each backend implements this to translate native exceptions
+   to canonical error types.
+
+   Example usage:
+   (try
+     (jdbc/execute! ...)
+     (catch SQLException e
+       (let [error-type (classify-error classifier e)]
+         (throw (ex-info \"DB error\" {:type error-type})))))"
+
+  (classify-error
+    [this exception]
+    "Classifies a storage exception into canonical error type.
+     Returns keyword from storage-error-types or :unknown-sql-error.
+     Exception can be SQLException, ExceptionInfo, etc.")
+
+  (wrap-error
+    [this exception operation context]
+    "Wraps a storage exception with application context.
+     Returns ex-info with :type, :operation, and merged context.
+     - operation: keyword like :create-entity, :update-entity
+     - context: map with additional info like {:entity-name :user}"))
+
+
 (defprotocol ExecutionGraph
   "Protocol for retrieving complete execution graph for a function.
    Implementations should optimize for efficient retrieval - using JOINs,
@@ -1365,3 +1407,78 @@
       (f)
       (finally
         (Lock/.unlock lock)))))
+
+
+;; === Storage Implementation Helpers ===
+;;
+;; Helper functions for implementing new storage backends.
+;; These provide common patterns and reduce boilerplate.
+
+(defn create-rw-lock
+  "Creates a new ReentrantReadWriteLock for thread-safe storage access.
+   Use with-read-lock and with-write-lock for locking operations."
+  []
+  (ReentrantReadWriteLock.))
+
+
+(defn standard-crud-validations!
+  "Performs standard validations for CRUD operations.
+   Call this at the beginning of create/update operations.
+
+   Arguments:
+   - entity-name: keyword identifying the entity type
+   - data: map of entity data
+   - fields: field specifications from schema (or nil)
+
+   Throws ExceptionInfo if validation fails."
+  [entity-name data fields]
+  (validate-data-is-map! entity-name data)
+  (when fields
+    (validate-required-fields! entity-name fields data)))
+
+
+(defn standard-batch-validations!
+  "Performs standard validations for batch CRUD operations.
+   Call this at the beginning of batch create operations.
+
+   Arguments:
+   - entity-name: keyword identifying the entity type
+   - data-seq: sequence of entity data maps
+
+   Throws ExceptionInfo if validation fails."
+  [entity-name data-seq]
+  (validate-no-duplicate-ids! entity-name data-seq))
+
+
+(def storage-checklist
+  "Checklist of protocols and functions to implement for a new storage backend.
+
+   Required protocols:
+   - Storage (initialize, close)
+   - StorageIntrospection (current-entities, current-fields, current-enums,
+                           current-enum-values, schema-metadata)
+   - StorageCRUD (create-entity, read-entity, update-entity, delete-entity, query-entities)
+
+   Optional protocols:
+   - StorageBatchCRUD (create-entities, read-entities, delete-entities)
+   - GraphConstraints (for graph storage with referential integrity)
+   - ExecutionGraph (for graph execution support)
+   - ConstraintHelpers (data-fetching for shared constraint validation)
+
+   Recommended utilities from this namespace:
+   - create-rw-lock / with-read-lock / with-write-lock (for thread safety)
+   - standard-crud-validations! / standard-batch-validations! (for input validation)
+   - validate-required-fields! / validate-data-is-map! / validate-where-clause!
+   - build-metadata-from-schema / build-first-init-changes (for migration)
+   - check-all-removals! / safe-type-change? / check-type-change! (for schema evolution)
+   - default-query-timeout-ms / default-max-depth (for configuration)
+
+   Protocols to implement from StorageErrorClassifier (recommended):
+   - classify-error (for error classification)
+   - wrap-error (for error wrapping with context)
+
+   Protocols to implement from StorageValueCodec (if needed):
+   - encode-value / decode-value / encode-row / decode-row"
+  {:required-protocols [:Storage :StorageIntrospection :StorageCRUD]
+   :optional-protocols [:StorageBatchCRUD :GraphConstraints :ExecutionGraph :ConstraintHelpers]
+   :recommended-protocols [:StorageErrorClassifier :StorageValueCodec]})

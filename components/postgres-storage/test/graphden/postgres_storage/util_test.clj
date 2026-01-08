@@ -3,7 +3,8 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.postgres-storage.util :as util])
+    [graphden.postgres-storage.util :as util]
+    [graphden.storage-protocol.interface :as sp])
   (:import
     (java.sql
       SQLException)))
@@ -273,3 +274,48 @@
           (util/validate-pg-type! "varchar(255)" {})))
     (is (thrown? clojure.lang.ExceptionInfo
           (util/validate-pg-type! "\"Invalid\"" {})))))   ; uppercase in quoted
+
+
+;; === PostgresErrorClassifier Tests ===
+
+(deftest postgres-error-classifier-test
+  (let [classifier (util/create-error-classifier)]
+    (testing "implements StorageErrorClassifier protocol"
+      (is (satisfies? sp/StorageErrorClassifier classifier)))
+
+    (testing "classify-error returns correct types for SQLException"
+      (is (= :unique-violation (sp/classify-error classifier (make-sql-exception "23505"))))
+      (is (= :foreign-key-violation (sp/classify-error classifier (make-sql-exception "23503"))))
+      (is (= :not-null-violation (sp/classify-error classifier (make-sql-exception "23502"))))
+      (is (= :table-not-found (sp/classify-error classifier (make-sql-exception "42P01"))))
+      (is (= :query-timeout (sp/classify-error classifier (make-sql-exception "57014"))))
+      (is (= :unknown-sql-error (sp/classify-error classifier (make-sql-exception "99999")))))
+
+    (testing "classify-error returns :unknown-sql-error for non-SQLException"
+      (is (= :unknown-sql-error (sp/classify-error classifier (ex-info "test" {}))))
+      (is (= :unknown-sql-error (sp/classify-error classifier (Exception. "test")))))
+
+    (testing "wrap-error returns ex-info with correct structure for SQLException"
+      (let [ex (make-sql-exception "23505")
+            wrapped (sp/wrap-error classifier ex :create-entity {:entity-name :user})]
+        (is (instance? clojure.lang.ExceptionInfo wrapped))
+        (let [data (ex-data wrapped)]
+          (is (= :unique-violation (:type data)))
+          (is (= :create-entity (:operation data)))
+          (is (= :user (:entity-name data)))
+          (is (= "23505" (:sql-state data))))))
+
+    (testing "wrap-error handles non-SQLException"
+      (let [ex (Exception. "generic error")
+            wrapped (sp/wrap-error classifier ex :read-entity {:id "123"})]
+        (is (instance? clojure.lang.ExceptionInfo wrapped))
+        (let [data (ex-data wrapped)]
+          (is (= :unknown-sql-error (:type data)))
+          (is (= :read-entity (:operation data)))
+          (is (= "123" (:id data))))))))
+
+
+(deftest create-error-classifier-test
+  (testing "creates PostgresErrorClassifier instance"
+    (let [classifier (util/create-error-classifier)]
+      (is (instance? graphden.postgres_storage.util.PostgresErrorClassifier classifier)))))

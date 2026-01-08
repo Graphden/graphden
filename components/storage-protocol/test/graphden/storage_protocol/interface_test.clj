@@ -1180,6 +1180,91 @@
     (is (pos? storage/default-query-timeout-ms))))
 
 
+;; === storage-error-types tests ===
+
+(deftest storage-error-types-test
+  (testing "contains all expected error types"
+    (is (contains? storage/storage-error-types :unique-violation))
+    (is (contains? storage/storage-error-types :foreign-key-violation))
+    (is (contains? storage/storage-error-types :not-null-violation))
+    (is (contains? storage/storage-error-types :check-constraint-violation))
+    (is (contains? storage/storage-error-types :table-not-found))
+    (is (contains? storage/storage-error-types :connection-error))
+    (is (contains? storage/storage-error-types :query-timeout))
+    (is (contains? storage/storage-error-types :parse-error))
+    (is (contains? storage/storage-error-types :unknown-sql-error)))
+
+  (testing "is a set"
+    (is (set? storage/storage-error-types))))
+
+
+;; === StorageErrorClassifier protocol tests ===
+
+(deftest storage-error-classifier-protocol-test
+  (testing "StorageErrorClassifier protocol is defined"
+    (is (some? storage/StorageErrorClassifier))
+    (is (contains? (:sigs storage/StorageErrorClassifier) :classify-error))
+    (is (contains? (:sigs storage/StorageErrorClassifier) :wrap-error))))
+
+
+;; === Storage Implementation Helpers tests ===
+
+(deftest create-rw-lock-test
+  (testing "creates ReentrantReadWriteLock"
+    (let [lock (storage/create-rw-lock)]
+      (is (instance? java.util.concurrent.locks.ReentrantReadWriteLock lock)))))
+
+
+(deftest standard-crud-validations!-test
+  (testing "passes for valid data"
+    (is (nil? (storage/standard-crud-validations! :user {:name "test"} nil)))
+    (is (nil? (storage/standard-crud-validations!
+                :user
+                {:name "test"}
+                {:name {:required true}}))))
+
+  (testing "throws for non-map data"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"data must be a map"
+          (storage/standard-crud-validations! :user "not a map" nil))))
+
+  (testing "throws for missing required fields"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Required field.*missing"
+          (storage/standard-crud-validations!
+            :user
+            {:other "field"}
+            {:name {:required true}})))))
+
+
+(deftest standard-batch-validations!-test
+  (testing "passes for unique IDs"
+    (let [id1 (random-uuid)
+          id2 (random-uuid)]
+      (is (nil? (storage/standard-batch-validations! :user [{:id id1} {:id id2}])))))
+
+  (testing "throws for duplicate IDs"
+    (let [dup-id (random-uuid)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Duplicate IDs"
+            (storage/standard-batch-validations! :user [{:id dup-id} {:id dup-id}]))))))
+
+
+(deftest storage-checklist-test
+  (testing "storage-checklist contains required protocols"
+    (is (contains? storage/storage-checklist :required-protocols))
+    (is (some #{:Storage} (:required-protocols storage/storage-checklist)))
+    (is (some #{:StorageCRUD} (:required-protocols storage/storage-checklist))))
+
+  (testing "storage-checklist contains optional protocols"
+    (is (contains? storage/storage-checklist :optional-protocols))
+    (is (some #{:GraphConstraints} (:optional-protocols storage/storage-checklist))))
+
+  (testing "storage-checklist contains recommended protocols"
+    (is (contains? storage/storage-checklist :recommended-protocols))
+    (is (some #{:StorageValueCodec} (:recommended-protocols storage/storage-checklist)))))
+
+
 ;; === validate-no-dependency-cycle-impl tests ===
 
 (deftest validate-no-dependency-cycle-impl-test

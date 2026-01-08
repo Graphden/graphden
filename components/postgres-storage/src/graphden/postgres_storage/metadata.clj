@@ -7,18 +7,13 @@
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.postgres-storage.util :as util]
     [honey.sql :as sql]
-    [next.jdbc :as jdbc]
-    [next.jdbc.result-set :as rs])
+    [next.jdbc :as jdbc])
   (:import
     (org.postgresql.util
       PGobject)))
 
 
 (def ^:private metadata-table-name "_schema_metadata")
-
-
-;; Use shared timeout utility from util.clj
-(def ^:private get-query-timeout util/get-query-timeout-seconds)
 
 
 ;; === Table management ===
@@ -48,8 +43,7 @@
                  (sql/format {:select [:uuid :kind :name :parent_uuid :extra]
                               :from [(keyword metadata-table-name)]}
                              {:quoted true})
-                 {:builder-fn rs/as-unqualified-lower-maps
-                  :timeout (get-query-timeout)}))
+                 (util/query-opts)))
 
 
 ;; === JSON conversion ===

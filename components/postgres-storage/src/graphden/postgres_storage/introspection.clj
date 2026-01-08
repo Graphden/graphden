@@ -5,15 +5,10 @@
     [clojure.string :as str]
     [graphden.postgres-storage.util :as util]
     [honey.sql :as sql]
-    [next.jdbc :as jdbc]
-    [next.jdbc.result-set :as rs]))
+    [next.jdbc :as jdbc]))
 
 
 (def ^:private metadata-table-name "_schema_metadata")
-
-
-;; Use shared utilities from util.clj
-(def ^:private get-query-timeout util/get-query-timeout-seconds)
 
 
 (defmacro ^:private with-introspection-error-handling
@@ -34,8 +29,7 @@
                                                    [:= :table_schema "public"]
                                                    [:= :table_type "BASE TABLE"]]}
                                           {:quoted true})
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout (get-query-timeout)})]
+                              (util/query-opts))]
       (set (remove #(= % metadata-table-name)
                    (map :table_name rows))))))
 
@@ -52,8 +46,7 @@
                                                    [:= :table_name table-name]
                                                    [:<> :column_name "id"]]}
                                           {:quoted true})
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout (get-query-timeout)})]
+                              (util/query-opts))]
       (into {}
             (map (fn [row]
                    (let [col-name (util/snake->kw (:column_name row))
@@ -93,8 +86,7 @@
                                                    [:= :n.nspname "public"]
                                                    [:= :t.typtype "e"]]}
                                           {:quoted true})
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout (get-query-timeout)})]
+                              (util/query-opts))]
       (set (map :typname rows)))))
 
 
@@ -114,6 +106,5 @@
                                                    [:= :n.nspname "public"]
                                                    [:= :t.typname enum-name]]}
                                           {:quoted true})
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout (get-query-timeout)})]
+                              (util/query-opts))]
       (set (map (comp util/sql->enum-value :enumlabel) rows)))))

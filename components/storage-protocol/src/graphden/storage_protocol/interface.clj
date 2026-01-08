@@ -86,7 +86,28 @@
    - DEBUG: Internal details for troubleshooting
      - Pool created/closed successfully
      - Metadata operations
-     - Query details"
+     - Query details
+
+   ## Naming Conventions
+
+   ### The `-impl` Suffix
+
+   Functions with the `-impl` suffix provide shared implementation logic that
+   storage backends can delegate to. There are two categories:
+
+   1. **Public shared implementations** (in this namespace):
+      Functions like `validate-parent-same-schema-impl`, `validate-no-arg-override-impl`
+      provide reusable validation logic that uses the ConstraintHelpers protocol.
+      Storage backends call these from their own validation functions.
+
+   2. **Private protocol implementations** (in storage backends):
+      Functions like `resolve-execution-graph-impl`, `create-entity-impl` contain
+      the core logic for protocol methods. The actual protocol method (in defrecord)
+      typically just delegates to the `-impl` function, possibly with error handling
+      or logging wrappers.
+
+   This pattern separates the pure implementation logic from protocol boilerplate,
+   making the code easier to test and maintain."
   (:require
     [clojure.set :as set]
     [clojure.tools.logging :as log]
@@ -377,34 +398,54 @@
 (defprotocol ConstraintHelpers
   "Helper protocol for constraint validation.
    Provides low-level operations that vary by storage implementation.
-   Used by the shared constraint validation functions below."
+   Used by the shared constraint validation functions below.
+
+   ## NULL Contract
+
+   All getter methods (get-fn-schema-id-for-fn, get-fn-schema-id-for-arg-schema,
+   get-parent-fn-id) MUST return nil when the entity is not found. They MUST NOT
+   throw exceptions for missing entities.
+
+   Callers handle nil values appropriately:
+   - validate-parent-same-schema-impl: skips validation if fn not found
+   - validate-no-arg-override-impl: allows override if parent chain is empty
+   - validate-no-inheritance-cycle-impl: stops traversal at nil
+
+   This contract enables consistent behavior across all storage backends
+   (postgres, datomic, memory) and simplifies error handling."
 
   (get-fn-schema-id-for-fn
     [this fn-id]
-    "Returns the fn-schema-id for the given fn-id, or nil if fn not found.")
+    "Returns the fn-schema-id for the given fn-id.
+     Returns nil if fn-id is nil or fn not found in storage.")
 
   (get-fn-schema-id-for-arg-schema
     [this arg-schema-id]
-    "Returns the fn-schema-id for the given arg-schema-id, or nil if not found.")
+    "Returns the fn-schema-id for the given arg-schema-id.
+     Returns nil if arg-schema-id is nil or not found in storage.")
 
   (get-parent-fn-id
     [this fn-id]
-    "Returns the parent-fn-id for the given fn-id, or nil if no parent.")
+    "Returns the parent-fn-id for the given fn-id.
+     Returns nil if fn-id is nil, fn not found, or fn has no parent.")
 
   (collect-parent-chain
     [this fn-id]
     "Returns a set of all ancestor fn-ids (not including fn-id itself).
-     Traverses the parent-fn-id chain up to the root.")
+     Traverses the parent-fn-id chain up to the root.
+     Returns empty set if fn has no parents.")
 
   (collect-arg-schema-ids-in-chain
     [this fn-id]
     "Returns a set of arg-schema-ids defined in the parent chain.
-     Does NOT include arg-values owned by fn-id itself.")
+     Does NOT include arg-values owned by fn-id itself.
+     Returns empty set if fn has no parents.")
 
   (collect-dependency-chain
     [this fn-id]
     "Returns a set of all fn-ids that fn-id depends on through arg-values.
-     Includes fn-id itself. Used for cycle detection."))
+     Includes fn-id itself. Used for cycle detection.
+     Returns #{fn-id} if fn has no dependencies."))
 
 
 ;; === Shared constraint helper implementations ===
@@ -663,7 +704,7 @@
 
 (defn ->execution-graph
   "Creates an ExecutionGraphResult record from a map.
-   Validates that all required keys are present.
+   Validates that all required keys are present and non-empty.
 
    Expected shape:
    {:fns {fn-id -> fn-record ...}
@@ -672,15 +713,24 @@
     :resolved-args {fn-id -> {arg-schema-id -> arg-value-record} ...}
     :fn-result-values {fn-result-value-id -> fn-result-value-record ...}}
 
-   Throws if required keys are missing."
+   Throws if:
+   - Required keys are missing
+   - :fns is empty (must contain at least the target function)
+   - :fn-schemas is empty (target fn must have a schema)"
   [{:keys [fns fn-schemas arg-schemas resolved-args fn-result-values]
     :or {fn-result-values {}}}]
   (when-not (map? fns)
     (throw (ex-info "ExecutionGraphResult requires :fns map"
                     {:type :invalid-data :received (type fns)})))
+  (when (empty? fns)
+    (throw (ex-info "ExecutionGraphResult :fns must contain at least target function"
+                    {:type :invalid-data :hint "Check that fn-id exists in storage"})))
   (when-not (map? fn-schemas)
     (throw (ex-info "ExecutionGraphResult requires :fn-schemas map"
                     {:type :invalid-data :received (type fn-schemas)})))
+  (when (empty? fn-schemas)
+    (throw (ex-info "ExecutionGraphResult :fn-schemas must contain at least one schema"
+                    {:type :invalid-data :hint "Check that fn has valid fn-schema-id"})))
   (when-not (map? arg-schemas)
     (throw (ex-info "ExecutionGraphResult requires :arg-schemas map"
                     {:type :invalid-data :received (type arg-schemas)})))
@@ -1068,7 +1118,21 @@
 
 (defn safe-type-change?
   "Returns true if changing from old-type to new-type is safe.
-   Safe changes are: same type, equivalent types, or widening to a more general type."
+   Safe changes are: same type, equivalent types, or widening to a more general type.
+
+   ## Limitations
+
+   This function checks SCHEMA compatibility only, not DATA compatibility.
+   It does NOT validate that existing data in the database would fit in the
+   new type. For example:
+
+   - int → numeric: Schema-safe, data-safe (widening)
+   - numeric → int: Schema-unsafe (not in type-widening map)
+   - text → text: Always safe
+
+   Before narrowing type changes (e.g., text with 1000 chars → varchar(100)),
+   manually verify that existing data fits. This is a known limitation
+   requiring DBA review for production migrations."
   [old-type new-type]
   (or (= old-type new-type)
       (types-equivalent? old-type new-type)

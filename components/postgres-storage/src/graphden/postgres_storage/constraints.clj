@@ -6,12 +6,7 @@
     [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
-    [next.jdbc :as jdbc]
-    [next.jdbc.result-set :as rs]))
-
-
-;; Use shared timeout utility from util.clj
-(def ^:private get-query-timeout util/get-query-timeout-seconds)
+    [next.jdbc :as jdbc]))
 
 
 ;; === ConstraintHelpers implementation for PostgreSQL ===
@@ -37,8 +32,7 @@
                              :where [:= :id fn-id]}
                             {:quoted true})
           row (jdbc/execute-one! ds query
-                                 {:builder-fn rs/as-unqualified-lower-maps
-                                  :timeout (get-query-timeout)})]
+                                 (util/query-opts))]
       (:fn_schema_id row)))
 
 
@@ -49,8 +43,7 @@
                              :where [:= :id arg-schema-id]}
                             {:quoted true})
           row (jdbc/execute-one! ds query
-                                 {:builder-fn rs/as-unqualified-lower-maps
-                                  :timeout (get-query-timeout)})]
+                                 (util/query-opts))]
       (:fn_schema_id row)))
 
 
@@ -61,8 +54,7 @@
                              :where [:= :id fn-id]}
                             {:quoted true})
           row (jdbc/execute-one! ds query
-                                 {:builder-fn rs/as-unqualified-lower-maps
-                                  :timeout (get-query-timeout)})]
+                                 (util/query-opts))]
       (:parent_fn_id row)))
 
 
@@ -101,8 +93,7 @@
                        :where [:<> :id fn-id]}
                       {:quoted true})
               rows (jdbc/execute! ds query
-                                  {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout (get-query-timeout)})]
+                                  (util/query-opts))]
           (set (map :id rows))))))
 
 
@@ -144,8 +135,7 @@
                        :join [[:ancestors :anc] [:= :av.owner_fn_id :anc.id]]}
                       {:quoted true})
               rows (jdbc/execute! ds query
-                                  {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout (get-query-timeout)})]
+                                  (util/query-opts))]
           (set (map :arg_schema_id rows))))))
 
 
@@ -193,8 +183,7 @@
                    :from [:deps]}
                   {:quoted true})
           rows (jdbc/execute! ds query
-                              {:builder-fn rs/as-unqualified-lower-maps
-                               :timeout (get-query-timeout)})]
+                              (util/query-opts))]
       (set (map :fn_id rows)))))
 
 

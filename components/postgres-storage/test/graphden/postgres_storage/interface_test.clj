@@ -1012,8 +1012,8 @@
 
 
 (deftest close-pool-idempotency-test
-  (testing "close-pool with nil pool does not throw"
-    (is (nil? (core/close-pool nil))))
+  (testing "close-pool with nil pool returns true (no-op)"
+    (is (true? (core/close-pool nil))))
 
   (testing "close-pool is idempotent - can be called multiple times"
     (let [pool (core/create-pool {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
@@ -1021,11 +1021,11 @@
                                   :password (PostgreSQLContainer/.getPassword *container*)
                                   :pool-size 1
                                   :min-idle 1})]
-      ;; First close
-      (is (nil? (core/close-pool pool)))
+      ;; First close - returns true on success
+      (is (true? (core/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool)))
-      ;; Second close - should not throw
-      (is (nil? (core/close-pool pool)))
+      ;; Second close - returns true (pool already closed, no-op)
+      (is (true? (core/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool))))))
 
 

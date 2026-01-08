@@ -248,3 +248,28 @@
    exactly one required argument."
   [context fn-id]
   (core/make-single-arg-callable context fn-id))
+
+
+;; === Test Fixtures ===
+
+(defn with-clean-registry
+  "Test fixture that clears the global base-fn registry before and after each test.
+   Prevents test pollution from leftover registered functions.
+
+   Usage with clojure.test:
+   (use-fixtures :each exec/with-clean-registry)
+
+   For custom setup/teardown in fixture:
+   (defn my-fixture [f]
+     (exec/with-clean-registry
+       (fn []
+         ;; custom setup
+         (exec/register-base-fn! :test-fn ...)
+         (f))))
+   (use-fixtures :each my-fixture)"
+  [f]
+  (clear-base-fns!)
+  (try
+    (f)
+    (finally
+      (clear-base-fns!))))

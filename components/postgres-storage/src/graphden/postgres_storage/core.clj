@@ -159,15 +159,22 @@
    - Connections already checked out will work until returned to pool
 
    Note: When called from PostgresStorage.close(), synchronization is handled
-   by the storage's lock. Direct callers should ensure proper synchronization."
+   by the storage's lock. Direct callers should ensure proper synchronization.
+
+   Returns true if pool was closed successfully, false if close failed.
+   Exceptions are logged but not thrown to allow cleanup to continue."
   [^HikariDataSource pool]
-  (when (and pool (not (HikariDataSource/.isClosed pool)))
-    (log/info "Closing PostgreSQL connection pool")
-    (try
-      (HikariDataSource/.close pool)
-      (log/debug "PostgreSQL connection pool closed successfully")
-      (catch Exception e
-        (log/error e "Failed to close PostgreSQL connection pool gracefully")))))
+  (if (and pool (not (HikariDataSource/.isClosed pool)))
+    (do
+      (log/info "Closing PostgreSQL connection pool")
+      (try
+        (HikariDataSource/.close pool)
+        (log/debug "PostgreSQL connection pool closed successfully")
+        true
+        (catch Exception e
+          (log/error e "Failed to close PostgreSQL connection pool gracefully")
+          false)))
+    true))
 
 
 ;; === Storage record ===
@@ -227,12 +234,17 @@
     [_this schema]
     (sp/with-write-lock rw-lock
                         (fn []
-                          ;; Invalidate cache BEFORE migration to prevent stale reads during migration.
-                          ;; If migration fails partially (some transactions commit, others fail),
-                          ;; the cache remains nil and will be refreshed on next read from actual DB state.
-                          ;; This is safer than invalidating after, which could leave stale cache on partial failure.
-                          (reset! metadata-cache nil)
-                          (migration/do-initialize pool schema))))
+                          ;; Perform migration first, only invalidate cache on success.
+                          ;; If migration fails, cache remains valid (reflects old schema).
+                          ;; If migration succeeds, cache is invalidated so next read fetches new state.
+                          ;;
+                          ;; Note: We invalidate AFTER success because:
+                          ;; 1. If migration fails, old cache is still valid
+                          ;; 2. Concurrent readers during migration see old (consistent) cache
+                          ;; 3. After success, readers will refresh cache from new DB state
+                          (let [result (migration/do-initialize pool schema)]
+                            (reset! metadata-cache nil)
+                            result))))
 
 
   (close

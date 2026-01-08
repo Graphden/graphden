@@ -49,13 +49,10 @@
 
 
 (defn with-clean-state
+  "Combines database cleanup with registry cleanup."
   [f]
   (clean-database! *container*)
-  (exec/clear-base-fns!)
-  (try
-    (f)
-    (finally
-      (exec/clear-base-fns!))))
+  (exec/with-clean-registry f))
 
 
 (use-fixtures :once with-postgres-container)

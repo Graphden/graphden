@@ -11,18 +11,7 @@
       UUID)))
 
 
-;; === Test Fixtures ===
-
-(defn with-clean-registry
-  [f]
-  (exec/clear-base-fns!)
-  (try
-    (f)
-    (finally
-      (exec/clear-base-fns!))))
-
-
-(use-fixtures :each with-clean-registry)
+(use-fixtures :each exec/with-clean-registry)
 
 
 ;; === Helper Functions ===

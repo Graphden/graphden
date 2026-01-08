@@ -8,16 +8,7 @@
     [graphden.storage-protocol.interface :as sp]))
 
 
-(defn with-clean-registry
-  [f]
-  (exec/clear-base-fns!)
-  (try
-    (f)
-    (finally
-      (exec/clear-base-fns!))))
-
-
-(use-fixtures :each with-clean-registry)
+(use-fixtures :each exec/with-clean-registry)
 
 
 (deftest create-storage-test

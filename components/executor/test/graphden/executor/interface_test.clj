@@ -2324,6 +2324,66 @@
       (sp/close storage))))
 
 
+;; === register-type-hint! Tests ===
+
+(deftest register-type-hint-interface-test
+  (testing "registers custom type hint through interface"
+    (exec/register-type-hint! :custom-email "string in email format")
+    ;; The hint is stored internally, we can verify it doesn't throw
+    (is true))
+
+  (testing "rejects invalid type keyword"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"type-keyword must be a keyword"
+          (exec/register-type-hint! "not-keyword" "hint"))))
+
+  (testing "rejects invalid hint string"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"hint-string must be a string"
+          (exec/register-type-hint! :valid-keyword :not-a-string)))))
+
+
+;; === arg-provided? Tests ===
+
+(deftest arg-provided-interface-test
+  (testing "returns true when arg is present"
+    (is (true? (exec/arg-provided? {:x (delay 1) :y (delay 2)} :x)))
+    (is (true? (exec/arg-provided? {:x (delay 1)} :x))))
+
+  (testing "returns false when arg is absent"
+    (is (false? (exec/arg-provided? {:x (delay 1)} :y)))
+    (is (false? (exec/arg-provided? {} :x))))
+
+  (testing "returns true even when value is nil (presence check)"
+    (is (true? (exec/arg-provided? {:x nil} :x)))))
+
+
+;; === get-single-required-arg Tests ===
+
+(deftest get-single-required-arg-interface-test
+  (testing "returns single required arg-schema"
+    (let [storage (create-test-storage)
+          _ (exec/register-base-fn! :identity-fn (fn [{:keys [x]} _] @x))
+          schema (sp/create-entity storage :fn-schema
+                                   {:name "identity-fn" :returned-type :int})
+          arg-schema (sp/create-entity storage :arg-schema
+                                       {:fn-schema-id (:id schema)
+                                        :name "x"
+                                        :type :int
+                                        :required true})
+          the-fn (sp/create-entity storage :fn
+                                   {:name "my-identity"
+                                    :fn-schema-id (:id schema)})
+          ctx (exec/create-context {:storage storage})
+          ;; Need to pre-resolve graph to have arg-schemas available
+          graph (sp/resolve-execution-graph storage (:id the-fn))
+          ctx-with-graph (assoc ctx :execution-graph graph)]
+      (let [result (exec/get-single-required-arg ctx-with-graph (:id the-fn))]
+        (is (= (:id arg-schema) (:id result)))
+        (is (= "x" (:name result))))
+      (sp/close storage))))
+
+
 ;; === with-clean-registry Tests ===
 
 (deftest with-clean-registry-test

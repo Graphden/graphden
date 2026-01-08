@@ -814,6 +814,33 @@
       arg-schemas)))
 
 
+;; === Optional Argument Helpers ===
+
+(defn arg-provided?
+  "Checks if an optional argument was provided in the args map.
+   Use this to safely handle optional arguments in base functions.
+
+   Optional args (`:required false` in arg-schema) are NOT included in the
+   delays map when no value is provided. This helper lets you check presence
+   before dereferencing.
+
+   Arguments:
+   - args: The args map passed to the base function
+   - arg-name: Keyword name of the argument (e.g., :x, :default-value)
+
+   Returns true if the argument is present in args, false otherwise.
+
+   Example:
+   (defbase my-fn
+     {:args {:x :int, :y {:type :int :required false}}
+      :return-type :int}
+     (if (arg-provided? args :y)
+       (+ @x @y)
+       @x))"
+  [args arg-name]
+  (contains? args arg-name))
+
+
 ;; === Execution ===
 
 (def ^:private warning-threshold-ratio

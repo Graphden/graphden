@@ -224,3 +224,18 @@
             (is (= :execution-error/invalid-context (:type data)))
             (is (= 10001 (:path-args-count err)))
             (is (= 10000 (:max-allowed err)))))))))
+
+
+;; === arg-provided? tests ===
+
+(deftest arg-provided?-test
+  (testing "returns true when arg is present"
+    (is (true? (core/arg-provided? {:x (delay 1) :y (delay 2)} :x)))
+    (is (true? (core/arg-provided? {:x (delay 1) :y (delay 2)} :y))))
+
+  (testing "returns false when arg is absent"
+    (is (false? (core/arg-provided? {:x (delay 1)} :y)))
+    (is (false? (core/arg-provided? {} :x))))
+
+  (testing "returns true even when value is nil (presence check, not value check)"
+    (is (true? (core/arg-provided? {:x nil} :x)))))

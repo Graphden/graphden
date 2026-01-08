@@ -4,7 +4,11 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.postgres-storage.core :as core]))
+    [graphden.postgres-storage.core :as core]
+    [graphden.storage-protocol.interface :as sp])
+  (:import
+    (java.sql
+      SQLException)))
 
 
 ;; === create-pool validation tests ===
@@ -255,3 +259,29 @@
 
   (testing "accepts valid timeout above minimum"
     (is (= :result (core/with-query-timeout 60000 #(identity :result))))))
+
+
+;; === PostgresStorage error classifier tests ===
+;; Tests the StorageErrorClassifier protocol implementation on PostgresStorage
+
+(defn- make-sql-exception
+  "Creates a SQLException with the given SQL state code."
+  [sql-state]
+  (SQLException. "Test error" sql-state))
+
+
+(deftest postgres-storage-error-classifier-test
+  (let [storage (core/->PostgresStorage nil nil nil)]
+    (testing "classify-error delegates to error classifier"
+      (is (= :unique-violation (sp/classify-error storage (make-sql-exception "23505"))))
+      (is (= :foreign-key-violation (sp/classify-error storage (make-sql-exception "23503"))))
+      (is (= :unknown-sql-error (sp/classify-error storage (Exception. "generic")))))
+
+    (testing "wrap-error delegates to error classifier"
+      (let [ex (make-sql-exception "23505")
+            wrapped (sp/wrap-error storage ex :create-entity {:entity-name :user})]
+        (is (instance? clojure.lang.ExceptionInfo wrapped))
+        (let [data (ex-data wrapped)]
+          (is (= :unique-violation (:type data)))
+          (is (= :create-entity (:operation data)))
+          (is (= :user (:entity-name data))))))))

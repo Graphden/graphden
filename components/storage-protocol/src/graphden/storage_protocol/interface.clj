@@ -278,10 +278,30 @@
    ATOMICITY GUARANTEES:
    - create-entities: All-or-nothing. If any record fails validation or
      constraint check, NO records are created.
-   - read-entities: Isolation depends on storage backend. Results represent
-     a consistent snapshot at some point during the read.
+   - read-entities: Isolation depends on storage backend (see below).
    - delete-entities: All-or-nothing. If any deletion would violate referential
      integrity, NO records are deleted.
+
+   ISOLATION GUARANTEES BY BACKEND:
+
+   Memory storage:
+   - Uses ReentrantReadWriteLock with read lock for queries
+   - Reads see a consistent snapshot (no dirty reads, no phantom reads)
+   - Multiple concurrent reads allowed
+   - Writes are exclusive and atomic
+
+   PostgreSQL storage:
+   - Uses PostgreSQL's default READ COMMITTED isolation level
+   - Each statement sees only rows committed before it began
+   - Dirty reads are prevented
+   - Phantom reads are possible between statements in a batch
+   - For stronger isolation, use explicit transactions at application level
+
+   Datomic storage:
+   - Uses Datomic's immutable database values
+   - Reads always see a consistent point-in-time snapshot
+   - No dirty reads, no phantom reads within a query
+   - Strongest isolation guarantees of all backends
 
    ORDERING:
    - create-entities: Returns records in same order as input data-seq.
@@ -449,13 +469,40 @@
 
 
 ;; === Shared constraint helper implementations ===
+;;
 ;; Default implementations for ConstraintHelpers methods.
-;; Storage implementations can use these if they only provide get-parent-fn-id.
+;; Storage implementations can use these or provide their own optimized versions.
+;;
+;; ## When to use shared impls:
+;;
+;; - collect-parent-chain-impl: Use when your storage doesn't have a native way
+;;   to traverse hierarchies (e.g., no recursive CTEs). This does N queries for
+;;   N levels of nesting. Memory storage uses this.
+;;
+;; - validate-*-impl functions: Always use these - they provide the constraint
+;;   validation logic that should be consistent across all backends. Each backend
+;;   just provides ConstraintHelpers that knows how to fetch data.
+;;
+;; ## When to override:
+;;
+;; - PostgreSQL: Uses recursive CTEs (WITH RECURSIVE) to fetch entire parent chain
+;;   in a single query. More efficient for deep hierarchies.
+;;
+;; - Datomic: Fetches all parent mappings and traverses in-memory. Better for
+;;   small graphs where in-memory traversal is faster than multiple queries.
+;;
+;; If your backend has efficient graph traversal primitives, implement
+;; collect-parent-chain and collect-dependency-chain directly in your
+;; ConstraintHelpers record instead of delegating to these impls.
 
 (defn collect-parent-chain-impl
   "Default implementation of collect-parent-chain.
    Uses get-parent-fn-id to traverse the chain.
-   Returns a set of all ancestor fn-ids (not including fn-id itself)."
+   Returns a set of all ancestor fn-ids (not including fn-id itself).
+
+   Performance: O(N) queries where N is the chain depth.
+   For deep hierarchies, consider implementing a custom version using
+   recursive CTEs or bulk fetching."
   [helpers fn-id]
   (loop [current-id (get-parent-fn-id helpers fn-id)
          ancestor-ids #{}]

@@ -25,7 +25,9 @@
       HikariConfig
       HikariDataSource)
     (java.sql
-      SQLException)))
+      SQLException)
+    (java.util.concurrent.locks
+      ReentrantReadWriteLock)))
 
 
 ;; === Configuration ===
@@ -172,7 +174,8 @@
 
 (defn- get-cached-metadata
   "Gets metadata from cache or reads from database.
-   Thread-safe: uses locking to prevent concurrent database reads.
+   Thread-safe: uses ReentrantReadWriteLock for concurrent read access.
+   Write lock is only acquired when cache needs to be populated.
    Cache is invalidated on schema changes (initialize).
 
    NOTE: Returns nil without caching if table not found (not initialized yet).
@@ -180,20 +183,25 @@
 
    Cache safety: reset! only happens after parse-metadata-lenient successfully returns.
    If parsing throws, cache remains unchanged (Clojure let-binding evaluation order)."
-  [pool metadata-cache lock]
+  [pool metadata-cache ^ReentrantReadWriteLock rw-lock]
+  ;; Fast path: check cache without lock
   (or @metadata-cache
-      (locking lock
-        ;; Double-check after acquiring lock
-        (or @metadata-cache
-            (try
-              ;; Parse first, cache only on success (let ensures order)
-              (let [result (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))]
-                (reset! metadata-cache result)
-                result)
-              (catch SQLException e
-                ;; Don't cache nil - table might be created soon
-                (when-not (util/table-not-found? e)
-                  (throw e))))))))
+      ;; Slow path: acquire write lock to populate cache
+      ;; Note: We use write lock here because we need to modify cache.
+      ;; This is rare (only on first access or after cache invalidation).
+      (sp/with-write-lock rw-lock
+                          (fn []
+                            ;; Double-check after acquiring lock
+                            (or @metadata-cache
+                                (try
+                                  ;; Parse first, cache only on success (let ensures order)
+                                  (let [result (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))]
+                                    (reset! metadata-cache result)
+                                    result)
+                                  (catch SQLException e
+                                    ;; Don't cache nil - table might be created soon
+                                    (when-not (util/table-not-found? e)
+                                      (throw e)))))))))
 
 
 (defn- extract-entity-fields
@@ -211,27 +219,29 @@
 
 
 (defrecord PostgresStorage
-  [pool metadata-cache lock]
+  [pool metadata-cache ^ReentrantReadWriteLock rw-lock]
 
   sp/Storage
 
   (initialize
     [_this schema]
-    (locking lock
-      ;; Invalidate cache BEFORE migration to prevent stale reads during migration.
-      ;; If migration fails partially (some transactions commit, others fail),
-      ;; the cache remains nil and will be refreshed on next read from actual DB state.
-      ;; This is safer than invalidating after, which could leave stale cache on partial failure.
-      (reset! metadata-cache nil)
-      (migration/do-initialize pool schema)))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          ;; Invalidate cache BEFORE migration to prevent stale reads during migration.
+                          ;; If migration fails partially (some transactions commit, others fail),
+                          ;; the cache remains nil and will be refreshed on next read from actual DB state.
+                          ;; This is safer than invalidating after, which could leave stale cache on partial failure.
+                          (reset! metadata-cache nil)
+                          (migration/do-initialize pool schema))))
 
 
   (close
     [_this]
-    (locking lock
-      ;; Clear cache first to prevent memory leak from stale references
-      (reset! metadata-cache nil)
-      (close-pool pool))
+    (sp/with-write-lock rw-lock
+                        (fn []
+                          ;; Clear cache first to prevent memory leak from stale references
+                          (reset! metadata-cache nil)
+                          (close-pool pool)))
     nil)
 
 
@@ -245,7 +255,7 @@
 
   (current-fields
     [_this entity-name]
-    (when-let [cached-metadata (get-cached-metadata pool metadata-cache lock)]
+    (when-let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)]
       (when (some #(= % entity-name) (vals (:entities cached-metadata)))
         (let [entity-fields (->> (:fields cached-metadata)
                                  (vals)
@@ -270,14 +280,14 @@
 
   (schema-metadata
     [_this]
-    (get-cached-metadata pool metadata-cache lock))
+    (get-cached-metadata pool metadata-cache rw-lock))
 
 
   sp/StorageCRUD
 
   (create-entity
     [_this entity-name data]
-    (let [cached-metadata (get-cached-metadata pool metadata-cache lock)
+    (let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)
           fields (extract-entity-fields cached-metadata entity-name)]
       (crud/create-entity pool entity-name data fields)))
 
@@ -289,7 +299,7 @@
 
   (update-entity
     [_this entity-name id data]
-    (let [cached-metadata (get-cached-metadata pool metadata-cache lock)
+    (let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)
           fields (extract-entity-fields cached-metadata entity-name)]
       (crud/update-entity pool entity-name id data fields)))
 
@@ -308,7 +318,7 @@
 
   (create-entities
     [_this entity-name data-seq]
-    (let [cached-metadata (get-cached-metadata pool metadata-cache lock)
+    (let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)
           fields (extract-entity-fields cached-metadata entity-name)]
       (crud/create-entities pool entity-name data-seq fields)))
 
@@ -380,6 +390,11 @@
    - :min-idle - minimum idle connections (default 2)
    - :connection-timeout - connection timeout in ms (default 30000)
    - :idle-timeout - idle connection timeout in ms (default 600000)
-   - :max-lifetime - maximum connection lifetime in ms (default 1800000)"
+   - :max-lifetime - maximum connection lifetime in ms (default 1800000)
+
+   Thread safety:
+   - Uses ReentrantReadWriteLock for metadata cache access
+   - Multiple concurrent reads allowed, writes are exclusive
+   - CRUD operations use PostgreSQL's own transaction isolation"
   [opts]
-  (->PostgresStorage (create-pool opts) (atom nil) (Object.)))
+  (->PostgresStorage (create-pool opts) (atom nil) (ReentrantReadWriteLock.)))

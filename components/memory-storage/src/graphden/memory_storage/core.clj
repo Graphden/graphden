@@ -548,7 +548,7 @@
 ;; === Storage record ===
 
 (defrecord MemoryStorage
-  [state ^ReentrantReadWriteLock rw-lock]
+  [state ^ReentrantReadWriteLock rw-lock helpers]
 
   sp/Storage
 
@@ -686,34 +686,37 @@
 
   sp/GraphConstraints
 
+  ;; Note: helpers is created once at storage creation and reused.
+  ;; It reads current state via the state atom on each call.
+
   (validate-parent-same-schema!
     [_this fn-id parent-fn-id]
     (sp/with-read-lock rw-lock
-                       #(sp/validate-parent-same-schema-impl (->MemoryConstraintHelpers state) fn-id parent-fn-id)))
+                       #(sp/validate-parent-same-schema-impl helpers fn-id parent-fn-id)))
 
 
   (validate-no-arg-override!
     [_this fn-id arg-schema-id]
     (sp/with-read-lock rw-lock
-                       #(sp/validate-no-arg-override-impl (->MemoryConstraintHelpers state) fn-id arg-schema-id)))
+                       #(sp/validate-no-arg-override-impl helpers fn-id arg-schema-id)))
 
 
   (validate-arg-schema-belongs-to-fn!
     [_this fn-id arg-schema-id]
     (sp/with-read-lock rw-lock
-                       #(sp/validate-arg-schema-belongs-to-fn-impl (->MemoryConstraintHelpers state) fn-id arg-schema-id)))
+                       #(sp/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)))
 
 
   (validate-no-inheritance-cycle!
     [_this fn-id parent-fn-id]
     (sp/with-read-lock rw-lock
-                       #(sp/validate-no-inheritance-cycle-impl (->MemoryConstraintHelpers state) fn-id parent-fn-id)))
+                       #(sp/validate-no-inheritance-cycle-impl helpers fn-id parent-fn-id)))
 
 
   (validate-no-dependency-cycle!
     [_this owner-fn-id value-fn-id]
     (sp/with-read-lock rw-lock
-                       #(sp/validate-no-dependency-cycle-impl (->MemoryConstraintHelpers state) owner-fn-id value-fn-id)))
+                       #(sp/validate-no-dependency-cycle-impl helpers owner-fn-id value-fn-id)))
 
 
   sp/ExecutionGraph
@@ -754,10 +757,13 @@
 
 (defn create-storage
   "Creates a new in-memory storage instance.
-   Thread-safe with ReentrantReadWriteLock for concurrent access."
+   Thread-safe with ReentrantReadWriteLock for concurrent access.
+   ConstraintHelpers is created once and reused for all constraint validations."
   []
-  (->MemoryStorage (atom {:entities {}
-                          :enums {}
-                          :metadata nil
-                          :data {}})
-                   (ReentrantReadWriteLock.)))
+  (let [state (atom {:entities {}
+                     :enums {}
+                     :metadata nil
+                     :data {}})]
+    (->MemoryStorage state
+                     (ReentrantReadWriteLock.)
+                     (->MemoryConstraintHelpers state))))

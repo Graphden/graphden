@@ -621,6 +621,18 @@
    Each backend implements this to translate native exceptions
    to canonical error types.
 
+   ## Primary Method: classify-error
+   The main method is `classify-error`, which translates native exceptions
+   to canonical error keywords. Most internal code uses macros like
+   `with-crud-error-handling` that call the underlying error handling
+   utilities directly.
+
+   ## Convenience Method: wrap-error
+   The `wrap-error` method is a convenience wrapper that combines
+   classification with ex-info creation. It's primarily useful for
+   external code that wants a simple error handling API. Internal
+   implementations typically use direct error handling for performance.
+
    Example usage:
    (try
      (jdbc/execute! ...)
@@ -639,7 +651,11 @@
     "Wraps a storage exception with application context.
      Returns ex-info with :type, :operation, and merged context.
      - operation: keyword like :create-entity, :update-entity
-     - context: map with additional info like {:entity-name :user}"))
+     - context: map with additional info like {:entity-name :user}
+
+     Note: Internal code often uses direct error handling macros instead
+     of this method for performance. This method is provided as a
+     convenience for external consumers of the protocol."))
 
 
 (defprotocol ExecutionGraph
@@ -935,7 +951,13 @@
 
 (defn redact-values-by-fields
   "Redacts values in a vector based on corresponding field names.
-   Used when logging constraint violations with field/value pairs."
+
+   DEPRECATED: Prefer using (redact-sensitive-map (zipmap fields values))
+   for consistent map-based error format across all storage backends.
+
+   This function is kept for backwards compatibility but may be removed
+   in a future version."
+  {:deprecated "Use redact-sensitive-map with zipmap instead"}
   [fields values]
   (mapv (fn [field value]
           (if (sensitive-field? field)

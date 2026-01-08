@@ -11,7 +11,7 @@
 
 
 ;; === Internal helpers ===
-;; Note: sensitive-field? and redact-values-by-fields are imported from sp/
+;; Note: sensitive-field? and redact-sensitive-map are used from sp/
 ;; See storage-protocol.interface for shared security utilities.
 
 
@@ -201,12 +201,13 @@
                 {:entity entity-name
                  :fields fields
                  :value-count (count new-values)})
-      ;; Exception includes redacted values to prevent sensitive data leakage
+      ;; Exception includes redacted values to prevent sensitive data leakage.
+      ;; Use redact-sensitive-map with zipmap for consistent error format across backends.
       (throw (ex-info "Unique constraint violation"
                       {:type :constraint-violation/unique
                        :entity entity-name
                        :fields fields
-                       :values (sp/redact-values-by-fields fields new-values)})))))
+                       :values (sp/redact-sensitive-map (zipmap fields new-values))})))))
 
 
 (defn- validate-entity-exists!
@@ -489,7 +490,7 @@
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
-        graph
+        (sp/->execution-graph graph)
         (let [current-fn-id (first to-visit)
               rest-to-visit (disj to-visit current-fn-id)
               {:keys [graph new-fn-refs]}

@@ -407,11 +407,12 @@
               arg-schemas (load-arg-schemas-batch ds fn-schema-ids)
               ;; Load all fn-result-values
               fn-result-values (load-fn-result-values-batch ds all-frv-ids)]
-          {:fns fns
-           :fn-schemas fn-schemas
-           :arg-schemas arg-schemas
-           :resolved-args all-merged-args
-           :fn-result-values fn-result-values})
+          (sp/->execution-graph
+            {:fns fns
+             :fn-schemas fn-schemas
+             :arg-schemas arg-schemas
+             :resolved-args all-merged-args
+             :fn-result-values fn-result-values}))
         ;; Process batch of pending fn-ids
         (let [batch (vec to-visit)
               new-visited (into visited batch)

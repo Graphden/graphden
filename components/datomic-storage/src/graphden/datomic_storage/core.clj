@@ -1319,11 +1319,12 @@
         fn-schemas (load-fn-schemas-batch db fn-schema-ids)
         arg-schemas (load-arg-schemas-batch db fn-schema-ids)
         fn-result-values (load-fn-result-values-batch db all-frv-ids)]
-    {:fns fns
-     :fn-schemas fn-schemas
-     :arg-schemas arg-schemas
-     :resolved-args all-merged-args
-     :fn-result-values fn-result-values}))
+    (sp/->execution-graph
+      {:fns fns
+       :fn-schemas fn-schemas
+       :arg-schemas arg-schemas
+       :resolved-args all-merged-args
+       :fn-result-values fn-result-values})))
 
 
 (defn- process-discovery-batch

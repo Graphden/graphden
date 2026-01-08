@@ -218,12 +218,12 @@
   (initialize
     [_this schema]
     (locking lock
-      ;; Perform migration first, only invalidate cache on success.
-      ;; If migration fails, cache remains unchanged (still reflects old schema).
-      ;; This prevents cache invalidation on failed migrations.
-      (let [result (migration/do-initialize pool schema)]
-        (reset! metadata-cache nil)
-        result)))
+      ;; Invalidate cache BEFORE migration to prevent stale reads during migration.
+      ;; If migration fails partially (some transactions commit, others fail),
+      ;; the cache remains nil and will be refreshed on next read from actual DB state.
+      ;; This is safer than invalidating after, which could leave stale cache on partial failure.
+      (reset! metadata-cache nil)
+      (migration/do-initialize pool schema)))
 
 
   (close
@@ -354,7 +354,19 @@
 
   (resolve-execution-graph
     [_this fn-id]
-    (crud/resolve-execution-graph pool fn-id)))
+    (crud/resolve-execution-graph pool fn-id))
+
+
+  sp/StorageErrorClassifier
+
+  (classify-error
+    [_this exception]
+    (sp/classify-error (util/create-error-classifier) exception))
+
+
+  (wrap-error
+    [_this exception operation context]
+    (sp/wrap-error (util/create-error-classifier) exception operation context)))
 
 
 (defn create-storage

@@ -1730,6 +1730,49 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"fn-name must be a string"
             (exec/execute-by-name ctx :my-add nil)))
+      (sp/close storage)))
+
+  (testing "throws when fn-name is nil"
+    (let [storage (create-test-storage)
+          _ (setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"fn-name must be a string"
+            (exec/execute-by-name ctx nil nil)))
+      (sp/close storage)))
+
+  (testing "throws when fn-name is integer"
+    (let [storage (create-test-storage)
+          _ (setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"fn-name must be a string"
+            (exec/execute-by-name ctx 123 nil)))
+      (sp/close storage)))
+
+  (testing "fn-name error includes type information"
+    (let [storage (create-test-storage)
+          _ (setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (exec/execute-by-name ctx :keyword-name nil)
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/invalid-fn-name (:type (ex-data e))))
+          (is (= :keyword-name (:fn-name (ex-data e))))
+          (is (= clojure.lang.Keyword (:fn-name-type (ex-data e))))))
+      (sp/close storage)))
+
+  (testing "fn-not-found error includes function name"
+    (let [storage (create-test-storage)
+          _ (setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (exec/execute-by-name ctx "no-such-fn" nil)
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/fn-not-found (:type (ex-data e))))
+          (is (= "no-such-fn" (:fn-name (ex-data e))))))
       (sp/close storage))))
 
 
@@ -2161,3 +2204,9 @@
       ;; - once for direct fn reference (not cached)
       (is (= 2 @call-count) "Direct fn ref and fn-result-value should execute separately")
       (sp/close storage))))
+
+
+;; Note: get-single-required-arg and make-single-arg-callable are designed
+;; to be used INSIDE HOF base functions during execution (when the execution
+;; graph is populated). They are tested indirectly via lazy-fn-callable-test
+;; and other HOF tests that exercise the full execution flow.

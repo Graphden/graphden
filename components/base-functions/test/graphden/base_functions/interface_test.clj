@@ -114,6 +114,10 @@
     (is (= 15 (call-base-fn :add {:nums [1 2 3 4 5]})))
     (is (zero? (call-base-fn :add {:nums []}))))
 
+  (testing "add - overflow to Infinity throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"overflow.*infinite"
+          (call-base-fn :add {:nums [Double/MAX_VALUE Double/MAX_VALUE]}))))
+
   (testing "sub"
     (is (= 2 (call-base-fn :sub {:nums [5 3]})))
     (is (= -8 (call-base-fn :sub {:nums [2 10]})))
@@ -137,6 +141,23 @@
           (call-base-fn :div {:nums [5 0]})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Division by zero"
           (call-base-fn :div {:nums [10 2 0 5]}))))
+
+  (testing "mul - overflow to Infinity throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"overflow.*infinite"
+          (call-base-fn :mul {:nums [Double/MAX_VALUE 2.0]}))))
+
+  (testing "sub - overflow to negative Infinity throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"overflow.*infinite"
+          (call-base-fn :sub {:nums [(- Double/MAX_VALUE) Double/MAX_VALUE]}))))
+
+  (testing "overflow exception contains correct data"
+    (try
+      (call-base-fn :mul {:nums [Double/MAX_VALUE Double/MAX_VALUE]})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :execution-error/numeric-overflow (:type (ex-data e))))
+        (is (= :mul (:operation (ex-data e))))
+        (is (= 2 (:num-count (ex-data e)))))))
 
   (testing "mod"
     (is (= 1 (call-base-fn :mod {:a 7 :b 3})))

@@ -1,5 +1,6 @@
 (ns graphden.datomic-storage.interface-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
@@ -1859,3 +1860,197 @@
               (sp/query-entities storage :user 123)))
         (finally
           (sp/close storage))))))
+
+
+;; === ensure-connection! Tests ===
+
+(deftest ensure-connection-error-test
+  (testing "throws when storage is closed"
+    (let [storage (create-test-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      ;; Close the storage
+      (sp/close storage)
+      ;; Now operations should fail with storage-not-initialized error
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"storage not initialized"
+            (sp/read-entity storage :user (random-uuid))))))
+
+  (testing "error includes operation name"
+    (let [storage (create-test-storage)
+          schema (make-schema)]
+      (sp/initialize storage schema)
+      (sp/close storage)
+      (try
+        (sp/create-entity storage :user {:name "test"})
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :storage-not-initialized (:type (ex-data e))))
+          (is (some? (:operation (ex-data e)))))))))
+
+
+;; === validate-db-name! Tests ===
+
+(deftest validate-db-name-test
+  (testing "rejects non-string db-name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"db-name must be a string"
+          (core/create-storage {:db-name 123})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"db-name must be a string"
+          (core/create-storage {:db-name :keyword}))))
+
+  (testing "rejects blank db-name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"db-name cannot be blank"
+          (core/create-storage {:db-name ""})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"db-name cannot be blank"
+          (core/create-storage {:db-name "   "}))))
+
+  (testing "rejects db-name with invalid pattern"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must start with a letter"
+          (core/create-storage {:db-name "123abc"})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must start with a letter"
+          (core/create-storage {:db-name "-abc"})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must start with a letter"
+          (core/create-storage {:db-name "a b c"}))))
+
+  (testing "error includes db-name value"
+    (try
+      (core/create-storage {:db-name 42})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :config-error/invalid-db-name (:type (ex-data e))))
+        (is (= 42 (:db-name (ex-data e))))))))
+
+
+;; === validate-client-config! Tests ===
+
+(deftest validate-client-config-test
+  (testing "rejects non-map config"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"client-config must be a map"
+          (core/create-storage {:db-name "test" :client-config "not-a-map"}))))
+
+  (testing "rejects missing server-type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must include :server-type"
+          (core/create-storage {:db-name "test" :client-config {}}))))
+
+  (testing "rejects unknown server-type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown server-type"
+          (core/create-storage {:db-name "test"
+                                :client-config {:server-type :unknown-type}}))))
+
+  (testing "rejects datomic-local without :system"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :system"
+          (core/create-storage {:db-name "test"
+                                :client-config {:server-type :datomic-local
+                                                :storage-dir :mem}}))))
+
+  (testing "rejects datomic-local without :storage-dir"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :storage-dir"
+          (core/create-storage {:db-name "test"
+                                :client-config {:server-type :datomic-local
+                                                :system "test"}}))))
+
+  (testing "rejects peer-server without :endpoint"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :endpoint"
+          (core/create-storage {:db-name "test"
+                                :client-config {:server-type :peer-server}}))))
+
+  (testing "rejects peer-server without :access-key"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :access-key"
+          (core/create-storage {:db-name "test"
+                                :client-config {:server-type :peer-server
+                                                :endpoint "localhost:8998"}}))))
+
+  (testing "rejects peer-server without :secret"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :secret"
+          (core/create-storage {:db-name "test"
+                                :client-config {:server-type :peer-server
+                                                :endpoint "localhost:8998"
+                                                :access-key "key"}}))))
+
+  (testing "error includes valid-types for unknown server-type"
+    (try
+      (core/create-storage {:db-name "test"
+                            :client-config {:server-type :bad-type}})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :config-error/invalid-server-type (:type (ex-data e))))
+        (is (= :bad-type (:server-type (ex-data e))))
+        (is (set? (:valid-types (ex-data e))))
+        (is (contains? (:valid-types (ex-data e)) :datomic-local))))))
+
+
+;; === with-query-timeout Tests ===
+
+(deftest with-query-timeout-custom-test
+  (testing "custom timeout can be set"
+    (let [original-timeout core/*query-timeout-ms*]
+      (core/with-query-timeout 60000
+                               (fn []
+                                 (is (= 60000 core/*query-timeout-ms*))))
+      ;; Verify original is restored
+      (is (= original-timeout core/*query-timeout-ms*))))
+
+  (testing "nested timeouts work correctly"
+    (let [original-timeout core/*query-timeout-ms*]
+      (core/with-query-timeout 30000
+                               (fn []
+                                 (is (= 30000 core/*query-timeout-ms*))
+                                 (core/with-query-timeout 10000
+                                                          (fn []
+                                                            (is (= 10000 core/*query-timeout-ms*))))
+                                 ;; After inner binding ends, outer binding is restored
+                                 (is (= 30000 core/*query-timeout-ms*))))
+      (is (= original-timeout core/*query-timeout-ms*)))))
+
+
+;; === Error classifier Tests ===
+
+(deftest classify-error-test
+  (let [storage (create-test-storage)]
+    (testing "classifies Datomic unique conflict"
+      (let [exc (ex-info "test" {:db/error :db.error/unique-conflict})]
+        (is (= :unique-violation (sp/classify-error storage exc)))))
+
+    (testing "classifies Datomic not-found"
+      (let [exc (ex-info "test" {:db/error :db.error/not-found})]
+        (is (= :not-found (sp/classify-error storage exc)))))
+
+    (testing "classifies Datomic datoms-conflict"
+      (let [exc (ex-info "test" {:db/error :db.error/datoms-conflict})]
+        (is (= :unique-violation (sp/classify-error storage exc)))))
+
+    (testing "classifies Datomic invalid-entity-id"
+      (let [exc (ex-info "test" {:db/error :db.error/invalid-entity-id})]
+        (is (= :not-found (sp/classify-error storage exc)))))
+
+    (testing "classifies Datomic cas-failed"
+      (let [exc (ex-info "test" {:db/error :db.error/cas-failed})]
+        (is (= :concurrent-modification (sp/classify-error storage exc)))))
+
+    (testing "classifies our custom types"
+      (let [exc (ex-info "test" {:type :custom-error})]
+        (is (= :custom-error (sp/classify-error storage exc)))))
+
+    (testing "returns unknown for other db/errors"
+      (let [exc (ex-info "test" {:db/error :db.error/some-other-error})]
+        (is (= :unknown-datomic-error (sp/classify-error storage exc)))))
+
+    (testing "returns unknown for non-ExceptionInfo"
+      (let [exc (Exception. "plain exception")]
+        (is (= :unknown-datomic-error (sp/classify-error storage exc)))))))
+
+
+;; === wrap-error Tests ===
+
+(deftest wrap-error-test
+  (let [storage (create-test-storage)]
+    (testing "wraps error with context"
+      (let [original (ex-info "original" {:db/error :db.error/unique-conflict})
+            wrapped (sp/wrap-error storage original :create-entity {:entity :user})]
+        (is (instance? clojure.lang.ExceptionInfo wrapped))
+        (is (str/includes? (ex-message wrapped) "create-entity"))
+        (is (= :unique-violation (:type (ex-data wrapped))))
+        (is (= :create-entity (:operation (ex-data wrapped))))
+        (is (= :user (:entity (ex-data wrapped))))
+        (is (= :db.error/unique-conflict (:db/error (ex-data wrapped))))
+        (is (= original (ex-cause wrapped)))))))

@@ -239,3 +239,76 @@
 
   (testing "returns true even when value is nil (presence check, not value check)"
     (is (true? (core/arg-provided? {:x nil} :x)))))
+
+
+;; === register-type-hint! tests ===
+
+(deftest register-type-hint!-test
+  (testing "registers custom type hint"
+    ;; Clean state
+    (reset! core/custom-type-hints {})
+    (core/register-type-hint! :email "string in email format")
+    (is (= "string in email format" (get @core/custom-type-hints :email))))
+
+  (testing "rejects non-keyword type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"type-keyword must be a keyword"
+          (core/register-type-hint! "email" "hint"))))
+
+  (testing "rejects non-string hint"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"hint-string must be a string"
+          (core/register-type-hint! :email :not-a-string))))
+
+  (testing "custom hint overrides default"
+    (reset! core/custom-type-hints {})
+    (core/register-type-hint! :int "custom integer hint")
+    (is (= "custom integer hint" (#'core/get-type-hint :int)))
+    ;; Cleanup
+    (reset! core/custom-type-hints {})))
+
+
+;; === truncate-value additional tests ===
+
+(deftest truncate-value-edge-cases-test
+  (testing "handles deeply nested structures"
+    (let [deep {:a {:b {:c {:d {:e "value"}}}}}
+          result (#'core/truncate-value deep 50)]
+      (is (<= (count result) 53))))  ; 50 + "..."
+
+  (testing "handles very long strings"
+    (let [long-str (str/join (repeat 1000 "x"))
+          result (#'core/truncate-value long-str 20)]
+      (is (= 23 (count result)))))  ; 20 + "..."
+
+  (testing "handles collections with many elements"
+    (let [big-vec (vec (range 100))
+          result (#'core/truncate-value big-vec 30)]
+      (is (<= (count result) 33)))))
+
+
+;; === check-unknown-type-circuit-breaker! tests ===
+
+(deftest check-unknown-type-circuit-breaker!-test
+  (testing "increments counter and allows under limit"
+    (let [counter (atom 0)]
+      (dotimes [_ 5]
+        (#'core/check-unknown-type-circuit-breaker! counter :custom-type))
+      (is (= 5 @counter))))
+
+  (testing "throws when exceeding limit"
+    (let [counter (atom 10)]  ; Start at limit
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Too many unknown types"
+            (#'core/check-unknown-type-circuit-breaker! counter :custom-type)))))
+
+  (testing "exception contains correct data"
+    (let [counter (atom 10)]
+      (try
+        (#'core/check-unknown-type-circuit-breaker! counter :my-custom-type)
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/unknown-type-limit-exceeded (:type (ex-data e))))
+          (is (= 11 (:unknown-type-count (ex-data e))))
+          (is (= 10 (:max-allowed (ex-data e))))
+          (is (= :my-custom-type (:last-unknown-type (ex-data e)))))))))

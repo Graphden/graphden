@@ -34,11 +34,6 @@
   ([opts]
    (let [db-name (or (:db-name opts)
                      (str "graph-" (System/currentTimeMillis) "-" (rand-int 10000)))
-         storage (dat/create-storage {:db-name db-name})
          schema (graph/build-schema (mds/create-builder))]
-     (try
-       (sp/initialize storage schema)
-       storage
-       (catch Exception e
-         (sp/close storage)
-         (throw e))))))
+     (-> (dat/create-storage {:db-name db-name})
+         (sp/initialize-with-cleanup! schema)))))

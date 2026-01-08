@@ -250,26 +250,7 @@
 
 ;; === Thunk Building ===
 
-;; Use sp/sensitive-field? from storage-protocol for consistent sensitive data detection
-
-
-(defn- redact-sensitive-values
-  "Recursively redacts values for keys matching sensitive patterns.
-   Preserves structure but replaces sensitive values with [REDACTED]."
-  [data]
-  (cond
-    (map? data)
-    (into {}
-          (map (fn [[k v]]
-                 [k (if (sp/sensitive-field? k)
-                      "[REDACTED]"
-                      (redact-sensitive-values v))])
-               data))
-
-    (sequential? data)
-    (mapv redact-sensitive-values data)
-
-    :else data))
+;; Use sp/redact-sensitive-deep from storage-protocol for consistent sensitive data redaction
 
 
 (defn- truncate-value
@@ -280,7 +261,7 @@
    Uses pr-str for consistent Clojure-readable output. The max-len parameter
    controls truncation; callers typically use 100 chars for error context."
   [value max-len]
-  (let [redacted (redact-sensitive-values value)
+  (let [redacted (sp/redact-sensitive-deep value)
         s (pr-str redacted)]
     (if (> (count s) max-len)
       (str (subs s 0 max-len) "...")

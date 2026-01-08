@@ -844,13 +844,43 @@
 
 (defn redact-sensitive-map
   "Redacts values for sensitive keys in a map.
-   Non-recursive - only checks top-level keys."
+   Non-recursive - only checks top-level keys.
+   Use redact-sensitive-deep for nested structures."
   [m]
   (when (map? m)
     (reduce-kv (fn [acc k v]
                  (assoc acc k (if (sensitive-field? k) "[REDACTED]" v)))
                {}
                m)))
+
+
+(defn redact-sensitive-deep
+  "Recursively redacts values for keys matching sensitive patterns.
+   Preserves structure but replaces sensitive values with [REDACTED].
+   Handles maps, vectors, lists, and sets. Other values pass through unchanged.
+
+   Use this for logging/error messages that may contain nested sensitive data.
+   For simple flat maps, redact-sensitive-map is more efficient."
+  [data]
+  (cond
+    (map? data)
+    (into {}
+          (map (fn [[k v]]
+                 [k (if (sensitive-field? k)
+                      "[REDACTED]"
+                      (redact-sensitive-deep v))])
+               data))
+
+    (vector? data)
+    (mapv redact-sensitive-deep data)
+
+    (set? data)
+    (set (map redact-sensitive-deep data))
+
+    (seq? data)
+    (map redact-sensitive-deep data)
+
+    :else data))
 
 
 (defn redact-values-by-fields
@@ -1540,6 +1570,35 @@
    Throws ExceptionInfo if validation fails."
   [entity-name data-seq]
   (validate-no-duplicate-ids! entity-name data-seq))
+
+
+(defn initialize-with-cleanup!
+  "Initializes storage with schema, cleaning up on failure.
+
+   This is a common pattern for storage factory functions:
+   1. Creates storage (caller's responsibility)
+   2. Initializes with schema
+   3. On success: returns storage
+   4. On failure: closes storage and re-throws exception
+
+   Arguments:
+   - storage: an uninitialized storage instance
+   - schema: DataSchema to initialize with
+
+   Returns initialized storage on success.
+   On error, closes storage and re-throws the exception.
+
+   Example:
+     (defn create-storage [opts]
+       (-> (backend/create-storage opts)
+           (sp/initialize-with-cleanup! schema)))"
+  [storage schema]
+  (try
+    (initialize storage schema)
+    storage
+    (catch Exception e
+      (close storage)
+      (throw e))))
 
 
 (def storage-checklist

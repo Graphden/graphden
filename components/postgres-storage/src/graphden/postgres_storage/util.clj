@@ -77,64 +77,89 @@
 ;; === Error handling ===
 
 ;; PostgreSQL error codes: https://www.postgresql.org/docs/current/errcodes-appendix.html
+;; Table-driven error classification for maintainability
 
+(def ^:private sql-state->error-type
+  "Maps PostgreSQL SQLSTATE codes to application error types.
+   See: https://www.postgresql.org/docs/current/errcodes-appendix.html"
+  {"23505" :unique-violation         ; unique_violation
+   "23503" :foreign-key-violation    ; foreign_key_violation
+   "23502" :not-null-violation       ; not_null_violation
+   "23514" :check-constraint-violation ; check_violation
+   "42P01" :table-not-found          ; undefined_table
+   "57014" :query-timeout})          ; query_canceled
+
+
+(def ^:private sql-state-prefix->error-type
+  "Maps PostgreSQL SQLSTATE class prefixes to application error types.
+   Used for error classes where specific codes aren't important."
+  {"08" :connection-error})          ; connection_exception class
+
+
+(defn- get-sql-state
+  "Safely gets SQL state from SQLException, returning nil if not available."
+  ^String [^java.sql.SQLException e]
+  (java.sql.SQLException/.getSQLState e))
+
+
+(defn classify-sql-error
+  "Classifies SQLException into application error type using table-driven lookup.
+   Returns a keyword like :unique-violation, :foreign-key-violation, etc.
+   Returns :unknown-sql-error for unrecognized errors."
+  [^java.sql.SQLException e]
+  (if-let [state (get-sql-state e)]
+    (or
+      ;; Exact match first
+      (get sql-state->error-type state)
+      ;; Then prefix match (for error classes)
+      (some (fn [[prefix error-type]]
+              (when (str/starts-with? state prefix) error-type))
+            sql-state-prefix->error-type)
+      :unknown-sql-error)
+    :unknown-sql-error))
+
+
+;; Convenience predicates for backward compatibility and specific checks
 (defn table-not-found?
   "Returns true if the SQLException indicates a missing table (PostgreSQL 42P01)."
   [^java.sql.SQLException e]
-  (= "42P01" (java.sql.SQLException/.getSQLState e)))
+  (= :table-not-found (classify-sql-error e)))
 
 
 (defn unique-violation?
   "Returns true if the SQLException indicates a unique constraint violation (PostgreSQL 23505)."
   [^java.sql.SQLException e]
-  (= "23505" (java.sql.SQLException/.getSQLState e)))
+  (= :unique-violation (classify-sql-error e)))
 
 
 (defn foreign-key-violation?
   "Returns true if the SQLException indicates a foreign key violation (PostgreSQL 23503)."
   [^java.sql.SQLException e]
-  (= "23503" (java.sql.SQLException/.getSQLState e)))
+  (= :foreign-key-violation (classify-sql-error e)))
 
 
 (defn not-null-violation?
   "Returns true if the SQLException indicates a NOT NULL violation (PostgreSQL 23502)."
   [^java.sql.SQLException e]
-  (= "23502" (java.sql.SQLException/.getSQLState e)))
+  (= :not-null-violation (classify-sql-error e)))
 
 
 (defn check-constraint-violation?
   "Returns true if the SQLException indicates a CHECK constraint violation (PostgreSQL 23514)."
   [^java.sql.SQLException e]
-  (= "23514" (java.sql.SQLException/.getSQLState e)))
+  (= :check-constraint-violation (classify-sql-error e)))
 
 
 (defn connection-error?
   "Returns true if the SQLException indicates a connection failure (PostgreSQL class 08)."
   [^java.sql.SQLException e]
-  (when-let [state (java.sql.SQLException/.getSQLState e)]
-    (str/starts-with? state "08")))
+  (= :connection-error (classify-sql-error e)))
 
 
 (defn query-canceled?
   "Returns true if the SQLException indicates a query was canceled (timeout) (PostgreSQL 57014)."
   [^java.sql.SQLException e]
-  (= "57014" (java.sql.SQLException/.getSQLState e)))
-
-
-(defn classify-sql-error
-  "Classifies SQLException into application error type.
-   Returns a keyword like :unique-violation, :foreign-key-violation, etc.
-   Returns :unknown-sql-error for unrecognized errors."
-  [^java.sql.SQLException e]
-  (cond
-    (unique-violation? e)           :unique-violation
-    (foreign-key-violation? e)      :foreign-key-violation
-    (not-null-violation? e)         :not-null-violation
-    (check-constraint-violation? e) :check-constraint-violation
-    (table-not-found? e)            :table-not-found
-    (connection-error? e)           :connection-error
-    (query-canceled? e)             :query-timeout
-    :else                           :unknown-sql-error))
+  (= :query-timeout (classify-sql-error e)))
 
 
 (defn wrap-sql-error

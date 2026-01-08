@@ -727,7 +727,29 @@
                              (throw (ex-info "Function not found"
                                              {:type :not-found
                                               :fn-id fn-id})))
-                           (resolve-execution-graph-impl s fn-id))))))
+                           (resolve-execution-graph-impl s fn-id)))))
+
+
+  sp/StorageErrorClassifier
+
+  (classify-error
+    [_this exception]
+    (if (instance? clojure.lang.ExceptionInfo exception)
+      (let [error-type (:type (ex-data exception))]
+        (or error-type :unknown-memory-error))
+      :unknown-memory-error))
+
+
+  (wrap-error
+    [this exception operation context]
+    (let [error-type (sp/classify-error this exception)
+          error-data (merge {:type error-type
+                             :operation operation
+                             :message (ex-message exception)}
+                            context)]
+      (ex-info (str "Memory storage error during " (name operation) ": " (ex-message exception))
+               error-data
+               exception))))
 
 
 (defn create-storage

@@ -91,8 +91,8 @@
     (is (false? (util/connection-error? (make-sql-exception "23505"))))
     (is (false? (util/connection-error? (make-sql-exception "42P01")))))
 
-  (testing "returns nil for null state"
-    (is (nil? (util/connection-error? (SQLException. "No state"))))))
+  (testing "returns false for null state"
+    (is (false? (util/connection-error? (SQLException. "No state"))))))
 
 
 (deftest query-canceled?-test

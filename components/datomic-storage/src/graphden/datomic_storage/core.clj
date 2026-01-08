@@ -143,16 +143,16 @@
 
 
 (defn- warn-multi-field-constraints!
-  "Logs info about multi-field unique constraints which require application-level enforcement.
+  "Logs debug info about multi-field unique constraints which require application-level enforcement.
    Datomic only supports single-attribute unique constraints natively, but we enforce
    multi-field constraints at the application level during create/update operations."
   [schema entity-name]
   (let [constraints (ds/entity-constraints schema entity-name)
         multi-field (filter multi-field-unique-constraint? constraints)]
     (doseq [c multi-field]
-      (log/info "Multi-field unique constraint will be enforced at application level"
-                {:entity entity-name
-                 :fields (:fields c)}))))
+      (log/debug "Multi-field unique constraint will be enforced at application level"
+                 {:entity entity-name
+                  :fields (:fields c)}))))
 
 
 (defn- get-single-field-constraints
@@ -220,13 +220,29 @@
                                     field-clauses
                                     [['?e id-attr '?id]]))
             ;; Execute query with error handling
-            ;; Note: Catching broad Exception because Datomic can throw various
-            ;; exception types (ExceptionInfo, RuntimeException, IllegalArgumentException)
-            ;; depending on query structure and data issues.
+            ;; Datomic can throw ExceptionInfo for query errors, RuntimeException for
+            ;; connection issues, and IllegalArgumentException for malformed queries.
+            ;; We catch these specifically to avoid masking critical errors like OOM.
             results (try
                       (d/q base-query db)
-                      (catch Exception e
+                      (catch clojure.lang.ExceptionInfo e
                         (throw (ex-info "Failed to validate unique constraint"
+                                        {:type :validation-error/constraint-check-failed
+                                         :entity entity-name
+                                         :fields fields
+                                         :query base-query
+                                         :cause (ex-message e)}
+                                        e)))
+                      (catch IllegalArgumentException e
+                        (throw (ex-info "Failed to validate unique constraint: invalid query"
+                                        {:type :validation-error/constraint-check-failed
+                                         :entity entity-name
+                                         :fields fields
+                                         :query base-query
+                                         :cause (ex-message e)}
+                                        e)))
+                      (catch RuntimeException e
+                        (throw (ex-info "Failed to validate unique constraint: runtime error"
                                         {:type :validation-error/constraint-check-failed
                                          :entity entity-name
                                          :fields fields
@@ -1622,7 +1638,46 @@
     (sp/with-read-lock rw-lock
                        (fn []
                          (let [conn (ensure-connection! conn-atom :resolve-execution-graph)]
-                           (resolve-execution-graph-impl conn fn-id))))))
+                           (resolve-execution-graph-impl conn fn-id)))))
+
+
+  sp/StorageErrorClassifier
+
+  (classify-error
+    [_this exception]
+    (cond
+      ;; ExceptionInfo with :db/error key is a Datomic-specific error
+      (and (instance? clojure.lang.ExceptionInfo exception)
+           (:db/error (ex-data exception)))
+      (let [db-error (:db/error (ex-data exception))]
+        (case db-error
+          :db.error/unique-conflict :unique-violation
+          :db.error/not-found :not-found
+          :db.error/datoms-conflict :unique-violation
+          :db.error/invalid-entity-id :not-found
+          :db.error/cas-failed :concurrent-modification
+          :unknown-datomic-error))
+
+      ;; ExceptionInfo with our own :type key
+      (and (instance? clojure.lang.ExceptionInfo exception)
+           (:type (ex-data exception)))
+      (:type (ex-data exception))
+
+      :else :unknown-datomic-error))
+
+
+  (wrap-error
+    [this exception operation context]
+    (let [error-type (sp/classify-error this exception)
+          error-data (merge {:type error-type
+                             :operation operation
+                             :message (ex-message exception)}
+                            context
+                            (when (instance? clojure.lang.ExceptionInfo exception)
+                              (select-keys (ex-data exception) [:db/error])))]
+      (ex-info (str "Datomic error during " (name operation) ": " (ex-message exception))
+               error-data
+               exception))))
 
 
 (defn create-storage

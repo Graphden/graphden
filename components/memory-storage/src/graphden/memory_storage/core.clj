@@ -406,74 +406,71 @@
           all-refs))
 
 
+(defn- process-fn-node
+  "Processes a single function node during graph resolution.
+   Returns updated graph state with the function's data added."
+  [state indexes current-fn-id graph]
+  (let [{:keys [arg-values-by-owner arg-schemas-by-fn-schema
+                fns-data fn-result-values-data]} indexes
+        fn-rec (get-record state :fn current-fn-id)]
+    (if-not fn-rec
+      ;; fn doesn't exist, skip (might be literal value that looks like UUID)
+      {:graph graph :new-fn-refs #{}}
+      (let [fn-schema-id (:fn-schema-id fn-rec)
+            fn-schema (get-record state :fn-schema fn-schema-id)
+            ;; Get arg-schemas for this fn-schema using pre-built index
+            new-arg-schemas (if (contains? (:fn-schemas graph) fn-schema-id)
+                              {}
+                              (->> (get arg-schemas-by-fn-schema fn-schema-id [])
+                                   (map (juxt :id identity))
+                                   (into {})))
+            ;; Merge arg-values from parent chain
+            chain (collect-fn-parent-chain state current-fn-id)
+            chain-arg-values (mapcat #(get arg-values-by-owner % []) chain)
+            merged-args (sp/merge-arg-values-for-chain chain-arg-values chain)
+            ;; Extract and classify UUID refs
+            all-refs (sp/extract-uuid-refs-from-arg-values merged-args)
+            {new-fn-refs :fn-refs new-frvs :frvs}
+            (classify-refs all-refs fns-data fn-result-values-data)]
+        {:graph (-> graph
+                    (update :fns assoc current-fn-id fn-rec)
+                    (update :fn-schemas #(if fn-schema (assoc % fn-schema-id fn-schema) %))
+                    (update :arg-schemas merge new-arg-schemas)
+                    (update :resolved-args assoc current-fn-id merged-args)
+                    (update :fn-result-values merge new-frvs))
+         :new-fn-refs new-fn-refs}))))
+
+
 (defn- resolve-execution-graph-impl
   "Resolves execution graph starting from fn-id.
    Uses BFS to collect all transitively referenced functions and fn-result-values.
    Builds indexes once for O(N+M) performance instead of O(N*M).
    Throws if iteration count exceeds sp/*max-graph-iterations*."
   [state fn-id]
-  ;; Build indexes once for efficient lookups
-  (let [arg-values-by-owner (group-by :owner-fn-id (vals (get-entity-data state :arg-value)))
-        arg-schemas-by-fn-schema (group-by :fn-schema-id (vals (get-entity-data state :arg-schema)))
-        fns-data (get-entity-data state :fn)
-        fn-result-values-data (get-entity-data state :fn-result-value)]
+  (let [indexes {:arg-values-by-owner (group-by :owner-fn-id (vals (get-entity-data state :arg-value)))
+                 :arg-schemas-by-fn-schema (group-by :fn-schema-id (vals (get-entity-data state :arg-schema)))
+                 :fns-data (get-entity-data state :fn)
+                 :fn-result-values-data (get-entity-data state :fn-result-value)}
+        init-graph {:fns {} :fn-schemas {} :arg-schemas {}
+                    :resolved-args {} :fn-result-values {}}]
     (loop [to-visit #{fn-id}
            visited #{}
-           fns {}
-           fn-schemas {}
-           arg-schemas {}
-           resolved-args {}
-           fn-result-values {}
+           graph init-graph
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
-        {:fns fns
-         :fn-schemas fn-schemas
-         :arg-schemas arg-schemas
-         :resolved-args resolved-args
-         :fn-result-values fn-result-values}
+        graph
         (let [current-fn-id (first to-visit)
               rest-to-visit (disj to-visit current-fn-id)]
           (if (contains? visited current-fn-id)
-            (recur rest-to-visit visited fns fn-schemas arg-schemas resolved-args
-                   fn-result-values (inc iter-count))
-            (let [fn-rec (get-record state :fn current-fn-id)]
-              (if-not fn-rec
-                ;; fn doesn't exist, skip (might be literal value that looks like UUID)
-                (recur rest-to-visit (conj visited current-fn-id)
-                       fns fn-schemas arg-schemas resolved-args fn-result-values
-                       (inc iter-count))
-                (let [fn-schema-id (:fn-schema-id fn-rec)
-                      fn-schema (get-record state :fn-schema fn-schema-id)
-                      ;; Get arg-schemas for this fn-schema using pre-built index
-                      new-arg-schemas (if (contains? fn-schemas fn-schema-id)
-                                        {}
-                                        (->> (get arg-schemas-by-fn-schema fn-schema-id [])
-                                             (map (juxt :id identity))
-                                             (into {})))
-                      ;; Merge arg-values from parent chain
-                      chain (collect-fn-parent-chain state current-fn-id)
-                      ;; Get all arg-values for chain members from pre-built index
-                      chain-arg-values (mapcat #(get arg-values-by-owner % []) chain)
-                      merged-args (sp/merge-arg-values-for-chain chain-arg-values chain)
-                      ;; Extract all UUID refs from arg-values
-                      all-refs (sp/extract-uuid-refs-from-arg-values merged-args)
-                      ;; Classify refs using extracted helper
-                      {new-fn-refs :fn-refs
-                       _new-frv-refs :frv-refs
-                       new-frvs :frvs}
-                      (classify-refs all-refs fns-data fn-result-values-data)
-                      new-to-visit (set/difference new-fn-refs visited)]
-                  (recur (set/union rest-to-visit new-to-visit)
-                         (conj visited current-fn-id)
-                         (assoc fns current-fn-id fn-rec)
-                         (if fn-schema
-                           (assoc fn-schemas fn-schema-id fn-schema)
-                           fn-schemas)
-                         (merge arg-schemas new-arg-schemas)
-                         (assoc resolved-args current-fn-id merged-args)
-                         (merge fn-result-values new-frvs)
-                         (inc iter-count)))))))))))
+            (recur rest-to-visit visited graph (inc iter-count))
+            (let [{:keys [graph new-fn-refs]}
+                  (process-fn-node state indexes current-fn-id graph)
+                  new-to-visit (set/difference new-fn-refs visited)]
+              (recur (set/union rest-to-visit new-to-visit)
+                     (conj visited current-fn-id)
+                     graph
+                     (inc iter-count)))))))))
 
 
 (defn- do-initialize

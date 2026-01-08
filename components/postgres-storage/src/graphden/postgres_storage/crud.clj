@@ -8,12 +8,7 @@
     [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
-    [next.jdbc :as jdbc]
-    [next.jdbc.result-set :as rs]))
-
-
-;; Use shared timeout utility from util.clj
-(def ^:private get-query-timeout util/get-query-timeout-seconds)
+    [next.jdbc :as jdbc]))
 
 
 ;; Use shared macro from util.clj with CRUD-specific prefix
@@ -64,9 +59,7 @@
                            :returning [:*]}
                           {:quoted true})]
     (with-crud-error-handling :create-entity {:entity-name entity-name :id id}
-      (-> (jdbc/execute-one! ds query
-                             {:builder-fn rs/as-unqualified-lower-maps
-                              :timeout (get-query-timeout)})
+      (-> (jdbc/execute-one! ds query (util/query-opts))
           row->entity))))
 
 
@@ -80,9 +73,7 @@
                            :where [:= :id id]}
                           {:quoted true})]
     (with-crud-error-handling :read-entity {:entity-name entity-name :id id}
-      (-> (jdbc/execute-one! ds query
-                             {:builder-fn rs/as-unqualified-lower-maps
-                              :timeout (get-query-timeout)})
+      (-> (jdbc/execute-one! ds query (util/query-opts))
           row->entity))))
 
 
@@ -109,9 +100,7 @@
                                :returning [:*]}
                               {:quoted true})]
         (with-crud-error-handling :update-entity {:entity-name entity-name :id id}
-          (-> (jdbc/execute-one! ds query
-                                 {:builder-fn rs/as-unqualified-lower-maps
-                                  :timeout (get-query-timeout)})
+          (-> (jdbc/execute-one! ds query (util/query-opts))
               row->entity))))))
 
 
@@ -125,7 +114,7 @@
                           {:quoted true})]
     (with-crud-error-handling :delete-entity {:entity-name entity-name :id id}
       (pos? (:next.jdbc/update-count
-              (jdbc/execute-one! ds query {:timeout (get-query-timeout)}))))))
+              (jdbc/execute-one! ds query (util/query-opts)))))))
 
 
 (defn query-entities
@@ -151,9 +140,7 @@
                             where-clause (assoc :where where-clause))
                           {:quoted true})]
     (with-crud-error-handling :query-entities {:entity-name entity-name :where where}
-      (let [rows (jdbc/execute! ds query
-                                {:builder-fn rs/as-unqualified-lower-maps
-                                 :timeout (get-query-timeout)})]
+      (let [rows (jdbc/execute! ds query (util/query-opts))]
         (map row->entity rows)))))
 
 
@@ -191,9 +178,7 @@
                                :returning [:*]}
                               {:quoted true})]
         (with-crud-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
-          (let [result-rows (jdbc/execute! ds query
-                                           {:builder-fn rs/as-unqualified-lower-maps
-                                            :timeout (get-query-timeout)})
+          (let [result-rows (jdbc/execute! ds query (util/query-opts))
                 expected-count (count data-seq)
                 actual-count (count result-rows)]
             ;; Validate that all records were inserted
@@ -218,9 +203,7 @@
                              :where [:in :id (vec ids)]}
                             {:quoted true})]
       (with-crud-error-handling :read-entities {:entity-name entity-name :count (count ids)}
-        (let [rows (jdbc/execute! ds query
-                                  {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout (get-query-timeout)})]
+        (let [rows (jdbc/execute! ds query (util/query-opts))]
           (->> rows
                (map row->entity)
                (map (juxt :id identity))
@@ -239,7 +222,7 @@
                             {:quoted true})]
       (with-crud-error-handling :delete-entities {:entity-name entity-name :count (count ids)}
         (:next.jdbc/update-count
-          (jdbc/execute-one! ds query {:timeout (get-query-timeout)}))))))
+          (jdbc/execute-one! ds query (util/query-opts)))))))
 
 
 ;; === ExecutionGraph ===
@@ -277,9 +260,7 @@
                    :order-by [:origin :depth]}
                   {:quoted true})]
       (with-crud-error-handling :collect-parent-chains {:fn-count (count fn-ids)}
-        (let [rows (jdbc/execute! ds query
-                                  {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout (get-query-timeout)})
+        (let [rows (jdbc/execute! ds query (util/query-opts))
               ;; Group by origin and extract ordered chain
               result (->> rows
                           (group-by :origin)
@@ -306,9 +287,7 @@
                              :where [:in :owner_fn_id (vec fn-ids)]}
                             {:quoted true})]
       (with-crud-error-handling :load-arg-values {:fn-count (count fn-ids)}
-        (let [rows (jdbc/execute! ds query
-                                  {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout (get-query-timeout)})]
+        (let [rows (jdbc/execute! ds query (util/query-opts))]
           (map row->entity rows))))))
 
 
@@ -331,14 +310,10 @@
                                  :where [:in :id uuids-vec]}
                                 {:quoted true})]
       (with-crud-error-handling :classify-uuid-refs {:candidate-count (count uuid-candidates)}
-        (let [fn-rows (jdbc/execute! ds fn-query
-                                     {:builder-fn rs/as-unqualified-lower-maps
-                                      :timeout (get-query-timeout)})
+        (let [fn-rows (jdbc/execute! ds fn-query (util/query-opts))
               ;; Try to query fn_result_value, but handle table-not-found gracefully
               frv-rows (try
-                         (jdbc/execute! ds frv-query
-                                        {:builder-fn rs/as-unqualified-lower-maps
-                                         :timeout (get-query-timeout)})
+                         (jdbc/execute! ds frv-query (util/query-opts))
                          (catch java.sql.SQLException e
                            ;; 42P01 = undefined_table in PostgreSQL
                            (if (= "42P01" (java.sql.SQLException/.getSQLState e))
@@ -359,9 +334,7 @@
                              :where [:in key-column (vec values)]}
                             {:quoted true})]
       (with-crud-error-handling :load-entities-batch {:table table :count (count values)}
-        (let [rows (jdbc/execute! ds query
-                                  {:builder-fn rs/as-unqualified-lower-maps
-                                   :timeout (get-query-timeout)})]
+        (let [rows (jdbc/execute! ds query (util/query-opts))]
           (->> rows
                (map row->entity)
                (map (juxt :id identity))

@@ -20,7 +20,8 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.storage-protocol.interface :as sp]
+    [next.jdbc.result-set :as rs]))
 
 
 ;; === Configuration ===
@@ -371,3 +372,23 @@
                     {:type :validation-error/invalid-pg-type
                      :pg-type type-str
                      :context context}))))
+
+
+;; === Query execution helpers ===
+;; Common patterns for executing SQL queries with consistent options.
+;; These reduce boilerplate in CRUD, DDL, and other modules.
+
+(def ^:private default-query-opts
+  "Default options for query execution.
+   - :builder-fn: Convert row keys to lowercase unqualified keywords
+   - :timeout: Comes from dynamic var *query-timeout-ms*"
+  {:builder-fn rs/as-unqualified-lower-maps})
+
+
+(defn query-opts
+  "Returns query options with current timeout.
+   Can optionally merge additional options."
+  ([]
+   (assoc default-query-opts :timeout (get-query-timeout-seconds)))
+  ([extra-opts]
+   (merge (query-opts) extra-opts)))

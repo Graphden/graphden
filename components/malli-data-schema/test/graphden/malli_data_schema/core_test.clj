@@ -1,5 +1,6 @@
 (ns graphden.malli-data-schema.core-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.field-types.interface :as ft]
@@ -1234,3 +1235,19 @@
       ;; case without default throws IllegalArgumentException for unknown keys
       (is (thrown? IllegalArgumentException
             (validate-single-ref-fn :entity :field :unknown-type :ref-name {} {}))))))
+
+
+(deftest identifier-length-validation-test
+  (testing "enum value name too long throws"
+    (let [long-value (keyword (str/join (repeat 64 "a")))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Identifier name too long"
+            (-> (mds/create-builder)
+                (ds/add-enum :status (uuid) [{:uuid (uuid) :value long-value}])
+                ds/build)))))
+
+  (testing "enum value exactly 63 chars is valid"
+    (let [max-value (keyword (str/join (repeat 63 "a")))]
+      (is (some? (-> (mds/create-builder)
+                     (ds/add-enum :status (uuid) [{:uuid (uuid) :value max-value}])
+                     ds/build))))))

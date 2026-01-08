@@ -32,5 +32,4 @@
        ;; ... use storage ...
        (sp/close storage))"
   []
-  (-> (gsm/create-storage)
-      (registry/initialize-with-base-fns!)))
+  (registry/create-storage-with-base-fns gsm/create-storage))

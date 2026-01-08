@@ -3,7 +3,6 @@
    Validates graph integrity constraints using Datomic queries.
    Uses shared validation logic from storage-protocol."
   (:require
-    [clojure.tools.logging :as log]
     [datomic.client.api :as d]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -148,26 +147,17 @@
   (->DatomicConstraintHelpers conn-atom))
 
 
-;; === Connection validation ===
-
-(defn- ensure-connection!
-  "Throws if connection is nil. Returns connection if valid."
-  [conn-atom operation-name]
-  (when-not @conn-atom
-    (log/error "Constraint validation failed: storage not initialized" {:operation operation-name})
-    (throw (ex-info "Cannot perform validation: storage not initialized"
-                    {:type :storage-not-initialized
-                     :operation operation-name}))))
-
-
 ;; === Validation functions using shared implementations ===
+;;
+;; Note: Connection validation happens inside ConstraintHelpers methods via get-conn!.
+;; No need for separate ensure-connection! call - the helpers already throw
+;; :storage-not-initialized if connection is nil.
 
 (defn validate-parent-same-schema!
   "Validates that parent-fn has the same fn-schema-id as fn.
    Throws :constraint-violation/parent-schema-mismatch on violation.
    Throws :storage-not-initialized if storage is closed."
   [conn-atom fn-id parent-fn-id]
-  (ensure-connection! conn-atom :validate-parent-same-schema)
   (sp/validate-parent-same-schema-impl (create-helpers conn-atom) fn-id parent-fn-id))
 
 
@@ -176,7 +166,6 @@
    Throws :constraint-violation/arg-already-defined on violation.
    Throws :storage-not-initialized if storage is closed."
   [conn-atom fn-id arg-schema-id]
-  (ensure-connection! conn-atom :validate-no-arg-override)
   (sp/validate-no-arg-override-impl (create-helpers conn-atom) fn-id arg-schema-id))
 
 
@@ -185,7 +174,6 @@
    Throws :constraint-violation/arg-schema-mismatch on violation.
    Throws :storage-not-initialized if storage is closed."
   [conn-atom fn-id arg-schema-id]
-  (ensure-connection! conn-atom :validate-arg-schema-belongs-to-fn)
   (sp/validate-arg-schema-belongs-to-fn-impl (create-helpers conn-atom) fn-id arg-schema-id))
 
 
@@ -194,7 +182,6 @@
    Throws :constraint-violation/inheritance-cycle on violation.
    Throws :storage-not-initialized if storage is closed."
   [conn-atom fn-id parent-fn-id]
-  (ensure-connection! conn-atom :validate-no-inheritance-cycle)
   (sp/validate-no-inheritance-cycle-impl (create-helpers conn-atom) fn-id parent-fn-id))
 
 
@@ -203,5 +190,4 @@
    Throws :constraint-violation/dependency-cycle on violation.
    Throws :storage-not-initialized if storage is closed."
   [conn-atom owner-fn-id value-fn-id]
-  (ensure-connection! conn-atom :validate-no-dependency-cycle)
   (sp/validate-no-dependency-cycle-impl (create-helpers conn-atom) owner-fn-id value-fn-id))

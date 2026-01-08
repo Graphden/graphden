@@ -37,5 +37,4 @@
   ([]
    (create-storage {}))
   ([opts]
-   (-> (gsd/create-storage opts)
-       (registry/initialize-with-base-fns!))))
+   (registry/create-storage-with-base-fns gsd/create-storage opts)))

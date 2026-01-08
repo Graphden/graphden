@@ -521,19 +521,22 @@
   (testing "constraint validation throws when storage not connected"
     (let [storage (create-test-storage)
           fake-fn-id #uuid "11111111-1111-1111-1111-111111111111"
+          fake-parent-fn-id #uuid "33333333-3333-3333-3333-333333333333"
           fake-arg-schema-id #uuid "22222222-2222-2222-2222-222222222222"]
       (sp/close storage)
       ;; All constraint validations should throw :storage-not-initialized
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
-            (sp/validate-parent-same-schema! storage fake-fn-id fake-fn-id)))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+      ;; Note: Use different IDs for fn-id and parent-fn-id to avoid triggering
+      ;; self-reference checks (which happen before storage connection check)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"(?i)storage not initialized"
+            (sp/validate-parent-same-schema! storage fake-fn-id fake-parent-fn-id)))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"(?i)storage not initialized"
             (sp/validate-no-arg-override! storage fake-fn-id fake-arg-schema-id)))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"(?i)storage not initialized"
             (sp/validate-arg-schema-belongs-to-fn! storage fake-fn-id fake-arg-schema-id)))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
-            (sp/validate-no-inheritance-cycle! storage fake-fn-id fake-fn-id)))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"storage not initialized"
-            (sp/validate-no-dependency-cycle! storage fake-fn-id fake-fn-id)))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"(?i)storage not initialized"
+            (sp/validate-no-inheritance-cycle! storage fake-fn-id fake-parent-fn-id)))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"(?i)storage not initialized"
+            (sp/validate-no-dependency-cycle! storage fake-fn-id fake-parent-fn-id)))))
 
   (testing "CRUD operations throw when storage not initialized"
     (let [storage (create-test-storage)

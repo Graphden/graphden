@@ -604,11 +604,20 @@
 
 (def storage-error-types
   "Canonical storage error types across all backends.
-   Each backend maps its native errors to these types."
+   Each backend maps its native errors to these types.
+
+   Note on entity/table errors:
+   - :entity-not-in-schema - Entity name not defined in DataSchema (application-level check)
+   - :table-not-found - Database table doesn't exist (database-level error, e.g., SQL state 42P01)
+
+   Memory storage uses :entity-not-in-schema (checks schema before operation).
+   PostgreSQL may return :table-not-found if table is missing (database error).
+   Both indicate the entity is not available, but at different levels."
   #{:unique-violation
     :foreign-key-violation
     :not-null-violation
     :check-constraint-violation
+    :entity-not-in-schema
     :table-not-found
     :connection-error
     :query-timeout
@@ -947,23 +956,6 @@
     (map redact-sensitive-deep data)
 
     :else data))
-
-
-(defn redact-values-by-fields
-  "Redacts values in a vector based on corresponding field names.
-
-   DEPRECATED: Prefer using (redact-sensitive-map (zipmap fields values))
-   for consistent map-based error format across all storage backends.
-
-   This function is kept for backwards compatibility but may be removed
-   in a future version."
-  {:deprecated "Use redact-sensitive-map with zipmap instead"}
-  [fields values]
-  (mapv (fn [field value]
-          (if (sensitive-field? field)
-            "[REDACTED]"
-            value))
-        fields values))
 
 
 ;; === Canonical Error Types ===

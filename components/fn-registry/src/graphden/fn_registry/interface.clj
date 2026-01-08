@@ -117,6 +117,26 @@
       (throw e))))
 
 
+(defn create-storage-with-base-fns
+  "Generic factory that creates storage and initializes with base functions.
+
+   This is a convenience function for creating complete graphden environments.
+   It wraps any storage creation function with base function initialization.
+
+   Arguments:
+   - create-fn: a function that creates a storage instance (e.g., gsp/create-storage)
+   - args: arguments to pass to create-fn
+
+   Returns a storage instance with all base functions registered and synced.
+
+   Example:
+     (require '[graphden.graph-storage-postgres.interface :as gsp])
+     (create-storage-with-base-fns gsp/create-storage {:jdbc-url \"...\"})"
+  [create-fn & args]
+  (-> (apply create-fn args)
+      (initialize-with-base-fns!)))
+
+
 ;; === Macro for Defining Base Functions ===
 
 (defmacro defbase

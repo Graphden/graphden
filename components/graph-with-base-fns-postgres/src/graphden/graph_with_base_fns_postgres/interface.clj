@@ -40,5 +40,4 @@
        ;; ... use storage ...
        (sp/close storage))"
   [opts]
-  (-> (gsp/create-storage opts)
-      (registry/initialize-with-base-fns!)))
+  (registry/create-storage-with-base-fns gsp/create-storage opts))

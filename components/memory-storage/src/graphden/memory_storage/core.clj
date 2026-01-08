@@ -212,8 +212,7 @@
 
 (defn- validate-entity-exists!
   "Validates that entity exists in schema. Throws :entity-not-in-schema if not.
-   Note: postgres-storage uses :table-not-found (PostgreSQL-specific term),
-   while memory-storage uses :entity-not-in-schema (storage-agnostic term)."
+   See storage-protocol.interface/storage-error-types for error type documentation."
   [state entity-name]
   (when-not (contains? (:entities state) entity-name)
     (throw (ex-info "Entity not found in schema"

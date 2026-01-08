@@ -67,7 +67,10 @@
       (is (= "in_progress" (PGobject/.getValue result)))))
 
   (testing "returns nil unchanged"
-    (is (nil? (sp/encode-value test-codec nil {:type :enum :enum-name :status})))))
+    (is (nil? (sp/encode-value test-codec nil {:type :enum :enum-name :status}))))
+
+  (testing "non-keyword enum value passes through unchanged"
+    (is (= "already-string" (sp/encode-value test-codec "already-string" {:type :enum :enum-name :status})))))
 
 
 (deftest encode-value-passthrough-test

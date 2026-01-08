@@ -1470,3 +1470,56 @@
     (is (false? (storage/execution-graph? {})))
     (is (false? (storage/execution-graph? nil)))
     (is (false? (storage/execution-graph? "string")))))
+
+
+;; === redact-sensitive tests ===
+
+(deftest redact-sensitive-map-test
+  (testing "redacts known sensitive keys"
+    (is (= {:password "[REDACTED]"}
+           (storage/redact-sensitive-map {:password "secret123"})))
+    (is (= {:api-key "[REDACTED]"}
+           (storage/redact-sensitive-map {:api-key "abc123"})))
+    (is (= {:secret "[REDACTED]"}
+           (storage/redact-sensitive-map {:secret "hidden"}))))
+
+  (testing "preserves non-sensitive keys"
+    (is (= {:username "john" :email "john@test.com"}
+           (storage/redact-sensitive-map {:username "john" :email "john@test.com"}))))
+
+  (testing "handles mixed keys"
+    (is (= {:name "test" :password "[REDACTED]"}
+           (storage/redact-sensitive-map {:name "test" :password "secret"})))))
+
+
+(deftest redact-sensitive-deep-test
+  (testing "redacts nested maps"
+    (is (= {:config {:db {:password "[REDACTED]"}} :name "test"}
+           (storage/redact-sensitive-deep
+             {:config {:db {:password "secret"}} :name "test"}))))
+
+  (testing "redacts in vectors"
+    (is (= [{:password "[REDACTED]"} {:password "[REDACTED]"}]
+           (storage/redact-sensitive-deep
+             [{:password "p1"} {:password "p2"}]))))
+
+  (testing "redacts in sets"
+    (let [result (storage/redact-sensitive-deep
+                   #{{:password "secret1"} {:password "secret2"}})]
+      (is (set? result))
+      (is (every? #(= "[REDACTED]" (:password %)) result))))
+
+  (testing "redacts in sequences"
+    (let [result (storage/redact-sensitive-deep
+                   (list {:password "p1"} {:password "p2"}))]
+      (is (seq? result))
+      (is (every? #(= "[REDACTED]" (:password %)) result))))
+
+  (testing "preserves non-sensitive data"
+    (is (= {:user {:name "john"}}
+           (storage/redact-sensitive-deep {:user {:name "john"}}))))
+
+  (testing "handles nil and other types"
+    (is (nil? (storage/redact-sensitive-deep nil)))
+    (is (= "string" (storage/redact-sensitive-deep "string")))
+    (is (= 42 (storage/redact-sensitive-deep 42)))))

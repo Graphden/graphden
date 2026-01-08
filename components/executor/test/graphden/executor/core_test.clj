@@ -265,7 +265,14 @@
     (core/register-type-hint! :int "custom integer hint")
     (is (= "custom integer hint" (#'core/get-type-hint :int)))
     ;; Cleanup
-    (reset! core/custom-type-hints {})))
+    (reset! core/custom-type-hints {}))
+
+  (testing "get-type-hint returns type name for unknown types"
+    (reset! core/custom-type-hints {})
+    ;; For unknown types not in default-type-hints or custom-type-hints,
+    ;; get-type-hint falls back to (name arg-type)
+    (is (= "unknown-custom-type" (#'core/get-type-hint :unknown-custom-type)))
+    (is (= "my-special-type" (#'core/get-type-hint :my-special-type)))))
 
 
 ;; === truncate-value additional tests ===

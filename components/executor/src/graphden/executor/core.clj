@@ -197,6 +197,32 @@
    - :strict-type-validation? - If true (default), throw on unknown types.
                                 If false, warn and accept (forward compatibility mode).
 
+   ## Forward Compatibility Mode (:strict-type-validation? false)
+
+   When enabled, the executor will accept arguments with unknown types instead
+   of throwing an exception. This is useful for:
+
+   1. **Rolling deployments**: When updating schema, old executor instances can
+      continue processing requests with new types until they're upgraded.
+
+   2. **API versioning**: Clients may send data with types that your version
+      doesn't recognize yet.
+
+   3. **Schema evolution**: Allows gradual migration without breaking existing
+      functionality.
+
+   Behavior:
+   - Unknown types are accepted without validation (any value passes)
+   - A warning is logged with type info and value preview
+   - Known types are still validated strictly
+
+   Risks:
+   - Type mismatches for new types won't be caught until the base function runs
+   - Data integrity relies on the base function's own validation
+
+   Recommendation: Use strict mode (default) in development, consider permissive
+   mode for production deployments during schema migrations.
+
    Validates:
    - storage is required
    - timeout-ms must be at least 50ms (allows for fast test cases)
@@ -224,25 +250,7 @@
 
 ;; === Thunk Building ===
 
-(def ^:private sensitive-key-patterns
-  "Regex patterns for identifying sensitive keys that should be redacted.
-   Matches common credential/secret naming patterns."
-  [#"(?i)password"
-   #"(?i)secret"
-   #"(?i)token"
-   #"(?i)api[_-]?key"
-   #"(?i)auth"
-   #"(?i)credential"
-   #"(?i)private[_-]?key"])
-
-
-(defn- sensitive-key?
-  "Returns true if the key name matches known sensitive patterns."
-  [k]
-  (when k
-    (let [key-str (if (keyword? k) (name k) (str k))]
-      (when (seq key-str)
-        (some #(re-find % key-str) sensitive-key-patterns)))))
+;; Use sp/sensitive-field? from storage-protocol for consistent sensitive data detection
 
 
 (defn- redact-sensitive-values
@@ -253,7 +261,7 @@
     (map? data)
     (into {}
           (map (fn [[k v]]
-                 [k (if (sensitive-key? k)
+                 [k (if (sp/sensitive-field? k)
                       "[REDACTED]"
                       (redact-sensitive-values v))])
                data))
@@ -336,9 +344,16 @@
                        :arg-type arg-type
                        :value-type (type provided-value)
                        :hint "Set :strict-type-validation? false in context for forward compatibility"}))
+      ;; Forward compatibility mode: accept unknown types with warning
+      ;; This allows newer schema versions to introduce new types without
+      ;; breaking existing deployments. The warning helps identify potential issues.
       (do
-        (log/warn "Unknown argument type encountered, skipping validation"
-                  {:type arg-type :value-type (type provided-value)})
+        (log/warn "Unknown argument type encountered in forward compatibility mode"
+                  {:arg-type arg-type
+                   :value-type (type provided-value)
+                   :value-preview (truncate-value provided-value log-value-truncation-length)
+                   :action :accepting-without-validation
+                   :hint "Consider upgrading to support this type natively"})
         false))))
 
 
@@ -589,7 +604,8 @@
    All arguments are wrapped in delay for lazy evaluation.
    Base functions receive delays and use @ (deref) to get values.
 
-   Priority:
+   ## Argument Resolution Priority
+
    1. Direct provided value (from HOF callable calls)
    2. Path-arg value (only if no DB value exists):
       - For root fn: looked up by arg-schema-id
@@ -597,7 +613,23 @@
       - If arg-value also exists in DB -> warning, use DB value (no override)
    3. Stored arg-value from DB
    4. Required arg with no value -> error
-   5. Optional arg with no value -> skip"
+   5. Optional arg with no value -> skip (NOT included in map)
+
+   ## Optional Arguments Convention
+
+   Optional args (`:required false` in arg-schema) are handled as follows:
+   - If no value is provided, the argument is NOT included in the delays map
+   - Base functions should check for the key's presence or provide defaults:
+     ```clojure
+     (defbase my-fn
+       {:args {:x :int, :y {:type :int :required false}}
+        :return-type :int}
+       (+ @x (or (some-> y deref) 0)))  ; y may not be present
+     ```
+
+   IMPORTANT: Optional args with no value will NOT have a key in the map,
+   so `(get args :optional-arg)` returns nil, and `@optional-arg` will fail
+   if the arg is not present. Always check for presence first."
   [context fn-data provided-args]
   (let [{:keys [arg-schemas arg-values]} fn-data
         current-frv-id (:current-frv-id context)

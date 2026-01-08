@@ -697,6 +697,31 @@
 
 
 ;; === Shared constants ===
+;;
+;; ## Timeout Architecture
+;;
+;; There are TWO different timeout concepts in graphden:
+;;
+;; ### Storage Query Timeout (default-query-timeout-ms)
+;; - Purpose: Limits individual database query duration
+;; - Scope: Single SQL query or Datomic query
+;; - Mechanism:
+;;   - PostgreSQL: JDBC setQueryTimeout (seconds, min 1s due to JDBC API)
+;;   - Datomic: :timeout query option (milliseconds)
+;; - Default: 30000ms (30 seconds)
+;; - Use case: Prevent runaway database queries from blocking connections
+;;
+;; ### Executor Timeout (executor/create-context :timeout-ms)
+;; - Purpose: Limits total execution time for a function graph
+;; - Scope: Entire execution including all function calls and queries
+;; - Mechanism: Checked at start of each function call (best-effort)
+;; - Default: 30000ms (same as storage for consistency)
+;; - Minimum: 50ms (allows for fast unit tests)
+;; - Use case: Prevent infinite loops or very long computations
+;;
+;; Note: Executor timeout is NOT a hard guarantee - a long-running base
+;; function will complete fully even if it exceeds the timeout.
+;; The check happens at function call boundaries, not during execution.
 
 (def default-query-timeout-ms
   "Default timeout for storage queries in milliseconds.
@@ -704,7 +729,9 @@
    Value: 30000ms (30 seconds) - reasonable default for most queries.
 
    Note: This is a shared constant for consistency across backends.
-   Each backend may provide its own dynamic var for runtime overrides."
+   Each backend may provide its own dynamic var for runtime overrides.
+
+   See also: executor/create-context :timeout-ms for execution timeout."
   30000)
 
 
@@ -721,6 +748,18 @@
   "Maximum number of iterations when resolving execution graph.
    Prevents infinite loops in case of data inconsistencies.
    Default: 10000 (enough for complex graphs, catches runaway loops).
+
+   ## Formula for Sizing
+
+   For a graph with N functions:
+   - Minimum iterations: N (one per function, best case no references)
+   - Typical iterations: N + R where R = number of fn-result-value refs
+   - Worst case: N * max-depth (deeply nested chains)
+
+   Recommendations:
+   - Small graphs (<100 fns): default 10000 is more than sufficient
+   - Medium graphs (100-1000 fns): default should work
+   - Large graphs (>1000 fns): consider increasing proportionally
 
    Can be overridden using with-max-graph-iterations."
   10000)
@@ -774,6 +813,55 @@
                    (java.util.UUID/fromString v)
                    (catch IllegalArgumentException _ nil))
      :else nil)))
+
+
+;; === Sensitive Data Redaction ===
+;;
+;; Shared utilities for redacting sensitive data in logs and exceptions.
+;; All storage implementations should use these to ensure consistent security.
+
+(def sensitive-field-patterns
+  "Regex patterns for identifying sensitive field names that should be redacted.
+   Used across all storage backends and executor for consistent security."
+  [#"(?i)password"
+   #"(?i)secret"
+   #"(?i)token"
+   #"(?i)api[_-]?key"
+   #"(?i)auth"
+   #"(?i)credential"
+   #"(?i)private[_-]?key"])
+
+
+(defn sensitive-field?
+  "Returns true if field name matches known sensitive patterns.
+   Handles keywords, strings, and nil gracefully."
+  [field-name]
+  (when field-name
+    (let [name-str (if (keyword? field-name) (name field-name) (str field-name))]
+      (when (seq name-str)
+        (some #(re-find % name-str) sensitive-field-patterns)))))
+
+
+(defn redact-sensitive-map
+  "Redacts values for sensitive keys in a map.
+   Non-recursive - only checks top-level keys."
+  [m]
+  (when (map? m)
+    (reduce-kv (fn [acc k v]
+                 (assoc acc k (if (sensitive-field? k) "[REDACTED]" v)))
+               {}
+               m)))
+
+
+(defn redact-values-by-fields
+  "Redacts values in a vector based on corresponding field names.
+   Used when logging constraint violations with field/value pairs."
+  [fields values]
+  (mapv (fn [field value]
+          (if (sensitive-field? field)
+            "[REDACTED]"
+            value))
+        fields values))
 
 
 ;; === Canonical Error Types ===

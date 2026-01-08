@@ -13,38 +13,6 @@
       ReentrantReadWriteLock)))
 
 
-;; === Sensitive data redaction ===
-
-(def ^:private sensitive-field-patterns
-  "Regex patterns for identifying sensitive field names that should be redacted."
-  [#"(?i)password"
-   #"(?i)secret"
-   #"(?i)token"
-   #"(?i)api[_-]?key"
-   #"(?i)auth"
-   #"(?i)credential"
-   #"(?i)private[_-]?key"])
-
-
-(defn- sensitive-field?
-  "Returns true if field name matches known sensitive patterns."
-  [field-name]
-  (when field-name
-    (let [name-str (if (keyword? field-name) (name field-name) (str field-name))]
-      (when (seq name-str)
-        (some #(re-find % name-str) sensitive-field-patterns)))))
-
-
-(defn- redact-values-map
-  "Redacts values in a map for sensitive field names.
-   Used when logging/throwing constraint violations to avoid exposing sensitive data."
-  [fields-values-map]
-  (reduce-kv (fn [acc field value]
-               (assoc acc field (if (sensitive-field? field) "[REDACTED]" value)))
-             {}
-             fields-values-map))
-
-
 ;; === Type mapping ===
 
 (def type->datomic
@@ -201,6 +169,15 @@
    exclude-id - optional id to exclude (for updates)"
   [db entity-name data constraint field-specs exclude-id]
   (let [fields (:fields constraint)
+        ;; Validate all constraint fields exist in schema
+        _ (doseq [field fields]
+            (when-not (contains? field-specs field)
+              (throw (ex-info "Constraint references non-existent field"
+                              {:type :validation-error/constraint-check-failed
+                               :entity entity-name
+                               :constraint-fields fields
+                               :missing-field field
+                               :available-fields (vec (keys field-specs))}))))
         ;; Get values for all constraint fields from data
         field-values (map #(get data %) fields)]
     ;; Only check if all fields have values
@@ -254,7 +231,7 @@
                           {:type :constraint-violation/unique
                            :entity entity-name
                            :fields fields
-                           :values (redact-values-map (zipmap fields field-values))
+                           :values (sp/redact-sensitive-map (zipmap fields field-values))
                            :conflicting-id (second (first conflicting))})))))))
 
 

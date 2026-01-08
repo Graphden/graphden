@@ -11,37 +11,8 @@
 
 
 ;; === Internal helpers ===
-
-
-(def ^:private sensitive-field-patterns
-  "Regex patterns for identifying sensitive field names that should be redacted."
-  [#"(?i)password"
-   #"(?i)secret"
-   #"(?i)token"
-   #"(?i)api[_-]?key"
-   #"(?i)auth"
-   #"(?i)credential"
-   #"(?i)private[_-]?key"])
-
-
-(defn- sensitive-field?
-  "Returns true if field name matches known sensitive patterns."
-  [field-name]
-  (when field-name
-    (let [name-str (if (keyword? field-name) (name field-name) (str field-name))]
-      (when (seq name-str)
-        (some #(re-find % name-str) sensitive-field-patterns)))))
-
-
-(defn- redact-values-by-fields
-  "Redacts values in a vector based on corresponding field names.
-   Used when logging constraint violations to avoid exposing sensitive data."
-  [fields values]
-  (mapv (fn [field value]
-          (if (sensitive-field? field)
-            "[REDACTED]"
-            value))
-        fields values))
+;; Note: sensitive-field? and redact-values-by-fields are imported from sp/
+;; See storage-protocol.interface for shared security utilities.
 
 
 (defn- build-entities-structure
@@ -235,7 +206,7 @@
                       {:type :constraint-violation/unique
                        :entity entity-name
                        :fields fields
-                       :values (redact-values-by-fields fields new-values)})))))
+                       :values (sp/redact-values-by-fields fields new-values)})))))
 
 
 (defn- validate-entity-exists!

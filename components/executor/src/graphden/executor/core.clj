@@ -94,7 +94,14 @@
 
 (def ^:private min-timeout-ms
   "Minimum allowed timeout in milliseconds.
-   50ms allows for fast test cases while preventing unrealistic timeouts."
+   50ms allows for fast test cases while preventing unrealistic timeouts.
+
+   Note: This is different from storage query timeout (min 1000ms in postgres-storage).
+   - Executor timeout: overall execution time for a function graph (includes all queries)
+   - Storage query timeout: single database query timeout (JDBC setQueryTimeout uses seconds)
+
+   Executor timeout can be lower because it measures in-memory computation,
+   while storage queries need network roundtrip and query parsing time."
   50)
 
 
@@ -161,6 +168,18 @@
                     {:type :execution-error/invalid-context
                      :path-args path-args
                      :path-args-type (type path-args)})))
+  ;; Validate path-args keys format for security
+  ;; Keys must be either UUID (for root fn args) or [UUID UUID] (for nested fn-result-value args)
+  (when (seq path-args)
+    (doseq [[k _v] path-args]
+      (when-not (or (uuid? k)
+                    (and (vector? k)
+                         (= 2 (count k))
+                         (every? uuid? k)))
+        (throw (ex-info "path-args keys must be UUID or [UUID UUID] vector"
+                        {:type :execution-error/invalid-path-args-key
+                         :invalid-key k
+                         :key-type (type k)})))))
   ;; Use provided base-fns or snapshot the default registry
   (let [fns (or base-fns @default-registry)]
     (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0 (or path-args {}) nil (atom {}))))
@@ -434,6 +453,10 @@
 
 ;; === Argument resolution helpers ===
 ;; These helpers handle specific cases in build-arg-delays.
+;; They are intentionally separate (not inlined) for:
+;; - Readability: descriptive names document business logic better than inline code
+;; - Single responsibility: each function handles one argument source scenario
+;; - Testability: individual functions can be tested in isolation if needed
 
 (defn- handle-provided-arg
   "Handles case when direct provided value exists (from HOF callable)."

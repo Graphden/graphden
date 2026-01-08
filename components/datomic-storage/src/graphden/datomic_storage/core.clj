@@ -693,8 +693,111 @@
 
 ;; === Initialize ===
 
+(defn- do-first-init
+  "First-time initialization: creates all schema and metadata.
+   Returns changes map with all created entities/fields/enums."
+  [conn schema]
+  (let [metadata-schema (build-metadata-schema)
+        enum-schema (build-enum-schemas schema)
+        field-schema (build-field-schemas schema)
+        all-schema (concat metadata-schema enum-schema field-schema)]
+    ;; Transact all schema
+    (when (seq all-schema)
+      (d/transact conn {:tx-data (vec all-schema)}))
+    ;; Save metadata
+    (save-metadata! conn schema)
+    ;; Return changes
+    {:entities {:created (vec (ds/entities schema)) :renamed {}}
+     :fields {:created (sp/collect-created-fields schema) :renamed []}
+     :enums {:created (vec (keys (ds/enums schema))) :renamed {}}
+     :enum-values {:created (sp/collect-created-enum-values schema)}}))
+
+
+(defn- check-destructive-changes!
+  "Validates that no entities/fields/enums have been removed.
+   Throws if destructive changes detected."
+  [old-metadata schema]
+  (let [old-entity-uuids (set (keys (:entities old-metadata)))
+        new-entity-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))]
+    (sp/check-removed! "entities" old-entity-uuids new-entity-uuids
+                       #(get (:entities old-metadata) %)))
+
+  (let [old-field-uuids (set (keys (:fields old-metadata)))
+        new-field-uuids (sp/collect-field-uuids schema)]
+    (sp/check-removed! "fields" old-field-uuids new-field-uuids
+                       #(get (:fields old-metadata) %)))
+
+  (let [old-enum-uuids (set (keys (:enums old-metadata)))
+        new-enum-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) (ds/enums schema)))]
+    (sp/check-removed! "enums" old-enum-uuids new-enum-uuids
+                       #(get (:enums old-metadata) %)))
+
+  (let [old-value-uuids (set (keys (:enum-values old-metadata)))
+        new-value-uuids (sp/collect-enum-value-uuids schema)]
+    (sp/check-removed! "enum values" old-value-uuids new-value-uuids
+                       #(get (:enum-values old-metadata) %))))
+
+
+(defn- create-migration-context
+  "Creates mutable context for tracking migration changes."
+  []
+  {:created-entities (atom [])
+   :renamed-entities (atom {})
+   :created-fields (atom [])
+   :renamed-fields (atom [])
+   :created-enums (atom [])
+   :renamed-enums (atom {})
+   :created-enum-values (atom [])
+   :new-schema (atom [])})
+
+
+(defn- context->changes
+  "Extracts changes map from migration context."
+  [ctx]
+  {:entities {:created @(:created-entities ctx) :renamed @(:renamed-entities ctx)}
+   :fields {:created @(:created-fields ctx) :renamed @(:renamed-fields ctx)}
+   :enums {:created @(:created-enums ctx) :renamed @(:renamed-enums ctx)}
+   :enum-values {:created @(:created-enum-values ctx)}})
+
+
+(defn- do-migration
+  "Performs schema migration from old-metadata to new schema.
+   Returns changes map with created/renamed entities/fields/enums."
+  [conn db old-metadata schema]
+  ;; Validate no destructive changes
+  (check-destructive-changes! old-metadata schema)
+  ;; Check type compatibility
+  (run! #(check-entity-fields-type! db old-metadata schema %) (ds/entities schema))
+
+  ;; Process changes
+  (let [ctx (create-migration-context)]
+    ;; Process enums
+    (run! (fn [[enum-name enum-def]]
+            (process-single-enum! old-metadata enum-name enum-def
+                                  (:created-enums ctx) (:renamed-enums ctx)
+                                  (:new-schema ctx) (:created-enum-values ctx)))
+          (ds/enums schema))
+
+    ;; Process entities and fields
+    (run! #(process-single-entity! schema old-metadata %
+                                   (:created-entities ctx) (:renamed-entities ctx)
+                                   (:new-schema ctx) (:created-fields ctx) (:renamed-fields ctx))
+          (ds/entities schema))
+
+    ;; Transact new schema
+    (when (seq @(:new-schema ctx))
+      (d/transact conn {:tx-data @(:new-schema ctx)}))
+
+    ;; Save metadata
+    (save-metadata! conn schema)
+
+    ;; Return changes
+    (context->changes ctx)))
+
+
 (defn- do-initialize
-  "Performs initialization/migration of the database."
+  "Performs initialization/migration of the database.
+   Delegates to do-first-init or do-migration based on existing metadata."
   [conn schema]
   ;; Log info about multi-field unique constraints (enforced at application level)
   (doseq [entity-name (ds/entities schema)]
@@ -702,88 +805,9 @@
 
   (let [db (d/db conn)
         old-metadata (read-metadata db)]
-
     (if (nil? old-metadata)
-      ;; First-time initialization
-      (let [metadata-schema (build-metadata-schema)
-            enum-schema (build-enum-schemas schema)
-            field-schema (build-field-schemas schema)
-            all-schema (concat metadata-schema enum-schema field-schema)]
-
-        ;; Transact all schema
-        (when (seq all-schema)
-          (d/transact conn {:tx-data (vec all-schema)}))
-
-        ;; Save metadata
-        (save-metadata! conn schema)
-
-        ;; Return changes
-        {:entities {:created (vec (ds/entities schema)) :renamed {}}
-         :fields {:created (sp/collect-created-fields schema) :renamed []}
-         :enums {:created (vec (keys (ds/enums schema))) :renamed {}}
-         :enum-values {:created (sp/collect-created-enum-values schema)}})
-
-      ;; Migration
-      (do
-        ;; Check for destructive changes
-        (let [old-entity-uuids (set (keys (:entities old-metadata)))
-              new-entity-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))]
-          (sp/check-removed! "entities" old-entity-uuids new-entity-uuids
-                             #(get (:entities old-metadata) %)))
-
-        (let [old-field-uuids (set (keys (:fields old-metadata)))
-              new-field-uuids (sp/collect-field-uuids schema)]
-          (sp/check-removed! "fields" old-field-uuids new-field-uuids
-                             #(get (:fields old-metadata) %)))
-
-        (let [old-enum-uuids (set (keys (:enums old-metadata)))
-              new-enum-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) (ds/enums schema)))]
-          (sp/check-removed! "enums" old-enum-uuids new-enum-uuids
-                             #(get (:enums old-metadata) %)))
-
-        (let [old-value-uuids (set (keys (:enum-values old-metadata)))
-              new-value-uuids (sp/collect-enum-value-uuids schema)]
-          (sp/check-removed! "enum values" old-value-uuids new-value-uuids
-                             #(get (:enum-values old-metadata) %)))
-
-        ;; Check type changes
-        (run! #(check-entity-fields-type! db old-metadata schema %) (ds/entities schema))
-
-        ;; Compute changes and apply new schema
-        (let [created-entities (atom [])
-              renamed-entities (atom {})
-              created-fields (atom [])
-              renamed-fields (atom [])
-              created-enums (atom [])
-              renamed-enums (atom {})
-              created-enum-values (atom [])
-              new-schema (atom [])]
-
-          ;; Process enums
-          (run! (fn [[enum-name enum-def]]
-                  (process-single-enum! old-metadata enum-name enum-def
-                                        created-enums renamed-enums
-                                        new-schema created-enum-values))
-                (ds/enums schema))
-
-          ;; Process entities and fields
-          (run! #(process-single-entity! schema old-metadata %
-                                         created-entities renamed-entities
-                                         new-schema created-fields renamed-fields)
-                (ds/entities schema))
-
-          ;; Transact new schema
-          (when (seq @new-schema)
-            (d/transact conn {:tx-data @new-schema}))
-
-          ;; Save metadata
-          (save-metadata! conn schema)
-
-          ;; Return changes
-          {:entities {:created @created-entities :renamed @renamed-entities}
-           :fields {:created @created-fields :renamed @renamed-fields}
-           :enums {:created @created-enums :renamed @renamed-enums}
-           :enum-values {:created @created-enum-values}})))))
+      (do-first-init conn schema)
+      (do-migration conn db old-metadata schema))))
 
 
 ;; === CRUD helpers ===
@@ -1248,6 +1272,72 @@
            (into {})))))
 
 
+(defn- check-fn-exists!
+  "Throws :not-found if function does not exist in database."
+  [db fn-id]
+  (let [exists? (seq (d/q '[:find ?e
+                            :in $ ?fn-id
+                            :where
+                            [?e :fn/id ?fn-id]]
+                          db fn-id))]
+    (when-not exists?
+      (throw (ex-info "Function not found"
+                      {:type :not-found
+                       :fn-id fn-id})))))
+
+
+(defn- load-final-graph-data
+  "Phase 2: Batch load all data for the discovered graph.
+   Returns the complete execution graph map."
+  [db all-chains all-merged-args all-frv-ids]
+  (let [all-fn-ids (set (keys all-chains))
+        fns (load-fns-batch db all-fn-ids)
+        fn-schema-ids (->> (vals fns)
+                           (map :fn-schema-id)
+                           (set))
+        fn-schemas (load-fn-schemas-batch db fn-schema-ids)
+        arg-schemas (load-arg-schemas-batch db fn-schema-ids)
+        fn-result-values (load-fn-result-values-batch db all-frv-ids)]
+    {:fns fns
+     :fn-schemas fn-schemas
+     :arg-schemas arg-schemas
+     :resolved-args all-merged-args
+     :fn-result-values fn-result-values}))
+
+
+(defn- process-discovery-batch
+  "Processes a batch of fn-ids during graph discovery.
+   Returns map with :next-to-visit, :new-visited, :chains, :merged-args, :frv-ids."
+  [db batch visited]
+  (let [new-visited (into visited batch)
+        ;; Batch load parent chains
+        chains (collect-parent-chains-batch db batch)
+        all-chain-fn-ids (->> (vals chains) (mapcat identity) (set))
+        ;; Batch load and merge arg-values
+        all-arg-values (load-arg-values-batch db all-chain-fn-ids)
+        merged-args-batch (into {}
+                                (map (fn [fid]
+                                       [fid (sp/merge-arg-values-for-chain
+                                              all-arg-values
+                                              (get chains fid [fid]))]))
+                                batch)
+        ;; Find new references
+        all-potential-refs (->> (vals merged-args-batch)
+                                (mapcat sp/extract-uuid-refs-from-arg-values)
+                                (set))
+        new-candidates (set/difference all-potential-refs new-visited)
+        ;; Classify and resolve fn-result-values
+        {:keys [fn-ids frv-ids]} (classify-uuid-refs db new-candidates)
+        new-frvs (load-fn-result-values-batch db frv-ids)
+        frv-fn-ids (set (map :fn-id (vals new-frvs)))
+        next-to-visit (set/union fn-ids (set/difference frv-fn-ids new-visited))]
+    {:next-to-visit next-to-visit
+     :new-visited new-visited
+     :chains chains
+     :merged-args merged-args-batch
+     :frv-ids frv-ids}))
+
+
 (defn- resolve-execution-graph-impl
   "Resolves complete execution graph for a function.
    Uses batched BFS to collect all transitively referenced functions and fn-result-values.
@@ -1260,83 +1350,27 @@
    4. Extract fn-refs and fn-result-value refs, continue until graph is complete
    5. Final batch load of all fns, fn-schemas, arg-schemas, fn-result-values"
   [conn fn-id]
-  (let [db (d/db conn)
-        ;; Check if fn exists
-        exists? (seq (d/q '[:find ?e
-                            :in $ ?fn-id
-                            :where
-                            [?e :fn/id ?fn-id]]
-                          db fn-id))]
-    (when-not exists?
-      (throw (ex-info "Function not found"
-                      {:type :not-found
-                       :fn-id fn-id})))
-    ;; Phase 1: Discover all fn-ids and fn-result-values in the graph using batched BFS
+  (let [db (d/db conn)]
+    (check-fn-exists! db fn-id)
+    ;; Phase 1: Discover all fn-ids and fn-result-values using batched BFS
     (loop [to-visit #{fn-id}
            visited #{}
-           ;; Accumulate: fn-id -> parent-chain, fn-id -> merged-args
            all-chains {}
            all-merged-args {}
            all-frv-ids #{}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
-        ;; Phase 2: Batch load all data
-        (let [all-fn-ids (set (keys all-chains))
-              ;; Load all fns
-              fns (load-fns-batch db all-fn-ids)
-              ;; Get unique fn-schema-ids
-              fn-schema-ids (->> (vals fns)
-                                 (map :fn-schema-id)
-                                 (set))
-              ;; Load all fn-schemas
-              fn-schemas (load-fn-schemas-batch db fn-schema-ids)
-              ;; Load all arg-schemas
-              arg-schemas (load-arg-schemas-batch db fn-schema-ids)
-              ;; Load all fn-result-values
-              fn-result-values (load-fn-result-values-batch db all-frv-ids)]
-          {:fns fns
-           :fn-schemas fn-schemas
-           :arg-schemas arg-schemas
-           :resolved-args all-merged-args
-           :fn-result-values fn-result-values})
-        ;; Process batch of pending fn-ids
+        ;; Phase 2: Load final graph data
+        (load-final-graph-data db all-chains all-merged-args all-frv-ids)
+        ;; Process batch
         (let [batch (vec to-visit)
-              new-visited (into visited batch)
-              ;; Batch load parent chains
-              chains (collect-parent-chains-batch db batch)
-              ;; Get all fn-ids in all chains
-              all-chain-fn-ids (->> (vals chains)
-                                    (mapcat identity)
-                                    (set))
-              ;; Batch load arg-values for all chain members
-              all-arg-values (load-arg-values-batch db all-chain-fn-ids)
-              ;; Merge arg-values for each fn
-              merged-args-batch (into {}
-                                      (map (fn [fid]
-                                             [fid (sp/merge-arg-values-for-chain
-                                                    all-arg-values
-                                                    (get chains fid [fid]))]))
-                                      batch)
-              ;; Extract all potential refs (UUIDs)
-              all-potential-refs (->> (vals merged-args-batch)
-                                      (mapcat sp/extract-uuid-refs-from-arg-values)
-                                      (set))
-              ;; Remove already visited
-              new-candidates (set/difference all-potential-refs new-visited)
-              ;; Classify refs as fn or fn-result-value
-              {:keys [fn-ids frv-ids]} (classify-uuid-refs db new-candidates)
-              ;; Load fn-result-values to get their fn-ids
-              new-frvs (load-fn-result-values-batch db frv-ids)
-              ;; Add fn-ids from fn-result-values to visit set
-              frv-fn-ids (set (map :fn-id (vals new-frvs)))
-              ;; Combine direct fn refs + fn refs from fn-result-values
-              all-new-fn-refs (set/union fn-ids (set/difference frv-fn-ids new-visited))]
-          (recur all-new-fn-refs
-                 new-visited
-                 (merge all-chains chains)
-                 (merge all-merged-args merged-args-batch)
-                 (set/union all-frv-ids frv-ids)
+              result (process-discovery-batch db batch visited)]
+          (recur (:next-to-visit result)
+                 (:new-visited result)
+                 (merge all-chains (:chains result))
+                 (merge all-merged-args (:merged-args result))
+                 (set/union all-frv-ids (:frv-ids result))
                  (+ iter-count (count batch))))))))
 
 

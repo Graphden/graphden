@@ -81,6 +81,18 @@
   (when-not jdbc-url
     (throw (ex-info "jdbc-url is required for postgres connection pool"
                     {:type :config-error/missing-jdbc-url})))
+  ;; Validate JDBC URL format and protocol for security
+  ;; Prevents injection of malicious connection strings
+  (when-not (string? jdbc-url)
+    (throw (ex-info "jdbc-url must be a string"
+                    {:type :config-error/invalid-jdbc-url
+                     :jdbc-url-type (type jdbc-url)})))
+  (when-not (str/starts-with? jdbc-url "jdbc:postgresql://")
+    (throw (ex-info "jdbc-url must start with 'jdbc:postgresql://' for PostgreSQL connections"
+                    {:type :config-error/invalid-jdbc-url
+                     :jdbc-url (if (> (count jdbc-url) 50)
+                                 (str (subs jdbc-url 0 50) "...")
+                                 jdbc-url)})))
   (when-not (and username (seq (str/trim username)))
     (throw (ex-info "username is required and cannot be empty"
                     {:type :config-error/missing-username})))

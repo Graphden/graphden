@@ -1,0 +1,149 @@
+(ns graphden.executor.core-test
+  "Unit tests for executor core functions.
+   Tests internal functions like truncate-value without requiring database."
+  (:require
+    [clojure.string :as str]
+    [clojure.test :refer [deftest is testing]]
+    [graphden.executor.core :as core]))
+
+
+;; === truncate-value tests ===
+
+(deftest truncate-value-test
+  (testing "returns original string when under limit"
+    (is (= "\"hello\"" (#'core/truncate-value "hello" 100)))
+    (is (= "42" (#'core/truncate-value 42 100)))
+    (is (= ":keyword" (#'core/truncate-value :keyword 100))))
+
+  (testing "truncates long strings with ellipsis"
+    (let [long-str "abcdefghij"  ; 10 chars, pr-str adds quotes -> 12 chars
+          result (#'core/truncate-value long-str 10)]
+      (is (= 13 (count result)))  ; 10 chars + "..."
+      (is (str/ends-with? result "..."))))
+
+  (testing "handles exact boundary - string exactly at limit"
+    (let [str-5 "abcde"  ; pr-str -> "\"abcde\"" = 7 chars
+          result (#'core/truncate-value str-5 7)]
+      ;; Exactly at limit, no truncation
+      (is (= "\"abcde\"" result))
+      (is (not (str/ends-with? result "...")))))
+
+  (testing "handles exact boundary - string one over limit"
+    (let [str-6 "abcdef"  ; pr-str -> "\"abcdef\"" = 8 chars
+          result (#'core/truncate-value str-6 7)]
+      ;; One over limit, should truncate
+      (is (= 10 (count result)))  ; 7 + "..."
+      (is (str/ends-with? result "..."))))
+
+  (testing "handles empty string"
+    (is (= "\"\"" (#'core/truncate-value "" 100))))
+
+  (testing "handles nil"
+    (is (= "nil" (#'core/truncate-value nil 100))))
+
+  (testing "handles complex data structures"
+    ;; Map
+    (let [m {:a 1 :b 2}
+          result (#'core/truncate-value m 100)]
+      (is (str/includes? result ":a")))
+
+    ;; Vector
+    (let [v [1 2 3 4 5]
+          result (#'core/truncate-value v 100)]
+      (is (= "[1 2 3 4 5]" result)))
+
+    ;; Large nested structure truncates properly
+    (let [large {:keys (vec (range 100))}
+          result (#'core/truncate-value large 20)]
+      (is (= 23 (count result)))  ; 20 + "..."
+      (is (str/ends-with? result "..."))))
+
+  (testing "handles special characters in strings"
+    (is (= "\"line1\\nline2\"" (#'core/truncate-value "line1\nline2" 100)))
+    (is (= "\"tab\\there\"" (#'core/truncate-value "tab\there" 100))))
+
+  (testing "handles Unicode characters"
+    ;; Unicode chars: pr-str preserves them
+    (let [unicode "привет"  ; Russian "hello"
+          result (#'core/truncate-value unicode 100)]
+      (is (str/includes? result "привет"))))
+
+  (testing "handles max-len of 0"
+    (let [result (#'core/truncate-value "test" 0)]
+      ;; Should truncate to 0 chars + "..."
+      (is (= "..." result))))
+
+  (testing "handles max-len of 1"
+    (let [result (#'core/truncate-value "test" 1)]
+      ;; Should truncate to 1 char + "..."
+      (is (= "\"..." result))))
+
+  (testing "edge case: truncation mid-escape sequence"
+    ;; pr-str of "a\nb" is "\"a\\nb\"" (7 chars)
+    ;; If we truncate at 4, we get "\"a\\" + "..." which may look odd but is safe
+    (let [result (#'core/truncate-value "a\nb" 4)]
+      (is (= 7 (count result)))  ; 4 + "..."
+      (is (str/ends-with? result "...")))))
+
+
+;; === create-context validation tests ===
+
+(deftest create-context-validation-test
+  (testing "rejects missing storage"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Storage is required"
+          (core/create-context {}))))
+
+  (testing "rejects timeout below minimum"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"timeout-ms must be at least"
+          (core/create-context {:storage :mock :timeout-ms 10}))))
+
+  (testing "rejects non-positive max-depth"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"max-depth must be a positive integer"
+          (core/create-context {:storage :mock :max-depth 0})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"max-depth must be a positive integer"
+          (core/create-context {:storage :mock :max-depth -1}))))
+
+  (testing "rejects max-depth exceeding limit"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"max-depth exceeds maximum allowed"
+          (core/create-context {:storage :mock :max-depth 200000}))))
+
+  (testing "rejects non-map path-args"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"path-args must be a map"
+          (core/create-context {:storage :mock :path-args [1 2 3]}))))
+
+  (testing "rejects invalid path-args keys"
+    (let [uuid1 (random-uuid)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"path-args keys must be UUID"
+            (core/create-context {:storage :mock
+                                  :path-args {"string-key" 42}})))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"path-args keys must be UUID"
+            (core/create-context {:storage :mock
+                                  :path-args {:keyword-key 42}})))
+      ;; Vector with wrong size
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"path-args keys must be UUID"
+            (core/create-context {:storage :mock
+                                  :path-args {[uuid1] 42}})))
+      ;; Vector with non-UUID
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"path-args keys must be UUID"
+            (core/create-context {:storage :mock
+                                  :path-args {[uuid1 "not-uuid"] 42}})))))
+
+  (testing "accepts valid path-args keys"
+    (let [uuid1 (random-uuid)
+          uuid2 (random-uuid)
+          ctx (core/create-context {:storage :mock
+                                    :path-args {uuid1 42
+                                                [uuid1 uuid2] "nested"}})]
+      (is (some? ctx))
+      (is (= 42 (get (:path-args ctx) uuid1)))
+      (is (= "nested" (get (:path-args ctx) [uuid1 uuid2]))))))

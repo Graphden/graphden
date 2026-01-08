@@ -120,46 +120,48 @@
 
 
 ;; Convenience predicates for backward compatibility and specific checks
-(defn table-not-found?
+
+(defn- make-error-predicate
+  "Factory function that creates an error type predicate.
+   Returns a function that checks if SQLException matches the given error type."
+  [error-type]
+  (fn [^java.sql.SQLException e]
+    (= error-type (classify-sql-error e))))
+
+
+(def table-not-found?
   "Returns true if the SQLException indicates a missing table (PostgreSQL 42P01)."
-  [^java.sql.SQLException e]
-  (= :table-not-found (classify-sql-error e)))
+  (make-error-predicate :table-not-found))
 
 
-(defn unique-violation?
+(def unique-violation?
   "Returns true if the SQLException indicates a unique constraint violation (PostgreSQL 23505)."
-  [^java.sql.SQLException e]
-  (= :unique-violation (classify-sql-error e)))
+  (make-error-predicate :unique-violation))
 
 
-(defn foreign-key-violation?
+(def foreign-key-violation?
   "Returns true if the SQLException indicates a foreign key violation (PostgreSQL 23503)."
-  [^java.sql.SQLException e]
-  (= :foreign-key-violation (classify-sql-error e)))
+  (make-error-predicate :foreign-key-violation))
 
 
-(defn not-null-violation?
+(def not-null-violation?
   "Returns true if the SQLException indicates a NOT NULL violation (PostgreSQL 23502)."
-  [^java.sql.SQLException e]
-  (= :not-null-violation (classify-sql-error e)))
+  (make-error-predicate :not-null-violation))
 
 
-(defn check-constraint-violation?
+(def check-constraint-violation?
   "Returns true if the SQLException indicates a CHECK constraint violation (PostgreSQL 23514)."
-  [^java.sql.SQLException e]
-  (= :check-constraint-violation (classify-sql-error e)))
+  (make-error-predicate :check-constraint-violation))
 
 
-(defn connection-error?
+(def connection-error?
   "Returns true if the SQLException indicates a connection failure (PostgreSQL class 08)."
-  [^java.sql.SQLException e]
-  (= :connection-error (classify-sql-error e)))
+  (make-error-predicate :connection-error))
 
 
-(defn query-canceled?
+(def query-canceled?
   "Returns true if the SQLException indicates a query was canceled (timeout) (PostgreSQL 57014)."
-  [^java.sql.SQLException e]
-  (= :query-timeout (classify-sql-error e)))
+  (make-error-predicate :query-timeout))
 
 
 (defn wrap-sql-error

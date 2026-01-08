@@ -84,7 +84,13 @@
    ;; {[fn-result-value-id arg-schema-id] -> value} for nested fns
    current-frv-id   ; Current fn-result-value-id (nil for root function)
    result-cache     ; Atom: {fn-result-value-id -> computed-value} for caching
-   strict-type-validation?])  ; If true, throw on unknown types; if false, warn and accept
+   ;; LIFECYCLE: result-cache is created in create-context (atom {}), populated
+   ;; during execution by execute-fn-result-value (memoizes fn results), and
+   ;; becomes eligible for GC when context goes out of scope. Cache is NOT bounded -
+   ;; for very large execution graphs, memory usage scales with unique fn-result-value
+   ;; count. Use max-depth to bound graph size if memory is a concern.
+   strict-type-validation?  ; If true, throw on unknown types; if false, warn and accept
+   unknown-type-counter])   ; Atom: count of unknown types (circuit breaker for forward compat)
 
 
 (def ^:private max-depth-limit
@@ -104,6 +110,20 @@
    Executor timeout can be lower because it measures in-memory computation,
    while storage queries need network roundtrip and query parsing time."
   50)
+
+
+(def ^:private max-unknown-types-per-execution
+  "Maximum number of unknown types allowed per execution before throwing.
+   Acts as circuit breaker in forward compatibility mode to prevent silent
+   schema mismatch issues from going unnoticed."
+  10)
+
+
+(def ^:private result-cache-size-warning-threshold
+  "Threshold for result-cache size that triggers a warning log.
+   Large caches indicate potentially unbounded execution graphs.
+   When exceeded, a warning is logged to help diagnose memory issues."
+  1000)
 
 
 (def ^:private default-timeout-ms
@@ -236,10 +256,13 @@
   (validate-context-options! storage timeout-ms max-depth path-args)
   (let [fns (or base-fns @default-registry)]
     (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0
-                        (or path-args {}) nil (atom {}) strict-type-validation?)))
+                        (or path-args {}) nil (atom {}) strict-type-validation? (atom 0))))
 
 
-;; Forward declaration for mutual recursion
+;; Forward declaration: execute-internal is defined later but referenced by
+;; build-delay, execute-fn-result-value, and make-single-arg-callable.
+;; The recursion is lazy (via delays) - functions create delays that capture
+;; execute-internal for later evaluation during argument resolution.
 (declare execute-internal)
 
 
@@ -268,8 +291,8 @@
       s)))
 
 
-(def ^:private type-hints
-  "Human-readable hints for expected Clojure types."
+(def ^:private default-type-hints
+  "Human-readable hints for expected Clojure types (built-in types)."
   {:fn "UUID (function reference)"
    :ref "UUID (entity reference)"
    :int "integer (e.g., 42, -1)"
@@ -283,13 +306,48 @@
    :uuid "UUID"})
 
 
+(def custom-type-hints
+  "Atom containing custom type hints that extend the built-in hints.
+   Use `register-type-hint!` to add hints for custom types.
+   Hints registered here take precedence over default hints."
+  (atom {}))
+
+
+(defn register-type-hint!
+  "Registers a human-readable hint for a custom type.
+   The hint is shown in type mismatch error messages to help users understand
+   what value format is expected.
+
+   Example:
+   (register-type-hint! :email \"string in email format (e.g., user@example.com)\")
+   (register-type-hint! :phone \"string with international format (e.g., +1-555-123-4567)\")"
+  [type-keyword hint-string]
+  (when-not (keyword? type-keyword)
+    (throw (ex-info "type-keyword must be a keyword"
+                    {:type :invalid-argument
+                     :type-keyword type-keyword})))
+  (when-not (string? hint-string)
+    (throw (ex-info "hint-string must be a string"
+                    {:type :invalid-argument
+                     :hint-string hint-string})))
+  (swap! custom-type-hints assoc type-keyword hint-string))
+
+
+(defn- get-type-hint
+  "Gets human-readable hint for a type, checking custom hints first."
+  [arg-type]
+  (or (get @custom-type-hints arg-type)
+      (get default-type-hints arg-type)
+      (name arg-type)))
+
+
 (defn- throw-type-mismatch!
   "Throws a type mismatch error with detailed context."
   [arg-schema provided-value]
   (let [arg-type (:type arg-schema)
         arg-name (:name arg-schema)
         arg-schema-id (:id arg-schema)
-        hint (get type-hints arg-type (name arg-type))]
+        hint (get-type-hint arg-type)]
     (throw (ex-info (str "Type mismatch for argument '" arg-name "': "
                          "expected " (name arg-type) " (" hint "), "
                          "got " (-> provided-value class .getSimpleName))
@@ -302,6 +360,20 @@
                      :provided-type (type provided-value)}))))
 
 
+(defn- check-unknown-type-circuit-breaker!
+  "Checks if unknown type count exceeds threshold and throws if so.
+   Acts as circuit breaker to prevent silent schema mismatch issues."
+  [unknown-type-counter arg-type]
+  (let [current-count (swap! unknown-type-counter inc)]
+    (when (> current-count max-unknown-types-per-execution)
+      (throw (ex-info "Too many unknown types in forward compatibility mode - possible schema mismatch"
+                      {:type :execution-error/unknown-type-limit-exceeded
+                       :unknown-type-count current-count
+                       :max-allowed max-unknown-types-per-execution
+                       :last-unknown-type arg-type
+                       :hint "Check schema version compatibility or disable forward compatibility mode"})))))
+
+
 (defn- type-mismatch?
   "Returns true if provided-value doesn't match the expected arg-type.
 
@@ -312,10 +384,11 @@
    - Unknown types: behavior depends on strict? flag:
      - strict?=true (default): throws exception to catch schema mismatches early
      - strict?=false: returns false (permissive) for forward compatibility
+       with circuit breaker at max-unknown-types-per-execution
 
    This is a runtime check for user-provided arguments only. Values from
    the execution graph (arg-values) are assumed to be already validated."
-  [arg-type provided-value strict?]
+  [arg-type provided-value strict? unknown-type-counter]
   (if (contains? ft/type-validators arg-type)
     (not (ft/valid-type? arg-type provided-value))
     ;; Unknown type - behavior depends on strict mode
@@ -325,16 +398,16 @@
                        :arg-type arg-type
                        :value-type (type provided-value)
                        :hint "Set :strict-type-validation? false in context for forward compatibility"}))
-      ;; Forward compatibility mode: accept unknown types with warning
+      ;; Forward compatibility mode: accept unknown types with warning + circuit breaker
       ;; This allows newer schema versions to introduce new types without
-      ;; breaking existing deployments. The warning helps identify potential issues.
+      ;; breaking existing deployments. Circuit breaker prevents silent failures.
       (do
-        (log/warn "Unknown argument type encountered in forward compatibility mode"
+        (check-unknown-type-circuit-breaker! unknown-type-counter arg-type)
+        ;; Log warning without value preview (security: avoid leaking data)
+        (log/warn "Unknown argument type in forward compatibility mode"
                   {:arg-type arg-type
                    :value-type (type provided-value)
-                   :value-preview (truncate-value provided-value log-value-truncation-length)
-                   :action :accepting-without-validation
-                   :hint "Consider upgrading to support this type natively"})
+                   :action :accepting-without-validation})
         false))))
 
 
@@ -348,12 +421,12 @@
 
    Note: Stored arg-values from the execution graph are not validated here;
    they are assumed to be valid from schema-level checks during creation."
-  [provided-value arg-schema strict?]
+  [provided-value arg-schema strict? unknown-type-counter]
   (when-not (and arg-schema (:type arg-schema))
     (throw (ex-info "Invalid arg-schema: missing type"
                     {:type :execution-error/invalid-arg-schema
                      :arg-schema arg-schema})))
-  (when (type-mismatch? (:type arg-schema) provided-value strict?)
+  (when (type-mismatch? (:type arg-schema) provided-value strict? unknown-type-counter)
     (throw-type-mismatch! arg-schema provided-value)))
 
 
@@ -439,7 +512,8 @@
   "Executes a fn-result-value, using cache for memoization.
    If the fn-result-value-id is already in cache, returns cached value.
    Otherwise executes the underlying fn, caches the result, and returns it.
-   Logs debug info for cache performance monitoring."
+   Logs debug info for cache performance monitoring.
+   Warns if cache grows beyond threshold (potential memory issue)."
   [context fn-result-value-id]
   (let [result-cache (:result-cache context)
         cached (get @result-cache fn-result-value-id)]
@@ -462,8 +536,14 @@
                    {:fn-result-value-id fn-result-value-id
                     :fn-id (:fn-id frv)})
         (let [fn-id (:fn-id frv)
-              result (execute-internal context fn-id nil)]
-          (swap! result-cache assoc fn-result-value-id result)
+              result (execute-internal context fn-id nil)
+              new-size (count (swap! result-cache assoc fn-result-value-id result))]
+          ;; Warn once when cache crosses threshold (check if we just crossed)
+          (when (= new-size result-cache-size-warning-threshold)
+            (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
+                      {:cache-size new-size
+                       :threshold result-cache-size-warning-threshold
+                       :hint "Large caches may indicate unbounded execution graphs"}))
           result)))))
 
 
@@ -484,6 +564,27 @@
                         e))))))
 
 
+(defn- build-uuid-ref-delay
+  "Builds a delay for a UUID reference (fn or fn-result-value).
+   Extracted from build-delay for readability."
+  [context uuid-value arg-name arg-type fn-result-values]
+  (cond
+    ;; fn-result-value reference: execute with caching
+    (contains? fn-result-values uuid-value)
+    (let [frv-context (assoc context :current-frv-id uuid-value)]
+      (wrap-delay-with-context arg-name :fn-result-value
+                               #(execute-fn-result-value frv-context uuid-value)))
+
+    ;; HOF (type=:fn): return fn-id directly for later callable creation
+    (= arg-type :fn)
+    (delay uuid-value)
+
+    ;; Direct fn ref: execute immediately
+    :else
+    (wrap-delay-with-context arg-name :fn-ref
+                             #(execute-internal context uuid-value nil))))
+
+
 (defn- build-delay
   "Builds a delay for an arg-value with error context.
    - If value is a UUID referencing fn-result-value -> delay with cached execution
@@ -501,39 +602,14 @@
 
    All delays include error context (arg-name, source) for better diagnostics."
   ^clojure.lang.Delay [^ExecutionContext context ^clojure.lang.IPersistentMap arg-value ^clojure.lang.IPersistentMap arg-schema]
-  ;; Note: :value can be nil for optional args with null values.
-  ;; arg-values from storage are assumed to have :value key present.
   (let [value (:value arg-value)
-        arg-type (:type arg-schema)
-        arg-name (:name arg-schema)
-        ;; Check if this UUID is a fn-result-value
-        execution-graph (:execution-graph context)
-        fn-result-values (:fn-result-values execution-graph)]
-    (cond
-      ;; UUID value means reference to fn or fn-result-value
-      (uuid? value)
-      (cond
-        ;; Check if it's a fn-result-value reference
-        (contains? fn-result-values value)
-        ;; fn-result-value: execute with caching, set current-frv-id for path-args lookup
-        (let [frv-context (assoc context :current-frv-id value)]
-          (wrap-delay-with-context arg-name :fn-result-value
-                                   #(execute-fn-result-value frv-context value)))
-
-        ;; It's a direct fn reference with :fn type -> HOF
-        (= arg-type :fn)
-        ;; HOF: return fn-id directly (not callable)
-        ;; HOF functions use get-single-required-arg or make-single-arg-callable
-        ;; to create appropriate callables based on their needs
-        (delay value)  ; No wrap needed - just returns UUID, no computation
-
-        :else
-        ;; Direct fn ref with non-:fn type: execute immediately
-        (wrap-delay-with-context arg-name :fn-ref
-                                 #(execute-internal context value nil)))
-
-      ;; Literal value - wrap in delay (no wrap needed for literals - no computation)
-      :else
+        arg-name (:name arg-schema)]
+    (if (uuid? value)
+      ;; UUID: reference to fn or fn-result-value
+      (let [arg-type (:type arg-schema)
+            fn-result-values (-> context :execution-graph :fn-result-values)]
+        (build-uuid-ref-delay context value arg-name arg-type fn-result-values))
+      ;; Literal value
       (delay value))))
 
 
@@ -564,8 +640,8 @@
 
 (defn- handle-provided-arg
   "Handles case when direct provided value exists (from HOF callable)."
-  [provided-value arg-schema strict? arg-name]
-  (validate-provided-arg-type! provided-value arg-schema strict?)
+  [provided-value arg-schema strict? arg-name unknown-type-counter]
+  (validate-provided-arg-type! provided-value arg-schema strict? unknown-type-counter)
   (wrap-delay-with-context arg-name :provided-arg #(identity provided-value)))
 
 
@@ -592,8 +668,8 @@
 
 (defn- handle-path-arg-only
   "Handles case when path-arg exists and no DB value."
-  [path-arg-value arg-schema strict? arg-name]
-  (validate-provided-arg-type! path-arg-value arg-schema strict?)
+  [path-arg-value arg-schema strict? arg-name unknown-type-counter]
+  (validate-provided-arg-type! path-arg-value arg-schema strict? unknown-type-counter)
   (wrap-delay-with-context arg-name :path-arg #(identity path-arg-value)))
 
 
@@ -643,7 +719,8 @@
   [context fn-data provided-args]
   (let [{:keys [arg-schemas arg-values]} fn-data
         current-frv-id (:current-frv-id context)
-        strict? (:strict-type-validation? context)]
+        strict? (:strict-type-validation? context)
+        unknown-type-counter (:unknown-type-counter context)]
     (reduce-kv
       (fn [acc arg-schema-id arg-schema]
         (let [arg-name (:name arg-schema)
@@ -654,7 +731,7 @@
           (cond
             ;; 1. Direct provided value (from HOF callable)
             (some? provided-value)
-            (assoc acc arg-name-kw (handle-provided-arg provided-value arg-schema strict? arg-name))
+            (assoc acc arg-name-kw (handle-provided-arg provided-value arg-schema strict? arg-name unknown-type-counter))
 
             ;; 2. Path-arg value exists
             (some? path-arg-value)
@@ -664,7 +741,7 @@
                      (handle-path-arg-with-db-value context arg-value arg-schema
                                                     arg-schema-id arg-name path-arg-value)
                      ;; No DB value - use path-arg
-                     (handle-path-arg-only path-arg-value arg-schema strict? arg-name)))
+                     (handle-path-arg-only path-arg-value arg-schema strict? arg-name unknown-type-counter)))
 
             ;; 3. Stored arg-value exists
             arg-value

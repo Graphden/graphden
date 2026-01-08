@@ -1237,7 +1237,7 @@
             (validate-single-ref-fn :entity :field :unknown-type :ref-name {} {}))))))
 
 
-(deftest identifier-length-validation-test
+(deftest identifier-validation-test
   (testing "enum value name too long throws"
     (let [long-value (keyword (str/join (repeat 64 "a")))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -1250,4 +1250,18 @@
     (let [max-value (keyword (str/join (repeat 63 "a")))]
       (is (some? (-> (mds/create-builder)
                      (ds/add-enum :status (uuid) [{:uuid (uuid) :value max-value}])
-                     ds/build))))))
+                     ds/build)))))
+
+  (testing "enum value with invalid pattern throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Invalid identifier name"
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) [{:uuid (uuid) :value :Invalid}])
+              ds/build))))
+
+  (testing "enum value starting with number throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Invalid identifier name"
+          (-> (mds/create-builder)
+              (ds/add-enum :status (uuid) [{:uuid (uuid) :value (keyword "1invalid")}])
+              ds/build)))))

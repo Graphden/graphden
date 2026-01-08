@@ -2,7 +2,7 @@
 
 [![Clojure](https://img.shields.io/badge/Clojure-1.12-blue.svg)](https://clojure.org/)
 [![Polylith](https://img.shields.io/badge/architecture-Polylith-purple.svg)](https://polylith.gitbook.io/)
-[![Coverage](https://img.shields.io/badge/coverage-96%25-brightgreen.svg)](#testing)
+[![Coverage](https://img.shields.io/badge/coverage-95%25-brightgreen.svg)](#testing)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
 **Visual functional programming environment and distributed execution runtime** — a function graph stored in a database.
@@ -129,7 +129,7 @@ bb coverage
 open target/coverage/index.html
 ```
 
-Current coverage: **96% forms / 98% lines**
+Current coverage: **95% forms / 98% lines**
 
 ## License
 

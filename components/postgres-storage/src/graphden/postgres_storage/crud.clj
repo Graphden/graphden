@@ -294,7 +294,14 @@
 (defn- classify-uuid-refs
   "Classifies UUID references as either fn refs or fn-result-value refs.
    Returns {:fn-ids #{...} :frv-ids #{...}}.
-   Gracefully handles missing fn_result_value table (returns empty frv-ids)."
+
+   BACKWARD COMPATIBILITY: Gracefully handles missing fn_result_value table
+   by returning empty frv-ids. This supports older schemas that don't have
+   the fn_result_value entity yet. Note: this is the ONLY place that handles
+   missing fn_result_value table - other code paths assume it exists.
+
+   For new deployments, ensure your schema includes :fn-result-value entity.
+   This grace fallback will be removed in a future major version."
   [ds uuid-candidates]
   (if (empty? uuid-candidates)
     {:fn-ids #{} :frv-ids #{}}
@@ -317,7 +324,10 @@
                          (catch java.sql.SQLException e
                            ;; 42P01 = undefined_table in PostgreSQL
                            (if (= "42P01" (java.sql.SQLException/.getSQLState e))
-                             []
+                             (do
+                               (log/warn "fn_result_value table not found - using legacy mode without fn-result-values. "
+                                         "Add :fn-result-value entity to your schema to enable nested function support.")
+                               [])
                              (throw e))))]
           {:fn-ids (set (map :id fn-rows))
            :frv-ids (set (map :id frv-rows))})))))

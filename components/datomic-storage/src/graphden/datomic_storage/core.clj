@@ -842,9 +842,38 @@
    :new-schema (atom [])})
 
 
-(defn- context->changes
-  "Extracts changes map from migration context."
+(defn- validate-migration-context!
+  "Validates that migration context is internally consistent.
+   Catches logical errors that could indicate partial/corrupted state.
+   Throws if validation fails."
   [ctx]
+  (let [created-entities (set @(:created-entities ctx))
+        renamed-entities-old (set (keys @(:renamed-entities ctx)))
+        renamed-entities-new (set (vals @(:renamed-entities ctx)))
+        created-enums (set @(:created-enums ctx))
+        renamed-enums-old (set (keys @(:renamed-enums ctx)))]
+    ;; Entity cannot be both created and renamed (from old name)
+    (when-let [overlap (seq (set/intersection created-entities renamed-entities-old))]
+      (throw (ex-info "Migration context inconsistency: entity both created and renamed-from"
+                      {:type :migration-error/context-inconsistent
+                       :overlap overlap})))
+    ;; Created entity name shouldn't match a renamed-to name (would indicate duplicate)
+    (when-let [overlap (seq (set/intersection created-entities renamed-entities-new))]
+      (throw (ex-info "Migration context inconsistency: entity created with same name as rename target"
+                      {:type :migration-error/context-inconsistent
+                       :overlap overlap})))
+    ;; Enum cannot be both created and renamed
+    (when-let [overlap (seq (set/intersection created-enums renamed-enums-old))]
+      (throw (ex-info "Migration context inconsistency: enum both created and renamed-from"
+                      {:type :migration-error/context-inconsistent
+                       :overlap overlap})))))
+
+
+(defn- context->changes
+  "Extracts changes map from migration context.
+   Validates context consistency before returning."
+  [ctx]
+  (validate-migration-context! ctx)
   {:entities {:created @(:created-entities ctx) :renamed @(:renamed-entities ctx)}
    :fields {:created @(:created-fields ctx) :renamed @(:renamed-fields ctx)}
    :enums {:created @(:created-enums ctx) :renamed @(:renamed-enums ctx)}

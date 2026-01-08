@@ -234,17 +234,21 @@
     [_this schema]
     (sp/with-write-lock rw-lock
                         (fn []
-                          ;; Perform migration first, only invalidate cache on success.
-                          ;; If migration fails, cache remains valid (reflects old schema).
-                          ;; If migration succeeds, cache is invalidated so next read fetches new state.
+                          ;; Invalidate cache BEFORE migration to prevent stale reads.
                           ;;
-                          ;; Note: We invalidate AFTER success because:
-                          ;; 1. If migration fails, old cache is still valid
-                          ;; 2. Concurrent readers during migration see old (consistent) cache
-                          ;; 3. After success, readers will refresh cache from new DB state
-                          (let [result (migration/do-initialize pool schema)]
-                            (reset! metadata-cache nil)
-                            result))))
+                          ;; Why invalidate before, not after?
+                          ;; - If we invalidate after and migration partially fails (DDL succeeds
+                          ;;   but metadata update fails), concurrent readers during recovery
+                          ;;   would still see old cached metadata while DB has new schema.
+                          ;; - By invalidating before, any read during/after migration will
+                          ;;   fetch fresh state from DB, ensuring consistency.
+                          ;; - The write lock prevents concurrent reads during the critical section,
+                          ;;   so this is safe even with eager invalidation.
+                          ;;
+                          ;; If migration throws, cache stays nil - next read refreshes from DB.
+                          ;; This is correct: DB state is authoritative, cache is just optimization.
+                          (reset! metadata-cache nil)
+                          (migration/do-initialize pool schema))))
 
 
   (close

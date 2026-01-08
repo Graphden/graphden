@@ -209,6 +209,12 @@
                  (not storage)
                  (conj {:error "Storage is required"})
 
+                 ;; Storage protocol validation - catch wrong type early with clear error
+                 ;; rather than cryptic "No implementation of method" later at first CRUD call
+                 (and storage (not (satisfies? sp/ExecutionGraph storage)))
+                 (conj {:error "storage must implement ExecutionGraph protocol"
+                        :received-type (type storage)})
+
                  ;; Optional timeout-ms validation
                  (and timeout-ms (< timeout-ms min-timeout-ms))
                  (conj {:error (str "timeout-ms must be at least " min-timeout-ms "ms")

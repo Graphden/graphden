@@ -4,7 +4,23 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.executor.core :as core]))
+    [graphden.executor.core :as core]
+    [graphden.storage-protocol.interface :as sp]))
+
+
+;; === Mock storage for validation tests ===
+;; Minimal implementation that satisfies ExecutionGraph protocol
+;; Used only for context creation validation, not actual execution
+
+(defrecord MockStorage
+  []
+
+  sp/ExecutionGraph
+
+  (resolve-execution-graph
+    [_this _fn-id]
+    ;; Not used in validation tests
+    nil))
 
 
 ;; === truncate-value tests ===
@@ -119,54 +135,62 @@
                           #"Storage is required"
           (core/create-context {}))))
 
+  (testing "rejects storage without ExecutionGraph protocol"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"storage must implement ExecutionGraph protocol"
+          (core/create-context {:storage :not-a-storage})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"storage must implement ExecutionGraph protocol"
+          (core/create-context {:storage {:fake "storage"}}))))
+
   (testing "rejects timeout below minimum"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"timeout-ms must be at least"
-          (core/create-context {:storage :mock :timeout-ms 10}))))
+          (core/create-context {:storage (->MockStorage) :timeout-ms 10}))))
 
   (testing "rejects non-positive max-depth"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"max-depth must be a positive integer"
-          (core/create-context {:storage :mock :max-depth 0})))
+          (core/create-context {:storage (->MockStorage) :max-depth 0})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"max-depth must be a positive integer"
-          (core/create-context {:storage :mock :max-depth -1}))))
+          (core/create-context {:storage (->MockStorage) :max-depth -1}))))
 
   (testing "rejects max-depth exceeding limit"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"max-depth exceeds maximum allowed"
-          (core/create-context {:storage :mock :max-depth 200000}))))
+          (core/create-context {:storage (->MockStorage) :max-depth 200000}))))
 
   (testing "rejects non-map path-args"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"path-args must be a map"
-          (core/create-context {:storage :mock :path-args [1 2 3]}))))
+          (core/create-context {:storage (->MockStorage) :path-args [1 2 3]}))))
 
   (testing "rejects invalid path-args keys"
     (let [uuid1 (random-uuid)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args keys must be UUID"
-            (core/create-context {:storage :mock
+            (core/create-context {:storage (->MockStorage)
                                   :path-args {"string-key" 42}})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args keys must be UUID"
-            (core/create-context {:storage :mock
+            (core/create-context {:storage (->MockStorage)
                                   :path-args {:keyword-key 42}})))
       ;; Vector with wrong size
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args keys must be UUID"
-            (core/create-context {:storage :mock
+            (core/create-context {:storage (->MockStorage)
                                   :path-args {[uuid1] 42}})))
       ;; Vector with non-UUID
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args keys must be UUID"
-            (core/create-context {:storage :mock
+            (core/create-context {:storage (->MockStorage)
                                   :path-args {[uuid1 "not-uuid"] 42}})))))
 
   (testing "accepts valid path-args keys"
     (let [uuid1 (random-uuid)
           uuid2 (random-uuid)
-          ctx (core/create-context {:storage :mock
+          ctx (core/create-context {:storage (->MockStorage)
                                     :path-args {uuid1 42
                                                 [uuid1 uuid2] "nested"}})]
       (is (some? ctx))
@@ -177,7 +201,7 @@
 (deftest create-context-path-args-count-test
   (testing "accepts reasonable number of path-args"
     (let [path-args (into {} (map (fn [_] [(random-uuid) "value"]) (range 100)))]
-      (is (some? (core/create-context {:storage :mock :path-args path-args})))))
+      (is (some? (core/create-context {:storage (->MockStorage) :path-args path-args})))))
 
   (testing "rejects excessive path-args count"
     ;; This tests the max-path-args-count limit (10000)
@@ -186,12 +210,12 @@
     (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 10001)))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args count exceeds maximum"
-            (core/create-context {:storage :mock :path-args large-path-args})))))
+            (core/create-context {:storage (->MockStorage) :path-args large-path-args})))))
 
   (testing "path-args count error includes details"
     (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 10001)))]
       (try
-        (core/create-context {:storage :mock :path-args large-path-args})
+        (core/create-context {:storage (->MockStorage) :path-args large-path-args})
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)

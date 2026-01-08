@@ -291,46 +291,52 @@
           (map row->entity rows))))))
 
 
-(defn- classify-uuid-refs
-  "Classifies UUID references as either fn refs or fn-result-value refs.
-   Returns {:fn-ids #{...} :frv-ids #{...}}.
+(defn- classify-and-load-refs
+  "Classifies UUID references and loads fn-result-values in a single query.
+   Returns {:fn-ids #{...} :frv-ids #{...} :fn-result-values {...}}.
+
+   Uses UNION ALL to classify refs and load frv data in one round-trip.
 
    BACKWARD COMPATIBILITY: Gracefully handles missing fn_result_value table
    by returning empty frv-ids. This supports older schemas that don't have
-   the fn_result_value entity yet. Note: this is the ONLY place that handles
-   missing fn_result_value table - other code paths assume it exists.
-
-   For new deployments, ensure your schema includes :fn-result-value entity.
-   This grace fallback will be removed in a future major version."
+   the fn_result_value entity yet."
   [ds uuid-candidates]
   (if (empty? uuid-candidates)
-    {:fn-ids #{} :frv-ids #{}}
+    {:fn-ids #{} :frv-ids #{} :fn-result-values {}}
     (let [uuids-vec (vec uuid-candidates)
-          ;; Query fn table
-          fn-query (sql/format {:select [:id]
-                                :from [:fn]
-                                :where [:in :id uuids-vec]}
-                               {:quoted true})
-          ;; Query fn_result_value table (may not exist in older schemas)
-          frv-query (sql/format {:select [:id]
-                                 :from [:fn_result_value]
-                                 :where [:in :id uuids-vec]}
-                                {:quoted true})]
-      (with-crud-error-handling :classify-uuid-refs {:candidate-count (count uuid-candidates)}
-        (let [fn-rows (jdbc/execute! ds fn-query (util/query-opts))
-              ;; Try to query fn_result_value, but handle table-not-found gracefully
-              frv-rows (try
-                         (jdbc/execute! ds frv-query (util/query-opts))
-                         (catch java.sql.SQLException e
-                           ;; 42P01 = undefined_table in PostgreSQL
-                           (if (= "42P01" (java.sql.SQLException/.getSQLState e))
-                             (do
-                               (log/warn "fn_result_value table not found - using legacy mode without fn-result-values. "
-                                         "Add :fn-result-value entity to your schema to enable nested function support.")
-                               [])
-                             (throw e))))]
-          {:fn-ids (set (map :id fn-rows))
-           :frv-ids (set (map :id frv-rows))})))))
+          ;; Combined query: classify refs AND load frv data in one query
+          ;; Returns rows with entity_type = 'fn' or 'frv'
+          combined-query
+          [(str "SELECT 'fn' as entity_type, id, NULL::uuid as fn_id FROM fn WHERE id = ANY(?)"
+                " UNION ALL "
+                "SELECT 'frv' as entity_type, id, fn_id FROM fn_result_value WHERE id = ANY(?)")
+           (into-array java.util.UUID uuids-vec)
+           (into-array java.util.UUID uuids-vec)]]
+      (with-crud-error-handling :classify-and-load-refs {:candidate-count (count uuid-candidates)}
+        (let [rows (try
+                     (jdbc/execute! ds combined-query (util/query-opts))
+                     (catch java.sql.SQLException e
+                       ;; 42P01 = undefined_table in PostgreSQL (fn_result_value missing)
+                       (if (= "42P01" (java.sql.SQLException/.getSQLState e))
+                         (do
+                           (log/warn "fn_result_value table not found - using legacy mode without fn-result-values. "
+                                     "Add :fn-result-value entity to your schema to enable nested function support.")
+                           ;; Fall back to fn-only query
+                           (let [fn-query (sql/format {:select [:id] :from [:fn]
+                                                       :where [:in :id uuids-vec]} {:quoted true})]
+                             (map #(assoc % :entity_type "fn") (jdbc/execute! ds fn-query (util/query-opts)))))
+                         (throw e))))]
+          (reduce
+            (fn [acc row]
+              (case (:entity_type row)
+                "fn" (update acc :fn-ids conj (:id row))
+                "frv" (-> acc
+                          (update :frv-ids conj (:id row))
+                          (assoc-in [:fn-result-values (:id row)]
+                                    {:id (:id row) :fn-id (:fn_id row)}))
+                acc))
+            {:fn-ids #{} :frv-ids #{} :fn-result-values {}}
+            rows))))))
 
 
 (defn- load-entities-batch
@@ -369,13 +375,6 @@
   (load-entities-batch ds :arg_schema :fn_schema_id fn-schema-ids))
 
 
-(defn- load-fn-result-values-batch
-  "Loads fn-result-values by their IDs.
-   Returns {fn-result-value-id -> fn-result-value-record}."
-  [ds frv-ids]
-  (load-entities-batch ds :fn_result_value :id frv-ids))
-
-
 (defn resolve-execution-graph
   "Resolves complete execution graph for a function.
    Uses batched BFS to collect all transitively referenced functions and fn-result-values.
@@ -396,14 +395,15 @@
     ;; Phase 1: Discover all fn-ids and fn-result-values in the graph using batched BFS
     (loop [to-visit #{fn-id}
            visited #{}
-           ;; Accumulate: fn-id -> parent-chain, fn-id -> merged-args
+           ;; Accumulate: fn-id -> parent-chain, fn-id -> merged-args, frv-id -> frv
            all-chains {}
            all-merged-args {}
-           all-frv-ids #{}
+           all-fn-result-values {}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
-        ;; Phase 2: Batch load all data
+        ;; Phase 2: Batch load all data (fns, fn-schemas, arg-schemas)
+        ;; Note: fn-result-values are already loaded during discovery
         (let [all-fn-ids (set (keys all-chains))
               ;; Load all fns
               fns (load-fns-batch ds all-fn-ids)
@@ -414,15 +414,13 @@
               ;; Load all fn-schemas
               fn-schemas (load-fn-schemas-batch ds fn-schema-ids)
               ;; Load all arg-schemas
-              arg-schemas (load-arg-schemas-batch ds fn-schema-ids)
-              ;; Load all fn-result-values
-              fn-result-values (load-fn-result-values-batch ds all-frv-ids)]
+              arg-schemas (load-arg-schemas-batch ds fn-schema-ids)]
           (sp/->execution-graph
             {:fns fns
              :fn-schemas fn-schemas
              :arg-schemas arg-schemas
              :resolved-args all-merged-args
-             :fn-result-values fn-result-values}))
+             :fn-result-values all-fn-result-values}))
         ;; Process batch of pending fn-ids
         (let [batch (vec to-visit)
               new-visited (into visited batch)
@@ -447,17 +445,16 @@
                                       (set))
               ;; Remove already visited
               new-candidates (set/difference all-potential-refs new-visited)
-              ;; Classify refs as fn or fn-result-value
-              {:keys [fn-ids frv-ids]} (classify-uuid-refs ds new-candidates)
-              ;; Load fn-result-values to get their fn-ids
-              new-frvs (load-fn-result-values-batch ds frv-ids)
+              ;; Classify refs AND load fn-result-values in one query (optimization)
+              {:keys [fn-ids fn-result-values]}
+              (classify-and-load-refs ds new-candidates)
               ;; Add fn-ids from fn-result-values to visit set
-              frv-fn-ids (set (map :fn-id (vals new-frvs)))
+              frv-fn-ids (set (map :fn-id (vals fn-result-values)))
               ;; Combine direct fn refs + fn refs from fn-result-values
               all-new-fn-refs (set/union fn-ids (set/difference frv-fn-ids new-visited))]
           (recur all-new-fn-refs
                  new-visited
                  (merge all-chains chains)
                  (merge all-merged-args merged-args-batch)
-                 (set/union all-frv-ids frv-ids)
+                 (merge all-fn-result-values fn-result-values)
                  (+ iter-count (count batch))))))))

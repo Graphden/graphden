@@ -1271,25 +1271,28 @@
            rows))))
 
 
-(defn- classify-uuid-refs
-  "Classifies UUID references as either fn refs or fn-result-value refs.
-   Returns {:fn-ids #{...} :frv-ids #{...}}.
-   Gracefully handles missing fn-result-value attribute (returns empty frv-ids)."
+(defn- classify-and-load-refs
+  "Classifies UUID references and loads fn-result-values in combined queries.
+   Returns {:fn-ids #{...} :frv-ids #{...} :fn-result-values {...}}.
+   Gracefully handles missing fn-result-value attribute."
   [db uuid-candidates]
   (if (empty? uuid-candidates)
-    {:fn-ids #{} :frv-ids #{}}
+    {:fn-ids #{} :frv-ids #{} :fn-result-values {}}
     (let [uuids-vec (vec uuid-candidates)
+          ;; Query fn refs
           fn-results (d/q '[:find ?fn-id
                             :in $ [?fn-id ...]
                             :where
                             [?e :fn/id ?fn-id]]
                           db uuids-vec)
-          ;; Try to query fn-result-value, handle missing attribute gracefully
+          ;; Query fn-result-values WITH their fn-ids (combined classify + load)
+          ;; Handle missing attribute gracefully
           frv-results (try
-                        (d/q '[:find ?frv-id
+                        (d/q '[:find ?frv-id ?fn-id
                                :in $ [?frv-id ...]
                                :where
-                               [?e :fn-result-value/id ?frv-id]]
+                               [?e :fn-result-value/id ?frv-id]
+                               [?e :fn-result-value/fn-id ?fn-id]]
                              db uuids-vec)
                         (catch clojure.lang.ExceptionInfo e
                           ;; :db.error/not-an-entity means attribute doesn't exist
@@ -1297,26 +1300,11 @@
                             []
                             (throw e))))]
       {:fn-ids (set (map first fn-results))
-       :frv-ids (set (map first frv-results))})))
-
-
-(defn- load-fn-result-values-batch
-  "Loads fn-result-values by their IDs.
-   Returns {fn-result-value-id -> fn-result-value-record}."
-  [db frv-ids]
-  (if (empty? frv-ids)
-    {}
-    (let [rows (d/q '[:find ?id ?fn-id
-                      :in $ [?id ...]
-                      :where
-                      [?e :fn-result-value/id ?id]
-                      [?e :fn-result-value/fn-id ?fn-id]]
-                    db (vec frv-ids))]
-      (->> rows
-           (map (fn [[id fn-id]]
-                  [id {:id id
-                       :fn-id fn-id}]))
-           (into {})))))
+       :frv-ids (set (map first frv-results))
+       :fn-result-values (->> frv-results
+                              (map (fn [[frv-id fn-id]]
+                                     [frv-id {:id frv-id :fn-id fn-id}]))
+                              (into {}))})))
 
 
 (defn- load-fns-batch
@@ -1409,27 +1397,27 @@
 
 (defn- load-final-graph-data
   "Phase 2: Batch load all data for the discovered graph.
+   fn-result-values are already loaded during discovery (optimization).
    Returns the complete execution graph map."
-  [db all-chains all-merged-args all-frv-ids]
+  [db all-chains all-merged-args all-fn-result-values]
   (let [all-fn-ids (set (keys all-chains))
         fns (load-fns-batch db all-fn-ids)
         fn-schema-ids (->> (vals fns)
                            (map :fn-schema-id)
                            (set))
         fn-schemas (load-fn-schemas-batch db fn-schema-ids)
-        arg-schemas (load-arg-schemas-batch db fn-schema-ids)
-        fn-result-values (load-fn-result-values-batch db all-frv-ids)]
+        arg-schemas (load-arg-schemas-batch db fn-schema-ids)]
     (sp/->execution-graph
       {:fns fns
        :fn-schemas fn-schemas
        :arg-schemas arg-schemas
        :resolved-args all-merged-args
-       :fn-result-values fn-result-values})))
+       :fn-result-values all-fn-result-values})))
 
 
 (defn- process-discovery-batch
   "Processes a batch of fn-ids during graph discovery.
-   Returns map with :next-to-visit, :new-visited, :chains, :merged-args, :frv-ids."
+   Returns map with :next-to-visit, :new-visited, :chains, :merged-args, :fn-result-values."
   [db batch visited]
   (let [new-visited (into visited batch)
         ;; Batch load parent chains
@@ -1448,16 +1436,15 @@
                                 (mapcat sp/extract-uuid-refs-from-arg-values)
                                 (set))
         new-candidates (set/difference all-potential-refs new-visited)
-        ;; Classify and resolve fn-result-values
-        {:keys [fn-ids frv-ids]} (classify-uuid-refs db new-candidates)
-        new-frvs (load-fn-result-values-batch db frv-ids)
-        frv-fn-ids (set (map :fn-id (vals new-frvs)))
+        ;; Classify AND load fn-result-values in one query (optimization)
+        {:keys [fn-ids fn-result-values]} (classify-and-load-refs db new-candidates)
+        frv-fn-ids (set (map :fn-id (vals fn-result-values)))
         next-to-visit (set/union fn-ids (set/difference frv-fn-ids new-visited))]
     {:next-to-visit next-to-visit
      :new-visited new-visited
      :chains chains
      :merged-args merged-args-batch
-     :frv-ids frv-ids}))
+     :fn-result-values fn-result-values}))
 
 
 (defn- resolve-execution-graph-impl
@@ -1470,7 +1457,8 @@
    2. Batch load parent chains
    3. Batch load arg-values for all chain members
    4. Extract fn-refs and fn-result-value refs, continue until graph is complete
-   5. Final batch load of all fns, fn-schemas, arg-schemas, fn-result-values"
+   5. Final batch load of all fns, fn-schemas, arg-schemas
+   Note: fn-result-values are loaded during discovery (optimization)"
   [conn fn-id]
   (let [db (d/db conn)]
     (check-fn-exists! db fn-id)
@@ -1479,12 +1467,12 @@
            visited #{}
            all-chains {}
            all-merged-args {}
-           all-frv-ids #{}
+           all-fn-result-values {}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
-        ;; Phase 2: Load final graph data
-        (load-final-graph-data db all-chains all-merged-args all-frv-ids)
+        ;; Phase 2: Load final graph data (fn-result-values already loaded)
+        (load-final-graph-data db all-chains all-merged-args all-fn-result-values)
         ;; Process batch
         (let [batch (vec to-visit)
               result (process-discovery-batch db batch visited)]
@@ -1492,7 +1480,7 @@
                  (:new-visited result)
                  (merge all-chains (:chains result))
                  (merge all-merged-args (:merged-args result))
-                 (set/union all-frv-ids (:frv-ids result))
+                 (merge all-fn-result-values (:fn-result-values result))
                  (+ iter-count (count batch))))))))
 
 

@@ -167,6 +167,12 @@
         (is (= :mul (:operation (ex-data e))))
         (is (= 2 (:num-count (ex-data e)))))))
 
+  (testing "NaN result throws"
+    ;; Test the private function directly to cover the NaN branch
+    ;; NaN can occur from 0.0/0.0 in floating point, but our div catches that first
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"NaN"
+          (#'core/check-numeric-result! Double/NaN :test [1 2]))))
+
   (testing "mod"
     (is (= 1 (call-base-fn :mod {:a 7 :b 3})))
     (is (zero? (call-base-fn :mod {:a 6 :b 2}))))

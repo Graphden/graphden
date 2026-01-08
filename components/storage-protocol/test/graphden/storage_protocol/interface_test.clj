@@ -1489,7 +1489,13 @@
 
   (testing "handles mixed keys"
     (is (= {:name "test" :password "[REDACTED]"}
-           (storage/redact-sensitive-map {:name "test" :password "secret"})))))
+           (storage/redact-sensitive-map {:name "test" :password "secret"}))))
+
+  (testing "handles string keys for sensitive fields"
+    (is (= {"password" "[REDACTED]"}
+           (storage/redact-sensitive-map {"password" "secret123"})))
+    (is (= {"api_key" "[REDACTED]"}
+           (storage/redact-sensitive-map {"api_key" "abc123"})))))
 
 
 (deftest redact-sensitive-deep-test

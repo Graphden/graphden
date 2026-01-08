@@ -170,6 +170,9 @@
    Logs the error with context for debugging.
    Returns an ex-info with :type, :sql-state, and operation context.
 
+   SECURITY: Context is redacted before logging to prevent sensitive data leakage.
+   The raw exception is NOT logged to avoid exposing SQL details.
+
    Parameters:
    - e: SQLException to wrap
    - log-prefix: String prefix for log message (e.g., \"Database error\", \"DDL error\")
@@ -179,14 +182,22 @@
   (let [error-type (classify-sql-error e)
         sql-state (java.sql.SQLException/.getSQLState e)
         message (java.sql.SQLException/.getMessage e)
+        ;; Redact sensitive data from context before logging
+        safe-context (sp/redact-sensitive-deep context)
         error-data (merge {:type error-type
                            :operation operation
                            :sql-state sql-state
                            :message message}
-                          context)]
-    (log/warn e log-prefix error-data)
+                          safe-context)]
+    ;; Log without raw exception to avoid exposing SQL internals
+    (log/warn log-prefix error-data)
     (ex-info (str log-prefix " during " (name operation) ": " message)
-             error-data
+             ;; Keep original context in exception for debugging (not logged)
+             (merge {:type error-type
+                     :operation operation
+                     :sql-state sql-state
+                     :message message}
+                    context)
              e)))
 
 

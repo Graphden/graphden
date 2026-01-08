@@ -302,32 +302,22 @@
             ;; Datomic can throw ExceptionInfo for query errors, RuntimeException for
             ;; connection issues, and IllegalArgumentException for malformed queries.
             ;; We catch these specifically to avoid masking critical errors like OOM.
+            wrap-constraint-error (fn [e suffix]
+                                    (ex-info (str "Failed to validate unique constraint" suffix)
+                                             {:type :validation-error/constraint-check-failed
+                                              :entity entity-name
+                                              :fields fields
+                                              :query base-query
+                                              :cause (ex-message e)}
+                                             e))
             results (try
                       (d/q base-query db)
                       (catch clojure.lang.ExceptionInfo e
-                        (throw (ex-info "Failed to validate unique constraint"
-                                        {:type :validation-error/constraint-check-failed
-                                         :entity entity-name
-                                         :fields fields
-                                         :query base-query
-                                         :cause (ex-message e)}
-                                        e)))
+                        (throw (wrap-constraint-error e "")))
                       (catch IllegalArgumentException e
-                        (throw (ex-info "Failed to validate unique constraint: invalid query"
-                                        {:type :validation-error/constraint-check-failed
-                                         :entity entity-name
-                                         :fields fields
-                                         :query base-query
-                                         :cause (ex-message e)}
-                                        e)))
+                        (throw (wrap-constraint-error e ": invalid query")))
                       (catch RuntimeException e
-                        (throw (ex-info "Failed to validate unique constraint: runtime error"
-                                        {:type :validation-error/constraint-check-failed
-                                         :entity entity-name
-                                         :fields fields
-                                         :query base-query
-                                         :cause (ex-message e)}
-                                        e))))
+                        (throw (wrap-constraint-error e ": runtime error"))))
             ;; Filter out the exclude-id (for updates)
             conflicting (if exclude-id
                           (filter #(not= (second %) exclude-id) results)

@@ -50,9 +50,11 @@
 
 (def ^:private identifier-pattern
   "Pattern for valid identifiers (entity names, field names, enum values).
-   Must start with letter, contain only letters/digits/hyphens, not end with hyphen.
-   This ensures safe conversion to SQL identifiers (kebab-case → snake_case)."
-  #"^[a-zA-Z][a-zA-Z0-9]*(-[a-zA-Z0-9]+)*$")
+   Must start with lowercase letter, contain only lowercase letters/digits/hyphens.
+   Lowercase-only ensures compatibility with PostgreSQL identifier rules
+   (PostgreSQL folds unquoted identifiers to lowercase).
+   kebab-case → snake_case conversion: my-entity → my_entity"
+  #"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 
 (defn- valid-identifier-name?
@@ -68,7 +70,7 @@
   [context kw]
   (when-not (valid-identifier-name? kw)
     (throw (ex-info (str "Invalid identifier name: " kw ". "
-                         "Must start with letter, contain only letters/digits/hyphens.")
+                         "Must start with lowercase letter, contain only lowercase letters/digits/hyphens.")
                     {:type :schema-error/invalid-identifier
                      :context context
                      :value kw

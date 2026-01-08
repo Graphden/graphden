@@ -105,15 +105,50 @@
       (UUID. (java.nio.ByteBuffer/.getLong result-buf) (java.nio.ByteBuffer/.getLong result-buf)))))
 
 
+(def ^:private identifier-pattern
+  "Pattern for valid function/argument names.
+   Must start with letter or underscore, contain only alphanumeric, underscore, hyphen.
+   May end with ? for predicate functions (Clojure convention)."
+  #"^[a-zA-Z_][a-zA-Z0-9_-]*\??$")
+
+
+(defn- validate-identifier!
+  "Validates that a name is a valid identifier for function or argument.
+   Throws if invalid. Empty strings, special characters, etc. are rejected."
+  [name-type name-value]
+  (let [s (if (keyword? name-value) (name name-value) (str name-value))]
+    (when (or (nil? s) (empty? s))
+      (throw (ex-info (str name-type " cannot be empty")
+                      {:type :invalid-identifier
+                       :name-type name-type
+                       :name-value name-value})))
+    (when (> (count s) 128)
+      (throw (ex-info (str name-type " exceeds maximum length of 128 characters")
+                      {:type :invalid-identifier
+                       :name-type name-type
+                       :name-value s
+                       :length (count s)})))
+    (when-not (re-matches identifier-pattern s)
+      (throw (ex-info (str name-type " contains invalid characters: must start with letter/underscore, contain only alphanumeric, underscore, hyphen")
+                      {:type :invalid-identifier
+                       :name-type name-type
+                       :name-value s})))))
+
+
 (defn fn-schema-uuid
-  "Generates deterministic UUID for a base function's fn-schema."
+  "Generates deterministic UUID for a base function's fn-schema.
+   Validates that fn-name is a valid identifier."
   [fn-name]
+  (validate-identifier! "fn-name" fn-name)
   (uuid-v5 base-fn-namespace-uuid (str "fn-schema:" (name fn-name))))
 
 
 (defn arg-schema-uuid
-  "Generates deterministic UUID for a base function's arg-schema."
+  "Generates deterministic UUID for a base function's arg-schema.
+   Validates that both fn-name and arg-name are valid identifiers."
   [fn-name arg-name]
+  (validate-identifier! "fn-name" fn-name)
+  (validate-identifier! "arg-name" arg-name)
   (uuid-v5 base-fn-namespace-uuid (str "arg-schema:" (name fn-name) ":" (name arg-name))))
 
 

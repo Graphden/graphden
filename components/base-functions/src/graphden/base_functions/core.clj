@@ -15,6 +15,19 @@
    and automatically deref'd. Arguments with :fn type are automatically
    wrapped as callables via make-single-arg-callable.
 
+   ## Optional Arguments Convention
+
+   Optional arguments MUST use the map form with explicit :required false:
+
+     {:args {:x :int                              ; required (shorthand)
+             :y {:type :int :required false}}}    ; optional (explicit)
+
+   Do NOT use shorthand for optional args - always use the explicit map form.
+   This ensures clarity about which arguments are optional.
+
+   In the function body, use `or` with default value:
+     (let [actual-y (or y 0)] ...)
+
    Registration and storage sync should be done by consuming components
    using fn-registry."
   (:require
@@ -433,6 +446,10 @@
 (defbase repeat-fn
   {:args {:n :int, :x :any}
    :return-type :jsonb}
+  (when (neg? n)
+    (throw (ex-info "repeat count cannot be negative"
+                    {:type :execution-error/invalid-repeat-count
+                     :n n})))
   (when (> n max-repeat-size)
     (throw (ex-info (str "repeat count " n " exceeds max allowed " max-repeat-size)
                     {:type :execution-error/repeat-too-large

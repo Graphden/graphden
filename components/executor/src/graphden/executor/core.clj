@@ -467,8 +467,25 @@
           result)))))
 
 
+(defn- wrap-delay-with-context
+  "Wraps a delay body with error context for better diagnostics.
+   When the delay fails to evaluate, the error includes arg-name and source info.
+   This helps diagnose which argument caused the failure in complex execution graphs."
+  [arg-name source body-fn]
+  (delay
+    (try
+      (body-fn)
+      (catch Exception e
+        (throw (ex-info (str "Error evaluating argument '" arg-name "': " (ex-message e))
+                        {:type :execution-error/arg-evaluation-failed
+                         :arg-name arg-name
+                         :source source
+                         :cause-type (type e)}
+                        e))))))
+
+
 (defn- build-delay
-  "Builds a delay for an arg-value.
+  "Builds a delay for an arg-value with error context.
    - If value is a UUID referencing fn-result-value -> delay with cached execution
    - If value is a UUID referencing fn and arg-schema type is :fn -> delay with callable (HOF, no path-args)
    - If value is a UUID referencing fn and arg-schema type is not :fn -> delay that executes fn
@@ -482,12 +499,13 @@
    'black boxes' controlled by map/reduce/etc. Only fn-result-value refs can have
    their free args set via path-args.
 
-   Type hints for hot-path performance."
+   All delays include error context (arg-name, source) for better diagnostics."
   ^clojure.lang.Delay [^ExecutionContext context ^clojure.lang.IPersistentMap arg-value ^clojure.lang.IPersistentMap arg-schema]
   ;; Note: :value can be nil for optional args with null values.
   ;; arg-values from storage are assumed to have :value key present.
   (let [value (:value arg-value)
         arg-type (:type arg-schema)
+        arg-name (:name arg-schema)
         ;; Check if this UUID is a fn-result-value
         execution-graph (:execution-graph context)
         fn-result-values (:fn-result-values execution-graph)]
@@ -499,20 +517,22 @@
         (contains? fn-result-values value)
         ;; fn-result-value: execute with caching, set current-frv-id for path-args lookup
         (let [frv-context (assoc context :current-frv-id value)]
-          (delay (execute-fn-result-value frv-context value)))
+          (wrap-delay-with-context arg-name :fn-result-value
+                                   #(execute-fn-result-value frv-context value)))
 
         ;; It's a direct fn reference with :fn type -> HOF
         (= arg-type :fn)
         ;; HOF: return fn-id directly (not callable)
         ;; HOF functions use get-single-required-arg or make-single-arg-callable
         ;; to create appropriate callables based on their needs
-        (delay value)
+        (delay value)  ; No wrap needed - just returns UUID, no computation
 
         :else
         ;; Direct fn ref with non-:fn type: execute immediately
-        (delay (execute-internal context value nil)))
+        (wrap-delay-with-context arg-name :fn-ref
+                                 #(execute-internal context value nil)))
 
-      ;; Literal value - wrap in delay
+      ;; Literal value - wrap in delay (no wrap needed for literals - no computation)
       :else
       (delay value))))
 
@@ -541,11 +561,12 @@
 ;; - Single responsibility: each function handles one argument source scenario
 ;; - Testability: individual functions can be tested in isolation if needed
 
+
 (defn- handle-provided-arg
   "Handles case when direct provided value exists (from HOF callable)."
-  [provided-value arg-schema strict?]
+  [provided-value arg-schema strict? arg-name]
   (validate-provided-arg-type! provided-value arg-schema strict?)
-  (delay provided-value))
+  (wrap-delay-with-context arg-name :provided-arg #(identity provided-value)))
 
 
 (defn- handle-path-arg-with-db-value
@@ -571,9 +592,9 @@
 
 (defn- handle-path-arg-only
   "Handles case when path-arg exists and no DB value."
-  [path-arg-value arg-schema strict?]
+  [path-arg-value arg-schema strict? arg-name]
   (validate-provided-arg-type! path-arg-value arg-schema strict?)
-  (delay path-arg-value))
+  (wrap-delay-with-context arg-name :path-arg #(identity path-arg-value)))
 
 
 (defn- throw-missing-required-arg!
@@ -633,7 +654,7 @@
           (cond
             ;; 1. Direct provided value (from HOF callable)
             (some? provided-value)
-            (assoc acc arg-name-kw (handle-provided-arg provided-value arg-schema strict?))
+            (assoc acc arg-name-kw (handle-provided-arg provided-value arg-schema strict? arg-name))
 
             ;; 2. Path-arg value exists
             (some? path-arg-value)
@@ -643,7 +664,7 @@
                      (handle-path-arg-with-db-value context arg-value arg-schema
                                                     arg-schema-id arg-name path-arg-value)
                      ;; No DB value - use path-arg
-                     (handle-path-arg-only path-arg-value arg-schema strict?)))
+                     (handle-path-arg-only path-arg-value arg-schema strict? arg-name)))
 
             ;; 3. Stored arg-value exists
             arg-value

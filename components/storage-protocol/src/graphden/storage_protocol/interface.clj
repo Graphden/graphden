@@ -64,6 +64,35 @@
    ### Storage State Errors
    - :storage-not-initialized         - CRUD attempted before initialize
 
+   ### Batch Operation Errors (prefix :batch-error/)
+   - :batch-error/partial-failure     - Some operations in batch failed
+   - :batch-error/validation-failed   - Batch validation failed before execution
+
+   When a batch operation fails, the exception data SHOULD include:
+   - :batch-index    - Zero-based index of the failed item
+   - :batch-size     - Total number of items in the batch
+   - :failed-id      - ID of the failed entity (if applicable)
+
+   ## NULL Handling Contract
+
+   All storage implementations MUST follow SQL NULL semantics for consistency:
+
+   ### Unique Constraints
+   - NULL values are NOT considered equal for uniqueness purposes
+   - Multiple rows can have NULL in a unique-constrained column
+   - This follows PostgreSQL/SQL standard behavior
+   - Example: unique(:email) allows multiple rows with email=NULL
+
+   ### Comparison Operations
+   - NULL = NULL returns UNKNOWN (not TRUE) in SQL semantics
+   - NULL != any_value returns UNKNOWN
+   - Use `some?` or explicit nil checks in Clojure code
+
+   ### Implications for Storage Backends
+   - Memory storage: Must explicitly skip NULL values in uniqueness checks
+   - PostgreSQL: Native behavior (no special handling needed)
+   - Datomic: Nil values are not indexed, inherently unique-safe
+
    ## Logging Level Policy
 
    All storage implementations SHOULD follow this logging policy:

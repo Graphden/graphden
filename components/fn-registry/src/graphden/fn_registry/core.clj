@@ -105,6 +105,13 @@
       (UUID. (java.nio.ByteBuffer/.getLong result-buf) (java.nio.ByteBuffer/.getLong result-buf)))))
 
 
+(def ^:private memoized-uuid-v5
+  "Memoized UUID v5 generation to avoid redundant SHA-1 calculations.
+   Cache key is the name string; namespace UUID is always base-fn-namespace-uuid."
+  (memoize (fn [name-str]
+             (uuid-v5 base-fn-namespace-uuid name-str))))
+
+
 (def ^:private identifier-pattern
   "Pattern for valid function/argument names.
    Must start with letter or underscore, contain only alphanumeric, underscore, hyphen.
@@ -137,19 +144,21 @@
 
 (defn fn-schema-uuid
   "Generates deterministic UUID for a base function's fn-schema.
-   Validates that fn-name is a valid identifier."
+   Validates that fn-name is a valid identifier.
+   Results are memoized to avoid redundant SHA-1 calculations."
   [fn-name]
   (validate-identifier! "fn-name" fn-name)
-  (uuid-v5 base-fn-namespace-uuid (str "fn-schema:" (name fn-name))))
+  (memoized-uuid-v5 (str "fn-schema:" (name fn-name))))
 
 
 (defn arg-schema-uuid
   "Generates deterministic UUID for a base function's arg-schema.
-   Validates that both fn-name and arg-name are valid identifiers."
+   Validates that both fn-name and arg-name are valid identifiers.
+   Results are memoized to avoid redundant SHA-1 calculations."
   [fn-name arg-name]
   (validate-identifier! "fn-name" fn-name)
   (validate-identifier! "arg-name" arg-name)
-  (uuid-v5 base-fn-namespace-uuid (str "arg-schema:" (name fn-name) ":" (name arg-name))))
+  (memoized-uuid-v5 (str "arg-schema:" (name fn-name) ":" (name arg-name))))
 
 
 (def ^:private valid-arg-types

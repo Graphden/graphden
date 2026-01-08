@@ -126,6 +126,13 @@
   1000)
 
 
+(def ^:private timeout-warning-window-ms
+  "Window size in milliseconds for timeout warning logs.
+   Used to avoid repeated warnings when execution is near timeout threshold.
+   Warning fires once when elapsed time enters [threshold, threshold+window) range."
+  100)
+
+
 (def ^:private default-timeout-ms
   "Default execution timeout in milliseconds.
    Uses the shared constant from storage-protocol for consistency."
@@ -403,7 +410,9 @@
       ;; breaking existing deployments. Circuit breaker prevents silent failures.
       (do
         (check-unknown-type-circuit-breaker! unknown-type-counter arg-type)
-        ;; Log warning without value preview (security: avoid leaking data)
+        ;; SECURITY: Intentionally NOT logging the actual value here.
+        ;; Values may contain secrets (passwords, tokens, API keys) that should
+        ;; never appear in logs. Only type information is logged for debugging.
         (log/warn "Unknown argument type in forward compatibility mode"
                   {:arg-type arg-type
                    :value-type (type provided-value)
@@ -793,7 +802,7 @@
         timeout-threshold (long (* timeout-ms warning-threshold-ratio))]
     ;; Warn when approaching timeout (check range to avoid repeated warnings)
     (when (and (>= elapsed timeout-threshold)
-               (< elapsed (+ timeout-threshold 100)))  ; 100ms window to avoid spam
+               (< elapsed (+ timeout-threshold timeout-warning-window-ms)))
       (log/warn "Approaching execution timeout"
                 {:elapsed-ms elapsed
                  :timeout-ms timeout-ms

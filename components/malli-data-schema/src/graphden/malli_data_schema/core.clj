@@ -57,6 +57,14 @@
   #"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 
+(def ^:private max-identifier-length
+  "Maximum length for identifiers in characters.
+   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1).
+   We enforce this limit early at schema definition time to prevent silent
+   truncation issues in the database layer."
+  63)
+
+
 (defn- valid-identifier-name?
   "Returns true if the keyword name is a valid identifier for SQL conversion."
   [kw]
@@ -66,6 +74,7 @@
 
 (defn- validate-identifier-name!
   "Validates that a keyword is suitable for use as a SQL identifier.
+   Checks both pattern validity and length limit.
    Throws if the name would be invalid after kebab-case → snake_case conversion."
   [context kw]
   (when-not (valid-identifier-name? kw)
@@ -74,7 +83,16 @@
                     {:type :schema-error/invalid-identifier
                      :context context
                      :value kw
-                     :pattern (str identifier-pattern)}))))
+                     :pattern (str identifier-pattern)})))
+  (let [kw-name (name kw)]
+    (when (> (count kw-name) max-identifier-length)
+      (throw (ex-info (str "Identifier name too long: " kw " (" (count kw-name) " chars). "
+                           "PostgreSQL limits identifiers to " max-identifier-length " characters.")
+                      {:type :schema-error/identifier-too-long
+                       :context context
+                       :value kw
+                       :length (count kw-name)
+                       :max-length max-identifier-length})))))
 
 
 (defn- validate-entity-name

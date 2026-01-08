@@ -194,7 +194,9 @@
         (core/create-context {:storage :mock :path-args large-path-args})
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
-          (let [data (ex-data e)]
+          (let [data (ex-data e)
+                ;; New structure: errors in :validation-errors vector
+                err (first (:validation-errors data))]
             (is (= :execution-error/invalid-context (:type data)))
-            (is (= 10001 (:path-args-count data)))
-            (is (= 10000 (:max-allowed data)))))))))
+            (is (= 10001 (:path-args-count err)))
+            (is (= 10000 (:max-allowed err)))))))))

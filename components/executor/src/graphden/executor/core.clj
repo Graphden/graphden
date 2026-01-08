@@ -200,42 +200,57 @@
 
 
 (defn- validate-context-options!
-  "Validates context creation options. Throws on invalid options."
+  "Validates context creation options. Throws on invalid options.
+   Collects ALL validation errors and reports them together for better UX,
+   so users can fix multiple issues in one iteration instead of one at a time."
   [storage timeout-ms max-depth path-args]
-  (when-not storage
-    (throw (ex-info "Storage is required" {:type :execution-error/invalid-context})))
-  (when (and timeout-ms (< timeout-ms min-timeout-ms))
-    (throw (ex-info (str "timeout-ms must be at least " min-timeout-ms "ms")
-                    {:type :execution-error/invalid-context
-                     :timeout-ms timeout-ms
-                     :min-allowed min-timeout-ms})))
-  (when (and max-depth (not (pos-int? max-depth)))
-    (throw (ex-info "max-depth must be a positive integer"
-                    {:type :execution-error/invalid-context
-                     :max-depth max-depth})))
-  (when (and max-depth (> max-depth max-depth-limit))
-    (throw (ex-info (str "max-depth exceeds maximum allowed value of " max-depth-limit)
-                    {:type :execution-error/invalid-context
-                     :max-depth max-depth
-                     :max-allowed max-depth-limit})))
-  (when (and (some? path-args) (not (map? path-args)))
-    (throw (ex-info "path-args must be a map"
-                    {:type :execution-error/invalid-context
-                     :path-args path-args
-                     :path-args-type (type path-args)})))
-  ;; Validate path-args count to prevent memory exhaustion
-  (when (and path-args (> (count path-args) max-path-args-count))
-    (throw (ex-info (str "path-args count exceeds maximum allowed value of " max-path-args-count)
-                    {:type :execution-error/invalid-context
-                     :path-args-count (count path-args)
-                     :max-allowed max-path-args-count})))
-  ;; Validate path-args keys format for security
-  (doseq [[k _v] path-args]
-    (when-not (valid-path-arg-key? k)
-      (throw (ex-info "path-args keys must be UUID or [UUID UUID] vector"
-                      {:type :execution-error/invalid-path-args-key
-                       :invalid-key k
-                       :key-type (type k)})))))
+  (let [errors (cond-> []
+                 ;; Required: storage
+                 (not storage)
+                 (conj {:error "Storage is required"})
+
+                 ;; Optional timeout-ms validation
+                 (and timeout-ms (< timeout-ms min-timeout-ms))
+                 (conj {:error (str "timeout-ms must be at least " min-timeout-ms "ms")
+                        :timeout-ms timeout-ms
+                        :min-allowed min-timeout-ms})
+
+                 ;; Optional max-depth validation
+                 (and max-depth (not (pos-int? max-depth)))
+                 (conj {:error "max-depth must be a positive integer"
+                        :max-depth max-depth})
+
+                 (and max-depth (pos-int? max-depth) (> max-depth max-depth-limit))
+                 (conj {:error (str "max-depth exceeds maximum allowed value of " max-depth-limit)
+                        :max-depth max-depth
+                        :max-allowed max-depth-limit})
+
+                 ;; Optional path-args type validation
+                 (and (some? path-args) (not (map? path-args)))
+                 (conj {:error "path-args must be a map"
+                        :path-args-type (type path-args)})
+
+                 ;; path-args count validation
+                 (and (map? path-args) (> (count path-args) max-path-args-count))
+                 (conj {:error (str "path-args count exceeds maximum allowed value of " max-path-args-count)
+                        :path-args-count (count path-args)
+                        :max-allowed max-path-args-count}))
+        ;; Validate path-args keys format (collect all invalid keys)
+        invalid-keys (when (map? path-args)
+                       (into []
+                             (comp (map first)
+                                   (filter (complement valid-path-arg-key?)))
+                             path-args))
+        errors (if (seq invalid-keys)
+                 (conj errors {:error "path-args keys must be UUID or [UUID UUID] vector"
+                               :invalid-keys invalid-keys})
+                 errors)]
+    (when (seq errors)
+      (throw (ex-info (if (= 1 (count errors))
+                        (:error (first errors))
+                        (str "Multiple validation errors (" (count errors) ")"))
+                      {:type :execution-error/invalid-context
+                       :validation-errors errors})))))
 
 
 (defn create-context

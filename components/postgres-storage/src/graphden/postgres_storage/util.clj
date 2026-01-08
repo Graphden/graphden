@@ -69,8 +69,15 @@
 (defn get-query-timeout-seconds
   "Returns the current query timeout in seconds for JDBC calls.
    Reads the dynamic var *query-timeout-ms* and converts to seconds.
-   The timeout is stored in milliseconds but JDBC setQueryTimeout uses seconds."
+   The timeout is stored in milliseconds but JDBC setQueryTimeout uses seconds.
+
+   Safety: Asserts that timeout is at least min-query-timeout-ms to prevent
+   silent timeout disabling. This catches improper direct binding of
+   *query-timeout-ms* (use with-query-timeout instead)."
   []
+  (assert (>= *query-timeout-ms* min-query-timeout-ms)
+          (str "Query timeout must be at least " min-query-timeout-ms "ms. "
+               "Use with-query-timeout for safe rebinding."))
   (quot *query-timeout-ms* 1000))
 
 

@@ -138,6 +138,7 @@
    ;; for very large execution graphs, memory usage scales with unique fn-result-value
    ;; count. Use max-depth to bound graph size if memory is a concern.
    strict-type-validation?  ; If true, throw on unknown types; if false, warn and accept
+   max-unknown-types        ; Limit for unknown types in forward compat mode (circuit breaker)
    unknown-type-counter])   ; Atom: count of unknown types (circuit breaker for forward compat)
 
 
@@ -160,16 +161,8 @@
   50)
 
 
-(def ^:private max-unknown-types-per-execution
-  "Maximum number of unknown types allowed per execution before throwing.
-   Acts as circuit breaker in forward compatibility mode to prevent silent
-   schema mismatch issues from going unnoticed.
-
-   Why 10? A single missing enum value or new field type shouldn't fail execution
-   (forward compatibility), but 10+ unknown types suggests a serious schema version
-   mismatch that warrants investigation. This balances graceful degradation with
-   early detection of configuration drift."
-  10)
+;; max-unknown-types is now configurable via context, see create-context
+;; Default value is sp/default-max-unknown-types (10)
 
 
 (def ^:private result-cache-size-warning-threshold
@@ -329,6 +322,8 @@
                   To override DB values, use provided-args in execute call instead.
    - :strict-type-validation? - If true (default), throw on unknown types.
                                 If false, warn and accept (forward compatibility mode).
+   - :max-unknown-types - Maximum unknown types allowed in forward compat mode (default 10).
+                          Acts as circuit breaker to detect schema version mismatches.
 
    ## Forward Compatibility Mode (:strict-type-validation? false)
 
@@ -348,6 +343,7 @@
    - Unknown types are accepted without validation (any value passes)
    - A warning is logged with type info and value preview
    - Known types are still validated strictly
+   - Circuit breaker throws if unknown types exceed :max-unknown-types
 
    Risks:
    - Type mismatches for new types won't be caught until the base function runs
@@ -361,15 +357,17 @@
    - timeout-ms must be at least 50ms (allows for fast test cases)
    - max-depth must be positive and <= 100000
    - path-args must be a map if provided"
-  [{:keys [storage base-fns max-depth timeout-ms path-args strict-type-validation?]
+  [{:keys [storage base-fns max-depth timeout-ms path-args strict-type-validation? max-unknown-types]
     :or {max-depth sp/default-max-depth
          timeout-ms default-timeout-ms
          path-args {}
-         strict-type-validation? true}}]
+         strict-type-validation? true
+         max-unknown-types sp/default-max-unknown-types}}]
   (validate-context-options! storage timeout-ms max-depth path-args)
   (let [fns (or base-fns @default-registry)]
     (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0
-                        (or path-args {}) nil (atom {}) strict-type-validation? (atom 0))))
+                        (or path-args {}) nil (atom {}) strict-type-validation?
+                        max-unknown-types (atom 0))))
 
 
 ;; Forward declaration: execute-internal is defined later but referenced by
@@ -476,13 +474,13 @@
 (defn- check-unknown-type-circuit-breaker!
   "Checks if unknown type count exceeds threshold and throws if so.
    Acts as circuit breaker to prevent silent schema mismatch issues."
-  [unknown-type-counter arg-type]
+  [^clojure.lang.Atom unknown-type-counter max-unknown-types ^clojure.lang.Keyword arg-type]
   (let [current-count (swap! unknown-type-counter inc)]
-    (when (> current-count max-unknown-types-per-execution)
+    (when (> current-count max-unknown-types)
       (throw (ex-info "Too many unknown types in forward compatibility mode - possible schema mismatch"
                       {:type :execution-error/unknown-type-limit-exceeded
                        :unknown-type-count current-count
-                       :max-allowed max-unknown-types-per-execution
+                       :max-allowed max-unknown-types
                        :last-unknown-type arg-type
                        :hint "Check schema version compatibility or disable forward compatibility mode"})))))
 
@@ -497,11 +495,11 @@
    - Unknown types: behavior depends on strict? flag:
      - strict?=true (default): throws exception to catch schema mismatches early
      - strict?=false: returns false (permissive) for forward compatibility
-       with circuit breaker at max-unknown-types-per-execution
+       with circuit breaker at max-unknown-types
 
    This is a runtime check for user-provided arguments only. Values from
    the execution graph (arg-values) are assumed to be already validated."
-  [arg-type provided-value strict? unknown-type-counter]
+  [^clojure.lang.Keyword arg-type provided-value strict? max-unknown-types ^clojure.lang.Atom unknown-type-counter]
   (if (contains? ft/type-validators arg-type)
     (not (ft/valid-type? arg-type provided-value))
     ;; Unknown type - behavior depends on strict mode
@@ -515,7 +513,7 @@
       ;; This allows newer schema versions to introduce new types without
       ;; breaking existing deployments. Circuit breaker prevents silent failures.
       (do
-        (check-unknown-type-circuit-breaker! unknown-type-counter arg-type)
+        (check-unknown-type-circuit-breaker! unknown-type-counter max-unknown-types arg-type)
         ;; SECURITY: Intentionally NOT logging the actual value here.
         ;; Values may contain secrets (passwords, tokens, API keys) that should
         ;; never appear in logs. Only type information is logged for debugging.
@@ -536,12 +534,12 @@
 
    Note: Stored arg-values from the execution graph are not validated here;
    they are assumed to be valid from schema-level checks during creation."
-  [provided-value arg-schema strict? unknown-type-counter]
+  [provided-value ^clojure.lang.IPersistentMap arg-schema strict? max-unknown-types ^clojure.lang.Atom unknown-type-counter]
   (when-not (and arg-schema (:type arg-schema))
     (throw (ex-info "Invalid arg-schema: missing type"
                     {:type :execution-error/invalid-arg-schema
                      :arg-schema arg-schema})))
-  (when (type-mismatch? (:type arg-schema) provided-value strict? unknown-type-counter)
+  (when (type-mismatch? (:type arg-schema) provided-value strict? max-unknown-types unknown-type-counter)
     (throw-type-mismatch! arg-schema provided-value)))
 
 
@@ -769,8 +767,8 @@
   "Validates and wraps a user-provided argument value in a delay.
    Used for both direct provided args (from HOF) and path-args.
    The source parameter identifies the origin for debugging."
-  [value arg-schema strict? arg-name unknown-type-counter source]
-  (validate-provided-arg-type! value arg-schema strict? unknown-type-counter)
+  [value arg-schema strict? max-unknown-types arg-name unknown-type-counter source]
+  (validate-provided-arg-type! value arg-schema strict? max-unknown-types unknown-type-counter)
   (wrap-delay-with-context arg-name source #(identity value)))
 
 
@@ -846,6 +844,7 @@
   (let [{:keys [arg-schemas arg-values]} fn-data
         current-frv-id (:current-frv-id context)
         strict? (:strict-type-validation? context)
+        max-unknown-types (:max-unknown-types context)
         unknown-type-counter (:unknown-type-counter context)]
     (reduce-kv
       (fn [acc arg-schema-id arg-schema]
@@ -857,7 +856,7 @@
           (cond
             ;; 1. Direct provided value (from HOF callable)
             (some? provided-value)
-            (assoc acc arg-name-kw (handle-validated-arg provided-value arg-schema strict? arg-name unknown-type-counter :provided-arg))
+            (assoc acc arg-name-kw (handle-validated-arg provided-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :provided-arg))
 
             ;; 2. Path-arg value exists
             (some? path-arg-value)
@@ -867,7 +866,7 @@
                      (handle-path-arg-with-db-value context arg-value arg-schema
                                                     arg-schema-id arg-name path-arg-value)
                      ;; No DB value - use path-arg
-                     (handle-validated-arg path-arg-value arg-schema strict? arg-name unknown-type-counter :path-arg)))
+                     (handle-validated-arg path-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :path-arg)))
 
             ;; 3. Stored arg-value exists
             arg-value
@@ -901,7 +900,7 @@
    if it exceeds the timeout. The timeout is a best-effort limit, not a hard
    guarantee. For precise timeout control, base functions should implement
    their own timeout logic (e.g., using futures with deref timeout)."
-  [context]
+  [^ExecutionContext context]
   (let [depth (:depth context)
         max-depth (:max-depth context)
         depth-threshold (long (* max-depth warning-threshold-ratio))]
@@ -942,7 +941,7 @@
 
    Arguments are passed to base functions as delays for lazy evaluation.
    Base functions should use @ (deref) to get values."
-  [context fn-id provided-args]
+  [^ExecutionContext context ^java.util.UUID fn-id ^clojure.lang.IPersistentMap provided-args]
   (check-limits! context)
   (let [execution-graph (:execution-graph context)
         fn-data (get-fn-data-from-graph execution-graph fn-id)

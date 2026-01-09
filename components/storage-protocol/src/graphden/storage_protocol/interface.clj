@@ -1129,6 +1129,19 @@
   1000)
 
 
+(def default-max-unknown-types
+  "Default maximum unknown types allowed per execution in forward compatibility mode.
+   Acts as circuit breaker to prevent silent schema mismatch issues.
+
+   Why 10? A single missing enum value or new field type shouldn't fail execution
+   (forward compatibility), but 10+ unknown types suggests a serious schema version
+   mismatch that warrants investigation. Balances graceful degradation with early
+   detection of configuration drift.
+
+   Used by executor when :strict-type-validation? is false."
+  10)
+
+
 (def ^:dynamic *max-graph-iterations*
   "Maximum number of iterations when resolving execution graph.
    Prevents infinite loops in case of data inconsistencies.

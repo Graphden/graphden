@@ -89,12 +89,15 @@
 (def ^:private sql-state->error-type
   "Maps PostgreSQL SQLSTATE codes to application error types.
    See: https://www.postgresql.org/docs/current/errcodes-appendix.html"
-  {"23505" :unique-violation         ; unique_violation
-   "23503" :foreign-key-violation    ; foreign_key_violation
-   "23502" :not-null-violation       ; not_null_violation
+  {"23505" :unique-violation           ; unique_violation
+   "23503" :foreign-key-violation      ; foreign_key_violation
+   "23502" :not-null-violation         ; not_null_violation
    "23514" :check-constraint-violation ; check_violation
-   "42P01" :table-not-found          ; undefined_table
-   "57014" :query-timeout})          ; query_canceled
+   "42P01" :table-not-found            ; undefined_table
+   "57014" :query-timeout              ; query_canceled
+   "40001" :serialization-failure      ; serialization_failure (transaction conflict)
+   "40P01" :deadlock-detected          ; deadlock_detected
+   "25006" :read-only-transaction})    ; read_only_sql_transaction
 
 
 (def ^:private sql-state-prefix->error-type
@@ -169,6 +172,25 @@
 (def query-canceled?
   "Returns true if the SQLException indicates a query was canceled (timeout) (PostgreSQL 57014)."
   (make-error-predicate :query-timeout))
+
+
+(def serialization-failure?
+  "Returns true if the SQLException indicates a serialization failure due to
+   concurrent transaction conflict (PostgreSQL 40001).
+   This typically occurs with SERIALIZABLE isolation level."
+  (make-error-predicate :serialization-failure))
+
+
+(def deadlock-detected?
+  "Returns true if the SQLException indicates a deadlock was detected (PostgreSQL 40P01).
+   The transaction was automatically aborted by PostgreSQL."
+  (make-error-predicate :deadlock-detected))
+
+
+(def read-only-transaction?
+  "Returns true if the SQLException indicates an attempt to write in a read-only transaction
+   (PostgreSQL 25006). This can occur with read replicas or explicit READ ONLY transactions."
+  (make-error-predicate :read-only-transaction))
 
 
 (defn wrap-sql-error

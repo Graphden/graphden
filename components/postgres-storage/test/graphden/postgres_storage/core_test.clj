@@ -289,3 +289,81 @@
           (is (= :unique-violation (:type data)))
           (is (= :create-entity (:operation data)))
           (is (= :user (:entity-name data))))))))
+
+
+;; === Additional PostgreSQL error type tests ===
+
+(deftest classify-sql-error-extended-test
+  (testing "classifies serialization failure (40001)"
+    (is (= :serialization-failure (util/classify-sql-error (make-sql-exception "40001")))))
+
+  (testing "classifies deadlock detected (40P01)"
+    (is (= :deadlock-detected (util/classify-sql-error (make-sql-exception "40P01")))))
+
+  (testing "classifies read-only transaction (25006)"
+    (is (= :read-only-transaction (util/classify-sql-error (make-sql-exception "25006")))))
+
+  (testing "classifies not-null violation (23502)"
+    (is (= :not-null-violation (util/classify-sql-error (make-sql-exception "23502")))))
+
+  (testing "classifies check constraint violation (23514)"
+    (is (= :check-constraint-violation (util/classify-sql-error (make-sql-exception "23514")))))
+
+  (testing "classifies table not found (42P01)"
+    (is (= :table-not-found (util/classify-sql-error (make-sql-exception "42P01")))))
+
+  (testing "classifies query timeout (57014)"
+    (is (= :query-timeout (util/classify-sql-error (make-sql-exception "57014")))))
+
+  (testing "classifies connection errors by prefix (08xxx)"
+    (is (= :connection-error (util/classify-sql-error (make-sql-exception "08000"))))
+    (is (= :connection-error (util/classify-sql-error (make-sql-exception "08003"))))
+    (is (= :connection-error (util/classify-sql-error (make-sql-exception "08006")))))
+
+  (testing "returns unknown-sql-error for unrecognized codes"
+    (is (= :unknown-sql-error (util/classify-sql-error (make-sql-exception "99999"))))
+    ;; SQLException with nil SQL state - use helper to avoid type hint issues
+    (let [^String nil-state nil]
+      (is (= :unknown-sql-error (util/classify-sql-error (SQLException. "No SQL state" nil-state)))))))
+
+
+(deftest error-predicate-functions-test
+  (testing "serialization-failure?"
+    (is (util/serialization-failure? (make-sql-exception "40001")))
+    (is (not (util/serialization-failure? (make-sql-exception "40P01")))))
+
+  (testing "deadlock-detected?"
+    (is (util/deadlock-detected? (make-sql-exception "40P01")))
+    (is (not (util/deadlock-detected? (make-sql-exception "40001")))))
+
+  (testing "read-only-transaction?"
+    (is (util/read-only-transaction? (make-sql-exception "25006")))
+    (is (not (util/read-only-transaction? (make-sql-exception "23505")))))
+
+  (testing "table-not-found?"
+    (is (util/table-not-found? (make-sql-exception "42P01")))
+    (is (not (util/table-not-found? (make-sql-exception "42P02")))))
+
+  (testing "unique-violation?"
+    (is (util/unique-violation? (make-sql-exception "23505")))
+    (is (not (util/unique-violation? (make-sql-exception "23503")))))
+
+  (testing "foreign-key-violation?"
+    (is (util/foreign-key-violation? (make-sql-exception "23503")))
+    (is (not (util/foreign-key-violation? (make-sql-exception "23505")))))
+
+  (testing "not-null-violation?"
+    (is (util/not-null-violation? (make-sql-exception "23502")))
+    (is (not (util/not-null-violation? (make-sql-exception "23505")))))
+
+  (testing "check-constraint-violation?"
+    (is (util/check-constraint-violation? (make-sql-exception "23514")))
+    (is (not (util/check-constraint-violation? (make-sql-exception "23505")))))
+
+  (testing "connection-error?"
+    (is (util/connection-error? (make-sql-exception "08000")))
+    (is (not (util/connection-error? (make-sql-exception "23505")))))
+
+  (testing "query-canceled?"
+    (is (util/query-canceled? (make-sql-exception "57014")))
+    (is (not (util/query-canceled? (make-sql-exception "23505"))))))

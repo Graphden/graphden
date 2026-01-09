@@ -1231,23 +1231,6 @@
             (storage/standard-batch-validations! :user [{:id dup-id} {:id dup-id}]))))))
 
 
-(deftest storage-checklist-test
-  (testing "storage-checklist contains required protocols"
-    (is (contains? storage/storage-checklist :required-protocols))
-    (is (some #{:Storage} (:required-protocols storage/storage-checklist)))
-    (is (some #{:StorageCRUD} (:required-protocols storage/storage-checklist))))
-
-  (testing "storage-checklist contains optional protocols"
-    (is (contains? storage/storage-checklist :optional-protocols))
-    (is (some #{:GraphConstraints} (:optional-protocols storage/storage-checklist))))
-
-  (testing "storage-checklist contains recommended protocols"
-    (is (contains? storage/storage-checklist :recommended-protocols))
-    (is (some #{:StorageValueCodec} (:recommended-protocols storage/storage-checklist)))))
-
-
-;; === validate-no-dependency-cycle-impl tests ===
-
 ;; === Error helpers tests ===
 
 (deftest make-error-context-test

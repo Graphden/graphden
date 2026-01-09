@@ -16,7 +16,6 @@
    3. Use storage for CRUD operations
    4. Call (close storage) when done"
   (:require
-    [graphden.storage-protocol.config :as config]
     [graphden.storage-protocol.constraints :as constraints]
     [graphden.storage-protocol.errors :as errors]
     [graphden.storage-protocol.graph :as graph]
@@ -357,10 +356,6 @@
 (def check-removed! metadata/check-removed!)
 (def check-type-change! metadata/check-type-change!)
 (def check-nullable-change! metadata/check-nullable-change!)
-(def collect-created-fields metadata/collect-created-fields)
-(def collect-created-enum-values metadata/collect-created-enum-values)
-(def collect-field-uuids metadata/collect-field-uuids)
-(def collect-enum-value-uuids metadata/collect-enum-value-uuids)
 (def build-metadata-from-schema metadata/build-metadata-from-schema)
 (def build-first-init-changes metadata/build-first-init-changes)
 (def check-all-removals! metadata/check-all-removals!)
@@ -434,8 +429,6 @@
 
 (def merge-arg-values-for-chain graph/merge-arg-values-for-chain)
 (def extract-uuid-refs-from-arg-values graph/extract-uuid-refs-from-arg-values)
-(def process-fn-node graph/process-fn-node)
-(def resolve-execution-graph-bfs graph/resolve-execution-graph-bfs)
 
 
 ;; === Lock re-exports ===
@@ -448,15 +441,6 @@
 (def kw->snake-case naming/kw->snake-case)
 (def snake->kw naming/snake->kw)
 (def check-snake-case-collisions! naming/check-snake-case-collisions!)
-
-
-;; === Config re-exports ===
-(def postgres-pool-config config/postgres-pool-config)
-(def datomic-config config/datomic-config)
-(def validate-config! config/validate-config!)
-(def validate-postgres-config! config/validate-postgres-config!)
-(def validate-datomic-config! config/validate-datomic-config!)
-(def apply-defaults config/apply-defaults)
 
 
 ;; ============================================================================
@@ -524,10 +508,3 @@
     (catch Exception e
       (close storage)
       (throw e))))
-
-
-(def storage-checklist
-  "Checklist of protocols and functions to implement for a new storage backend."
-  {:required-protocols [:Storage :StorageIntrospection :StorageCRUD]
-   :optional-protocols [:StorageBatchCRUD :GraphConstraints :ExecutionGraph :ConstraintHelpers]
-   :recommended-protocols [:StorageErrorClassifier :StorageValueCodec]})

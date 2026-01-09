@@ -341,38 +341,20 @@
    :bytes       "BYTEA"})
 
 
-(defn kw->snake-case
+;; Delegate to shared naming utilities
+(def kw->snake-case
   "Converts a keyword to snake_case string (unquoted)."
-  [k]
-  (str/replace (name k) "-" "_"))
+  sp/kw->snake-case)
 
 
-(defn snake->kw
+(def snake->kw
   "Converts a snake_case string to kebab-case keyword."
-  [s]
-  (keyword (str/replace s "_" "-")))
+  sp/snake->kw)
 
 
-(defn check-snake-case-collisions!
-  "Checks that converting keywords to snake_case doesn't create collisions.
-   E.g., :foo-bar and :foo_bar would both become 'foo_bar'.
-   Throws if collisions detected. Runs in O(n) time where n = number of keywords."
-  [context keywords]
-  (let [;; Group keywords by their snake_case form in single pass - O(n)
-        snake->originals (reduce (fn [acc kw]
-                                   (update acc (kw->snake-case kw) (fnil conj []) kw))
-                                 {}
-                                 keywords)
-        ;; Find groups with more than one original - O(n)
-        collisions (into []
-                         (comp (filter #(> (count (val %)) 1))
-                               (map (fn [[snake originals]]
-                                      {:snake-case snake :originals originals})))
-                         snake->originals)]
-    (when (seq collisions)
-      (throw (ex-info "Snake_case naming collision detected"
-                      (merge context {:type :validation-error/naming-collision
-                                      :collisions collisions}))))))
+(def check-snake-case-collisions!
+  "Checks that converting keywords to snake_case doesn't create collisions."
+  sp/check-snake-case-collisions!)
 
 
 (defn ident->sql

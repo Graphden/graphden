@@ -16,11 +16,13 @@
    3. Use storage for CRUD operations
    4. Call (close storage) when done"
   (:require
+    [graphden.storage-protocol.config :as config]
     [graphden.storage-protocol.constraints :as constraints]
     [graphden.storage-protocol.errors :as errors]
     [graphden.storage-protocol.graph :as graph]
     [graphden.storage-protocol.locks :as locks]
     [graphden.storage-protocol.metadata :as metadata]
+    [graphden.storage-protocol.naming :as naming]
     [graphden.storage-protocol.validation :as validation])
   (:import
     (graphden.storage_protocol.graph
@@ -455,6 +457,21 @@
 (def with-read-lock locks/with-read-lock)
 (def with-write-lock locks/with-write-lock)
 (def create-rw-lock locks/create-rw-lock)
+
+
+;; === Naming re-exports ===
+(def kw->snake-case naming/kw->snake-case)
+(def snake->kw naming/snake->kw)
+(def check-snake-case-collisions! naming/check-snake-case-collisions!)
+
+
+;; === Config re-exports ===
+(def postgres-pool-config config/postgres-pool-config)
+(def datomic-config config/datomic-config)
+(def validate-config! config/validate-config!)
+(def validate-postgres-config! config/validate-postgres-config!)
+(def validate-datomic-config! config/validate-datomic-config!)
+(def apply-defaults config/apply-defaults)
 
 
 ;; ============================================================================

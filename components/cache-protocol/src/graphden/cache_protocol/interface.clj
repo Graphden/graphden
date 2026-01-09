@@ -111,3 +111,32 @@
     (throw (ex-info (str param-name " must be a UUID")
                     {:type :invalid-uuid :param param-name :value value})))
   true)
+
+
+;; === Graph building helpers ===
+
+(defn build-cached-graph
+  "Builds an execution graph from cache data.
+   Returns nil if fns is empty (cache miss).
+
+   Arguments:
+   - fns: map of {fn-id -> fn-record}
+   - fn-schemas: map of {fn-schema-id -> schema-record}
+   - arg-schemas: map of {arg-schema-id -> arg-schema-record}
+   - resolved-args: map of {fn-id -> {arg-schema-id -> value}}
+   - fn-result-values: (optional) map of {frv-id -> frv-record}
+
+   This is a convenience wrapper around sp/->execution-graph for
+   cache implementations."
+  ([fns fn-schemas arg-schemas resolved-args]
+   (build-cached-graph fns fn-schemas arg-schemas resolved-args {}))
+  ([fns fn-schemas arg-schemas resolved-args fn-result-values]
+   (when (seq fns)
+     ;; Use require/resolve to avoid circular dependency with storage-protocol
+     (let [->execution-graph (requiring-resolve 'graphden.storage-protocol.interface/->execution-graph)]
+       (->execution-graph
+         {:fns fns
+          :fn-schemas fn-schemas
+          :arg-schemas arg-schemas
+          :resolved-args resolved-args
+          :fn-result-values fn-result-values})))))

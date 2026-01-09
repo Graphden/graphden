@@ -13,7 +13,6 @@
    (cache/get-cached-graph cache fn-id)"
   (:require
     [cheshire.core :as json]
-    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.cache-protocol.interface :as cache]
     [graphden.cache-protocol.value-codec :as codec]
@@ -28,19 +27,12 @@
 
 ;; === SQL helpers ===
 
-(defn- kw->snake-case
-  "Converts keyword to snake_case string."
-  [kw]
-  (-> (name kw)
-      (str/replace "-" "_")))
-
-
 (defn- value->enum
   "Converts keyword to PostgreSQL enum PGobject."
   [v enum-name]
   (doto (PGobject.)
-    (PGobject/.setType (kw->snake-case enum-name))
-    (PGobject/.setValue (kw->snake-case v))))
+    (PGobject/.setType (sp/kw->snake-case enum-name))
+    (PGobject/.setValue (sp/kw->snake-case v))))
 
 
 (defn- execute!
@@ -303,13 +295,7 @@
             fn-schemas (load-cached-fn-schemas datasource fn-id)
             arg-schemas (load-cached-arg-schemas datasource fn-id)
             resolved-args (load-cached-merged-args datasource fn-id)]
-        (when (seq fns)
-          (sp/->execution-graph
-            {:fns fns
-             :fn-schemas fn-schemas
-             :arg-schemas arg-schemas
-             :resolved-args resolved-args
-             :fn-result-values {}})))))
+        (cache/build-cached-graph fns fn-schemas arg-schemas resolved-args))))
 
 
   (cache-exists?

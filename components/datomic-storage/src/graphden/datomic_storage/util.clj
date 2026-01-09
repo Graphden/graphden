@@ -185,3 +185,114 @@
           (log/warn "Datomic ion/cloud config seems minimal, may fail to connect"
                     {:server-type server-type
                      :config-keys (keys config)}))))))
+
+
+;; === Error handling ===
+
+(defn classify-datomic-error
+  "Classifies a Datomic exception into a canonical error type.
+   Returns a keyword like :not-found, :constraint-violation, etc."
+  [e]
+  (cond
+    ;; ExceptionInfo with :db/error key (Datomic-specific errors)
+    (instance? clojure.lang.ExceptionInfo e)
+    (let [data (ex-data e)
+          db-error (:db/error data)
+          cognitect-anomaly (:cognitect.anomalies/category data)]
+      (cond
+        ;; Datomic error codes
+        (= db-error :db.error/not-an-entity) :not-found
+        (= db-error :db.error/unique-conflict) :constraint-violation/unique
+        (= db-error :db.error/invalid-entity-id) :invalid-data
+        (= db-error :db.error/datoms-conflict) :constraint-violation/conflict
+        (= db-error :db.error/cas-failed) :constraint-violation/cas-failed
+
+        ;; Cognitect anomalies (Datomic Client API)
+        (= cognitect-anomaly :cognitect.anomalies/not-found) :not-found
+        (= cognitect-anomaly :cognitect.anomalies/conflict) :constraint-violation/conflict
+        (= cognitect-anomaly :cognitect.anomalies/busy) :transient-error/busy
+        (= cognitect-anomaly :cognitect.anomalies/unavailable) :transient-error/unavailable
+        (= cognitect-anomaly :cognitect.anomalies/interrupted) :transient-error/interrupted
+
+        ;; Fall back to generic error
+        :else :datomic-error))
+
+    ;; Connection/runtime errors
+    (instance? java.util.concurrent.ExecutionException e)
+    :transient-error/execution
+
+    (instance? java.net.ConnectException e)
+    :connection-error
+
+    (instance? java.io.IOException e)
+    :io-error
+
+    :else :unknown-datomic-error))
+
+
+(defn wrap-datomic-error
+  "Wraps a Datomic exception with application context.
+   Returns an ex-info with :type, :operation, and context.
+
+   SECURITY: Context is redacted before logging to prevent sensitive data leakage."
+  [e log-prefix operation context]
+  (let [error-type (classify-datomic-error e)
+        message (ex-message e)
+        ;; Redact sensitive data from context before logging
+        safe-context (sp/redact-sensitive-deep context)
+        error-data (merge {:type error-type
+                           :operation operation
+                           :message message}
+                          safe-context)]
+    ;; Log without exposing full exception details
+    (log/warn log-prefix error-data)
+    (ex-info (str log-prefix " during " (name operation) ": " message)
+             ;; Keep original context in exception for debugging
+             (merge {:type error-type
+                     :operation operation
+                     :message message}
+                    context)
+             e)))
+
+
+(defmacro with-datomic-error-handling
+  "Wraps body with Datomic error handling.
+   Catches exceptions and rethrows with application context.
+
+   Parameters:
+   - log-prefix: String prefix for log message (e.g., \"Database error\")
+   - operation: Keyword describing the operation (e.g., :create-entity)
+   - context: Map of additional context
+   - body: Forms to execute
+
+   Usage:
+   (with-datomic-error-handling \"Database error\" :create-entity {:entity-name name}
+     (d/transact conn tx-data))"
+  [log-prefix operation context & body]
+  `(try
+     (do ~@body)
+     (catch Exception e#
+       (throw (wrap-datomic-error e# ~log-prefix ~operation ~context)))))
+
+
+;; === StorageErrorClassifier implementation ===
+
+(defrecord DatomicErrorClassifier
+  []
+
+  sp/StorageErrorClassifier
+
+  (classify-error
+    [_this exception]
+    (classify-datomic-error exception))
+
+
+  (wrap-error
+    [_this exception operation context]
+    (wrap-datomic-error exception "Datomic error" operation context)))
+
+
+(defn create-error-classifier
+  "Creates a Datomic error classifier instance."
+  []
+  (->DatomicErrorClassifier))

@@ -16,8 +16,7 @@
     [clojure.tools.logging :as log]
     [datomic.client.api :as d]
     [graphden.cache-protocol.interface :as cache]
-    [graphden.cache-protocol.value-codec :as codec]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.cache-protocol.value-codec :as codec]))
 
 
 ;; === Attribute naming ===
@@ -468,13 +467,7 @@
               fn-schemas (load-cached-fn-schemas db fn-id)
               arg-schemas (load-cached-arg-schemas db fn-id)
               resolved-args (load-cached-merged-args db fn-id)]
-          (when (seq fns)
-            (sp/->execution-graph
-              {:fns fns
-               :fn-schemas fn-schemas
-               :arg-schemas arg-schemas
-               :resolved-args resolved-args
-               :fn-result-values {}}))))))
+          (cache/build-cached-graph fns fn-schemas arg-schemas resolved-args)))))
 
 
   (cache-exists?

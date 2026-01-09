@@ -274,7 +274,8 @@
   "Atomically validates and creates multiple records. Returns sequence of records.
    All validations happen inside swap! to ensure atomicity.
    On validation failure, logs which record (by index) failed and includes
-   batch context in the exception data."
+   batch context in the exception data.
+   Uses sp/wrap-batch-error for consistent error formatting across storage backends."
   [state-atom entity-name records]
   (swap! state-atom
          (fn [state]
@@ -287,11 +288,7 @@
                          (catch clojure.lang.ExceptionInfo e
                            (log/error "Batch create failed at record index" idx
                                       {:entity entity-name :record-id (:id record)})
-                           (throw (ex-info (ex-message e)
-                                           (assoc (ex-data e)
-                                                  :batch-index idx
-                                                  :batch-size (count records))
-                                           e)))))
+                           (throw (sp/wrap-batch-error e idx (count records) (:id record))))))
                      [state 0]
                      records))))
   records)

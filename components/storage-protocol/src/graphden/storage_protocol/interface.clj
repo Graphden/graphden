@@ -795,6 +795,188 @@
        (ex-info message error-context)))))
 
 
+;; === Extensible Error Registry ===
+;;
+;; Allows storage backends to register custom error types and
+;; provides a unified way to look up error metadata.
+
+(def ^:private error-registry
+  "Registry of error types with metadata.
+   Key: error keyword (e.g., :unique-violation)
+   Value: {:category :constraint|:validation|:config|:connection
+           :retryable? boolean
+           :severity :error|:warning
+           :description string}"
+  (atom {}))
+
+
+(def ^:const error-categories
+  "Valid error categories for classification."
+  #{:constraint :validation :config :connection :execution :metadata :batch :unknown})
+
+
+(def ^:const error-severities
+  "Valid error severities."
+  #{:error :warning :info})
+
+
+(defn register-error-type!
+  "Registers a new error type with metadata.
+   Use this to define custom application-level error types.
+
+   Arguments:
+   - error-type: keyword identifying the error (e.g., :my-app/custom-error)
+   - metadata: map with error metadata
+     - :category - one of error-categories (required)
+     - :retryable? - boolean, true if operation can be retried
+     - :severity - one of error-severities (default :error)
+     - :description - human-readable description
+
+   Returns the error-type keyword.
+
+   Example:
+     (register-error-type! :my-app/rate-limited
+       {:category :connection
+        :retryable? true
+        :severity :warning
+        :description \"Rate limit exceeded, retry after delay\"})"
+  [error-type metadata]
+  (when-not (keyword? error-type)
+    (throw (ex-info "error-type must be a keyword" {:error-type error-type})))
+  (when-not (contains? error-categories (:category metadata))
+    (throw (ex-info "Invalid error category"
+                    {:error-type error-type
+                     :category (:category metadata)
+                     :valid-categories error-categories})))
+  (swap! error-registry assoc error-type
+         (merge {:severity :error
+                 :retryable? false}
+                metadata))
+  error-type)
+
+
+(defn get-error-metadata
+  "Returns metadata for an error type, or nil if not registered."
+  [error-type]
+  (get @error-registry error-type))
+
+
+(defn error-retryable?
+  "Returns true if the error type is marked as retryable.
+   Returns false for unknown error types."
+  [error-type]
+  (boolean (:retryable? (get-error-metadata error-type))))
+
+
+(defn error-category
+  "Returns the category of an error type.
+   Returns :unknown for unregistered error types."
+  [error-type]
+  (or (:category (get-error-metadata error-type)) :unknown))
+
+
+(defn registered-error-types
+  "Returns a set of all registered error type keywords."
+  []
+  (set (keys @error-registry)))
+
+
+;; Register standard error types on load
+(doseq [[error-type metadata]
+        {;; Constraint violations
+         :constraint-violation/unique
+         {:category :constraint :retryable? false
+          :description "Unique constraint violated"}
+
+         :constraint-violation/parent-schema-mismatch
+         {:category :constraint :retryable? false
+          :description "Parent fn has different schema"}
+
+         :constraint-violation/arg-already-defined
+         {:category :constraint :retryable? false
+          :description "Arg already defined in parent chain"}
+
+         :constraint-violation/arg-schema-mismatch
+         {:category :constraint :retryable? false
+          :description "Arg schema doesn't belong to fn"}
+
+         :constraint-violation/inheritance-cycle
+         {:category :constraint :retryable? false
+          :description "Cycle in parent-fn-id chain"}
+
+         :constraint-violation/dependency-cycle
+         {:category :constraint :retryable? false
+          :description "Cycle in arg-value references"}
+
+         ;; Validation errors
+         :validation-error/required-field-missing
+         {:category :validation :retryable? false
+          :description "Required field not provided"}
+
+         :validation-error/duplicate-ids
+         {:category :validation :retryable? false
+          :description "Duplicate IDs in batch"}
+
+         :validation-error/constraint-check-failed
+         {:category :validation :retryable? false
+          :description "Constraint validation query failed"}
+
+         ;; Config errors
+         :config-error/invalid-timeout
+         {:category :config :retryable? false
+          :description "Invalid timeout value"}
+
+         :config-error/missing-jdbc-url
+         {:category :config :retryable? false
+          :description "JDBC URL not provided"}
+
+         :config-error/credential-too-long
+         {:category :config :retryable? false
+          :description "Credential exceeds maximum length"}
+
+         :config-error/invalid-credential
+         {:category :config :retryable? false
+          :description "Credential contains invalid characters"}
+
+         ;; Connection errors
+         :connection-error
+         {:category :connection :retryable? true
+          :description "Database connection failed"}
+
+         :query-timeout
+         {:category :connection :retryable? true
+          :description "Query exceeded timeout"}
+
+         ;; Execution errors
+         :execution-error/graph-too-large
+         {:category :execution :retryable? false
+          :description "Graph resolution exceeded max iterations"}
+
+         ;; Metadata errors
+         :metadata-error/inconsistency
+         {:category :metadata :retryable? false
+          :description "Metadata doesn't match DB state"}
+
+         :metadata-error/rollback-failed
+         {:category :metadata :retryable? false :severity :error
+          :description "Migration rollback failed"}
+
+         ;; Batch errors
+         :batch-error/partial-failure
+         {:category :batch :retryable? false
+          :description "Some operations in batch failed"}
+
+         ;; Storage state
+         :storage-not-initialized
+         {:category :validation :retryable? false
+          :description "CRUD attempted before initialize"}
+
+         :not-found
+         {:category :validation :retryable? false
+          :description "Entity/record not found by ID"}}]
+  (register-error-type! error-type metadata))
+
+
 (defprotocol ExecutionGraph
   "Protocol for retrieving complete execution graph for a function.
    Implementations should optimize for efficient retrieval - using JOINs,
@@ -1649,6 +1831,114 @@
                      :where-type (type where)}))))
 
 
+;; === Credential validation utilities ===
+;;
+;; Security-focused validation for database credentials to prevent:
+;; - Buffer overflow attacks via extremely long strings
+;; - DoS attacks via memory exhaustion
+;; - Injection attacks via control characters
+
+(def ^:const max-username-length
+  "Maximum allowed length for database username.
+   PostgreSQL supports up to 63 characters for identifiers.
+   We use 128 to allow for potential domain prefixes (e.g., AD\\user)."
+  128)
+
+
+(def ^:const max-password-length
+  "Maximum allowed length for database password.
+   Most password managers support up to 128 characters.
+   We use 1024 as a generous limit for certificates/tokens."
+  1024)
+
+
+(def ^:const max-jdbc-url-length
+  "Maximum allowed length for JDBC URL.
+   Standard URLs shouldn't exceed 2048 characters.
+   We use 4096 to allow for complex connection strings."
+  4096)
+
+
+(defn validate-credential-length!
+  "Validates that a credential string doesn't exceed maximum length.
+   Throws ex-info with :type :config-error/credential-too-long on failure.
+
+   Arguments:
+   - value: the string to validate
+   - param-name: name of the parameter for error messages
+   - max-length: maximum allowed length
+
+   This is a security measure to prevent:
+   - Buffer overflow attacks
+   - DoS via memory exhaustion
+   - Log pollution from huge strings"
+  [value param-name max-length]
+  (when (and (string? value) (> (count value) max-length))
+    (throw (ex-info (str param-name " exceeds maximum length of " max-length " characters")
+                    {:type :config-error/credential-too-long
+                     :param param-name
+                     :max-length max-length
+                     :actual-length (count value)}))))
+
+
+(defn validate-no-control-chars!
+  "Validates that a string doesn't contain control characters.
+   Throws ex-info with :type :config-error/invalid-credential on failure.
+
+   Control characters (ASCII 0-31, 127) in credentials can indicate:
+   - Null byte injection attempts
+   - Escape sequence attacks
+   - Binary data mistakenly passed as string
+
+   Excludes tabs (9), newlines (10), and carriage returns (13) as they
+   may appear legitimately in some credential formats."
+  [value param-name]
+  (when (string? value)
+    (when-let [_dangerous-chars (re-find #"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]" value)]
+      (throw (ex-info (str param-name " contains invalid control characters")
+                      {:type :config-error/invalid-credential
+                       :param param-name
+                       :reason "contains control characters"})))))
+
+
+(defn validate-credentials!
+  "Validates database credentials for security.
+   Checks both username and password for:
+   - Maximum length limits
+   - Control character injection
+
+   Arguments:
+   - username: database username string
+   - password: database password string
+
+   Throws ex-info with :type :config-error/* on validation failure.
+
+   Example:
+     (validate-credentials! \"myuser\" \"mypass\") ; => nil (valid)
+     (validate-credentials! (apply str (repeat 200 \"x\")) \"pass\")
+     ; => throws :config-error/credential-too-long"
+  [username password]
+  (validate-credential-length! username "username" max-username-length)
+  (validate-credential-length! password "password" max-password-length)
+  (validate-no-control-chars! username "username")
+  (validate-no-control-chars! password "password"))
+
+
+(defn validate-jdbc-url!
+  "Validates JDBC URL for security.
+   Checks for:
+   - Maximum length limits
+   - Control character injection
+
+   Arguments:
+   - jdbc-url: JDBC connection URL string
+
+   Throws ex-info with :type :config-error/* on validation failure."
+  [jdbc-url]
+  (validate-credential-length! jdbc-url "jdbc-url" max-jdbc-url-length)
+  (validate-no-control-chars! jdbc-url "jdbc-url"))
+
+
 ;; === Execution Graph Utilities ===
 ;;
 ;; Shared utilities for execution graph resolution across storage implementations.
@@ -1772,6 +2062,69 @@
    Throws ExceptionInfo if validation fails."
   [entity-name data-seq]
   (validate-no-duplicate-ids! entity-name data-seq))
+
+
+(defn wrap-batch-error
+  "Wraps an exception with batch context information.
+   Adds :batch-index, :batch-size, and optionally :failed-id to exception data.
+
+   Arguments:
+   - exception: the original ExceptionInfo or Exception
+   - index: zero-based index of the failed item
+   - batch-size: total number of items in the batch
+   - failed-id: (optional) ID of the failed entity
+
+   Returns a new ExceptionInfo with batch context.
+
+   Example:
+     (catch ExceptionInfo e
+       (throw (wrap-batch-error e idx (count records) (:id record))))"
+  ([exception index batch-size]
+   (wrap-batch-error exception index batch-size nil))
+  ([exception index batch-size failed-id]
+   (let [base-data (if (instance? clojure.lang.ExceptionInfo exception)
+                     (ex-data exception)
+                     {:type :batch-error/partial-failure})
+         batch-data (cond-> {:batch-index index
+                             :batch-size batch-size}
+                      failed-id (assoc :failed-id failed-id))]
+     (ex-info (ex-message exception)
+              (merge base-data batch-data)
+              exception))))
+
+
+(defn process-batch-with-index
+  "Processes a sequence of items with error handling that includes batch context.
+   Each item is processed by process-fn. If processing fails, the exception is
+   wrapped with batch context (index, batch-size, item-id).
+
+   Arguments:
+   - items: sequence of items to process (must support nth)
+   - get-id-fn: function to extract ID from an item (or nil if not applicable)
+   - process-fn: function (fn [item index] -> result) to process each item
+
+   Returns sequence of results from process-fn.
+
+   On error, throws ExceptionInfo with :batch-index, :batch-size, and :failed-id.
+
+   Example:
+     (process-batch-with-index
+       records
+       :id
+       (fn [record idx]
+         (validate-and-save! record)))"
+  [items get-id-fn process-fn]
+  (let [items-vec (vec items)
+        batch-size (count items-vec)]
+    (map-indexed
+      (fn [idx item]
+        (try
+          (process-fn item idx)
+          (catch clojure.lang.ExceptionInfo e
+            (throw (wrap-batch-error e idx batch-size (when get-id-fn (get-id-fn item)))))
+          (catch Exception e
+            (throw (wrap-batch-error e idx batch-size (when get-id-fn (get-id-fn item)))))))
+      items-vec)))
 
 
 (defn initialize-with-cleanup!

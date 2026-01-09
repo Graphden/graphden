@@ -101,6 +101,9 @@
   (when-not (and password (seq (str/trim password)))
     (throw (ex-info "password is required and cannot be empty"
                     {:type :config-error/missing-password})))
+  ;; Security: validate credential lengths and content
+  (sp/validate-jdbc-url! jdbc-url)
+  (sp/validate-credentials! username password)
   ;; Validate pool size configuration
   (when-not (pos-int? pool-size)
     (throw (ex-info "pool-size must be a positive integer"

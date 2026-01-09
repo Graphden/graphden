@@ -16,6 +16,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.cache-protocol.interface :as cache]
+    [graphden.cache-protocol.value-codec :as codec]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
@@ -113,14 +114,7 @@
                       :else nil)
           parsed (when raw-value
                    (json/parse-string raw-value true))]
-      ;; Handle union value format: {:kind :literal :value ...}
-      (when parsed
-        (if (and (map? parsed) (contains? parsed :kind))
-          (case (keyword (:kind parsed))
-            :literal (:value parsed)
-            :fn-ref (assoc parsed :kind :fn-ref)
-            parsed)
-          parsed)))))
+      (codec/parse-cached-value parsed))))
 
 
 (defn- load-cached-merged-args
@@ -151,16 +145,8 @@
 (defn- encode-value
   "Encodes a value for JSON storage."
   [value]
-  (cond
-    (nil? value) nil
-
-    ;; fn-ref values keep their kind
-    (and (map? value) (= :fn-ref (:kind value)))
-    (json/generate-string value)
-
-    ;; literal values wrap in union format
-    :else
-    (json/generate-string {:kind :literal :value value})))
+  (when-let [formatted (codec/format-cached-value value)]
+    (json/generate-string formatted)))
 
 
 (defn- save-cached-fns!

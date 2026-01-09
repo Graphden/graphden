@@ -9,7 +9,8 @@
     [graphden.datomic-storage.schema :as schema]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.storage-protocol.contract-tests :as contract]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.test-helpers :as th]))
 
 
 ;; === Test fixtures ===
@@ -30,23 +31,7 @@
 
 
 ;; === Test helpers ===
-
-(defn- make-schema
-  "Creates a simple schema with one entity and one enum for testing."
-  [& {:keys [entity-name entity-uuid fields enum-name enum-uuid enum-values]
-      :or {entity-name :user
-           entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
-           fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                          :type :text}}}}]
-  (cond-> (mds/create-builder)
-    (and enum-name enum-uuid enum-values)
-    (ds/add-enum enum-name enum-uuid enum-values)
-
-    true
-    (ds/add-entity entity-name entity-uuid fields)
-
-    true
-    ds/build))
+;; make-schema is now in graphden.storage-protocol.test-helpers (aliased as th)
 
 
 ;; === First-time initialization tests ===
@@ -54,7 +39,7 @@
 (deftest first-initialization-test
   (testing "initializing empty storage creates entities"
     (let [storage (create-test-storage)
-          schema (make-schema)
+          schema (th/make-schema)
           changes (sp/initialize storage schema)]
       (try
         (is (= [:user] (:created (:entities changes))))
@@ -66,12 +51,12 @@
 
   (testing "initializing with enum creates enum"
     (let [storage (create-test-storage)
-          schema (make-schema :enum-name :status
-                              :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                              :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                             :value :active}
-                                            {:uuid #uuid "00000000-0000-0000-0000-000000000012"
-                                             :value :inactive}])
+          schema (th/make-schema :enum-name :status
+                                 :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                 :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                :value :active}
+                                               {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                                :value :inactive}])
           changes (sp/initialize storage schema)]
       (try
         (is (= [:status] (:created (:enums changes))))
@@ -191,7 +176,7 @@
 (deftest introspection-test
   (testing "current-entities returns entity names"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (try
         (sp/initialize storage schema)
         (is (contains? (sp/current-entities storage) :user))
@@ -200,11 +185,11 @@
 
   (testing "current-fields returns field definitions"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}
-                                       :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
-                                               :type :text
-                                               :nullable? true}})]
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                  :type :text
+                                                  :nullable? true}})]
       (try
         (sp/initialize storage schema)
         (let [fields (sp/current-fields storage :user)]
@@ -215,7 +200,7 @@
 
   (testing "current-fields returns nil for unknown entity"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (try
         (sp/initialize storage schema)
         (is (nil? (sp/current-fields storage :unknown)))
@@ -224,10 +209,10 @@
 
   (testing "current-enums returns enum names"
     (let [storage (create-test-storage)
-          schema (make-schema :enum-name :status
-                              :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                              :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                             :value :active}])]
+          schema (th/make-schema :enum-name :status
+                                 :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                 :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                :value :active}])]
       (try
         (sp/initialize storage schema)
         (is (contains? (sp/current-enums storage) :status))
@@ -236,12 +221,12 @@
 
   (testing "current-enum-values returns values"
     (let [storage (create-test-storage)
-          schema (make-schema :enum-name :status
-                              :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                              :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                             :value :active}
-                                            {:uuid #uuid "00000000-0000-0000-0000-000000000012"
-                                             :value :inactive}])]
+          schema (th/make-schema :enum-name :status
+                                 :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                 :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                :value :active}
+                                               {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                                :value :inactive}])]
       (try
         (sp/initialize storage schema)
         (is (= #{:active :inactive} (sp/current-enum-values storage :status)))
@@ -250,7 +235,7 @@
 
   (testing "current-enum-values returns nil for unknown enum"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (try
         (sp/initialize storage schema)
         (is (nil? (sp/current-enum-values storage :unknown)))
@@ -261,8 +246,8 @@
     (let [storage (create-test-storage)
           entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
           field-uuid #uuid "00000000-0000-0000-0000-000000000002"
-          schema (make-schema :entity-uuid entity-uuid
-                              :fields {:name {:uuid field-uuid :type :text}})]
+          schema (th/make-schema :entity-uuid entity-uuid
+                                 :fields {:name {:uuid field-uuid :type :text}})]
       (try
         (sp/initialize storage schema)
         (let [metadata (sp/schema-metadata storage)]
@@ -278,7 +263,7 @@
 (deftest no-changes-test
   (testing "re-initializing with same schema reports no changes"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (try
         (sp/initialize storage schema)
         (let [changes (sp/initialize storage schema)]
@@ -295,7 +280,7 @@
 (deftest adding-test
   (testing "adding new entity"
     (let [storage (create-test-storage)
-          schema1 (make-schema)
+          schema1 (th/make-schema)
           _ (sp/initialize storage schema1)
           schema2 (-> (mds/create-builder)
                       (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
@@ -314,12 +299,12 @@
 
   (testing "adding new field to existing entity"
     (let [storage (create-test-storage)
-          schema1 (make-schema)
+          schema1 (th/make-schema)
           _ (sp/initialize storage schema1)
-          schema2 (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                               :type :text}
-                                        :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
-                                                :type :text}})
+          schema2 (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                  :type :text}
+                                           :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                   :type :text}})
           changes (sp/initialize storage schema2)]
       (try
         (is (= [] (:created (:entities changes))))
@@ -329,12 +314,12 @@
 
   (testing "adding new enum"
     (let [storage (create-test-storage)
-          schema1 (make-schema)
+          schema1 (th/make-schema)
           _ (sp/initialize storage schema1)
-          schema2 (make-schema :enum-name :status
-                               :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                               :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                              :value :active}])
+          schema2 (th/make-schema :enum-name :status
+                                  :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                  :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                 :value :active}])
           changes (sp/initialize storage schema2)]
       (try
         (is (= [:status] (:created (:enums changes))))
@@ -344,17 +329,17 @@
 
   (testing "adding new enum value"
     (let [storage (create-test-storage)
-          schema1 (make-schema :enum-name :status
-                               :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                               :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                              :value :active}])
+          schema1 (th/make-schema :enum-name :status
+                                  :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                  :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                 :value :active}])
           _ (sp/initialize storage schema1)
-          schema2 (make-schema :enum-name :status
-                               :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                               :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                              :value :active}
-                                             {:uuid #uuid "00000000-0000-0000-0000-000000000012"
-                                              :value :inactive}])
+          schema2 (th/make-schema :enum-name :status
+                                  :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                  :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                 :value :active}
+                                                {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                                 :value :inactive}])
           changes (sp/initialize storage schema2)]
       (try
         (is (= [] (:created (:enums changes))))
@@ -370,13 +355,13 @@
     (let [storage (create-test-storage)
           entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
           field-uuid #uuid "00000000-0000-0000-0000-000000000002"
-          schema1 (make-schema :entity-name :user
-                               :entity-uuid entity-uuid
-                               :fields {:name {:uuid field-uuid :type :text}})
+          schema1 (th/make-schema :entity-name :user
+                                  :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})
           _ (sp/initialize storage schema1)
-          schema2 (make-schema :entity-name :person
-                               :entity-uuid entity-uuid
-                               :fields {:name {:uuid field-uuid :type :text}})
+          schema2 (th/make-schema :entity-name :person
+                                  :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})
           changes (sp/initialize storage schema2)]
       (try
         (is (= [] (:created (:entities changes))))
@@ -388,11 +373,11 @@
     (let [storage (create-test-storage)
           entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
           field-uuid #uuid "00000000-0000-0000-0000-000000000002"
-          schema1 (make-schema :entity-uuid entity-uuid
-                               :fields {:name {:uuid field-uuid :type :text}})
+          schema1 (th/make-schema :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})
           _ (sp/initialize storage schema1)
-          schema2 (make-schema :entity-uuid entity-uuid
-                               :fields {:full-name {:uuid field-uuid :type :text}})
+          schema2 (th/make-schema :entity-uuid entity-uuid
+                                  :fields {:full-name {:uuid field-uuid :type :text}})
           changes (sp/initialize storage schema2)]
       (try
         (is (= [] (:created (:fields changes))))
@@ -405,13 +390,13 @@
     (let [storage (create-test-storage)
           enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
           value-uuid #uuid "00000000-0000-0000-0000-000000000011"
-          schema1 (make-schema :enum-name :status
-                               :enum-uuid enum-uuid
-                               :enum-values [{:uuid value-uuid :value :active}])
+          schema1 (th/make-schema :enum-name :status
+                                  :enum-uuid enum-uuid
+                                  :enum-values [{:uuid value-uuid :value :active}])
           _ (sp/initialize storage schema1)
-          schema2 (make-schema :enum-name :state
-                               :enum-uuid enum-uuid
-                               :enum-values [{:uuid value-uuid :value :active}])
+          schema2 (th/make-schema :enum-name :state
+                                  :enum-uuid enum-uuid
+                                  :enum-values [{:uuid value-uuid :value :active}])
           changes (sp/initialize storage schema2)]
       (try
         (is (= [] (:created (:enums changes))))
@@ -434,7 +419,7 @@
                                               :type :text}})
                       ds/build)
           _ (sp/initialize storage schema1)
-          schema2 (make-schema)]
+          schema2 (th/make-schema)]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"Destructive change: entities removed"
@@ -444,13 +429,13 @@
 
   (testing "removing field throws"
     (let [storage (create-test-storage)
-          schema1 (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                               :type :text}
-                                        :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
-                                                :type :text}})
+          schema1 (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                  :type :text}
+                                           :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                   :type :text}})
           _ (sp/initialize storage schema1)
-          schema2 (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                               :type :text}})]
+          schema2 (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                  :type :text}})]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"Destructive change: fields removed"
@@ -460,12 +445,12 @@
 
   (testing "removing enum throws"
     (let [storage (create-test-storage)
-          schema1 (make-schema :enum-name :status
-                               :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                               :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                              :value :active}])
+          schema1 (th/make-schema :enum-name :status
+                                  :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                  :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                 :value :active}])
           _ (sp/initialize storage schema1)
-          schema2 (make-schema)]
+          schema2 (th/make-schema)]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"Destructive change: enums removed"
@@ -475,17 +460,17 @@
 
   (testing "removing enum value throws"
     (let [storage (create-test-storage)
-          schema1 (make-schema :enum-name :status
-                               :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                               :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                              :value :active}
-                                             {:uuid #uuid "00000000-0000-0000-0000-000000000012"
-                                              :value :inactive}])
+          schema1 (th/make-schema :enum-name :status
+                                  :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                  :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                 :value :active}
+                                                {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                                 :value :inactive}])
           _ (sp/initialize storage schema1)
-          schema2 (make-schema :enum-name :status
-                               :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
-                               :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
-                                              :value :active}])]
+          schema2 (th/make-schema :enum-name :status
+                                  :enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+                                  :enum-values [{:uuid #uuid "00000000-0000-0000-0000-000000000011"
+                                                 :value :active}])]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"Destructive change: enum values removed"
@@ -499,7 +484,7 @@
 (deftest close-test
   (testing "close is idempotent"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (sp/initialize storage schema)
       (is (nil? (sp/close storage)))
       (is (nil? (sp/close storage))))))
@@ -581,8 +566,8 @@
     (let [storage (create-test-storage)
           entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
           field-uuid #uuid "00000000-0000-0000-0000-000000000002"
-          schema1 (make-schema :entity-uuid entity-uuid
-                               :fields {:name {:uuid field-uuid :type :text}})]
+          schema1 (th/make-schema :entity-uuid entity-uuid
+                                  :fields {:name {:uuid field-uuid :type :text}})]
       (try
         ;; First initialize normally
         (sp/initialize storage schema1)
@@ -660,7 +645,7 @@
 (deftest initialize-error-handling-test
   (testing "initialize re-throws non-'already exists' exceptions from create-database"
     (let [storage (dat/create-storage {:db-name (unique-db-name)})
-          schema (make-schema)
+          schema (th/make-schema)
           ;; Store original create-database
           original-create-db d/create-database
           call-count (atom 0)]
@@ -759,8 +744,8 @@
 (deftest crud-create-entity-test
   (testing "create-entity with provided id"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id #uuid "11111111-1111-1111-1111-111111111111"
           result (sp/create-entity storage :user {:id id :name "Alice"})]
@@ -772,8 +757,8 @@
 
   (testing "create-entity generates id if not provided"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           result (sp/create-entity storage :user {:name "Bob"})]
       (try
@@ -786,8 +771,8 @@
 (deftest crud-read-entity-test
   (testing "read-entity returns entity by id"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id #uuid "11111111-1111-1111-1111-111111111111"
           _ (sp/create-entity storage :user {:id id :name "Alice"})
@@ -800,8 +785,8 @@
 
   (testing "read-entity returns nil for non-existent id"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           result (sp/read-entity storage :user #uuid "11111111-1111-1111-1111-111111111111")]
       (try
@@ -813,8 +798,8 @@
 (deftest crud-update-entity-test
   (testing "update-entity updates existing entity"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id #uuid "11111111-1111-1111-1111-111111111111"
           _ (sp/create-entity storage :user {:id id :name "Alice"})
@@ -829,8 +814,8 @@
 
   (testing "update-entity throws for non-existent entity"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Entity not found"
@@ -844,8 +829,8 @@
 (deftest crud-delete-entity-test
   (testing "delete-entity returns true for existing entity"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id #uuid "11111111-1111-1111-1111-111111111111"
           _ (sp/create-entity storage :user {:id id :name "Alice"})
@@ -858,8 +843,8 @@
 
   (testing "delete-entity returns false for non-existent entity"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           result (sp/delete-entity storage :user #uuid "11111111-1111-1111-1111-111111111111")]
       (try
@@ -871,8 +856,8 @@
 (deftest crud-query-entities-test
   (testing "query-entities with empty where returns all"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"})
           _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"})
@@ -885,8 +870,8 @@
 
   (testing "query-entities with where filters results"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"})
           _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"})
@@ -903,8 +888,8 @@
 (deftest batch-create-entities-test
   (testing "create-entities creates multiple entities in single operation"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           data [{:name "Alice"}
                 {:name "Bob"}
@@ -921,8 +906,8 @@
 
   (testing "create-entities with provided ids"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id1 #uuid "11111111-1111-1111-1111-111111111111"
           id2 #uuid "22222222-2222-2222-2222-222222222222"
@@ -936,8 +921,8 @@
 
   (testing "create-entities with empty sequence returns empty"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           results (sp/create-entities storage :user [])]
       (try
@@ -949,8 +934,8 @@
 (deftest batch-read-entities-test
   (testing "read-entities returns map of found entities"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id1 #uuid "11111111-1111-1111-1111-111111111111"
           id2 #uuid "22222222-2222-2222-2222-222222222222"
@@ -966,8 +951,8 @@
 
   (testing "read-entities excludes non-existent ids"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id1 #uuid "11111111-1111-1111-1111-111111111111"
           id-nonexistent #uuid "99999999-9999-9999-9999-999999999999"
@@ -982,8 +967,8 @@
 
   (testing "read-entities with empty ids returns empty map"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           results (sp/read-entities storage :user [])]
       (try
@@ -995,8 +980,8 @@
 (deftest batch-delete-entities-test
   (testing "delete-entities deletes multiple entities and returns count"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id1 #uuid "11111111-1111-1111-1111-111111111111"
           id2 #uuid "22222222-2222-2222-2222-222222222222"
@@ -1017,8 +1002,8 @@
 
   (testing "delete-entities with non-existent ids returns count of actually deleted"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           id1 #uuid "11111111-1111-1111-1111-111111111111"
           id-nonexistent #uuid "99999999-9999-9999-9999-999999999999"
@@ -1031,8 +1016,8 @@
 
   (testing "delete-entities with empty ids returns 0"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           _ (sp/initialize storage schema)
           deleted-count (sp/delete-entities storage :user [])]
       (try
@@ -1046,10 +1031,10 @@
 (deftest crud-required-field-validation-test
   (testing "create-entity throws when required field is missing"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}
-                                       :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
-                                               :type :text}})]
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                  :type :text}})]
       (sp/initialize storage schema)
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'email' is missing or nil"
@@ -1059,8 +1044,8 @@
 
   (testing "create-entity throws when required field is nil"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})]
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})]
       (sp/initialize storage schema)
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required field 'name' is missing or nil"
@@ -1070,10 +1055,10 @@
 
   (testing "create-entity allows missing nullable field"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}
-                                       :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
-                                             :type :text :nullable? true}})]
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                :type :text :nullable? true}})]
       (sp/initialize storage schema)
       (try
         ;; Note: Datomic doesn't allow nil values, so we just omit the field
@@ -1085,8 +1070,8 @@
 
   (testing "update-entity throws when setting required field to nil"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})]
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})]
       (sp/initialize storage schema)
       (try
         (let [user (sp/create-entity storage :user {:name "Alice"})]
@@ -1097,10 +1082,10 @@
 
   (testing "update-entity preserves nullable field when not updating it"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}
-                                       :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
-                                             :type :text :nullable? true}})]
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                :type :text :nullable? true}})]
       (sp/initialize storage schema)
       (try
         ;; Note: Datomic doesn't allow nil values, but we can update without including the field
@@ -1682,8 +1667,8 @@
 (deftest concurrent-access-test
   (testing "concurrent reads are thread-safe"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                              :type :text}})
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
           errors (atom [])]
       (sp/initialize storage schema)
       (try
@@ -1705,8 +1690,8 @@
 
   (testing "concurrent writes are thread-safe"
     (let [storage (create-test-storage)
-          schema (make-schema :fields {:value {:uuid #uuid "00000000-0000-0000-0000-000000000002"
-                                               :type :int}})
+          schema (th/make-schema :fields {:value {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                  :type :int}})
           errors (atom [])]
       (sp/initialize storage schema)
       (try
@@ -1828,7 +1813,7 @@
 (deftest create-entity-invalid-data-test
   (testing "create-entity throws when data is not a map"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (try
         (sp/initialize storage schema)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -1847,7 +1832,7 @@
 (deftest query-entities-invalid-where-test
   (testing "query-entities throws when where is not a map"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (try
         (sp/initialize storage schema)
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -1868,7 +1853,7 @@
 (deftest ensure-connection-error-test
   (testing "throws when storage is closed"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (sp/initialize storage schema)
       ;; Close the storage
       (sp/close storage)
@@ -1879,7 +1864,7 @@
 
   (testing "error includes operation name"
     (let [storage (create-test-storage)
-          schema (make-schema)]
+          schema (th/make-schema)]
       (sp/initialize storage schema)
       (sp/close storage)
       (try

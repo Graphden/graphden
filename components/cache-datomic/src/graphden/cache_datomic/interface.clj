@@ -16,6 +16,7 @@
     [clojure.tools.logging :as log]
     [datomic.client.api :as d]
     [graphden.cache-protocol.interface :as cache]
+    [graphden.cache-protocol.value-codec :as codec]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -256,13 +257,7 @@
     (let [parsed (if (string? value-edn)
                    (edn/read-string value-edn)
                    value-edn)]
-      ;; Handle union value format: {:kind :literal :value ...}
-      (if (and (map? parsed) (contains? parsed :kind))
-        (case (keyword (:kind parsed))
-          :literal (:value parsed)
-          :fn-ref (assoc parsed :kind :fn-ref)
-          parsed)
-        parsed))))
+      (codec/parse-cached-value parsed))))
 
 
 (defn- load-cached-merged-args
@@ -300,16 +295,8 @@
 (defn- encode-value
   "Encodes a value for EDN storage."
   [value]
-  (cond
-    (nil? value) nil
-
-    ;; fn-ref values keep their kind
-    (and (map? value) (= :fn-ref (:kind value)))
-    (pr-str value)
-
-    ;; literal values wrap in union format
-    :else
-    (pr-str {:kind :literal :value value})))
+  (when-let [formatted (codec/format-cached-value value)]
+    (pr-str formatted)))
 
 
 (defn- build-cached-fn-tx

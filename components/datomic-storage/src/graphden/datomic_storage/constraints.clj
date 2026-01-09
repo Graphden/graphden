@@ -104,41 +104,32 @@
     [_this owner-fn-id]
     (let [conn (get-conn! conn-atom)
           db (d/db conn)]
-      (loop [to-visit [owner-fn-id]
-             visited #{}
-             iter-count 0]
-        ;; Check iteration limit to prevent infinite loops
-        (sp/check-graph-iteration-limit! iter-count owner-fn-id)
-        (if (empty? to-visit)
-          visited
-          (let [current-id (first to-visit)
-                rest-to-visit (rest to-visit)]
-            (if (contains? visited current-id)
-              (recur rest-to-visit visited (inc iter-count))
-              (let [;; Get arg-values for current fn
-                    arg-values (d/q '[:find ?value
-                                      :in $ ?owner-id
-                                      :where
-                                      [?e :arg-value/owner-fn-id ?owner-id]
-                                      [?e :arg-value/value ?value]]
-                                    db current-id)
-                    ;; Extract UUID candidates from arg-values
-                    uuid-candidates (->> arg-values
-                                         (map first)
-                                         (keep sp/try-parse-uuid)
-                                         vec)
-                    ;; Batch check: find which UUIDs are actually fn-ids
-                    ref-fn-ids (if (empty? uuid-candidates)
-                                 []
-                                 (let [valid-fn-ids (d/q '[:find ?fn-id
-                                                           :in $ [?fn-id ...]
-                                                           :where
-                                                           [?e :fn/id ?fn-id]]
-                                                         db uuid-candidates)]
-                                   (map first valid-fn-ids)))]
-                (recur (concat rest-to-visit ref-fn-ids)
-                       (conj visited current-id)
-                       (inc iter-count))))))))))
+      ;; Use generic BFS traversal with database queries in get-neighbors-fn
+      (sp/traverse-bfs
+        owner-fn-id
+        (fn [current-id]
+          ;; Get arg-values for current fn
+          (let [arg-values (d/q '[:find ?value
+                                  :in $ ?owner-id
+                                  :where
+                                  [?e :arg-value/owner-fn-id ?owner-id]
+                                  [?e :arg-value/value ?value]]
+                                db current-id)
+                ;; Extract UUID candidates from arg-values
+                uuid-candidates (->> arg-values
+                                     (map first)
+                                     (keep sp/try-parse-uuid)
+                                     vec)]
+            ;; Batch check: find which UUIDs are actually fn-ids
+            (if (empty? uuid-candidates)
+              []
+              (let [valid-fn-ids (d/q '[:find ?fn-id
+                                        :in $ [?fn-id ...]
+                                        :where
+                                        [?e :fn/id ?fn-id]]
+                                      db uuid-candidates)]
+                (map first valid-fn-ids)))))
+        {:context-id owner-fn-id}))))
 
 
 (defn create-helpers

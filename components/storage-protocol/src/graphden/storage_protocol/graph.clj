@@ -71,6 +71,60 @@
                      :iteration-count iteration-count}))))
 
 
+;; === Generic BFS Traversal ===
+
+(defn traverse-bfs
+  "Generic BFS traversal utility for in-memory graph operations.
+   Returns set of all visited nodes.
+
+   Parameters:
+   - start-id: Starting node ID
+   - get-neighbors-fn: (fn [node-id] -> seq of neighbor IDs)
+     Function that returns neighbors for a given node.
+     Only unvisited neighbors will be added to queue.
+
+   Options (via opts map):
+   - :max-iterations - Override default iteration limit (default: *max-graph-iterations*)
+   - :context-id - ID for error context in limit messages (default: start-id)
+
+   Example:
+   ```clojure
+   ;; Collect all function dependencies
+   (traverse-bfs fn-id
+     (fn [id]
+       (->> (get-arg-values-for-fn id)
+            (map :value)
+            (filter uuid?)
+            (filter fn-exists?))))
+   ```
+
+   Returns: Set of all visited node IDs (including start-id)"
+  ([start-id get-neighbors-fn]
+   (traverse-bfs start-id get-neighbors-fn {}))
+  ([start-id get-neighbors-fn opts]
+   (let [max-iter (or (:max-iterations opts) *max-graph-iterations*)
+         context-id (or (:context-id opts) start-id)]
+     (loop [to-visit [start-id]
+            visited #{start-id}
+            iter-count 0]
+       (when (> iter-count max-iter)
+         (throw (ex-info "BFS traversal exceeded maximum iterations"
+                         {:type :execution-error/traversal-too-large
+                          :context-id context-id
+                          :max-iterations max-iter
+                          :iteration-count iter-count})))
+       (if (empty? to-visit)
+         visited
+         (let [current-id (first to-visit)
+               rest-queue (subvec (vec to-visit) 1)
+               neighbors (get-neighbors-fn current-id)
+               new-neighbors (remove visited neighbors)
+               new-visited (into visited new-neighbors)]
+           (recur (into rest-queue new-neighbors)
+                  new-visited
+                  (inc iter-count))))))))
+
+
 ;; === UUID parsing ===
 
 (defn try-parse-uuid

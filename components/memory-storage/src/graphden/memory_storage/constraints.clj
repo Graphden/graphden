@@ -50,25 +50,14 @@
           ;; This changes O(N*M) to O(N+M) where N=fns, M=arg-values
           arg-values-by-owner (group-by :owner-fn-id (vals (crud/get-entity-data state :arg-value)))
           fns-data (crud/get-entity-data state :fn)]
-      (loop [to-visit [owner-fn-id]
-             visited #{owner-fn-id}  ; Mark as visited when added to queue
-             iter-count 0]
-        ;; Check iteration limit to prevent infinite loops
-        (sp/check-graph-iteration-limit! iter-count owner-fn-id)
-        (if (empty? to-visit)
-          visited
-          (let [current-id (first to-visit)
-                rest-to-visit (rest to-visit)
-                arg-values (get arg-values-by-owner current-id [])
-                ;; Get fn references from arg-values (UUIDs that are fn refs)
-                ref-fn-ids (->> arg-values
-                                (map :value)
-                                (filter uuid?)
-                                ;; Check if this UUID is actually a fn
-                                (filter #(contains? fns-data %))
-                                ;; Filter out already visited
-                                (remove visited))
-                new-visited (into visited ref-fn-ids)]
-            (recur (into (vec rest-to-visit) ref-fn-ids)
-                   new-visited
-                   (inc iter-count))))))))
+      ;; Use generic BFS traversal
+      (sp/traverse-bfs
+        owner-fn-id
+        (fn [current-id]
+          ;; Get fn references from arg-values (UUIDs that are fn refs)
+          (->> (get arg-values-by-owner current-id [])
+               (map :value)
+               (filter uuid?)
+               ;; Check if this UUID is actually a fn
+               (filter #(contains? fns-data %))))
+        {:context-id owner-fn-id}))))

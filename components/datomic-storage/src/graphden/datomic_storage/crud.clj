@@ -203,7 +203,8 @@
 
 (defn create-entities-impl
   "Creates multiple entities in a single transaction.
-   Throws :duplicate-ids if duplicate IDs found in batch."
+   Throws :duplicate-ids if duplicate IDs found in batch.
+   Includes batch context in errors for debugging."
   [conn entity-name data-seq]
   (if (empty? data-seq)
     []
@@ -211,28 +212,41 @@
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [db (d/db conn)
             field-specs (get-fields-with-specs db entity-name)
-            ;; Validate all records first
+            total-count (count data-seq)
+            ;; Validate all records first with batch context
             _ (when (seq field-specs)
-                (doseq [data data-seq]
-                  (sp/validate-required-fields! entity-name field-specs data)))
+                (doseq [[idx data] (map-indexed vector data-seq)]
+                  (try
+                    (sp/validate-required-fields! entity-name field-specs data)
+                    (catch clojure.lang.ExceptionInfo e
+                      (throw (sp/wrap-batch-error e idx total-count (:id data)))))))
             ;; Prepare transaction data
-            records (map (fn [data]
-                           (let [id (or (:id data) (random-uuid))
-                                 temp-id (str "new-entity-" (random-uuid))]
-                             {:id id
-                              :temp-id temp-id
-                              :data (assoc data :id id)}))
-                         data-seq)
-            tx-data (map (fn [{:keys [id temp-id data]}]
-                           (entity->tx entity-name data id temp-id field-specs))
-                         records)]
-        (d/transact conn {:tx-data (vec tx-data)})
+            records (mapv (fn [data]
+                            (let [id (or (:id data) (random-uuid))
+                                  temp-id (str "new-entity-" (random-uuid))]
+                              {:id id
+                               :temp-id temp-id
+                               :data (assoc data :id id)}))
+                          data-seq)
+            tx-data (mapv (fn [{:keys [id temp-id data]}]
+                            (entity->tx entity-name data id temp-id field-specs))
+                          records)]
+        ;; Wrap transaction in error handling
+        (try
+          (d/transact conn {:tx-data tx-data})
+          (catch Exception e
+            (throw (ex-info "Batch create failed"
+                            {:type :batch-create-failed
+                             :entity-name entity-name
+                             :batch-size total-count
+                             :record-ids (mapv :id records)}
+                            e))))
         ;; Read back created entities
         (let [new-db (d/db conn)
               fields (get-entity-fields new-db entity-name)
-              ids (map :id records)
+              ids (mapv :id records)
               results (keep (fn [id] (pull-entity new-db entity-name id fields)) ids)
-              expected-count (count data-seq)
+              expected-count total-count
               actual-count (count results)]
           ;; Validate that all records were created
           (when (not= expected-count actual-count)
@@ -270,7 +284,8 @@
 
 
 (defn delete-entities-impl
-  "Deletes multiple entities by ids. Returns count of deleted."
+  "Deletes multiple entities by ids. Returns count of deleted.
+   Includes batch context in errors for debugging."
   [conn entity-name ids]
   (if (empty? ids)
     0
@@ -281,7 +296,15 @@
                         :in '[$ [?id ...]]
                         :where [['?e id-attr '?id]]}
                        db (vec ids))
-          entity-ids (map first results)]
+          entity-ids (mapv first results)]
       (when (seq entity-ids)
-        (d/transact conn {:tx-data (mapv (fn [eid] [:db/retractEntity eid]) entity-ids)}))
+        (try
+          (d/transact conn {:tx-data (mapv (fn [eid] [:db/retractEntity eid]) entity-ids)})
+          (catch Exception e
+            (throw (ex-info "Batch delete failed"
+                            {:type :batch-delete-failed
+                             :entity-name entity-name
+                             :batch-size (count ids)
+                             :deleted-count (count entity-ids)}
+                            e)))))
       (count entity-ids))))

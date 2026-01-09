@@ -4,7 +4,8 @@
    ## Module Structure
 
    The executor is split into focused namespaces:
-   - core.clj (this file) - Main execution logic, thunk building, argument resolution
+   - core.clj (this file) - Main execution logic
+   - argument_resolution.clj - Delay building and argument resolution
    - registry.clj - Base function registry (global and context-based)
    - context.clj - ExecutionContext record and creation
    - types.clj - Type hints and validation
@@ -24,6 +25,7 @@
    The defbase macro in fn-registry handles this automatically."
   (:require
     [clojure.tools.logging :as log]
+    [graphden.executor.argument-resolution :as arg-res]
     [graphden.executor.context :as ctx]
     [graphden.executor.registry :as registry]
     [graphden.executor.types :as types]
@@ -194,220 +196,6 @@
             result))))))
 
 
-;; === Delay Building ===
-
-(defn- wrap-delay-with-context
-  "Wraps a delay body with error context for better diagnostics.
-   When the delay fails to evaluate, the error includes arg-name and source info.
-   This helps diagnose which argument caused the failure in complex execution graphs."
-  [arg-name source body-fn]
-  (delay
-    (try
-      (body-fn)
-      (catch Exception e
-        (throw (ex-info (str "Error evaluating argument '" arg-name "': " (ex-message e))
-                        {:type :execution-error/arg-evaluation-failed
-                         :arg-name arg-name
-                         :source source
-                         :cause-type (type e)}
-                        e))))))
-
-
-(defn- build-uuid-ref-delay
-  "Builds a delay for a UUID reference (fn or fn-result-value).
-   Extracted from build-delay for readability."
-  [context uuid-value arg-name arg-type fn-result-values]
-  (cond
-    ;; fn-result-value reference: execute with caching
-    (contains? fn-result-values uuid-value)
-    (let [frv-context (assoc context :current-frv-id uuid-value)]
-      (wrap-delay-with-context arg-name :fn-result-value
-                               #(execute-fn-result-value frv-context uuid-value)))
-
-    ;; HOF (type=:fn): return fn-id directly for later callable creation
-    (= arg-type :fn)
-    (delay uuid-value)
-
-    ;; Direct fn ref: execute immediately
-    :else
-    (wrap-delay-with-context arg-name :fn-ref
-                             #(execute-internal context uuid-value nil))))
-
-
-(defn- build-delay
-  "Builds a delay for an arg-value with error context.
-   - If value is a UUID referencing fn-result-value -> delay with cached execution
-   - If value is a UUID referencing fn and arg-schema type is :fn -> delay with callable (HOF, no path-args)
-   - If value is a UUID referencing fn and arg-schema type is not :fn -> delay that executes fn
-   - Otherwise -> delay with literal value
-
-   NOTE: This function is only called from build-arg-delays when a stored arg-value
-   exists AND no provided-arg override was found for this arg-schema-id.
-   The provided-args check happens in build-arg-delays before calling this function.
-
-   IMPORTANT: Direct fn refs (HOF, type=:fn) do NOT receive path-args - they are
-   'black boxes' controlled by map/reduce/etc. Only fn-result-value refs can have
-   their free args set via path-args.
-
-   All delays include error context (arg-name, source) for better diagnostics."
-  ^clojure.lang.Delay [context ^clojure.lang.IPersistentMap arg-value ^clojure.lang.IPersistentMap arg-schema]
-  (let [value (:value arg-value)
-        arg-name (:name arg-schema)]
-    (if (uuid? value)
-      ;; UUID: reference to fn or fn-result-value
-      (let [arg-type (:type arg-schema)
-            fn-result-values (-> context :execution-graph :fn-result-values)]
-        (build-uuid-ref-delay context value arg-name arg-type fn-result-values))
-      ;; Literal value
-      (delay value))))
-
-
-(defn- get-path-arg
-  "Gets a runtime argument value from path-args.
-
-   For root function (current-frv-id is nil): looks up by arg-schema-id directly
-   For nested fns via fn-result-value: looks up by [fn-result-value-id arg-schema-id]
-
-   Returns the value or nil if not found."
-  [context arg-schema-id]
-  (let [current-frv-id (:current-frv-id context)
-        path-args (:path-args context)]
-    (if current-frv-id
-      ;; Nested fn via fn-result-value: use [frv-id arg-schema-id] as key
-      (get path-args [current-frv-id arg-schema-id])
-      ;; Root function: use arg-schema-id directly
-      (get path-args arg-schema-id))))
-
-
-;; === Argument Resolution Helpers ===
-;; These helpers handle specific cases in build-arg-delays.
-;; They are intentionally separate (not inlined) for:
-;; - Readability: descriptive names document business logic better than inline code
-;; - Single responsibility: each function handles one argument source scenario
-;; - Testability: individual functions can be tested in isolation if needed
-
-
-(defn- handle-validated-arg
-  "Validates and wraps a user-provided argument value in a delay.
-   Used for both direct provided args (from HOF) and path-args.
-   The source parameter identifies the origin for debugging."
-  [value arg-schema strict? max-unknown-types arg-name unknown-type-counter source]
-  (types/validate-provided-arg-type! value arg-schema strict? max-unknown-types unknown-type-counter)
-  (wrap-delay-with-context arg-name source #(identity value)))
-
-
-(defn- handle-path-arg-with-db-value
-  "Handles case when path-arg exists but DB value takes precedence.
-
-   Design Decision: DB values always win over path-args.
-   This prevents accidental override of validated stored data.
-   If you need to override a stored arg-value:
-   1. Use `provided-args` in `execute` call (for HOF callables)
-   2. Or update the arg-value in the database first
-
-   Logs warning at WARN level to help debugging when override doesn't work.
-
-   SECURITY: Does NOT log actual values to prevent sensitive data leakage.
-   Only logs type information which is safe for debugging."
-  [context arg-value arg-schema arg-schema-id arg-name _path-arg-value]
-  (log/warn "Path-arg ignored: argument already defined in DB (DB value takes precedence)"
-            {:arg-schema-id arg-schema-id
-             :current-frv-id (:current-frv-id context)
-             :arg-name arg-name
-             ;; SECURITY: Log types only, not actual values
-             :db-value-type (type (:value arg-value))
-             :arg-type (:type arg-schema)
-             :hint "Use provided-args in execute call or update DB arg-value to override"})
-  (build-delay context arg-value arg-schema))
-
-
-(defn- throw-missing-required-arg!
-  "Throws error for required arg with no value."
-  [arg-schema-id arg-name current-frv-id]
-  (throw (ex-info (str "Required argument '" arg-name "' not provided")
-                  {:type :execution-error/missing-required-arg
-                   :arg-schema-id arg-schema-id
-                   :arg-name arg-name
-                   :current-frv-id current-frv-id})))
-
-
-(defn- build-arg-delays
-  "Builds delays for all arg-schemas.
-   Returns a map of {arg-name-keyword -> delay}.
-
-   All arguments are wrapped in delay for lazy evaluation.
-   Base functions receive delays and use @ (deref) to get values.
-
-   ## Argument Resolution Priority
-
-   1. Direct provided value (from HOF callable calls)
-   2. Path-arg value (only if no DB value exists):
-      - For root fn: looked up by arg-schema-id
-      - For nested fn via fn-result-value: looked up by [frv-id arg-schema-id]
-      - If arg-value also exists in DB -> warning, use DB value (no override)
-   3. Stored arg-value from DB
-   4. Required arg with no value -> error
-   5. Optional arg with no value -> delay returning nil
-
-   ## Optional Arguments Convention
-
-   Optional args (`:required false` in arg-schema) are handled as follows:
-   - If no value is provided, the argument IS included in the map with a delay
-     that returns nil when dereferenced
-   - This follows SQL/Clojure convention where missing = nil, not absent key
-   - Base functions can simply use @arg and get nil for missing optionals:
-     ```clojure
-     (defbase my-fn
-       {:args {:x :int, :y {:type :int :required false}}
-        :return-type :int}
-       (+ @x (or @y 0)))  ; @y returns nil if not provided
-     ```
-
-   This simplifies base function code - no need for arg-provided? checks."
-  [context fn-data provided-args]
-  (let [{:keys [arg-schemas arg-values]} fn-data
-        current-frv-id (:current-frv-id context)
-        strict? (:strict-type-validation? context)
-        max-unknown-types (:max-unknown-types context)
-        unknown-type-counter (:unknown-type-counter context)]
-    (reduce-kv
-      (fn [acc arg-schema-id arg-schema]
-        (let [arg-name (:name arg-schema)
-              arg-name-kw (keyword arg-name)
-              provided-value (get provided-args arg-schema-id)
-              path-arg-value (get-path-arg context arg-schema-id)
-              arg-value (get arg-values arg-schema-id)]
-          (cond
-            ;; 1. Direct provided value (from HOF callable)
-            (some? provided-value)
-            (assoc acc arg-name-kw (handle-validated-arg provided-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :provided-arg))
-
-            ;; 2. Path-arg value exists
-            (some? path-arg-value)
-            (assoc acc arg-name-kw
-                   (if arg-value
-                     ;; DB value takes precedence
-                     (handle-path-arg-with-db-value context arg-value arg-schema
-                                                    arg-schema-id arg-name path-arg-value)
-                     ;; No DB value - use path-arg
-                     (handle-validated-arg path-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :path-arg)))
-
-            ;; 3. Stored arg-value exists
-            arg-value
-            (assoc acc arg-name-kw (build-delay context arg-value arg-schema))
-
-            ;; 4. Required arg with no value -> error
-            (:required arg-schema)
-            (throw-missing-required-arg! arg-schema-id arg-name current-frv-id)
-
-            ;; 5. Optional arg with no value -> delay returning nil
-            ;; This follows SQL/Clojure convention: missing value = nil, not absent key
-            :else
-            (assoc acc arg-name-kw (delay nil)))))
-      {}
-      arg-schemas)))
-
-
 ;; === Execution ===
 
 (defn- check-limits!
@@ -479,7 +267,9 @@
                        :fn-name fn-name
                        :registry-size (count registry)})))
     (let [new-context (update context :depth inc)
-          arg-delays (build-arg-delays new-context fn-data provided-args)]
+          ;; Pass execute functions to argument resolution for recursive execution
+          arg-delays (arg-res/build-arg-delays new-context fn-data provided-args
+                                               execute-fn-result-value execute-internal)]
       (base-fn arg-delays new-context))))
 
 

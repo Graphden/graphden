@@ -438,6 +438,7 @@
 
 
 (def check-graph-iteration-limit! graph/check-graph-iteration-limit!)
+(def traverse-bfs graph/traverse-bfs)
 (def try-parse-uuid graph/try-parse-uuid)
 (def ->execution-graph graph/->execution-graph)
 

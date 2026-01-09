@@ -132,6 +132,25 @@
                            :limit 1})))
 
 
+(defn- load-all-cache-data
+  "Loads all cache data in parallel. Returns nil if cache doesn't exist.
+   Optimizes N+1 by running 4 queries concurrently instead of sequentially."
+  [ds cache-id]
+  ;; Start all queries in parallel using futures
+  (let [fns-future (future (load-cached-fns ds cache-id))
+        fn-schemas-future (future (load-cached-fn-schemas ds cache-id))
+        arg-schemas-future (future (load-cached-arg-schemas ds cache-id))
+        resolved-args-future (future (load-cached-merged-args ds cache-id))
+        ;; Wait for all results
+        fns @fns-future]
+    ;; If no fns found, cache doesn't exist - don't wait for other queries
+    (when (seq fns)
+      {:fns fns
+       :fn-schemas @fn-schemas-future
+       :arg-schemas @arg-schemas-future
+       :resolved-args @resolved-args-future})))
+
+
 ;; === Graph saving helpers ===
 
 (defn- encode-value
@@ -290,12 +309,10 @@
 
   (get-cached-graph
     [_ fn-id]
-    (when (cache-exists-query datasource fn-id)
-      (let [fns (load-cached-fns datasource fn-id)
-            fn-schemas (load-cached-fn-schemas datasource fn-id)
-            arg-schemas (load-cached-arg-schemas datasource fn-id)
-            resolved-args (load-cached-merged-args datasource fn-id)]
-        (cache/build-cached-graph fns fn-schemas arg-schemas resolved-args))))
+    ;; Load all data in parallel - no separate exists check needed
+    (when-let [data (load-all-cache-data datasource fn-id)]
+      (cache/build-cached-graph (:fns data) (:fn-schemas data)
+                                (:arg-schemas data) (:resolved-args data))))
 
 
   (cache-exists?

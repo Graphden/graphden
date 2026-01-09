@@ -1,0 +1,236 @@
+(ns graphden.executor.argument-resolution
+  "Argument resolution logic for the function executor.
+
+   This module handles:
+   - Building delays for lazy argument evaluation
+   - Resolving argument values from various sources (provided, path-args, DB)
+   - Type validation for provided arguments
+
+   ## Architecture Note
+
+   Argument resolution uses delays to defer execution until values are needed.
+   This enables lazy evaluation and memoization of fn-result-values.
+
+   The functions in this module create delays that may capture references to
+   execute-internal (passed as parameter) for recursive execution."
+  (:require
+    [clojure.tools.logging :as log]
+    [graphden.executor.types :as types]))
+
+
+;; === Delay Building Infrastructure ===
+
+(defn wrap-delay-with-context
+  "Wraps a delay body with error context for better diagnostics.
+   When the delay fails to evaluate, the error includes arg-name and source info.
+   This helps diagnose which argument caused the failure in complex execution graphs."
+  [arg-name source body-fn]
+  (delay
+    (try
+      (body-fn)
+      (catch Exception e
+        (throw (ex-info (str "Error evaluating argument '" arg-name "': " (ex-message e))
+                        {:type :execution-error/arg-evaluation-failed
+                         :arg-name arg-name
+                         :source source
+                         :cause-type (type e)}
+                        e))))))
+
+
+(defn- build-uuid-ref-delay
+  "Builds a delay for a UUID reference (fn or fn-result-value).
+
+   Parameters:
+   - context: Execution context
+   - uuid-value: The UUID reference
+   - arg-name: Argument name for error context
+   - arg-type: Type from arg-schema (:fn for HOF)
+   - fn-result-values: Map of fn-result-values from execution graph
+   - execute-fn-result-value-fn: Function to execute fn-result-values (injected)
+   - execute-internal-fn: Function for internal execution (injected)"
+  [context uuid-value arg-name arg-type fn-result-values
+   execute-fn-result-value-fn execute-internal-fn]
+  (cond
+    ;; fn-result-value reference: execute with caching
+    (contains? fn-result-values uuid-value)
+    (let [frv-context (assoc context :current-frv-id uuid-value)]
+      (wrap-delay-with-context arg-name :fn-result-value
+                               #(execute-fn-result-value-fn frv-context uuid-value)))
+
+    ;; HOF (type=:fn): return fn-id directly for later callable creation
+    (= arg-type :fn)
+    (delay uuid-value)
+
+    ;; Direct fn ref: execute immediately
+    :else
+    (wrap-delay-with-context arg-name :fn-ref
+                             #(execute-internal-fn context uuid-value nil))))
+
+
+(defn build-delay
+  "Builds a delay for an arg-value with error context.
+
+   - If value is a UUID referencing fn-result-value -> delay with cached execution
+   - If value is a UUID referencing fn and arg-schema type is :fn -> delay with callable (HOF)
+   - If value is a UUID referencing fn and arg-schema type is not :fn -> delay that executes fn
+   - Otherwise -> delay with literal value
+
+   Parameters:
+   - context: Execution context
+   - arg-value: The argument value record
+   - arg-schema: The argument schema
+   - execute-fn-result-value-fn: Injected function to execute fn-result-values
+   - execute-internal-fn: Injected function for internal execution
+
+   All delays include error context (arg-name, source) for better diagnostics."
+  ^clojure.lang.Delay [context ^clojure.lang.IPersistentMap arg-value
+                       ^clojure.lang.IPersistentMap arg-schema
+                       execute-fn-result-value-fn execute-internal-fn]
+  (let [value (:value arg-value)
+        arg-name (:name arg-schema)]
+    (if (uuid? value)
+      ;; UUID: reference to fn or fn-result-value
+      (let [arg-type (:type arg-schema)
+            fn-result-values (-> context :execution-graph :fn-result-values)]
+        (build-uuid-ref-delay context value arg-name arg-type fn-result-values
+                              execute-fn-result-value-fn execute-internal-fn))
+      ;; Literal value
+      (delay value))))
+
+
+;; === Path Argument Resolution ===
+
+(defn get-path-arg
+  "Gets a runtime argument value from path-args.
+
+   For root function (current-frv-id is nil): looks up by arg-schema-id directly
+   For nested fns via fn-result-value: looks up by [fn-result-value-id arg-schema-id]
+
+   Returns the value or nil if not found."
+  [context arg-schema-id]
+  (let [current-frv-id (:current-frv-id context)
+        path-args (:path-args context)]
+    (if current-frv-id
+      ;; Nested fn via fn-result-value: use [frv-id arg-schema-id] as key
+      (get path-args [current-frv-id arg-schema-id])
+      ;; Root function: use arg-schema-id directly
+      (get path-args arg-schema-id))))
+
+
+;; === Argument Validation Helpers ===
+
+(defn handle-validated-arg
+  "Validates and wraps a user-provided argument value in a delay.
+   Used for both direct provided args (from HOF) and path-args.
+   The source parameter identifies the origin for debugging."
+  [value arg-schema strict? max-unknown-types arg-name unknown-type-counter source]
+  (types/validate-provided-arg-type! value arg-schema strict? max-unknown-types unknown-type-counter)
+  (wrap-delay-with-context arg-name source #(identity value)))
+
+
+(defn handle-path-arg-with-db-value
+  "Handles case when path-arg exists but DB value takes precedence.
+
+   Design Decision: DB values always win over path-args.
+   This prevents accidental override of validated stored data.
+   If you need to override a stored arg-value:
+   1. Use `provided-args` in `execute` call (for HOF callables)
+   2. Or update the arg-value in the database first
+
+   Logs warning at WARN level to help debugging when override doesn't work.
+
+   SECURITY: Does NOT log actual values to prevent sensitive data leakage.
+   Only logs type information which is safe for debugging."
+  [context arg-value arg-schema arg-schema-id arg-name _path-arg-value
+   execute-fn-result-value-fn execute-internal-fn]
+  (log/warn "Path-arg ignored: argument already defined in DB (DB value takes precedence)"
+            {:arg-schema-id arg-schema-id
+             :current-frv-id (:current-frv-id context)
+             :arg-name arg-name
+             ;; SECURITY: Log types only, not actual values
+             :db-value-type (type (:value arg-value))
+             :arg-type (:type arg-schema)
+             :hint "Use provided-args in execute call or update DB arg-value to override"})
+  (build-delay context arg-value arg-schema execute-fn-result-value-fn execute-internal-fn))
+
+
+(defn throw-missing-required-arg!
+  "Throws error for required arg with no value."
+  [arg-schema-id arg-name current-frv-id]
+  (throw (ex-info (str "Required argument '" arg-name "' not provided")
+                  {:type :execution-error/missing-required-arg
+                   :arg-schema-id arg-schema-id
+                   :arg-name arg-name
+                   :current-frv-id current-frv-id})))
+
+
+;; === Main Argument Resolution ===
+
+(defn build-arg-delays
+  "Builds delays for all arg-schemas.
+   Returns a map of {arg-name-keyword -> delay}.
+
+   All arguments are wrapped in delay for lazy evaluation.
+   Base functions receive delays and use @ (deref) to get values.
+
+   ## Argument Resolution Priority
+
+   1. Direct provided value (from HOF callable calls)
+   2. Path-arg value (only if no DB value exists):
+      - For root fn: looked up by arg-schema-id
+      - For nested fn via fn-result-value: looked up by [frv-id arg-schema-id]
+      - If arg-value also exists in DB -> warning, use DB value (no override)
+   3. Stored arg-value from DB
+   4. Required arg with no value -> error
+   5. Optional arg with no value -> delay returning nil
+
+   ## Parameters
+
+   - context: Execution context
+   - fn-data: Function data from graph {:arg-schemas {...} :arg-values {...}}
+   - provided-args: Map of {arg-schema-id -> value} provided at call time
+   - execute-fn-result-value-fn: Injected function to execute fn-result-values
+   - execute-internal-fn: Injected function for internal execution"
+  [context fn-data provided-args execute-fn-result-value-fn execute-internal-fn]
+  (let [{:keys [arg-schemas arg-values]} fn-data
+        current-frv-id (:current-frv-id context)
+        strict? (:strict-type-validation? context)
+        max-unknown-types (:max-unknown-types context)
+        unknown-type-counter (:unknown-type-counter context)]
+    (reduce-kv
+      (fn [acc arg-schema-id arg-schema]
+        (let [arg-name (:name arg-schema)
+              arg-name-kw (keyword arg-name)
+              provided-value (get provided-args arg-schema-id)
+              path-arg-value (get-path-arg context arg-schema-id)
+              arg-value (get arg-values arg-schema-id)]
+          (cond
+            ;; 1. Direct provided value (from HOF callable)
+            (some? provided-value)
+            (assoc acc arg-name-kw (handle-validated-arg provided-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :provided-arg))
+
+            ;; 2. Path-arg value exists
+            (some? path-arg-value)
+            (assoc acc arg-name-kw
+                   (if arg-value
+                     ;; DB value takes precedence
+                     (handle-path-arg-with-db-value context arg-value arg-schema
+                                                    arg-schema-id arg-name path-arg-value
+                                                    execute-fn-result-value-fn execute-internal-fn)
+                     ;; No DB value - use path-arg
+                     (handle-validated-arg path-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :path-arg)))
+
+            ;; 3. Stored arg-value exists
+            arg-value
+            (assoc acc arg-name-kw (build-delay context arg-value arg-schema
+                                                execute-fn-result-value-fn execute-internal-fn))
+
+            ;; 4. Required arg with no value -> error
+            (:required arg-schema)
+            (throw-missing-required-arg! arg-schema-id arg-name current-frv-id)
+
+            ;; 5. Optional arg with no value -> delay returning nil
+            :else
+            (assoc acc arg-name-kw (delay nil)))))
+      {}
+      arg-schemas)))

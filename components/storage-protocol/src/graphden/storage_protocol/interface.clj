@@ -1939,6 +1939,63 @@
   (validate-no-control-chars! jdbc-url "jdbc-url"))
 
 
+;; === Canonical Field Types ===
+;;
+;; Standard field types supported by all storage backends.
+;; Each backend maps these to their native types.
+
+(def canonical-field-types
+  "Set of canonical field types supported by all storage backends.
+   - :uuid - UUID/GUID values
+   - :text - Variable-length text strings
+   - :int - 64-bit integers (BIGINT)
+   - :bool - Boolean true/false
+   - :numeric - Arbitrary precision decimal numbers
+   - :timestamptz - Timestamp with timezone
+   - :jsonb - JSON data (stored as native JSON or EDN string)
+   - :bytes - Binary data
+   - :ref - Reference to another entity (stored as UUID)
+   - :enum - Enumerated value (backend-specific storage)
+   - :union - Union type (stored as JSON/EDN)"
+  #{:uuid :text :int :bool :numeric :timestamptz :jsonb :bytes :ref :enum :union})
+
+
+(defn canonical-type?
+  "Returns true if the type keyword is a canonical field type."
+  [type-kw]
+  (contains? canonical-field-types type-kw))
+
+
+(def type-category
+  "Categorizes field types for common handling patterns.
+   - :primitive - Simple scalar values
+   - :reference - References to other entities
+   - :complex - Structured data types"
+  {:uuid        :primitive
+   :text        :primitive
+   :int         :primitive
+   :bool        :primitive
+   :numeric     :primitive
+   :timestamptz :primitive
+   :bytes       :primitive
+   :jsonb       :complex
+   :ref         :reference
+   :enum        :primitive
+   :union       :complex})
+
+
+(defn reference-type?
+  "Returns true if the field type is a reference type (:ref)."
+  [type-kw]
+  (= :reference (get type-category type-kw)))
+
+
+(defn complex-type?
+  "Returns true if the field type is a complex type (:jsonb, :union)."
+  [type-kw]
+  (= :complex (get type-category type-kw)))
+
+
 ;; === Execution Graph Utilities ===
 ;;
 ;; Shared utilities for execution graph resolution across storage implementations.
@@ -1984,6 +2041,182 @@
        (map :value)
        (keep try-parse-uuid)
        (set)))
+
+
+;; === Graph Resolution Protocol ===
+;;
+;; Shared BFS algorithm for resolve-execution-graph with backend-specific
+;; data loading. This eliminates code duplication across storage backends.
+
+(defprotocol GraphDataLoader
+  "Protocol for loading graph data during execution graph resolution.
+   Implement this for each storage backend to provide data access.
+
+   All methods receive the loader instance and relevant IDs,
+   and return data in canonical formats."
+
+  (load-fn-record
+    [this fn-id]
+    "Loads a single fn record by ID. Returns fn map or nil if not found.")
+
+  (load-fn-schema-record
+    [this fn-schema-id]
+    "Loads a single fn-schema record by ID. Returns fn-schema map or nil if not found.")
+
+  (load-arg-schemas-for-fn-schema
+    [this fn-schema-id]
+    "Loads all arg-schemas for a fn-schema.
+     Returns map of {arg-schema-id -> arg-schema-record}.")
+
+  (load-parent-chain
+    [this fn-id]
+    "Loads the parent chain for a fn (fn-id first, then parent, grandparent, etc).
+     Returns vector [fn-id parent-id grandparent-id ...] ordered child to root.")
+
+  (load-arg-values-for-fns
+    [this fn-ids]
+    "Loads all arg-values for a set of fn-ids (owners).
+     Returns sequence of arg-value records.")
+
+  (classify-uuid-refs
+    [this uuid-refs]
+    "Classifies UUIDs into fn-refs vs fn-result-value-refs.
+     Returns {:fn-refs #{fn-id ...}
+              :frv-refs #{frv-id ...}
+              :frvs {frv-id -> frv-record ...}}"))
+
+
+(defn process-fn-node
+  "Processes a single fn node during graph resolution.
+   Returns {:graph updated-graph :new-fn-refs #{fn-ids-to-visit}}.
+
+   This is a pure function that uses GraphDataLoader for data access,
+   enabling the same BFS logic across all storage backends.
+
+   Arguments:
+   - loader: implementation of GraphDataLoader
+   - current-fn-id: UUID of fn to process
+   - graph: current accumulated graph state"
+  [loader current-fn-id graph]
+  (if-let [fn-rec (load-fn-record loader current-fn-id)]
+    (let [fn-schema-id (:fn-schema-id fn-rec)
+          ;; Only load fn-schema if not already in graph
+          fn-schema (when-not (contains? (:fn-schemas graph) fn-schema-id)
+                      (load-fn-schema-record loader fn-schema-id))
+          ;; Only load arg-schemas if fn-schema was loaded
+          new-arg-schemas (if fn-schema
+                            (load-arg-schemas-for-fn-schema loader fn-schema-id)
+                            {})
+          ;; Load parent chain and merge arg-values
+          chain (load-parent-chain loader current-fn-id)
+          chain-arg-values (load-arg-values-for-fns loader chain)
+          merged-args (merge-arg-values-for-chain chain-arg-values chain)
+          ;; Extract and classify UUID refs
+          all-refs (extract-uuid-refs-from-arg-values merged-args)
+          {:keys [fn-refs frvs]} (classify-uuid-refs loader all-refs)]
+      {:graph (-> graph
+                  (update :fns assoc current-fn-id fn-rec)
+                  (update :fn-schemas #(if fn-schema (assoc % fn-schema-id fn-schema) %))
+                  (update :arg-schemas merge new-arg-schemas)
+                  (update :resolved-args assoc current-fn-id merged-args)
+                  (update :fn-result-values merge frvs))
+       :new-fn-refs fn-refs})
+    ;; fn doesn't exist, skip (might be literal value that looks like UUID)
+    {:graph graph :new-fn-refs #{}}))
+
+
+(defn resolve-execution-graph-bfs
+  "Shared BFS algorithm for execution graph resolution.
+   Uses GraphDataLoader protocol for backend-specific data access.
+
+   This function implements the core BFS traversal that collects all
+   transitively referenced functions and fn-result-values.
+
+   Arguments:
+   - loader: implementation of GraphDataLoader
+   - fn-id: starting function UUID
+
+   Returns ExecutionGraphResult record.
+
+   Each storage backend can use this with their GraphDataLoader implementation
+   instead of reimplementing the BFS logic."
+  [loader fn-id]
+  (let [init-graph {:fns {} :fn-schemas {} :arg-schemas {}
+                    :resolved-args {} :fn-result-values {}}]
+    (loop [to-visit #{fn-id}
+           visited #{fn-id}
+           graph init-graph
+           iter-count 0]
+      (check-graph-iteration-limit! iter-count fn-id)
+      (if (empty? to-visit)
+        (->execution-graph graph)
+        (let [current-fn-id (first to-visit)
+              rest-to-visit (disj to-visit current-fn-id)
+              {:keys [graph new-fn-refs]} (process-fn-node loader current-fn-id graph)
+              ;; Only add truly new nodes (not yet visited)
+              new-to-visit (clojure.set/difference new-fn-refs visited)
+              new-visited (clojure.set/union visited new-to-visit)]
+          (recur (clojure.set/union rest-to-visit new-to-visit)
+                 new-visited
+                 graph
+                 (inc iter-count)))))))
+
+
+;; === Execution Graph Reader Protocol ===
+;;
+;; Abstraction layer for accessing execution graph data.
+;; This decouples executor from specific storage format.
+
+(defprotocol ExecutionGraphReader
+  "Protocol for reading data from execution graphs.
+   Provides an abstraction layer between executor and storage format.
+
+   This allows the executor to work with any data structure that
+   implements these accessors, rather than coupling to a specific map shape."
+
+  (graph-get-fn
+    [this fn-id]
+    "Returns fn record for fn-id, or nil if not found.")
+
+  (graph-get-fn-schema
+    [this fn-schema-id]
+    "Returns fn-schema record for fn-schema-id, or nil if not found.")
+
+  (graph-get-arg-schemas
+    [this fn-schema-id]
+    "Returns map of {arg-schema-id -> arg-schema-record} for fn-schema-id.")
+
+  (graph-get-resolved-args
+    [this fn-id]
+    "Returns map of {arg-schema-id -> arg-value-record} for fn-id.")
+
+  (graph-get-fn-result-value
+    [this frv-id]
+    "Returns fn-result-value record for frv-id, or nil if not found."))
+
+
+;; Default implementation for ExecutionGraphResult records
+(extend-type ExecutionGraphResult
+  ExecutionGraphReader
+
+  (graph-get-fn [this fn-id]
+    (get (:fns this) fn-id))
+
+  (graph-get-fn-schema [this fn-schema-id]
+    (get (:fn-schemas this) fn-schema-id))
+
+  (graph-get-arg-schemas [this fn-schema-id]
+    ;; Filter arg-schemas belonging to this fn-schema
+    (into {}
+          (filter (fn [[_ arg-schema]]
+                    (= fn-schema-id (:fn-schema-id arg-schema))))
+          (:arg-schemas this)))
+
+  (graph-get-resolved-args [this fn-id]
+    (get (:resolved-args this) fn-id))
+
+  (graph-get-fn-result-value [this frv-id]
+    (get (:fn-result-values this) frv-id)))
 
 
 ;; === Read-Write Lock Utilities ===

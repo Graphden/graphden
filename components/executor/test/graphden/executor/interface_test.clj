@@ -2343,21 +2343,6 @@
           (exec/register-type-hint! :valid-keyword :not-a-string)))))
 
 
-;; === arg-provided? Tests ===
-
-(deftest arg-provided-interface-test
-  (testing "returns true when arg is present"
-    (is (true? (exec/arg-provided? {:x (delay 1) :y (delay 2)} :x)))
-    (is (true? (exec/arg-provided? {:x (delay 1)} :x))))
-
-  (testing "returns false when arg is absent"
-    (is (false? (exec/arg-provided? {:x (delay 1)} :y)))
-    (is (false? (exec/arg-provided? {} :x))))
-
-  (testing "returns true even when value is nil (presence check)"
-    (is (true? (exec/arg-provided? {:x nil} :x)))))
-
-
 ;; === get-single-required-arg Tests ===
 
 (deftest get-single-required-arg-interface-test

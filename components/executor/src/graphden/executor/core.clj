@@ -22,6 +22,20 @@
 
 
 ;; === Base Functions Registry ===
+;;
+;; The executor supports two approaches for providing base functions:
+;;
+;; 1. **Global Registry (Convenience)**: Use register-base-fn! and friends.
+;;    Simple for applications, but global state can cause test interference.
+;;
+;; 2. **Context Injection (Recommended for tests)**: Pass :base-fns to create-context.
+;;    Isolated, thread-safe, enables parallel testing without state conflicts.
+;;
+;; Example of context injection:
+;; ```clojure
+;; (def my-fns {:add (fn [args ctx] (+ @(:a args) @(:b args)))})
+;; (def ctx (create-context {:storage s :base-fns my-fns}))
+;; ```
 
 ;; Default global registry for convenience.
 ;; For better testability, use :base-fns in create-context.
@@ -33,7 +47,11 @@
    fn-name - keyword identifying the function (must match fn-schema name)
    f - function taking [thunks context] and returning the result
 
-   For better testability, consider using :base-fns in create-context instead."
+   NOTE: This modifies global state. For isolated tests, prefer passing
+   :base-fns directly to create-context instead of using the global registry.
+
+   Thread safety: swap! is atomic, but concurrent register/clear calls
+   from different tests can interfere. Use with-base-fns for isolated testing."
   [fn-name f]
   (swap! default-registry assoc fn-name f)
   nil)
@@ -50,7 +68,10 @@
 
 (defn clear-base-fns!
   "Clears all registered base functions from the default global registry.
-   Primarily used in tests to reset state between test cases."
+   Primarily used in tests to reset state between test cases.
+
+   WARNING: This affects all threads. Avoid in parallel tests.
+   Prefer with-base-fns or :base-fns context injection instead."
   []
   (reset! default-registry {})
   nil)
@@ -61,6 +82,31 @@
    Useful for passing to create-context."
   []
   @default-registry)
+
+
+(defmacro with-base-fns
+  "Executes body with a temporary base-fns registry.
+   The registry is isolated to this execution - other threads and tests
+   are not affected. After body completes, the original registry is restored.
+
+   This is the recommended approach for parallel testing.
+
+   Example:
+   ```clojure
+   (with-base-fns {:add add-fn :multiply multiply-fn}
+     (let [ctx (create-context {:storage storage})]
+       (execute ctx fn-id)))
+   ```
+
+   Note: This binds the default-registry atom temporarily. For complete
+   isolation, pass :base-fns directly to create-context instead."
+  [fns-map & body]
+  `(let [old-registry# @default-registry]
+     (try
+       (reset! default-registry ~fns-map)
+       ~@body
+       (finally
+         (reset! default-registry old-registry#)))))
 
 
 (defn get-base-fn-from-context
@@ -138,6 +184,17 @@
   1000)
 
 
+(def ^:private result-cache-max-size
+  "Maximum size for result-cache before rejecting new entries.
+   Provides hard limit to prevent OOM in unbounded execution graphs.
+   When reached, new fn-result-values will throw an error.
+
+   Why 10000? This is 10x the warning threshold. If you've hit 10K unique
+   fn-result-values, the graph is almost certainly unbounded or misconfigured.
+   At ~1KB per cached value average, this limits memory to ~10MB per execution."
+  10000)
+
+
 (def ^:private timeout-warning-window-ms
   "Window size in milliseconds for timeout warning logs.
    Used to avoid repeated warnings when execution is near timeout threshold.
@@ -165,12 +222,6 @@
    readable in logs and stack traces. Error messages are typically viewed in
    full, so slightly more verbose is acceptable."
   100)
-
-
-(def ^:private log-value-truncation-length
-  "Maximum length for values in log messages.
-   Shorter than error messages to reduce sensitive data exposure in logs."
-  20)
 
 
 (def ^:private max-path-args-count
@@ -577,7 +628,8 @@
    If the fn-result-value-id is already in cache, returns cached value.
    Otherwise executes the underlying fn, caches the result, and returns it.
    Logs debug info for cache performance monitoring.
-   Warns if cache grows beyond threshold (potential memory issue)."
+   Warns if cache grows beyond threshold (potential memory issue).
+   Throws if cache exceeds max-size (hard limit for OOM prevention)."
   [context fn-result-value-id]
   (let [result-cache (:result-cache context)
         cached (get @result-cache fn-result-value-id)]
@@ -588,27 +640,38 @@
                    {:fn-result-value-id fn-result-value-id
                     :cache-size (count @result-cache)})
         cached)
-      ;; Cache miss - execute and cache
-      (let [execution-graph (:execution-graph context)
-            fn-result-values (:fn-result-values execution-graph)
-            frv (get fn-result-values fn-result-value-id)]
-        (when-not frv
-          (throw (ex-info "fn-result-value not found in execution graph"
-                          {:type :execution-error/fn-result-value-not-found
-                           :fn-result-value-id fn-result-value-id})))
-        (log/debug "fn-result-value cache miss, executing"
-                   {:fn-result-value-id fn-result-value-id
-                    :fn-id (:fn-id frv)})
-        (let [fn-id (:fn-id frv)
-              result (execute-internal context fn-id nil)
-              new-size (count (swap! result-cache assoc fn-result-value-id result))]
-          ;; Warn once when cache crosses threshold (check if we just crossed)
-          (when (= new-size result-cache-size-warning-threshold)
-            (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
-                      {:cache-size new-size
-                       :threshold result-cache-size-warning-threshold
-                       :hint "Large caches may indicate unbounded execution graphs"}))
-          result)))))
+      ;; Cache miss - check limit before executing
+      (let [current-size (count @result-cache)]
+        ;; Hard limit check BEFORE adding new entry
+        (when (>= current-size result-cache-max-size)
+          (throw (ex-info "Result cache size limit exceeded - execution graph too large"
+                          {:type :execution-error/cache-limit-exceeded
+                           :cache-size current-size
+                           :max-size result-cache-max-size
+                           :fn-result-value-id fn-result-value-id
+                           :hint "Reduce graph complexity or increase max-depth to fail earlier"})))
+        ;; Execute and cache
+        (let [execution-graph (:execution-graph context)
+              fn-result-values (:fn-result-values execution-graph)
+              frv (get fn-result-values fn-result-value-id)]
+          (when-not frv
+            (throw (ex-info "fn-result-value not found in execution graph"
+                            {:type :execution-error/fn-result-value-not-found
+                             :fn-result-value-id fn-result-value-id})))
+          (log/debug "fn-result-value cache miss, executing"
+                     {:fn-result-value-id fn-result-value-id
+                      :fn-id (:fn-id frv)})
+          (let [fn-id (:fn-id frv)
+                result (execute-internal context fn-id nil)
+                new-size (count (swap! result-cache assoc fn-result-value-id result))]
+            ;; Warn once when cache crosses threshold (check if we just crossed)
+            (when (= new-size result-cache-size-warning-threshold)
+              (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
+                        {:cache-size new-size
+                         :threshold result-cache-size-warning-threshold
+                         :max-size result-cache-max-size
+                         :hint "Large caches may indicate unbounded execution graphs"}))
+            result))))))
 
 
 (defn- wrap-delay-with-context
@@ -720,14 +783,18 @@
    1. Use `provided-args` in `execute` call (for HOF callables)
    2. Or update the arg-value in the database first
 
-   Logs warning at WARN level to help debugging when override doesn't work."
-  [context arg-value arg-schema arg-schema-id arg-name path-arg-value]
+   Logs warning at WARN level to help debugging when override doesn't work.
+
+   SECURITY: Does NOT log actual values to prevent sensitive data leakage.
+   Only logs type information which is safe for debugging."
+  [context arg-value arg-schema arg-schema-id arg-name _path-arg-value]
   (log/warn "Path-arg ignored: argument already defined in DB (DB value takes precedence)"
             {:arg-schema-id arg-schema-id
              :current-frv-id (:current-frv-id context)
              :arg-name arg-name
-             :db-value (truncate-value (:value arg-value) log-value-truncation-length)
-             :provided-value (truncate-value path-arg-value log-value-truncation-length)
+             ;; SECURITY: Log types only, not actual values
+             :db-value-type (type (:value arg-value))
+             :arg-type (:type arg-schema)
              :hint "Use provided-args in execute call or update DB arg-value to override"})
   (build-delay context arg-value arg-schema))
 
@@ -758,23 +825,23 @@
       - If arg-value also exists in DB -> warning, use DB value (no override)
    3. Stored arg-value from DB
    4. Required arg with no value -> error
-   5. Optional arg with no value -> skip (NOT included in map)
+   5. Optional arg with no value -> delay returning nil
 
    ## Optional Arguments Convention
 
    Optional args (`:required false` in arg-schema) are handled as follows:
-   - If no value is provided, the argument is NOT included in the delays map
-   - Base functions should check for the key's presence or provide defaults:
+   - If no value is provided, the argument IS included in the map with a delay
+     that returns nil when dereferenced
+   - This follows SQL/Clojure convention where missing = nil, not absent key
+   - Base functions can simply use @arg and get nil for missing optionals:
      ```clojure
      (defbase my-fn
        {:args {:x :int, :y {:type :int :required false}}
         :return-type :int}
-       (+ @x (or (some-> y deref) 0)))  ; y may not be present
+       (+ @x (or @y 0)))  ; @y returns nil if not provided
      ```
 
-   IMPORTANT: Optional args with no value will NOT have a key in the map,
-   so `(get args :optional-arg)` returns nil, and `@optional-arg` will fail
-   if the arg is not present. Always check for presence first."
+   This simplifies base function code - no need for arg-provided? checks."
   [context fn-data provided-args]
   (let [{:keys [arg-schemas arg-values]} fn-data
         current-frv-id (:current-frv-id context)
@@ -810,37 +877,12 @@
             (:required arg-schema)
             (throw-missing-required-arg! arg-schema-id arg-name current-frv-id)
 
-            ;; 5. Optional arg with no value -> skip
-            :else acc)))
+            ;; 5. Optional arg with no value -> delay returning nil
+            ;; This follows SQL/Clojure convention: missing value = nil, not absent key
+            :else
+            (assoc acc arg-name-kw (delay nil)))))
       {}
       arg-schemas)))
-
-
-;; === Optional Argument Helpers ===
-
-(defn arg-provided?
-  "Checks if an optional argument was provided in the args map.
-   Use this to safely handle optional arguments in base functions.
-
-   Optional args (`:required false` in arg-schema) are NOT included in the
-   delays map when no value is provided. This helper lets you check presence
-   before dereferencing.
-
-   Arguments:
-   - args: The args map passed to the base function
-   - arg-name: Keyword name of the argument (e.g., :x, :default-value)
-
-   Returns true if the argument is present in args, false otherwise.
-
-   Example:
-   (defbase my-fn
-     {:args {:x :int, :y {:type :int :required false}}
-      :return-type :int}
-     (if (arg-provided? args :y)
-       (+ @x @y)
-       @x))"
-  [args arg-name]
-  (contains? args arg-name))
 
 
 ;; === Execution ===

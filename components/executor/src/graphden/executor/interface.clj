@@ -233,33 +233,6 @@
   (core/execute-by-name context fn-name named-args))
 
 
-;; === Optional Argument Helpers ===
-
-(defn arg-provided?
-  "Checks if an optional argument was provided in the args map.
-   Use this to safely handle optional arguments in base functions.
-
-   Optional args (`:required false` in arg-schema) are NOT included in the
-   delays map when no value is provided. This helper lets you check presence
-   before dereferencing.
-
-   Arguments:
-   - args: The args map passed to the base function
-   - arg-name: Keyword name of the argument (e.g., :x, :default-value)
-
-   Returns true if the argument is present in args, false otherwise.
-
-   Example:
-   (defbase my-fn
-     {:args {:x :int, :y {:type :int :required false}}
-      :return-type :int}
-     (if (exec/arg-provided? args :y)
-       (+ @x @y)
-       @x))"
-  [args arg-name]
-  (core/arg-provided? args arg-name))
-
-
 ;; === HOF Helpers ===
 
 (defn get-single-required-arg

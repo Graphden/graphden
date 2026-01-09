@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.postgres-storage.core :as core]
+    [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp])
   (:import
     (java.sql
@@ -238,29 +239,30 @@
 
 
 ;; === with-query-timeout tests ===
+;; Note: with-query-timeout is defined in util.clj, not in core.clj
 
 (deftest with-query-timeout-validation-test
   (testing "rejects non-positive timeout"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Query timeout must be a positive integer"
-          (core/with-query-timeout 0 #(identity :result))))
+          (util/with-query-timeout 0 #(identity :result))))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Query timeout must be a positive integer"
-          (core/with-query-timeout -1000 #(identity :result)))))
+          (util/with-query-timeout -1000 #(identity :result)))))
 
   (testing "rejects timeout below minimum (1000ms)"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Query timeout must be at least 1000ms"
-          (core/with-query-timeout 500 #(identity :result))))
+          (util/with-query-timeout 500 #(identity :result))))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Query timeout must be at least 1000ms"
-          (core/with-query-timeout 999 #(identity :result)))))
+          (util/with-query-timeout 999 #(identity :result)))))
 
   (testing "accepts valid timeout at minimum"
-    (is (= :result (core/with-query-timeout 1000 #(identity :result)))))
+    (is (= :result (util/with-query-timeout 1000 #(identity :result)))))
 
   (testing "accepts valid timeout above minimum"
-    (is (= :result (core/with-query-timeout 60000 #(identity :result))))))
+    (is (= :result (util/with-query-timeout 60000 #(identity :result))))))
 
 
 ;; === PostgresStorage error classifier tests ===

@@ -4,6 +4,7 @@
    Contract tests for Storage/StorageIntrospection protocols
    will be added when implementations exist."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
@@ -1683,3 +1684,45 @@
       (is (= {} (storage/graph-get-arg-schemas graph (random-uuid))))
       (is (nil? (storage/graph-get-resolved-args graph (random-uuid))))
       (is (nil? (storage/graph-get-fn-result-value graph (random-uuid)))))))
+
+
+;; === Entity name validation tests ===
+
+(deftest validate-entity-name-test
+  (testing "valid entity names pass validation"
+    (is (nil? (storage/validate-entity-name! :user "test")))
+    (is (nil? (storage/validate-entity-name! :fn-schema "test")))
+    (is (nil? (storage/validate-entity-name! :arg-value "test")))
+    (is (nil? (storage/validate-entity-name! :my-entity-123 "test")))
+    (is (nil? (storage/validate-entity-name! :a "test"))))
+
+  (testing "rejects non-keyword entity names"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword"
+          (storage/validate-entity-name! "user" "test")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword"
+          (storage/validate-entity-name! nil "test")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword"
+          (storage/validate-entity-name! 123 "test"))))
+
+  (testing "rejects entity names with invalid characters"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid characters"
+          (storage/validate-entity-name! :User "test")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid characters"
+          (storage/validate-entity-name! :user! "test")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid characters"
+          (storage/validate-entity-name! :user.name "test")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid characters"
+          (storage/validate-entity-name! :123user "test"))))
+
+  (testing "rejects entity names exceeding max length"
+    (let [long-name (keyword (str/join (repeat 65 "a")))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"exceeds maximum length"
+            (storage/validate-entity-name! long-name "test")))))
+
+  (testing "error includes operation context"
+    (try
+      (storage/validate-entity-name! "bad" "create-entity")
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-entity-name (:type (ex-data e))))
+        (is (= "create-entity" (:operation (ex-data e))))))))

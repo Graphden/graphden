@@ -321,3 +321,109 @@
         (let [errors (:validation-errors (ex-data e))]
           (is (>= (count errors) 2))
           (is (re-find #"Multiple validation errors" (ex-message e))))))))
+
+
+;; === type-mismatch? tests ===
+
+(deftest type-mismatch-test
+  (testing "returns false for matching known types"
+    (let [counter (atom 0)]
+      (is (not (#'core/type-mismatch? :int 42 true counter)))
+      (is (not (#'core/type-mismatch? :text "hello" true counter)))
+      (is (not (#'core/type-mismatch? :bool true true counter)))
+      (is (not (#'core/type-mismatch? :uuid (random-uuid) true counter)))))
+
+  (testing "returns true for mismatched known types"
+    (let [counter (atom 0)]
+      (is (#'core/type-mismatch? :int "not an int" true counter))
+      (is (#'core/type-mismatch? :text 42 true counter))
+      (is (#'core/type-mismatch? :bool "not a bool" true counter))
+      (is (#'core/type-mismatch? :uuid "not a uuid" true counter))))
+
+  (testing "union type accepts any value"
+    (let [counter (atom 0)]
+      (is (not (#'core/type-mismatch? :union 42 true counter)))
+      (is (not (#'core/type-mismatch? :union "string" true counter)))
+      (is (not (#'core/type-mismatch? :union {:a 1} true counter)))
+      (is (not (#'core/type-mismatch? :union nil true counter)))))
+
+  (testing "unknown type in strict mode throws exception"
+    (let [counter (atom 0)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown argument type"
+            (#'core/type-mismatch? :custom-unknown-type "value" true counter)))))
+
+  (testing "unknown type in non-strict mode returns false with circuit breaker"
+    (let [counter (atom 0)]
+      (is (not (#'core/type-mismatch? :custom-unknown-type "value" false counter)))
+      (is (= 1 @counter))))  ; Counter incremented
+
+  (testing "nil value for non-nullable types"
+    (let [counter (atom 0)]
+      ;; Most types don't accept nil
+      (is (#'core/type-mismatch? :int nil true counter))
+      (is (#'core/type-mismatch? :text nil true counter))
+      (is (#'core/type-mismatch? :uuid nil true counter))
+      ;; Union accepts nil
+      (is (not (#'core/type-mismatch? :union nil true counter))))))
+
+
+;; === validate-provided-arg-type! tests ===
+
+(deftest validate-provided-arg-type-test
+  (testing "accepts valid typed value"
+    (let [counter (atom 0)
+          arg-schema {:name "x" :type :int :required true}]
+      (is (nil? (#'core/validate-provided-arg-type! 42 arg-schema true counter)))))
+
+  (testing "throws on type mismatch"
+    (let [counter (atom 0)
+          arg-schema {:name "x" :type :int :required true}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch"
+            (#'core/validate-provided-arg-type! "not-an-int" arg-schema true counter)))))
+
+  (testing "throws on nil arg-schema"
+    (let [counter (atom 0)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid arg-schema.*missing type"
+            (#'core/validate-provided-arg-type! 42 nil true counter)))))
+
+  (testing "throws on arg-schema without type"
+    (let [counter (atom 0)
+          arg-schema {:name "x" :required true}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Invalid arg-schema.*missing type"
+            (#'core/validate-provided-arg-type! 42 arg-schema true counter)))))
+
+  (testing "type mismatch error includes arg name"
+    (let [counter (atom 0)
+          arg-schema {:name "my-arg" :type :int :required true}]
+      (try
+        (#'core/validate-provided-arg-type! "wrong-type" arg-schema true counter)
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/type-mismatch (:type (ex-data e))))
+          (is (= "my-arg" (:arg-name (ex-data e))))
+          (is (= :int (:expected-type (ex-data e))))))))
+
+  (testing "accepts union type with any value"
+    (let [counter (atom 0)
+          arg-schema {:name "x" :type :union :required false}]
+      (is (nil? (#'core/validate-provided-arg-type! 42 arg-schema true counter)))
+      (is (nil? (#'core/validate-provided-arg-type! "string" arg-schema true counter)))
+      (is (nil? (#'core/validate-provided-arg-type! {:map "value"} arg-schema true counter)))))
+
+  (testing "non-strict mode accepts unknown types"
+    (let [counter (atom 0)
+          arg-schema {:name "x" :type :custom-type :required true}]
+      ;; Non-strict mode should not throw for unknown types
+      (is (nil? (#'core/validate-provided-arg-type! "any-value" arg-schema false counter)))
+      (is (= 1 @counter))))  ; Circuit breaker counter incremented
+
+  (testing "strict mode rejects unknown types"
+    (let [counter (atom 0)
+          arg-schema {:name "x" :type :custom-type :required true}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown argument type"
+            (#'core/validate-provided-arg-type! "any-value" arg-schema true counter))))))

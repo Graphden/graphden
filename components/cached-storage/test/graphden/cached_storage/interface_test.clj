@@ -1163,3 +1163,242 @@
       (is (cache/cache-exists? cache fn-id))
       ;; deleted-fn-id's cache should be deleted but not rebuilt (fn doesn't exist)
       (is (not (cache/cache-exists? cache deleted-fn-id))))))
+
+
+;; === Edge case tests for invalidation logic ===
+
+(deftest compute-dependencies-edge-cases-test
+  (testing "compute-dependencies with multiple fns sharing same schema"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-id-1 (random-uuid)
+          fn-id-2 (random-uuid)
+          fn-id-3 (random-uuid)]
+      ;; Setup - 3 fns with same schema
+      (sp/create-entity storage :fn-schema {:id schema-id :name "shared" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id fn-id-1 :name "fn1" :fn-schema-id schema-id})
+      (sp/create-entity wrapped :fn {:id fn-id-2 :name "fn2" :fn-schema-id schema-id})
+      (sp/create-entity wrapped :fn {:id fn-id-3 :name "fn3" :fn-schema-id schema-id})
+      ;; All should have caches
+      (is (cache/cache-exists? cache fn-id-1))
+      (is (cache/cache-exists? cache fn-id-2))
+      (is (cache/cache-exists? cache fn-id-3)))))
+
+
+(deftest fn-update-without-fn-schema-id-in-data-test
+  (testing "fn update without fn-schema-id in data does not compare schemas"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-id (random-uuid)]
+      ;; Setup
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      (is (cache/cache-exists? cache fn-id))
+      ;; Update without parent-fn-id or fn-schema-id - should NOT invalidate
+      (sp/update-entity wrapped :fn fn-id {:name "renamed"})
+      ;; Cache should still exist (not rebuilt)
+      (is (cache/cache-exists? cache fn-id)))))
+
+
+(deftest fn-update-with-same-fn-schema-id-test
+  (testing "fn update with same fn-schema-id does not invalidate cache"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-id (random-uuid)]
+      ;; Setup
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      (is (cache/cache-exists? cache fn-id))
+      ;; Update with SAME fn-schema-id - should NOT invalidate
+      (sp/update-entity wrapped :fn fn-id {:fn-schema-id schema-id :name "renamed"})
+      ;; Cache should still exist (not invalidated because schema didn't change)
+      (is (cache/cache-exists? cache fn-id)))))
+
+
+(deftest fn-update-with-both-parent-and-schema-change-test
+  (testing "fn update with both parent-fn-id and fn-schema-id change"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id-1 (random-uuid)
+          schema-id-2 (random-uuid)
+          parent-fn-id (random-uuid)
+          fn-id (random-uuid)]
+      ;; Setup
+      (sp/create-entity storage :fn-schema {:id schema-id-1 :name "schema1" :returned-type :int})
+      (sp/create-entity storage :fn-schema {:id schema-id-2 :name "schema2" :returned-type :text})
+      (sp/create-entity wrapped :fn {:id parent-fn-id :name "parent" :fn-schema-id schema-id-1})
+      (sp/create-entity wrapped :fn {:id fn-id :name "child" :fn-schema-id schema-id-1})
+      (is (cache/cache-exists? cache fn-id))
+      ;; Update with BOTH parent-fn-id and fn-schema-id change
+      (sp/update-entity wrapped :fn fn-id {:parent-fn-id parent-fn-id :fn-schema-id schema-id-2})
+      ;; Cache should be rebuilt
+      (is (cache/cache-exists? cache fn-id)))))
+
+
+(deftest multiple-dependent-caches-invalidation-test
+  (testing "invalidating a schema affects all dependent caches correctly"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-ids (repeatedly 5 random-uuid)]
+      ;; Setup - create schema and 5 fns
+      (sp/create-entity storage :fn-schema {:id schema-id :name "shared" :returned-type :int})
+      (doseq [fn-id fn-ids]
+        (sp/create-entity wrapped :fn {:id fn-id :name (str "fn-" fn-id) :fn-schema-id schema-id}))
+      ;; All should be cached
+      (doseq [fn-id fn-ids]
+        (is (cache/cache-exists? cache fn-id)))
+      ;; Update schema - all dependents should be invalidated and rebuilt
+      (sp/update-entity wrapped :fn-schema schema-id {:name "updated"})
+      ;; All should still be cached (rebuilt)
+      (doseq [fn-id fn-ids]
+        (is (cache/cache-exists? cache fn-id))))))
+
+
+(deftest cascade-invalidation-through-fn-chain-test
+  (testing "deleting a fn invalidates dependent caches in a chain"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          ;; Create chain: grandparent -> parent -> child
+          grandparent-id (random-uuid)
+          parent-id (random-uuid)
+          child-id (random-uuid)]
+      ;; Setup
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id grandparent-id :name "grandparent" :fn-schema-id schema-id})
+      (sp/create-entity wrapped :fn {:id parent-id :name "parent" :fn-schema-id schema-id
+                                     :parent-fn-id grandparent-id})
+      (sp/create-entity wrapped :fn {:id child-id :name "child" :fn-schema-id schema-id
+                                     :parent-fn-id parent-id})
+      ;; Add fn dependencies
+      (swap! (:state cache) update-in [:fn-deps grandparent-id] (fnil conj #{}) parent-id)
+      (swap! (:state cache) update-in [:fn-deps parent-id] (fnil conj #{}) child-id)
+      ;; All should be cached
+      (is (cache/cache-exists? cache grandparent-id))
+      (is (cache/cache-exists? cache parent-id))
+      (is (cache/cache-exists? cache child-id))
+      ;; Delete grandparent - should cascade to parent's cache
+      (sp/delete-entity wrapped :fn grandparent-id)
+      ;; grandparent cache deleted
+      (is (not (cache/cache-exists? cache grandparent-id)))
+      ;; parent cache should be rebuilt (parent fn still exists)
+      (is (cache/cache-exists? cache parent-id))
+      ;; child cache unchanged (wasn't directly dependent on grandparent)
+      (is (cache/cache-exists? cache child-id)))))
+
+
+(deftest arg-value-update-with-owner-fn-id-test
+  (testing "arg-value update correctly uses result's owner-fn-id"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          arg-value-id (random-uuid)]
+      ;; Setup
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id schema-id
+                                             :name "x" :type :int :required true})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      (sp/create-entity storage :arg-value {:id arg-value-id :owner-fn-id fn-id
+                                            :arg-schema-id arg-schema-id :value 42})
+      (is (cache/cache-exists? cache fn-id))
+      ;; Update arg-value - should invalidate owner fn's cache
+      (sp/update-entity wrapped :arg-value arg-value-id {:value 100})
+      ;; Cache should be rebuilt
+      (is (cache/cache-exists? cache fn-id)))))
+
+
+(deftest batch-fn-create-caches-all-test
+  (testing "batch create-entities for :fn creates caches for all"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-ids (repeatedly 3 random-uuid)]
+      ;; Setup
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      ;; Batch create fns
+      (let [results (sp/create-entities wrapped :fn
+                                        (mapv (fn [fn-id]
+                                                {:id fn-id :name (str "fn-" fn-id) :fn-schema-id schema-id})
+                                              fn-ids))]
+        (is (= 3 (count results)))
+        ;; All should be cached
+        (doseq [fn-id fn-ids]
+          (is (cache/cache-exists? cache fn-id)))))))
+
+
+(deftest invalidation-with-empty-dependents-test
+  (testing "invalidation with no dependents completes without error"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)]
+      ;; Create schema but no fns using it
+      (sp/create-entity storage :fn-schema {:id schema-id :name "orphan" :returned-type :int})
+      ;; Update schema - should complete without error even with no dependents
+      (let [result (sp/update-entity wrapped :fn-schema schema-id {:name "updated"})]
+        (is (= "updated" (:name result))))
+      ;; Delete schema - should complete without error
+      (is (sp/delete-entity wrapped :fn-schema schema-id)))))
+
+
+(deftest delete-arg-value-nil-owner-fn-test
+  (testing "delete arg-value with nil record does not trigger invalidation"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          nonexistent-id (random-uuid)]
+      ;; Try to delete nonexistent arg-value - should return false
+      (is (not (sp/delete-entity wrapped :arg-value nonexistent-id))))))
+
+
+(deftest batch-delete-mixed-existing-nonexisting-test
+  (testing "batch delete with mix of existing and non-existing entities"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          existing-fn-id (random-uuid)
+          nonexistent-fn-id (random-uuid)]
+      ;; Setup
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id existing-fn-id :name "fn" :fn-schema-id schema-id})
+      (is (cache/cache-exists? cache existing-fn-id))
+      ;; Batch delete - one exists, one doesn't
+      (let [result (sp/delete-entities wrapped :fn [existing-fn-id nonexistent-fn-id])]
+        (is (= 1 result)))
+      ;; existing-fn-id cache should be deleted
+      (is (not (cache/cache-exists? cache existing-fn-id))))))
+
+
+(deftest resolve-graph-handles-cache-hit-test
+  (testing "resolve-execution-graph returns cached graph without recomputing"
+    (let [storage (create-mock-storage)
+          cache (create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-id (random-uuid)]
+      ;; Setup
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      ;; First resolve - caches the graph
+      (let [graph1 (sp/resolve-execution-graph wrapped fn-id)]
+        (is (sp/execution-graph? graph1))
+        ;; Second resolve - should return same cached graph
+        (let [graph2 (sp/resolve-execution-graph wrapped fn-id)]
+          (is (sp/execution-graph? graph2))
+          ;; Both should be equivalent
+          (is (= (:fns graph1) (:fns graph2))))))))

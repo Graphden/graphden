@@ -30,19 +30,64 @@
       ReentrantReadWriteLock)))
 
 
-;; === Configuration ===
-;; Re-export timeout from util for backward compatibility.
-;; The canonical definition is now in util.clj to avoid circular dependency.
-;; Use util/*query-timeout-ms* for bindings since Clojure def doesn't create var aliases.
-
-(def with-query-timeout
-  "Executes f with a custom query timeout (in milliseconds).
-   Timeout must be a positive integer. Minimum is 1000ms (1 second).
-   Delegates to util/with-query-timeout."
-  util/with-query-timeout)
-
-
 ;; === Connection pool ===
+
+(defn- validate-pool-options!
+  "Validates connection pool options. Throws on invalid configuration.
+   Extracted for clarity and testability."
+  [{:keys [jdbc-url username password pool-size min-idle
+           connection-timeout idle-timeout max-lifetime]}]
+  ;; Required fields
+  (when-not jdbc-url
+    (throw (ex-info "jdbc-url is required for postgres connection pool"
+                    {:type :config-error/missing-jdbc-url})))
+  (when-not (string? jdbc-url)
+    (throw (ex-info "jdbc-url must be a string"
+                    {:type :config-error/invalid-jdbc-url
+                     :jdbc-url-type (type jdbc-url)})))
+  (when-not (str/starts-with? jdbc-url "jdbc:postgresql://")
+    (throw (ex-info "jdbc-url must start with 'jdbc:postgresql://' for PostgreSQL connections"
+                    {:type :config-error/invalid-jdbc-url
+                     :hint "Expected format: jdbc:postgresql://host:port/database"})))
+  (when-not (and username (seq (str/trim username)))
+    (throw (ex-info "username is required and cannot be empty"
+                    {:type :config-error/missing-username})))
+  (when-not (and password (seq (str/trim password)))
+    (throw (ex-info "password is required and cannot be empty"
+                    {:type :config-error/missing-password})))
+  ;; Security: validate credential lengths and content
+  (sp/validate-jdbc-url! jdbc-url)
+  (sp/validate-credentials! username password)
+  ;; Pool size configuration
+  (when-not (pos-int? pool-size)
+    (throw (ex-info "pool-size must be a positive integer"
+                    {:type :config-error/invalid-pool-size
+                     :pool-size pool-size})))
+  (when (> pool-size 100)
+    (throw (ex-info "pool-size exceeds maximum allowed value of 100"
+                    {:type :config-error/invalid-pool-size
+                     :pool-size pool-size
+                     :max-allowed 100})))
+  (when-not (pos-int? min-idle)
+    (throw (ex-info "min-idle must be a positive integer"
+                    {:type :config-error/invalid-min-idle
+                     :min-idle min-idle})))
+  (when (> min-idle pool-size)
+    (throw (ex-info "min-idle cannot exceed pool-size"
+                    {:type :config-error/invalid-pool-config
+                     :min-idle min-idle
+                     :pool-size pool-size})))
+  ;; Timeout configuration
+  (when-not (pos-int? connection-timeout)
+    (throw (ex-info "connection-timeout must be a positive integer (ms)"
+                    {:type :config-error/invalid-timeout
+                     :connection-timeout connection-timeout})))
+  (when (and (pos? idle-timeout) (>= idle-timeout max-lifetime))
+    (throw (ex-info "idle-timeout must be less than max-lifetime"
+                    {:type :config-error/invalid-pool-config
+                     :idle-timeout idle-timeout
+                     :max-lifetime max-lifetime}))))
+
 
 (defn create-pool
   "Creates a HikariCP connection pool.
@@ -80,75 +125,32 @@
          idle-timeout 600000
          max-lifetime 1800000
          leak-detection-threshold 60000}}]
-  (when-not jdbc-url
-    (throw (ex-info "jdbc-url is required for postgres connection pool"
-                    {:type :config-error/missing-jdbc-url})))
-  ;; Validate JDBC URL format and protocol for security
-  ;; Prevents injection of malicious connection strings
-  (when-not (string? jdbc-url)
-    (throw (ex-info "jdbc-url must be a string"
-                    {:type :config-error/invalid-jdbc-url
-                     :jdbc-url-type (type jdbc-url)})))
-  (when-not (str/starts-with? jdbc-url "jdbc:postgresql://")
-    (throw (ex-info "jdbc-url must start with 'jdbc:postgresql://' for PostgreSQL connections"
-                    {:type :config-error/invalid-jdbc-url
-                     ;; Don't include jdbc-url in error - it may contain credentials
-                     :hint "Expected format: jdbc:postgresql://host:port/database"})))
-  (when-not (and username (seq (str/trim username)))
-    (throw (ex-info "username is required and cannot be empty"
-                    {:type :config-error/missing-username})))
-  (when-not (and password (seq (str/trim password)))
-    (throw (ex-info "password is required and cannot be empty"
-                    {:type :config-error/missing-password})))
-  ;; Security: validate credential lengths and content
-  (sp/validate-jdbc-url! jdbc-url)
-  (sp/validate-credentials! username password)
-  ;; Validate pool size configuration
-  (when-not (pos-int? pool-size)
-    (throw (ex-info "pool-size must be a positive integer"
-                    {:type :config-error/invalid-pool-size
-                     :pool-size pool-size})))
-  (when (> pool-size 100)
-    (throw (ex-info "pool-size exceeds maximum allowed value of 100"
-                    {:type :config-error/invalid-pool-size
-                     :pool-size pool-size
-                     :max-allowed 100})))
-  (when-not (pos-int? min-idle)
-    (throw (ex-info "min-idle must be a positive integer"
-                    {:type :config-error/invalid-min-idle
-                     :min-idle min-idle})))
-  (when (> min-idle pool-size)
-    (throw (ex-info "min-idle cannot exceed pool-size"
-                    {:type :config-error/invalid-pool-config
-                     :min-idle min-idle
-                     :pool-size pool-size})))
-  ;; Validate timeout values
-  (when-not (pos-int? connection-timeout)
-    (throw (ex-info "connection-timeout must be a positive integer (ms)"
-                    {:type :config-error/invalid-timeout
-                     :connection-timeout connection-timeout})))
-  ;; Validate idle-timeout vs max-lifetime relationship
-  ;; idle-timeout = 0 is special case meaning "never retire idle connections"
-  (when (and (pos? idle-timeout) (>= idle-timeout max-lifetime))
-    (throw (ex-info "idle-timeout must be less than max-lifetime"
-                    {:type :config-error/invalid-pool-config
-                     :idle-timeout idle-timeout
-                     :max-lifetime max-lifetime})))
-  (log/info "Creating PostgreSQL connection pool" {:pool-size pool-size :min-idle min-idle})
-  ;; Note: HikariCP validates connectivity on first connection acquisition.
-  ;; Configuration errors (wrong password, unreachable host) will be detected
-  ;; when the first query is executed, not during pool creation.
-  (let [config (HikariConfig.)]
-    (HikariConfig/.setJdbcUrl config jdbc-url)
-    (HikariConfig/.setUsername config username)
-    (HikariConfig/.setPassword config password)
-    (HikariConfig/.setMaximumPoolSize config pool-size)
-    (HikariConfig/.setMinimumIdle config min-idle)
-    (HikariConfig/.setConnectionTimeout config connection-timeout)
-    (HikariConfig/.setIdleTimeout config idle-timeout)
-    (HikariConfig/.setMaxLifetime config max-lifetime)
-    (HikariConfig/.setLeakDetectionThreshold config leak-detection-threshold)
-    (HikariDataSource. config)))
+  ;; Construct opts map with defaults applied for validation
+  (let [opts {:jdbc-url jdbc-url
+              :username username
+              :password password
+              :pool-size pool-size
+              :min-idle min-idle
+              :connection-timeout connection-timeout
+              :idle-timeout idle-timeout
+              :max-lifetime max-lifetime
+              :leak-detection-threshold leak-detection-threshold}]
+    (validate-pool-options! opts)
+    (log/info "Creating PostgreSQL connection pool" {:pool-size pool-size :min-idle min-idle})
+    ;; Note: HikariCP validates connectivity on first connection acquisition.
+    ;; Configuration errors (wrong password, unreachable host) will be detected
+    ;; when the first query is executed, not during pool creation.
+    (let [config (HikariConfig.)]
+      (HikariConfig/.setJdbcUrl config jdbc-url)
+      (HikariConfig/.setUsername config username)
+      (HikariConfig/.setPassword config password)
+      (HikariConfig/.setMaximumPoolSize config pool-size)
+      (HikariConfig/.setMinimumIdle config min-idle)
+      (HikariConfig/.setConnectionTimeout config connection-timeout)
+      (HikariConfig/.setIdleTimeout config idle-timeout)
+      (HikariConfig/.setMaxLifetime config max-lifetime)
+      (HikariConfig/.setLeakDetectionThreshold config leak-detection-threshold)
+      (HikariDataSource. config))))
 
 
 (defn close-pool

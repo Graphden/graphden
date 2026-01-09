@@ -1831,6 +1831,43 @@
                      :where-type (type where)}))))
 
 
+(defn validate-entity-name!
+  "Validates that entity-name is a safe keyword for storage operations.
+   Prevents SQL injection and other attacks via malicious entity names.
+
+   Entity names must be:
+   - A keyword (not nil, not a string)
+   - Start with a letter
+   - Contain only lowercase letters, digits, hyphens, and underscores
+   - Not exceed 64 characters
+
+   Arguments:
+   - entity-name: the entity name to validate
+   - operation: string describing the operation (for error messages)
+
+   Throws ExceptionInfo with :type :invalid-entity-name if validation fails."
+  [entity-name operation]
+  (when-not (keyword? entity-name)
+    (throw (ex-info (str "entity-name must be a keyword for " operation)
+                    {:type :invalid-entity-name
+                     :entity-name entity-name
+                     :entity-name-type (type entity-name)
+                     :operation operation})))
+  (let [name-str (name entity-name)]
+    (when (> (count name-str) 64)
+      (throw (ex-info (str "entity-name exceeds maximum length (64) for " operation)
+                      {:type :invalid-entity-name
+                       :entity-name entity-name
+                       :length (count name-str)
+                       :operation operation})))
+    (when-not (re-matches #"^[a-z][a-z0-9_-]*$" name-str)
+      (throw (ex-info (str "entity-name contains invalid characters for " operation
+                           ". Must start with a letter and contain only lowercase letters, digits, hyphens, and underscores.")
+                      {:type :invalid-entity-name
+                       :entity-name entity-name
+                       :operation operation})))))
+
+
 ;; === Credential validation utilities ===
 ;;
 ;; Security-focused validation for database credentials to prevent:

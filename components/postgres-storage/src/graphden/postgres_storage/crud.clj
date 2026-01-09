@@ -44,9 +44,7 @@
    Throws with :unique-violation type if unique constraint violated.
    Throws with :invalid-data type if data is not a map."
   [ds entity-name data fields]
-  (sp/validate-data-is-map! entity-name data)
-  (when fields
-    (sp/validate-required-fields! entity-name fields data))
+  (sp/standard-crud-validations! entity-name data fields)
   (let [table-name (keyword (util/kw->snake-case entity-name))
         id (or (:id data) (random-uuid))
         record (assoc data :id id)

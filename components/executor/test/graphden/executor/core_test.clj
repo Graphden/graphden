@@ -204,16 +204,15 @@
       (is (some? (core/create-context {:storage (->MockStorage) :path-args path-args})))))
 
   (testing "rejects excessive path-args count"
-    ;; This tests the max-path-args-count limit (10000)
-    ;; We use a smaller test to avoid slow test execution
-    ;; The actual limit check is tested indirectly via validation
-    (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 10001)))]
+    ;; This tests the max-path-args-count limit (1000)
+    ;; Reduced from 10000 to prevent DoS via oversized path-args
+    (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 1001)))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args count exceeds maximum"
             (core/create-context {:storage (->MockStorage) :path-args large-path-args})))))
 
   (testing "path-args count error includes details"
-    (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 10001)))]
+    (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 1001)))]
       (try
         (core/create-context {:storage (->MockStorage) :path-args large-path-args})
         (is false "should have thrown")
@@ -222,8 +221,8 @@
                 ;; New structure: errors in :validation-errors vector
                 err (first (:validation-errors data))]
             (is (= :execution-error/invalid-context (:type data)))
-            (is (= 10001 (:path-args-count err)))
-            (is (= 10000 (:max-allowed err)))))))))
+            (is (= 1001 (:path-args-count err)))
+            (is (= 1000 (:max-allowed err)))))))))
 
 
 ;; === register-type-hint! tests ===

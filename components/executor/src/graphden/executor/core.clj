@@ -219,8 +219,12 @@
 
 (def ^:private max-path-args-count
   "Maximum number of path-args allowed.
-   Prevents potential memory exhaustion from large path-args maps."
-  10000)
+   Prevents potential memory exhaustion from large path-args maps.
+
+   Why 1000? Typical execution graphs have <100 arguments. 1000 unique path-args
+   indicates either a very deep graph or potential abuse. This limit prevents
+   DoS attacks via oversized path-args while accommodating legitimate large graphs."
+  1000)
 
 
 (def ^:private nested-path-arg-key-length

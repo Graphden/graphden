@@ -20,6 +20,7 @@
    - fn-schema updated: invalidate all caches depending on it
    - arg-schema updated: invalidate all caches depending on it"
   (:require
+    [clojure.tools.logging :as log]
     [graphden.cache-protocol.interface :as cache]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -40,9 +41,13 @@
 (defn- rebuild-cache!
   "Rebuilds cache for a single fn-id using base storage's resolve-execution-graph."
   [base-storage cache-storage fn-id]
+  (log/debug "Rebuilding cache" {:fn-id fn-id})
   (let [graph (sp/resolve-execution-graph base-storage fn-id)
         deps (compute-dependencies graph)]
-    (cache/save-cache! cache-storage fn-id graph deps)))
+    (cache/save-cache! cache-storage fn-id graph deps)
+    (log/debug "Cache rebuilt" {:fn-id fn-id
+                                :fns-count (count (:fns graph))
+                                :fn-schemas-count (count (:fn-schemas graph))})))
 
 
 (defn- invalidate-dependents!
@@ -50,6 +55,9 @@
    find-fn should be a function that takes cache-storage and returns a set of cache-ids."
   [base-storage cache-storage find-fn]
   (let [dependent-cache-ids (find-fn cache-storage)]
+    (when (seq dependent-cache-ids)
+      (log/debug "Invalidating dependent caches" {:count (count dependent-cache-ids)
+                                                  :cache-ids dependent-cache-ids}))
     (doseq [cache-id dependent-cache-ids]
       (cache/delete-cache! cache-storage cache-id)
       (when (sp/read-entity base-storage :fn cache-id)
@@ -59,6 +67,7 @@
 (defn- invalidate-fn-and-dependents!
   "Invalidates cache for fn-id and all caches that depend on it."
   [base-storage cache-storage fn-id]
+  (log/debug "Invalidating fn and dependents" {:fn-id fn-id})
   ;; Invalidate and rebuild all dependent caches
   (invalidate-dependents! base-storage cache-storage
                           #(cache/find-caches-by-fn-dep % fn-id))
@@ -70,6 +79,7 @@
 (defn- invalidate-fn-schema-dependents!
   "Invalidates all caches that depend on a fn-schema."
   [base-storage cache-storage fn-schema-id]
+  (log/debug "Invalidating fn-schema dependents" {:fn-schema-id fn-schema-id})
   (invalidate-dependents! base-storage cache-storage
                           #(cache/find-caches-by-fn-schema-dep % fn-schema-id)))
 
@@ -77,6 +87,7 @@
 (defn- invalidate-arg-schema-dependents!
   "Invalidates all caches that depend on an arg-schema."
   [base-storage cache-storage arg-schema-id]
+  (log/debug "Invalidating arg-schema dependents" {:arg-schema-id arg-schema-id})
   (invalidate-dependents! base-storage cache-storage
                           #(cache/find-caches-by-arg-schema-dep % arg-schema-id)))
 

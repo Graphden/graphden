@@ -1,0 +1,3 @@
+{:paths ["src" "resources"]
+ :deps {graphden/storage-protocol {:local/root "../storage-protocol"}
+        graphden/cache-protocol {:local/root "../cache-protocol"}}}

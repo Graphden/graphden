@@ -1247,3 +1247,79 @@
     (let [uuid1 (core/arg-schema-uuid :fn-a :x)
           uuid2 (core/arg-schema-uuid :fn-b :x)]
       (is (not= uuid1 uuid2)))))
+
+
+;; === create-storage-with-base-fns Tests ===
+
+(deftest create-storage-with-base-fns-test
+  (testing "creates storage and initializes with base fns"
+    (let [storage (registry/create-storage-with-base-fns gsm/create-storage)]
+      (try
+        ;; Should have storage
+        (is (some? storage))
+        ;; Base functions should be registered
+        (is (some? (exec/get-base-fn :add)))
+        ;; fn-schemas should be in storage
+        (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :add))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === initialize-with-base-fns! Error Handling Tests ===
+
+(defrecord FailingStorage
+  [fail-atom]
+
+  sp/Storage
+
+  (initialize [_ _] (throw (ex-info "Init failed" {})))
+
+
+  (close [_] (swap! fail-atom conj :closed)))
+
+
+(deftest initialize-with-base-fns-error-handling-test
+  (testing "closes storage on error during sync"
+    ;; This tests the catch block in initialize-with-base-fns!
+    ;; We need a storage that will fail during sync-defs-to-storage!
+    (let [storage (gsm/create-storage)
+          close-called (atom false)
+          ;; Wrap storage to track close and fail on specific operation
+          wrapped (reify
+                    sp/Storage
+                    (initialize [_ schema] (sp/initialize storage schema))
+
+                    (close
+                      [_]
+                      (reset! close-called true)
+                      (sp/close storage))
+
+
+                    sp/StorageCRUD
+
+                    (create-entity
+                      [_ entity-name data]
+                      ;; Fail on fn-schema creation to trigger error path
+                      (if (= entity-name :fn-schema)
+                        (throw (ex-info "Simulated failure" {:type :test-error}))
+                        (sp/create-entity storage entity-name data)))
+
+                    (read-entity
+                      [_ entity-name id]
+                      (sp/read-entity storage entity-name id))
+
+                    (update-entity
+                      [_ entity-name id data]
+                      (sp/update-entity storage entity-name id data))
+
+                    (delete-entity
+                      [_ entity-name id]
+                      (sp/delete-entity storage entity-name id))
+
+                    (query-entities
+                      [_ entity-name where]
+                      (sp/query-entities storage entity-name where)))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Simulated failure"
+            (registry/initialize-with-base-fns! wrapped)))
+      ;; Verify close was called
+      (is @close-called))))

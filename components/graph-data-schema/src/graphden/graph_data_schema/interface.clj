@@ -145,13 +145,15 @@
              ft/supported-types)))
 
 
-(defn- value-variants
+(defn value-variants
   "Generates union variants for arg-value.
    Variants:
    - ref to fn: for HOF (passing function as first-class value)
    - ref to fn-result-value: for computed values (execute fn, cache result)
    - :any/:fn types
-   - literal types"
+   - literal types
+
+   Public for reuse by cache-data-schema."
   []
   (into [{:type :ref :ref-entity :fn}
          {:type :ref :ref-entity :fn-result-value}
@@ -160,9 +162,12 @@
         (map (fn [t] {:type t}) ft/supported-types)))
 
 
-(defn build-schema
-  "Builds the graph data schema using the provided builder.
-   Returns a built DataSchema instance."
+(defn extend-builder
+  "Extends a builder with graph data schema entities without finalizing.
+   Returns the builder (not a built schema) for further extension.
+
+   Use this when you need to add more entities on top of graph schema,
+   e.g., for cache-data-schema."
   [builder]
   (-> builder
       ;; Define the value_kind enum: null (void) + all supported types
@@ -216,6 +221,13 @@
                                       :type :ref :ref-entity :arg-schema}
                       :value {:uuid arg-value-value-field-uuid
                               :type :union :variants (value-variants)}})
-      (ds/add-constraint :arg-value {:type :unique :fields [:owner-fn-id :arg-schema-id]})
+      (ds/add-constraint :arg-value {:type :unique :fields [:owner-fn-id :arg-schema-id]})))
 
+
+(defn build-schema
+  "Builds the graph data schema using the provided builder.
+   Returns a built DataSchema instance."
+  [builder]
+  (-> builder
+      (extend-builder)
       (ds/build)))

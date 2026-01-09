@@ -3,6 +3,12 @@
  [{:id :unit,
    :test-paths
    ["components/base-functions/test"
+    "components/cache-data-schema/test"
+    "components/cache-datomic/test"
+    "components/cache-memory/test"
+    "components/cache-postgres/test"
+    "components/cache-protocol/test"
+    "components/cached-storage/test"
     "components/data-schema-protocol/test"
     "components/datomic-storage/test"
     "components/executor/test"

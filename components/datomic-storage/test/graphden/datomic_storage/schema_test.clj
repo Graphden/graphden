@@ -1,8 +1,12 @@
 (ns graphden.datomic-storage.schema-test
   (:require
     [clojure.test :refer [deftest is testing]]
+    [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
-    [graphden.datomic-storage.schema :as schema]))
+    [graphden.datomic-storage.interface :as dat]
+    [graphden.datomic-storage.schema :as schema]
+    [graphden.malli-data-schema.interface :as mds]
+    [graphden.storage-protocol.interface :as sp]))
 
 
 ;; === field-type->datomic tests ===
@@ -200,3 +204,252 @@
                           {:type :unique :fields [:c :d :e]}])
           result (schema/get-multi-field-constraints s :user)]
       (is (= 2 (count result))))))
+
+
+;; === Tests with Datomic Local ===
+
+(def ^:private test-counter (atom 0))
+
+
+(defn- unique-db-name
+  "Generates a unique database name for each test."
+  []
+  (str "schema-test-" (swap! test-counter inc) "-" (System/currentTimeMillis)))
+
+
+(defn- create-test-storage
+  "Creates a test storage with a unique database."
+  []
+  (dat/create-storage {:db-name (unique-db-name)}))
+
+
+(defn- make-test-schema
+  "Creates a test schema with fields and optional constraints."
+  [& {:keys [fields constraints]
+      :or {fields {:first-name {:uuid #uuid "00000000-0000-0000-0000-000000000001"
+                                :type :text}
+                   :last-name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                               :type :text}
+                   :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                           :type :text}}
+           constraints []}}]
+  (let [builder (-> (mds/create-builder)
+                    (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000010" fields))]
+    (-> (reduce (fn [b c] (ds/add-constraint b :user c)) builder constraints)
+        ds/build)))
+
+
+;; === warn-multi-field-constraints! tests ===
+
+(deftest warn-multi-field-constraints!-test
+  (testing "logs debug info for multi-field constraints (no error)"
+    (let [s (make-test-schema :constraints [{:type :unique :fields [:first-name :last-name]}])]
+      ;; Should not throw, just log
+      (is (nil? (schema/warn-multi-field-constraints! s :user)))))
+
+  (testing "does nothing for single-field constraints"
+    (let [s (make-test-schema :constraints [{:type :unique :fields [:email]}])]
+      (is (nil? (schema/warn-multi-field-constraints! s :user)))))
+
+  (testing "does nothing for empty constraints"
+    (let [s (make-test-schema)]
+      (is (nil? (schema/warn-multi-field-constraints! s :user))))))
+
+
+;; === validate-multi-field-unique-constraint! tests ===
+
+(deftest validate-multi-field-unique-constraint!-test
+  (testing "passes when no conflict exists"
+    (let [storage (create-test-storage)
+          s (make-test-schema :constraints [{:type :unique :fields [:first-name :last-name]}])]
+      (try
+        (sp/initialize storage s)
+        ;; Create first user
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"
+                                         :last-name "Doe"
+                                         :email "john@example.com"})
+        ;; Validate with different values - should pass
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              constraint {:type :unique :fields [:first-name :last-name]}
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}}]
+          (is (nil? (schema/validate-multi-field-unique-constraint!
+                      db :user {:first-name "Jane" :last-name "Doe"} constraint field-specs nil))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "throws on conflict"
+    (let [storage (create-test-storage)
+          s (make-test-schema :constraints [{:type :unique :fields [:first-name :last-name]}])]
+      (try
+        (sp/initialize storage s)
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"
+                                         :last-name "Doe"
+                                         :email "john@example.com"})
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              constraint {:type :unique :fields [:first-name :last-name]}
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}}]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Unique constraint violation"
+                (schema/validate-multi-field-unique-constraint!
+                  db :user {:first-name "John" :last-name "Doe"} constraint field-specs nil))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "skips validation when not all fields have values"
+    (let [storage (create-test-storage)
+          s (make-test-schema :constraints [{:type :unique :fields [:first-name :last-name]}])]
+      (try
+        (sp/initialize storage s)
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"
+                                         :last-name "Doe"
+                                         :email "john@example.com"})
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              constraint {:type :unique :fields [:first-name :last-name]}
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}}]
+          ;; Only first-name provided - should skip validation
+          (is (nil? (schema/validate-multi-field-unique-constraint!
+                      db :user {:first-name "John"} constraint field-specs nil))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "excludes specified id during update"
+    (let [storage (create-test-storage)
+          s (make-test-schema :constraints [{:type :unique :fields [:first-name :last-name]}])
+          user-id (random-uuid)]
+      (try
+        (sp/initialize storage s)
+        (sp/create-entity storage :user {:id user-id
+                                         :first-name "John"
+                                         :last-name "Doe"
+                                         :email "john@example.com"})
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              constraint {:type :unique :fields [:first-name :last-name]}
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}}]
+          ;; Updating same entity with same values - should pass because we exclude its id
+          (is (nil? (schema/validate-multi-field-unique-constraint!
+                      db :user {:first-name "John" :last-name "Doe"} constraint field-specs user-id))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "throws when constraint references non-existent field"
+    (let [storage (create-test-storage)
+          s (make-test-schema)]
+      (try
+        (sp/initialize storage s)
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              constraint {:type :unique :fields [:first-name :nonexistent]}
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}}]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Constraint references non-existent field"
+                (schema/validate-multi-field-unique-constraint!
+                  db :user {:first-name "John" :nonexistent "X"} constraint field-specs nil))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === validate-multi-field-constraints! tests ===
+
+(deftest validate-multi-field-constraints!-test
+  (testing "validates all multi-field constraints"
+    (let [storage (create-test-storage)
+          s (make-test-schema :constraints [{:type :unique :fields [:first-name :last-name]}
+                                            {:type :unique :fields [:email]}])]
+      (try
+        (sp/initialize storage s)
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"
+                                         :last-name "Doe"
+                                         :email "john@example.com"})
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}
+                           :email {:type :text}}]
+          ;; Should throw on multi-field constraint violation
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Unique constraint violation"
+                (schema/validate-multi-field-constraints!
+                  db s :user {:first-name "John" :last-name "Doe" :email "other@example.com"}
+                  field-specs nil))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "passes when no multi-field constraints violated"
+    (let [storage (create-test-storage)
+          s (make-test-schema :constraints [{:type :unique :fields [:first-name :last-name]}])]
+      (try
+        (sp/initialize storage s)
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"
+                                         :last-name "Doe"
+                                         :email "john@example.com"})
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}
+                           :email {:type :text}}]
+          (is (nil? (schema/validate-multi-field-constraints!
+                      db s :user {:first-name "Jane" :last-name "Doe" :email "jane@example.com"}
+                      field-specs nil))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === validate-multi-field-unique-constraint! with ref fields ===
+
+(deftest validate-multi-field-unique-constraint-with-ref-test
+  (testing "validates constraint with ref field"
+    (let [storage (create-test-storage)
+          org-id (random-uuid)
+          s (-> (mds/create-builder)
+                (ds/add-entity :org #uuid "00000000-0000-0000-0000-000000000020"
+                               {:name {:uuid #uuid "00000000-0000-0000-0000-000000000021"
+                                       :type :text}})
+                (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000030"
+                               {:name {:uuid #uuid "00000000-0000-0000-0000-000000000031"
+                                       :type :text}
+                                :org {:uuid #uuid "00000000-0000-0000-0000-000000000032"
+                                      :type :ref
+                                      :ref-entity :org}})
+                (ds/add-constraint :user {:type :unique :fields [:name :org]})
+                ds/build)]
+      (try
+        (sp/initialize storage s)
+        ;; Create org
+        (sp/create-entity storage :org {:id org-id :name "Acme Corp"})
+        ;; Create user in that org
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :name "John"
+                                         :org org-id})
+        ;; Try to create another user with same name in same org - should fail
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Unique constraint violation"
+              (sp/create-entity storage :user {:id (random-uuid)
+                                               :name "John"
+                                               :org org-id})))
+        ;; Different name in same org - should work
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :name "Jane"
+                                         :org org-id})
+        (finally
+          (sp/close storage))))))

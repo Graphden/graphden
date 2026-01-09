@@ -2229,10 +2229,6 @@
           (sp/close storage))))))
 
 
-;; NOTE: JSONB parsing error tests moved to codec_test.clj
-;; The parse-pgobject function was extracted to the codec module.
-
-
 ;; === GraphConstraints tests ===
 
 (defn- make-graph-schema
@@ -2933,7 +2929,6 @@
                        :arg-schema-id arg-schema-id
                        :value 999}]
           chain [fn-id]
-          ;; Use sp/merge-arg-values-for-chain (moved to storage-protocol)
           result (sp/merge-arg-values-for-chain arg-values chain)]
       ;; The arg-value with known owner should win (lower chain position)
       (is (= 42 (:value (get result arg-schema-id)))))))
@@ -3198,7 +3193,6 @@
           (sp/close storage)))))
 
   (testing "merge-arg-values-for-chain returns nil for empty chain"
-    ;; Use sp/merge-arg-values-for-chain (moved to storage-protocol)
     (let [result (sp/merge-arg-values-for-chain [] [])]
       (is (nil? result)))))
 

@@ -11,26 +11,6 @@
     [graphden.storage-protocol.interface :as storage]))
 
 
-;; === Type widening tests ===
-
-(deftest type-widening-test
-  (testing "type-widening map contains expected entries"
-    (is (contains? storage/type-widening :int))
-    (is (contains? storage/type-widening :bool))
-    (is (contains? storage/type-widening :numeric))
-    (is (contains? storage/type-widening :text))
-    (is (contains? storage/type-widening :uuid))
-    (is (contains? storage/type-widening :timestamptz)))
-
-  (testing "int can widen to numeric, text, jsonb"
-    (is (contains? (:int storage/type-widening) :numeric))
-    (is (contains? (:int storage/type-widening) :text))
-    (is (contains? (:int storage/type-widening) :jsonb)))
-
-  (testing "text can only widen to jsonb"
-    (is (= #{:jsonb} (:text storage/type-widening)))))
-
-
 (deftest types-equivalent?-test
   (testing "uuid and ref are equivalent"
     (is (storage/types-equivalent? :uuid :ref))
@@ -1035,53 +1015,6 @@
           (is (= :constraint-violation/inheritance-cycle (:type (ex-data e))))
           (is (= fn-id (:fn-id (ex-data e))))
           (is (= fn-id (:parent-fn-id (ex-data e)))))))))
-
-
-;; === type-mappings tests ===
-
-(deftest type-mappings-test
-  (testing "type-mappings contains all base types"
-    (is (contains? storage/type-mappings :uuid))
-    (is (contains? storage/type-mappings :text))
-    (is (contains? storage/type-mappings :int))
-    (is (contains? storage/type-mappings :bool))
-    (is (contains? storage/type-mappings :numeric))
-    (is (contains? storage/type-mappings :timestamptz))
-    (is (contains? storage/type-mappings :jsonb))
-    (is (contains? storage/type-mappings :bytes)))
-
-  (testing "type-mappings contains special types"
-    (is (contains? storage/type-mappings :ref))
-    (is (contains? storage/type-mappings :enum))
-    (is (contains? storage/type-mappings :union)))
-
-  (testing "each type has all backend mappings"
-    (doseq [t (keys storage/type-mappings)]
-      (is (contains? (get storage/type-mappings t) :postgres) (str "Missing :postgres for " t))
-      (is (contains? (get storage/type-mappings t) :datomic) (str "Missing :datomic for " t))
-      (is (contains? (get storage/type-mappings t) :memory) (str "Missing :memory for " t))))
-
-  (testing "postgres mappings are strings or :custom"
-    (doseq [[t mapping] storage/type-mappings]
-      (let [pg-type (:postgres mapping)]
-        (is (or (string? pg-type) (= :custom pg-type))
-            (str "Postgres mapping for " t " should be string or :custom")))))
-
-  (testing "datomic mappings are keywords"
-    (doseq [[t mapping] storage/type-mappings]
-      (is (keyword? (:datomic mapping))
-          (str "Datomic mapping for " t " should be keyword"))))
-
-  (testing "memory mappings are :any"
-    (doseq [[t mapping] storage/type-mappings]
-      (is (= :any (:memory mapping))
-          (str "Memory mapping for " t " should be :any"))))
-
-  (testing "can look up specific mappings"
-    (is (= "UUID" (get-in storage/type-mappings [:uuid :postgres])))
-    (is (= :db.type/long (get-in storage/type-mappings [:int :datomic])))
-    (is (= "BIGINT" (get-in storage/type-mappings [:int :postgres])))
-    (is (= :db.type/ref (get-in storage/type-mappings [:ref :datomic])))))
 
 
 ;; === StorageBatchCRUD protocol tests ===

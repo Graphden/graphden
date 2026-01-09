@@ -12,7 +12,6 @@
 
 
 ;; === Type compatibility ===
-;; Re-export from field-types for backwards compatibility
 
 (def type-mappings
   "Complete type mapping reference for all storage backends.

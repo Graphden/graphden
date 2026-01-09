@@ -20,7 +20,6 @@
     [graphden.cache-protocol.value-codec :as codec]))
 
 
-;; Re-export schema for backward compatibility
 (def cache-schema schema/cache-schema)
 (def ensure-cache-schema! schema/ensure-cache-schema!)
 

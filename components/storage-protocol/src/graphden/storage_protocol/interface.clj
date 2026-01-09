@@ -254,7 +254,7 @@
 
 
 ;; ============================================================================
-;; CONSTRAINT HELPER IMPLEMENTATIONS (wrappers for backward compat)
+;; CONSTRAINT HELPER IMPLEMENTATIONS
 ;; ============================================================================
 
 (defn collect-parent-chain-impl
@@ -333,24 +333,11 @@
 (def storage-error-types errors/storage-error-types)
 (def make-error-context errors/make-error-context)
 (def make-storage-error errors/make-storage-error)
-(def error-categories errors/error-categories)
-(def error-severities errors/error-severities)
-(def register-error-type! errors/register-error-type!)
-(def get-error-metadata errors/get-error-metadata)
-(def error-retryable? errors/error-retryable?)
-(def error-category errors/error-category)
-(def registered-error-types errors/registered-error-types)
-(def sensitive-field-patterns errors/sensitive-field-patterns)
-(def sensitive-field? errors/sensitive-field?)
 (def redact-sensitive-map errors/redact-sensitive-map)
 (def redact-sensitive-deep errors/redact-sensitive-deep)
 
 
 ;; === Metadata re-exports ===
-(def type-mappings metadata/type-mappings)
-(def type-widening metadata/type-widening)
-(def type-equivalents metadata/type-equivalents)
-
 
 (defn types-equivalent?
   [t1 t2]
@@ -389,9 +376,6 @@
 (def validate-data-is-map! validation/validate-data-is-map!)
 (def validate-where-clause! validation/validate-where-clause!)
 (def validate-entity-name! validation/validate-entity-name!)
-(def max-username-length validation/max-username-length)
-(def max-password-length validation/max-password-length)
-(def max-jdbc-url-length validation/max-jdbc-url-length)
 (def validate-credential-length! validation/validate-credential-length!)
 (def validate-no-control-chars! validation/validate-no-control-chars!)
 (def validate-credentials! validation/validate-credentials!)

@@ -1,377 +1,57 @@
 (ns graphden.executor.core
-  "Core implementation of the function executor."
+  "Core implementation of the function executor.
+
+   ## Module Structure
+
+   The executor is split into focused namespaces:
+   - core.clj (this file) - Main execution logic, thunk building, argument resolution
+   - registry.clj - Base function registry (global and context-based)
+   - context.clj - ExecutionContext record and creation
+   - types.clj - Type hints and validation
+
+   ## Lazy Arguments
+
+   Arguments are passed to base functions as Clojure `delay` objects.
+   This enables lazy evaluation - values are only computed when dereferenced.
+
+   For :fn type arguments, the delay contains a callable (a Clojure function)
+   that can be invoked with a map of named arguments.
+
+   Base functions should use @ (deref) to get values:
+     (+ @a @b)           ; for regular args
+     (f {:item x})       ; for :fn args (f is already a callable after deref)
+
+   The defbase macro in fn-registry handles this automatically."
   (:require
     [clojure.tools.logging :as log]
-    [graphden.field-types.interface :as ft]
+    [graphden.executor.context :as ctx]
+    [graphden.executor.registry :as registry]
+    [graphden.executor.types :as types]
     [graphden.storage-protocol.interface :as sp]))
 
 
-;; === Lazy Arguments ===
-;;
-;; Arguments are passed to base functions as Clojure `delay` objects.
-;; This enables lazy evaluation - values are only computed when dereferenced.
-;;
-;; For :fn type arguments, the delay contains a callable (a Clojure function)
-;; that can be invoked with a map of named arguments.
-;;
-;; Base functions should use @ (deref) to get values:
-;;   (+ @a @b)           ; for regular args
-;;   (f {:item x})       ; for :fn args (f is already a callable after deref)
-;;
-;; The defbase macro in fn-registry handles this automatically.
-
-
-;; === Base Functions Registry ===
-;;
-;; The executor supports two approaches for providing base functions:
-;;
-;; 1. **Global Registry (Convenience)**: Use register-base-fn! and friends.
-;;    Simple for applications, but global state can cause test interference.
-;;
-;; 2. **Context Injection (Recommended for tests)**: Pass :base-fns to create-context.
-;;    Isolated, thread-safe, enables parallel testing without state conflicts.
-;;
-;; Example of context injection:
-;; ```clojure
-;; (def my-fns {:add (fn [args ctx] (+ @(:a args) @(:b args)))})
-;; (def ctx (create-context {:storage s :base-fns my-fns}))
-;; ```
-
-;; Default global registry for convenience.
-;; For better testability, use :base-fns in create-context.
-(defonce ^:private default-registry (atom {}))
-
-
-(defn register-base-fn!
-  "Registers a base function in the default global registry.
-   fn-name - keyword identifying the function (must match fn-schema name)
-   f - function taking [thunks context] and returning the result
-
-   NOTE: This modifies global state. For isolated tests, prefer passing
-   :base-fns directly to create-context instead of using the global registry.
-
-   Thread safety: swap! is atomic, but concurrent register/clear calls
-   from different tests can interfere. Use with-base-fns for isolated testing."
-  [fn-name f]
-  (swap! default-registry assoc fn-name f)
-  nil)
-
-
-(defn get-base-fn
-  "Retrieves a registered base function by name from the default global registry.
-   Returns the function or nil if not found.
-
-   For context-aware lookup, use get-base-fn-from-context."
-  [fn-name]
-  (get @default-registry fn-name))
-
-
-(defn clear-base-fns!
-  "Clears all registered base functions from the default global registry.
-   Primarily used in tests to reset state between test cases.
-
-   WARNING: This affects all threads. Avoid in parallel tests.
-   Prefer with-base-fns or :base-fns context injection instead."
-  []
-  (reset! default-registry {})
-  nil)
-
-
-(defn get-default-registry
-  "Returns the current state of the default global registry.
-   Useful for passing to create-context."
-  []
-  @default-registry)
+;; Re-export registry functions for backward compatibility
+(def register-base-fn! registry/register-base-fn!)
+(def get-base-fn registry/get-base-fn)
+(def clear-base-fns! registry/clear-base-fns!)
+(def get-default-registry registry/get-default-registry)
 
 
 (defmacro with-base-fns
-  "Executes body with a temporary base-fns registry.
-   The registry is isolated to this execution - other threads and tests
-   are not affected. After body completes, the original registry is restored.
-
-   This is the recommended approach for parallel testing.
-
-   Example:
-   ```clojure
-   (with-base-fns {:add add-fn :multiply multiply-fn}
-     (let [ctx (create-context {:storage storage})]
-       (execute ctx fn-id)))
-   ```
-
-   Note: This binds the default-registry atom temporarily. For complete
-   isolation, pass :base-fns directly to create-context instead."
   [fns-map & body]
-  `(let [old-registry# @default-registry]
-     (try
-       (reset! default-registry ~fns-map)
-       ~@body
-       (finally
-         (reset! default-registry old-registry#)))))
+  `(registry/with-base-fns ~fns-map ~@body))
 
 
-(defn get-base-fn-from-context
-  "Retrieves a base function by name from the context's registry.
-   Returns the function or nil if not found.
-
-   Note: The returned function expects arguments as delay objects."
-  [context fn-name]
-  (get (:base-fns context) fn-name))
+(def get-base-fn-from-context registry/get-base-fn-from-context)
 
 
-;; === Execution Context ===
-
-(defrecord ExecutionContext
-  [storage
-   execution-graph  ; Cached graph from resolve-execution-graph
-   base-fns         ; Map of fn-name -> fn, for base function lookup
-   max-depth
-   timeout-ms
-   start-time
-   depth
-   path-args        ; Map of runtime args: {arg-schema-id -> value} for root fn,
-   ;; {[fn-result-value-id arg-schema-id] -> value} for nested fns
-   current-frv-id   ; Current fn-result-value-id (nil for root function)
-   result-cache     ; Atom: {fn-result-value-id -> computed-value} for caching
-   ;; LIFECYCLE: result-cache is created in create-context (atom {}), populated
-   ;; during execution by execute-fn-result-value (memoizes fn results), and
-   ;; becomes eligible for GC when context goes out of scope. Cache is NOT bounded -
-   ;; for very large execution graphs, memory usage scales with unique fn-result-value
-   ;; count. Use max-depth to bound graph size if memory is a concern.
-   strict-type-validation?  ; If true, throw on unknown types; if false, warn and accept
-   max-unknown-types        ; Limit for unknown types in forward compat mode (circuit breaker)
-   unknown-type-counter])   ; Atom: count of unknown types (circuit breaker for forward compat)
+;; Re-export context functions for backward compatibility
+(def create-context ctx/create-context)
 
 
-(def ^:private max-depth-limit
-  "Upper limit for max-depth to prevent accidental resource exhaustion.
-   100000 is generous but prevents typos like 1000000000."
-  100000)
-
-
-(def ^:private min-timeout-ms
-  "Minimum allowed timeout in milliseconds.
-   50ms allows for fast test cases while preventing unrealistic timeouts.
-
-   Note: This is different from storage query timeout (min 1000ms in postgres-storage).
-   - Executor timeout: overall execution time for a function graph (includes all queries)
-   - Storage query timeout: single database query timeout (JDBC setQueryTimeout uses seconds)
-
-   Executor timeout can be lower because it measures in-memory computation,
-   while storage queries need network roundtrip and query parsing time."
-  50)
-
-
-;; max-unknown-types is now configurable via context, see create-context
-;; Default value is sp/default-max-unknown-types (10)
-
-
-(def ^:private result-cache-size-warning-threshold
-  "Threshold for result-cache size that triggers a warning log.
-   Large caches indicate potentially unbounded execution graphs.
-   When exceeded, a warning is logged to help diagnose memory issues.
-
-   Why 1000? Typical function graphs have <100 nodes. 1000 unique fn-result-value
-   entries indicates either a very deep recursion, infinite loop, or exponential
-   branching. This threshold is high enough to avoid false positives in legitimate
-   large graphs while catching runaway executions before they exhaust memory."
-  1000)
-
-
-(def ^:private result-cache-max-size
-  "Maximum size for result-cache before rejecting new entries.
-   Provides hard limit to prevent OOM in unbounded execution graphs.
-   When reached, new fn-result-values will throw an error.
-
-   Why 10000? This is 10x the warning threshold. If you've hit 10K unique
-   fn-result-values, the graph is almost certainly unbounded or misconfigured.
-   At ~1KB per cached value average, this limits memory to ~10MB per execution."
-  10000)
-
-
-(def ^:private timeout-warning-window-ms
-  "Window size in milliseconds for timeout warning logs.
-   Used to avoid repeated warnings when execution is near timeout threshold.
-   Warning fires once when elapsed time enters [threshold, threshold+window) range.
-
-   Why 100ms? This window should be small enough to give timely warning (not too
-   far before actual timeout) but large enough to account for timing jitter in
-   time checks. 100ms is ~0.3% of the default 30s timeout - negligible but
-   sufficient to deduplicate warnings across multiple function calls."
-  100)
-
-
-(def ^:private default-timeout-ms
-  "Default execution timeout in milliseconds.
-   Uses the shared constant from storage-protocol for consistency."
-  sp/default-query-timeout-ms)
-
-
-(def ^:private error-value-truncation-length
-  "Maximum length for values in error messages.
-   Prevents huge exception data for large values.
-
-   Why 100 chars? Long enough to show meaningful context (e.g., first part of
-   a string, several collection items) but short enough to keep exception data
-   readable in logs and stack traces. Error messages are typically viewed in
-   full, so slightly more verbose is acceptable."
-  100)
-
-
-(def ^:private max-path-args-count
-  "Maximum number of path-args allowed.
-   Prevents potential memory exhaustion from large path-args maps.
-
-   Why 1000? Typical execution graphs have <100 arguments. 1000 unique path-args
-   indicates either a very deep graph or potential abuse. This limit prevents
-   DoS attacks via oversized path-args while accommodating legitimate large graphs."
-  1000)
-
-
-(def ^:private nested-path-arg-key-length
-  "Length of path-arg key tuple for nested functions.
-   Format: [fn-result-value-id arg-schema-id]
-   - fn-result-value-id: identifies which fn-result-value references the function
-   - arg-schema-id: identifies which argument within that function"
-  2)
-
-
-(defn- valid-path-arg-key?
-  "Returns true if key is a valid path-arg key format.
-
-   Valid formats:
-   - UUID: for root function arguments (looked up by arg-schema-id directly)
-   - [UUID UUID]: for nested function arguments via fn-result-value
-     Format is [fn-result-value-id arg-schema-id]"
-  [k]
-  (or (uuid? k)
-      (and (vector? k)
-           (= nested-path-arg-key-length (count k))
-           (every? uuid? k))))
-
-
-(defn- validate-context-options!
-  "Validates context creation options. Throws on invalid options.
-   Collects ALL validation errors and reports them together for better UX,
-   so users can fix multiple issues in one iteration instead of one at a time."
-  [storage timeout-ms max-depth path-args]
-  (let [errors (cond-> []
-                 ;; Required: storage
-                 (not storage)
-                 (conj {:error "Storage is required"})
-
-                 ;; Storage protocol validation - catch wrong type early with clear error
-                 ;; rather than cryptic "No implementation of method" later at first CRUD call
-                 (and storage (not (satisfies? sp/ExecutionGraph storage)))
-                 (conj {:error "storage must implement ExecutionGraph protocol"
-                        :received-type (type storage)})
-
-                 ;; Optional timeout-ms validation
-                 (and timeout-ms (< timeout-ms min-timeout-ms))
-                 (conj {:error (str "timeout-ms must be at least " min-timeout-ms "ms")
-                        :timeout-ms timeout-ms
-                        :min-allowed min-timeout-ms})
-
-                 ;; Optional max-depth validation
-                 (and max-depth (not (pos-int? max-depth)))
-                 (conj {:error "max-depth must be a positive integer"
-                        :max-depth max-depth})
-
-                 (and max-depth (pos-int? max-depth) (> max-depth max-depth-limit))
-                 (conj {:error (str "max-depth exceeds maximum allowed value of " max-depth-limit)
-                        :max-depth max-depth
-                        :max-allowed max-depth-limit})
-
-                 ;; Optional path-args type validation
-                 (and (some? path-args) (not (map? path-args)))
-                 (conj {:error "path-args must be a map"
-                        :path-args-type (type path-args)})
-
-                 ;; path-args count validation
-                 (and (map? path-args) (> (count path-args) max-path-args-count))
-                 (conj {:error (str "path-args count exceeds maximum allowed value of " max-path-args-count)
-                        :path-args-count (count path-args)
-                        :max-allowed max-path-args-count}))
-        ;; Validate path-args keys format (collect all invalid keys)
-        invalid-keys (when (map? path-args)
-                       (into []
-                             (comp (map first)
-                                   (filter (complement valid-path-arg-key?)))
-                             path-args))
-        errors (if (seq invalid-keys)
-                 (conj errors {:error "path-args keys must be UUID or [UUID UUID] vector"
-                               :invalid-keys invalid-keys})
-                 errors)]
-    (when (seq errors)
-      (throw (ex-info (if (= 1 (count errors))
-                        (:error (first errors))
-                        (str "Multiple validation errors (" (count errors) ")"))
-                      {:type :execution-error/invalid-context
-                       :validation-errors errors})))))
-
-
-(defn create-context
-  "Creates initial execution context. Note: execution-graph is populated
-   later when execute is called with a root fn-id.
-
-   Options:
-   - :storage - Storage instance (required)
-   - :base-fns - Map of fn-name -> fn for base function lookup (optional, uses default registry if not provided)
-   - :max-depth - Maximum recursion depth (default 1000)
-   - :timeout-ms - Maximum execution time in ms (default 30000)
-   - :path-args - Map of runtime args (optional):
-                  For root function: {arg-schema-id -> value}
-                  For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
-                  IMPORTANT: path-args can only set args that have NO value in DB.
-                  If arg-value exists in DB, path-arg is ignored (warning logged).
-                  To override DB values, use provided-args in execute call instead.
-   - :strict-type-validation? - If true (default), throw on unknown types.
-                                If false, warn and accept (forward compatibility mode).
-   - :max-unknown-types - Maximum unknown types allowed in forward compat mode (default 10).
-                          Acts as circuit breaker to detect schema version mismatches.
-
-   ## Forward Compatibility Mode (:strict-type-validation? false)
-
-   When enabled, the executor will accept arguments with unknown types instead
-   of throwing an exception. This is useful for:
-
-   1. **Rolling deployments**: When updating schema, old executor instances can
-      continue processing requests with new types until they're upgraded.
-
-   2. **API versioning**: Clients may send data with types that your version
-      doesn't recognize yet.
-
-   3. **Schema evolution**: Allows gradual migration without breaking existing
-      functionality.
-
-   Behavior:
-   - Unknown types are accepted without validation (any value passes)
-   - A warning is logged with type info and value preview
-   - Known types are still validated strictly
-   - Circuit breaker throws if unknown types exceed :max-unknown-types
-
-   Risks:
-   - Type mismatches for new types won't be caught until the base function runs
-   - Data integrity relies on the base function's own validation
-
-   Recommendation: Use strict mode (default) in development, consider permissive
-   mode for production deployments during schema migrations.
-
-   Validates:
-   - storage is required
-   - timeout-ms must be at least 50ms (allows for fast test cases)
-   - max-depth must be positive and <= 100000
-   - path-args must be a map if provided"
-  [{:keys [storage base-fns max-depth timeout-ms path-args strict-type-validation? max-unknown-types]
-    :or {max-depth sp/default-max-depth
-         timeout-ms default-timeout-ms
-         path-args {}
-         strict-type-validation? true
-         max-unknown-types sp/default-max-unknown-types}}]
-  (validate-context-options! storage timeout-ms max-depth path-args)
-  (let [fns (or base-fns @default-registry)]
-    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0
-                        (or path-args {}) nil (atom {}) strict-type-validation?
-                        max-unknown-types (atom 0))))
+;; Re-export type functions for backward compatibility
+(def custom-type-hints types/custom-type-hints)
+(def register-type-hint! types/register-type-hint!)
 
 
 ;; Forward declaration: execute-internal is defined later but referenced by
@@ -381,171 +61,7 @@
 (declare execute-internal)
 
 
-;; === Graph Resolution ===
-;; Note: The actual graph resolution is now done by storage's resolve-execution-graph
-;; which fetches everything in one call. See ExecutionGraph protocol.
-
-
-;; === Thunk Building ===
-
-;; Use sp/redact-sensitive-deep from storage-protocol for consistent sensitive data redaction
-
-
-(defn- truncate-value
-  "Truncates large values for error messages to avoid huge exception data.
-   Returns a shortened representation for display purposes.
-   Redacts sensitive data (passwords, tokens, etc.) before truncation.
-
-   Uses pr-str for consistent Clojure-readable output. The max-len parameter
-   controls truncation; callers typically use 100 chars for error context."
-  [value max-len]
-  (let [redacted (sp/redact-sensitive-deep value)
-        s (pr-str redacted)]
-    (if (> (count s) max-len)
-      (str (subs s 0 max-len) "...")
-      s)))
-
-
-(def ^:private default-type-hints
-  "Human-readable hints for expected Clojure types (built-in types)."
-  {:fn "UUID (function reference)"
-   :ref "UUID (entity reference)"
-   :int "integer (e.g., 42, -1)"
-   :bool "boolean (true or false)"
-   :text "string (e.g., \"hello\")"
-   :numeric "number (int, float, bigdec, ratio)"
-   :jsonb "map or vector"
-   :bytes "byte array (byte-array)"
-   :timestamptz "java.time.Instant, java.time.LocalDateTime, or java.util.Date"
-   :enum "keyword (e.g., :active, :pending)"
-   :uuid "UUID"})
-
-
-(def custom-type-hints
-  "Atom containing custom type hints that extend the built-in hints.
-   Use `register-type-hint!` to add hints for custom types.
-   Hints registered here take precedence over default hints."
-  (atom {}))
-
-
-(defn register-type-hint!
-  "Registers a human-readable hint for a custom type.
-   The hint is shown in type mismatch error messages to help users understand
-   what value format is expected.
-
-   Example:
-   (register-type-hint! :email \"string in email format (e.g., user@example.com)\")
-   (register-type-hint! :phone \"string with international format (e.g., +1-555-123-4567)\")"
-  [type-keyword hint-string]
-  (when-not (keyword? type-keyword)
-    (throw (ex-info "type-keyword must be a keyword"
-                    {:type :invalid-argument
-                     :type-keyword type-keyword})))
-  (when-not (string? hint-string)
-    (throw (ex-info "hint-string must be a string"
-                    {:type :invalid-argument
-                     :hint-string hint-string})))
-  (swap! custom-type-hints assoc type-keyword hint-string))
-
-
-(defn- get-type-hint
-  "Gets human-readable hint for a type, checking custom hints first."
-  [arg-type]
-  (or (get @custom-type-hints arg-type)
-      (get default-type-hints arg-type)
-      (name arg-type)))
-
-
-(defn- throw-type-mismatch!
-  "Throws a type mismatch error with detailed context."
-  [arg-schema provided-value]
-  (let [arg-type (:type arg-schema)
-        arg-name (:name arg-schema)
-        arg-schema-id (:id arg-schema)
-        hint (get-type-hint arg-type)]
-    (throw (ex-info (str "Type mismatch for argument '" arg-name "': "
-                         "expected " (name arg-type) " (" hint "), "
-                         "got " (-> provided-value class .getSimpleName))
-                    {:type :execution-error/type-mismatch
-                     :arg-name arg-name
-                     :arg-schema-id arg-schema-id
-                     :expected-type arg-type
-                     :expected-hint hint
-                     :provided-value (truncate-value provided-value error-value-truncation-length)
-                     :provided-type (type provided-value)}))))
-
-
-(defn- check-unknown-type-circuit-breaker!
-  "Checks if unknown type count exceeds threshold and throws if so.
-   Acts as circuit breaker to prevent silent schema mismatch issues."
-  [^clojure.lang.Atom unknown-type-counter max-unknown-types ^clojure.lang.Keyword arg-type]
-  (let [current-count (swap! unknown-type-counter inc)]
-    (when (> current-count max-unknown-types)
-      (throw (ex-info "Too many unknown types in forward compatibility mode - possible schema mismatch"
-                      {:type :execution-error/unknown-type-limit-exceeded
-                       :unknown-type-count current-count
-                       :max-allowed max-unknown-types
-                       :last-unknown-type arg-type
-                       :hint "Check schema version compatibility or disable forward compatibility mode"})))))
-
-
-(defn- type-mismatch?
-  "Returns true if provided-value doesn't match the expected arg-type.
-
-   Type validation rules:
-   - Known types: strict validation based on Clojure predicates (from field-types)
-   - :union type: accepts any value (validation happens at schema level,
-     where union variants are checked against allowed types)
-   - Unknown types: behavior depends on strict? flag:
-     - strict?=true (default): throws exception to catch schema mismatches early
-     - strict?=false: returns false (permissive) for forward compatibility
-       with circuit breaker at max-unknown-types
-
-   This is a runtime check for user-provided arguments only. Values from
-   the execution graph (arg-values) are assumed to be already validated."
-  [^clojure.lang.Keyword arg-type provided-value strict? max-unknown-types ^clojure.lang.Atom unknown-type-counter]
-  (if (contains? ft/type-validators arg-type)
-    (not (ft/valid-type? arg-type provided-value))
-    ;; Unknown type - behavior depends on strict mode
-    (if strict?
-      (throw (ex-info "Unknown argument type encountered"
-                      {:type :execution-error/unknown-arg-type
-                       :arg-type arg-type
-                       :value-type (type provided-value)
-                       :hint "Set :strict-type-validation? false in context for forward compatibility"}))
-      ;; Forward compatibility mode: accept unknown types with warning + circuit breaker
-      ;; This allows newer schema versions to introduce new types without
-      ;; breaking existing deployments. Circuit breaker prevents silent failures.
-      (do
-        (check-unknown-type-circuit-breaker! unknown-type-counter max-unknown-types arg-type)
-        ;; SECURITY: Intentionally NOT logging the actual value here.
-        ;; Values may contain secrets (passwords, tokens, API keys) that should
-        ;; never appear in logs. Only type information is logged for debugging.
-        (log/warn "Unknown argument type in forward compatibility mode"
-                  {:arg-type arg-type
-                   :value-type (type provided-value)
-                   :action :accepting-without-validation})
-        false))))
-
-
-(defn- validate-provided-arg-type!
-  "Validates that a provided argument matches the expected arg-schema type.
-   Throws ExceptionInfo with detailed context if type mismatch detected.
-
-   Called from build-thunk when a user provides an argument that overrides
-   a stored arg-value. This ensures user-provided values match the expected
-   type before creating a LiteralThunk.
-
-   Note: Stored arg-values from the execution graph are not validated here;
-   they are assumed to be valid from schema-level checks during creation."
-  [provided-value ^clojure.lang.IPersistentMap arg-schema strict? max-unknown-types ^clojure.lang.Atom unknown-type-counter]
-  (when-not (and arg-schema (:type arg-schema))
-    (throw (ex-info "Invalid arg-schema: missing type"
-                    {:type :execution-error/invalid-arg-schema
-                     :arg-schema arg-schema})))
-  (when (type-mismatch? (:type arg-schema) provided-value strict? max-unknown-types unknown-type-counter)
-    (throw-type-mismatch! arg-schema provided-value)))
-
+;; === Graph Data Helpers ===
 
 (defn- get-fn-data-from-graph
   "Gets function data from the cached execution graph.
@@ -625,6 +141,8 @@
       (execute-internal context fn-id {arg-schema-id value}))))
 
 
+;; === fn-result-value Execution ===
+
 (defn- execute-fn-result-value
   "Executes a fn-result-value, using cache for memoization.
    If the fn-result-value-id is already in cache, returns cached value.
@@ -645,11 +163,11 @@
       ;; Cache miss - check limit before executing
       (let [current-size (count @result-cache)]
         ;; Hard limit check BEFORE adding new entry
-        (when (>= current-size result-cache-max-size)
+        (when (>= current-size ctx/result-cache-max-size)
           (throw (ex-info "Result cache size limit exceeded - execution graph too large"
                           {:type :execution-error/cache-limit-exceeded
                            :cache-size current-size
-                           :max-size result-cache-max-size
+                           :max-size ctx/result-cache-max-size
                            :fn-result-value-id fn-result-value-id
                            :hint "Reduce graph complexity or increase max-depth to fail earlier"})))
         ;; Execute and cache
@@ -667,14 +185,16 @@
                 result (execute-internal context fn-id nil)
                 new-size (count (swap! result-cache assoc fn-result-value-id result))]
             ;; Warn once when cache crosses threshold (check if we just crossed)
-            (when (= new-size result-cache-size-warning-threshold)
+            (when (= new-size ctx/result-cache-size-warning-threshold)
               (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
                         {:cache-size new-size
-                         :threshold result-cache-size-warning-threshold
-                         :max-size result-cache-max-size
+                         :threshold ctx/result-cache-size-warning-threshold
+                         :max-size ctx/result-cache-max-size
                          :hint "Large caches may indicate unbounded execution graphs"}))
             result))))))
 
+
+;; === Delay Building ===
 
 (defn- wrap-delay-with-context
   "Wraps a delay body with error context for better diagnostics.
@@ -730,7 +250,7 @@
    their free args set via path-args.
 
    All delays include error context (arg-name, source) for better diagnostics."
-  ^clojure.lang.Delay [^ExecutionContext context ^clojure.lang.IPersistentMap arg-value ^clojure.lang.IPersistentMap arg-schema]
+  ^clojure.lang.Delay [context ^clojure.lang.IPersistentMap arg-value ^clojure.lang.IPersistentMap arg-schema]
   (let [value (:value arg-value)
         arg-name (:name arg-schema)]
     (if (uuid? value)
@@ -759,7 +279,7 @@
       (get path-args arg-schema-id))))
 
 
-;; === Argument resolution helpers ===
+;; === Argument Resolution Helpers ===
 ;; These helpers handle specific cases in build-arg-delays.
 ;; They are intentionally separate (not inlined) for:
 ;; - Readability: descriptive names document business logic better than inline code
@@ -772,7 +292,7 @@
    Used for both direct provided args (from HOF) and path-args.
    The source parameter identifies the origin for debugging."
   [value arg-schema strict? max-unknown-types arg-name unknown-type-counter source]
-  (validate-provided-arg-type! value arg-schema strict? max-unknown-types unknown-type-counter)
+  (types/validate-provided-arg-type! value arg-schema strict? max-unknown-types unknown-type-counter)
   (wrap-delay-with-context arg-name source #(identity value)))
 
 
@@ -890,11 +410,6 @@
 
 ;; === Execution ===
 
-(def ^:private warning-threshold-ratio
-  "Ratio of limit at which to log warning. 0.8 = warn at 80% of limit."
-  0.8)
-
-
 (defn- check-limits!
   "Checks execution limits (depth, timeout). Throws if exceeded.
    Logs warning when approaching limits (80% threshold).
@@ -904,16 +419,16 @@
    if it exceeds the timeout. The timeout is a best-effort limit, not a hard
    guarantee. For precise timeout control, base functions should implement
    their own timeout logic (e.g., using futures with deref timeout)."
-  [^ExecutionContext context]
+  [context]
   (let [depth (:depth context)
         max-depth (:max-depth context)
-        depth-threshold (long (* max-depth warning-threshold-ratio))]
+        depth-threshold (long (* max-depth ctx/warning-threshold-ratio))]
     ;; Warn when approaching depth limit (only once at threshold)
     (when (= depth depth-threshold)
       (log/warn "Approaching max recursion depth"
                 {:depth depth
                  :max-depth max-depth
-                 :threshold-ratio warning-threshold-ratio}))
+                 :threshold-ratio ctx/warning-threshold-ratio}))
     (when (> depth max-depth)
       (throw (ex-info "Maximum recursion depth exceeded"
                       {:type :execution-error/max-depth-exceeded
@@ -921,14 +436,14 @@
                        :max-depth max-depth}))))
   (let [elapsed (- (System/currentTimeMillis) (:start-time context))
         timeout-ms (:timeout-ms context)
-        timeout-threshold (long (* timeout-ms warning-threshold-ratio))]
+        timeout-threshold (long (* timeout-ms ctx/warning-threshold-ratio))]
     ;; Warn when approaching timeout (check range to avoid repeated warnings)
     (when (and (>= elapsed timeout-threshold)
-               (< elapsed (+ timeout-threshold timeout-warning-window-ms)))
+               (< elapsed (+ timeout-threshold ctx/timeout-warning-window-ms)))
       (log/warn "Approaching execution timeout"
                 {:elapsed-ms elapsed
                  :timeout-ms timeout-ms
-                 :threshold-ratio warning-threshold-ratio
+                 :threshold-ratio ctx/warning-threshold-ratio
                  :depth (:depth context)}))
     (when (> elapsed timeout-ms)
       (throw (ex-info "Execution timeout exceeded"
@@ -945,7 +460,7 @@
 
    Arguments are passed to base functions as delays for lazy evaluation.
    Base functions should use @ (deref) to get values."
-  [^ExecutionContext context ^java.util.UUID fn-id ^clojure.lang.IPersistentMap provided-args]
+  [context ^java.util.UUID fn-id ^clojure.lang.IPersistentMap provided-args]
   (check-limits! context)
   (let [execution-graph (:execution-graph context)
         fn-data (get-fn-data-from-graph execution-graph fn-id)

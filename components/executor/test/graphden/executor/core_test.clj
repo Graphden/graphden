@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.core :as core]
+    [graphden.executor.types :as types]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -27,102 +28,102 @@
 
 (deftest truncate-value-test
   (testing "returns original string when under limit"
-    (is (= "\"hello\"" (#'core/truncate-value "hello" 100)))
-    (is (= "42" (#'core/truncate-value 42 100)))
-    (is (= ":keyword" (#'core/truncate-value :keyword 100))))
+    (is (= "\"hello\"" (#'types/truncate-value "hello" 100)))
+    (is (= "42" (#'types/truncate-value 42 100)))
+    (is (= ":keyword" (#'types/truncate-value :keyword 100))))
 
   (testing "truncates long strings with ellipsis"
     (let [long-str "abcdefghij"  ; 10 chars, pr-str adds quotes -> 12 chars
-          result (#'core/truncate-value long-str 10)]
+          result (#'types/truncate-value long-str 10)]
       (is (= 13 (count result)))  ; 10 chars + "..."
       (is (str/ends-with? result "..."))))
 
   (testing "handles exact boundary - string exactly at limit"
     (let [str-5 "abcde"  ; pr-str -> "\"abcde\"" = 7 chars
-          result (#'core/truncate-value str-5 7)]
+          result (#'types/truncate-value str-5 7)]
       ;; Exactly at limit, no truncation
       (is (= "\"abcde\"" result))
       (is (not (str/ends-with? result "...")))))
 
   (testing "handles exact boundary - string one over limit"
     (let [str-6 "abcdef"  ; pr-str -> "\"abcdef\"" = 8 chars
-          result (#'core/truncate-value str-6 7)]
+          result (#'types/truncate-value str-6 7)]
       ;; One over limit, should truncate
       (is (= 10 (count result)))  ; 7 + "..."
       (is (str/ends-with? result "..."))))
 
   (testing "handles empty string"
-    (is (= "\"\"" (#'core/truncate-value "" 100))))
+    (is (= "\"\"" (#'types/truncate-value "" 100))))
 
   (testing "handles nil"
-    (is (= "nil" (#'core/truncate-value nil 100))))
+    (is (= "nil" (#'types/truncate-value nil 100))))
 
   (testing "handles complex data structures"
     ;; Map
     (let [m {:a 1 :b 2}
-          result (#'core/truncate-value m 100)]
+          result (#'types/truncate-value m 100)]
       (is (str/includes? result ":a")))
 
     ;; Vector
     (let [v [1 2 3 4 5]
-          result (#'core/truncate-value v 100)]
+          result (#'types/truncate-value v 100)]
       (is (= "[1 2 3 4 5]" result)))
 
     ;; Large nested structure truncates properly
     (let [large {:keys (vec (range 100))}
-          result (#'core/truncate-value large 20)]
+          result (#'types/truncate-value large 20)]
       (is (= 23 (count result)))  ; 20 + "..."
       (is (str/ends-with? result "..."))))
 
   (testing "handles special characters in strings"
-    (is (= "\"line1\\nline2\"" (#'core/truncate-value "line1\nline2" 100)))
-    (is (= "\"tab\\there\"" (#'core/truncate-value "tab\there" 100))))
+    (is (= "\"line1\\nline2\"" (#'types/truncate-value "line1\nline2" 100)))
+    (is (= "\"tab\\there\"" (#'types/truncate-value "tab\there" 100))))
 
   (testing "handles Unicode characters"
     ;; Unicode chars: pr-str preserves them
     (let [unicode "привет"  ; Russian "hello"
-          result (#'core/truncate-value unicode 100)]
+          result (#'types/truncate-value unicode 100)]
       (is (str/includes? result "привет"))))
 
   (testing "handles max-len of 0"
-    (let [result (#'core/truncate-value "test" 0)]
+    (let [result (#'types/truncate-value "test" 0)]
       ;; Should truncate to 0 chars + "..."
       (is (= "..." result))))
 
   (testing "handles max-len of 1"
-    (let [result (#'core/truncate-value "test" 1)]
+    (let [result (#'types/truncate-value "test" 1)]
       ;; Should truncate to 1 char + "..."
       (is (= "\"..." result))))
 
   (testing "edge case: truncation mid-escape sequence"
     ;; pr-str of "a\nb" is "\"a\\nb\"" (7 chars)
     ;; If we truncate at 4, we get "\"a\\" + "..." which may look odd but is safe
-    (let [result (#'core/truncate-value "a\nb" 4)]
+    (let [result (#'types/truncate-value "a\nb" 4)]
       (is (= 7 (count result)))  ; 4 + "..."
       (is (str/ends-with? result "..."))))
 
   (testing "redacts sensitive keys in maps"
-    (is (str/includes? (#'core/truncate-value {:password "secret123"} 100) "[REDACTED]"))
-    (is (str/includes? (#'core/truncate-value {:api-key "abc123"} 100) "[REDACTED]"))
-    (is (str/includes? (#'core/truncate-value {:auth-token "xyz"} 100) "[REDACTED]"))
-    (is (str/includes? (#'core/truncate-value {:secret "hidden"} 100) "[REDACTED]"))
-    (is (str/includes? (#'core/truncate-value {:private-key "key"} 100) "[REDACTED]"))
-    (is (str/includes? (#'core/truncate-value {:credential "cred"} 100) "[REDACTED]")))
+    (is (str/includes? (#'types/truncate-value {:password "secret123"} 100) "[REDACTED]"))
+    (is (str/includes? (#'types/truncate-value {:api-key "abc123"} 100) "[REDACTED]"))
+    (is (str/includes? (#'types/truncate-value {:auth-token "xyz"} 100) "[REDACTED]"))
+    (is (str/includes? (#'types/truncate-value {:secret "hidden"} 100) "[REDACTED]"))
+    (is (str/includes? (#'types/truncate-value {:private-key "key"} 100) "[REDACTED]"))
+    (is (str/includes? (#'types/truncate-value {:credential "cred"} 100) "[REDACTED]")))
 
   (testing "redacts nested sensitive keys"
     (let [nested {:config {:db {:password "secret"}} :name "test"}
-          result (#'core/truncate-value nested 200)]
+          result (#'types/truncate-value nested 200)]
       (is (str/includes? result "[REDACTED]"))
       (is (str/includes? result ":name"))
       (is (str/includes? result "\"test\""))))
 
   (testing "preserves non-sensitive keys"
-    (let [result (#'core/truncate-value {:username "john" :email "john@test.com"} 100)]
+    (let [result (#'types/truncate-value {:username "john" :email "john@test.com"} 100)]
       (is (str/includes? result "john"))
       (is (str/includes? result "john@test.com"))))
 
   (testing "redacts sensitive values in sequences"
-    (let [result (#'core/truncate-value [{:password "p1"} {:password "p2"}] 100)]
+    (let [result (#'types/truncate-value [{:password "p1"} {:password "p2"}] 100)]
       (is (str/includes? result "[REDACTED]"))
       (is (not (str/includes? result "p1"))))))
 
@@ -247,7 +248,7 @@
   (testing "custom hint overrides default"
     (reset! core/custom-type-hints {})
     (core/register-type-hint! :int "custom integer hint")
-    (is (= "custom integer hint" (#'core/get-type-hint :int)))
+    (is (= "custom integer hint" (#'types/get-type-hint :int)))
     ;; Cleanup
     (reset! core/custom-type-hints {}))
 
@@ -255,8 +256,8 @@
     (reset! core/custom-type-hints {})
     ;; For unknown types not in default-type-hints or custom-type-hints,
     ;; get-type-hint falls back to (name arg-type)
-    (is (= "unknown-custom-type" (#'core/get-type-hint :unknown-custom-type)))
-    (is (= "my-special-type" (#'core/get-type-hint :my-special-type)))))
+    (is (= "unknown-custom-type" (#'types/get-type-hint :unknown-custom-type)))
+    (is (= "my-special-type" (#'types/get-type-hint :my-special-type)))))
 
 
 ;; === truncate-value additional tests ===
@@ -264,17 +265,17 @@
 (deftest truncate-value-edge-cases-test
   (testing "handles deeply nested structures"
     (let [deep {:a {:b {:c {:d {:e "value"}}}}}
-          result (#'core/truncate-value deep 50)]
+          result (#'types/truncate-value deep 50)]
       (is (<= (count result) 53))))  ; 50 + "..."
 
   (testing "handles very long strings"
     (let [long-str (str/join (repeat 1000 "x"))
-          result (#'core/truncate-value long-str 20)]
+          result (#'types/truncate-value long-str 20)]
       (is (= 23 (count result)))))  ; 20 + "..."
 
   (testing "handles collections with many elements"
     (let [big-vec (vec (range 100))
-          result (#'core/truncate-value big-vec 30)]
+          result (#'types/truncate-value big-vec 30)]
       (is (<= (count result) 33)))))
 
 
@@ -284,19 +285,19 @@
   (testing "increments counter and allows under limit"
     (let [counter (atom 0)]
       (dotimes [_ 5]
-        (#'core/check-unknown-type-circuit-breaker! counter 10 :custom-type))
+        (#'types/check-unknown-type-circuit-breaker! counter 10 :custom-type))
       (is (= 5 @counter))))
 
   (testing "throws when exceeding limit"
     (let [counter (atom 10)]  ; Start at limit
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Too many unknown types"
-            (#'core/check-unknown-type-circuit-breaker! counter 10 :custom-type)))))
+            (#'types/check-unknown-type-circuit-breaker! counter 10 :custom-type)))))
 
   (testing "exception contains correct data"
     (let [counter (atom 10)]
       (try
-        (#'core/check-unknown-type-circuit-breaker! counter 10 :my-custom-type)
+        (#'types/check-unknown-type-circuit-breaker! counter 10 :my-custom-type)
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (is (= :execution-error/unknown-type-limit-exceeded (:type (ex-data e))))
@@ -308,12 +309,12 @@
     (let [counter (atom 0)]
       ;; With limit of 3, should allow 3 calls
       (dotimes [_ 3]
-        (#'core/check-unknown-type-circuit-breaker! counter 3 :custom-type))
+        (#'types/check-unknown-type-circuit-breaker! counter 3 :custom-type))
       (is (= 3 @counter))
       ;; Fourth call should throw
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Too many unknown types"
-            (#'core/check-unknown-type-circuit-breaker! counter 3 :custom-type))))))
+            (#'types/check-unknown-type-circuit-breaker! counter 3 :custom-type))))))
 
 
 ;; === Multiple validation errors test ===
@@ -338,44 +339,44 @@
 (deftest type-mismatch-test
   (testing "returns false for matching known types"
     (let [counter (atom 0)]
-      (is (not (#'core/type-mismatch? :int 42 true 10 counter)))
-      (is (not (#'core/type-mismatch? :text "hello" true 10 counter)))
-      (is (not (#'core/type-mismatch? :bool true true 10 counter)))
-      (is (not (#'core/type-mismatch? :uuid (random-uuid) true 10 counter)))))
+      (is (not (#'types/type-mismatch? :int 42 true 10 counter)))
+      (is (not (#'types/type-mismatch? :text "hello" true 10 counter)))
+      (is (not (#'types/type-mismatch? :bool true true 10 counter)))
+      (is (not (#'types/type-mismatch? :uuid (random-uuid) true 10 counter)))))
 
   (testing "returns true for mismatched known types"
     (let [counter (atom 0)]
-      (is (#'core/type-mismatch? :int "not an int" true 10 counter))
-      (is (#'core/type-mismatch? :text 42 true 10 counter))
-      (is (#'core/type-mismatch? :bool "not a bool" true 10 counter))
-      (is (#'core/type-mismatch? :uuid "not a uuid" true 10 counter))))
+      (is (#'types/type-mismatch? :int "not an int" true 10 counter))
+      (is (#'types/type-mismatch? :text 42 true 10 counter))
+      (is (#'types/type-mismatch? :bool "not a bool" true 10 counter))
+      (is (#'types/type-mismatch? :uuid "not a uuid" true 10 counter))))
 
   (testing "union type accepts any value"
     (let [counter (atom 0)]
-      (is (not (#'core/type-mismatch? :union 42 true 10 counter)))
-      (is (not (#'core/type-mismatch? :union "string" true 10 counter)))
-      (is (not (#'core/type-mismatch? :union {:a 1} true 10 counter)))
-      (is (not (#'core/type-mismatch? :union nil true 10 counter)))))
+      (is (not (#'types/type-mismatch? :union 42 true 10 counter)))
+      (is (not (#'types/type-mismatch? :union "string" true 10 counter)))
+      (is (not (#'types/type-mismatch? :union {:a 1} true 10 counter)))
+      (is (not (#'types/type-mismatch? :union nil true 10 counter)))))
 
   (testing "unknown type in strict mode throws exception"
     (let [counter (atom 0)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown argument type"
-            (#'core/type-mismatch? :custom-unknown-type "value" true 10 counter)))))
+            (#'types/type-mismatch? :custom-unknown-type "value" true 10 counter)))))
 
   (testing "unknown type in non-strict mode returns false with circuit breaker"
     (let [counter (atom 0)]
-      (is (not (#'core/type-mismatch? :custom-unknown-type "value" false 10 counter)))
+      (is (not (#'types/type-mismatch? :custom-unknown-type "value" false 10 counter)))
       (is (= 1 @counter))))  ; Counter incremented
 
   (testing "nil value for non-nullable types"
     (let [counter (atom 0)]
       ;; Most types don't accept nil
-      (is (#'core/type-mismatch? :int nil true 10 counter))
-      (is (#'core/type-mismatch? :text nil true 10 counter))
-      (is (#'core/type-mismatch? :uuid nil true 10 counter))
+      (is (#'types/type-mismatch? :int nil true 10 counter))
+      (is (#'types/type-mismatch? :text nil true 10 counter))
+      (is (#'types/type-mismatch? :uuid nil true 10 counter))
       ;; Union accepts nil
-      (is (not (#'core/type-mismatch? :union nil true 10 counter))))))
+      (is (not (#'types/type-mismatch? :union nil true 10 counter))))))
 
 
 ;; === validate-provided-arg-type! tests ===
@@ -384,33 +385,33 @@
   (testing "accepts valid typed value"
     (let [counter (atom 0)
           arg-schema {:name "x" :type :int :required true}]
-      (is (nil? (#'core/validate-provided-arg-type! 42 arg-schema true 10 counter)))))
+      (is (nil? (#'types/validate-provided-arg-type! 42 arg-schema true 10 counter)))))
 
   (testing "throws on type mismatch"
     (let [counter (atom 0)
           arg-schema {:name "x" :type :int :required true}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch"
-            (#'core/validate-provided-arg-type! "not-an-int" arg-schema true 10 counter)))))
+            (#'types/validate-provided-arg-type! "not-an-int" arg-schema true 10 counter)))))
 
   (testing "throws on nil arg-schema"
     (let [counter (atom 0)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Invalid arg-schema.*missing type"
-            (#'core/validate-provided-arg-type! 42 nil true 10 counter)))))
+            (#'types/validate-provided-arg-type! 42 nil true 10 counter)))))
 
   (testing "throws on arg-schema without type"
     (let [counter (atom 0)
           arg-schema {:name "x" :required true}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Invalid arg-schema.*missing type"
-            (#'core/validate-provided-arg-type! 42 arg-schema true 10 counter)))))
+            (#'types/validate-provided-arg-type! 42 arg-schema true 10 counter)))))
 
   (testing "type mismatch error includes arg name"
     (let [counter (atom 0)
           arg-schema {:name "my-arg" :type :int :required true}]
       (try
-        (#'core/validate-provided-arg-type! "wrong-type" arg-schema true 10 counter)
+        (#'types/validate-provided-arg-type! "wrong-type" arg-schema true 10 counter)
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (is (= :execution-error/type-mismatch (:type (ex-data e))))
@@ -420,15 +421,15 @@
   (testing "accepts union type with any value"
     (let [counter (atom 0)
           arg-schema {:name "x" :type :union :required false}]
-      (is (nil? (#'core/validate-provided-arg-type! 42 arg-schema true 10 counter)))
-      (is (nil? (#'core/validate-provided-arg-type! "string" arg-schema true 10 counter)))
-      (is (nil? (#'core/validate-provided-arg-type! {:map "value"} arg-schema true 10 counter)))))
+      (is (nil? (#'types/validate-provided-arg-type! 42 arg-schema true 10 counter)))
+      (is (nil? (#'types/validate-provided-arg-type! "string" arg-schema true 10 counter)))
+      (is (nil? (#'types/validate-provided-arg-type! {:map "value"} arg-schema true 10 counter)))))
 
   (testing "non-strict mode accepts unknown types"
     (let [counter (atom 0)
           arg-schema {:name "x" :type :custom-type :required true}]
       ;; Non-strict mode should not throw for unknown types
-      (is (nil? (#'core/validate-provided-arg-type! "any-value" arg-schema false 10 counter)))
+      (is (nil? (#'types/validate-provided-arg-type! "any-value" arg-schema false 10 counter)))
       (is (= 1 @counter))))  ; Circuit breaker counter incremented
 
   (testing "strict mode rejects unknown types"
@@ -436,4 +437,4 @@
           arg-schema {:name "x" :type :custom-type :required true}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown argument type"
-            (#'core/validate-provided-arg-type! "any-value" arg-schema true 10 counter))))))
+            (#'types/validate-provided-arg-type! "any-value" arg-schema true 10 counter))))))

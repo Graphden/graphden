@@ -129,4 +129,44 @@
 
   (testing "unknown type returns true (forward compatibility)"
     (is (ft/valid-type? :unknown-future-type 42))
-    (is (ft/valid-type? :custom-type "anything"))))
+    (is (ft/valid-type? :custom-type "anything")))
+
+  (testing "timestamptz validation"
+    (is (ft/valid-type? :timestamptz (java.time.Instant/now)))
+    (is (ft/valid-type? :timestamptz (java.time.LocalDateTime/now)))
+    (is (ft/valid-type? :timestamptz (java.util.Date.)))
+    (is (not (ft/valid-type? :timestamptz "2024-01-01")))
+    (is (not (ft/valid-type? :timestamptz 1704067200))))
+
+  (testing "bytes validation"
+    (is (ft/valid-type? :bytes (byte-array [1 2 3])))
+    (is (ft/valid-type? :bytes (byte-array 0)))
+    (is (not (ft/valid-type? :bytes [1 2 3])))
+    (is (not (ft/valid-type? :bytes "bytes"))))
+
+  (testing "ref validation (same as uuid)"
+    (is (ft/valid-type? :ref (random-uuid)))
+    (is (not (ft/valid-type? :ref "not-a-uuid"))))
+
+  (testing "fn validation (same as uuid)"
+    (is (ft/valid-type? :fn (random-uuid)))
+    (is (not (ft/valid-type? :fn "not-a-uuid"))))
+
+  (testing "enum validation"
+    (is (ft/valid-type? :enum :some-value))
+    (is (ft/valid-type? :enum :another/namespaced))
+    (is (not (ft/valid-type? :enum "string-value")))
+    (is (not (ft/valid-type? :enum 42))))
+
+  (testing "int boundary values"
+    (is (ft/valid-type? :int Long/MAX_VALUE))
+    (is (ft/valid-type? :int Long/MIN_VALUE))
+    (is (ft/valid-type? :int 0))
+    (is (ft/valid-type? :int -1)))
+
+  (testing "nil handling for all types"
+    (is (not (ft/valid-type? :uuid nil)))
+    (is (not (ft/valid-type? :text nil)))
+    (is (not (ft/valid-type? :int nil)))
+    (is (not (ft/valid-type? :bool nil)))
+    (is (ft/valid-type? :union nil))))

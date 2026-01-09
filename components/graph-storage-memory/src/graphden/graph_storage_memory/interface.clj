@@ -13,6 +13,8 @@
 (defn create-storage
   "Creates an in-memory storage initialized with graph-data-schema.
 
+   Options: none currently supported (accepts empty map for API consistency).
+
    Returns a storage instance implementing Storage and StorageIntrospection
    protocols, ready for CRUD operations on graph entities (fn-schema, arg-schema,
    fn, arg-value).
@@ -26,7 +28,9 @@
        (sp/current-entities storage)  ; => #{:fn-schema :arg-schema :fn :arg-value}
        ;; ... use storage ...
        (sp/close storage))"
-  []
-  (let [schema (graph/build-schema (mds/create-builder))]
-    (-> (mem/create-storage)
-        (sp/initialize-with-cleanup! schema))))
+  ([]
+   (create-storage {}))
+  ([_opts]
+   (let [schema (graph/build-schema (mds/create-builder))]
+     (-> (mem/create-storage)
+         (sp/initialize-with-cleanup! schema)))))

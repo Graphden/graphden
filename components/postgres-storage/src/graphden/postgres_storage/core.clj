@@ -92,9 +92,8 @@
   (when-not (str/starts-with? jdbc-url "jdbc:postgresql://")
     (throw (ex-info "jdbc-url must start with 'jdbc:postgresql://' for PostgreSQL connections"
                     {:type :config-error/invalid-jdbc-url
-                     :jdbc-url (if (> (count jdbc-url) 50)
-                                 (str (subs jdbc-url 0 50) "...")
-                                 jdbc-url)})))
+                     ;; Don't include jdbc-url in error - it may contain credentials
+                     :hint "Expected format: jdbc:postgresql://host:port/database"})))
   (when-not (and username (seq (str/trim username)))
     (throw (ex-info "username is required and cannot be empty"
                     {:type :config-error/missing-username})))

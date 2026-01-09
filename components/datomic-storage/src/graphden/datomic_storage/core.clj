@@ -21,41 +21,34 @@
     [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.datomic-storage.constraints :as constraints]
+    [graphden.datomic-storage.schema :as schema]
+    [graphden.datomic-storage.util :as util]
     [graphden.storage-protocol.interface :as sp])
   (:import
     (java.util.concurrent.locks
       ReentrantReadWriteLock)))
 
 
-;; === Type mapping ===
-
-(def type->datomic
-  "Maps our field types to Datomic value types."
-  {:uuid        :db.type/uuid
-   :text        :db.type/string
-   :int         :db.type/long
-   :bool        :db.type/boolean
-   :numeric     :db.type/bigdec
-   :timestamptz :db.type/instant
-   :jsonb       :db.type/string  ; Stored as EDN string
-   :bytes       :db.type/bytes})
-
-
-;; NOTE: Type information (:enum vs :ref, etc.) is preserved through the metadata system,
-;; not through Datomic's native schema introspection. Both :enum and :ref map to
-;; :db.type/ref in Datomic, but the original type is stored in graphden.metadata entities.
-
-
 ;; === Configuration ===
+;; Query timeout is for API consistency with postgres-storage.
+;; Note: Datomic Client API does not support native query timeout, so the timeout
+;; is only used for API compatibility and does not actually limit Datomic query time.
 
 (def ^:dynamic *query-timeout-ms*
-  "Timeout for Datomic queries in milliseconds. Can be rebound per-thread.
-   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change."
+  "Query timeout in milliseconds for API compatibility with postgres-storage.
+
+   IMPORTANT: Datomic Client API does not support native query timeout.
+   This var exists for API compatibility but does NOT actually limit query time.
+
+   Default is 30000 ms (30 seconds)."
   sp/default-query-timeout-ms)
 
 
 (defn with-query-timeout
-  "Executes f with a custom query timeout (in milliseconds).
+  "Executes f with a custom query timeout binding.
+
+   NOTE: Datomic Client API does not enforce this timeout on queries.
+   This function exists for API compatibility with postgres-storage.
 
    Example:
    (with-query-timeout 60000
@@ -63,28 +56,6 @@
   [timeout-ms f]
   (binding [*query-timeout-ms* timeout-ms]
     (f)))
-
-
-;; === Attribute naming ===
-
-(defn- entity-attr
-  "Creates a Datomic attribute ident for an entity field.
-   E.g., :user/name -> user entity, name field"
-  [entity-name field-name]
-  (keyword (name entity-name) (name field-name)))
-
-
-(defn- metadata-attr
-  "Creates a metadata attribute ident."
-  [attr-name]
-  (keyword "graphden.metadata" (name attr-name)))
-
-
-(defn- enum-value-ident
-  "Creates a Datomic ident for an enum value.
-   E.g., :status.value/active"
-  [enum-name value-kw]
-  (keyword (str (name enum-name) ".value") (name value-kw)))
 
 
 ;; === Connection validation ===
@@ -101,309 +72,6 @@
       (throw (ex-info "Cannot perform operation: storage not initialized"
                       {:type :storage-not-initialized
                        :operation operation-name})))))
-
-
-;; Lock utilities imported from storage-protocol
-
-
-;; === Default configurations ===
-
-(def default-local-config
-  "Default configuration for Datomic Local with in-memory storage."
-  {:server-type :datomic-local
-   :storage-dir :mem
-   :system "graphden-dev"})
-
-
-(def ^:private valid-server-types
-  "Valid Datomic server types."
-  #{:datomic-local :peer-server :ion :cloud})
-
-
-(defn- validate-db-name!
-  "Validates database name. Must be non-empty string without special characters."
-  [db-name]
-  (when-not (string? db-name)
-    (throw (ex-info "db-name must be a string"
-                    {:type :config-error/invalid-db-name
-                     :db-name db-name
-                     :db-name-type (type db-name)})))
-  (when (str/blank? db-name)
-    (throw (ex-info "db-name cannot be blank"
-                    {:type :config-error/invalid-db-name
-                     :db-name db-name})))
-  ;; Datomic database names should be alphanumeric with hyphens
-  (when-not (re-matches #"[a-zA-Z][a-zA-Z0-9-]*" db-name)
-    (throw (ex-info "db-name must start with a letter and contain only alphanumeric characters and hyphens"
-                    {:type :config-error/invalid-db-name
-                     :db-name db-name}))))
-
-
-(defn- validate-client-config!
-  "Validates Datomic client configuration.
-
-   Validates:
-   - server-type is one of known types
-   - Required keys are present for each server type
-   - No obviously invalid values"
-  [config]
-  (when-not (map? config)
-    (throw (ex-info "client-config must be a map"
-                    {:type :config-error/invalid-client-config
-                     :config-type (type config)})))
-  (let [server-type (:server-type config)]
-    (when-not server-type
-      (throw (ex-info "client-config must include :server-type"
-                      {:type :config-error/missing-server-type
-                       :available-types valid-server-types})))
-    (when-not (contains? valid-server-types server-type)
-      (throw (ex-info (str "Unknown server-type: " server-type)
-                      {:type :config-error/invalid-server-type
-                       :server-type server-type
-                       :valid-types valid-server-types})))
-    ;; Server-type specific validation
-    ;; Redact config once for all error messages (security: prevent credential leakage)
-    (let [safe-config (sp/redact-sensitive-deep config)]
-      (case server-type
-        :datomic-local
-        (do
-          (when-not (:system config)
-            (throw (ex-info "datomic-local requires :system in client-config"
-                            {:type :config-error/missing-system
-                             :config safe-config})))
-          (when-not (:storage-dir config)
-            (throw (ex-info "datomic-local requires :storage-dir in client-config"
-                            {:type :config-error/missing-storage-dir
-                             :config safe-config}))))
-
-        :peer-server
-        (do
-          (when-not (:endpoint config)
-            (throw (ex-info "peer-server requires :endpoint in client-config"
-                            {:type :config-error/missing-endpoint})))
-          (when-not (:access-key config)
-            (throw (ex-info "peer-server requires :access-key in client-config"
-                            {:type :config-error/missing-access-key})))
-          (when-not (:secret config)
-            (throw (ex-info "peer-server requires :secret in client-config"
-                            {:type :config-error/missing-secret}))))
-
-        ;; :ion and :cloud have complex configs, just warn if empty
-        (:ion :cloud)
-        (when (< (count config) 2)
-          (log/warn "Datomic ion/cloud config seems minimal, may fail to connect"
-                    {:server-type server-type
-                     :config-keys (keys config)}))))))
-
-
-;; === Schema operations ===
-
-(defn- field-type->datomic
-  "Converts a field type to Datomic value type."
-  [field-spec]
-  (let [t (:type field-spec)]
-    (case t
-      :ref :db.type/ref
-      :enum :db.type/ref
-      :union :db.type/string  ; Stored as EDN string
-      (get type->datomic t :db.type/string))))
-
-
-(defn- single-field-unique-constraint?
-  "Returns true if constraint is a single-field unique constraint."
-  [constraint]
-  (and (= (:type constraint) :unique)
-       (= (count (:fields constraint)) 1)))
-
-
-(defn- multi-field-unique-constraint?
-  "Returns true if constraint is a multi-field unique constraint."
-  [constraint]
-  (and (= (:type constraint) :unique)
-       (> (count (:fields constraint)) 1)))
-
-
-(defn- warn-multi-field-constraints!
-  "Logs debug info about multi-field unique constraints which require application-level enforcement.
-   Datomic only supports single-attribute unique constraints natively, but we enforce
-   multi-field constraints at the application level during create/update operations."
-  [schema entity-name]
-  (let [constraints (ds/entity-constraints schema entity-name)
-        multi-field (filter multi-field-unique-constraint? constraints)]
-    (doseq [c multi-field]
-      (log/debug "Multi-field unique constraint will be enforced at application level"
-                 {:entity entity-name
-                  :fields (:fields c)}))))
-
-
-(defn- get-single-field-constraints
-  "Returns a set of field names that are part of single-field unique constraints."
-  [schema entity-name]
-  (let [constraints (ds/entity-constraints schema entity-name)]
-    (->> constraints
-         (filter single-field-unique-constraint?)
-         (mapcat :fields)
-         (set))))
-
-
-(defn- get-multi-field-constraints
-  "Returns a seq of multi-field unique constraints for an entity.
-   Each constraint is {:type :unique :fields [:field1 :field2 ...]}."
-  [schema entity-name]
-  (let [constraints (ds/entity-constraints schema entity-name)]
-    (filter multi-field-unique-constraint? constraints)))
-
-
-(defn- validate-multi-field-unique-constraint!
-  "Validates that a multi-field unique constraint is not violated.
-   db - Datomic database value
-   entity-name - entity name (e.g., :user)
-   data - the data being inserted/updated
-   constraint - the constraint to check {:type :unique :fields [...]}
-   field-specs - field specifications (for handling ref types)
-   exclude-id - optional id to exclude (for updates)"
-  [db entity-name data constraint field-specs exclude-id]
-  (let [fields (:fields constraint)
-        ;; Validate all constraint fields exist in schema
-        _ (doseq [field fields]
-            (when-not (contains? field-specs field)
-              (throw (ex-info "Constraint references non-existent field"
-                              {:type :validation-error/constraint-check-failed
-                               :entity entity-name
-                               :constraint-fields fields
-                               :missing-field field
-                               :available-fields (vec (keys field-specs))}))))
-        ;; Get values for all constraint fields from data
-        field-values (map #(get data %) fields)]
-    ;; Only check if all fields have values
-    (when (every? some? field-values)
-      ;; Build a query to find existing records with same field values
-      ;; For ref fields, we need to join through the referenced entity
-      (let [id-attr (entity-attr entity-name :id)
-            ref-var-counter (atom 0)
-            ;; Build where clauses for each field value
-            field-clauses (mapcat
-                            (fn [[field value]]
-                              (let [attr (entity-attr entity-name field)
-                                    field-spec (get field-specs field)]
-                                (if (and (= (:type field-spec) :ref) (uuid? value))
-                                  ;; Ref field with UUID value: join through referenced entity
-                                  (let [ref-var (symbol (str "?ref-" (swap! ref-var-counter inc)))
-                                        ref-entity (:ref-entity field-spec)
-                                        ref-id-attr (entity-attr ref-entity :id)]
-                                    [['?e attr ref-var]
-                                     [ref-var ref-id-attr value]])
-                                  ;; Regular field: direct comparison
-                                  [['?e attr value]])))
-                            (map vector fields field-values))
-            ;; Build the complete query
-            base-query (vec (concat '[:find ?e ?id :where]
-                                    field-clauses
-                                    [['?e id-attr '?id]]))
-            ;; Execute query with error handling
-            ;; Datomic can throw ExceptionInfo for query errors, RuntimeException for
-            ;; connection issues, and IllegalArgumentException for malformed queries.
-            ;; We catch these specifically to avoid masking critical errors like OOM.
-            wrap-constraint-error (fn [e suffix]
-                                    (ex-info (str "Failed to validate unique constraint" suffix)
-                                             {:type :validation-error/constraint-check-failed
-                                              :entity entity-name
-                                              :fields fields
-                                              :query base-query
-                                              :cause (ex-message e)}
-                                             e))
-            results (try
-                      (d/q base-query db)
-                      (catch clojure.lang.ExceptionInfo e
-                        (throw (wrap-constraint-error e "")))
-                      (catch IllegalArgumentException e
-                        (throw (wrap-constraint-error e ": invalid query")))
-                      (catch RuntimeException e
-                        (throw (wrap-constraint-error e ": runtime error"))))
-            ;; Filter out the exclude-id (for updates)
-            conflicting (if exclude-id
-                          (filter #(not= (second %) exclude-id) results)
-                          results)]
-        (when (seq conflicting)
-          ;; Redact sensitive values to prevent data leakage
-          ;; Include conflicting-id for debugging (helps identify which record conflicts)
-          (throw (ex-info (str "Unique constraint violation on " (name entity-name)
-                               " fields: " (pr-str fields))
-                          {:type :constraint-violation/unique
-                           :entity entity-name
-                           :fields fields
-                           :values (sp/redact-sensitive-map (zipmap fields field-values))
-                           :conflicting-id (second (first conflicting))})))))))
-
-
-(defn- validate-multi-field-constraints!
-  "Validates all multi-field unique constraints for an entity during create/update.
-   This provides application-level enforcement since Datomic doesn't support
-   composite unique constraints natively."
-  [db schema entity-name data field-specs exclude-id]
-  (let [constraints (get-multi-field-constraints schema entity-name)]
-    (doseq [constraint constraints]
-      (validate-multi-field-unique-constraint! db entity-name data constraint field-specs exclude-id))))
-
-
-(defn- build-field-schema
-  "Builds Datomic schema for a single field.
-   Adds :db/unique when field is part of a single-field unique constraint."
-  [schema entity-name field-name field-spec]
-  (let [attr-ident (entity-attr entity-name field-name)
-        value-type (field-type->datomic field-spec)
-        unique-fields (get-single-field-constraints schema entity-name)
-        base-schema {:db/ident attr-ident
-                     :db/valueType value-type
-                     :db/cardinality :db.cardinality/one}]
-    (if (contains? unique-fields field-name)
-      (assoc base-schema :db/unique :db.unique/value)
-      base-schema)))
-
-
-(defn- build-id-schema
-  "Builds Datomic schema for entity's :id attribute (UUID, unique identity)."
-  [entity-name]
-  {:db/ident (entity-attr entity-name :id)
-   :db/valueType :db.type/uuid
-   :db/cardinality :db.cardinality/one
-   :db/unique :db.unique/identity})
-
-
-(defn- build-enum-value-schema
-  "Builds Datomic schema for an enum value (just an entity with :db/ident)."
-  [enum-name value-kw]
-  {:db/ident (enum-value-ident enum-name value-kw)})
-
-
-(defn- build-metadata-schema
-  "Builds schema for metadata attributes."
-  []
-  [{:db/ident (metadata-attr :uuid)
-    :db/valueType :db.type/uuid
-    :db/cardinality :db.cardinality/one
-    :db/unique :db.unique/identity}
-   {:db/ident (metadata-attr :kind)
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident (metadata-attr :name)
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident (metadata-attr :parent-uuid)
-    :db/valueType :db.type/uuid
-    :db/cardinality :db.cardinality/one}
-   {:db/ident (metadata-attr :field-type)
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident (metadata-attr :field-nullable)
-    :db/valueType :db.type/boolean
-    :db/cardinality :db.cardinality/one}
-   {:db/ident (metadata-attr :field-enum-name)
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}
-   {:db/ident (metadata-attr :field-ref-entity)
-    :db/valueType :db.type/keyword
-    :db/cardinality :db.cardinality/one}])
 
 
 ;; === Introspection ===
@@ -703,7 +371,7 @@
   (let [field-uuid (:uuid field-spec)
         old-field-info (get (:fields old-metadata) field-uuid)]
     (when old-field-info
-      (let [old-attr (entity-attr old-entity-name (:field old-field-info))
+      (let [old-attr (util/entity-attr old-entity-name (:field old-field-info))
             attr-exists? (seq (d/q '[:find ?e
                                      :in $ ?attr
                                      :where [?e :db/ident ?attr]]
@@ -739,7 +407,7 @@
   "Processes a single enum value during migration (add if new)."
   [old-metadata enum-name value-kw value-uuid new-schema created-enum-values]
   (when-not (get (:enum-values old-metadata) value-uuid)
-    (swap! new-schema conj (build-enum-value-schema enum-name value-kw))
+    (swap! new-schema conj (schema/build-enum-value-schema enum-name value-kw))
     (swap! created-enum-values conj {:enum enum-name :value value-kw})))
 
 
@@ -758,7 +426,7 @@
     (do
       (swap! created-enums conj enum-name)
       (run! (fn [[value-kw _]]
-              (swap! new-schema conj (build-enum-value-schema enum-name value-kw))
+              (swap! new-schema conj (schema/build-enum-value-schema enum-name value-kw))
               (swap! created-enum-values conj {:enum enum-name :value value-kw}))
             values))))
 
@@ -780,7 +448,7 @@
     (if old-field-info
       (process-existing-field! old-field-info entity-name field-name renamed-fields)
       (do
-        (swap! new-schema conj (build-field-schema schema entity-name field-name field-spec))
+        (swap! new-schema conj (schema/build-field-schema schema entity-name field-name field-spec))
         (swap! created-fields conj {:entity entity-name :field field-name})))))
 
 
@@ -809,9 +477,9 @@
       (do
         (swap! created-entities conj entity-name)
         ;; Add :id attribute for new entity
-        (swap! new-schema conj (build-id-schema entity-name))
+        (swap! new-schema conj (schema/build-id-schema entity-name))
         (run! (fn [[field-name field-spec]]
-                (swap! new-schema conj (build-field-schema schema entity-name field-name field-spec))
+                (swap! new-schema conj (schema/build-field-schema schema entity-name field-name field-spec))
                 (swap! created-fields conj {:entity entity-name :field field-name}))
               (ds/entity-fields schema entity-name))))))
 
@@ -822,7 +490,7 @@
   "Builds all enum value schemas for initialization."
   [schema]
   (mapcat (fn [[enum-name {:keys [values]}]]
-            (map (fn [[value-kw _]] (build-enum-value-schema enum-name value-kw))
+            (map (fn [[value-kw _]] (schema/build-enum-value-schema enum-name value-kw))
                  values))
           (ds/enums schema)))
 
@@ -832,9 +500,9 @@
    Includes :id attribute for each entity."
   [schema]
   (mapcat (fn [entity-name]
-            (cons (build-id-schema entity-name)
+            (cons (schema/build-id-schema entity-name)
                   (map (fn [[field-name field-spec]]
-                         (build-field-schema schema entity-name field-name field-spec))
+                         (schema/build-field-schema schema entity-name field-name field-spec))
                        (ds/entity-fields schema entity-name))))
           (ds/entities schema)))
 
@@ -850,7 +518,7 @@
   "First-time initialization: creates all schema and metadata.
    Returns changes map with all created entities/fields/enums."
   [conn schema]
-  (let [metadata-schema (build-metadata-schema)
+  (let [metadata-schema (schema/build-metadata-schema)
         enum-schema (build-enum-schemas schema)
         field-schema (build-field-schemas schema)
         all-schema (concat metadata-schema enum-schema field-schema)]
@@ -958,7 +626,7 @@
   [conn schema]
   ;; Log info about multi-field unique constraints (enforced at application level)
   (doseq [entity-name (ds/entities schema)]
-    (warn-multi-field-constraints! schema entity-name))
+    (schema/warn-multi-field-constraints! schema entity-name))
 
   (let [db (d/db conn)
         old-metadata (read-metadata db)]
@@ -978,12 +646,12 @@
   (let [field-spec (get field-specs field-name)]
     (case (:type field-spec)
       :enum (if (keyword? v)
-              (enum-value-ident (:enum-name field-spec) v)
+              (util/enum-value-ident (:enum-name field-spec) v)
               v)
       :ref (if (uuid? v)
              ;; Convert UUID to lookup ref for the referenced entity type
              (let [ref-entity (:ref-entity field-spec)]
-               [(entity-attr ref-entity :id) v])
+               [(util/entity-attr ref-entity :id) v])
              v)
       ;; Default: return as-is
       v)))
@@ -998,12 +666,12 @@
    Type hints for hot-path performance (called during batch operations)."
   ^clojure.lang.IPersistentMap [entity-name ^clojure.lang.IPersistentMap data id temp-id ^clojure.lang.IPersistentMap field-specs]
   (let [base-tx {:db/id temp-id
-                 (entity-attr entity-name :id) id}]
+                 (util/entity-attr entity-name :id) id}]
     (reduce-kv (fn [acc k v]
                  (if (= k :id)
                    acc  ; Already handled above
                    (let [converted-v (convert-field-value field-specs k v)]
-                     (assoc acc (entity-attr entity-name k) converted-v))))
+                     (assoc acc (util/entity-attr entity-name k) converted-v))))
                base-tx
                data)))
 
@@ -1012,10 +680,10 @@
   "Pulls an entity by id (UUID) from the database.
    Queries by :entity-name/id attribute."
   [db entity-name id entity-fields]
-  (let [id-attr (entity-attr entity-name :id)
+  (let [id-attr (util/entity-attr entity-name :id)
         ;; Include :id in pattern along with other fields
         pattern (into [id-attr]
-                      (map #(entity-attr entity-name %) entity-fields))
+                      (map #(util/entity-attr entity-name %) entity-fields))
         ;; Find the entity by its :entity-name/id attribute
         eid (ffirst (d/q {:find '[?e]
                           :in '[$ ?id]
@@ -1087,7 +755,7 @@
   (let [db (d/db conn)
         fields (get-entity-fields db entity-name)
         field-specs (get-fields-with-specs db entity-name)
-        id-attr (entity-attr entity-name :id)
+        id-attr (util/entity-attr entity-name :id)
         ;; Find entity id
         eid (ffirst (d/q {:find '[?e]
                           :in '[$ ?id]
@@ -1113,7 +781,7 @@
   "Deletes an entity by id."
   [conn entity-name id]
   (let [db (d/db conn)
-        id-attr (entity-attr entity-name :id)
+        id-attr (util/entity-attr entity-name :id)
         eid (ffirst (d/q {:find '[?e]
                           :in '[$ ?id]
                           :where [['?e id-attr '?id]]}
@@ -1132,15 +800,15 @@
   (sp/validate-where-clause! where)
   (let [db (d/db conn)
         fields (get-entity-fields db entity-name)
-        id-attr (entity-attr entity-name :id)
-        pattern (into [id-attr] (map #(entity-attr entity-name %) fields))
+        id-attr (util/entity-attr entity-name :id)
+        pattern (into [id-attr] (map #(util/entity-attr entity-name %) fields))
         ;; Build where clauses - must have at least one clause to identify entities of this type
         base-where [['?e id-attr '_]]  ; Match entities that have an :id attribute
         where-clauses (if (empty? where)
                         base-where
                         (into base-where
                               (map (fn [[k v]]
-                                     ['?e (entity-attr entity-name k) v])
+                                     ['?e (util/entity-attr entity-name k) v])
                                    where)))
         query {:find '[?e]
                :where where-clauses}
@@ -1207,8 +875,8 @@
     {}
     (let [db (d/db conn)
           fields (get-entity-fields db entity-name)
-          id-attr (entity-attr entity-name :id)
-          pattern (into [id-attr] (map #(entity-attr entity-name %) fields))
+          id-attr (util/entity-attr entity-name :id)
+          pattern (into [id-attr] (map #(util/entity-attr entity-name %) fields))
           ;; Find all entity ids in one query
           results (d/q {:find '[?e ?id]
                         :in '[$ [?id ...]]
@@ -1231,7 +899,7 @@
   (if (empty? ids)
     0
     (let [db (d/db conn)
-          id-attr (entity-attr entity-name :id)
+          id-attr (util/entity-attr entity-name :id)
           ;; Find all entity ids in one query
           results (d/q {:find '[?e]
                         :in '[$ [?id ...]]
@@ -1656,7 +1324,7 @@
                                 field-specs (get-fields-with-specs db entity-name)]
                             ;; Validate multi-field unique constraints before creating
                             (when-let [schema @schema-atom]
-                              (validate-multi-field-constraints! db schema entity-name data field-specs nil))
+                              (schema/validate-multi-field-constraints! db schema entity-name data field-specs nil))
                             (create-entity-impl conn entity-name data)))))
 
 
@@ -1677,7 +1345,7 @@
                                 field-specs (get-fields-with-specs db entity-name)]
                             ;; Validate multi-field unique constraints before updating
                             (when-let [schema @schema-atom]
-                              (validate-multi-field-constraints! db schema entity-name data field-specs id))
+                              (schema/validate-multi-field-constraints! db schema entity-name data field-specs id))
                             (update-entity-impl conn entity-name id data)))))
 
 
@@ -1709,7 +1377,7 @@
                             ;; Validate multi-field unique constraints for each entity
                             (when-let [schema @schema-atom]
                               (doseq [data data-seq]
-                                (validate-multi-field-constraints! db schema entity-name data field-specs nil)))
+                                (schema/validate-multi-field-constraints! db schema entity-name data field-specs nil)))
                             (create-entities-impl conn entity-name data-seq)))))
 
 
@@ -1816,7 +1484,7 @@
    Options:
    - :db-name - database name (default \"graphden\")
    - :client-config - Datomic client configuration map
-                      (default: local in-memory, see default-local-config)
+                      (default: local in-memory, see util/default-local-config)
 
    Validates:
    - db-name must be alphanumeric with hyphens, starting with letter
@@ -1842,8 +1510,8 @@
                                     :access-key \"your-key\"}})"
   [{:keys [db-name client-config]
     :or {db-name "graphden"
-         client-config default-local-config}}]
-  (validate-db-name! db-name)
-  (validate-client-config! client-config)
+         client-config util/default-local-config}}]
+  (util/validate-db-name! db-name)
+  (util/validate-client-config! client-config)
   (log/info "Creating Datomic storage" {:db-name db-name :server-type (:server-type client-config)})
   (->DatomicStorage client-config db-name (atom nil) (atom nil) (atom nil) (atom nil) (ReentrantReadWriteLock.)))

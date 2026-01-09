@@ -50,7 +50,7 @@
                              :username "user"
                              :password "pass"}))))
 
-  (testing "jdbc-url validation error includes truncated url for long urls"
+  (testing "jdbc-url validation error does not leak url (security)"
     (try
       (core/create-pool {:jdbc-url (str "jdbc:mysql://" (str/join (repeat 100 "x")))
                          :username "user"
@@ -59,8 +59,10 @@
       (catch clojure.lang.ExceptionInfo e
         (let [data (ex-data e)]
           (is (= :config-error/invalid-jdbc-url (:type data)))
-          ;; URL should be truncated to 50 chars + "..."
-          (is (= 53 (count (:jdbc-url data)))))))))
+          ;; URL should NOT be included in error data (may contain credentials)
+          (is (nil? (:jdbc-url data)))
+          ;; Instead, a hint about expected format should be provided
+          (is (string? (:hint data))))))))
 
 
 (deftest create-pool-credentials-validation-test

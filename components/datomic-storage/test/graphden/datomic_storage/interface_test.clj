@@ -6,6 +6,7 @@
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.datomic-storage.core :as core]
     [graphden.datomic-storage.interface :as dat]
+    [graphden.datomic-storage.schema :as schema]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.storage-protocol.contract-tests :as contract]
     [graphden.storage-protocol.interface :as sp]))
@@ -645,7 +646,7 @@
 ;; === Private function unit tests ===
 
 (deftest single-field-unique-constraint?-test
-  (let [single-field-unique-constraint? #'core/single-field-unique-constraint?]
+  (let [single-field-unique-constraint? schema/single-field-unique-constraint?]
     (testing "returns true for single-field unique constraint"
       (is (true? (single-field-unique-constraint? {:type :unique :fields [:email]}))))
 

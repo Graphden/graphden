@@ -35,13 +35,21 @@
 ;; === Configuration ===
 
 (def ^:dynamic *query-timeout-ms*
-  "Timeout for Datomic queries in milliseconds. Can be rebound per-thread.
-   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change."
+  "Query timeout in milliseconds for API consistency with postgres-storage.
+
+   IMPORTANT: Datomic Client API does not support native query timeout.
+   This var exists for API compatibility but does NOT actually limit query time.
+   For real timeout control, consider using Datomic's :io-context or external timeout.
+
+   Default is 30000 ms (30 seconds)."
   sp/default-query-timeout-ms)
 
 
 (defn with-query-timeout
-  "Executes f with a custom query timeout (in milliseconds).
+  "Executes f with a custom query timeout binding.
+
+   NOTE: Datomic Client API does not support native query timeout.
+   This function exists for API compatibility with postgres-storage.
 
    Example:
    (with-query-timeout 60000

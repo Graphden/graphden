@@ -232,48 +232,24 @@
                       :do-update-set {:value :excluded.value}})))))
 
 
-(defn- save-fn-deps!
-  "Saves fn dependency records with ref-counts using batch insert."
-  [ds cache-id fn-deps]
-  (when (seq fn-deps)
-    (let [values (mapv (fn [[dep-fn-id ref-count]]
+(defn- save-deps!
+  "Saves dependency records with ref-counts using batch insert.
+   Parameters:
+   - ds: datasource
+   - cache-id: UUID of the cache
+   - table: target table keyword (e.g., :cache-fn-dep)
+   - dep-key: dependency column keyword (e.g., :dep-fn-id)
+   - deps: map of {dep-id -> ref-count}"
+  [ds cache-id table dep-key deps]
+  (when (seq deps)
+    (let [values (mapv (fn [[dep-id ref-count]]
                          {:cache-id cache-id
-                          :dep-fn-id dep-fn-id
+                          dep-key dep-id
                           :ref-count ref-count})
-                       fn-deps)]
-      (execute! ds {:insert-into :cache-fn-dep
+                       deps)]
+      (execute! ds {:insert-into table
                     :values values
-                    :on-conflict [:cache-id :dep-fn-id]
-                    :do-update-set [:ref-count]}))))
-
-
-(defn- save-fn-schema-deps!
-  "Saves fn-schema dependency records with ref-counts using batch insert."
-  [ds cache-id fn-schema-deps]
-  (when (seq fn-schema-deps)
-    (let [values (mapv (fn [[dep-fn-schema-id ref-count]]
-                         {:cache-id cache-id
-                          :dep-fn-schema-id dep-fn-schema-id
-                          :ref-count ref-count})
-                       fn-schema-deps)]
-      (execute! ds {:insert-into :cache-fn-schema-dep
-                    :values values
-                    :on-conflict [:cache-id :dep-fn-schema-id]
-                    :do-update-set [:ref-count]}))))
-
-
-(defn- save-arg-schema-deps!
-  "Saves arg-schema dependency records with ref-counts using batch insert."
-  [ds cache-id arg-schema-deps]
-  (when (seq arg-schema-deps)
-    (let [values (mapv (fn [[dep-arg-schema-id ref-count]]
-                         {:cache-id cache-id
-                          :dep-arg-schema-id dep-arg-schema-id
-                          :ref-count ref-count})
-                       arg-schema-deps)]
-      (execute! ds {:insert-into :cache-arg-schema-dep
-                    :values values
-                    :on-conflict [:cache-id :dep-arg-schema-id]
+                    :on-conflict [:cache-id dep-key]
                     :do-update-set [:ref-count]}))))
 
 
@@ -312,32 +288,17 @@
 
 ;; === Dependency lookup ===
 
-(defn- find-caches-by-fn-dep-impl
-  "Returns set of cache-ids that depend on dep-fn-id."
-  [ds dep-fn-id]
+(defn- find-caches-by-dep
+  "Returns set of cache-ids that depend on a given entity.
+   Parameters:
+   - ds: datasource
+   - table: dependency table keyword (e.g., :cache-fn-dep)
+   - dep-key: dependency column keyword (e.g., :dep-fn-id)
+   - dep-id: UUID of the dependency"
+  [ds table dep-key dep-id]
   (->> (execute! ds {:select [:cache-id]
-                     :from [:cache-fn-dep]
-                     :where [:= :dep-fn-id dep-fn-id]})
-       (map :cache-id)
-       (into #{})))
-
-
-(defn- find-caches-by-fn-schema-dep-impl
-  "Returns set of cache-ids that depend on dep-fn-schema-id."
-  [ds dep-fn-schema-id]
-  (->> (execute! ds {:select [:cache-id]
-                     :from [:cache-fn-schema-dep]
-                     :where [:= :dep-fn-schema-id dep-fn-schema-id]})
-       (map :cache-id)
-       (into #{})))
-
-
-(defn- find-caches-by-arg-schema-dep-impl
-  "Returns set of cache-ids that depend on dep-arg-schema-id."
-  [ds dep-arg-schema-id]
-  (->> (execute! ds {:select [:cache-id]
-                     :from [:cache-arg-schema-dep]
-                     :where [:= :dep-arg-schema-id dep-arg-schema-id]})
+                     :from [table]
+                     :where [:= dep-key dep-id]})
        (map :cache-id)
        (into #{})))
 
@@ -385,9 +346,9 @@
                            (save-cached-arg-schemas! tx fn-id (:arg-schemas graph))
                            (save-cached-merged-args! tx fn-id (:resolved-args graph))
                            ;; Save dependencies
-                           (save-fn-deps! tx fn-id (:fn-ids dependencies))
-                           (save-fn-schema-deps! tx fn-id (:fn-schema-ids dependencies))
-                           (save-arg-schema-deps! tx fn-id (:arg-schema-ids dependencies))))
+                           (save-deps! tx fn-id :cache-fn-dep :dep-fn-id (:fn-ids dependencies))
+                           (save-deps! tx fn-id :cache-fn-schema-dep :dep-fn-schema-id (:fn-schema-ids dependencies))
+                           (save-deps! tx fn-id :cache-arg-schema-dep :dep-arg-schema-id (:arg-schema-ids dependencies))))
 
 
   (delete-cache!
@@ -399,17 +360,17 @@
 
   (find-caches-by-fn-dep
     [_ dep-fn-id]
-    (find-caches-by-fn-dep-impl datasource dep-fn-id))
+    (find-caches-by-dep datasource :cache-fn-dep :dep-fn-id dep-fn-id))
 
 
   (find-caches-by-fn-schema-dep
     [_ dep-fn-schema-id]
-    (find-caches-by-fn-schema-dep-impl datasource dep-fn-schema-id))
+    (find-caches-by-dep datasource :cache-fn-schema-dep :dep-fn-schema-id dep-fn-schema-id))
 
 
   (find-caches-by-arg-schema-dep
     [_ dep-arg-schema-id]
-    (find-caches-by-arg-schema-dep-impl datasource dep-arg-schema-id)))
+    (find-caches-by-dep datasource :cache-arg-schema-dep :dep-arg-schema-id dep-arg-schema-id)))
 
 
 (defn create-cache

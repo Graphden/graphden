@@ -1,18 +1,21 @@
 (ns graphden.datomic-storage.interface
   "Public interface for Datomic storage implementation."
   (:require
-    [graphden.datomic-storage.core :as core]))
+    [graphden.datomic-storage.core :as core]
+    [graphden.datomic-storage.util :as util]))
 
 
-;; Re-export timeout configuration for external use
+;; Re-export timeout configuration for API compatibility
 (def ^:dynamic *query-timeout-ms*
-  "Timeout for Datomic queries in milliseconds. Can be rebound per-thread.
+  "Query timeout in milliseconds for API compatibility with postgres-storage.
+   NOTE: Datomic Client API does not support native query timeout.
    Default is 30000 ms (30 seconds)."
   core/*query-timeout-ms*)
 
 
 (defn with-query-timeout
-  "Executes f with a custom query timeout (in milliseconds).
+  "Executes f with a custom query timeout binding.
+   NOTE: Datomic Client API does not enforce this timeout on queries.
 
    Example:
    (with-query-timeout 60000
@@ -24,7 +27,7 @@
 (def default-local-config
   "Default configuration for Datomic Local with in-memory storage.
    Use this as a base for customization."
-  core/default-local-config)
+  util/default-local-config)
 
 
 (defn create-storage

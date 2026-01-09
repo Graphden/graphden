@@ -431,6 +431,11 @@
 (def extract-uuid-refs-from-arg-values graph/extract-uuid-refs-from-arg-values)
 
 
+;; === Constraint limits re-exports ===
+(def default-max-parent-chain-depth constraints/default-max-parent-chain-depth)
+(def default-max-dependency-chain-depth constraints/default-max-dependency-chain-depth)
+
+
 ;; === Lock re-exports ===
 (def with-read-lock locks/with-read-lock)
 (def with-write-lock locks/with-write-lock)

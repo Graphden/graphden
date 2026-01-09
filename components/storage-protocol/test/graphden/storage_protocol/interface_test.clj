@@ -1642,3 +1642,45 @@
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-entity-name (:type (ex-data e))))
         (is (= "create-entity" (:operation (ex-data e))))))))
+
+
+;; === Chain depth limits tests ===
+
+(deftest chain-depth-limits-constants-test
+  (testing "default-max-parent-chain-depth is defined"
+    (is (pos-int? storage/default-max-parent-chain-depth))
+    (is (= 100 storage/default-max-parent-chain-depth)))
+
+  (testing "default-max-dependency-chain-depth is defined"
+    (is (pos-int? storage/default-max-dependency-chain-depth))
+    (is (= 1000 storage/default-max-dependency-chain-depth))))
+
+
+(deftest collect-parent-chain-impl-depth-limit-test
+  (testing "throws when parent chain exceeds depth limit"
+    ;; Build a chain that exceeds the limit (100+)
+    (let [ids (repeatedly 150 random-uuid)
+          parent-map (zipmap (rest ids) (butlast ids))
+          helpers (->MockConstraintHelpers {} {} parent-map {} {})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Parent chain exceeds maximum allowed depth"
+            (storage/collect-parent-chain-impl helpers (last ids))))))
+
+  (testing "exception contains correct data for depth exceeded"
+    (let [ids (repeatedly 150 random-uuid)
+          parent-map (zipmap (rest ids) (butlast ids))
+          helpers (->MockConstraintHelpers {} {} parent-map {} {})]
+      (try
+        (storage/collect-parent-chain-impl helpers (last ids))
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :constraint-violation/chain-too-deep (:type (ex-data e))))
+          (is (= :parent (:chain-type (ex-data e))))
+          (is (= storage/default-max-parent-chain-depth (:max-depth (ex-data e))))))))
+
+  (testing "succeeds for chain at limit boundary"
+    ;; Chain of exactly 100 should work (limit check is >100, not >=100)
+    (let [ids (repeatedly 101 random-uuid)
+          parent-map (zipmap (rest ids) (butlast ids))
+          helpers (->MockConstraintHelpers {} {} parent-map {} {})]
+      (is (set? (storage/collect-parent-chain-impl helpers (last ids)))))))

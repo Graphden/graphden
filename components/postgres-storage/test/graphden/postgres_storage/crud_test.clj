@@ -67,5 +67,3 @@
       (is (instance? PGobject status-pg))
       (is (= "user_status" (PGobject/.getType status-pg)))
       (is (= "active" (PGobject/.getValue status-pg))))))
-
-

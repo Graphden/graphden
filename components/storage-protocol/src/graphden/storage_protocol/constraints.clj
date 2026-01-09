@@ -13,6 +13,24 @@
    Protocol methods are passed as arguments or called via protocol dispatch.")
 
 
+;; === Chain depth limits ===
+;;
+;; These limits prevent DoS attacks via extremely deep graphs.
+
+(def default-max-parent-chain-depth
+  "Maximum depth for parent inheritance chains.
+   Prevents DoS via deeply nested function hierarchies.
+   Value: 100 - sufficient for any practical use case."
+  100)
+
+
+(def default-max-dependency-chain-depth
+  "Maximum depth for dependency chains (fn references).
+   Prevents DoS via deeply nested function dependencies.
+   Value: 1000 - matches default-max-depth for execution."
+  1000)
+
+
 ;; === Shared constraint helper implementations ===
 ;;
 ;; Default implementations for ConstraintHelpers methods.
@@ -33,14 +51,59 @@
    Arguments:
    - get-parent-fn-id-fn: function (fn [helpers fn-id] -> parent-fn-id)
    - helpers: ConstraintHelpers implementation
-   - fn-id: starting fn UUID"
+   - fn-id: starting fn UUID
+
+   Throws if chain depth exceeds default-max-parent-chain-depth."
   [get-parent-fn-id-fn helpers fn-id]
   (loop [current-id (get-parent-fn-id-fn helpers fn-id)
-         ancestor-ids #{}]
+         ancestor-ids #{}
+         depth 0]
+    (when (> depth default-max-parent-chain-depth)
+      (throw (ex-info "Parent chain exceeds maximum allowed depth"
+                      {:type :constraint-violation/chain-too-deep
+                       :fn-id fn-id
+                       :max-depth default-max-parent-chain-depth
+                       :chain-type :parent})))
     (if (or (nil? current-id) (contains? ancestor-ids current-id))
       ancestor-ids
       (recur (get-parent-fn-id-fn helpers current-id)
-             (conj ancestor-ids current-id)))))
+             (conj ancestor-ids current-id)
+             (inc depth)))))
+
+
+(defn collect-dependency-chain-impl
+  "Default implementation of collect-dependency-chain.
+   Uses BFS to collect all fn-ids that a function depends on.
+   Returns a set of all dependent fn-ids (not including fn-id itself).
+
+   Arguments:
+   - get-fn-dependencies-fn: function (fn [helpers fn-id] -> #{dep-fn-ids})
+     Returns immediate fn dependencies for a given fn-id.
+   - helpers: ConstraintHelpers implementation
+   - fn-id: starting fn UUID
+
+   Throws if total visited nodes exceed default-max-dependency-chain-depth."
+  [get-fn-dependencies-fn helpers fn-id]
+  (loop [to-visit (get-fn-dependencies-fn helpers fn-id)
+         visited #{}
+         iter-count 0]
+    (when (> iter-count default-max-dependency-chain-depth)
+      (throw (ex-info "Dependency chain exceeds maximum allowed depth"
+                      {:type :constraint-violation/chain-too-deep
+                       :fn-id fn-id
+                       :max-depth default-max-dependency-chain-depth
+                       :chain-type :dependency})))
+    (if (empty? to-visit)
+      visited
+      (let [current-id (first to-visit)
+            rest-queue (disj to-visit current-id)]
+        (if (contains? visited current-id)
+          (recur rest-queue visited (inc iter-count))
+          (let [new-deps (get-fn-dependencies-fn helpers current-id)
+                unvisited-deps (remove visited new-deps)]
+            (recur (into rest-queue unvisited-deps)
+                   (conj visited current-id)
+                   (inc iter-count))))))))
 
 
 ;; === Shared constraint validation functions ===

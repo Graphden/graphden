@@ -69,3 +69,45 @@
   "Returns true if storage implements CacheStorage protocol."
   [storage]
   (satisfies? CacheStorage storage))
+
+
+;; === Validation utilities ===
+
+(defn validate-graph!
+  "Validates that graph has the expected structure.
+   Throws ex-info with :type :invalid-graph on validation failure."
+  [graph]
+  (when-not (map? graph)
+    (throw (ex-info "Graph must be a map" {:type :invalid-graph :value graph})))
+  (when-not (map? (:fns graph))
+    (throw (ex-info "Graph :fns must be a map" {:type :invalid-graph :key :fns :value (:fns graph)})))
+  (when-not (map? (:fn-schemas graph))
+    (throw (ex-info "Graph :fn-schemas must be a map" {:type :invalid-graph :key :fn-schemas :value (:fn-schemas graph)})))
+  (when-not (map? (:arg-schemas graph))
+    (throw (ex-info "Graph :arg-schemas must be a map" {:type :invalid-graph :key :arg-schemas :value (:arg-schemas graph)})))
+  true)
+
+
+(defn validate-dependencies!
+  "Validates that dependencies map has the expected structure.
+   Throws ex-info with :type :invalid-dependencies on validation failure."
+  [dependencies]
+  (when-not (map? dependencies)
+    (throw (ex-info "Dependencies must be a map" {:type :invalid-dependencies :value dependencies})))
+  (when-not (map? (:fn-ids dependencies))
+    (throw (ex-info "Dependencies :fn-ids must be a map" {:type :invalid-dependencies :key :fn-ids :value (:fn-ids dependencies)})))
+  (when-not (map? (:fn-schema-ids dependencies))
+    (throw (ex-info "Dependencies :fn-schema-ids must be a map" {:type :invalid-dependencies :key :fn-schema-ids :value (:fn-schema-ids dependencies)})))
+  (when-not (map? (:arg-schema-ids dependencies))
+    (throw (ex-info "Dependencies :arg-schema-ids must be a map" {:type :invalid-dependencies :key :arg-schema-ids :value (:arg-schema-ids dependencies)})))
+  true)
+
+
+(defn validate-uuid!
+  "Validates that value is a UUID.
+   Throws ex-info with :type :invalid-uuid on validation failure."
+  [value param-name]
+  (when-not (uuid? value)
+    (throw (ex-info (str param-name " must be a UUID")
+                    {:type :invalid-uuid :param param-name :value value})))
+  true)

@@ -45,40 +45,132 @@
     (cache/save-cache! cache-storage fn-id graph deps)))
 
 
+(defn- invalidate-dependents!
+  "Invalidates all caches returned by find-fn and rebuilds them if the fn exists.
+   find-fn should be a function that takes cache-storage and returns a set of cache-ids."
+  [base-storage cache-storage find-fn]
+  (let [dependent-cache-ids (find-fn cache-storage)]
+    (doseq [cache-id dependent-cache-ids]
+      (cache/delete-cache! cache-storage cache-id)
+      (when (sp/read-entity base-storage :fn cache-id)
+        (rebuild-cache! base-storage cache-storage cache-id)))))
+
+
 (defn- invalidate-fn-and-dependents!
   "Invalidates cache for fn-id and all caches that depend on it."
   [base-storage cache-storage fn-id]
-  ;; First, find all caches that depend on this fn
-  (let [dependent-cache-ids (cache/find-caches-by-fn-dep cache-storage fn-id)]
-    ;; Invalidate and rebuild all dependent caches
-    (doseq [cache-id dependent-cache-ids]
-      (cache/delete-cache! cache-storage cache-id)
-      ;; Check if the fn still exists before rebuilding
-      (when (sp/read-entity base-storage :fn cache-id)
-        (rebuild-cache! base-storage cache-storage cache-id)))
-    ;; Rebuild cache for the fn itself if it exists
-    (when (sp/read-entity base-storage :fn fn-id)
-      (rebuild-cache! base-storage cache-storage fn-id))))
+  ;; Invalidate and rebuild all dependent caches
+  (invalidate-dependents! base-storage cache-storage
+                          #(cache/find-caches-by-fn-dep % fn-id))
+  ;; Rebuild cache for the fn itself if it exists
+  (when (sp/read-entity base-storage :fn fn-id)
+    (rebuild-cache! base-storage cache-storage fn-id)))
 
 
 (defn- invalidate-fn-schema-dependents!
   "Invalidates all caches that depend on a fn-schema."
   [base-storage cache-storage fn-schema-id]
-  (let [dependent-cache-ids (cache/find-caches-by-fn-schema-dep cache-storage fn-schema-id)]
-    (doseq [cache-id dependent-cache-ids]
-      (cache/delete-cache! cache-storage cache-id)
-      (when (sp/read-entity base-storage :fn cache-id)
-        (rebuild-cache! base-storage cache-storage cache-id)))))
+  (invalidate-dependents! base-storage cache-storage
+                          #(cache/find-caches-by-fn-schema-dep % fn-schema-id)))
 
 
 (defn- invalidate-arg-schema-dependents!
   "Invalidates all caches that depend on an arg-schema."
   [base-storage cache-storage arg-schema-id]
-  (let [dependent-cache-ids (cache/find-caches-by-arg-schema-dep cache-storage arg-schema-id)]
-    (doseq [cache-id dependent-cache-ids]
-      (cache/delete-cache! cache-storage cache-id)
-      (when (sp/read-entity base-storage :fn cache-id)
-        (rebuild-cache! base-storage cache-storage cache-id)))))
+  (invalidate-dependents! base-storage cache-storage
+                          #(cache/find-caches-by-arg-schema-dep % arg-schema-id)))
+
+
+;; === Cache invalidation multimethods ===
+;; Extensible invalidation strategies for different entity types and operations.
+
+(defmulti invalidate-after-create!
+  "Invalidates caches after entity creation.
+   Dispatches on entity-name keyword."
+  (fn [_base-storage _cache-storage entity-name _result] entity-name))
+
+
+(defmethod invalidate-after-create! :fn
+  [base-storage cache-storage _entity-name result]
+  (rebuild-cache! base-storage cache-storage (:id result)))
+
+
+(defmethod invalidate-after-create! :arg-value
+  [base-storage cache-storage _entity-name result]
+  (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result)))
+
+
+(defmethod invalidate-after-create! :default
+  [_base-storage _cache-storage _entity-name _result]
+  nil)
+
+
+(defmulti invalidate-after-update!
+  "Invalidates caches after entity update.
+   Dispatches on entity-name keyword.
+   For :fn entities, old-record contains the pre-update state."
+  (fn [_base-storage _cache-storage entity-name _id _data _result _old-record] entity-name))
+
+
+(defmethod invalidate-after-update! :fn
+  [base-storage cache-storage _entity-name id data _result old-record]
+  (when (or (contains? data :parent-fn-id)
+            (not= (:fn-schema-id old-record) (:fn-schema-id data)))
+    (invalidate-fn-and-dependents! base-storage cache-storage id)))
+
+
+(defmethod invalidate-after-update! :arg-value
+  [base-storage cache-storage _entity-name _id _data result _old-record]
+  (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result)))
+
+
+(defmethod invalidate-after-update! :fn-schema
+  [base-storage cache-storage _entity-name id _data _result _old-record]
+  (invalidate-fn-schema-dependents! base-storage cache-storage id))
+
+
+(defmethod invalidate-after-update! :arg-schema
+  [base-storage cache-storage _entity-name id _data _result _old-record]
+  (invalidate-arg-schema-dependents! base-storage cache-storage id))
+
+
+(defmethod invalidate-after-update! :default
+  [_base-storage _cache-storage _entity-name _id _data _result _old-record]
+  nil)
+
+
+(defmulti invalidate-after-delete!
+  "Invalidates caches after entity deletion.
+   Dispatches on entity-name keyword.
+   Record contains the entity data before deletion."
+  (fn [_base-storage _cache-storage entity-name _id _record] entity-name))
+
+
+(defmethod invalidate-after-delete! :fn
+  [base-storage cache-storage _entity-name id _record]
+  (cache/delete-cache! cache-storage id)
+  (invalidate-fn-and-dependents! base-storage cache-storage id))
+
+
+(defmethod invalidate-after-delete! :arg-value
+  [base-storage cache-storage _entity-name _id record]
+  (when record
+    (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id record))))
+
+
+(defmethod invalidate-after-delete! :fn-schema
+  [base-storage cache-storage _entity-name id _record]
+  (invalidate-fn-schema-dependents! base-storage cache-storage id))
+
+
+(defmethod invalidate-after-delete! :arg-schema
+  [base-storage cache-storage _entity-name id _record]
+  (invalidate-arg-schema-dependents! base-storage cache-storage id))
+
+
+(defmethod invalidate-after-delete! :default
+  [_base-storage _cache-storage _entity-name _id _record]
+  nil)
 
 
 ;; === Cached Storage Record ===
@@ -130,31 +222,7 @@
   (create-entity
     [_ entity-name data]
     (let [result (sp/create-entity base-storage entity-name data)]
-      ;; After creation, handle cache
-      (case entity-name
-        :fn
-        ;; New fn - create its cache
-        (rebuild-cache! base-storage cache-storage (:id result))
-
-        :arg-value
-        ;; Arg-value created - invalidate owner fn's cache
-        (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result))
-
-        :fn-result-value
-        ;; fn-result-value created - no immediate cache impact
-        ;; (referenced caches will be rebuilt when they're accessed)
-        nil
-
-        :fn-schema
-        ;; New fn-schema - no caches depend on it yet
-        nil
-
-        :arg-schema
-        ;; New arg-schema - no caches depend on it yet
-        nil
-
-        ;; Default: no cache action
-        nil)
+      (invalidate-after-create! base-storage cache-storage entity-name result)
       result))
 
 
@@ -165,31 +233,11 @@
 
   (update-entity
     [_ entity-name id data]
-    (let [;; For fn updates, check if parent-fn-id is changing
+    (let [;; For fn updates, need old record to check if fn-schema-id changed
           old-record (when (= entity-name :fn)
                        (sp/read-entity base-storage entity-name id))
           result (sp/update-entity base-storage entity-name id data)]
-      (case entity-name
-        :fn
-        ;; If parent-fn-id changed, need to invalidate
-        (when (or (contains? data :parent-fn-id)
-                  (not= (:fn-schema-id old-record) (:fn-schema-id data)))
-          (invalidate-fn-and-dependents! base-storage cache-storage id))
-
-        :arg-value
-        ;; Arg-value updated - invalidate owner fn's cache
-        (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result))
-
-        :fn-schema
-        ;; fn-schema updated - invalidate all dependent caches
-        (invalidate-fn-schema-dependents! base-storage cache-storage id)
-
-        :arg-schema
-        ;; arg-schema updated - invalidate all dependent caches
-        (invalidate-arg-schema-dependents! base-storage cache-storage id)
-
-        ;; Default: no cache action
-        nil)
+      (invalidate-after-update! base-storage cache-storage entity-name id data result old-record)
       result))
 
 
@@ -199,34 +247,7 @@
     (let [record (sp/read-entity base-storage entity-name id)
           result (sp/delete-entity base-storage entity-name id)]
       (when result
-        (case entity-name
-          :fn
-          ;; fn deleted - delete its cache and invalidate dependents
-          (do
-            (cache/delete-cache! cache-storage id)
-            (invalidate-fn-and-dependents! base-storage cache-storage id))
-
-          :arg-value
-          ;; Arg-value deleted - invalidate owner fn's cache
-          (when record
-            (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id record)))
-
-          :fn-result-value
-          ;; fn-result-value deleted - need to invalidate caches that reference it
-          ;; This is complex - for now, we'd need to scan all caches
-          ;; TODO: Consider adding find-caches-by-frv-ref to cache-protocol
-          nil
-
-          :fn-schema
-          ;; fn-schema deleted - invalidate all dependent caches
-          (invalidate-fn-schema-dependents! base-storage cache-storage id)
-
-          :arg-schema
-          ;; arg-schema deleted - invalidate all dependent caches
-          (invalidate-arg-schema-dependents! base-storage cache-storage id)
-
-          ;; Default: no cache action
-          nil))
+        (invalidate-after-delete! base-storage cache-storage entity-name id record))
       result))
 
 
@@ -240,20 +261,9 @@
   (create-entities
     [_ entity-name data-seq]
     (let [results (sp/create-entities base-storage entity-name data-seq)]
-      (case entity-name
-        :fn
-        ;; New fns - create their caches
-        (doseq [result results]
-          (rebuild-cache! base-storage cache-storage (:id result)))
-
-        :arg-value
-        ;; Arg-values created - invalidate owner fns
-        (let [owner-ids (set (map :owner-fn-id results))]
-          (doseq [owner-id owner-ids]
-            (invalidate-fn-and-dependents! base-storage cache-storage owner-id)))
-
-        ;; Default: no cache action
-        nil)
+      ;; Invalidate caches for each created entity
+      (doseq [result results]
+        (invalidate-after-create! base-storage cache-storage entity-name result))
       results))
 
 
@@ -265,26 +275,12 @@
   (delete-entities
     [_ entity-name ids]
     ;; Before deletion, capture info for cache invalidation
-    (let [records (when (contains? #{:fn :arg-value} entity-name)
-                    (sp/read-entities base-storage entity-name ids))
+    (let [records (sp/read-entities base-storage entity-name ids)
           result (sp/delete-entities base-storage entity-name ids)]
       (when (pos? result)
-        (case entity-name
-          :fn
-          ;; fns deleted - delete their caches and invalidate dependents
-          (doseq [id ids]
-            (cache/delete-cache! cache-storage id)
-            (invalidate-fn-and-dependents! base-storage cache-storage id))
-
-          :arg-value
-          ;; Arg-values deleted - invalidate owner fns
-          (when records
-            (let [owner-ids (set (map :owner-fn-id (vals records)))]
-              (doseq [owner-id owner-ids]
-                (invalidate-fn-and-dependents! base-storage cache-storage owner-id))))
-
-          ;; Default: no cache action
-          nil))
+        ;; Invalidate caches for each deleted entity
+        (doseq [id ids]
+          (invalidate-after-delete! base-storage cache-storage entity-name id (get records id))))
       result))
 
 

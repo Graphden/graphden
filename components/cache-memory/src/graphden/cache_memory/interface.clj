@@ -20,6 +20,90 @@
       ReentrantReadWriteLock)))
 
 
+;; === Dependency map helpers ===
+
+(def ^:private dep-keys
+  "Keys for all dependency types in the deps atom."
+  [:fn-deps :fn-schema-deps :arg-schema-deps])
+
+
+(defn- remove-cache-from-dep-map
+  "Removes a cache-id from a single dependency map.
+   Returns updated map with empty entries removed."
+  [dep-map cache-id]
+  (persistent!
+    (reduce-kv (fn [acc dep-id cache-ids]
+                 (let [new-ids (disj cache-ids cache-id)]
+                   (if (seq new-ids)
+                     (assoc! acc dep-id new-ids)
+                     acc)))
+               (transient {})
+               dep-map)))
+
+
+(defn- remove-from-all-deps
+  "Removes a cache-id from all dependency maps."
+  [deps cache-id]
+  (reduce #(update %1 %2 remove-cache-from-dep-map cache-id)
+          deps
+          dep-keys))
+
+
+(defn- add-to-dep-map
+  "Adds a cache-id to dependency entries for given dep-ids."
+  [dep-map cache-id dep-ids]
+  (reduce (fn [acc dep-id]
+            (update acc dep-id (fnil conj #{}) cache-id))
+          dep-map
+          dep-ids))
+
+
+(defn- add-to-all-deps
+  "Adds a cache-id to all dependency maps based on dependencies structure."
+  [deps cache-id dependencies]
+  (-> deps
+      (update :fn-deps add-to-dep-map cache-id (keys (:fn-ids dependencies)))
+      (update :fn-schema-deps add-to-dep-map cache-id (keys (:fn-schema-ids dependencies)))
+      (update :arg-schema-deps add-to-dep-map cache-id (keys (:arg-schema-ids dependencies)))))
+
+
+;; === Pure state computation functions ===
+;; These functions compute new state without side effects for testability.
+
+(defn compute-save-cache-state
+  "Computes the new graphs and deps state after saving a cache.
+   Pure function for testability.
+
+   Arguments:
+   - graphs: Current graphs map {fn-id -> ExecutionGraph}
+   - deps: Current deps map {:fn-deps ... :fn-schema-deps ... :arg-schema-deps ...}
+   - fn-id: The function ID to cache
+   - exec-graph: The execution graph to store
+   - dependencies: Dependency tracking info
+
+   Returns {:graphs new-graphs :deps new-deps}"
+  [graphs deps fn-id exec-graph dependencies]
+  (let [cache-existed? (contains? graphs fn-id)
+        new-deps (cond-> deps
+                   cache-existed? (remove-from-all-deps fn-id)
+                   true (add-to-all-deps fn-id dependencies))
+        new-graphs (assoc graphs fn-id exec-graph)]
+    {:graphs new-graphs
+     :deps new-deps}))
+
+
+(defn compute-delete-cache-state
+  "Computes the new graphs and deps state after deleting a cache.
+   Pure function for testability.
+
+   Returns {:graphs new-graphs :deps new-deps :existed? boolean}"
+  [graphs deps fn-id]
+  (let [existed? (contains? graphs fn-id)]
+    {:graphs (dissoc graphs fn-id)
+     :deps (remove-from-all-deps deps fn-id)
+     :existed? existed?}))
+
+
 ;; === MemoryCache record ===
 
 (defrecord MemoryCache
@@ -49,69 +133,21 @@
 
   (save-cache!
     [_ fn-id graph dependencies]
+    (cache/validate-uuid! fn-id "fn-id")
+    (cache/validate-graph! graph)
+    (cache/validate-dependencies! dependencies)
     (log/debug "Saving cache for fn-id" fn-id)
-    (sp/with-write-lock rw-lock
-                        (fn []
-                          ;; First, remove old dependency entries if cache exists
-                          (when (contains? @graphs-atom fn-id)
-                            (swap! deps-atom
-                                   (fn [deps]
-                                     (-> deps
-                                         (update :fn-deps
-                                                 (fn [m]
-                                                   (reduce-kv (fn [acc dep-id cache-ids]
-                                                                (let [new-ids (disj cache-ids fn-id)]
-                                                                  (if (empty? new-ids)
-                                                                    (dissoc acc dep-id)
-                                                                    (assoc acc dep-id new-ids))))
-                                                              {}
-                                                              m)))
-                                         (update :fn-schema-deps
-                                                 (fn [m]
-                                                   (reduce-kv (fn [acc dep-id cache-ids]
-                                                                (let [new-ids (disj cache-ids fn-id)]
-                                                                  (if (empty? new-ids)
-                                                                    (dissoc acc dep-id)
-                                                                    (assoc acc dep-id new-ids))))
-                                                              {}
-                                                              m)))
-                                         (update :arg-schema-deps
-                                                 (fn [m]
-                                                   (reduce-kv (fn [acc dep-id cache-ids]
-                                                                (let [new-ids (disj cache-ids fn-id)]
-                                                                  (if (empty? new-ids)
-                                                                    (dissoc acc dep-id)
-                                                                    (assoc acc dep-id new-ids))))
-                                                              {}
-                                                              m)))))))
-                          ;; Store the graph
-                          (let [exec-graph (if (sp/execution-graph? graph)
-                                             graph
-                                             (sp/->execution-graph graph))]
-                            (swap! graphs-atom assoc fn-id exec-graph))
-                          ;; Add new dependency entries
-                          (swap! deps-atom
-                                 (fn [deps]
-                                   (-> deps
-                                       (update :fn-deps
-                                               (fn [m]
-                                                 (reduce (fn [acc dep-fn-id]
-                                                           (update acc dep-fn-id (fnil conj #{}) fn-id))
-                                                         m
-                                                         (keys (:fn-ids dependencies)))))
-                                       (update :fn-schema-deps
-                                               (fn [m]
-                                                 (reduce (fn [acc dep-id]
-                                                           (update acc dep-id (fnil conj #{}) fn-id))
-                                                         m
-                                                         (keys (:fn-schema-ids dependencies)))))
-                                       (update :arg-schema-deps
-                                               (fn [m]
-                                                 (reduce (fn [acc dep-id]
-                                                           (update acc dep-id (fnil conj #{}) fn-id))
-                                                         m
-                                                         (keys (:arg-schema-ids dependencies))))))))
-                          nil)))
+    (let [exec-graph (if (sp/execution-graph? graph)
+                       graph
+                       (sp/->execution-graph graph))]
+      (sp/with-write-lock rw-lock
+                          (fn []
+                            (let [{:keys [graphs deps]}
+                                  (compute-save-cache-state @graphs-atom @deps-atom
+                                                            fn-id exec-graph dependencies)]
+                              (reset! graphs-atom graphs)
+                              (reset! deps-atom deps))
+                            nil))))
 
 
   (delete-cache!
@@ -119,40 +155,10 @@
     (log/debug "Deleting cache for fn-id" fn-id)
     (sp/with-write-lock rw-lock
                         (fn []
-                          (let [existed? (contains? @graphs-atom fn-id)]
-                            ;; Remove from graphs
-                            (swap! graphs-atom dissoc fn-id)
-                            ;; Remove dependency entries
-                            (swap! deps-atom
-                                   (fn [deps]
-                                     (-> deps
-                                         (update :fn-deps
-                                                 (fn [m]
-                                                   (reduce-kv (fn [acc dep-id cache-ids]
-                                                                (let [new-ids (disj cache-ids fn-id)]
-                                                                  (if (empty? new-ids)
-                                                                    (dissoc acc dep-id)
-                                                                    (assoc acc dep-id new-ids))))
-                                                              {}
-                                                              m)))
-                                         (update :fn-schema-deps
-                                                 (fn [m]
-                                                   (reduce-kv (fn [acc dep-id cache-ids]
-                                                                (let [new-ids (disj cache-ids fn-id)]
-                                                                  (if (empty? new-ids)
-                                                                    (dissoc acc dep-id)
-                                                                    (assoc acc dep-id new-ids))))
-                                                              {}
-                                                              m)))
-                                         (update :arg-schema-deps
-                                                 (fn [m]
-                                                   (reduce-kv (fn [acc dep-id cache-ids]
-                                                                (let [new-ids (disj cache-ids fn-id)]
-                                                                  (if (empty? new-ids)
-                                                                    (dissoc acc dep-id)
-                                                                    (assoc acc dep-id new-ids))))
-                                                              {}
-                                                              m))))))
+                          (let [{:keys [graphs deps existed?]}
+                                (compute-delete-cache-state @graphs-atom @deps-atom fn-id)]
+                            (reset! graphs-atom graphs)
+                            (reset! deps-atom deps)
                             existed?))))
 
 

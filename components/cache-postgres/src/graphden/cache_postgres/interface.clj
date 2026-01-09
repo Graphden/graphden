@@ -164,16 +164,18 @@
 
 
 (defn- save-cached-fns!
-  "Saves denormalized fn records to cache."
+  "Saves denormalized fn records to cache using batch insert."
   [ds cache-id fns]
   (when (seq fns)
-    (doseq [[fn-id fn-record] fns]
+    (let [values (mapv (fn [[fn-id fn-record]]
+                         {:cache-id cache-id
+                          :fn-id fn-id
+                          :name (:name fn-record)
+                          :fn-schema-id (:fn-schema-id fn-record)
+                          :parent-fn-id (:parent-fn-id fn-record)})
+                       fns)]
       (execute! ds {:insert-into :cached-fn
-                    :values [{:cache-id cache-id
-                              :fn-id fn-id
-                              :name (:name fn-record)
-                              :fn-schema-id (:fn-schema-id fn-record)
-                              :parent-fn-id (:parent-fn-id fn-record)}]
+                    :values values
                     :on-conflict [:cache-id :fn-id]
                     :do-update-set [:name :fn-schema-id :parent-fn-id]}))))
 
@@ -214,55 +216,63 @@
 
 
 (defn- save-cached-merged-args!
-  "Saves precomputed merged argument values to cache."
+  "Saves precomputed merged argument values to cache using batch insert."
   [ds cache-id resolved-args]
   (when (seq resolved-args)
-    (doseq [[fn-id args-map] resolved-args
-            [arg-schema-id value] args-map]
-      (execute! ds {:insert-into :cached-merged-arg
-                    :values [{:cache-id cache-id
-                              :fn-id fn-id
-                              :arg-schema-id arg-schema-id
-                              :value [:cast (encode-value value) :jsonb]}]
-                    :on-conflict [:cache-id :fn-id :arg-schema-id]
-                    :do-update-set {:value [:cast (encode-value value) :jsonb]}}))))
+    (let [values (vec (for [[fn-id args-map] resolved-args
+                            [arg-schema-id value] args-map]
+                        {:cache-id cache-id
+                         :fn-id fn-id
+                         :arg-schema-id arg-schema-id
+                         :value [:cast (encode-value value) :jsonb]}))]
+      (when (seq values)
+        (execute! ds {:insert-into :cached-merged-arg
+                      :values values
+                      :on-conflict [:cache-id :fn-id :arg-schema-id]
+                      :do-update-set {:value :excluded.value}})))))
 
 
 (defn- save-fn-deps!
-  "Saves fn dependency records with ref-counts."
+  "Saves fn dependency records with ref-counts using batch insert."
   [ds cache-id fn-deps]
   (when (seq fn-deps)
-    (doseq [[dep-fn-id ref-count] fn-deps]
+    (let [values (mapv (fn [[dep-fn-id ref-count]]
+                         {:cache-id cache-id
+                          :dep-fn-id dep-fn-id
+                          :ref-count ref-count})
+                       fn-deps)]
       (execute! ds {:insert-into :cache-fn-dep
-                    :values [{:cache-id cache-id
-                              :dep-fn-id dep-fn-id
-                              :ref-count ref-count}]
+                    :values values
                     :on-conflict [:cache-id :dep-fn-id]
                     :do-update-set [:ref-count]}))))
 
 
 (defn- save-fn-schema-deps!
-  "Saves fn-schema dependency records with ref-counts."
+  "Saves fn-schema dependency records with ref-counts using batch insert."
   [ds cache-id fn-schema-deps]
   (when (seq fn-schema-deps)
-    (doseq [[dep-fn-schema-id ref-count] fn-schema-deps]
+    (let [values (mapv (fn [[dep-fn-schema-id ref-count]]
+                         {:cache-id cache-id
+                          :dep-fn-schema-id dep-fn-schema-id
+                          :ref-count ref-count})
+                       fn-schema-deps)]
       (execute! ds {:insert-into :cache-fn-schema-dep
-                    :values [{:cache-id cache-id
-                              :dep-fn-schema-id dep-fn-schema-id
-                              :ref-count ref-count}]
+                    :values values
                     :on-conflict [:cache-id :dep-fn-schema-id]
                     :do-update-set [:ref-count]}))))
 
 
 (defn- save-arg-schema-deps!
-  "Saves arg-schema dependency records with ref-counts."
+  "Saves arg-schema dependency records with ref-counts using batch insert."
   [ds cache-id arg-schema-deps]
   (when (seq arg-schema-deps)
-    (doseq [[dep-arg-schema-id ref-count] arg-schema-deps]
+    (let [values (mapv (fn [[dep-arg-schema-id ref-count]]
+                         {:cache-id cache-id
+                          :dep-arg-schema-id dep-arg-schema-id
+                          :ref-count ref-count})
+                       arg-schema-deps)]
       (execute! ds {:insert-into :cache-arg-schema-dep
-                    :values [{:cache-id cache-id
-                              :dep-arg-schema-id dep-arg-schema-id
-                              :ref-count ref-count}]
+                    :values values
                     :on-conflict [:cache-id :dep-arg-schema-id]
                     :do-update-set [:ref-count]}))))
 
@@ -362,6 +372,9 @@
 
   (save-cache!
     [_ fn-id graph dependencies]
+    (cache/validate-uuid! fn-id "fn-id")
+    (cache/validate-graph! graph)
+    (cache/validate-dependencies! dependencies)
     (log/debug "Saving cache for fn-id" fn-id)
     (jdbc/with-transaction [tx datasource]
                            ;; Delete existing cache data first (if any)

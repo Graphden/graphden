@@ -637,10 +637,6 @@
           (sp/close storage))))))
 
 
-;; wrap-base-fn was removed - base functions now receive delays directly
-;; and use @ to deref. The defbase macro handles this automatically.
-
-
 ;; === initialize-with-base-fns! Tests ===
 
 (deftest initialize-with-base-fns-test

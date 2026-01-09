@@ -69,5 +69,3 @@
       (is (= "active" (PGobject/.getValue status-pg))))))
 
 
-;; NOTE: merge-arg-values-for-chain tests are in storage-protocol/interface_test.clj
-;; since the function was extracted to storage-protocol for shared use

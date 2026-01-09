@@ -1952,7 +1952,7 @@
           (core/create-storage {:db-name "test"
                                 :client-config {:server-type :peer-server
                                                 :endpoint "localhost:8998"
-                                                :access-key "key"}}))))
+                                                :access-key "test-access-key"}}))))
 
   (testing "error includes valid-types for unknown server-type"
     (try

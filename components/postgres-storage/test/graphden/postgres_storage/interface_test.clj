@@ -7,6 +7,7 @@
     [graphden.postgres-storage.core :as core]
     [graphden.postgres-storage.crud :as crud]
     [graphden.postgres-storage.ddl :as ddl]
+    [graphden.postgres-storage.graph :as graph]
     [graphden.postgres-storage.interface :as pg]
     [graphden.postgres-storage.introspection :as introspection]
     [graphden.postgres-storage.metadata :as metadata]
@@ -2235,7 +2236,7 @@
 ;; === GraphConstraints tests ===
 
 (defn- make-graph-schema
-  "Creates schema with fn-schema, arg-schema, fn, and arg-value entities."
+  "Creates schema with fn-schema, arg-schema, fn, fn-result-value, and arg-value entities."
   []
   (-> (mds/create-builder)
       (ds/add-entity :fn-schema #uuid "00000000-0000-0000-0001-000000000001"
@@ -2260,6 +2261,9 @@
                       :parent-fn-id {:uuid #uuid "00000000-0000-0000-0003-000000000004"
                                      :type :ref :ref-entity :fn
                                      :nullable? true}})
+      (ds/add-entity :fn-result-value #uuid "00000000-0000-0000-0005-000000000001"
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000002"
+                              :type :ref :ref-entity :fn}})
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
                      {:owner-fn-id {:uuid #uuid "00000000-0000-0000-0004-000000000002"
                                     :type :ref :ref-entity :fn}
@@ -3154,7 +3158,7 @@
       (try
         (sp/initialize storage (make-graph-schema))
         (let [pool (:pool storage)
-              load-fn #'crud/load-arg-values-batch
+              load-fn #'graph/load-arg-values-batch
               result (load-fn pool #{})]
           (is (empty? result)))
         (finally
@@ -3165,7 +3169,7 @@
       (try
         (sp/initialize storage (make-graph-schema))
         (let [pool (:pool storage)
-              collect-fn #'crud/collect-parent-chains-batch
+              collect-fn #'graph/collect-parent-chains-batch
               result (collect-fn pool #{})]
           (is (= {} result)))
         (finally
@@ -3176,7 +3180,7 @@
       (try
         (sp/initialize storage (make-graph-schema))
         (let [pool (:pool storage)
-              classify-fn #'crud/classify-and-load-refs
+              classify-fn #'graph/classify-and-load-refs
               result (classify-fn pool #{})]
           (is (= {:fn-ids #{} :frv-ids #{} :fn-result-values {}} result)))
         (finally
@@ -3187,7 +3191,7 @@
       (try
         (sp/initialize storage (make-graph-schema))
         (let [pool (:pool storage)
-              load-fn #'crud/load-entities-batch
+              load-fn #'graph/load-entities-batch
               result (load-fn pool :fn :id #{})]
           (is (= {} result)))
         (finally
@@ -3267,7 +3271,7 @@
 
 (deftest sql-error-graph-operations-mock-test
   (testing "collect-parent-chains-batch throws wrapped error on SQLException"
-    (let [collect-fn #'crud/collect-parent-chains-batch
+    (let [collect-fn #'graph/collect-parent-chains-batch
           connection-ex (SQLException. "connection failed" "08001")]
       (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
                                     (throw connection-ex))]
@@ -3279,7 +3283,7 @@
             (is (= :collect-parent-chains (:operation (ex-data e)))))))))
 
   (testing "load-arg-values-batch throws wrapped error on SQLException"
-    (let [load-fn #'crud/load-arg-values-batch
+    (let [load-fn #'graph/load-arg-values-batch
           timeout-ex (SQLException. "query canceled" "57014")]
       (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
                                     (throw timeout-ex))]
@@ -3291,7 +3295,7 @@
             (is (= :load-arg-values (:operation (ex-data e)))))))))
 
   (testing "classify-and-load-refs throws wrapped error on SQLException"
-    (let [classify-fn #'crud/classify-and-load-refs
+    (let [classify-fn #'graph/classify-and-load-refs
           not-null-ex (SQLException. "not null violation" "23502")]
       (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
                                     (throw not-null-ex))]
@@ -3303,7 +3307,7 @@
             (is (= :classify-and-load-refs (:operation (ex-data e)))))))))
 
   (testing "load-entities-batch throws wrapped error on SQLException"
-    (let [load-fn #'crud/load-entities-batch
+    (let [load-fn #'graph/load-entities-batch
           check-ex (SQLException. "check violation" "23514")]
       (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
                                     (throw check-ex))]

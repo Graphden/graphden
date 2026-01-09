@@ -137,8 +137,6 @@
   (->PostgresValueCodec))
 
 
-;; === Convenience functions for backward compatibility ===
-
 (def ^:private default-codec (delay (create-codec)))
 
 

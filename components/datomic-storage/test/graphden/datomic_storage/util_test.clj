@@ -170,8 +170,8 @@
     (is (nil? (util/validate-client-config!
                 {:server-type :peer-server
                  :endpoint "localhost:8998"
-                 :access-key "key"
-                 :secret "secret"}))))
+                 :access-key "test-access-key"
+                 :secret "test-secret-key"}))))
 
   (testing "rejects non-map"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -210,8 +210,8 @@
                           #"peer-server requires :endpoint"
           (util/validate-client-config!
             {:server-type :peer-server
-             :access-key "key"
-             :secret "secret"}))))
+             :access-key "test-access-key"
+             :secret "test-secret-key"}))))
 
   (testing "rejects peer-server without access-key"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -219,7 +219,7 @@
           (util/validate-client-config!
             {:server-type :peer-server
              :endpoint "localhost:8998"
-             :secret "secret"}))))
+             :secret "test-secret-key"}))))
 
   (testing "rejects peer-server without secret"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -227,7 +227,25 @@
           (util/validate-client-config!
             {:server-type :peer-server
              :endpoint "localhost:8998"
-             :access-key "key"}))))
+             :access-key "test-access-key"}))))
+
+  (testing "rejects peer-server with short access-key"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"access-key must be at least 8 characters"
+          (util/validate-client-config!
+            {:server-type :peer-server
+             :endpoint "localhost:8998"
+             :access-key "short"
+             :secret "test-secret-key"}))))
+
+  (testing "rejects peer-server with short secret"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"secret must be at least 8 characters"
+          (util/validate-client-config!
+            {:server-type :peer-server
+             :endpoint "localhost:8998"
+             :access-key "test-access-key"
+             :secret "short"}))))
 
   (testing "accepts ion with minimal config (warns but doesn't throw)"
     (is (nil? (util/validate-client-config!

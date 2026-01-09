@@ -1,6 +1,7 @@
 (ns graphden.base-functions.interface-test
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.base-functions.arithmetic :as arithmetic]
     [graphden.base-functions.core :as core]
     [graphden.base-functions.interface :as bf]
     [graphden.executor.interface :as exec]
@@ -171,7 +172,7 @@
     ;; Test the private function directly to cover the NaN branch
     ;; NaN can occur from 0.0/0.0 in floating point, but our div catches that first
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"NaN"
-          (#'core/check-numeric-result! Double/NaN :test [1 2]))))
+          (#'arithmetic/check-numeric-result! Double/NaN :test [1 2]))))
 
   (testing "mod"
     (is (= 1 (call-base-fn :mod {:a 7 :b 3})))

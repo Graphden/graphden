@@ -4,7 +4,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.executor.core :as core]
+    [graphden.executor.context :as ctx]
     [graphden.executor.types :as types]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -134,66 +134,66 @@
   (testing "rejects missing storage"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Storage is required"
-          (core/create-context {}))))
+          (ctx/create-context {}))))
 
   (testing "rejects storage without ExecutionGraph protocol"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"storage must implement ExecutionGraph protocol"
-          (core/create-context {:storage :not-a-storage})))
+          (ctx/create-context {:storage :not-a-storage})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"storage must implement ExecutionGraph protocol"
-          (core/create-context {:storage {:fake "storage"}}))))
+          (ctx/create-context {:storage {:fake "storage"}}))))
 
   (testing "rejects timeout below minimum"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"timeout-ms must be at least"
-          (core/create-context {:storage (->MockStorage) :timeout-ms 10}))))
+          (ctx/create-context {:storage (->MockStorage) :timeout-ms 10}))))
 
   (testing "rejects non-positive max-depth"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"max-depth must be a positive integer"
-          (core/create-context {:storage (->MockStorage) :max-depth 0})))
+          (ctx/create-context {:storage (->MockStorage) :max-depth 0})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"max-depth must be a positive integer"
-          (core/create-context {:storage (->MockStorage) :max-depth -1}))))
+          (ctx/create-context {:storage (->MockStorage) :max-depth -1}))))
 
   (testing "rejects max-depth exceeding limit"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"max-depth exceeds maximum allowed"
-          (core/create-context {:storage (->MockStorage) :max-depth 200000}))))
+          (ctx/create-context {:storage (->MockStorage) :max-depth 200000}))))
 
   (testing "rejects non-map path-args"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"path-args must be a map"
-          (core/create-context {:storage (->MockStorage) :path-args [1 2 3]}))))
+          (ctx/create-context {:storage (->MockStorage) :path-args [1 2 3]}))))
 
   (testing "rejects invalid path-args keys"
     (let [uuid1 (random-uuid)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args keys must be UUID"
-            (core/create-context {:storage (->MockStorage)
-                                  :path-args {"string-key" 42}})))
+            (ctx/create-context {:storage (->MockStorage)
+                                 :path-args {"string-key" 42}})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args keys must be UUID"
-            (core/create-context {:storage (->MockStorage)
-                                  :path-args {:keyword-key 42}})))
+            (ctx/create-context {:storage (->MockStorage)
+                                 :path-args {:keyword-key 42}})))
       ;; Vector with wrong size
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args keys must be UUID"
-            (core/create-context {:storage (->MockStorage)
-                                  :path-args {[uuid1] 42}})))
+            (ctx/create-context {:storage (->MockStorage)
+                                 :path-args {[uuid1] 42}})))
       ;; Vector with non-UUID
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args keys must be UUID"
-            (core/create-context {:storage (->MockStorage)
-                                  :path-args {[uuid1 "not-uuid"] 42}})))))
+            (ctx/create-context {:storage (->MockStorage)
+                                 :path-args {[uuid1 "not-uuid"] 42}})))))
 
   (testing "accepts valid path-args keys"
     (let [uuid1 (random-uuid)
           uuid2 (random-uuid)
-          ctx (core/create-context {:storage (->MockStorage)
-                                    :path-args {uuid1 42
-                                                [uuid1 uuid2] "nested"}})]
+          ctx (ctx/create-context {:storage (->MockStorage)
+                                   :path-args {uuid1 42
+                                               [uuid1 uuid2] "nested"}})]
       (is (some? ctx))
       (is (= 42 (get (:path-args ctx) uuid1)))
       (is (= "nested" (get (:path-args ctx) [uuid1 uuid2]))))))
@@ -202,7 +202,7 @@
 (deftest create-context-path-args-count-test
   (testing "accepts reasonable number of path-args"
     (let [path-args (into {} (map (fn [_] [(random-uuid) "value"]) (range 100)))]
-      (is (some? (core/create-context {:storage (->MockStorage) :path-args path-args})))))
+      (is (some? (ctx/create-context {:storage (->MockStorage) :path-args path-args})))))
 
   (testing "rejects excessive path-args count"
     ;; This tests the max-path-args-count limit (1000)
@@ -210,12 +210,12 @@
     (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 1001)))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"path-args count exceeds maximum"
-            (core/create-context {:storage (->MockStorage) :path-args large-path-args})))))
+            (ctx/create-context {:storage (->MockStorage) :path-args large-path-args})))))
 
   (testing "path-args count error includes details"
     (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 1001)))]
       (try
-        (core/create-context {:storage (->MockStorage) :path-args large-path-args})
+        (ctx/create-context {:storage (->MockStorage) :path-args large-path-args})
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)
@@ -231,29 +231,29 @@
 (deftest register-type-hint!-test
   (testing "registers custom type hint"
     ;; Clean state
-    (reset! core/custom-type-hints {})
-    (core/register-type-hint! :email "string in email format")
-    (is (= "string in email format" (get @core/custom-type-hints :email))))
+    (reset! types/custom-type-hints {})
+    (types/register-type-hint! :email "string in email format")
+    (is (= "string in email format" (get @types/custom-type-hints :email))))
 
   (testing "rejects non-keyword type"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"type-keyword must be a keyword"
-          (core/register-type-hint! "email" "hint"))))
+          (types/register-type-hint! "email" "hint"))))
 
   (testing "rejects non-string hint"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"hint-string must be a string"
-          (core/register-type-hint! :email :not-a-string))))
+          (types/register-type-hint! :email :not-a-string))))
 
   (testing "custom hint overrides default"
-    (reset! core/custom-type-hints {})
-    (core/register-type-hint! :int "custom integer hint")
+    (reset! types/custom-type-hints {})
+    (types/register-type-hint! :int "custom integer hint")
     (is (= "custom integer hint" (#'types/get-type-hint :int)))
     ;; Cleanup
-    (reset! core/custom-type-hints {}))
+    (reset! types/custom-type-hints {}))
 
   (testing "get-type-hint returns type name for unknown types"
-    (reset! core/custom-type-hints {})
+    (reset! types/custom-type-hints {})
     ;; For unknown types not in default-type-hints or custom-type-hints,
     ;; get-type-hint falls back to (name arg-type)
     (is (= "unknown-custom-type" (#'types/get-type-hint :unknown-custom-type)))
@@ -323,9 +323,9 @@
   (testing "multiple validation errors produces combined message"
     (try
       ;; Trigger multiple errors: bad timeout AND bad max-depth
-      (core/create-context {:storage (->MockStorage)
-                            :timeout-ms 10    ; too low
-                            :max-depth 0})    ; invalid
+      (ctx/create-context {:storage (->MockStorage)
+                           :timeout-ms 10    ; too low
+                           :max-depth 0})    ; invalid
       (is false "should have thrown")
       (catch clojure.lang.ExceptionInfo e
         (is (= :execution-error/invalid-context (:type (ex-data e))))

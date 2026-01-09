@@ -27,33 +27,7 @@
     [clojure.tools.logging :as log]
     [graphden.executor.argument-resolution :as arg-res]
     [graphden.executor.context :as ctx]
-    [graphden.executor.registry :as registry]
-    [graphden.executor.types :as types]
     [graphden.storage-protocol.interface :as sp]))
-
-
-;; Re-export registry functions for backward compatibility
-(def register-base-fn! registry/register-base-fn!)
-(def get-base-fn registry/get-base-fn)
-(def clear-base-fns! registry/clear-base-fns!)
-(def get-default-registry registry/get-default-registry)
-
-
-(defmacro with-base-fns
-  [fns-map & body]
-  `(registry/with-base-fns ~fns-map ~@body))
-
-
-(def get-base-fn-from-context registry/get-base-fn-from-context)
-
-
-;; Re-export context functions for backward compatibility
-(def create-context ctx/create-context)
-
-
-;; Re-export type functions for backward compatibility
-(def custom-type-hints types/custom-type-hints)
-(def register-type-hint! types/register-type-hint!)
 
 
 ;; Forward declaration: execute-internal is defined later but referenced by

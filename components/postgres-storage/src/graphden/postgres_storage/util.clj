@@ -20,6 +20,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.postgres-storage.errors :as errors]
     [graphden.storage-protocol.interface :as sp]
     [next.jdbc.result-set :as rs]))
 
@@ -81,207 +82,26 @@
   (quot *query-timeout-ms* 1000))
 
 
-;; === Error handling ===
+;; === Error handling (re-exports from errors.clj) ===
 
-;; PostgreSQL error codes: https://www.postgresql.org/docs/current/errcodes-appendix.html
-;; Table-driven error classification for maintainability
-
-(def ^:private sql-state->error-type
-  "Maps PostgreSQL SQLSTATE codes to application error types.
-   See: https://www.postgresql.org/docs/current/errcodes-appendix.html"
-  {"23505" :unique-violation           ; unique_violation
-   "23503" :foreign-key-violation      ; foreign_key_violation
-   "23502" :not-null-violation         ; not_null_violation
-   "23514" :check-constraint-violation ; check_violation
-   "42P01" :table-not-found            ; undefined_table
-   "57014" :query-timeout              ; query_canceled
-   "40001" :serialization-failure      ; serialization_failure (transaction conflict)
-   "40P01" :deadlock-detected          ; deadlock_detected
-   "25006" :read-only-transaction})    ; read_only_sql_transaction
-
-
-(def ^:private sql-state-prefix->error-type
-  "Maps PostgreSQL SQLSTATE class prefixes to application error types.
-   Used for error classes where specific codes aren't important."
-  {"08" :connection-error})          ; connection_exception class
-
-
-(defn- get-sql-state
-  "Safely gets SQL state from SQLException, returning nil if not available."
-  ^String [^java.sql.SQLException e]
-  (java.sql.SQLException/.getSQLState e))
-
-
-(defn classify-sql-error
-  "Classifies SQLException into application error type using table-driven lookup.
-   Returns a keyword like :unique-violation, :foreign-key-violation, etc.
-   Returns :unknown-sql-error for unrecognized errors."
-  [^java.sql.SQLException e]
-  (if-let [state (get-sql-state e)]
-    (or
-      ;; Exact match first
-      (get sql-state->error-type state)
-      ;; Then prefix match (for error classes)
-      (some (fn [[prefix error-type]]
-              (when (str/starts-with? state prefix) error-type))
-            sql-state-prefix->error-type)
-      :unknown-sql-error)
-    :unknown-sql-error))
-
-
-;; Convenience predicates for backward compatibility and specific checks
-
-(defn- make-error-predicate
-  "Factory function that creates an error type predicate.
-   Returns a function that checks if SQLException matches the given error type."
-  [error-type]
-  (fn [^java.sql.SQLException e]
-    (= error-type (classify-sql-error e))))
-
-
-(def table-not-found?
-  "Returns true if the SQLException indicates a missing table (PostgreSQL 42P01)."
-  (make-error-predicate :table-not-found))
-
-
-(def unique-violation?
-  "Returns true if the SQLException indicates a unique constraint violation (PostgreSQL 23505)."
-  (make-error-predicate :unique-violation))
-
-
-(def foreign-key-violation?
-  "Returns true if the SQLException indicates a foreign key violation (PostgreSQL 23503)."
-  (make-error-predicate :foreign-key-violation))
-
-
-(def not-null-violation?
-  "Returns true if the SQLException indicates a NOT NULL violation (PostgreSQL 23502)."
-  (make-error-predicate :not-null-violation))
-
-
-(def check-constraint-violation?
-  "Returns true if the SQLException indicates a CHECK constraint violation (PostgreSQL 23514)."
-  (make-error-predicate :check-constraint-violation))
-
-
-(def connection-error?
-  "Returns true if the SQLException indicates a connection failure (PostgreSQL class 08)."
-  (make-error-predicate :connection-error))
-
-
-(def query-canceled?
-  "Returns true if the SQLException indicates a query was canceled (timeout) (PostgreSQL 57014)."
-  (make-error-predicate :query-timeout))
-
-
-(def serialization-failure?
-  "Returns true if the SQLException indicates a serialization failure due to
-   concurrent transaction conflict (PostgreSQL 40001).
-   This typically occurs with SERIALIZABLE isolation level."
-  (make-error-predicate :serialization-failure))
-
-
-(def deadlock-detected?
-  "Returns true if the SQLException indicates a deadlock was detected (PostgreSQL 40P01).
-   The transaction was automatically aborted by PostgreSQL."
-  (make-error-predicate :deadlock-detected))
-
-
-(def read-only-transaction?
-  "Returns true if the SQLException indicates an attempt to write in a read-only transaction
-   (PostgreSQL 25006). This can occur with read replicas or explicit READ ONLY transactions."
-  (make-error-predicate :read-only-transaction))
-
-
-(defn wrap-sql-error
-  "Wraps a SQLException with application-level context.
-   Translates PostgreSQL error codes to meaningful error types.
-   Logs the error with context for debugging.
-   Returns an ex-info with :type, :sql-state, and operation context.
-
-   SECURITY: Context is redacted before logging to prevent sensitive data leakage.
-   The raw exception is NOT logged to avoid exposing SQL details.
-
-   Parameters:
-   - e: SQLException to wrap
-   - log-prefix: String prefix for log message (e.g., \"Database error\", \"DDL error\")
-   - operation: Keyword describing the operation (e.g., :create-entity, :add-column)
-   - context: Map of additional context (e.g., {:entity-name :user})"
-  [^java.sql.SQLException e log-prefix operation context]
-  (let [error-type (classify-sql-error e)
-        sql-state (java.sql.SQLException/.getSQLState e)
-        message (java.sql.SQLException/.getMessage e)
-        ;; Redact sensitive data from context before logging
-        safe-context (sp/redact-sensitive-deep context)
-        error-data (merge {:type error-type
-                           :operation operation
-                           :sql-state sql-state
-                           :message message}
-                          safe-context)]
-    ;; Log without raw exception to avoid exposing SQL internals
-    (log/warn log-prefix error-data)
-    (ex-info (str log-prefix " during " (name operation) ": " message)
-             ;; Keep original context in exception for debugging (not logged)
-             (merge {:type error-type
-                     :operation operation
-                     :sql-state sql-state
-                     :message message}
-                    context)
-             e)))
-
-
-;; === StorageErrorClassifier implementation ===
-
-(defrecord PostgresErrorClassifier
-  []
-
-  sp/StorageErrorClassifier
-
-  (classify-error
-    [_this exception]
-    (if (instance? java.sql.SQLException exception)
-      (classify-sql-error exception)
-      :unknown-sql-error))
-
-
-  (wrap-error
-    [_this exception operation context]
-    (if (instance? java.sql.SQLException exception)
-      (wrap-sql-error exception "Database error" operation context)
-      (let [error-data (merge {:type :unknown-sql-error
-                               :operation operation
-                               :message (str exception)}
-                              context)]
-        (log/warn exception "Unknown error" error-data)
-        (ex-info (str "Error during " (name operation) ": " exception)
-                 error-data
-                 exception)))))
-
-
-(defn create-error-classifier
-  "Creates a PostgreSQL error classifier instance."
-  []
-  (->PostgresErrorClassifier))
+(def classify-sql-error errors/classify-sql-error)
+(def table-not-found? errors/table-not-found?)
+(def unique-violation? errors/unique-violation?)
+(def foreign-key-violation? errors/foreign-key-violation?)
+(def not-null-violation? errors/not-null-violation?)
+(def check-constraint-violation? errors/check-constraint-violation?)
+(def connection-error? errors/connection-error?)
+(def query-canceled? errors/query-canceled?)
+(def serialization-failure? errors/serialization-failure?)
+(def deadlock-detected? errors/deadlock-detected?)
+(def read-only-transaction? errors/read-only-transaction?)
+(def wrap-sql-error errors/wrap-sql-error)
+(def create-error-classifier errors/create-error-classifier)
 
 
 (defmacro with-sql-error-handling
-  "Wraps body with SQLException handling.
-   Catches SQLException and rethrows with application context.
-
-   Parameters:
-   - log-prefix: String prefix for log message (e.g., \"Database error\", \"DDL error\")
-   - operation: Keyword describing the operation (e.g., :create-entity, :add-column)
-   - context: Map of additional context
-   - body: Forms to execute
-
-   Usage:
-   (with-sql-error-handling \"Database error\" :create-entity {:entity-name name}
-     (jdbc/execute! ...))"
   [log-prefix operation context & body]
-  `(try
-     (do ~@body)
-     (catch java.sql.SQLException e#
-       (throw (wrap-sql-error e# ~log-prefix ~operation ~context)))))
+  `(errors/with-sql-error-handling ~log-prefix ~operation ~context ~@body))
 
 
 ;; === SQL validation ===

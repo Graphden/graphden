@@ -318,7 +318,7 @@
 (deftest create-error-classifier-test
   (testing "creates PostgresErrorClassifier instance"
     (let [classifier (util/create-error-classifier)]
-      (is (instance? graphden.postgres_storage.util.PostgresErrorClassifier classifier)))))
+      (is (instance? graphden.postgres_storage.errors.PostgresErrorClassifier classifier)))))
 
 
 (deftest query-opts-test

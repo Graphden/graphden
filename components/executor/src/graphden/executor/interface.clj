@@ -20,7 +20,10 @@
    - Timeout protection
    - Base function registry"
   (:require
-    [graphden.executor.core :as core]))
+    [graphden.executor.context :as ctx]
+    [graphden.executor.core :as core]
+    [graphden.executor.registry :as registry]
+    [graphden.executor.types :as types]))
 
 
 ;; === Execution Context ===
@@ -71,7 +74,7 @@
    (create-context {:storage s
                     :path-args {[frv-1 y-schema-id] 100}})"
   [opts]
-  (core/create-context opts))
+  (ctx/create-context opts))
 
 
 ;; === Base Functions Registry ===
@@ -94,21 +97,21 @@
    Consider using the defbase macro from fn-registry instead for
    automatic argument dereferencing."
   [fn-name f]
-  (core/register-base-fn! fn-name f))
+  (registry/register-base-fn! fn-name f))
 
 
 (defn get-base-fn
   "Gets a base function from the registry by name.
    Returns nil if not found."
   [fn-name]
-  (core/get-base-fn fn-name))
+  (registry/get-base-fn fn-name))
 
 
 (defn clear-base-fns!
   "Clears all registered base functions from the global registry.
    Useful for testing."
   []
-  (core/clear-base-fns!))
+  (registry/clear-base-fns!))
 
 
 (defn get-default-registry
@@ -119,7 +122,7 @@
    (create-context {:storage s
                     :base-fns (get-default-registry)})"
   []
-  (core/get-default-registry))
+  (registry/get-default-registry))
 
 
 (defn get-base-fn-from-context
@@ -136,7 +139,7 @@
    (let [other-fn (get-base-fn-from-context ctx :other)]
      (other-fn {:x (delay 42) :y (delay \"hello\")} ctx))"
   [context fn-name]
-  (core/get-base-fn-from-context context fn-name))
+  (registry/get-base-fn-from-context context fn-name))
 
 
 ;; === Type Hints ===
@@ -153,7 +156,7 @@
    (register-type-hint! :email \"string in email format (e.g., user@example.com)\")
    (register-type-hint! :phone \"string with international format (e.g., +1-555-123-4567)\")"
   [type-keyword hint-string]
-  (core/register-type-hint! type-keyword hint-string))
+  (types/register-type-hint! type-keyword hint-string))
 
 
 ;; === Execution ===

@@ -15,6 +15,7 @@
     [clojure.tools.logging :as log]
     [graphden.postgres-storage.constraints :as constraints]
     [graphden.postgres-storage.crud :as crud]
+    [graphden.postgres-storage.graph :as graph]
     [graphden.postgres-storage.introspection :as introspection]
     [graphden.postgres-storage.metadata :as metadata]
     [graphden.postgres-storage.migration :as migration]
@@ -384,7 +385,7 @@
 
   (resolve-execution-graph
     [_this fn-id]
-    (crud/resolve-execution-graph pool fn-id))
+    (graph/resolve-execution-graph pool fn-id))
 
 
   sp/StorageErrorClassifier

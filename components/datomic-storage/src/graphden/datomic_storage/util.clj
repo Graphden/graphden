@@ -136,6 +136,7 @@
    Validates:
    - server-type is one of known types
    - Required keys are present for each server type
+   - Credentials (access-key, secret) are at least 8 characters (security)
    - No obviously invalid values"
   [config]
   (when-not (map? config)
@@ -168,16 +169,28 @@
                              :config safe-config}))))
 
         :peer-server
-        (do
+        (let [min-credential-length 8]  ; Security: prevent trivially weak credentials
           (when-not (:endpoint config)
             (throw (ex-info "peer-server requires :endpoint in client-config"
                             {:type :config-error/missing-endpoint})))
           (when-not (:access-key config)
             (throw (ex-info "peer-server requires :access-key in client-config"
                             {:type :config-error/missing-access-key})))
+          (when (and (:access-key config) (< (count (:access-key config)) min-credential-length))
+            (throw (ex-info (str "access-key must be at least " min-credential-length " characters")
+                            {:type :config-error/credential-too-short
+                             :field :access-key
+                             :min-length min-credential-length
+                             :actual-length (count (:access-key config))})))
           (when-not (:secret config)
             (throw (ex-info "peer-server requires :secret in client-config"
-                            {:type :config-error/missing-secret}))))
+                            {:type :config-error/missing-secret})))
+          (when (and (:secret config) (< (count (:secret config)) min-credential-length))
+            (throw (ex-info (str "secret must be at least " min-credential-length " characters")
+                            {:type :config-error/credential-too-short
+                             :field :secret
+                             :min-length min-credential-length
+                             :actual-length (count (:secret config))}))))
 
         ;; :ion and :cloud have complex configs, just warn if empty
         (:ion :cloud)

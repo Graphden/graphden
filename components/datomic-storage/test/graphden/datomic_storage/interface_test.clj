@@ -6,6 +6,7 @@
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.datomic-storage.core :as core]
     [graphden.datomic-storage.interface :as dat]
+    [graphden.datomic-storage.introspection :as introspection]
     [graphden.datomic-storage.schema :as schema]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.storage-protocol.contract-tests :as contract]
@@ -592,7 +593,7 @@
                                           :ghost-field {:uuid #uuid "00000000-0000-0000-0000-000000000099"
                                                         :type :text}})
                           ds/build)]
-          (with-redefs [core/read-metadata (constantly fake-metadata)]
+          (with-redefs [introspection/read-metadata (constantly fake-metadata)]
             (is (thrown-with-msg? clojure.lang.ExceptionInfo
                                   #"Metadata/DB inconsistency"
                   (sp/initialize storage schema2)))))
@@ -606,7 +607,7 @@
     ;; We initialize with a minimal schema that doesn't include graphden.metadata attributes
     ;; then directly query to confirm metadata-schema-exists? returns false on fresh db
     (let [storage (create-test-storage)
-          metadata-exists-fn #'core/metadata-schema-exists?]
+          metadata-exists-fn #'introspection/metadata-schema-exists?]
       (try
         ;; First, create the client and database without initializing schema
         ;; This gives us a fresh db without metadata schema
@@ -668,7 +669,7 @@
 
 (deftest current-attrs-edge-cases-test
   (testing "filters out idents without namespace"
-    (let [current-attrs-fn #'core/current-attrs
+    (let [current-attrs-fn #'introspection/current-attrs
           ;; Mock query results with some idents without namespace
           fake-results [[:db/ident :db.type/string]
                         ['no-namespace-symbol :db.type/string] ; symbol without namespace
@@ -679,7 +680,7 @@
           (is (= {:user/name :db.type/string} result))))))
 
   (testing "filters out idents from db and fressian namespaces"
-    (let [current-attrs-fn #'core/current-attrs
+    (let [current-attrs-fn #'introspection/current-attrs
           fake-results [[:db/ident :db.type/ref]
                         [:fressian/tag :db.type/string]
                         [:graphden.metadata/uuid :db.type/uuid]
@@ -691,7 +692,7 @@
 
 (deftest current-enum-values-db-edge-cases-test
   (testing "filters out idents without namespace"
-    (let [current-enum-values-db-fn #'core/current-enum-values-db
+    (let [current-enum-values-db-fn #'introspection/current-enum-values-db
           ;; Include idents without namespace - they should be filtered
           fake-results [['no-namespace] [:status.value/active] [:other/thing]]]
       (with-redefs [d/q (constantly fake-results)]
@@ -702,7 +703,7 @@
 
 (deftest read-metadata-empty-test
   (testing "read-metadata returns nil when no metadata entities exist"
-    (let [read-metadata-fn #'core/read-metadata
+    (let [read-metadata-fn #'introspection/read-metadata
           ;; Mock all queries to return empty - but first query is metadata-schema-exists?
           ;; which checks for :graphden.metadata/uuid attribute
           query-results (atom 0)]
@@ -720,7 +721,7 @@
           (is (nil? result))))))
 
   (testing "read-metadata returns data when entities exist but other types are empty"
-    (let [read-metadata-fn #'core/read-metadata
+    (let [read-metadata-fn #'introspection/read-metadata
           entity-uuid #uuid "11111111-1111-1111-1111-111111111111"
           query-results (atom 0)]
       (with-redefs [d/q (fn [& _]

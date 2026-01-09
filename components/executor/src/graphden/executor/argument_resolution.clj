@@ -20,14 +20,58 @@
 
 ;; === Delay Building Infrastructure ===
 
+(defn- realize-lazy-value
+  "Forces evaluation of lazy sequences/maps to ensure errors are caught.
+
+   - Lazy sequences are converted to vectors
+   - Lazy map values are realized
+   - Other values pass through unchanged
+
+   This ensures that execution errors in nested lazy computations
+   are caught at the point of argument evaluation, not during consumption."
+  [value]
+  (cond
+    ;; nil passes through
+    (nil? value) nil
+
+    ;; Lazy seq -> realize as vector
+    (and (seqable? value)
+         (not (string? value))
+         (not (map? value))
+         (instance? clojure.lang.LazySeq value))
+    (vec value)
+
+    ;; Map with lazy values -> realize all values
+    (map? value)
+    (persistent!
+      (reduce-kv
+        (fn [m k v]
+          (assoc! m k (realize-lazy-value v)))
+        (transient {})
+        value))
+
+    ;; Other seqable that might be lazy (like range) -> realize
+    (and (seqable? value)
+         (not (string? value))
+         (not (vector? value))
+         (not (set? value)))
+    (vec value)
+
+    ;; Everything else passes through
+    :else value))
+
+
 (defn wrap-delay-with-context
   "Wraps a delay body with error context for better diagnostics.
    When the delay fails to evaluate, the error includes arg-name and source info.
-   This helps diagnose which argument caused the failure in complex execution graphs."
+   This helps diagnose which argument caused the failure in complex execution graphs.
+
+   Values are realized (lazy seqs -> vectors) to ensure errors occur here,
+   not when the value is later consumed by a base function."
   [arg-name source body-fn]
   (delay
     (try
-      (body-fn)
+      (realize-lazy-value (body-fn))
       (catch Exception e
         (throw (ex-info (str "Error evaluating argument '" arg-name "': " (ex-message e))
                         {:type :execution-error/arg-evaluation-failed

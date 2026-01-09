@@ -11,12 +11,15 @@
 
 (defn- get-conn!
   "Gets connection from atom, throws if nil.
-   Used by ConstraintHelpers - throws generic error for internal helper use."
-  [conn-atom]
-  (or @conn-atom
-      (throw (ex-info "Storage not initialized"
-                      {:type :storage-not-initialized
-                       :hint "Call initialize before using storage operations"}))))
+   Includes operation context for better debugging."
+  ([conn-atom]
+   (get-conn! conn-atom :constraint-check))
+  ([conn-atom operation]
+   (or @conn-atom
+       (throw (ex-info "Storage not initialized"
+                       {:type :storage-not-initialized
+                        :operation operation
+                        :hint "Call initialize before using storage operations"})))))
 
 
 ;; === ConstraintHelpers implementation for Datomic ===

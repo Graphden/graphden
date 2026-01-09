@@ -31,16 +31,12 @@
 
 
 ;; === Configuration ===
-;; Query timeout is for API consistency with postgres-storage.
-;; Note: Datomic Client API does not support native query timeout, so the timeout
-;; is only used for API compatibility and does not actually limit Datomic query time.
+;; Query timeout is enforced via future+deref since Datomic Client API lacks native timeout.
+;; This provides real timeout protection for query operations (query-entities, read-entities).
 
 (def ^:dynamic *query-timeout-ms*
-  "Query timeout in milliseconds for API compatibility with postgres-storage.
-
-   IMPORTANT: Datomic Client API does not support native query timeout.
-   This var exists for API compatibility but does NOT actually limit query time.
-
+  "Query timeout in milliseconds.
+   Enforced via future+deref since Datomic Client API lacks native timeout.
    Default is 30000 ms (30 seconds)."
   sp/default-query-timeout-ms)
 
@@ -48,14 +44,12 @@
 (defn with-query-timeout
   "Executes f with a custom query timeout binding.
 
-   NOTE: Datomic Client API does not enforce this timeout on queries.
-   This function exists for API compatibility with postgres-storage.
-
    Example:
    (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
   [timeout-ms f]
-  (binding [*query-timeout-ms* timeout-ms]
+  (binding [*query-timeout-ms* timeout-ms
+            util/*query-timeout-ms* timeout-ms]
     (f)))
 
 
@@ -248,7 +242,8 @@
     (sp/with-read-lock rw-lock
                        (fn []
                          (let [conn (ensure-connection! conn-atom :query-entities)]
-                           (crud/query-entities-impl conn entity-name where)))))
+                           (util/execute-with-timeout! :query-entities
+                                                       #(crud/query-entities-impl conn entity-name where))))))
 
 
   sp/StorageBatchCRUD
@@ -272,7 +267,8 @@
     (sp/with-read-lock rw-lock
                        (fn []
                          (let [conn (ensure-connection! conn-atom :read-entities)]
-                           (crud/read-entities-impl conn entity-name ids)))))
+                           (util/execute-with-timeout! :read-entities
+                                                       #(crud/read-entities-impl conn entity-name ids))))))
 
 
   (delete-entities

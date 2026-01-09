@@ -48,15 +48,43 @@
 (defn with-query-timeout
   "Executes f with a custom query timeout binding.
 
-   NOTE: Datomic Client API does not support native query timeout.
-   This function exists for API compatibility with postgres-storage.
-
    Example:
    (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
   [timeout-ms f]
   (binding [*query-timeout-ms* timeout-ms]
     (f)))
+
+
+(defn execute-with-timeout!
+  "Executes a query function with timeout enforcement.
+
+   Unlike native Datomic queries, this enforces timeout by running
+   the query in a future and dereferencing with timeout.
+
+   Arguments:
+   - operation: keyword describing the operation (for error messages)
+   - query-fn: zero-arg function that executes the query
+
+   Returns the query result.
+   Throws TimeoutException if query exceeds *query-timeout-ms*.
+   Re-throws original exception if query fails (unwraps ExecutionException)."
+  [operation query-fn]
+  (let [timeout-ms *query-timeout-ms*
+        fut (future (query-fn))
+        result (try
+                 (deref fut timeout-ms ::timeout)
+                 (catch java.util.concurrent.ExecutionException e
+                   ;; Unwrap ExecutionException to preserve original exception
+                   (throw (or (Throwable/.getCause e) e))))]
+    (if (= result ::timeout)
+      (do
+        (future-cancel fut)
+        (throw (ex-info (str "Query timeout after " timeout-ms "ms")
+                        {:type :query-timeout
+                         :operation operation
+                         :timeout-ms timeout-ms})))
+      result)))
 
 
 ;; === Attribute naming ===

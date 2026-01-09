@@ -3,6 +3,7 @@
    Generic entity operations for create, read, update, delete, query."
   (:require
     [graphden.postgres-storage.codec :as codec]
+    [graphden.postgres-storage.errors :as errors]
     [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
@@ -136,7 +137,11 @@
   "Creates multiple entity records in a single transaction.
    Returns a sequence of created records with generated ids.
    Throws :unique-violation if any unique constraint violated.
-   Throws :duplicate-ids if duplicate IDs found in batch."
+   Throws :duplicate-ids if duplicate IDs found in batch.
+
+   Note: PostgreSQL batch INSERT uses a single statement, so on failure
+   the exact failing record index is unknown. Error context includes
+   batch-size and all record IDs for debugging."
   [ds entity-name data-seq fields]
   (if (empty? data-seq)
     []
@@ -144,12 +149,14 @@
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name (keyword (util/kw->snake-case entity-name))
             ;; Prepare all records with IDs
-            records (map (fn [data]
-                           (when fields
-                             (sp/validate-required-fields! entity-name fields data))
-                           (let [id (or (:id data) (random-uuid))]
-                             (assoc data :id id)))
-                         data-seq)
+            records (vec (map (fn [data]
+                                (when fields
+                                  (sp/validate-required-fields! entity-name fields data))
+                                (let [id (or (:id data) (random-uuid))]
+                                  (assoc data :id id)))
+                              data-seq))
+            batch-size (count records)
+            batch-ids (mapv :id records)
             ;; Convert to rows using codec
             rows (map #(entity->row % fields) records)
             ;; Get consistent column order from first row
@@ -162,19 +169,29 @@
                                :columns columns
                                :values values
                                :returning [:*]}
-                              {:quoted true})]
-        (with-crud-error-handling :create-entities {:entity-name entity-name :count (count data-seq)}
-          (let [result-rows (jdbc/execute! ds query (util/query-opts))
-                expected-count (count data-seq)
-                actual-count (count result-rows)]
-            ;; Validate that all records were inserted
-            (when (not= expected-count actual-count)
-              (throw (ex-info "Batch insert returned unexpected number of records"
-                              {:type :batch-insert-mismatch
-                               :entity-name entity-name
-                               :expected-count expected-count
-                               :actual-count actual-count})))
-            (map row->entity result-rows)))))))
+                              {:quoted true})
+            result-rows (try
+                          (jdbc/execute! ds query (util/query-opts))
+                          (catch java.sql.SQLException e
+                            ;; Wrap SQL exceptions with proper classification and batch context
+                            ;; Index is -1 because PostgreSQL batch INSERT doesn't reveal which row failed
+                            (let [wrapped (errors/wrap-sql-error e "Database error" :create-entities
+                                                                 {:entity-name entity-name
+                                                                  :batch-ids batch-ids})]
+                              (throw (sp/wrap-batch-error wrapped -1 batch-size nil))))
+                          (catch Exception e
+                            ;; Non-SQL exceptions (rare)
+                            (throw (sp/wrap-batch-error e -1 batch-size nil))))
+            expected-count batch-size
+            actual-count (count result-rows)]
+        ;; Validate that all records were inserted
+        (when (not= expected-count actual-count)
+          (throw (ex-info "Batch insert returned unexpected number of records"
+                          {:type :batch-insert-mismatch
+                           :entity-name entity-name
+                           :expected-count expected-count
+                           :actual-count actual-count})))
+        (map row->entity result-rows)))))
 
 
 (defn read-entities

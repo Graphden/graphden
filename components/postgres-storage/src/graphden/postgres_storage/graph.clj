@@ -62,12 +62,21 @@
                           (map (fn [[origin chain-rows]]
                                  [origin (mapv :id (sort-by :depth chain-rows))]))
                           (into {}))
-              ;; Warn if any chain reached the depth limit
-              max-depth-found (apply max 0 (map :depth rows))]
-          (when (>= max-depth-found max-parent-chain-depth)
-            (log/warn "Parent chain reached maximum depth limit"
+              ;; Warn if any chain reached the depth limit - helps detect circular refs or very deep inheritance
+              max-depths-by-origin (->> rows
+                                        (group-by :origin)
+                                        (map (fn [[origin chain-rows]]
+                                               [origin (apply max 0 (map :depth chain-rows))]))
+                                        (into {}))
+              truncated-origins (->> max-depths-by-origin
+                                     (filter (fn [[_ depth]] (>= depth max-parent-chain-depth)))
+                                     (map first)
+                                     vec)]
+          (when (seq truncated-origins)
+            (log/warn "Parent chain(s) reached maximum depth limit - possible circular reference or very deep inheritance"
                       {:max-depth max-parent-chain-depth
-                       :fn-ids fn-ids-vec}))
+                       :truncated-fn-ids truncated-origins
+                       :hint "Check for circular parent-fn references in these functions"}))
           result)))))
 
 

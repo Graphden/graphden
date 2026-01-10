@@ -2,6 +2,7 @@
   "CRUD operations for PostgreSQL storage.
    Generic entity operations for create, read, update, delete, query."
   (:require
+    [clojure.tools.logging :as log]
     [graphden.postgres-storage.codec :as codec]
     [graphden.postgres-storage.errors :as errors]
     [graphden.postgres-storage.util :as util]
@@ -110,7 +111,10 @@
    Supports nil values (generates IS NULL instead of = NULL).
    Returns a sequence of matching entities.
    Throws :table-not-found if entity table doesn't exist.
-   Throws :invalid-where-clause if where is not nil or a map."
+   Throws :invalid-where-clause if where is not nil or a map.
+
+   Note: Empty where clause ({} or nil) returns all entities (full table scan).
+   This is logged at DEBUG level to help identify unintended full scans."
   [ds entity-name where]
   (sp/validate-where-clause! where)
   (let [table-name (keyword (util/kw->snake-case entity-name))
@@ -126,6 +130,8 @@
                                    :from [table-name]}
                             where-clause (assoc :where where-clause))
                           {:quoted true})]
+    (when-not where-clause
+      (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
     (with-crud-error-handling :query-entities {:entity-name entity-name :where where}
       (let [rows (jdbc/execute! ds query (util/query-opts))]
         (map row->entity rows)))))

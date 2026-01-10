@@ -103,8 +103,10 @@
    (traverse-bfs start-id get-neighbors-fn {}))
   ([start-id get-neighbors-fn opts]
    (let [max-iter (or (:max-iterations opts) *max-graph-iterations*)
-         context-id (or (:context-id opts) start-id)]
-     (loop [to-visit [start-id]
+         context-id (or (:context-id opts) start-id)
+         ;; Use PersistentQueue for O(1) enqueue/dequeue instead of vector O(n)
+         init-queue (conj clojure.lang.PersistentQueue/EMPTY start-id)]
+     (loop [queue init-queue
             visited #{start-id}
             iter-count 0]
        (when (> iter-count max-iter)
@@ -113,10 +115,10 @@
                           :context-id context-id
                           :max-iterations max-iter
                           :iteration-count iter-count})))
-       (if (empty? to-visit)
+       (if (empty? queue)
          visited
-         (let [current-id (first to-visit)
-               rest-queue (subvec (vec to-visit) 1)
+         (let [current-id (peek queue)
+               rest-queue (pop queue)
                neighbors (get-neighbors-fn current-id)
                new-neighbors (remove visited neighbors)
                new-visited (into visited new-neighbors)]

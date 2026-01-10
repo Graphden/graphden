@@ -275,3 +275,27 @@
     (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0
                         (or path-args {}) nil (atom {}) strict-type-validation?
                         max-unknown-types (atom 0))))
+
+
+(defn clear-result-cache!
+  "Clears the result cache in the given context.
+   Useful for long-running applications that reuse contexts across multiple executions.
+
+   The result cache stores computed fn-result-values to avoid recomputation within
+   a single execution. When reusing a context across multiple independent executions,
+   call this between executions to:
+   - Free memory from previous execution results
+   - Ensure fresh computation for the next execution
+
+   Returns the number of entries that were cleared.
+
+   Example:
+   (let [ctx (create-context {:storage s})]
+     (execute ctx fn-id-1 nil)
+     (clear-result-cache! ctx)  ; Clear before next independent execution
+     (execute ctx fn-id-2 nil))"
+  [context]
+  (let [cache (:result-cache context)
+        count-before (count @cache)]
+    (reset! cache {})
+    count-before))

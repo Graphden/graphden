@@ -283,6 +283,23 @@
   (core/make-single-arg-callable context fn-id))
 
 
+;; === Context Utilities ===
+
+(defn clear-result-cache!
+  "Clears the result cache in the given context.
+   Useful for long-running applications that reuse contexts across multiple executions.
+
+   Returns the number of entries that were cleared.
+
+   Example:
+   (let [ctx (create-context {:storage s})]
+     (execute ctx fn-id-1 nil)
+     (clear-result-cache! ctx)  ; Clear before next independent execution
+     (execute ctx fn-id-2 nil))"
+  [context]
+  (ctx/clear-result-cache! context))
+
+
 ;; === Test Fixtures ===
 
 (defn with-clean-registry

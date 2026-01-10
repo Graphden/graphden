@@ -31,26 +31,14 @@
 
 
 ;; === Configuration ===
-;; Query timeout is enforced via future+deref since Datomic Client API lacks native timeout.
-;; This provides real timeout protection for query operations (query-entities, read-entities).
+;; Query timeout is managed by util.clj for this component.
+;; Re-export from util for backward compatibility.
+;; NOTE: Use util/*query-timeout-ms* as the canonical var.
 
-(def ^:dynamic *query-timeout-ms*
-  "Query timeout in milliseconds.
-   Enforced via future+deref since Datomic Client API lacks native timeout.
-   Default is 30000 ms (30 seconds)."
-  sp/default-query-timeout-ms)
-
-
-(defn with-query-timeout
+(def with-query-timeout
   "Executes f with a custom query timeout binding.
-
-   Example:
-   (with-query-timeout 60000
-     #(sp/query-entities storage :user {}))"
-  [timeout-ms f]
-  (binding [*query-timeout-ms* timeout-ms
-            util/*query-timeout-ms* timeout-ms]
-    (f)))
+   See util/with-query-timeout for details."
+  util/with-query-timeout)
 
 
 ;; === Connection validation ===

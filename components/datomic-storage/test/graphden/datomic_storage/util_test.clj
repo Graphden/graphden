@@ -265,23 +265,25 @@
            (util/execute-with-timeout! :test-op #(+ 40 2)))))
 
   (testing "throws on timeout"
+    ;; Use binding directly to bypass validation (for testing timeout behavior)
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Query timeout"
-          (util/with-query-timeout 10
-                                   #(util/execute-with-timeout!
-                                      :slow-query
-                                      (fn []
-                                        (Thread/sleep 100)
-                                        :never-reached))))))
+          (binding [util/*query-timeout-ms* 10]
+            (util/execute-with-timeout!
+              :slow-query
+              (fn []
+                (Thread/sleep 100)
+                :never-reached))))))
 
   (testing "timeout exception contains operation and timeout info"
     (try
-      (util/with-query-timeout 10
-                               #(util/execute-with-timeout!
-                                  :my-operation
-                                  (fn []
-                                    (Thread/sleep 100)
-                                    nil)))
+      ;; Use binding directly to bypass validation (for testing timeout behavior)
+      (binding [util/*query-timeout-ms* 10]
+        (util/execute-with-timeout!
+          :my-operation
+          (fn []
+            (Thread/sleep 100)
+            nil)))
       (is false "should have thrown")
       (catch clojure.lang.ExceptionInfo e
         (is (= :query-timeout (:type (ex-data e))))

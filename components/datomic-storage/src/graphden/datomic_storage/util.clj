@@ -33,26 +33,27 @@
 
 
 ;; === Configuration ===
+;; Query timeout is now managed by storage-protocol.config
+;; Re-export for backward compatibility
 
 (def ^:dynamic *query-timeout-ms*
   "Query timeout in milliseconds for API consistency with postgres-storage.
-
-   IMPORTANT: Datomic Client API does not support native query timeout.
-   This var exists for API compatibility but does NOT actually limit query time.
-   For real timeout control, consider using Datomic's :io-context or external timeout.
-
-   Default is 30000 ms (30 seconds)."
+   Default is 30000 ms (30 seconds).
+   Note: This is the canonical var; sp/*query-timeout-ms* is also bound for consistency."
   sp/default-query-timeout-ms)
 
 
 (defn with-query-timeout
   "Executes f with a custom query timeout binding.
+   Binds both local *query-timeout-ms* and sp/*query-timeout-ms* for consistency.
 
    Example:
    (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
   [timeout-ms f]
-  (binding [*query-timeout-ms* timeout-ms]
+  (sp/validate-query-timeout! timeout-ms)
+  (binding [*query-timeout-ms* timeout-ms
+            sp/*query-timeout-ms* timeout-ms]
     (f)))
 
 
@@ -75,7 +76,6 @@
         result (try
                  (deref fut timeout-ms ::timeout)
                  (catch java.util.concurrent.ExecutionException e
-                   ;; Unwrap ExecutionException to preserve original exception
                    (throw (or (Throwable/.getCause e) e))))]
     (if (= result ::timeout)
       (do

@@ -7,6 +7,30 @@
    - Graph utility functions
    - BFS algorithm for graph resolution
 
+   ## Why BFS (Breadth-First Search)?
+
+   We use BFS instead of DFS for graph resolution because:
+   1. More predictable memory usage (queue vs recursive stack)
+   2. Better for detecting cycles early (same depth explored together)
+   3. Easier to implement iteration limits (count queue operations)
+   4. Natural batching of queries at the same depth level
+
+   ## Cycle Detection
+
+   Cycles in the execution graph are prevented by:
+   1. Visited set: tracks already-processed fn-ids
+   2. UNION in recursive CTEs: automatically deduplicates (SQL level)
+   3. *max-graph-iterations*: hard limit on total iterations
+
+   ## ExecutionGraphResult Structure
+
+   The record contains all data needed to execute a function:
+   - :fns - Map of fn-id -> fn record
+   - :fn-schemas - Map of fn-schema-id -> fn-schema record
+   - :arg-schemas - Map of arg-schema-id -> arg-schema record
+   - :resolved-args - Map of fn-id -> {arg-schema-id -> arg-value}
+   - :fn-result-values - Map of frv-id -> fn-result-value record
+
    Note: This namespace does NOT define protocols to avoid circular deps.
    The ExecutionGraphReader extension is done in interface.clj."
   (:require

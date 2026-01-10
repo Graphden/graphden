@@ -5,9 +5,12 @@
    configurations. Uses Malli for:
    - Declarative schema definitions
    - Human-readable error messages
-   - Schema composition and reuse"
+   - Schema composition and reuse
+
+   Also provides shared query timeout infrastructure for all storage backends."
   (:require
     [clojure.string :as str]
+    [graphden.storage-protocol.graph :as graph]
     [malli.core :as m]
     [malli.error :as me]))
 
@@ -179,3 +182,113 @@
         config
         (rest schema-form))
       config)))
+
+
+;; ============================================================================
+;; Query Timeout Infrastructure
+;; ============================================================================
+;;
+;; Shared query timeout handling for all storage backends.
+;; Each backend can use these primitives to implement timeout consistently.
+
+(def ^:dynamic *query-timeout-ms*
+  "Timeout for storage queries in milliseconds. Can be rebound per-thread.
+   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
+
+   Backend-specific notes:
+   - PostgreSQL: Converted to seconds for JDBC setQueryTimeout
+   - Datomic: Enforced via future+deref (no native timeout support)
+   - Memory: Not applicable (in-memory operations are instant)"
+  graph/default-query-timeout-ms)
+
+
+(def min-query-timeout-ms
+  "Minimum allowed query timeout in milliseconds.
+   1000ms (1 second) minimum because:
+   - JDBC setQueryTimeout uses seconds, sub-second values round to 0
+   - SQL queries need time for network roundtrip and query parsing
+   - Different from executor timeout (50ms min) which covers overall execution"
+  1000)
+
+
+(defn validate-query-timeout!
+  "Validates query timeout value. Throws on invalid timeout.
+
+   Arguments:
+   - timeout-ms: Timeout in milliseconds (must be positive integer >= 1000)
+
+   Throws:
+   - :config-error/invalid-timeout if timeout is not a positive integer
+   - :config-error/invalid-timeout if timeout < min-query-timeout-ms"
+  [timeout-ms]
+  (when-not (pos-int? timeout-ms)
+    (throw (ex-info "Query timeout must be a positive integer (ms)"
+                    {:type :config-error/invalid-timeout
+                     :timeout-ms timeout-ms})))
+  (when (< timeout-ms min-query-timeout-ms)
+    (throw (ex-info (str "Query timeout must be at least " min-query-timeout-ms "ms (1 second)")
+                    {:type :config-error/invalid-timeout
+                     :timeout-ms timeout-ms
+                     :min-timeout-ms min-query-timeout-ms}))))
+
+
+(defn with-query-timeout
+  "Executes f with a custom query timeout (in milliseconds).
+   Timeout must be a positive integer >= 1000ms.
+
+   Why 1000ms minimum?
+   - JDBC setQueryTimeout uses seconds (integer), values <1000ms become 0
+   - SQL queries need time for network roundtrip and query parsing
+   - Different from executor timeout (50ms min) which covers overall execution
+
+   Example:
+   (with-query-timeout 60000
+     #(sp/query-entities storage :user {}))"
+  [timeout-ms f]
+  (validate-query-timeout! timeout-ms)
+  (binding [*query-timeout-ms* timeout-ms]
+    (f)))
+
+
+(defn get-query-timeout-seconds
+  "Returns the current query timeout in seconds for JDBC calls.
+   Reads the dynamic var *query-timeout-ms* and converts to seconds.
+
+   Safety: Asserts that timeout is at least min-query-timeout-ms to prevent
+   silent timeout disabling. This catches improper direct binding of
+   *query-timeout-ms* (use with-query-timeout instead)."
+  []
+  (assert (>= *query-timeout-ms* min-query-timeout-ms)
+          (str "Query timeout must be at least " min-query-timeout-ms "ms. "
+               "Use with-query-timeout for safe rebinding."))
+  (quot *query-timeout-ms* 1000))
+
+
+(defn execute-with-timeout!
+  "Executes a query function with timeout enforcement via future+deref.
+
+   Useful for backends that don't support native query timeout (e.g., Datomic).
+
+   Arguments:
+   - operation: keyword describing the operation (for error messages)
+   - query-fn: zero-arg function that executes the query
+
+   Returns the query result.
+   Throws TimeoutException if query exceeds *query-timeout-ms*.
+   Re-throws original exception if query fails (unwraps ExecutionException)."
+  [operation query-fn]
+  (let [timeout-ms *query-timeout-ms*
+        fut (future (query-fn))
+        result (try
+                 (deref fut timeout-ms ::timeout)
+                 (catch java.util.concurrent.ExecutionException e
+                   ;; Unwrap ExecutionException to preserve original exception
+                   (throw (or (Throwable/.getCause e) e))))]
+    (if (= result ::timeout)
+      (do
+        (future-cancel fut)
+        (throw (ex-info (str "Query timeout after " timeout-ms "ms")
+                        {:type :query-timeout
+                         :operation operation
+                         :timeout-ms timeout-ms})))
+      result)))

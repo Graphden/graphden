@@ -6,13 +6,31 @@
    - Resolving argument values from various sources (provided, path-args, DB)
    - Type validation for provided arguments
 
-   ## Architecture Note
+   ## Why Delays?
 
-   Argument resolution uses delays to defer execution until values are needed.
-   This enables lazy evaluation and memoization of fn-result-values.
+   Arguments are wrapped in Clojure `delay` objects for lazy evaluation:
+   - Values are only computed when dereferenced with @
+   - For :fn type arguments, the delay contains a callable function
+   - Enables memoization of fn-result-values across the execution graph
 
-   The functions in this module create delays that may capture references to
-   execute-internal (passed as parameter) for recursive execution."
+   ## Argument Resolution Priority
+
+   1. `provided-args` - Explicitly passed at execute time (highest priority)
+   2. `path-args` - Runtime args from context (for root and nested fns)
+   3. `arg-values` - Stored values from database (resolved-args in graph)
+
+   ## HOF (Higher-Order Functions) Support
+
+   For :fn type arguments, the delay contains a callable function:
+   - The callable accepts a map of named arguments
+   - It internally calls execute-internal to run the referenced function
+   - This enables map, filter, reduce and other HOF patterns
+
+   ## Error Handling
+
+   - `realize-lazy-value` forces evaluation to catch errors early
+   - Type validation happens before creating delays
+   - Unknown types in forward-compat mode log warnings but don't throw"
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.types :as types]))

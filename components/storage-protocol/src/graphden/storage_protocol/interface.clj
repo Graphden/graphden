@@ -14,8 +14,32 @@
    1. Create storage instance (implementation-specific)
    2. Call (initialize storage schema) to sync with DataSchema
    3. Use storage for CRUD operations
-   4. Call (close storage) when done"
+   4. Call (close storage) when done
+
+   ## Naming Conventions
+
+   Functions follow these naming patterns:
+   - `get-*` - Returns value or nil if not found (optional lookup)
+   - `read-*` - Returns value or throws if not found (required lookup)
+   - `create-*` / `update-*` / `delete-*` - Mutating operations
+   - `query-*` - Returns collection (possibly empty)
+   - `validate-*!` - Validates and throws on failure
+   - `*-impl` - Internal implementation (not for direct use)
+
+   ## Security
+
+   Sensitive data is automatically redacted in logs and error messages.
+   Use `register-sensitive-field-name!` to add application-specific fields.
+   Default patterns cover: password, secret, token, api-key, credentials.
+
+   ## Query Timeout
+
+   All storage backends support configurable query timeout via:
+   - `*query-timeout-ms*` - Dynamic var (default: 30s)
+   - `with-query-timeout` - Macro for temporary timeout change
+   - `get-query-timeout-seconds` - Get timeout in seconds for JDBC"
   (:require
+    [graphden.storage-protocol.config :as config]
     [graphden.storage-protocol.constraints :as constraints]
     [graphden.storage-protocol.errors :as errors]
     [graphden.storage-protocol.graph :as graph]
@@ -455,6 +479,20 @@
 (def kw->snake-case naming/kw->snake-case)
 (def snake->kw naming/snake->kw)
 (def check-snake-case-collisions! naming/check-snake-case-collisions!)
+
+
+;; === Query timeout re-exports ===
+(def ^:dynamic *query-timeout-ms*
+  "Timeout for storage queries in milliseconds. Can be rebound per-thread.
+   Default is 30000 ms (30 seconds). Use with-query-timeout for safe rebinding."
+  config/*query-timeout-ms*)
+
+
+(def min-query-timeout-ms config/min-query-timeout-ms)
+(def validate-query-timeout! config/validate-query-timeout!)
+(def with-query-timeout config/with-query-timeout)
+(def get-query-timeout-seconds config/get-query-timeout-seconds)
+(def execute-with-timeout! config/execute-with-timeout!)
 
 
 ;; ============================================================================

@@ -8,6 +8,7 @@
     [graphden.datomic-storage.interface :as dat]
     [graphden.datomic-storage.introspection :as introspection]
     [graphden.datomic-storage.schema :as schema]
+    [graphden.datomic-storage.util :as util]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.storage-protocol.contract-tests :as contract]
     [graphden.storage-protocol.interface :as sp]
@@ -1794,19 +1795,19 @@
   (testing "with-query-timeout binds timeout value"
     (is (= 5000
            (dat/with-query-timeout 5000
-                                   #(deref #'core/*query-timeout-ms*)))))
+                                   #(identity util/*query-timeout-ms*)))))
 
   (testing "with-query-timeout restores original value after execution"
-    (let [original (deref #'core/*query-timeout-ms*)]
+    (let [original util/*query-timeout-ms*]
       (dat/with-query-timeout 99999 #(identity :done))
-      (is (= original (deref #'core/*query-timeout-ms*)))))
+      (is (= original util/*query-timeout-ms*))))
 
   (testing "with-query-timeout restores value after exception"
-    (let [original (deref #'core/*query-timeout-ms*)]
+    (let [original util/*query-timeout-ms*]
       (try
         (dat/with-query-timeout 99999 #(throw (ex-info "test" {})))
         (catch Exception _))
-      (is (= original (deref #'core/*query-timeout-ms*))))))
+      (is (= original util/*query-timeout-ms*)))))
 
 
 ;; === Input validation tests ===
@@ -1970,24 +1971,24 @@
 
 (deftest with-query-timeout-custom-test
   (testing "custom timeout can be set"
-    (let [original-timeout core/*query-timeout-ms*]
-      (core/with-query-timeout 60000
+    (let [original-timeout util/*query-timeout-ms*]
+      (util/with-query-timeout 60000
                                (fn []
-                                 (is (= 60000 core/*query-timeout-ms*))))
+                                 (is (= 60000 util/*query-timeout-ms*))))
       ;; Verify original is restored
-      (is (= original-timeout core/*query-timeout-ms*))))
+      (is (= original-timeout util/*query-timeout-ms*))))
 
   (testing "nested timeouts work correctly"
-    (let [original-timeout core/*query-timeout-ms*]
-      (core/with-query-timeout 30000
+    (let [original-timeout util/*query-timeout-ms*]
+      (util/with-query-timeout 30000
                                (fn []
-                                 (is (= 30000 core/*query-timeout-ms*))
-                                 (core/with-query-timeout 10000
+                                 (is (= 30000 util/*query-timeout-ms*))
+                                 (util/with-query-timeout 10000
                                                           (fn []
-                                                            (is (= 10000 core/*query-timeout-ms*))))
+                                                            (is (= 10000 util/*query-timeout-ms*))))
                                  ;; After inner binding ends, outer binding is restored
-                                 (is (= 30000 core/*query-timeout-ms*))))
-      (is (= original-timeout core/*query-timeout-ms*)))))
+                                 (is (= 30000 util/*query-timeout-ms*))))
+      (is (= original-timeout util/*query-timeout-ms*)))))
 
 
 ;; === Error classifier Tests ===

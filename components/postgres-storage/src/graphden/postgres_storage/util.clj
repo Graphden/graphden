@@ -25,11 +25,14 @@
 
 
 ;; === Configuration ===
+;; Query timeout is now managed by storage-protocol.config
+;; Re-export for backward compatibility
 
 (def ^:dynamic *query-timeout-ms*
   "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
-   Note: Internally converted to seconds for JDBC calls."
+   Note: Internally converted to seconds for JDBC calls.
+   Note: This is the canonical var; sp/*query-timeout-ms* is also bound for consistency."
   sp/default-query-timeout-ms)
 
 
@@ -37,12 +40,13 @@
   "Minimum allowed query timeout in milliseconds.
    1000ms (1 second) minimum because JDBC setQueryTimeout uses seconds,
    and sub-second values would round to 0 (no timeout)."
-  1000)
+  sp/min-query-timeout-ms)
 
 
 (defn with-query-timeout
   "Executes f with a custom query timeout (in milliseconds).
    Timeout must be a positive integer. Minimum is 1000ms (1 second).
+   Binds both local *query-timeout-ms* and sp/*query-timeout-ms* for consistency.
 
    Why 1000ms minimum?
    - JDBC setQueryTimeout uses seconds (integer), values <1000ms become 0
@@ -53,16 +57,9 @@
    (with-query-timeout 60000
      #(sp/query-entities storage :user {}))"
   [timeout-ms f]
-  (when-not (pos-int? timeout-ms)
-    (throw (ex-info "Query timeout must be a positive integer (ms)"
-                    {:type :config-error/invalid-timeout
-                     :timeout-ms timeout-ms})))
-  (when (< timeout-ms min-query-timeout-ms)
-    (throw (ex-info (str "Query timeout must be at least " min-query-timeout-ms "ms (1 second)")
-                    {:type :config-error/invalid-timeout
-                     :timeout-ms timeout-ms
-                     :min-timeout-ms min-query-timeout-ms})))
-  (binding [*query-timeout-ms* timeout-ms]
+  (sp/validate-query-timeout! timeout-ms)
+  (binding [*query-timeout-ms* timeout-ms
+            sp/*query-timeout-ms* timeout-ms]
     (f)))
 
 

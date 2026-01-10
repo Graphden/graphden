@@ -5,23 +5,14 @@
     [graphden.datomic-storage.util :as util]))
 
 
-;; Re-export timeout configuration for API compatibility
-(def ^:dynamic *query-timeout-ms*
-  "Query timeout in milliseconds for API compatibility with postgres-storage.
-   NOTE: Datomic Client API does not support native query timeout.
-   Default is 30000 ms (30 seconds)."
-  core/*query-timeout-ms*)
+;; Re-export timeout configuration from util for API compatibility
+;; NOTE: Use util/*query-timeout-ms* as the canonical var for reading timeout value.
 
-
-(defn with-query-timeout
+(def with-query-timeout
   "Executes f with a custom query timeout binding.
-   NOTE: Datomic Client API does not enforce this timeout on queries.
-
-   Example:
-   (with-query-timeout 60000
-     #(sp/query-entities storage :user {}))"
-  [timeout-ms f]
-  (core/with-query-timeout timeout-ms f))
+   Timeout is enforced via future+deref.
+   See util/with-query-timeout for details."
+  util/with-query-timeout)
 
 
 (def default-local-config

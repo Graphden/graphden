@@ -271,3 +271,178 @@
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (is (contains? #{:unknown1 :unknown2} (:field (ex-data e)))))))))
+
+
+;; === validate-entity-name! comprehensive tests ===
+
+(deftest validate-entity-name-comprehensive-test
+  (testing "rejects non-keyword entity name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"entity-name must be a keyword"
+          (crud/validate-entity-name! "string-name" "create")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"entity-name must be a keyword"
+          (crud/validate-entity-name! 123 "update")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"entity-name must be a keyword"
+          (crud/validate-entity-name! nil "delete"))))
+
+  (testing "rejects entity name starting with number"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (crud/validate-entity-name! (keyword "123user") "test"))))
+
+  (testing "rejects entity name with uppercase"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (crud/validate-entity-name! :User "test"))))
+
+  (testing "rejects entity name with special chars"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (crud/validate-entity-name! (keyword "user.name") "test")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (crud/validate-entity-name! (keyword "user@name") "test"))))
+
+  (testing "error data contains operation context"
+    (try
+      (crud/validate-entity-name! "not-keyword" "my-operation")
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-entity-name (:type (ex-data e))))
+        (is (= "not-keyword" (:entity-name (ex-data e))))
+        (is (= "my-operation" (:operation (ex-data e))))
+        (is (= java.lang.String (:entity-name-type (ex-data e))))))))
+
+
+;; === validate-where-clause-types! comprehensive tests ===
+
+(deftest validate-where-clause-types-comprehensive-test
+  (testing "passes for nil where clause"
+    (is (nil? (crud/validate-where-clause-types! :entity {:f {:type :text}} nil))))
+
+  (testing "passes for empty where clause"
+    (is (nil? (crud/validate-where-clause-types! :entity {:f {:type :text}} {}))))
+
+  (testing ":id field always treated as :uuid"
+    (is (nil? (crud/validate-where-clause-types! :entity {} {:id (random-uuid)})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (crud/validate-where-clause-types! :entity {} {:id "not-a-uuid"}))))
+
+  (testing "error data contains all context"
+    (try
+      (crud/validate-where-clause-types! :my-entity {:status {:type :int}} {:status "text"})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :validation-error/type-mismatch (:type (ex-data e))))
+        (is (= :my-entity (:entity (ex-data e))))
+        (is (= :status (:field (ex-data e))))
+        (is (= :int (:expected-type (ex-data e))))
+        (is (= :text (:actual-type (ex-data e))))))))
+
+
+;; === validate-where-clause! comprehensive tests ===
+
+(deftest validate-where-clause-comprehensive-test
+  (testing "passes for nil"
+    (is (nil? (crud/validate-where-clause! nil))))
+
+  (testing "passes for empty map"
+    (is (nil? (crud/validate-where-clause! {}))))
+
+  (testing "passes for map with values"
+    (is (nil? (crud/validate-where-clause! {:name "test" :age 25}))))
+
+  (testing "error data contains where clause info"
+    (try
+      (crud/validate-where-clause! :not-a-map)
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-where-clause (:type (ex-data e))))
+        (is (= :not-a-map (:where (ex-data e))))
+        (is (= clojure.lang.Keyword (:where-type (ex-data e))))))))
+
+
+;; === validate-data-is-map! comprehensive tests ===
+
+(deftest validate-data-is-map-comprehensive-test
+  (testing "passes for various map types"
+    (is (nil? (crud/validate-data-is-map! :entity {})))
+    (is (nil? (crud/validate-data-is-map! :entity {:a 1})))
+    (is (nil? (crud/validate-data-is-map! :entity (sorted-map :a 1 :b 2)))))
+
+  (testing "error data contains all context"
+    (try
+      (crud/validate-data-is-map! :my-entity [1 2 3])
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-data (:type (ex-data e))))
+        (is (= :my-entity (:entity-name (ex-data e))))
+        (is (= [1 2 3] (:data (ex-data e))))
+        (is (= clojure.lang.PersistentVector (:data-type (ex-data e))))))))
+
+
+;; === validate-required-fields! comprehensive tests ===
+
+(deftest validate-required-fields-comprehensive-test
+  (testing "skips :id field (auto-generated)"
+    (let [fields {:id {:type :uuid :nullable? false}
+                  :name {:type :text :nullable? false}}]
+      ;; :id is skipped, so only :name is required
+      (is (nil? (crud/validate-required-fields! :entity fields {:name "test"})))))
+
+  (testing "skips nullable fields"
+    (let [fields {:required {:type :text :nullable? false}
+                  :optional {:type :text :nullable? true}}]
+      (is (nil? (crud/validate-required-fields! :entity fields {:required "value"})))))
+
+  (testing "error data contains field info"
+    (let [fields {:name {:type :text :nullable? false}}]
+      (try
+        (crud/validate-required-fields! :my-entity fields {})
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :validation-error/required-field-missing (:type (ex-data e))))
+          (is (= :my-entity (:entity (ex-data e))))
+          (is (= :name (:field (ex-data e)))))))))
+
+
+;; === validate-no-duplicate-ids! comprehensive tests ===
+
+(deftest validate-no-duplicate-ids-comprehensive-test
+  (testing "filters out nil ids before checking duplicates"
+    (is (nil? (crud/validate-no-duplicate-ids! :entity
+                                               [{:id nil} {:id nil} {:name "a"}]))))
+
+  (testing "error data contains duplicate ids"
+    (let [dup-id (random-uuid)]
+      (try
+        (crud/validate-no-duplicate-ids! :my-entity
+                                         [{:id dup-id} {:id (random-uuid)} {:id dup-id}])
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :validation-error/duplicate-ids (:type (ex-data e))))
+          (is (= :my-entity (:entity (ex-data e))))
+          (is (= [dup-id] (:duplicate-ids (ex-data e)))))))))
+
+
+;; === validate-where-clause-fields! comprehensive tests ===
+
+(deftest validate-where-clause-fields-comprehensive-test
+  (testing "passes for nil where clause"
+    (is (nil? (crud/validate-where-clause-fields! :entity {:f {:type :text}} nil))))
+
+  (testing ":id is always valid even if not in fields"
+    (is (nil? (crud/validate-where-clause-fields! :entity {} {:id (random-uuid)}))))
+
+  (testing "error data contains known fields list"
+    (try
+      (crud/validate-where-clause-fields! :my-entity {:name {:type :text}} {:unknown 1})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :validation-error/unknown-field (:type (ex-data e))))
+        (is (= :my-entity (:entity (ex-data e))))
+        (is (= :unknown (:field (ex-data e))))
+        (is (= [:name] (:known-fields (ex-data e))))))))

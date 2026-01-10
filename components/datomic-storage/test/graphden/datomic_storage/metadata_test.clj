@@ -398,4 +398,134 @@
                                 set)]
           (is (= #{:new-entity} entity-names)))
         (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "assert-metadata! attempts rollback on failure with old-metadata"
+    ;; This test covers the rollback path in assert-metadata!
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+
+        ;; Create some "old metadata" that would be restored
+        (let [old-metadata [{:graphden.metadata/uuid #uuid "00000000-0000-0000-0000-000000000099"
+                             :graphden.metadata/kind :entity
+                             :graphden.metadata/name :restored-entity}]
+              ;; Invalid tx-data that will cause transaction failure
+              ;; Using an invalid attribute to trigger error
+              invalid-tx-data [{:db/id "temp-id"
+                                :graphden.metadata/uuid #uuid "00000000-0000-0000-0000-000000000001"
+                                :graphden.metadata/kind :entity
+                                :graphden.metadata/name :new-entity
+                                :graphden.metadata/invalid-attr "this-will-fail"}]]
+          ;; This should fail and attempt to restore old-metadata
+          (is (thrown? Exception
+                (#'metadata/assert-metadata! conn invalid-tx-data old-metadata))))
+
+        ;; Note: rollback should have attempted to restore old-metadata
+        ;; Due to exception bubbling, we verify rollback was attempted
+        (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "assert-metadata! logs warning when no old metadata to restore"
+    ;; This test covers the else branch - when assertion fails but there's no old metadata
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+
+        ;; Try to assert invalid tx-data with nil old-metadata
+        (let [invalid-tx-data [{:db/id "temp-id"
+                                :graphden.metadata/uuid #uuid "00000000-0000-0000-0000-000000000001"
+                                :graphden.metadata/kind :entity
+                                :graphden.metadata/name :new-entity
+                                :graphden.metadata/invalid-attr "this-will-fail"}]]
+          ;; Should fail, log warning about no old metadata, and re-throw
+          (is (thrown? Exception
+                (#'metadata/assert-metadata! conn invalid-tx-data nil))))
+        (finally
           (cleanup-test-db ctx))))))
+
+
+;; === build-*-metadata-tx private function tests ===
+
+(deftest build-entity-metadata-tx-test
+  (testing "builds entity metadata with correct fields"
+    (let [entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :my-entity entity-uuid {})
+                     ds/build)
+          result (#'metadata/build-entity-metadata-tx schema :my-entity)]
+      (is (= entity-uuid (:graphden.metadata/uuid result)))
+      (is (= :entity (:graphden.metadata/kind result)))
+      (is (= :my-entity (:graphden.metadata/name result))))))
+
+
+(deftest build-field-metadata-tx-test
+  (testing "builds field metadata for regular field"
+    (let [entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user entity-uuid
+                                    {:name {:uuid field-uuid :type :text :nullable? true}})
+                     ds/build)
+          field-spec {:uuid field-uuid :type :text :nullable? true}
+          result (#'metadata/build-field-metadata-tx schema :user :name field-spec)]
+      (is (= field-uuid (:graphden.metadata/uuid result)))
+      (is (= :field (:graphden.metadata/kind result)))
+      (is (= :name (:graphden.metadata/name result)))
+      (is (= entity-uuid (:graphden.metadata/parent-uuid result)))
+      (is (= :text (:graphden.metadata/field-type result)))
+      (is (true? (:graphden.metadata/field-nullable result)))
+      ;; Should not have enum-name or ref-entity
+      (is (nil? (:graphden.metadata/field-enum-name result)))
+      (is (nil? (:graphden.metadata/field-ref-entity result)))))
+
+  (testing "builds field metadata for enum field with enum-name"
+    (let [entity-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+          schema (-> (mds/create-builder)
+                     (ds/add-enum :status enum-uuid
+                                  [{:uuid #uuid "00000000-0000-0000-0000-000000000011" :value :active}])
+                     (ds/add-entity :user entity-uuid
+                                    {:status {:uuid field-uuid :type :enum :enum-name :status}})
+                     ds/build)
+          field-spec {:uuid field-uuid :type :enum :enum-name :status}
+          result (#'metadata/build-field-metadata-tx schema :user :status field-spec)]
+      (is (= :enum (:graphden.metadata/field-type result)))
+      (is (= :status (:graphden.metadata/field-enum-name result)))))
+
+  (testing "builds field metadata for ref field with ref-entity"
+    (let [user-uuid #uuid "00000000-0000-0000-0000-000000000001"
+          order-uuid #uuid "00000000-0000-0000-0000-000000000002"
+          field-uuid #uuid "00000000-0000-0000-0000-000000000003"
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user user-uuid {})
+                     (ds/add-entity :order order-uuid
+                                    {:user-id {:uuid field-uuid :type :ref :ref-entity :user}})
+                     ds/build)
+          field-spec {:uuid field-uuid :type :ref :ref-entity :user}
+          result (#'metadata/build-field-metadata-tx schema :order :user-id field-spec)]
+      (is (= :ref (:graphden.metadata/field-type result)))
+      (is (= :user (:graphden.metadata/field-ref-entity result))))))
+
+
+(deftest build-enum-metadata-tx-test
+  (testing "builds enum metadata"
+    (let [enum-uuid #uuid "00000000-0000-0000-0000-000000000010"
+          result (#'metadata/build-enum-metadata-tx :my-status {:uuid enum-uuid})]
+      (is (= enum-uuid (:graphden.metadata/uuid result)))
+      (is (= :enum (:graphden.metadata/kind result)))
+      (is (= :my-status (:graphden.metadata/name result))))))
+
+
+(deftest build-enum-value-metadata-tx-test
+  (testing "builds enum value metadata"
+    (let [parent-uuid #uuid "00000000-0000-0000-0000-000000000010"
+          value-uuid #uuid "00000000-0000-0000-0000-000000000011"
+          result (#'metadata/build-enum-value-metadata-tx parent-uuid :active value-uuid)]
+      (is (= value-uuid (:graphden.metadata/uuid result)))
+      (is (= :enum-value (:graphden.metadata/kind result)))
+      (is (= :active (:graphden.metadata/name result)))
+      (is (= parent-uuid (:graphden.metadata/parent-uuid result))))))

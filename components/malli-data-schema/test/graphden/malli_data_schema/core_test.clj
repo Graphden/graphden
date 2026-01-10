@@ -5,7 +5,8 @@
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.field-types.interface :as ft]
     [graphden.malli-data-schema.core :as core]
-    [graphden.malli-data-schema.interface :as mds]))
+    [graphden.malli-data-schema.interface :as mds]
+    [graphden.malli-data-schema.validators :as validators]))
 
 
 ;; Helper to generate UUIDs for tests
@@ -1231,7 +1232,7 @@
 
 (deftest validate-single-ref-unknown-type-test
   (testing "validate-single-ref with unknown ref-type throws"
-    (let [validate-single-ref-fn #'core/validate-single-ref]
+    (let [validate-single-ref-fn #'validators/validate-single-ref]
       ;; case without default throws IllegalArgumentException for unknown keys
       (is (thrown? IllegalArgumentException
             (validate-single-ref-fn :entity :field :unknown-type :ref-name {} {}))))))

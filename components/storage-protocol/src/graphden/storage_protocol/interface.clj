@@ -336,10 +336,8 @@
     (get (:fn-schemas this) fn-schema-id))
 
   (graph-get-arg-schemas [this fn-schema-id]
-    (into {}
-          (filter (fn [[_ arg-schema]]
-                    (= fn-schema-id (:fn-schema-id arg-schema))))
-          (:arg-schemas this)))
+    ;; O(1) lookup via pre-built index instead of O(n) filter
+    (get (:arg-schemas-by-fn-schema this) fn-schema-id {}))
 
   (graph-get-resolved-args [this fn-id]
     (get (:resolved-args this) fn-id))

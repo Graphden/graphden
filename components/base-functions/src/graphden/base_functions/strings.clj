@@ -66,7 +66,11 @@
    - Catches all regex engine exceptions
 
    Limits are configurable via config/*max-regex-length* and
-   config/*regex-compile-timeout-ms* dynamic vars."
+   config/*regex-compile-timeout-ms* dynamic vars.
+
+   Note: On timeout, we call future-cancel to signal cancellation.
+   While regex compilation doesn't respond to thread interruption,
+   cancelling prevents result delivery and allows GC of the future."
   [pattern-str]
   (let [max-len config/*max-regex-length*
         timeout-ms config/*regex-compile-timeout-ms*]
@@ -76,17 +80,26 @@
                        :pattern-length (count pattern-str)
                        :max-length max-len
                        :hint "Use simpler separator or literal string"})))
-    (let [result (deref
-                   (future
-                     (try
-                       {:pattern (re-pattern pattern-str)}
-                       (catch java.util.regex.PatternSyntaxException e
-                         {:error :syntax :cause (Throwable/.getMessage e)})
-                       (catch Exception e
-                         {:error :engine :cause (Throwable/.getMessage e)})))
-                   timeout-ms
-                   {:error :timeout})]
+    (let [fut (future
+                (try
+                  {:pattern (re-pattern pattern-str)}
+                  (catch java.util.regex.PatternSyntaxException e
+                    {:error :syntax :cause (Throwable/.getMessage e)})
+                  (catch Exception e
+                    {:error :engine :cause (Throwable/.getMessage e)})))
+          result (deref fut timeout-ms ::timeout)]
       (cond
+        (= result ::timeout)
+        (do
+          ;; Cancel future to prevent result delivery and allow GC.
+          ;; Note: regex compilation won't actually stop, but the future
+          ;; will be marked as cancelled and won't hold references.
+          (future-cancel fut)
+          (throw (ex-info "Regex pattern too complex (compilation timeout)"
+                          {:type :execution-error/regex-too-complex
+                           :separator pattern-str
+                           :timeout-ms timeout-ms})))
+
         (:pattern result)
         (:pattern result)
 
@@ -95,12 +108,6 @@
                         {:type :execution-error/invalid-regex
                          :separator pattern-str
                          :cause (:cause result)}))
-
-        (= (:error result) :timeout)
-        (throw (ex-info "Regex pattern too complex (compilation timeout)"
-                        {:type :execution-error/regex-too-complex
-                         :separator pattern-str
-                         :timeout-ms timeout-ms}))
 
         :else
         (throw (ex-info "Regex engine error"

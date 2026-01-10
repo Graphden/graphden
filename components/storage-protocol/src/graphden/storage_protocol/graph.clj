@@ -182,12 +182,24 @@
 ;; === ExecutionGraphResult record ===
 
 (defrecord ExecutionGraphResult
-  [fns fn-schemas arg-schemas resolved-args fn-result-values])
+  [fns fn-schemas arg-schemas resolved-args fn-result-values arg-schemas-by-fn-schema])
+
+
+(defn- build-arg-schemas-index
+  "Builds index of fn-schema-id -> {arg-schema-id -> arg-schema}.
+   Provides O(1) lookup by fn-schema-id instead of O(n) filter."
+  [arg-schemas]
+  (reduce-kv
+    (fn [acc arg-schema-id arg-schema]
+      (update acc (:fn-schema-id arg-schema) assoc arg-schema-id arg-schema))
+    {}
+    arg-schemas))
 
 
 (defn ->execution-graph
   "Creates an ExecutionGraphResult record from a map.
-   Validates that all required keys are present and non-empty."
+   Validates that all required keys are present and non-empty.
+   Builds arg-schemas-by-fn-schema index for O(1) lookup."
   [{:keys [fns fn-schemas arg-schemas resolved-args fn-result-values]
     :or {fn-result-values {}}}]
   (when-not (map? fns)
@@ -208,7 +220,8 @@
   (when-not (map? resolved-args)
     (throw (ex-info "ExecutionGraphResult requires :resolved-args map"
                     {:type :invalid-data :received (type resolved-args)})))
-  (->ExecutionGraphResult fns fn-schemas arg-schemas resolved-args fn-result-values))
+  (->ExecutionGraphResult fns fn-schemas arg-schemas resolved-args fn-result-values
+                          (build-arg-schemas-index arg-schemas)))
 
 
 (defn execution-graph?

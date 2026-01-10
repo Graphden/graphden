@@ -138,7 +138,7 @@
    - context: Map of additional context (e.g., {:entity-name :user})"
   [^java.sql.SQLException e log-prefix operation context]
   (let [error-type (classify-sql-error e)
-        sql-state (java.sql.SQLException/.getSQLState e)
+        sql-state (get-sql-state e)
         message (java.sql.SQLException/.getMessage e)
         ;; Redact sensitive data from context before logging
         safe-context (sp/redact-sensitive-deep context)

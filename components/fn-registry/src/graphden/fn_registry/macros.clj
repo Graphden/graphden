@@ -191,19 +191,54 @@
     [graphden.executor.interface :as exec]))
 
 
+;; === Extensible Binding Forms Registry ===
+;;
+;; These are the built-in Clojure forms that introduce new bindings.
+;; Custom binding forms (e.g., from core.async or other libraries) can be
+;; registered via *custom-binding-forms*.
+
+(def ^:private builtin-binding-forms
+  "Built-in Clojure forms that introduce new variable bindings."
+  #{'fn 'fn* 'let 'let* 'loop 'loop* 'letfn 'letfn*
+    'for 'doseq 'with-open 'with-local-vars 'binding
+    'catch})
+
+
+(def ^:dynamic *custom-binding-forms*
+  "Set of additional binding forms to recognize in defbase macro.
+   Use this to register custom binding macros from libraries.
+
+   Example:
+   ```clojure
+   ;; Register core.async binding forms
+   (binding [*custom-binding-forms* #{'clojure.core.async/go 'clojure.core.async/go-loop}]
+     (defbase my-fn ...))
+   ```
+
+   Each form should follow standard binding conventions where the second
+   element is a binding vector."
+  #{})
+
+
 (defn- binding-form?
-  "Returns true if form is a binding construct (fn, let, loop, etc.)."
+  "Returns true if form is a binding construct (fn, let, loop, etc.).
+   Recognizes both built-in forms and custom forms registered in *custom-binding-forms*."
   [form]
   (and (seq? form)
        (symbol? (first form))
-       (#{'fn 'fn* 'let 'let* 'loop 'loop* 'letfn 'letfn*
-          'for 'doseq 'with-open 'with-local-vars 'binding
-          'catch} (first form))))
+       (or (builtin-binding-forms (first form))
+           (*custom-binding-forms* (first form)))))
 
 
 (defn- extract-bound-symbols
   "Extracts symbols bound by a binding form.
-   Returns set of newly bound symbols."
+   Returns set of newly bound symbols.
+
+   Note: For custom binding forms registered via *custom-binding-forms*, this returns
+   an empty set (conservative default). This means symbol shadowing won't be detected
+   for custom forms, which may result in unnecessary derefs but won't cause incorrect
+   behavior. If precise shadowing detection is needed, the custom form should follow
+   the let-style binding convention: (custom-form [x val y val2] body)"
   [form]
   (let [op (first form)]
     (cond
@@ -235,6 +270,14 @@
       (if (>= (count form) 3)
         #{(nth form 2)}
         #{})
+
+      ;; Custom binding forms from *custom-binding-forms* - try let-style extraction
+      ;; Falls back to empty set if bindings don't follow let convention
+      (*custom-binding-forms* op)
+      (let [bindings (second form)]
+        (if (vector? bindings)
+          (set (filter symbol? (take-nth 2 bindings)))
+          #{}))
 
       :else #{})))
 

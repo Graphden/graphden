@@ -137,6 +137,15 @@
       (initialize-with-base-fns!)))
 
 
+;; === Macro Configuration ===
+
+(def ^:dynamic *custom-binding-forms*
+  "Set of additional binding forms to recognize in defbase macro.
+   Use this to register custom binding macros from libraries (e.g., core.async).
+   See graphden.fn-registry.macros/*custom-binding-forms* for details."
+  macros/*custom-binding-forms*)
+
+
 ;; === Macro for Defining Base Functions ===
 
 (defmacro defbase

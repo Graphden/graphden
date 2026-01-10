@@ -1,6 +1,6 @@
 # Graphden: Visual Functional Programming System
 
-> **Last updated:** 2026-01-07
+> **Last updated:** 2026-01-10
 >
 > This document describes the technical architecture of graphden.
 > For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
@@ -12,9 +12,10 @@
 3. [Recursion and Cycles](#part-3-recursion-and-cycles) - Handling recursive patterns
 4. [Data Schema](#part-4-data-schema) - Entity definitions
 5. [Execution Model](#part-5-execution-model) - Lazy evaluation with thunks
-6. [System Limitations](#part-6-system-limitations) - Known constraints and mitigations
-7. [Distributed Execution](#part-7-distributed-execution-future) - Parallelization and distribution
-8. [Appendices](#appendix-a-component-dependency-graph) - Reference material
+6. [Execution Graph Caching](#part-6-execution-graph-caching) - O(1) graph resolution
+7. [System Limitations](#part-7-system-limitations) - Known constraints and mitigations
+8. [Distributed Execution](#part-8-distributed-execution-future) - Parallelization and distribution
+9. [Appendices](#appendix-a-component-dependency-graph) - Reference material
 
 ---
 
@@ -632,7 +633,114 @@ fn: map-doubles
 
 ---
 
-## Part 6: System Limitations
+## Part 6: Execution Graph Caching
+
+### The Problem
+
+Without caching, every function execution requires:
+1. Resolve the execution graph (recursive queries to load fns, schemas, args)
+2. Merge arguments from parent chain
+3. Classify UUID references
+
+For deep graphs, this means O(depth) database queries per execution.
+
+### Solution: CacheStorage Protocol
+
+The caching layer provides O(1) access to precomputed execution graphs:
+
+```clojure
+(defprotocol CacheStorage
+  (get-cached-graph [this fn-id])      ; O(1) cache lookup
+  (save-cache! [this fn-id graph deps]) ; Store with dependencies
+  (delete-cache! [this fn-id])          ; Explicit invalidation
+  (find-caches-by-fn-dep [this dep-fn-id])        ; Find affected caches
+  (find-caches-by-fn-schema-dep [this dep-fn-schema-id])
+  (find-caches-by-arg-schema-dep [this dep-arg-schema-id]))
+```
+
+### Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    CachedStorage                             │
+│  (decorator wrapping base storage + cache)                  │
+├─────────────────────────────────────────────────────────────┤
+│  resolve-execution-graph:                                    │
+│    1. Check cache → return if hit                           │
+│    2. Call base storage → compute graph                     │
+│    3. Save to cache with dependencies                       │
+│    4. Return graph                                          │
+├─────────────────────────────────────────────────────────────┤
+│  CRUD operations:                                            │
+│    1. Delegate to base storage                              │
+│    2. Invalidate affected caches                            │
+└─────────────────────────────────────────────────────────────┘
+         │                              │
+         v                              v
+┌─────────────────┐          ┌─────────────────┐
+│   Base Storage  │          │  Cache Storage  │
+│ (postgres, etc) │          │ (cache-postgres)│
+└─────────────────┘          └─────────────────┘
+```
+
+### Cache Invalidation Strategy
+
+The cache tracks dependencies with ref-counts for proper invalidation:
+
+```clojure
+{:fn-ids {fn-id-1 -> 2, fn-id-2 -> 1}        ; fn referenced 2 times
+ :fn-schema-ids {schema-id -> 1}              ; schema referenced 1 time
+ :arg-schema-ids {arg-schema-id-1 -> 3}}      ; arg-schema referenced 3 times
+```
+
+**Invalidation triggers:**
+
+| Entity | Operation | Action |
+|--------|-----------|--------|
+| fn | created | Create cache for new fn |
+| fn | updated (parent changed) | Invalidate fn + all dependents |
+| fn | deleted | Delete cache + invalidate dependents |
+| arg-value | created/updated/deleted | Invalidate owner-fn + dependents |
+| fn-schema | updated | Invalidate all caches using this schema |
+| arg-schema | updated | Invalidate all caches using this arg-schema |
+
+### Implementations
+
+| Component | Backend | Use Case |
+|-----------|---------|----------|
+| cache-memory | In-memory maps | Tests, single-process apps |
+| cache-postgres | PostgreSQL tables | Production, multi-process |
+| cache-datomic | Datomic entities | Immutable history, audit |
+
+### Usage
+
+```clojure
+(require '[graphden.postgres-storage.interface :as pg]
+         '[graphden.cache-postgres.interface :as cache-pg]
+         '[graphden.cached-storage.interface :as cached])
+
+;; Create base storage and cache
+(def storage (pg/create-storage config))
+(def cache (cache-pg/create-cache config))
+
+;; Wrap with caching
+(def cached-storage (cached/wrap-with-cache storage cache))
+
+;; Use normally - caching is transparent
+(sp/resolve-execution-graph cached-storage fn-id)  ; O(1) after first call
+```
+
+### Performance Characteristics
+
+| Operation | Without Cache | With Cache (hit) | With Cache (miss) |
+|-----------|--------------|------------------|-------------------|
+| resolve-execution-graph | O(depth) queries | O(1) lookup | O(depth) + O(1) save |
+| create-entity :fn | O(1) | O(1) + cache build | - |
+| update-entity :arg-value | O(1) | O(1) + invalidation cascade | - |
+
+---
+
+## Part 7: System Limitations
 
 ### What CANNOT Be Done Elegantly
 
@@ -659,7 +767,7 @@ fn: map-doubles
 
 ---
 
-## Part 7: Distributed Execution (Future)
+## Part 8: Distributed Execution (Future)
 
 ### Overview
 

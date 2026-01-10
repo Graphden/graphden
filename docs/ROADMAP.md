@@ -1,6 +1,6 @@
 # Graphden Roadmap
 
-> **Last updated:** 2026-01-07
+> **Last updated:** 2026-01-10
 >
 > This document tracks implementation status and future plans.
 > For technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -12,10 +12,11 @@
 | GraphConstraints Protocol | Done | All 5 validators |
 | StorageCRUD Protocol | Done | + Batch operations |
 | Executor with Thunks | Done | + Graph caching |
-| Base Functions | Partial | Arithmetic, logic, HOF done; I/O pending |
+| Base Functions | Partial | 50+ functions done; I/O pending |
 | Memory Storage | Done | Full protocol support |
 | PostgreSQL Storage | Done | Full protocol support |
 | Datomic Storage | Done | Full protocol support |
+| Execution Graph Caching | Done | O(1) resolution, auto-invalidation |
 | REST API | Planned | Phase 5 |
 | Web UI | Planned | Phase 5 |
 | Type System | Planned | Future work |
@@ -27,8 +28,9 @@
 ## Phase 0: Documentation [DONE]
 
 - Main README.md
-- Component READMEs for all 16 components
-- ARCHITECTURE.md document
+- Component READMEs for all 23 components
+- ARCHITECTURE.md document (with caching section)
+- CONSTRAINTS.md, ERROR_CODES.md, EXTENDING.md
 - This ROADMAP.md document
 
 ---
@@ -97,6 +99,36 @@
 - `register-base-fns!` - Register implementations
 - `sync-defs-to-storage!` - Sync schemas to storage
 - Deterministic UUID generation for idempotent operations
+
+---
+
+## Phase 3.5: Execution Graph Caching [DONE]
+
+**Goal**: O(1) graph resolution instead of O(depth) recursive queries.
+
+**3.5.1 CacheStorage protocol:**
+```clojure
+(defprotocol CacheStorage
+  (get-cached-graph [this fn-id])
+  (save-cache! [this fn-id graph dependencies])
+  (delete-cache! [this fn-id])
+  (find-caches-by-fn-dep [this dep-fn-id])
+  (find-caches-by-fn-schema-dep [this dep-fn-schema-id])
+  (find-caches-by-arg-schema-dep [this dep-arg-schema-id]))
+```
+
+**3.5.2 Components:**
+- `cache-protocol` - Protocol definition and utilities
+- `cache-data-schema` - Schema for cache storage
+- `cache-memory` - In-memory implementation
+- `cache-postgres` - PostgreSQL implementation
+- `cache-datomic` - Datomic implementation
+- `cached-storage` - Decorator with automatic invalidation
+
+**3.5.3 Features:**
+- Dependency tracking with ref-counts
+- Automatic invalidation on entity changes
+- Extensible via multimethods
 
 ---
 
@@ -174,7 +206,7 @@
 - Handling side effects and ordering guarantees
 - Failure handling and retry strategy
 
-**See:** [ARCHITECTURE.md - Distributed Execution](ARCHITECTURE.md#part-7-distributed-execution-future)
+**See:** [ARCHITECTURE.md - Distributed Execution](ARCHITECTURE.md#part-8-distributed-execution-future)
 
 ---
 

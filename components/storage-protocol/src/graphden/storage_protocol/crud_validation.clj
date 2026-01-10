@@ -5,7 +5,9 @@
    - Required field presence
    - Duplicate ID detection
    - Entity name format
-   - Where clause structure and types")
+   - Where clause structure and types"
+  (:require
+    [graphden.field-types.interface :as ft]))
 
 
 (defn validate-required-fields!
@@ -122,38 +124,35 @@
                            :known-fields (vec (sort known-fields))})))))))
 
 
+(defn- infer-actual-type
+  "Infers the actual type of a value for error reporting.
+   Returns a type keyword or :unknown."
+  [value]
+  (cond
+    (nil? value) :nil
+    (uuid? value) :uuid
+    (string? value) :text
+    (integer? value) :int
+    (boolean? value) :bool
+    (or (float? value) (decimal? value)) :numeric
+    (inst? value) :timestamptz
+    (bytes? value) :bytes
+    (keyword? value) :enum
+    (or (map? value) (vector? value)) :jsonb
+    :else :unknown))
+
+
 (defn- check-type-match
   "Checks if a value matches the expected field type.
    Returns nil if valid, or error-map {:expected ... :actual ...} if invalid.
 
-   This is a soft check for common types - exotic types pass through
-   to allow backend-specific handling."
+   Uses field-types validators for consistent type checking across the codebase.
+   Exotic types pass through to allow backend-specific handling."
   [value field-type]
-  (let [actual-type (cond
-                      (nil? value) :nil
-                      (uuid? value) :uuid
-                      (string? value) :text
-                      (integer? value) :int
-                      (boolean? value) :bool
-                      (or (float? value) (decimal? value)) :numeric
-                      (inst? value) :timestamptz
-                      (bytes? value) :bytes
-                      (keyword? value) :enum
-                      (or (map? value) (vector? value) (sequential? value)) :jsonb
-                      :else :unknown)]
+  (let [actual-type (infer-actual-type value)]
     ;; nil is valid for any nullable field - caller handles nullability
     (when (and (not= actual-type :nil)
-               (not= actual-type :unknown)
-               (not= actual-type field-type)
-               ;; Allow common compatible types
-               (not (and (= field-type :jsonb)
-                         (#{:text} actual-type)))
-               (not (and (= field-type :union)
-                         true))  ; union accepts anything
-               (not (and (= field-type :ref)
-                         (= actual-type :uuid)))
-               (not (and (= field-type :numeric)
-                         (= actual-type :int))))
+               (not (ft/valid-type? field-type value)))
       {:expected field-type :actual actual-type})))
 
 

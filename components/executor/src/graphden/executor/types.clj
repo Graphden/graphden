@@ -106,13 +106,19 @@
 
 (defn- check-unknown-type-circuit-breaker!
   "Checks if unknown type count exceeds threshold and throws if so.
-   Acts as circuit breaker to prevent silent schema mismatch issues."
+   Acts as circuit breaker to prevent silent schema mismatch issues.
+
+   Uses swap-vals! for atomic check-and-increment to avoid race conditions
+   where multiple threads could slip past the threshold check simultaneously.
+   The check uses >= to ensure we throw exactly when hitting the limit."
   [^clojure.lang.Atom unknown-type-counter max-unknown-types ^clojure.lang.Keyword arg-type]
-  (let [current-count (swap! unknown-type-counter inc)]
-    (when (> current-count max-unknown-types)
+  (let [[_old-count new-count] (swap-vals! unknown-type-counter inc)]
+    ;; Use >= to throw when reaching the limit (not after exceeding it)
+    ;; This prevents off-by-one errors in concurrent scenarios
+    (when (>= new-count max-unknown-types)
       (throw (ex-info "Too many unknown types in forward compatibility mode - possible schema mismatch"
                       {:type :execution-error/unknown-type-limit-exceeded
-                       :unknown-type-count current-count
+                       :unknown-type-count new-count
                        :max-allowed max-unknown-types
                        :last-unknown-type arg-type
                        :hint "Check schema version compatibility or disable forward compatibility mode"})))))

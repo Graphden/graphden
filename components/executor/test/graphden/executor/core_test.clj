@@ -288,30 +288,34 @@
         (#'types/check-unknown-type-circuit-breaker! counter 10 :custom-type))
       (is (= 5 @counter))))
 
-  (testing "throws when exceeding limit"
-    (let [counter (atom 10)]  ; Start at limit
+  (testing "throws when reaching limit"
+    ;; With >= check and swap-vals!, throws exactly when reaching the limit
+    ;; Counter at 9, after increment becomes 10, which triggers (>= 10 10)
+    (let [counter (atom 9)]  ; One below limit
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Too many unknown types"
             (#'types/check-unknown-type-circuit-breaker! counter 10 :custom-type)))))
 
   (testing "exception contains correct data"
-    (let [counter (atom 10)]
+    ;; Counter at 9, after increment becomes 10 (the trigger point)
+    (let [counter (atom 9)]
       (try
         (#'types/check-unknown-type-circuit-breaker! counter 10 :my-custom-type)
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (is (= :execution-error/unknown-type-limit-exceeded (:type (ex-data e))))
-          (is (= 11 (:unknown-type-count (ex-data e))))
+          (is (= 10 (:unknown-type-count (ex-data e))))  ; Now throws at exactly limit
           (is (= 10 (:max-allowed (ex-data e))))
           (is (= :my-custom-type (:last-unknown-type (ex-data e))))))))
 
   (testing "respects configurable limit"
     (let [counter (atom 0)]
-      ;; With limit of 3, should allow 3 calls
-      (dotimes [_ 3]
+      ;; With limit of 3 and >= check, allows calls while counter < 3
+      ;; 0→1, 1→2 are allowed; 2→3 throws because (>= 3 3)
+      (dotimes [_ 2]
         (#'types/check-unknown-type-circuit-breaker! counter 3 :custom-type))
-      (is (= 3 @counter))
-      ;; Fourth call should throw
+      (is (= 2 @counter))
+      ;; Third call should throw (reaching limit of 3)
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Too many unknown types"
             (#'types/check-unknown-type-circuit-breaker! counter 3 :custom-type))))))

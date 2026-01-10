@@ -172,20 +172,13 @@
 
 ;; === Execution ===
 
-(defn- check-limits!
-  "Checks execution limits (depth, timeout). Throws if exceeded.
-   Logs warning when approaching limits (80% threshold).
-
-   IMPORTANT: Timeout is checked at the START of each function call, not during
-   execution. This means a long-running base function will complete fully even
-   if it exceeds the timeout. The timeout is a best-effort limit, not a hard
-   guarantee. For precise timeout control, base functions should implement
-   their own timeout logic (e.g., using futures with deref timeout)."
+(defn- check-depth-limit!
+  "Checks recursion depth limit. Throws if exceeded.
+   Logs warning when approaching limit (at 80% threshold, exactly once)."
   [context]
   (let [depth (:depth context)
         max-depth (:max-depth context)
         depth-threshold (long (* max-depth ctx/warning-threshold-ratio))]
-    ;; Warn when approaching depth limit (only once at threshold)
     (when (= depth depth-threshold)
       (log/warn "Approaching max recursion depth"
                 {:depth depth
@@ -195,11 +188,22 @@
       (throw (ex-info "Maximum recursion depth exceeded"
                       {:type :execution-error/max-depth-exceeded
                        :depth depth
-                       :max-depth max-depth}))))
+                       :max-depth max-depth})))))
+
+
+(defn- check-timeout-limit!
+  "Checks execution timeout. Throws if exceeded.
+   Logs warning when approaching timeout (within warning window after 80% threshold).
+
+   IMPORTANT: Timeout is checked at the START of each function call, not during
+   execution. This means a long-running base function will complete fully even
+   if it exceeds the timeout. The timeout is a best-effort limit, not a hard
+   guarantee. For precise timeout control, base functions should implement
+   their own timeout logic (e.g., using futures with deref timeout)."
+  [context]
   (let [elapsed (- (System/currentTimeMillis) (:start-time context))
         timeout-ms (:timeout-ms context)
         timeout-threshold (long (* timeout-ms ctx/warning-threshold-ratio))]
-    ;; Warn when approaching timeout (check range to avoid repeated warnings)
     (when (and (>= elapsed timeout-threshold)
                (< elapsed (+ timeout-threshold ctx/timeout-warning-window-ms)))
       (log/warn "Approaching execution timeout"
@@ -214,6 +218,13 @@
                        :timeout-ms timeout-ms
                        :depth (:depth context)
                        :hint "Consider increasing timeout-ms or optimizing the graph"})))))
+
+
+(defn- check-limits!
+  "Checks all execution limits (depth, timeout). Throws if any exceeded."
+  [context]
+  (check-depth-limit! context)
+  (check-timeout-limit! context))
 
 
 (defn- execute-internal

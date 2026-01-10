@@ -6,11 +6,8 @@
     [graphden.postgres-storage.constraints :as constraints]
     [graphden.postgres-storage.interface :as pg]
     [graphden.storage-protocol.interface :as sp]
-    [graphden.storage-protocol.test-helpers :as th]
-    [next.jdbc :as jdbc])
-  (:import
-    (org.testcontainers.containers
-      PostgreSQLContainer)))
+    [graphden.storage-protocol.postgres-test-helpers :as pth]
+    [graphden.storage-protocol.test-helpers :as th]))
 
 
 ;; === Testcontainers setup ===
@@ -18,48 +15,14 @@
 (def ^:dynamic *container* nil)
 
 
-(defn- clean-database!
-  [container]
-  (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
-        username (PostgreSQLContainer/.getUsername container)
-        password (PostgreSQLContainer/.getPassword container)]
-    (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
-                                           :user username
-                                           :password password})]
-      (jdbc/execute! conn ["DROP SCHEMA public CASCADE"])
-      (jdbc/execute! conn ["CREATE SCHEMA public"])
-      (jdbc/execute! conn ["GRANT ALL ON SCHEMA public TO PUBLIC"]))))
-
-
 (defn- create-test-storage
   []
-  (clean-database! *container*)
-  (pg/create-storage {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-                      :username (PostgreSQLContainer/.getUsername *container*)
-                      :password (PostgreSQLContainer/.getPassword *container*)
-                      :pool-size 2}))
+  (pth/clean-database-fast! *container*)
+  (pg/create-storage (pth/get-container-config *container*)))
 
 
-(defn with-postgres-container
-  [f]
-  (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
-                    (PostgreSQLContainer/.withStartupAttempts 3))]
-    (PostgreSQLContainer/.start container)
-    (try
-      (binding [*container* container]
-        (f))
-      (finally
-        (PostgreSQLContainer/.stop container)))))
-
-
-(defn with-clean-database
-  [f]
-  (clean-database! *container*)
-  (f))
-
-
-(use-fixtures :once with-postgres-container)
-(use-fixtures :each with-clean-database)
+(use-fixtures :once (pth/create-container-fixture #'*container*))
+(use-fixtures :each (pth/create-clean-db-fixture #'*container*))
 
 
 ;; === ConstraintHelpers protocol tests ===

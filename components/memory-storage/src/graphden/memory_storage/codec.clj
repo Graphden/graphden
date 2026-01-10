@@ -46,18 +46,3 @@
   "Creates a memory value codec instance."
   []
   (->MemoryValueCodec))
-
-
-(def ^:private default-codec (delay (create-codec)))
-
-
-(defn encode-row
-  "Encodes a row using the default codec (passthrough for memory)."
-  [row field-specs]
-  (sp/encode-row @default-codec row field-specs))
-
-
-(defn decode-row
-  "Decodes a row using the default codec (passthrough for memory)."
-  [row field-specs]
-  (sp/decode-row @default-codec row field-specs))

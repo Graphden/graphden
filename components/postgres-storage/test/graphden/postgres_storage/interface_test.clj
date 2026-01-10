@@ -14,6 +14,7 @@
     [graphden.postgres-storage.util :as util]
     [graphden.storage-protocol.contract-tests :as contract]
     [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as pth]
     [graphden.storage-protocol.test-helpers :as th]
     [next.jdbc :as jdbc])
   (:import
@@ -23,9 +24,7 @@
       SQLException)
     (java.util.concurrent
       CountDownLatch
-      TimeUnit)
-    (org.testcontainers.containers
-      PostgreSQLContainer)))
+      TimeUnit)))
 
 
 ;; === Testcontainers setup ===
@@ -33,55 +32,16 @@
 (def ^:dynamic *container* nil)
 
 
-(defn- clean-database!
-  "Drops all user-created objects in public schema.
-   Uses DROP SCHEMA CASCADE + CREATE SCHEMA for speed (single DDL vs N operations)."
-  [container]
-  (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
-        username (PostgreSQLContainer/.getUsername container)
-        password (PostgreSQLContainer/.getPassword container)]
-    (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
-                                           :user username
-                                           :password password})]
-      ;; Drop and recreate public schema - much faster than iterating tables/enums
-      (jdbc/execute! conn ["DROP SCHEMA public CASCADE"])
-      (jdbc/execute! conn ["CREATE SCHEMA public"])
-      (jdbc/execute! conn ["GRANT ALL ON SCHEMA public TO PUBLIC"]))))
-
-
-(defn with-postgres-container
-  [f]
-  (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
-                    (PostgreSQLContainer/.withStartupAttempts 3))]
-    (PostgreSQLContainer/.start container)
-    (when-not (PostgreSQLContainer/.isRunning container)
-      (throw (ex-info "Failed to start PostgreSQL test container" {})))
-    (try
-      (binding [*container* container]
-        (f))
-      (finally
-        (PostgreSQLContainer/.stop container)))))
-
-
-(defn with-clean-database
-  [f]
-  (clean-database! *container*)
-  (f))
-
-
-(use-fixtures :once with-postgres-container)
-(use-fixtures :each with-clean-database)
+(use-fixtures :once (pth/create-container-fixture #'*container*))
+(use-fixtures :each (pth/create-clean-db-fixture #'*container*))
 
 
 (defn- create-test-storage
   "Creates a test storage with a clean database.
    Cleans DB to ensure isolation when multiple storages created in one test."
   []
-  (clean-database! *container*)
-  (pg/create-storage {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-                      :username (PostgreSQLContainer/.getUsername *container*)
-                      :password (PostgreSQLContainer/.getPassword *container*)
-                      :pool-size 2}))
+  (pth/clean-database-fast! *container*)
+  (pg/create-storage (pth/get-container-config *container*)))
 
 
 ;; === Test helpers ===
@@ -751,9 +711,7 @@
   "Insert an orphaned metadata entry directly into the database.
    Uses a fresh connection to ensure the insert is committed."
   [kind entry-name parent-uuid extra]
-  (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-        username (PostgreSQLContainer/.getUsername *container*)
-        password (PostgreSQLContainer/.getPassword *container*)
+  (let [{:keys [jdbc-url username password]} (pth/get-container-config *container*)
         orphan-uuid (random-uuid)]
     (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
                                            :user username
@@ -864,9 +822,7 @@
                                                      :type :text}})]
           (sp/initialize storage schema))
         ;; Insert a metadata row with unknown kind
-        (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-              username (PostgreSQLContainer/.getUsername *container*)
-              password (PostgreSQLContainer/.getPassword *container*)]
+        (let [{:keys [jdbc-url username password]} (pth/get-container-config *container*)]
           (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
                                                  :user username
                                                  :password password})]
@@ -1002,11 +958,8 @@
     (is (true? (core/close-pool nil))))
 
   (testing "close-pool is idempotent - can be called multiple times"
-    (let [pool (core/create-pool {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-                                  :username (PostgreSQLContainer/.getUsername *container*)
-                                  :password (PostgreSQLContainer/.getPassword *container*)
-                                  :pool-size 1
-                                  :min-idle 1})]
+    (let [pool (core/create-pool (merge (pth/get-container-config *container*)
+                                        {:pool-size 1 :min-idle 1}))]
       ;; First close - returns true on success
       (is (true? (core/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool)))
@@ -1016,9 +969,7 @@
 
 
 (deftest create-pool-validation-test
-  (let [valid-opts {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-                    :username (PostgreSQLContainer/.getUsername *container*)
-                    :password (PostgreSQLContainer/.getPassword *container*)}]
+  (let [valid-opts (pth/get-container-config *container*)]
 
     (testing "pool-size must be positive integer"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -1113,9 +1064,7 @@
                                      :fields {:name {:uuid field-uuid :type :text}})]
           (sp/initialize storage schema))
         ;; Add a column with an unusual postgres type directly
-        (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-              username (PostgreSQLContainer/.getUsername *container*)
-              password (PostgreSQLContainer/.getPassword *container*)]
+        (let [{:keys [jdbc-url username password]} (pth/get-container-config *container*)]
           (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
                                                  :user username
                                                  :password password})]
@@ -1140,9 +1089,7 @@
                                      :fields {:name {:uuid field-uuid :type :text}})]
           (sp/initialize storage schema))
         ;; Add a timestamp without time zone column
-        (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-              username (PostgreSQLContainer/.getUsername *container*)
-              password (PostgreSQLContainer/.getPassword *container*)]
+        (let [{:keys [jdbc-url username password]} (pth/get-container-config *container*)]
           (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
                                                  :user username
                                                  :password password})]
@@ -1165,9 +1112,7 @@
                                      :fields {:name {:uuid field-uuid :type :text}})]
           (sp/initialize storage schema))
         ;; Add columns with various postgres types
-        (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-              username (PostgreSQLContainer/.getUsername *container*)
-              password (PostgreSQLContainer/.getPassword *container*)]
+        (let [{:keys [jdbc-url username password]} (pth/get-container-config *container*)]
           (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
                                                  :user username
                                                  :password password})]

@@ -123,93 +123,101 @@
   (run! #(validate-single-field-name entity-name %) (keys fields)))
 
 
+(defn- check-extra-keys!
+  "Throws if field-spec contains keys not in allowed-keys set."
+  [entity-name field-name field-type field-spec allowed-keys]
+  (let [extra-keys (apply disj (set (keys field-spec)) allowed-keys)]
+    (when (seq extra-keys)
+      (throw (ex-info (str "Field type " field-type " has unsupported attributes")
+                      {:entity entity-name
+                       :field field-name
+                       :unsupported-keys extra-keys
+                       :allowed-keys allowed-keys})))))
+
+
+(defn- validate-field-type!
+  "Validates that field-spec has a known :type. Returns the type."
+  [entity-name field-name field-spec]
+  (let [field-type (:type field-spec)]
+    (when-not field-type
+      (throw (ex-info "Field spec missing :type"
+                      {:entity entity-name :field field-name :spec field-spec})))
+    (when-not (contains? known-field-types field-type)
+      (throw (ex-info (str "Unknown field type: " field-type)
+                      {:entity entity-name
+                       :field field-name
+                       :type field-type
+                       :known-types known-field-types})))
+    field-type))
+
+
+(defn- validate-nullable!
+  "Validates :nullable? attribute if present."
+  [entity-name field-name field-spec in-variant?]
+  (when (contains? field-spec :nullable?)
+    (if in-variant?
+      (throw (ex-info "Union variant cannot have :nullable? attribute"
+                      {:entity entity-name :field field-name :spec field-spec}))
+      (let [nullable-val (:nullable? field-spec)]
+        (when-not (boolean? nullable-val)
+          (throw (ex-info "Field :nullable? must be a boolean"
+                          {:entity entity-name
+                           :field field-name
+                           :nullable? nullable-val
+                           :type (type nullable-val)})))))))
+
+
+(defn- validate-ref-type!
+  "Validates :ref field type requirements."
+  [entity-name field-name field-spec base-allowed-keys]
+  (when-not (:ref-entity field-spec)
+    (throw (ex-info "Field type :ref requires :ref-entity"
+                    {:entity entity-name :field field-name :spec field-spec})))
+  (check-extra-keys! entity-name field-name :ref field-spec
+                     (conj base-allowed-keys :ref-entity)))
+
+
+(defn- validate-enum-type!
+  "Validates :enum field type requirements."
+  [entity-name field-name field-spec base-allowed-keys]
+  (when-not (:enum-name field-spec)
+    (throw (ex-info "Field type :enum requires :enum-name"
+                    {:entity entity-name :field field-name :spec field-spec})))
+  (check-extra-keys! entity-name field-name :enum field-spec
+                     (conj base-allowed-keys :enum-name)))
+
+
+(declare validate-field-spec)
+
+
+(defn- validate-union-type!
+  "Validates :union field type requirements."
+  [entity-name field-name field-spec base-allowed-keys]
+  (let [variants (:variants field-spec)]
+    (when-not (vector? variants)
+      (throw (ex-info "Field type :union requires :variants vector"
+                      {:entity entity-name :field field-name :spec field-spec})))
+    (run! (fn [[idx variant]]
+            (validate-field-spec entity-name (str field-name "[" idx "]") variant true))
+          (map-indexed vector variants)))
+  (check-extra-keys! entity-name field-name :union field-spec
+                     (conj base-allowed-keys :variants)))
+
+
 (defn- validate-field-spec
   "Validates a single field spec structure. Throws if invalid.
    When in-variant? is true, :nullable? and :uuid are not allowed (variants cannot have them)."
   ([entity-name field-name field-spec]
    (validate-field-spec entity-name field-name field-spec false))
   ([entity-name field-name field-spec in-variant?]
-   (let [field-type (:type field-spec)
-         ;; Allowed keys depend on whether we're in a variant context
-         ;; Variants don't have :uuid or :nullable?
+   (let [field-type (validate-field-type! entity-name field-name field-spec)
          base-allowed-keys (if in-variant? #{:type} #{:type :nullable? :uuid})]
-     ;; Check :type is present
-     (when-not field-type
-       (throw (ex-info "Field spec missing :type"
-                       {:entity entity-name :field field-name :spec field-spec})))
-     ;; Check :type is known
-     (when-not (contains? known-field-types field-type)
-       (throw (ex-info (str "Unknown field type: " field-type)
-                       {:entity entity-name
-                        :field field-name
-                        :type field-type
-                        :known-types known-field-types})))
-     ;; Check :nullable? - not allowed in variants, must be boolean otherwise
-     (when (contains? field-spec :nullable?)
-       (if in-variant?
-         (throw (ex-info "Union variant cannot have :nullable? attribute"
-                         {:entity entity-name :field field-name :spec field-spec}))
-         (let [nullable-val (:nullable? field-spec)]
-           (when-not (boolean? nullable-val)
-             (throw (ex-info "Field :nullable? must be a boolean"
-                             {:entity entity-name
-                              :field field-name
-                              :nullable? nullable-val
-                              :type (type nullable-val)}))))))
-     ;; Type-specific validation
+     (validate-nullable! entity-name field-name field-spec in-variant?)
      (case field-type
-       :ref
-       (do
-         (when-not (:ref-entity field-spec)
-           (throw (ex-info "Field type :ref requires :ref-entity"
-                           {:entity entity-name :field field-name :spec field-spec})))
-         (let [allowed-keys (conj base-allowed-keys :ref-entity)
-               extra-keys (apply disj (set (keys field-spec)) allowed-keys)]
-           (when (seq extra-keys)
-             (throw (ex-info "Field type :ref has unsupported attributes"
-                             {:entity entity-name
-                              :field field-name
-                              :unsupported-keys extra-keys
-                              :allowed-keys allowed-keys})))))
-       :enum
-       (do
-         (when-not (:enum-name field-spec)
-           (throw (ex-info "Field type :enum requires :enum-name"
-                           {:entity entity-name :field field-name :spec field-spec})))
-         (let [allowed-keys (conj base-allowed-keys :enum-name)
-               extra-keys (apply disj (set (keys field-spec)) allowed-keys)]
-           (when (seq extra-keys)
-             (throw (ex-info "Field type :enum has unsupported attributes"
-                             {:entity entity-name
-                              :field field-name
-                              :unsupported-keys extra-keys
-                              :allowed-keys allowed-keys})))))
-       :union
-       (do
-         (let [variants (:variants field-spec)]
-           (when-not (vector? variants)
-             (throw (ex-info "Field type :union requires :variants vector"
-                             {:entity entity-name :field field-name :spec field-spec})))
-           ;; Recursively validate each variant (with in-variant? = true)
-           (run! (fn [[idx variant]]
-                   (validate-field-spec entity-name (str field-name "[" idx "]") variant true))
-                 (map-indexed vector variants)))
-         (let [allowed-keys (conj base-allowed-keys :variants)
-               extra-keys (apply disj (set (keys field-spec)) allowed-keys)]
-           (when (seq extra-keys)
-             (throw (ex-info "Field type :union has unsupported attributes"
-                             {:entity entity-name
-                              :field field-name
-                              :unsupported-keys extra-keys
-                              :allowed-keys allowed-keys})))))
-       ;; Default: base types
-       (let [extra-keys (apply disj (set (keys field-spec)) base-allowed-keys)]
-         (when (seq extra-keys)
-           (throw (ex-info (str "Field type " field-type " has unsupported attributes")
-                           {:entity entity-name
-                            :field field-name
-                            :unsupported-keys extra-keys
-                            :allowed-keys base-allowed-keys}))))))))
+       :ref (validate-ref-type! entity-name field-name field-spec base-allowed-keys)
+       :enum (validate-enum-type! entity-name field-name field-spec base-allowed-keys)
+       :union (validate-union-type! entity-name field-name field-spec base-allowed-keys)
+       (check-extra-keys! entity-name field-name field-type field-spec base-allowed-keys)))))
 
 
 (defn- validate-entity-field-specs

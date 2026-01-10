@@ -101,11 +101,13 @@
 
 
 (defn- parse-value
-  "Parses a cached value from EDN storage format."
+  "Parses a cached value from EDN storage format.
+   Uses safe EDN parsing with no custom readers to prevent code execution."
   [value-edn]
   (when value-edn
     (let [parsed (if (string? value-edn)
-                   (edn/read-string value-edn)
+                   ;; Use empty :readers to prevent arbitrary code execution
+                   (edn/read-string {:readers {}} value-edn)
                    value-edn)]
       (codec/parse-cached-value parsed))))
 

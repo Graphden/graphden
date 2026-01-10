@@ -8,10 +8,8 @@
     [graphden.postgres-storage.interface :as pg]
     [graphden.postgres-storage.introspection :as introspection]
     [graphden.storage-protocol.interface :as sp]
-    [next.jdbc :as jdbc])
-  (:import
-    (org.testcontainers.containers
-      PostgreSQLContainer)))
+    [graphden.storage-protocol.postgres-test-helpers :as pth]
+    [next.jdbc :as jdbc]))
 
 
 ;; === Testcontainers setup ===
@@ -20,37 +18,11 @@
 (def ^:dynamic *datasource* nil)
 
 
-(defn- clean-database!
-  [container]
-  (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
-        username (PostgreSQLContainer/.getUsername container)
-        password (PostgreSQLContainer/.getPassword container)]
-    (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
-                                           :user username
-                                           :password password})]
-      (jdbc/execute! conn ["DROP SCHEMA public CASCADE"])
-      (jdbc/execute! conn ["CREATE SCHEMA public"])
-      (jdbc/execute! conn ["GRANT ALL ON SCHEMA public TO PUBLIC"]))))
-
-
-(defn with-postgres-container
-  [f]
-  (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
-                    (PostgreSQLContainer/.withStartupAttempts 3))]
-    (PostgreSQLContainer/.start container)
-    (try
-      (binding [*container* container]
-        (f))
-      (finally
-        (PostgreSQLContainer/.stop container)))))
-
-
 (defn with-clean-database
+  "Cleans database and binds a fresh datasource."
   [f]
-  (clean-database! *container*)
-  (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-        username (PostgreSQLContainer/.getUsername *container*)
-        password (PostgreSQLContainer/.getPassword *container*)
+  (pth/clean-database-fast! *container*)
+  (let [{:keys [jdbc-url username password]} (pth/get-container-config *container*)
         ds (jdbc/get-datasource {:jdbcUrl jdbc-url
                                  :user username
                                  :password password})]
@@ -58,7 +30,7 @@
       (f))))
 
 
-(use-fixtures :once with-postgres-container)
+(use-fixtures :once (pth/create-container-fixture #'*container*))
 (use-fixtures :each with-clean-database)
 
 
@@ -220,11 +192,7 @@
 
 (deftest introspection-after-schema-initialization-test
   (testing "introspection correctly sees tables created by schema initialization"
-    (let [storage (pg/create-storage
-                    {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-                     :username (PostgreSQLContainer/.getUsername *container*)
-                     :password (PostgreSQLContainer/.getPassword *container*)
-                     :pool-size 2})
+    (let [storage (pg/create-storage (pth/get-container-config *container*))
           ;; Build schema properly using builder pattern (not simplified make-schema)
           schema (-> (mds/create-builder)
                      (ds/add-enum

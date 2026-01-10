@@ -7,64 +7,23 @@
     [graphden.malli-data-schema.interface :as mds]
     [graphden.postgres-storage.interface :as pg]
     [graphden.storage-protocol.interface :as sp]
-    [next.jdbc :as jdbc])
-  (:import
-    (org.testcontainers.containers
-      PostgreSQLContainer)))
+    [graphden.storage-protocol.postgres-test-helpers :as pth]))
 
 
 ;; === Testcontainers setup ===
 
 (def ^:dynamic *container* nil)
-(def ^:dynamic *datasource* nil)
 
 
-(defn- clean-database!
-  "Drops all user-created objects in public schema."
-  [container]
-  (let [jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
-        username (PostgreSQLContainer/.getUsername container)
-        password (PostgreSQLContainer/.getPassword container)]
-    (with-open [conn (jdbc/get-connection {:jdbcUrl jdbc-url
-                                           :user username
-                                           :password password})]
-      (jdbc/execute! conn ["DROP SCHEMA public CASCADE"])
-      (jdbc/execute! conn ["CREATE SCHEMA public"])
-      (jdbc/execute! conn ["GRANT ALL ON SCHEMA public TO PUBLIC"]))))
-
-
-(defn with-postgres-container
-  [f]
-  (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
-                    (PostgreSQLContainer/.withStartupAttempts 3))]
-    (PostgreSQLContainer/.start container)
-    (when-not (PostgreSQLContainer/.isRunning container)
-      (throw (ex-info "Failed to start PostgreSQL test container" {})))
-    (try
-      (binding [*container* container]
-        (f))
-      (finally
-        (PostgreSQLContainer/.stop container)))))
-
-
-(defn with-clean-database
-  [f]
-  (clean-database! *container*)
-  (f))
-
-
-(use-fixtures :once with-postgres-container)
-(use-fixtures :each with-clean-database)
+(use-fixtures :once (pth/create-container-fixture #'*container*))
+(use-fixtures :each (pth/create-clean-db-fixture #'*container*))
 
 
 (defn- create-test-storage
   "Creates a test storage with cache schema initialized."
   []
-  (clean-database! *container*)
-  (let [storage (pg/create-storage {:jdbc-url (PostgreSQLContainer/.getJdbcUrl *container*)
-                                    :username (PostgreSQLContainer/.getUsername *container*)
-                                    :password (PostgreSQLContainer/.getPassword *container*)
-                                    :pool-size 2})
+  (pth/clean-database-fast! *container*)
+  (let [storage (pg/create-storage (pth/get-container-config *container*))
         schema (cds/build-schema (mds/create-builder))]
     (sp/initialize storage schema)
     storage))

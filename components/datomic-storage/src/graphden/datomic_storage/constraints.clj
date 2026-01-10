@@ -148,40 +148,25 @@
 ;; :storage-not-initialized if connection is nil.
 
 (defn validate-parent-same-schema!
-  "Validates that parent-fn has the same fn-schema-id as fn.
-   Throws :constraint-violation/parent-schema-mismatch on violation.
-   Throws :storage-not-initialized if storage is closed."
   [conn-atom fn-id parent-fn-id]
   (sp/validate-parent-same-schema-impl (create-helpers conn-atom) fn-id parent-fn-id))
 
 
 (defn validate-no-arg-override!
-  "Validates that arg-schema-id is not already defined in the parent chain.
-   Throws :constraint-violation/arg-already-defined on violation.
-   Throws :storage-not-initialized if storage is closed."
   [conn-atom fn-id arg-schema-id]
   (sp/validate-no-arg-override-impl (create-helpers conn-atom) fn-id arg-schema-id))
 
 
 (defn validate-arg-schema-belongs-to-fn!
-  "Validates that arg-schema belongs to fn's fn-schema.
-   Throws :constraint-violation/arg-schema-mismatch on violation.
-   Throws :storage-not-initialized if storage is closed."
   [conn-atom fn-id arg-schema-id]
   (sp/validate-arg-schema-belongs-to-fn-impl (create-helpers conn-atom) fn-id arg-schema-id))
 
 
 (defn validate-no-inheritance-cycle!
-  "Validates that setting parent-fn-id would not create an inheritance cycle.
-   Throws :constraint-violation/inheritance-cycle on violation.
-   Throws :storage-not-initialized if storage is closed."
   [conn-atom fn-id parent-fn-id]
   (sp/validate-no-inheritance-cycle-impl (create-helpers conn-atom) fn-id parent-fn-id))
 
 
 (defn validate-no-dependency-cycle!
-  "Validates that referencing value-fn-id would not create a dependency cycle.
-   Throws :constraint-violation/dependency-cycle on violation.
-   Throws :storage-not-initialized if storage is closed."
   [conn-atom owner-fn-id value-fn-id]
   (sp/validate-no-dependency-cycle-impl (create-helpers conn-atom) owner-fn-id value-fn-id))

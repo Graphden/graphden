@@ -84,11 +84,6 @@
   10000)
 
 
-;; Legacy aliases for backward compatibility
-(def result-cache-size-warning-threshold default-cache-warning-threshold)
-(def result-cache-max-size default-cache-max-size)
-
-
 (def timeout-warning-window-ms
   "Window size in milliseconds for timeout warning logs.
    Used to avoid repeated warnings when execution is near timeout threshold.

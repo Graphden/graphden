@@ -25,37 +25,24 @@
 
 
 ;; === Configuration ===
-;; Query timeout is now managed by storage-protocol.config
-;; Re-export for backward compatibility
+;; Query timeout - local var that delegates to storage-protocol for actual value.
+;; We maintain a local var for binding compatibility in tests.
 
 (def ^:dynamic *query-timeout-ms*
   "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
-   Note: Internally converted to seconds for JDBC calls.
-   Note: This is the canonical var; sp/*query-timeout-ms* is also bound for consistency."
+   Note: Internally converted to seconds for JDBC calls."
   sp/default-query-timeout-ms)
 
 
 (def min-query-timeout-ms
-  "Minimum allowed query timeout in milliseconds.
-   1000ms (1 second) minimum because JDBC setQueryTimeout uses seconds,
-   and sub-second values would round to 0 (no timeout)."
+  "Minimum allowed query timeout in milliseconds."
   sp/min-query-timeout-ms)
 
 
 (defn with-query-timeout
   "Executes f with a custom query timeout (in milliseconds).
-   Timeout must be a positive integer. Minimum is 1000ms (1 second).
-   Binds both local *query-timeout-ms* and sp/*query-timeout-ms* for consistency.
-
-   Why 1000ms minimum?
-   - JDBC setQueryTimeout uses seconds (integer), values <1000ms become 0
-   - SQL queries need time for network roundtrip and query parsing
-   - This is different from executor timeout (50ms min) which covers overall execution
-
-   Example:
-   (with-query-timeout 60000
-     #(sp/query-entities storage :user {}))"
+   Binds both local *query-timeout-ms* and sp/*query-timeout-ms* for consistency."
   [timeout-ms f]
   (sp/validate-query-timeout! timeout-ms)
   (binding [*query-timeout-ms* timeout-ms
@@ -65,15 +52,7 @@
 
 (defn get-query-timeout-seconds
   "Returns the current query timeout in seconds for JDBC calls.
-   Reads the dynamic var *query-timeout-ms* and converts to seconds.
-   The timeout is stored in milliseconds but JDBC setQueryTimeout uses seconds.
-
-   Safety: Throws IllegalArgumentException if timeout is below minimum to prevent
-   silent timeout disabling. This catches improper direct binding of
-   *query-timeout-ms* (use with-query-timeout instead).
-
-   Note: Uses explicit throw instead of assert to ensure check runs in production
-   even with -da flag (assertions disabled)."
+   Reads *query-timeout-ms* and converts to seconds."
   []
   (when (< *query-timeout-ms* min-query-timeout-ms)
     (throw (IllegalArgumentException.

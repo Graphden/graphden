@@ -33,23 +33,18 @@
 
 
 ;; === Configuration ===
-;; Query timeout is now managed by storage-protocol.config
-;; Re-export for backward compatibility
+;; Query timeout - local var that delegates to storage-protocol for actual value.
+;; We maintain a local var for binding compatibility in tests.
 
 (def ^:dynamic *query-timeout-ms*
   "Query timeout in milliseconds for API consistency with postgres-storage.
-   Default is 30000 ms (30 seconds).
-   Note: This is the canonical var; sp/*query-timeout-ms* is also bound for consistency."
+   Default is 30000 ms (30 seconds)."
   sp/default-query-timeout-ms)
 
 
 (defn with-query-timeout
   "Executes f with a custom query timeout binding.
-   Binds both local *query-timeout-ms* and sp/*query-timeout-ms* for consistency.
-
-   Example:
-   (with-query-timeout 60000
-     #(sp/query-entities storage :user {}))"
+   Binds both local *query-timeout-ms* and sp/*query-timeout-ms* for consistency."
   [timeout-ms f]
   (sp/validate-query-timeout! timeout-ms)
   (binding [*query-timeout-ms* timeout-ms
@@ -59,17 +54,7 @@
 
 (defn execute-with-timeout!
   "Executes a query function with timeout enforcement.
-
-   Unlike native Datomic queries, this enforces timeout by running
-   the query in a future and dereferencing with timeout.
-
-   Arguments:
-   - operation: keyword describing the operation (for error messages)
-   - query-fn: zero-arg function that executes the query
-
-   Returns the query result.
-   Throws TimeoutException if query exceeds *query-timeout-ms*.
-   Re-throws original exception if query fails (unwraps ExecutionException)."
+   Uses local *query-timeout-ms* for the timeout value."
   [operation query-fn]
   (let [timeout-ms *query-timeout-ms*
         fut (future (query-fn))

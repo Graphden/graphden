@@ -35,6 +35,13 @@
 
 ;; === PostgreSQL configuration schema ===
 
+(defn- jdbc-url-has-embedded-credentials?
+  "Returns true if JDBC URL contains embedded credentials (user:pass@host pattern).
+   This is a security risk - credentials should be passed separately."
+  [url]
+  (boolean (re-find #"://[^/]*:[^/]*@" url)))
+
+
 (def postgres-pool-config
   "Schema for PostgreSQL connection pool configuration."
   [:map
@@ -42,7 +49,9 @@
    [:jdbc-url [:and
                :string
                [:fn {:error/message "must start with 'jdbc:postgresql://'"}
-                #(str/starts-with? % "jdbc:postgresql://")]]]
+                #(str/starts-with? % "jdbc:postgresql://")]
+               [:fn {:error/message "must not contain embedded credentials (use :username/:password instead)"}
+                #(not (jdbc-url-has-embedded-credentials? %))]]]
    [:username non-blank-string]
    [:password non-blank-string]
    [:pool-size {:optional true

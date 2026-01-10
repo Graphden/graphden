@@ -7,7 +7,9 @@
    Implementations maintain cache consistency by:
    1. Storing denormalized graph data (fns, schemas, merged args)
    2. Tracking dependencies with ref-counts for proper invalidation
-   3. Rebuilding affected caches when source entities change")
+   3. Rebuilding affected caches when source entities change"
+  (:require
+    [clojure.tools.logging :as log]))
 
 
 (defprotocol CacheStorage
@@ -69,6 +71,60 @@
   "Returns true if storage implements CacheStorage protocol."
   [storage]
   (satisfies? CacheStorage storage))
+
+
+;; === Cache loading timeout configuration ===
+
+(def ^:dynamic *cache-load-timeout-ms*
+  "Timeout for individual cache loading queries in milliseconds.
+   Default is 30000 ms (30 seconds). Used by load-cache-data-parallel."
+  30000)
+
+
+(defn deref-with-timeout
+  "Derefs a future with timeout. Returns ::timeout if timed out.
+   Logs a warning on timeout for visibility."
+  [fut timeout-ms future-name]
+  (let [result (deref fut timeout-ms ::timeout)]
+    (when (= result ::timeout)
+      (log/warn "Cache loading timed out for" future-name "after" timeout-ms "ms"))
+    result))
+
+
+(defn load-cache-data-parallel
+  "Loads all cache data in parallel with timeout protection.
+   Returns nil if cache doesn't exist or any query times out.
+
+   Arguments:
+   - cache-id: UUID of the cache (typically fn-id)
+   - load-fns-fn: (fn [cache-id]) -> {fn-id -> fn-record}
+   - load-fn-schemas-fn: (fn [cache-id]) -> {fn-schema-id -> schema-record}
+   - load-arg-schemas-fn: (fn [cache-id]) -> {arg-schema-id -> arg-schema-record}
+   - load-merged-args-fn: (fn [cache-id]) -> {fn-id -> {arg-schema-id -> value}}
+
+   Starts all queries in parallel and waits for results with timeout.
+   If any query times out, returns nil (cache miss)."
+  [cache-id load-fns-fn load-fn-schemas-fn load-arg-schemas-fn load-merged-args-fn]
+  (let [timeout-ms *cache-load-timeout-ms*
+        fns-future (future (load-fns-fn cache-id))
+        fn-schemas-future (future (load-fn-schemas-fn cache-id))
+        arg-schemas-future (future (load-arg-schemas-fn cache-id))
+        resolved-args-future (future (load-merged-args-fn cache-id))
+        ;; Wait for fns first to check existence
+        fns (deref-with-timeout fns-future timeout-ms "fns")]
+    ;; If timeout or no fns found, cache doesn't exist
+    (when (and (not= fns ::timeout) (seq fns))
+      (let [fn-schemas (deref-with-timeout fn-schemas-future timeout-ms "fn-schemas")
+            arg-schemas (deref-with-timeout arg-schemas-future timeout-ms "arg-schemas")
+            resolved-args (deref-with-timeout resolved-args-future timeout-ms "resolved-args")]
+        ;; If any other query timed out, treat as cache miss
+        (when (and (not= fn-schemas ::timeout)
+                   (not= arg-schemas ::timeout)
+                   (not= resolved-args ::timeout))
+          {:fns fns
+           :fn-schemas fn-schemas
+           :arg-schemas arg-schemas
+           :resolved-args resolved-args})))))
 
 
 ;; === Validation utilities ===

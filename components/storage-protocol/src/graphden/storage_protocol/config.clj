@@ -254,13 +254,18 @@
   "Returns the current query timeout in seconds for JDBC calls.
    Reads the dynamic var *query-timeout-ms* and converts to seconds.
 
-   Safety: Asserts that timeout is at least min-query-timeout-ms to prevent
+   Safety: Throws IllegalArgumentException if timeout is below minimum to prevent
    silent timeout disabling. This catches improper direct binding of
-   *query-timeout-ms* (use with-query-timeout instead)."
+   *query-timeout-ms* (use with-query-timeout instead).
+
+   Note: Uses explicit throw instead of assert to ensure check runs in production
+   even with -da flag (assertions disabled)."
   []
-  (assert (>= *query-timeout-ms* min-query-timeout-ms)
-          (str "Query timeout must be at least " min-query-timeout-ms "ms. "
-               "Use with-query-timeout for safe rebinding."))
+  (when (< *query-timeout-ms* min-query-timeout-ms)
+    (throw (IllegalArgumentException.
+             (str "Query timeout must be at least " min-query-timeout-ms "ms. "
+                  "Current value: " *query-timeout-ms* "ms. "
+                  "Use with-query-timeout for safe rebinding."))))
   (quot *query-timeout-ms* 1000))
 
 

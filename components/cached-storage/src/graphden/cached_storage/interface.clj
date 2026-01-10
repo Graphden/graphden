@@ -50,18 +50,47 @@
                                 :fn-schemas-count (count (:fn-schemas graph))})))
 
 
+(defn- batch-delete-caches!
+  "Deletes multiple caches. Returns the set of deleted cache-ids."
+  [cache-storage cache-ids]
+  (doseq [cache-id cache-ids]
+    (cache/delete-cache! cache-storage cache-id))
+  cache-ids)
+
+
+(defn- batch-rebuild-existing-caches!
+  "Rebuilds caches only for fns that still exist in storage.
+   Uses parallel reads to check existence, then sequential rebuilds.
+   Returns the set of cache-ids that were rebuilt."
+  [base-storage cache-storage cache-ids]
+  (when (seq cache-ids)
+    ;; Batch read to check which fns exist
+    (let [existing-fns (sp/read-entities base-storage :fn (vec cache-ids))
+          existing-fn-ids (set (keys existing-fns))]
+      (when (seq existing-fn-ids)
+        (log/debug "Rebuilding caches for existing fns"
+                   {:total (count cache-ids)
+                    :existing (count existing-fn-ids)})
+        (doseq [cache-id existing-fn-ids]
+          (rebuild-cache! base-storage cache-storage cache-id)))
+      existing-fn-ids)))
+
+
 (defn- invalidate-dependents!
   "Invalidates all caches returned by find-fn and rebuilds them if the fn exists.
-   find-fn should be a function that takes cache-storage and returns a set of cache-ids."
+   find-fn should be a function that takes cache-storage and returns a set of cache-ids.
+
+   Optimization: Uses batch read to check existence of all fns at once,
+   then rebuilds only those that exist. This reduces N+1 queries."
   [base-storage cache-storage find-fn]
   (let [dependent-cache-ids (find-fn cache-storage)]
     (when (seq dependent-cache-ids)
       (log/debug "Invalidating dependent caches" {:count (count dependent-cache-ids)
-                                                  :cache-ids dependent-cache-ids}))
-    (doseq [cache-id dependent-cache-ids]
-      (cache/delete-cache! cache-storage cache-id)
-      (when (sp/read-entity base-storage :fn cache-id)
-        (rebuild-cache! base-storage cache-storage cache-id)))))
+                                                  :cache-ids dependent-cache-ids})
+      ;; Phase 1: Delete all caches
+      (batch-delete-caches! cache-storage dependent-cache-ids)
+      ;; Phase 2: Rebuild caches for existing fns
+      (batch-rebuild-existing-caches! base-storage cache-storage dependent-cache-ids))))
 
 
 (defn- invalidate-fn-and-dependents!

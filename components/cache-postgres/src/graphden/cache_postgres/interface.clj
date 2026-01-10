@@ -133,22 +133,16 @@
 
 
 (defn- load-all-cache-data
-  "Loads all cache data in parallel. Returns nil if cache doesn't exist.
-   Optimizes N+1 by running 4 queries concurrently instead of sequentially."
+  "Loads all cache data in parallel with timeout protection.
+   Returns nil if cache doesn't exist or any query times out.
+   Uses shared utility from cache-protocol for consistent timeout handling."
   [ds cache-id]
-  ;; Start all queries in parallel using futures
-  (let [fns-future (future (load-cached-fns ds cache-id))
-        fn-schemas-future (future (load-cached-fn-schemas ds cache-id))
-        arg-schemas-future (future (load-cached-arg-schemas ds cache-id))
-        resolved-args-future (future (load-cached-merged-args ds cache-id))
-        ;; Wait for all results
-        fns @fns-future]
-    ;; If no fns found, cache doesn't exist - don't wait for other queries
-    (when (seq fns)
-      {:fns fns
-       :fn-schemas @fn-schemas-future
-       :arg-schemas @arg-schemas-future
-       :resolved-args @resolved-args-future})))
+  (cache/load-cache-data-parallel
+    cache-id
+    (partial load-cached-fns ds)
+    (partial load-cached-fn-schemas ds)
+    (partial load-cached-arg-schemas ds)
+    (partial load-cached-merged-args ds)))
 
 
 ;; === Graph saving helpers ===

@@ -360,12 +360,69 @@
 (def redact-sensitive-deep errors/redact-sensitive-deep)
 
 
-;; Sensitive field registry (extensible)
-(def register-sensitive-field-name! errors/register-sensitive-field-name!)
-(def register-sensitive-field-pattern! errors/register-sensitive-field-pattern!)
-(def register-sensitive-field-predicate! errors/register-sensitive-field-predicate!)
-(def reset-sensitive-field-registry! errors/reset-sensitive-field-registry!)
-(def sensitive-field? errors/sensitive-field?)
+;; === Sensitive Field Registry ===
+;;
+;; Extensible system for identifying and redacting sensitive data in logs
+;; and error messages. Use these functions to protect PII, credentials,
+;; and other sensitive information from appearing in logs.
+;;
+;; Default protected fields: password, secret, token, api-key, auth-token,
+;; access-key, private-key, jdbc-url, connection-string, credentials, etc.
+;;
+;; Usage examples:
+;;
+;;   ;; Register a custom field name as sensitive
+;;   (register-sensitive-field-name! :patient-medical-id)
+;;   (register-sensitive-field-name! :social-security-number)
+;;
+;;   ;; Register a pattern for field name matching
+;;   (register-sensitive-field-pattern! #"(?i)hipaa[_-]?.*")
+;;   (register-sensitive-field-pattern! #"(?i)gdpr[_-]?data")
+;;
+;;   ;; Register a predicate for complex logic
+;;   (register-sensitive-field-predicate!
+;;     (fn [field-kw] (= "pii" (namespace field-kw))))
+;;
+;;   ;; Check if a field is sensitive
+;;   (sensitive-field? :password)        ; => true
+;;   (sensitive-field? :user-name)       ; => false
+;;   (sensitive-field? :patient-medical-id) ; => true (after registration)
+;;
+;;   ;; Redact sensitive values in maps
+;;   (redact-sensitive-map {:user "john" :password "secret123"})
+;;   ; => {:user "john" :password "[REDACTED]"}
+;;
+;;   ;; Deep redaction for nested structures
+;;   (redact-sensitive-deep {:config {:db {:password "x"}}})
+;;   ; => {:config {:db {:password "[REDACTED]"}}}
+
+(def register-sensitive-field-name!
+  "Registers an explicit field name as sensitive for redaction.
+   See errors/register-sensitive-field-name! for details."
+  errors/register-sensitive-field-name!)
+
+
+(def register-sensitive-field-pattern!
+  "Registers a regex pattern for matching sensitive field names.
+   See errors/register-sensitive-field-pattern! for details."
+  errors/register-sensitive-field-pattern!)
+
+
+(def register-sensitive-field-predicate!
+  "Registers a custom predicate for sensitive field detection.
+   See errors/register-sensitive-field-predicate! for details."
+  errors/register-sensitive-field-predicate!)
+
+
+(def reset-sensitive-field-registry!
+  "Resets sensitive field registry to defaults. Use with caution."
+  errors/reset-sensitive-field-registry!)
+
+
+(def sensitive-field?
+  "Returns true if field name matches sensitive patterns.
+   Checks explicit names, regex patterns, and custom predicates."
+  errors/sensitive-field?)
 
 
 ;; === Metadata re-exports ===

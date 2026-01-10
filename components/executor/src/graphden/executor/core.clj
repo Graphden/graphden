@@ -119,57 +119,86 @@
 
 ;; === fn-result-value Execution ===
 
+(defn- check-cache-limit!
+  "Checks if result cache has reached its hard limit.
+   Throws if cache size >= max-size (before adding new entry).
+   This prevents OOM from unbounded execution graphs."
+  [context fn-result-value-id]
+  (let [result-cache (:result-cache context)
+        current-size (count @result-cache)
+        cache-max-size (:cache-max-size context)]
+    (when (>= current-size cache-max-size)
+      (throw (ex-info "Result cache size limit exceeded - execution graph too large"
+                      {:type :execution-error/cache-limit-exceeded
+                       :cache-size current-size
+                       :max-size cache-max-size
+                       :fn-result-value-id fn-result-value-id
+                       :hint "Reduce graph complexity or increase cache-max-size"})))))
+
+
+(defn- get-fn-result-value!
+  "Gets fn-result-value from execution graph.
+   Throws if not found."
+  [context fn-result-value-id]
+  (let [execution-graph (:execution-graph context)
+        fn-result-values (:fn-result-values execution-graph)
+        frv (get fn-result-values fn-result-value-id)]
+    (when-not frv
+      (throw (ex-info "fn-result-value not found in execution graph"
+                      {:type :execution-error/fn-result-value-not-found
+                       :fn-result-value-id fn-result-value-id})))
+    frv))
+
+
+(defn- execute-and-cache-result!
+  "Executes fn-result-value and stores result in cache.
+   Logs warning once when cache reaches warning threshold.
+   Returns the computed result."
+  [context fn-result-value-id frv]
+  (let [result-cache (:result-cache context)
+        cache-max-size (:cache-max-size context)
+        cache-warning-threshold (:cache-warning-threshold context)]
+    (log/debug "fn-result-value cache miss, executing"
+               {:fn-result-value-id fn-result-value-id
+                :fn-id (:fn-id frv)})
+    (let [fn-id (:fn-id frv)
+          result (execute-internal context fn-id nil)
+          new-size (count (swap! result-cache assoc fn-result-value-id result))]
+      ;; Warn once when cache crosses threshold (check if we just crossed)
+      (when (= new-size cache-warning-threshold)
+        (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
+                  {:cache-size new-size
+                   :threshold cache-warning-threshold
+                   :max-size cache-max-size
+                   :hint "Large caches may indicate unbounded execution graphs"}))
+      result)))
+
+
 (defn- execute-fn-result-value
   "Executes a fn-result-value, using cache for memoization.
    If the fn-result-value-id is already in cache, returns cached value.
    Otherwise executes the underlying fn, caches the result, and returns it.
-   Logs debug info for cache performance monitoring.
-   Warns if cache grows beyond threshold (potential memory issue).
-   Throws if cache exceeds max-size (hard limit for OOM prevention)."
+
+   Structure:
+   1. Check cache for existing result (fast path)
+   2. Check cache limit before adding new entry
+   3. Get fn-result-value from graph
+   4. Execute and cache the result"
   [context fn-result-value-id]
   (let [result-cache (:result-cache context)
         cached (get @result-cache fn-result-value-id)]
     (if (some? cached)
-      ;; Cache hit - return cached value
+      ;; Fast path: cache hit
       (do
         (log/debug "fn-result-value cache hit"
                    {:fn-result-value-id fn-result-value-id
                     :cache-size (count @result-cache)})
         cached)
-      ;; Cache miss - check limit before executing
-      (let [current-size (count @result-cache)
-            cache-max-size (:cache-max-size context)
-            cache-warning-threshold (:cache-warning-threshold context)]
-        ;; Hard limit check BEFORE adding new entry
-        (when (>= current-size cache-max-size)
-          (throw (ex-info "Result cache size limit exceeded - execution graph too large"
-                          {:type :execution-error/cache-limit-exceeded
-                           :cache-size current-size
-                           :max-size cache-max-size
-                           :fn-result-value-id fn-result-value-id
-                           :hint "Reduce graph complexity or increase cache-max-size"})))
-        ;; Execute and cache
-        (let [execution-graph (:execution-graph context)
-              fn-result-values (:fn-result-values execution-graph)
-              frv (get fn-result-values fn-result-value-id)]
-          (when-not frv
-            (throw (ex-info "fn-result-value not found in execution graph"
-                            {:type :execution-error/fn-result-value-not-found
-                             :fn-result-value-id fn-result-value-id})))
-          (log/debug "fn-result-value cache miss, executing"
-                     {:fn-result-value-id fn-result-value-id
-                      :fn-id (:fn-id frv)})
-          (let [fn-id (:fn-id frv)
-                result (execute-internal context fn-id nil)
-                new-size (count (swap! result-cache assoc fn-result-value-id result))]
-            ;; Warn once when cache crosses threshold (check if we just crossed)
-            (when (= new-size cache-warning-threshold)
-              (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
-                        {:cache-size new-size
-                         :threshold cache-warning-threshold
-                         :max-size cache-max-size
-                         :hint "Large caches may indicate unbounded execution graphs"}))
-            result))))))
+      ;; Slow path: cache miss - check limits, execute, cache
+      (do
+        (check-cache-limit! context fn-result-value-id)
+        (let [frv (get-fn-result-value! context fn-result-value-id)]
+          (execute-and-cache-result! context fn-result-value-id frv))))))
 
 
 ;; === Execution ===

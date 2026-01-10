@@ -44,32 +44,20 @@
 
 (defn with-query-timeout
   "Executes f with a custom query timeout binding.
-   Binds both local *query-timeout-ms* and sp/*query-timeout-ms* for consistency."
+   Delegates to sp/with-query-timeout which properly binds config/*query-timeout-ms*.
+   Also binds local *query-timeout-ms* for API compatibility."
   [timeout-ms f]
-  (sp/validate-query-timeout! timeout-ms)
-  (binding [*query-timeout-ms* timeout-ms
-            sp/*query-timeout-ms* timeout-ms]
-    (f)))
+  (sp/with-query-timeout timeout-ms
+                         (fn []
+                           (binding [*query-timeout-ms* timeout-ms]
+                             (f)))))
 
 
-(defn execute-with-timeout!
+(def execute-with-timeout!
   "Executes a query function with timeout enforcement.
-   Uses local *query-timeout-ms* for the timeout value."
-  [operation query-fn]
-  (let [timeout-ms *query-timeout-ms*
-        fut (future (query-fn))
-        result (try
-                 (deref fut timeout-ms ::timeout)
-                 (catch java.util.concurrent.ExecutionException e
-                   (throw (or (Throwable/.getCause e) e))))]
-    (if (= result ::timeout)
-      (do
-        (future-cancel fut)
-        (throw (ex-info (str "Query timeout after " timeout-ms "ms")
-                        {:type :query-timeout
-                         :operation operation
-                         :timeout-ms timeout-ms})))
-      result)))
+   Delegates to storage-protocol implementation.
+   Uses sp/*query-timeout-ms* which is bound by with-query-timeout."
+  sp/execute-with-timeout!)
 
 
 ;; === Attribute naming ===

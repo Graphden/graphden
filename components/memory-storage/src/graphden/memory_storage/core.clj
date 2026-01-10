@@ -181,6 +181,8 @@
                           (if (empty? data-seq)
                             []
                             (do
+                              (sp/validate-batch-size! (count data-seq) :create-entities
+                                                       {:entity-name entity-name})
                               (sp/validate-no-duplicate-ids! entity-name data-seq)
                               (let [records (map (fn [data]
                                                    (let [id (or (:id data) (random-uuid))]

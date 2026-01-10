@@ -240,6 +240,9 @@
     [_this entity-name data-seq]
     (sp/with-write-lock rw-lock
                         (fn []
+                          (when (seq data-seq)
+                            (sp/validate-batch-size! (count data-seq) :create-entities
+                                                     {:entity-name entity-name}))
                           (let [conn (ensure-connection! conn-atom :create-entities)
                                 db (d/db conn)
                                 field-specs (crud/get-fields-with-specs db entity-name)]

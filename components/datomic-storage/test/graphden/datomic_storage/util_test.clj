@@ -265,30 +265,32 @@
            (util/execute-with-timeout! :test-op #(+ 40 2)))))
 
   (testing "throws on timeout"
-    ;; Use binding directly to bypass validation (for testing timeout behavior)
+    ;; Use with-query-timeout to properly bind both sp and config vars
+    ;; min-query-timeout-ms is 1000, so use 1000 and sleep longer
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Query timeout"
-          (binding [util/*query-timeout-ms* 10]
-            (util/execute-with-timeout!
-              :slow-query
-              (fn []
-                (Thread/sleep 100)
-                :never-reached))))))
+          (util/with-query-timeout 1000
+                                   #(util/execute-with-timeout!
+                                      :slow-query
+                                      (fn []
+                                        (Thread/sleep 2000)
+                                        :never-reached))))))
 
   (testing "timeout exception contains operation and timeout info"
     (try
-      ;; Use binding directly to bypass validation (for testing timeout behavior)
-      (binding [util/*query-timeout-ms* 10]
-        (util/execute-with-timeout!
-          :my-operation
-          (fn []
-            (Thread/sleep 100)
-            nil)))
+      ;; Use with-query-timeout to properly bind both sp and config vars
+      ;; min-query-timeout-ms is 1000, so use 1000 and sleep longer
+      (util/with-query-timeout 1000
+                               #(util/execute-with-timeout!
+                                  :my-operation
+                                  (fn []
+                                    (Thread/sleep 2000)
+                                    nil)))
       (is false "should have thrown")
       (catch clojure.lang.ExceptionInfo e
         (is (= :query-timeout (:type (ex-data e))))
         (is (= :my-operation (:operation (ex-data e))))
-        (is (= 10 (:timeout-ms (ex-data e)))))))
+        (is (= 1000 (:timeout-ms (ex-data e)))))))
 
   (testing "unwraps ExecutionException to get original exception"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo

@@ -562,6 +562,17 @@
   config/*max-repeat-size*)
 
 
+;; === Batch size validation re-exports ===
+(def ^:dynamic *max-batch-size*
+  "Maximum entities in a single batch operation. Default: 1000."
+  config/*max-batch-size*)
+
+
+(def validate-batch-size!
+  "Validates batch size is within allowed limits. Throws if exceeded."
+  config/validate-batch-size!)
+
+
 ;; ============================================================================
 ;; ADDITIONAL HELPERS
 ;; ============================================================================

@@ -8,6 +8,7 @@
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.interface :as registry]
     [graphden.graph-storage-memory.interface :as gsm]
+    [graphden.storage-protocol.config :as config]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -401,7 +402,33 @@
 
   (testing "str-split - regex with special chars works"
     (is (= ["a" "b" "c"] (call-base-fn :str-split {:s "a.b.c" :sep "\\."})))
-    (is (= ["1" "2" "3"] (call-base-fn :str-split {:s "1|2|3" :sep "\\|"})))))
+    (is (= ["1" "2" "3"] (call-base-fn :str-split {:s "1|2|3" :sep "\\|"}))))
+
+  ;; Note: Regex compilation timeout test is inherently flaky because:
+  ;; - 1ms timeout may not trigger on fast machines
+  ;; - Finding a pattern that reliably times out is difficult
+  ;; The timeout code path is covered implicitly by integration tests
+  )
+
+
+(deftest string-regex-edge-cases-test
+  "Tests edge cases in regex handling for complete coverage."
+  (register-strings!)
+
+  (testing "str-split - uses configured limits"
+    ;; Verify that with-regex-limits correctly applies custom limits
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Regex pattern too long"
+          (config/with-regex-limits
+            {:max-pattern-length 5}
+            #(call-base-fn :str-split {:s "test" :sep "longer-pattern"})))))
+
+  (testing "str-split - input length limit applies"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Input string too long"
+          (config/with-regex-limits
+            {:max-input-length 10}
+            #(call-base-fn :str-split {:s "this is a longer string" :sep " "}))))))
 
 
 ;; === Collection Tests ===

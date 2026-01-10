@@ -1,10 +1,15 @@
 (ns graphden.datomic-storage.metadata-test
-  "Tests for datomic-storage.metadata - metadata transaction building."
+  "Tests for datomic-storage.metadata - metadata transaction building and persistence."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
+    [graphden.datomic-storage.interface :as dat]
+    [graphden.datomic-storage.introspection :as introspection]
     [graphden.datomic-storage.metadata :as metadata]
-    [graphden.malli-data-schema.interface :as mds]))
+    [graphden.datomic-storage.schema :as schema]
+    [graphden.malli-data-schema.interface :as mds]
+    [graphden.storage-protocol.interface :as sp]))
 
 
 ;; === build-all-metadata-tx-data tests ===
@@ -141,3 +146,259 @@
       (is (= 1 (count enums)))       ; status
       (is (= 2 (count enum-values))) ; active, inactive
       (is (= 8 (count tx-data))))))  ; total
+
+
+;; === Integration tests for save-metadata! ===
+
+(def ^:private test-counter (atom 0))
+
+
+(defn- unique-db-name
+  "Generates a unique database name for each test."
+  []
+  (str "metadata-test-" (swap! test-counter inc) "-" (System/currentTimeMillis)))
+
+
+(defn- create-test-client-and-conn
+  "Creates a datomic-local client and connection for testing."
+  []
+  (let [db-name (unique-db-name)
+        client (d/client {:server-type :datomic-local
+                          :storage-dir :mem
+                          :system "test"})
+        _ (d/create-database client {:db-name db-name})
+        conn (d/connect client {:db-name db-name})]
+    {:client client :conn conn :db-name db-name}))
+
+
+(defn- cleanup-test-db
+  "Cleans up test database."
+  [{:keys [client db-name]}]
+  (d/delete-database client {:db-name db-name}))
+
+
+(deftest save-metadata!-integration-test
+  (testing "save-metadata! saves metadata to empty database"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; First, install metadata schema
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+
+        (let [test-schema (-> (mds/create-builder)
+                              (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                             {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                     :type :text}})
+                              ds/build)]
+          ;; Save metadata
+          (metadata/save-metadata! conn test-schema)
+
+          ;; Verify metadata was saved
+          (let [db (d/db conn)
+                entities (d/q '[:find ?uuid ?name
+                                :where
+                                [?e :graphden.metadata/uuid ?uuid]
+                                [?e :graphden.metadata/kind :entity]
+                                [?e :graphden.metadata/name ?name]]
+                              db)]
+            (is (= 1 (count entities)))
+            (is (= #{[#uuid "00000000-0000-0000-0000-000000000001" :user]} (set entities)))))
+        (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "save-metadata! replaces old metadata"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+
+        ;; Save first schema
+        (let [schema1 (-> (mds/create-builder)
+                          (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001" {})
+                          ds/build)]
+          (metadata/save-metadata! conn schema1))
+
+        ;; Save second schema (replaces first)
+        (let [schema2 (-> (mds/create-builder)
+                          (ds/add-entity :product #uuid "00000000-0000-0000-0000-000000000010" {})
+                          (ds/add-entity :order #uuid "00000000-0000-0000-0000-000000000020" {})
+                          ds/build)]
+          (metadata/save-metadata! conn schema2))
+
+        ;; Verify only new metadata exists
+        (let [db (d/db conn)
+              entity-names (->> (d/q '[:find ?name
+                                       :where
+                                       [?e :graphden.metadata/kind :entity]
+                                       [?e :graphden.metadata/name ?name]]
+                                     db)
+                                (map first)
+                                set)]
+          (is (= #{:product :order} entity-names))
+          (is (not (contains? entity-names :user))))
+        (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "save-metadata! with empty schema clears metadata"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+
+        ;; Save initial schema
+        (let [schema1 (-> (mds/create-builder)
+                          (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001" {})
+                          ds/build)]
+          (metadata/save-metadata! conn schema1))
+
+        ;; Save empty schema
+        (let [empty-schema (-> (mds/create-builder) ds/build)]
+          (metadata/save-metadata! conn empty-schema))
+
+        ;; Verify no metadata exists
+        (let [db (d/db conn)
+              all-metadata (d/q '[:find ?e
+                                  :where [?e :graphden.metadata/uuid _]]
+                                db)]
+          (is (empty? all-metadata)))
+        (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "save-metadata! is idempotent"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+
+        (let [test-schema (-> (mds/create-builder)
+                              (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                             {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                     :type :text}})
+                              ds/build)]
+          ;; Save multiple times
+          (metadata/save-metadata! conn test-schema)
+          (metadata/save-metadata! conn test-schema)
+          (metadata/save-metadata! conn test-schema)
+
+          ;; Verify correct count
+          (let [db (d/db conn)
+                entities (d/q '[:find ?e
+                                :where [?e :graphden.metadata/kind :entity]]
+                              db)]
+            (is (= 1 (count entities)))))
+        (finally
+          (cleanup-test-db ctx))))))
+
+
+(deftest fetch-existing-metadata-test
+  (testing "fetch-existing-metadata returns nil when no metadata schema"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; No metadata schema installed
+        (let [db (d/db conn)
+              result (#'metadata/fetch-existing-metadata db)]
+          (is (nil? result)))
+        (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "fetch-existing-metadata returns empty when schema exists but no data"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema but don't add data
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+
+        (let [db (d/db conn)
+              result (#'metadata/fetch-existing-metadata db)]
+          (is (some? result))
+          (is (empty? (:entity-ids result)))
+          (is (nil? (:full-data result))))
+        (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "fetch-existing-metadata returns data when metadata exists"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema and add data
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+        (d/transact conn {:tx-data [{:graphden.metadata/uuid #uuid "00000000-0000-0000-0000-000000000001"
+                                     :graphden.metadata/kind :entity
+                                     :graphden.metadata/name :test-entity}]})
+
+        (let [db (d/db conn)
+              result (#'metadata/fetch-existing-metadata db)]
+          (is (some? result))
+          (is (= 1 (count (:entity-ids result))))
+          (is (= 1 (count (:full-data result))))
+          (is (= :test-entity (:graphden.metadata/name (first (:full-data result))))))
+        (finally
+          (cleanup-test-db ctx))))))
+
+
+(deftest retract-metadata!-test
+  (testing "retract-metadata! does nothing with empty entity-ids"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Should not throw
+        (is (nil? (#'metadata/retract-metadata! conn [])))
+        (is (nil? (#'metadata/retract-metadata! conn nil)))
+        (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "retract-metadata! removes entities"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema and add data
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+        (d/transact conn {:tx-data [{:graphden.metadata/uuid #uuid "00000000-0000-0000-0000-000000000001"
+                                     :graphden.metadata/kind :entity
+                                     :graphden.metadata/name :test-entity}]})
+
+        ;; Get entity id
+        (let [db (d/db conn)
+              entity-ids (d/q '[:find ?e :where [?e :graphden.metadata/uuid _]] db)]
+          (is (= 1 (count entity-ids)))
+
+          ;; Retract
+          (#'metadata/retract-metadata! conn entity-ids)
+
+          ;; Verify removed
+          (let [db-after (d/db conn)
+                remaining (d/q '[:find ?e :where [?e :graphden.metadata/uuid _]] db-after)]
+            (is (empty? remaining))))
+        (finally
+          (cleanup-test-db ctx))))))
+
+
+(deftest assert-metadata!-test
+  (testing "assert-metadata! does nothing with empty tx-data"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Should not throw and return nil
+        (is (nil? (#'metadata/assert-metadata! conn [] nil)))
+        (is (nil? (#'metadata/assert-metadata! conn nil nil)))
+        (finally
+          (cleanup-test-db ctx)))))
+
+  (testing "assert-metadata! creates new entities"
+    (let [{:keys [conn] :as ctx} (create-test-client-and-conn)]
+      (try
+        ;; Install metadata schema
+        (d/transact conn {:tx-data (schema/build-metadata-schema)})
+
+        ;; Assert new metadata
+        (let [tx-data [{:graphden.metadata/uuid #uuid "00000000-0000-0000-0000-000000000001"
+                        :graphden.metadata/kind :entity
+                        :graphden.metadata/name :new-entity}]]
+          (#'metadata/assert-metadata! conn tx-data nil))
+
+        ;; Verify created
+        (let [db (d/db conn)
+              entity-names (->> (d/q '[:find ?name
+                                       :where
+                                       [?e :graphden.metadata/kind :entity]
+                                       [?e :graphden.metadata/name ?name]]
+                                     db)
+                                (map first)
+                                set)]
+          (is (= #{:new-entity} entity-names)))
+        (finally
+          (cleanup-test-db ctx))))))

@@ -1754,3 +1754,329 @@
     (is (not (storage/sensitive-field? :custom-field-xyz)))
     ;; Defaults still work
     (is (storage/sensitive-field? :password))))
+
+
+;; === Additional Helper Function Tests ===
+
+(deftest canonical-type?-test
+  (testing "returns true for canonical types"
+    (is (true? (storage/canonical-type? :uuid)))
+    (is (true? (storage/canonical-type? :text)))
+    (is (true? (storage/canonical-type? :int)))
+    (is (true? (storage/canonical-type? :bool)))
+    (is (true? (storage/canonical-type? :numeric)))
+    (is (true? (storage/canonical-type? :timestamptz)))
+    (is (true? (storage/canonical-type? :bytes)))
+    (is (true? (storage/canonical-type? :jsonb)))
+    (is (true? (storage/canonical-type? :ref)))
+    (is (true? (storage/canonical-type? :enum)))
+    (is (true? (storage/canonical-type? :union))))
+
+  (testing "returns false for non-canonical types"
+    (is (false? (storage/canonical-type? :unknown)))
+    (is (false? (storage/canonical-type? :string)))
+    (is (false? (storage/canonical-type? :integer)))
+    (is (false? (storage/canonical-type? nil)))))
+
+
+(deftest reference-type?-test
+  (testing "returns true for reference types"
+    (is (true? (storage/reference-type? :ref))))
+
+  (testing "returns false for non-reference types"
+    (is (false? (storage/reference-type? :uuid)))
+    (is (false? (storage/reference-type? :text)))
+    (is (false? (storage/reference-type? :jsonb)))))
+
+
+(deftest complex-type?-test
+  (testing "returns true for complex types"
+    (is (true? (storage/complex-type? :jsonb)))
+    (is (true? (storage/complex-type? :union))))
+
+  (testing "returns false for non-complex types"
+    (is (false? (storage/complex-type? :text)))
+    (is (false? (storage/complex-type? :int)))
+    (is (false? (storage/complex-type? :ref)))))
+
+
+(deftest standard-query-validations!-test
+  (testing "passes for valid query"
+    (let [fields {:name {:type :text} :age {:type :int}}]
+      (is (nil? (storage/standard-query-validations! :user fields {:name "Alice"})))))
+
+  (testing "passes with nil where clause"
+    (is (nil? (storage/standard-query-validations! :user nil nil))))
+
+  (testing "throws for invalid where type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"where clause must be nil or a map"
+          (storage/standard-query-validations! :user nil "invalid"))))
+
+  (testing "throws for unknown field in where clause"
+    (let [fields {:name {:type :text}}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown field"
+            (storage/standard-query-validations! :user fields {:unknown "value"})))))
+
+  (testing "throws for type mismatch in where clause"
+    (let [fields {:age {:type :int}}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch"
+            (storage/standard-query-validations! :user fields {:age "not-an-int"}))))))
+
+
+(deftest wrap-batch-error-test
+  (testing "wraps ExceptionInfo with batch context"
+    (let [original (ex-info "Original error" {:type :test-error})
+          wrapped (storage/wrap-batch-error original 5 10)]
+      (is (instance? clojure.lang.ExceptionInfo wrapped))
+      (is (= "Original error" (ex-message wrapped)))
+      (is (= :test-error (:type (ex-data wrapped))))
+      (is (= 5 (:batch-index (ex-data wrapped))))
+      (is (= 10 (:batch-size (ex-data wrapped))))
+      (is (= original (ex-cause wrapped)))))
+
+  (testing "wraps regular Exception with batch context"
+    (let [original (Exception. "Regular exception")
+          wrapped (storage/wrap-batch-error original 2 5)]
+      (is (= "Regular exception" (ex-message wrapped)))
+      (is (= :batch-error/partial-failure (:type (ex-data wrapped))))
+      (is (= 2 (:batch-index (ex-data wrapped))))
+      (is (= 5 (:batch-size (ex-data wrapped))))))
+
+  (testing "includes failed-id when provided"
+    (let [failed-id (random-uuid)
+          original (ex-info "Error" {:type :test})
+          wrapped (storage/wrap-batch-error original 0 3 failed-id)]
+      (is (= failed-id (:failed-id (ex-data wrapped))))))
+
+  (testing "omits failed-id when nil"
+    (let [original (ex-info "Error" {:type :test})
+          wrapped (storage/wrap-batch-error original 0 3 nil)]
+      (is (not (contains? (ex-data wrapped) :failed-id))))))
+
+
+(deftest process-batch-with-index-test
+  (testing "processes items and returns results"
+    (let [items [{:id 1} {:id 2} {:id 3}]
+          results (doall (storage/process-batch-with-index
+                           items
+                           :id
+                           (fn [item _idx] (:id item))))]
+      (is (= [1 2 3] results))))
+
+  (testing "wraps exceptions with batch context"
+    (let [items [{:id 1} {:id 2} {:id 3}]
+          fail-on-2 (fn [item _idx]
+                      (if (= 2 (:id item))
+                        (throw (ex-info "Failed on 2" {:type :test-failure}))
+                        (:id item)))]
+      (try
+        (doall (storage/process-batch-with-index items :id fail-on-2))
+        (is false "Should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= "Failed on 2" (ex-message e)))
+          (is (= 1 (:batch-index (ex-data e))))
+          (is (= 3 (:batch-size (ex-data e))))
+          (is (= 2 (:failed-id (ex-data e))))))))
+
+  (testing "handles regular exceptions"
+    (let [items [{:id 1}]
+          fail-fn (fn [_item _idx]
+                    (throw (Exception. "Regular error")))]
+      (try
+        (doall (storage/process-batch-with-index items :id fail-fn))
+        (is false "Should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= "Regular error" (ex-message e)))
+          (is (= :batch-error/partial-failure (:type (ex-data e))))))))
+
+  (testing "works without get-id-fn"
+    (let [items [{:x 1} {:x 2}]
+          results (doall (storage/process-batch-with-index
+                           items
+                           nil
+                           (fn [item _idx] (:x item))))]
+      (is (= [1 2] results)))))
+
+
+;; === validate-where-clause-fields! tests ===
+
+(deftest validate-where-clause-fields!-test
+  (testing "passes for known fields"
+    (let [fields {:name {:type :text} :age {:type :int}}]
+      (is (nil? (storage/validate-where-clause-fields! :user fields {:name "test"})))))
+
+  (testing "passes for empty where clause"
+    (is (nil? (storage/validate-where-clause-fields! :user {:name {:type :text}} {}))))
+
+  (testing "throws for unknown field"
+    (let [fields {:name {:type :text}}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown field"
+            (storage/validate-where-clause-fields! :user fields {:unknown "value"})))))
+
+  (testing "exception contains correct data"
+    (let [fields {:name {:type :text}}]
+      (try
+        (storage/validate-where-clause-fields! :user fields {:bad-field 123})
+        (is false "Should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :validation-error/unknown-field (:type (ex-data e))))
+          (is (= :user (:entity (ex-data e))))
+          (is (= :bad-field (:field (ex-data e)))))))))
+
+
+;; === kw->snake-case and snake->kw tests ===
+
+(deftest kw->snake-case-test
+  (testing "converts kebab-case to snake_case"
+    (is (= "user_name" (storage/kw->snake-case :user-name)))
+    (is (= "fn_schema_id" (storage/kw->snake-case :fn-schema-id))))
+
+  (testing "handles simple keywords"
+    (is (= "id" (storage/kw->snake-case :id)))
+    (is (= "name" (storage/kw->snake-case :name)))))
+
+
+(deftest snake->kw-test
+  (testing "converts snake_case to kebab-case keyword"
+    (is (= :user-name (storage/snake->kw "user_name")))
+    (is (= :fn-schema-id (storage/snake->kw "fn_schema_id"))))
+
+  (testing "handles simple strings"
+    (is (= :id (storage/snake->kw "id")))
+    (is (= :name (storage/snake->kw "name")))))
+
+
+(deftest check-snake-case-collisions!-test
+  (testing "passes for unique snake_case names"
+    (is (nil? (storage/check-snake-case-collisions! {:context "test"} [:user :fn-schema :arg-value]))))
+
+  (testing "throws for colliding names"
+    ;; :user-name and :user_name would both become user_name
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"collision"
+          (storage/check-snake-case-collisions! {:context "test"} [:user-name :user_name])))))
+
+
+;; === traverse-bfs tests ===
+
+(deftest traverse-bfs-test
+  (testing "traverses graph and returns visited nodes"
+    (let [graph {:a #{:b :c}
+                 :b #{:d}
+                 :c #{:d}
+                 :d #{}}
+          get-neighbors (fn [node] (get graph node #{}))]
+      ;; traverse-bfs returns set of visited nodes
+      (is (= #{:a :b :c :d} (storage/traverse-bfs :a get-neighbors)))))
+
+  (testing "returns set with just start node if no neighbors"
+    (is (= #{:x} (storage/traverse-bfs :x (constantly #{})))))
+
+  (testing "handles cycles in graph"
+    (let [graph {:a #{:b}
+                 :b #{:c}
+                 :c #{:a}}  ; cycle back to :a
+          get-neighbors (fn [node] (get graph node #{}))]
+      ;; Should visit each node exactly once despite cycle
+      (is (= #{:a :b :c} (storage/traverse-bfs :a get-neighbors))))))
+
+
+;; === validate-credentials! tests ===
+
+(deftest validate-credentials!-test
+  (testing "passes for valid credentials"
+    (is (nil? (storage/validate-credentials! "username" "password"))))
+
+  (testing "passes for nil username - only validates if string"
+    (is (nil? (storage/validate-credentials! nil "password"))))
+
+  (testing "passes for nil password - only validates if string"
+    (is (nil? (storage/validate-credentials! "username" nil))))
+
+  (testing "throws for too long username"
+    (let [long-user (str/join (repeat 200 "x"))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exceeds maximum length"
+            (storage/validate-credentials! long-user "password")))))
+
+  (testing "throws for too long password"
+    (let [long-pass (str/join (repeat 1100 "x"))]  ; max-password-length = 1024
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exceeds maximum length"
+            (storage/validate-credentials! "username" long-pass)))))
+
+  (testing "throws for username with control chars"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"control characters"
+          (storage/validate-credentials! "user\u0000name" "password"))))
+
+  (testing "throws for password with control chars"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"control characters"
+          (storage/validate-credentials! "username" "pass\u0007word")))))
+
+
+;; === validate-jdbc-url! tests ===
+
+(deftest validate-jdbc-url!-test
+  (testing "passes for valid JDBC URL"
+    (is (nil? (storage/validate-jdbc-url! "jdbc:postgresql://localhost:5432/db"))))
+
+  (testing "passes for nil URL - only validates if string"
+    (is (nil? (storage/validate-jdbc-url! nil))))
+
+  (testing "passes for non-string - only validates if string"
+    (is (nil? (storage/validate-jdbc-url! 12345))))
+
+  (testing "throws for too long URL"
+    (let [long-url (str "jdbc:postgresql://localhost:5432/" (str/join (repeat 5000 "x")))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exceeds maximum length"
+            (storage/validate-jdbc-url! long-url)))))
+
+  (testing "throws for URL with control characters"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"control characters"
+          (storage/validate-jdbc-url! "jdbc:postgresql://localhost\u0000:5432/db")))))
+
+
+;; === validate-credential-length! tests ===
+
+(deftest validate-credential-length!-test
+  (testing "passes for normal length credentials"
+    (is (nil? (storage/validate-credential-length! "testuser" "username" 256)))
+    (is (nil? (storage/validate-credential-length! "testpass" "password" 256))))
+
+  (testing "passes for nil value"
+    (is (nil? (storage/validate-credential-length! nil "username" 256))))
+
+  (testing "throws for too-long credentials"
+    (let [long-value (str/join (repeat 300 "x"))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exceeds maximum length"
+            (storage/validate-credential-length! long-value "username" 256))))))
+
+
+;; === validate-no-control-chars! tests ===
+
+(deftest validate-no-control-chars!-test
+  (testing "passes for normal strings"
+    (is (nil? (storage/validate-no-control-chars! "normal_value" "field")))
+    (is (nil? (storage/validate-no-control-chars! "with spaces" "field"))))
+
+  (testing "passes for nil value"
+    (is (nil? (storage/validate-no-control-chars! nil "field"))))
+
+  (testing "throws for null bytes"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"control characters"
+          (storage/validate-no-control-chars! "has\u0000null" "field"))))
+
+  (testing "throws for other control chars"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"control characters"
+          (storage/validate-no-control-chars! "has\u0007bell" "field")))))

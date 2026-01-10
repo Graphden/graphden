@@ -323,4 +323,12 @@
     (let [uuid (#'core/uuid-v5 (random-uuid) "test")]
       ;; UUID version is encoded in bits 12-15 of time_hi_and_version (byte 6)
       ;; For version 5, this should be 0x5
-      (is (= 5 (UUID/.version uuid))))))
+      (is (= 5 (UUID/.version uuid)))))
+
+  (testing "uuid-v5 throws for blank name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"name-str must not be blank"
+          (#'core/uuid-v5 (random-uuid) "   ")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"name-str must not be blank"
+          (#'core/uuid-v5 (random-uuid) "\t\n")))))

@@ -241,9 +241,18 @@
     (is (= "active" (util/enum-value->sql :active)))
     (is (= "in_progress" (util/enum-value->sql :in-progress))))
 
+  (testing "normalizes uppercase to lowercase"
+    ;; Security: uppercase is normalized to lowercase before validation
+    (is (= "invalid" (util/enum-value->sql :Invalid)))
+    ;; Note: lowercase happens first, then hyphen->underscore
+    ;; :MixedCase -> "mixedcase" (no hyphens to convert)
+    (is (= "mixedcase" (util/enum-value->sql :MixedCase)))
+    ;; :ALL-UPPER -> "all-upper" -> "all_upper"
+    (is (= "all_upper" (util/enum-value->sql :ALL-UPPER))))
+
   (testing "rejects invalid enum values"
     (is (thrown? clojure.lang.ExceptionInfo
-          (util/enum-value->sql :Invalid)))))     ; uppercase
+          (util/enum-value->sql (keyword "123invalid"))))))
 
 
 (deftest sql->enum-value-test

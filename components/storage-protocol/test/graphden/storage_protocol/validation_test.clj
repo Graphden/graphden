@@ -157,6 +157,42 @@
         (is (= Long (:where-type (ex-data e))))))))
 
 
+;; === validate-where-clause-fields! tests ===
+
+(deftest validate-where-clause-fields!-test
+  (let [fields {:name {:type :text}
+                :email {:type :text}
+                :status {:type :enum}}]
+
+    (testing "passes for nil where"
+      (is (nil? (v/validate-where-clause-fields! :user fields nil))))
+
+    (testing "passes for empty where"
+      (is (nil? (v/validate-where-clause-fields! :user fields {}))))
+
+    (testing "passes for known fields"
+      (is (nil? (v/validate-where-clause-fields! :user fields {:name "Alice"})))
+      (is (nil? (v/validate-where-clause-fields! :user fields {:name "Alice" :status :active}))))
+
+    (testing "passes for :id field even if not in fields"
+      (is (nil? (v/validate-where-clause-fields! :user fields {:id (random-uuid)}))))
+
+    (testing "throws for unknown field"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Unknown field 'unknown'"
+            (v/validate-where-clause-fields! :user fields {:unknown "value"}))))
+
+    (testing "error contains details"
+      (try
+        (v/validate-where-clause-fields! :user fields {:bad-field 123})
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :validation-error/unknown-field (:type (ex-data e))))
+          (is (= :user (:entity (ex-data e))))
+          (is (= :bad-field (:field (ex-data e))))
+          (is (contains? (set (:known-fields (ex-data e))) :name)))))))
+
+
 ;; === validate-entity-name! tests ===
 
 (deftest validate-entity-name!-test

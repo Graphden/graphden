@@ -161,7 +161,10 @@
                        (fn []
                          (let [s @state]
                            (crud/validate-entity-exists! s entity-name)
-                           (let [all-records (vals (crud/get-entity-data s entity-name))]
+                           (let [fields (crud/get-entity-fields s entity-name)
+                                 all-records (vals (crud/get-entity-data s entity-name))]
+                             ;; Validate where clause fields after we have schema info
+                             (sp/validate-where-clause-fields! entity-name fields where)
                              (if (empty? where)
                                all-records
                                (filter (fn [record]

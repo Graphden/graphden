@@ -27,6 +27,12 @@
   (get-in state [:data entity-name] {}))
 
 
+(defn get-entity-fields
+  "Gets the fields map for an entity from state."
+  [state entity-name]
+  (get-in state [:entities entity-name :fields]))
+
+
 (defn- find-conflicting-record
   "Finds the first record that conflicts with new-values for the given fields.
    Returns the conflicting record or nil."

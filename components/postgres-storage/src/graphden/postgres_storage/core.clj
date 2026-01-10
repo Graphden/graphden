@@ -190,7 +190,9 @@
 
   (query-entities
     [_this entity-name where]
-    (crud/query-entities pool entity-name where))
+    (let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)
+          fields (extract-entity-fields cached-metadata entity-name)]
+      (crud/query-entities pool entity-name where fields)))
 
 
   sp/StorageBatchCRUD

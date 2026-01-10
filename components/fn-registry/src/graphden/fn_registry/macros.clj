@@ -247,6 +247,19 @@
     arg-spec))
 
 
+(defn- transform-fn-arg-symbol
+  "Transforms a :fn type argument symbol to a callable wrapper."
+  [sym]
+  `(exec/make-single-arg-callable ~'ctx (deref ~sym)))
+
+
+(defn- transform-regular-arg-symbol
+  "Transforms a regular argument symbol to deref with nil check.
+   Note: (when delay (deref delay)) works because delays are always truthy."
+  [sym]
+  `(when ~sym (deref ~sym)))
+
+
 (defn- transform-body
   "AST walker that transforms argument symbols to delayed evaluation.
 
@@ -282,29 +295,39 @@
    - arg-syms: Sequence of regular argument symbols
    - fn-arg-syms: Sequence of :fn type argument symbols"
   [body arg-syms fn-arg-syms]
-  (letfn [(transform
+  (letfn [(transform-symbol
+            [form active-args active-fn-args]
+            (cond
+              (active-fn-args form) (transform-fn-arg-symbol form)
+              (active-args form) (transform-regular-arg-symbol form)
+              :else form))
+
+          (transform-binding
+            [form active-args active-fn-args]
+            (let [bound (extract-bound-symbols form)
+                  new-active (apply disj active-args bound)
+                  new-fn-active (apply disj active-fn-args bound)]
+              (apply list (map #(transform % new-active new-fn-active) form))))
+
+          (transform-map-entry
+            [[k v] active-args active-fn-args]
+            [(transform k active-args active-fn-args)
+             (transform v active-args active-fn-args)])
+
+          (transform
             [form active-args active-fn-args]
             (cond
               ;; Optimization: if no active args to replace, return as-is
               (and (empty? active-args) (empty? active-fn-args))
               form
 
-              ;; Symbol that is a :fn type arg - wrap as callable
-              (and (symbol? form) (active-fn-args form))
-              `(exec/make-single-arg-callable ~'ctx (deref ~form))
-
-              ;; Symbol that should be replaced with deref
-              ;; Note: (when delay (deref delay)) works because delays are always truthy
-              (and (symbol? form) (active-args form))
-              `(when ~form (deref ~form))
+              ;; Symbol transformation
+              (symbol? form)
+              (transform-symbol form active-args active-fn-args)
 
               ;; Binding form - remove shadowed symbols from active sets
-              ;; This implements lexical scoping: local bindings shadow args
               (binding-form? form)
-              (let [bound (extract-bound-symbols form)
-                    new-active (apply disj active-args bound)
-                    new-fn-active (apply disj active-fn-args bound)]
-                (apply list (map #(transform % new-active new-fn-active) form)))
+              (transform-binding form active-args active-fn-args)
 
               ;; Other sequences - transform children
               (seq? form)
@@ -316,10 +339,7 @@
 
               ;; Maps - transform both keys and values
               (map? form)
-              (into {} (map (fn [[k v]]
-                              [(transform k active-args active-fn-args)
-                               (transform v active-args active-fn-args)])
-                            form))
+              (into {} (map #(transform-map-entry % active-args active-fn-args) form))
 
               ;; Sets - preserve type
               (set? form)

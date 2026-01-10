@@ -1540,11 +1540,12 @@
           back (util/sql->enum-value sql-val)]
       (is (= original back))))
 
-  (testing "enum-value->sql rejects invalid values"
+  (testing "enum-value->sql normalizes case and rejects invalid values"
+    ;; Uppercase is now normalized to lowercase (security fix)
+    (is (= "uppercase" (util/enum-value->sql :UPPERCASE)))
+    ;; These still fail because they start with numbers
     (is (thrown? clojure.lang.ExceptionInfo
-          (util/enum-value->sql :123-invalid)))
-    (is (thrown? clojure.lang.ExceptionInfo
-          (util/enum-value->sql :UPPERCASE)))))
+          (util/enum-value->sql (keyword "123-invalid"))))))
 
 
 (deftest metadata-caching-test
@@ -3242,7 +3243,8 @@
       (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
                                     (throw connection-ex))]
         (try
-          (query-entities-fn nil :some-entity {:name "test"})
+          ;; query-entities signature: [ds entity-name where fields]
+          (query-entities-fn nil :some-entity {:name "test"} {:name {:type :text}})
           (is false "Should have thrown")
           (catch clojure.lang.ExceptionInfo e
             (is (= :connection-error (:type (ex-data e))))

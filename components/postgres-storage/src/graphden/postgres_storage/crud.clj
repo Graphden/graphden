@@ -115,8 +115,8 @@
 
    Note: Empty where clause ({} or nil) returns all entities (full table scan).
    This is logged at DEBUG level to help identify unintended full scans."
-  [ds entity-name where]
-  (sp/validate-where-clause! where)
+  [ds entity-name where fields]
+  (sp/standard-query-validations! entity-name fields where)
   (let [table-name (keyword (util/kw->snake-case entity-name))
         where-clause (when (seq where)
                        (into [:and]

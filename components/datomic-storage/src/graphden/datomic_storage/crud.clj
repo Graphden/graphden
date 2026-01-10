@@ -176,6 +176,8 @@
   (sp/validate-where-clause! where)
   (let [db (d/db conn)
         fields (get-entity-fields db entity-name)
+        field-specs (zipmap fields (repeat {:type :any}))  ; Datomic fields for validation
+        _ (sp/validate-where-clause-fields! entity-name field-specs where)
         id-attr (util/entity-attr entity-name :id)
         pattern (into [id-attr] (map #(util/entity-attr entity-name %) fields))
         ;; Build where clauses - must have at least one clause to identify entities of this type

@@ -271,27 +271,57 @@
 ;;
 ;; Shared utilities for redacting sensitive data in logs and exceptions.
 ;; All storage implementations should use these to ensure consistent security.
+;;
+;; IMPORTANT: Any new sensitive field patterns should be added here.
+;; All storage backends and the executor use these patterns for consistent
+;; security across the entire Graphden system.
+
+(def sensitive-field-names
+  "Explicit field names that should always be redacted.
+   These are checked with exact match (case-insensitive)."
+  #{:password :secret :token :api-key :auth-token
+    :access-key :private-key :jdbc-url :connection-string
+    :credentials :passphrase :pin :ssn :credit-card})
+
 
 (def sensitive-field-patterns
   "Regex patterns for identifying sensitive field names that should be redacted.
-   Used across all storage backends and executor for consistent security."
-  [#"(?i)password"
+   Used across all storage backends and executor for consistent security.
+
+   Pattern matching is case-insensitive and matches partial field names:
+   - password, pass, passwd → matches 'user-password', 'passwd123'
+   - secret → matches 'client-secret', 'secret-key'
+   - token → matches 'auth-token', 'access-token', 'refresh-token'
+   - api[_-]?key → matches 'api-key', 'apikey', 'api_key'
+   - auth → matches 'auth-header', 'oauth-token'
+   - credential → matches 'user-credentials', 'db-credential'
+   - private[_-]?key → matches 'private-key', 'privatekey'"
+  [#"(?i)pass(word|wd)?"
    #"(?i)secret"
    #"(?i)token"
    #"(?i)api[_-]?key"
    #"(?i)auth"
    #"(?i)credential"
-   #"(?i)private[_-]?key"])
+   #"(?i)private[_-]?key"
+   #"(?i)access[_-]?key"
+   #"(?i)connection[_-]?string"
+   #"(?i)jdbc[_-]?url"])
 
 
 (defn sensitive-field?
   "Returns true if field name matches known sensitive patterns.
+   Checks both explicit field names and regex patterns.
    Handles keywords, strings, and nil gracefully."
   [field-name]
   (when field-name
-    (let [name-str (if (keyword? field-name) (name field-name) (str field-name))]
+    (let [kw (if (keyword? field-name) field-name (keyword field-name))
+          name-str (name kw)]
       (when (seq name-str)
-        (some #(re-find % name-str) sensitive-field-patterns)))))
+        (or
+          ;; Check explicit names first (fast exact match)
+          (contains? sensitive-field-names kw)
+          ;; Then check patterns (regex matching)
+          (some #(re-find % name-str) sensitive-field-patterns))))))
 
 
 (defn redact-sensitive-map

@@ -73,6 +73,30 @@
 
 ;; === Generic BFS Traversal ===
 
+(defn- check-bfs-iteration-limit!
+  "Throws if BFS iteration count exceeds limit."
+  [iter-count max-iter context-id]
+  (when (> iter-count max-iter)
+    (throw (ex-info "BFS traversal exceeded maximum iterations"
+                    {:type :execution-error/traversal-too-large
+                     :context-id context-id
+                     :max-iterations max-iter
+                     :iteration-count iter-count}))))
+
+
+(defn- bfs-step
+  "Processes a single BFS step.
+   Returns updated state map with :queue, :visited."
+  [queue visited get-neighbors-fn]
+  (let [current-id (peek queue)
+        rest-queue (pop queue)
+        neighbors (get-neighbors-fn current-id)
+        new-neighbors (remove visited neighbors)
+        new-visited (into visited new-neighbors)]
+    {:queue (into rest-queue new-neighbors)
+     :visited new-visited}))
+
+
 (defn traverse-bfs
   "Generic BFS traversal utility for in-memory graph operations.
    Returns set of all visited nodes.
@@ -109,22 +133,12 @@
      (loop [queue init-queue
             visited #{start-id}
             iter-count 0]
-       (when (> iter-count max-iter)
-         (throw (ex-info "BFS traversal exceeded maximum iterations"
-                         {:type :execution-error/traversal-too-large
-                          :context-id context-id
-                          :max-iterations max-iter
-                          :iteration-count iter-count})))
+       (check-bfs-iteration-limit! iter-count max-iter context-id)
        (if (empty? queue)
          visited
-         (let [current-id (peek queue)
-               rest-queue (pop queue)
-               neighbors (get-neighbors-fn current-id)
-               new-neighbors (remove visited neighbors)
-               new-visited (into visited new-neighbors)]
-           (recur (into rest-queue new-neighbors)
-                  new-visited
-                  (inc iter-count))))))))
+         (let [{new-queue :queue new-visited :visited}
+               (bfs-step queue visited get-neighbors-fn)]
+           (recur new-queue new-visited (inc iter-count))))))))
 
 
 ;; === UUID parsing ===

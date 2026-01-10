@@ -19,7 +19,6 @@
       only valid, validated identifiers are used in SQL statements."
   (:require
     [clojure.string :as str]
-    [clojure.tools.logging :as log]
     [graphden.postgres-storage.errors :as errors]
     [graphden.storage-protocol.interface :as sp]
     [next.jdbc.result-set :as rs]))
@@ -202,19 +201,18 @@
 
 
 (defn enum-value->sql
-  "Converts an enum value keyword to SQL string (snake_case, no quotes wrapper).
+  "Converts an enum value keyword to SQL string (snake_case, lowercase).
    Validates the result to prevent SQL injection.
 
-   Note: Uppercase letters in keyword will cause validation to fail since
-   PostgreSQL enum values must be lowercase (they are case-sensitive and
-   we use unquoted identifiers which PostgreSQL folds to lowercase)."
+   Uppercase letters are automatically converted to lowercase since
+   PostgreSQL enum values are case-sensitive and we use unquoted
+   identifiers which PostgreSQL folds to lowercase."
   [k]
   (let [kw-name (name k)
-        sql-val (str/replace kw-name "-" "_")]
-    ;; Log warning if keyword contains uppercase (will fail validation anyway)
-    (when (not= kw-name (str/lower-case kw-name))
-      (log/warn "Enum value keyword contains uppercase letters which are not allowed"
-                {:keyword k :would-become sql-val}))
+        ;; Explicitly convert to lowercase for safety
+        sql-val (-> kw-name
+                    str/lower-case
+                    (str/replace "-" "_"))]
     (validate-sql-identifier! sql-val {:type :enum-value :keyword k})
     sql-val))
 

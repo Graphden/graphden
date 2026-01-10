@@ -100,6 +100,32 @@
                      :where-type (type where)}))))
 
 
+(defn validate-where-clause-fields!
+  "Validates that all keys in where clause are known fields for the entity.
+   Prevents queries against non-existent fields which could indicate
+   programming errors or injection attempts.
+
+   Arguments:
+   - entity-name: keyword name of the entity
+   - fields: map of {field-name field-spec} for the entity
+   - where: the where clause map to validate
+
+   Throws ExceptionInfo with :type :validation-error/unknown-field if
+   a where clause key doesn't match a known field."
+  [entity-name fields where]
+  (when (and (some? where) (map? where))
+    (let [known-fields (set (keys fields))
+          ;; :id is always valid even if not in fields
+          valid-fields (conj known-fields :id)]
+      (doseq [k (keys where)]
+        (when-not (contains? valid-fields k)
+          (throw (ex-info (str "Unknown field '" (name k) "' in where clause for entity '" (name entity-name) "'")
+                          {:type :validation-error/unknown-field
+                           :entity entity-name
+                           :field k
+                           :known-fields (vec (sort known-fields))})))))))
+
+
 (defn validate-entity-name!
   "Validates that entity-name is a safe keyword for storage operations.
    Prevents SQL injection and other attacks via malicious entity names.

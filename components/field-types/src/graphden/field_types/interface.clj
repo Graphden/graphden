@@ -128,3 +128,130 @@
   (if-let [validator (get type-validators type-kw)]
     (validator value)
     true))  ; Unknown types are permissively accepted
+
+
+;; === Custom Type Registry ===
+;;
+;; Allows registering custom field types at runtime.
+;; Useful for domain-specific types that need special encoding/decoding.
+
+;; Registry for custom field types registered via plugins.
+;; Structure: {type-kw {:validator fn, :encoder fn, :decoder fn, :backend-mappings {...}}}
+(defonce ^:private custom-types-registry (atom {}))
+
+
+(defn register-custom-type!
+  "Registers a custom field type with encoder/decoder/validator.
+
+   Arguments:
+   - type-kw: Keyword name for the custom type (e.g., :email, :phone)
+   - opts: Map with keys:
+     - :validator - (fn [value] -> boolean) - validates values of this type
+     - :encoder - (fn [value] -> storage-value) - converts to storage format
+     - :decoder - (fn [storage-value] -> value) - converts from storage format
+     - :backend-mappings - (optional) Map of {:postgres \"TYPE\" :datomic :db.type/...}
+     - :description - (optional) Human-readable description
+
+   Example:
+   ```clojure
+   (register-custom-type! :email
+     {:validator #(and (string? %) (re-matches #\".+@.+\\..+\" %))
+      :encoder identity
+      :decoder identity
+      :backend-mappings {:postgres \"TEXT\" :datomic :db.type/string :memory :any}
+      :description \"Email address\"})
+   ```
+
+   Returns nil."
+  [type-kw {:keys [validator encoder decoder backend-mappings description]
+            :or {validator (constantly true)
+                 encoder identity
+                 decoder identity
+                 backend-mappings {:postgres "TEXT" :datomic :db.type/string :memory :any}
+                 description "Custom type"}}]
+  (when-not (keyword? type-kw)
+    (throw (ex-info "Custom type key must be a keyword"
+                    {:type :invalid-custom-type
+                     :type-kw type-kw})))
+  (when (contains? supported-types type-kw)
+    (throw (ex-info "Cannot override built-in type"
+                    {:type :invalid-custom-type
+                     :type-kw type-kw
+                     :built-in-types supported-types})))
+  (swap! custom-types-registry assoc type-kw
+         {:validator validator
+          :encoder encoder
+          :decoder decoder
+          :backend-mappings backend-mappings
+          :description description})
+  nil)
+
+
+(defn unregister-custom-type!
+  "Removes a custom field type from the registry.
+   Returns nil."
+  [type-kw]
+  (swap! custom-types-registry dissoc type-kw)
+  nil)
+
+
+(defn get-custom-type
+  "Returns custom type spec or nil if not registered."
+  [type-kw]
+  (get @custom-types-registry type-kw))
+
+
+(defn custom-type?
+  "Returns true if type-kw is a registered custom type."
+  [type-kw]
+  (contains? @custom-types-registry type-kw))
+
+
+(defn all-custom-types
+  "Returns set of all registered custom type keywords."
+  []
+  (set (keys @custom-types-registry)))
+
+
+(defn all-supported-types
+  "Returns set of all supported types (built-in + custom)."
+  []
+  (into supported-types (all-custom-types)))
+
+
+(defn get-type-validator
+  "Returns validator function for type (built-in or custom).
+   Returns (constantly true) for unknown types."
+  [type-kw]
+  (or (get type-validators type-kw)
+      (:validator (get-custom-type type-kw))
+      (constantly true)))
+
+
+(defn get-type-encoder
+  "Returns encoder function for custom type, or identity for built-in types."
+  [type-kw]
+  (if-let [custom (get-custom-type type-kw)]
+    (:encoder custom)
+    identity))
+
+
+(defn get-type-decoder
+  "Returns decoder function for custom type, or identity for built-in types."
+  [type-kw]
+  (if-let [custom (get-custom-type type-kw)]
+    (:decoder custom)
+    identity))
+
+
+(defn get-backend-mapping
+  "Returns backend type mapping for a type (built-in or custom).
+
+   Arguments:
+   - type-kw: Type keyword
+   - backend: Backend keyword (:postgres, :datomic, :memory)
+
+   Returns the backend-specific type or nil."
+  [type-kw backend]
+  (or (get-in type-mappings [type-kw backend])
+      (get-in (get-custom-type type-kw) [:backend-mappings backend])))

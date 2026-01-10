@@ -1,7 +1,8 @@
 (ns graphden.datomic-storage.util-test
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.datomic-storage.util :as util]))
+    [graphden.datomic-storage.util :as util]
+    [graphden.storage-protocol.interface :as sp]))
 
 
 ;; === Type mapping tests ===
@@ -254,3 +255,168 @@
   (testing "accepts cloud with minimal config (warns but doesn't throw)"
     (is (nil? (util/validate-client-config!
                 {:server-type :cloud})))))
+
+
+;; === execute-with-timeout! tests ===
+
+(deftest execute-with-timeout!-test
+  (testing "returns result of successful query"
+    (is (= 42
+           (util/execute-with-timeout! :test-op #(+ 40 2)))))
+
+  (testing "throws on timeout"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Query timeout"
+          (util/with-query-timeout 10
+                                   #(util/execute-with-timeout!
+                                      :slow-query
+                                      (fn []
+                                        (Thread/sleep 100)
+                                        :never-reached))))))
+
+  (testing "timeout exception contains operation and timeout info"
+    (try
+      (util/with-query-timeout 10
+                               #(util/execute-with-timeout!
+                                  :my-operation
+                                  (fn []
+                                    (Thread/sleep 100)
+                                    nil)))
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :query-timeout (:type (ex-data e))))
+        (is (= :my-operation (:operation (ex-data e))))
+        (is (= 10 (:timeout-ms (ex-data e)))))))
+
+  (testing "unwraps ExecutionException to get original exception"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Original error"
+          (util/execute-with-timeout!
+            :failing-query
+            #(throw (ex-info "Original error" {:cause :test})))))))
+
+
+;; === classify-datomic-error tests ===
+
+(deftest classify-datomic-error-test
+  (testing "classifies :db.error/not-an-entity as :not-found"
+    (is (= :not-found
+           (util/classify-datomic-error
+             (ex-info "error" {:db/error :db.error/not-an-entity})))))
+
+  (testing "classifies :db.error/unique-conflict as :constraint-violation/unique"
+    (is (= :constraint-violation/unique
+           (util/classify-datomic-error
+             (ex-info "error" {:db/error :db.error/unique-conflict})))))
+
+  (testing "classifies :db.error/invalid-entity-id as :invalid-data"
+    (is (= :invalid-data
+           (util/classify-datomic-error
+             (ex-info "error" {:db/error :db.error/invalid-entity-id})))))
+
+  (testing "classifies :db.error/datoms-conflict as :constraint-violation/conflict"
+    (is (= :constraint-violation/conflict
+           (util/classify-datomic-error
+             (ex-info "error" {:db/error :db.error/datoms-conflict})))))
+
+  (testing "classifies :db.error/cas-failed as :constraint-violation/cas-failed"
+    (is (= :constraint-violation/cas-failed
+           (util/classify-datomic-error
+             (ex-info "error" {:db/error :db.error/cas-failed})))))
+
+  (testing "classifies cognitect anomalies"
+    (is (= :not-found
+           (util/classify-datomic-error
+             (ex-info "error" {:cognitect.anomalies/category :cognitect.anomalies/not-found}))))
+    (is (= :constraint-violation/conflict
+           (util/classify-datomic-error
+             (ex-info "error" {:cognitect.anomalies/category :cognitect.anomalies/conflict}))))
+    (is (= :transient-error/busy
+           (util/classify-datomic-error
+             (ex-info "error" {:cognitect.anomalies/category :cognitect.anomalies/busy}))))
+    (is (= :transient-error/unavailable
+           (util/classify-datomic-error
+             (ex-info "error" {:cognitect.anomalies/category :cognitect.anomalies/unavailable}))))
+    (is (= :transient-error/interrupted
+           (util/classify-datomic-error
+             (ex-info "error" {:cognitect.anomalies/category :cognitect.anomalies/interrupted})))))
+
+  (testing "classifies ExecutionException as :transient-error/execution"
+    (is (= :transient-error/execution
+           (util/classify-datomic-error
+             (java.util.concurrent.ExecutionException. "error" nil)))))
+
+  (testing "classifies ConnectException as :connection-error"
+    (is (= :connection-error
+           (util/classify-datomic-error
+             (java.net.ConnectException. "connection refused")))))
+
+  (testing "classifies IOException as :io-error"
+    (is (= :io-error
+           (util/classify-datomic-error
+             (java.io.IOException. "IO failed")))))
+
+  (testing "classifies unknown ExceptionInfo as :datomic-error"
+    (is (= :datomic-error
+           (util/classify-datomic-error
+             (ex-info "unknown" {:some :data})))))
+
+  (testing "classifies other exceptions as :unknown-datomic-error"
+    (is (= :unknown-datomic-error
+           (util/classify-datomic-error
+             (Exception. "some exception"))))))
+
+
+;; === wrap-datomic-error tests ===
+
+(deftest wrap-datomic-error-test
+  (testing "creates wrapped exception with context"
+    (let [original (ex-info "Original" {:db/error :db.error/not-an-entity})
+          wrapped (util/wrap-datomic-error original "Test error" :read {:id 123})]
+      (is (instance? clojure.lang.ExceptionInfo wrapped))
+      (is (= :not-found (:type (ex-data wrapped))))
+      (is (= :read (:operation (ex-data wrapped))))
+      (is (= 123 (:id (ex-data wrapped))))
+      (is (= original (ex-cause wrapped)))))
+
+  (testing "redacts sensitive context in exception message"
+    (let [original (ex-info "DB error" {})
+          wrapped (util/wrap-datomic-error original "Error" :query
+                                           {:password "secret123"})]
+      ;; The actual context in ex-data should still have password (for debugging)
+      (is (= "secret123" (:password (ex-data wrapped)))))))
+
+
+;; === with-datomic-error-handling tests ===
+
+(deftest with-datomic-error-handling-test
+  (testing "returns result when no exception"
+    (is (= 42
+           (util/with-datomic-error-handling "Test" :read {}
+                                             (+ 40 2)))))
+
+  (testing "wraps exception with context"
+    (try
+      (util/with-datomic-error-handling "DB error" :create {:entity :user}
+                                        (throw (ex-info "Original" {:db/error :db.error/unique-conflict})))
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :constraint-violation/unique (:type (ex-data e))))
+        (is (= :create (:operation (ex-data e))))
+        (is (= :user (:entity (ex-data e))))))))
+
+
+;; === DatomicErrorClassifier tests ===
+
+(deftest datomic-error-classifier-test
+  (let [classifier (util/create-error-classifier)]
+    (testing "classify-error delegates to classify-datomic-error"
+      (let [error (ex-info "test" {:db/error :db.error/not-an-entity})]
+        (is (= :not-found
+               (sp/classify-error classifier error)))))
+
+    (testing "wrap-error creates wrapped exception"
+      (let [error (ex-info "test" {:db/error :db.error/unique-conflict})
+            wrapped (sp/wrap-error classifier error :create {:entity :user})]
+        (is (= :constraint-violation/unique (:type (ex-data wrapped))))
+        (is (= :create (:operation (ex-data wrapped))))))))

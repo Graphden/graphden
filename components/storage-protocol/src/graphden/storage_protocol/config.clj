@@ -345,3 +345,28 @@
             *max-regex-input-length* (get opts :max-input-length *max-regex-input-length*)
             *regex-compile-timeout-ms* (get opts :compile-timeout-ms *regex-compile-timeout-ms*)]
     (f)))
+
+
+;; ============================================================================
+;; Lazy Sequence Safety Configuration
+;; ============================================================================
+;;
+;; Configurable limits for lazy sequence realization to prevent DoS attacks.
+;; User functions that return infinite or very large lazy sequences could
+;; exhaust memory when realized.
+
+(def ^:dynamic *max-lazy-seq-size*
+  "Maximum number of elements allowed when realizing a lazy sequence.
+   Sequences larger than this will throw an error.
+   Default: 100000 elements.
+
+   This protects against DoS via functions that return (range) or
+   other infinite/large lazy sequences."
+  100000)
+
+
+(def ^:dynamic *max-nested-collection-depth*
+  "Maximum depth for recursive collection realization.
+   Prevents stack overflow from deeply nested structures.
+   Default: 100 levels."
+  100)

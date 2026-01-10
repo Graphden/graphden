@@ -407,6 +407,88 @@
     (is (false? (v/complex-type? :ref)))))
 
 
+;; === validate-where-clause-types! tests ===
+
+(deftest validate-where-clause-types!-test
+  (let [fields {:name {:type :text}
+                :age {:type :int}
+                :active {:type :bool}
+                :score {:type :numeric}
+                :data {:type :jsonb}
+                :status {:type :enum}
+                :parent-id {:type :ref}
+                :created {:type :timestamptz}
+                :content {:type :bytes}
+                :meta {:type :union}}]
+
+    (testing "passes for nil where"
+      (is (nil? (v/validate-where-clause-types! :user fields nil))))
+
+    (testing "passes for empty where"
+      (is (nil? (v/validate-where-clause-types! :user fields {}))))
+
+    (testing "passes for matching types"
+      (is (nil? (v/validate-where-clause-types! :user fields {:name "Alice"})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:age 25})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:active true})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:score 99.5})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:data {:key "value"}})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:status :active})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:parent-id (random-uuid)})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:created (java.util.Date.)}))))
+
+    (testing "passes for nil values (nullable check is separate)"
+      (is (nil? (v/validate-where-clause-types! :user fields {:name nil}))))
+
+    (testing "passes for :id field as UUID"
+      (is (nil? (v/validate-where-clause-types! :user fields {:id (random-uuid)}))))
+
+    (testing "allows int for numeric type"
+      (is (nil? (v/validate-where-clause-types! :user fields {:score 100}))))
+
+    (testing "allows text for jsonb type"
+      (is (nil? (v/validate-where-clause-types! :user fields {:data "{\"key\": \"value\"}"}))))
+
+    (testing "allows any value for union type"
+      (is (nil? (v/validate-where-clause-types! :user fields {:meta "string"})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:meta 123})))
+      (is (nil? (v/validate-where-clause-types! :user fields {:meta {:nested "map"}}))))
+
+    (testing "allows uuid for ref type"
+      (is (nil? (v/validate-where-clause-types! :user fields {:parent-id (random-uuid)}))))
+
+    (testing "throws for type mismatch - string for int"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch.*expected int, got text"
+            (v/validate-where-clause-types! :user fields {:age "twenty-five"}))))
+
+    (testing "throws for type mismatch - string for bool"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch.*expected bool, got text"
+            (v/validate-where-clause-types! :user fields {:active "yes"}))))
+
+    (testing "throws for type mismatch - int for text"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch.*expected text, got int"
+            (v/validate-where-clause-types! :user fields {:name 123}))))
+
+    (testing "throws for type mismatch - string for uuid on :id"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch.*expected uuid, got text"
+            (v/validate-where-clause-types! :user fields {:id "not-a-uuid"}))))
+
+    (testing "error contains details"
+      (try
+        (v/validate-where-clause-types! :user fields {:age "string-value"})
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :validation-error/type-mismatch (:type (ex-data e))))
+          (is (= :user (:entity (ex-data e))))
+          (is (= :age (:field (ex-data e))))
+          (is (= :int (:expected-type (ex-data e))))
+          (is (= :text (:actual-type (ex-data e)))))))))
+
+
 ;; === type-category tests ===
 
 (deftest type-category-test

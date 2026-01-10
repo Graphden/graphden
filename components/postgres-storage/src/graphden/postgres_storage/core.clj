@@ -102,20 +102,10 @@
 
 (defn- get-entity-fields
   "Gets field specs for an entity using cached index.
-   O(1) lookup instead of O(n) filter on every call."
+   O(1) lookup via pre-built :fields-by-entity index."
   [pool metadata-cache rw-lock entity-name]
   (when-let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)]
-    ;; Use :fields-by-entity index if available, otherwise build on demand
-    (if-let [index (:fields-by-entity cached-metadata)]
-      (get index entity-name)
-      ;; Fallback for backwards compatibility (should not happen in practice)
-      (->> (:fields cached-metadata)
-           vals
-           (filter #(= (:entity %) entity-name))
-           (map (fn [{:keys [field nullable? enum-name] field-type :type}]
-                  [field (cond-> {:type field-type :nullable? nullable?}
-                           enum-name (assoc :enum-name enum-name))]))
-           (into {})))))
+    (get (:fields-by-entity cached-metadata) entity-name)))
 
 
 (defrecord PostgresStorage

@@ -149,17 +149,60 @@
 
 
 ;; === Type mapping ===
+;;
+;; Type mappings are extensible for custom types.
+;; Use register-type-mapping! to add new canonical type -> PostgreSQL type mappings.
 
-(def type->pg
-  "Maps our field types to PostgreSQL types."
-  {:uuid        "UUID"
-   :text        "TEXT"
-   :int         "BIGINT"
-   :bool        "BOOLEAN"
-   :numeric     "NUMERIC"
-   :timestamptz "TIMESTAMPTZ"
-   :jsonb       "JSONB"
-   :bytes       "BYTEA"})
+(def ^:private type-mappings
+  "Atom holding canonical type -> PostgreSQL type mappings.
+   Extensible via register-type-mapping! for custom types."
+  (atom {:uuid        "UUID"
+         :text        "TEXT"
+         :int         "BIGINT"
+         :bool        "BOOLEAN"
+         :numeric     "NUMERIC"
+         :timestamptz "TIMESTAMPTZ"
+         :jsonb       "JSONB"
+         :bytes       "BYTEA"}))
+
+
+(defn type->pg
+  "Maps a canonical field type to PostgreSQL type string.
+   Returns nil for unknown types.
+
+   This function looks up the type in the current type mappings.
+   Use register-type-mapping! to add custom type mappings."
+  [field-type]
+  (get @type-mappings field-type))
+
+
+(defn register-type-mapping!
+  "Registers a new canonical type -> PostgreSQL type mapping.
+   Use this to add support for custom field types.
+
+   Arguments:
+   - canonical-type: keyword like :my-custom-type
+   - pg-type: PostgreSQL type string like \"MYTYPE\"
+
+   Example:
+   (register-type-mapping! :money \"MONEY\")
+   (register-type-mapping! :point \"POINT\")"
+  [canonical-type pg-type]
+  (swap! type-mappings assoc canonical-type pg-type))
+
+
+(defn reset-type-mappings!
+  "Resets type mappings to defaults. Mainly for testing."
+  []
+  (reset! type-mappings
+          {:uuid        "UUID"
+           :text        "TEXT"
+           :int         "BIGINT"
+           :bool        "BOOLEAN"
+           :numeric     "NUMERIC"
+           :timestamptz "TIMESTAMPTZ"
+           :jsonb       "JSONB"
+           :bytes       "BYTEA"}))
 
 
 ;; Delegate to shared naming utilities
@@ -192,14 +235,15 @@
 
 (defn field-type->pg
   "Converts a field type to PostgreSQL type string.
-   Handles basic types, refs (as UUID), enums, and unions (as JSONB)."
+   Handles basic types, refs (as UUID), enums, and unions (as JSONB).
+   Falls back to TEXT for unknown types (allows custom types via type mappings)."
   [field-spec]
   (let [t (:type field-spec)]
     (case t
       :ref "UUID"
       :enum (ident->sql (:enum-name field-spec))
       :union "JSONB"
-      (get type->pg t "TEXT"))))
+      (or (type->pg t) "TEXT"))))
 
 
 (defn enum-value->sql

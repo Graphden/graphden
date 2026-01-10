@@ -460,6 +460,7 @@
 (def validate-data-is-map! validation/validate-data-is-map!)
 (def validate-where-clause! validation/validate-where-clause!)
 (def validate-where-clause-fields! validation/validate-where-clause-fields!)
+(def validate-where-clause-types! validation/validate-where-clause-types!)
 (def validate-entity-name! validation/validate-entity-name!)
 (def validate-credential-length! validation/validate-credential-length!)
 (def validate-no-control-chars! validation/validate-no-control-chars!)
@@ -572,11 +573,12 @@
 
 (defn standard-query-validations!
   "Performs standard validations for query operations.
-   Validates both the where clause structure and field names."
+   Validates the where clause structure, field names, and value types."
   [entity-name fields where]
   (validate-where-clause! where)
   (when fields
-    (validate-where-clause-fields! entity-name fields where)))
+    (validate-where-clause-fields! entity-name fields where)
+    (validate-where-clause-types! entity-name fields where)))
 
 
 (defn standard-batch-validations!

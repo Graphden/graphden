@@ -126,6 +126,71 @@
                            :known-fields (vec (sort known-fields))})))))))
 
 
+(defn- check-type-match
+  "Checks if a value matches the expected field type.
+   Returns nil if valid, or error-map {:expected ... :actual ...} if invalid.
+
+   This is a soft check for common types - exotic types pass through
+   to allow backend-specific handling."
+  [value field-type]
+  (let [actual-type (cond
+                      (nil? value) :nil
+                      (uuid? value) :uuid
+                      (string? value) :text
+                      (integer? value) :int
+                      (boolean? value) :bool
+                      (or (float? value) (decimal? value)) :numeric
+                      (inst? value) :timestamptz
+                      (bytes? value) :bytes
+                      (keyword? value) :enum
+                      (or (map? value) (vector? value) (sequential? value)) :jsonb
+                      :else :unknown)]
+    ;; nil is valid for any nullable field - caller handles nullability
+    (when (and (not= actual-type :nil)
+               (not= actual-type :unknown)
+               (not= actual-type field-type)
+               ;; Allow common compatible types
+               (not (and (= field-type :jsonb)
+                         (#{:text} actual-type)))
+               (not (and (= field-type :union)
+                         true))  ; union accepts anything
+               (not (and (= field-type :ref)
+                         (= actual-type :uuid)))
+               (not (and (= field-type :numeric)
+                         (= actual-type :int))))
+      {:expected field-type :actual actual-type})))
+
+
+(defn validate-where-clause-types!
+  "Validates that values in where clause match the expected field types.
+   This catches type mismatches early before hitting the database.
+
+   Arguments:
+   - entity-name: keyword name of the entity
+   - fields: map of {field-name {:type ... :nullable? ...}} for the entity
+   - where: the where clause map to validate
+
+   Throws ExceptionInfo with :type :validation-error/type-mismatch if
+   a where clause value doesn't match the field's expected type.
+
+   Note: This is a soft validation for common types. Exotic types and
+   backend-specific coercion are allowed to pass through."
+  [entity-name fields where]
+  (when (and (some? where) (map? where))
+    (doseq [[k v] where]
+      (when-let [field-spec (or (get fields k)
+                                (when (= k :id) {:type :uuid}))]
+        (when-let [error (check-type-match v (:type field-spec))]
+          (throw (ex-info (str "Type mismatch for field '" (name k) "' in where clause: "
+                               "expected " (name (:expected error)) ", got " (name (:actual error)))
+                          {:type :validation-error/type-mismatch
+                           :entity entity-name
+                           :field k
+                           :expected-type (:expected error)
+                           :actual-type (:actual error)
+                           :value-type (type v)})))))))
+
+
 (defn validate-entity-name!
   "Validates that entity-name is a safe keyword for storage operations.
    Prevents SQL injection and other attacks via malicious entity names.

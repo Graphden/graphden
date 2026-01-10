@@ -16,12 +16,6 @@
   `(util/with-sql-error-handling "Database error" ~operation ~context ~@body))
 
 
-(defn- row->entity
-  [row]
-  (when row
-    (codec/decode-row row nil)))
-
-
 (defn- entity->row
   [entity fields]
   (codec/encode-row entity fields))
@@ -48,7 +42,7 @@
                           {:quoted true})]
     (with-crud-error-handling :create-entity {:entity-name entity-name :id id}
       (-> (jdbc/execute-one! ds query (util/query-opts))
-          row->entity))))
+          codec/row->entity))))
 
 
 (defn read-entity
@@ -62,7 +56,7 @@
                           {:quoted true})]
     (with-crud-error-handling :read-entity {:entity-name entity-name :id id}
       (-> (jdbc/execute-one! ds query (util/query-opts))
-          row->entity))))
+          codec/row->entity))))
 
 
 (defn update-entity
@@ -89,7 +83,7 @@
                               {:quoted true})]
         (with-crud-error-handling :update-entity {:entity-name entity-name :id id}
           (-> (jdbc/execute-one! ds query (util/query-opts))
-              row->entity))))))
+              codec/row->entity))))))
 
 
 (defn delete-entity
@@ -134,7 +128,7 @@
       (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
     (with-crud-error-handling :query-entities {:entity-name entity-name :where where}
       (let [rows (jdbc/execute! ds query (util/query-opts))]
-        (map row->entity rows)))))
+        (map codec/row->entity rows)))))
 
 
 ;; === Batch CRUD operations ===
@@ -197,7 +191,7 @@
                            :entity-name entity-name
                            :expected-count expected-count
                            :actual-count actual-count})))
-        (map row->entity result-rows)))))
+        (map codec/row->entity result-rows)))))
 
 
 (defn read-entities
@@ -214,7 +208,7 @@
       (with-crud-error-handling :read-entities {:entity-name entity-name :count (count ids)}
         (let [rows (jdbc/execute! ds query (util/query-opts))]
           (->> rows
-               (map row->entity)
+               (map codec/row->entity)
                (map (juxt :id identity))
                (into {})))))))
 

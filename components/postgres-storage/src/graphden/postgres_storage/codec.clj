@@ -150,3 +150,14 @@
   "Decodes a row using the default codec."
   [row field-specs]
   (sp/decode-row @default-codec row field-specs))
+
+
+(defn row->entity
+  "Converts a JDBC result row to an entity map.
+   Decodes all values using the default codec.
+   Returns nil for nil input."
+  ([row]
+   (row->entity row nil))
+  ([row field-specs]
+   (when row
+     (decode-row row field-specs))))

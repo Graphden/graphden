@@ -30,53 +30,92 @@
 
    - `realize-lazy-value` forces evaluation to catch errors early
    - Type validation happens before creating delays
-   - Unknown types in forward-compat mode log warnings but don't throw"
+   - Unknown types in forward-compat mode log warnings but don't throw
+
+   ## Security
+
+   - Lazy sequence size is limited by config/*max-lazy-seq-size* (default 100k)
+   - Nested collection depth limited by config/*max-nested-collection-depth*
+   - Prevents DoS via infinite sequences like (range)"
   (:require
     [clojure.tools.logging :as log]
-    [graphden.executor.types :as types]))
+    [graphden.executor.types :as types]
+    [graphden.storage-protocol.config :as config]))
 
 
 ;; === Delay Building Infrastructure ===
 
+(defn- realize-lazy-seq-bounded
+  "Realizes a lazy sequence with size limit to prevent DoS.
+   Throws if sequence exceeds max-size elements."
+  [coll max-size]
+  (let [result (transient [])
+        iter (clojure.lang.RT/iter coll)]
+    (loop [n 0]
+      (if (java.util.Iterator/.hasNext iter)
+        (if (>= n max-size)
+          (throw (ex-info "Lazy sequence exceeds maximum allowed size"
+                          {:type :execution-error/lazy-seq-too-large
+                           :max-size max-size
+                           :hint "Reduce sequence size or increase config/*max-lazy-seq-size*"}))
+          (let [_ (conj! result (java.util.Iterator/.next iter))]
+            (recur (unchecked-inc n))))
+        (persistent! result)))))
+
+
 (defn- realize-lazy-value
   "Forces evaluation of lazy sequences/maps to ensure errors are caught.
 
-   - Lazy sequences are converted to vectors
-   - Lazy map values are realized
+   - Lazy sequences are converted to vectors (with size limit)
+   - Lazy map values are realized recursively (with depth limit)
    - Other values pass through unchanged
+
+   Security:
+   - Limits lazy sequence size to config/*max-lazy-seq-size* (default 100k)
+   - Limits recursion depth to config/*max-nested-collection-depth* (default 100)
+   - Prevents DoS via infinite sequences like (range)
 
    This ensures that execution errors in nested lazy computations
    are caught at the point of argument evaluation, not during consumption."
-  [value]
-  (cond
-    ;; nil passes through
-    (nil? value) nil
+  ([value]
+   (realize-lazy-value value 0))
+  ([value depth]
+   (let [max-size config/*max-lazy-seq-size*
+         max-depth config/*max-nested-collection-depth*]
+     (when (> depth max-depth)
+       (throw (ex-info "Collection nesting exceeds maximum allowed depth"
+                       {:type :execution-error/collection-too-deep
+                        :max-depth max-depth
+                        :hint "Reduce nesting or increase config/*max-nested-collection-depth*"})))
+     (cond
+       ;; nil passes through
+       (nil? value) nil
 
-    ;; Lazy seq -> realize as vector
-    (and (seqable? value)
-         (not (string? value))
-         (not (map? value))
-         (instance? clojure.lang.LazySeq value))
-    (vec value)
+       ;; Lazy seq -> realize as vector with size limit
+       (and (seqable? value)
+            (not (string? value))
+            (not (map? value))
+            (instance? clojure.lang.LazySeq value))
+       (realize-lazy-seq-bounded value max-size)
 
-    ;; Map with lazy values -> realize all values
-    (map? value)
-    (persistent!
-      (reduce-kv
-        (fn [m k v]
-          (assoc! m k (realize-lazy-value v)))
-        (transient {})
-        value))
+       ;; Map with lazy values -> realize all values recursively
+       (map? value)
+       (persistent!
+         (reduce-kv
+           (fn [m k v]
+             (assoc! m k (realize-lazy-value v (inc depth))))
+           (transient {})
+           value))
 
-    ;; Other seqable that might be lazy (like range) -> realize
-    (and (seqable? value)
-         (not (string? value))
-         (not (vector? value))
-         (not (set? value)))
-    (vec value)
+       ;; Other seqable that might be lazy (like range) -> realize with limit
+       (and (seqable? value)
+            (not (string? value))
+            (not (vector? value))
+            (not (set? value)))
+       (realize-lazy-seq-bounded value max-size)
 
-    ;; Everything else passes through
-    :else value))
+       ;; Everything else passes through
+       :else value))))
 
 
 (defn wrap-delay-with-context

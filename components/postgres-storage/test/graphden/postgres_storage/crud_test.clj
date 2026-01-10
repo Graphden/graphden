@@ -2,6 +2,7 @@
   "Unit tests for PostgreSQL CRUD functions that don't require a database."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.postgres-storage.codec :as codec]
     [graphden.postgres-storage.crud :as crud])
   (:import
     (org.postgresql.util
@@ -25,21 +26,21 @@
   (testing "converts snake_case keys to kebab-case"
     (let [row {:user_name "john" :created_at "2024-01-01"}]
       (is (= {:user-name "john" :created-at "2024-01-01"}
-             (#'crud/row->entity row)))))
+             (codec/row->entity row)))))
 
   (testing "handles single-word keys"
     (let [row {:id 1 :name "test"}]
       (is (= {:id 1 :name "test"}
-             (#'crud/row->entity row)))))
+             (codec/row->entity row)))))
 
   (testing "parses PGobject values"
     (let [pg (make-pgobject "jsonb" "{\"a\": 1}")
           row {:data pg :name "test"}]
       (is (= {:data {:a 1} :name "test"}
-             (#'crud/row->entity row)))))
+             (codec/row->entity row)))))
 
   (testing "returns nil for nil input"
-    (is (nil? (#'crud/row->entity nil)))))
+    (is (nil? (codec/row->entity nil)))))
 
 
 (deftest entity->row-test

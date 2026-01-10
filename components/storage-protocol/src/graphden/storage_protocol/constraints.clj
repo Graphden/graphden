@@ -10,7 +10,9 @@
    each backend handles data access differently.
 
    Note: This namespace does NOT require interface.clj to avoid circular deps.
-   Protocol methods are passed as arguments or called via protocol dispatch.")
+   Protocol methods are passed as arguments or called via protocol dispatch."
+  (:require
+    [clojure.walk :as walk]))
 
 
 ;; === Chain depth limits ===
@@ -219,3 +221,72 @@
                         {:type :constraint-violation/dependency-cycle
                          :owner-fn-id owner-fn-id
                          :value-fn-id value-fn-id}))))))
+
+
+;; === Macro for generating constraint wrapper functions ===
+;;
+;; This macro reduces boilerplate in storage implementations.
+;; Each storage backend has 5 constraint functions that all follow the same pattern:
+;; 1. Create helpers from resource (ds, conn-atom, etc.)
+;; 2. Call the *-impl function with helpers and args
+
+(defmacro defconstraint-wrappers
+  "Generates constraint wrapper functions for a storage backend.
+
+   This macro defines 5 functions that follow the pattern:
+   (defn validate-X! [resource & args] (impl-fn (create-helpers resource) args...))
+
+   Arguments:
+   - create-helpers-form: form that creates helpers, e.g., (create-helpers ds)
+   - impl-ns-alias: namespace alias for *-impl functions, e.g., sp
+
+   Example usage:
+   (defconstraint-wrappers (create-helpers ds) sp)
+
+   Generates:
+   - validate-parent-same-schema!
+   - validate-no-arg-override!
+   - validate-arg-schema-belongs-to-fn!
+   - validate-no-inheritance-cycle!
+   - validate-no-dependency-cycle!"
+  [create-helpers-form impl-ns-alias]
+  `(do
+     (defn ~'validate-parent-same-schema!
+       ~(str "Validates that parent-fn has the same fn-schema-id.\n"
+             "   Throws :constraint-violation/parent-schema-mismatch on violation.")
+       [~'resource ~'fn-id ~'parent-fn-id]
+       (~(symbol (str impl-ns-alias) "validate-parent-same-schema-impl")
+        ~(walk/postwalk-replace {'ds 'resource 'conn-atom 'resource} create-helpers-form)
+        ~'fn-id ~'parent-fn-id))
+
+     (defn ~'validate-no-arg-override!
+       ~(str "Validates that arg-schema-id is not already defined in parent chain.\n"
+             "   Throws :constraint-violation/arg-already-defined on violation.")
+       [~'resource ~'fn-id ~'arg-schema-id]
+       (~(symbol (str impl-ns-alias) "validate-no-arg-override-impl")
+        ~(walk/postwalk-replace {'ds 'resource 'conn-atom 'resource} create-helpers-form)
+        ~'fn-id ~'arg-schema-id))
+
+     (defn ~'validate-arg-schema-belongs-to-fn!
+       ~(str "Validates that arg-schema belongs to fn's fn-schema.\n"
+             "   Throws :constraint-violation/arg-schema-mismatch on violation.")
+       [~'resource ~'fn-id ~'arg-schema-id]
+       (~(symbol (str impl-ns-alias) "validate-arg-schema-belongs-to-fn-impl")
+        ~(walk/postwalk-replace {'ds 'resource 'conn-atom 'resource} create-helpers-form)
+        ~'fn-id ~'arg-schema-id))
+
+     (defn ~'validate-no-inheritance-cycle!
+       ~(str "Validates that setting parent-fn-id would not create inheritance cycle.\n"
+             "   Throws :constraint-violation/inheritance-cycle on violation.")
+       [~'resource ~'fn-id ~'parent-fn-id]
+       (~(symbol (str impl-ns-alias) "validate-no-inheritance-cycle-impl")
+        ~(walk/postwalk-replace {'ds 'resource 'conn-atom 'resource} create-helpers-form)
+        ~'fn-id ~'parent-fn-id))
+
+     (defn ~'validate-no-dependency-cycle!
+       ~(str "Validates that referencing value-fn-id would not create dependency cycle.\n"
+             "   Throws :constraint-violation/dependency-cycle on violation.")
+       [~'resource ~'owner-fn-id ~'value-fn-id]
+       (~(symbol (str impl-ns-alias) "validate-no-dependency-cycle-impl")
+        ~(walk/postwalk-replace {'ds 'resource 'conn-atom 'resource} create-helpers-form)
+        ~'owner-fn-id ~'value-fn-id))))

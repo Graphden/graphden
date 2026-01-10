@@ -16,12 +16,6 @@
   `(util/with-sql-error-handling "Database error" ~operation ~context ~@body))
 
 
-(defn- row->entity
-  [row]
-  (when row
-    (codec/decode-row row nil)))
-
-
 (def ^:private max-parent-chain-depth
   "Maximum depth for parent chain traversal to prevent runaway recursion.
    Uses shared default-max-depth from storage-protocol for consistency."
@@ -92,7 +86,7 @@
                             {:quoted true})]
       (with-crud-error-handling :load-arg-values {:fn-count (count fn-ids)}
         (let [rows (jdbc/execute! ds query (util/query-opts))]
-          (map row->entity rows))))))
+          (map codec/row->entity rows))))))
 
 
 (defn- classify-and-load-refs
@@ -140,7 +134,7 @@
       (with-crud-error-handling :load-entities-batch {:table table :count (count values)}
         (let [rows (jdbc/execute! ds query (util/query-opts))]
           (->> rows
-               (map row->entity)
+               (map codec/row->entity)
                (map (juxt :id identity))
                (into {})))))))
 
@@ -171,7 +165,7 @@
                           {:quoted true})]
     (with-crud-error-handling :read-entity {:entity-name entity-name :id id}
       (-> (jdbc/execute-one! ds query (util/query-opts))
-          row->entity))))
+          codec/row->entity))))
 
 
 (defn resolve-execution-graph

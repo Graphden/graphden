@@ -297,3 +297,51 @@
                          :operation operation
                          :timeout-ms timeout-ms})))
       result)))
+
+
+;; ============================================================================
+;; Regex Safety Configuration
+;; ============================================================================
+;;
+;; Configurable limits for regex operations to prevent ReDoS attacks.
+;; These are defaults that can be overridden via dynamic vars.
+
+(def ^:dynamic *max-regex-length*
+  "Maximum length of regex pattern to prevent complex pattern attacks.
+   Patterns longer than this are rejected.
+   Default: 100 characters."
+  100)
+
+
+(def ^:dynamic *max-regex-input-length*
+  "Maximum input string length for regex operations.
+   Prevents catastrophic backtracking on large inputs.
+   Default: 100000 characters (100KB)."
+  100000)
+
+
+(def ^:dynamic *regex-compile-timeout-ms*
+  "Timeout for regex compilation in milliseconds.
+   Catches patterns that take too long to compile.
+   Default: 100ms."
+  100)
+
+
+(defn with-regex-limits
+  "Executes f with custom regex safety limits.
+
+   Arguments:
+   - opts: map with optional keys:
+     - :max-pattern-length - maximum regex pattern length
+     - :max-input-length - maximum input string length
+     - :compile-timeout-ms - regex compilation timeout
+   - f: zero-arg function to execute
+
+   Example:
+   (with-regex-limits {:max-pattern-length 50 :max-input-length 10000}
+     #(str-split my-string my-pattern))"
+  [opts f]
+  (binding [*max-regex-length* (get opts :max-pattern-length *max-regex-length*)
+            *max-regex-input-length* (get opts :max-input-length *max-regex-input-length*)
+            *regex-compile-timeout-ms* (get opts :compile-timeout-ms *regex-compile-timeout-ms*)]
+    (f)))

@@ -42,6 +42,26 @@
 
 ;; === Storage record ===
 
+(defn- build-entity-fields-index
+  "Builds an index of entity-name -> field-specs from raw metadata.
+   This is O(n) once at cache time instead of O(n) on every CRUD call.
+   Returns {entity-name {field-name {:type t :nullable? n :enum-name e}}}."
+  [cached-metadata]
+  (when cached-metadata
+    (->> (:fields cached-metadata)
+         vals
+         (group-by :entity)
+         (reduce-kv
+           (fn [acc entity-name fields]
+             (assoc acc entity-name
+                    (into {}
+                          (map (fn [{:keys [field nullable? enum-name] field-type :type}]
+                                 [field (cond-> {:type field-type :nullable? nullable?}
+                                          enum-name (assoc :enum-name enum-name))])
+                               fields))))
+           {}))))
+
+
 (defn- get-cached-metadata
   "Gets metadata from cache or reads from database.
    Thread-safe: uses ReentrantReadWriteLock for concurrent read access.
@@ -52,7 +72,9 @@
    This prevents caching stale nil values during initialization race conditions.
 
    Cache safety: reset! only happens after parse-metadata-lenient successfully returns.
-   If parsing throws, cache remains unchanged (Clojure let-binding evaluation order)."
+   If parsing throws, cache remains unchanged (Clojure let-binding evaluation order).
+
+   Optimization: Adds :fields-by-entity index for O(1) entity field lookups."
   [pool metadata-cache ^ReentrantReadWriteLock rw-lock]
   ;; Fast path: check cache without lock
   (or @metadata-cache
@@ -65,7 +87,11 @@
                             (or @metadata-cache
                                 (try
                                   ;; Parse first, cache only on success (let ensures order)
-                                  (let [result (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))]
+                                  (let [raw-metadata (metadata/parse-metadata-lenient (metadata/read-metadata-rows pool))
+                                        ;; Add entity->fields index for O(1) lookups
+                                        result (when raw-metadata
+                                                 (assoc raw-metadata
+                                                        :fields-by-entity (build-entity-fields-index raw-metadata)))]
                                     (reset! metadata-cache result)
                                     result)
                                   (catch SQLException e
@@ -74,18 +100,22 @@
                                       (throw e)))))))))
 
 
-(defn- extract-entity-fields
-  "Extracts field specs for an entity from cached metadata.
-   Returns a map of field-name -> {:type type :nullable? nullable? :enum-name kw}."
-  [cached-metadata entity-name]
-  (when cached-metadata
-    (->> (:fields cached-metadata)
-         (vals)
-         (filter #(= (:entity %) entity-name))
-         (map (fn [{:keys [field nullable? enum-name] field-type :type}]
-                [field (cond-> {:type field-type :nullable? nullable?}
-                         enum-name (assoc :enum-name enum-name))]))
-         (into {}))))
+(defn- get-entity-fields
+  "Gets field specs for an entity using cached index.
+   O(1) lookup instead of O(n) filter on every call."
+  [pool metadata-cache rw-lock entity-name]
+  (when-let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)]
+    ;; Use :fields-by-entity index if available, otherwise build on demand
+    (if-let [index (:fields-by-entity cached-metadata)]
+      (get index entity-name)
+      ;; Fallback for backwards compatibility (should not happen in practice)
+      (->> (:fields cached-metadata)
+           vals
+           (filter #(= (:entity %) entity-name))
+           (map (fn [{:keys [field nullable? enum-name] field-type :type}]
+                  [field (cond-> {:type field-type :nullable? nullable?}
+                           enum-name (assoc :enum-name enum-name))]))
+           (into {})))))
 
 
 (defrecord PostgresStorage
@@ -166,9 +196,8 @@
 
   (create-entity
     [_this entity-name data]
-    (let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)
-          fields (extract-entity-fields cached-metadata entity-name)]
-      (crud/create-entity pool entity-name data fields)))
+    (crud/create-entity pool entity-name data
+                        (get-entity-fields pool metadata-cache rw-lock entity-name)))
 
 
   (read-entity
@@ -178,9 +207,8 @@
 
   (update-entity
     [_this entity-name id data]
-    (let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)
-          fields (extract-entity-fields cached-metadata entity-name)]
-      (crud/update-entity pool entity-name id data fields)))
+    (crud/update-entity pool entity-name id data
+                        (get-entity-fields pool metadata-cache rw-lock entity-name)))
 
 
   (delete-entity
@@ -190,18 +218,16 @@
 
   (query-entities
     [_this entity-name where]
-    (let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)
-          fields (extract-entity-fields cached-metadata entity-name)]
-      (crud/query-entities pool entity-name where fields)))
+    (crud/query-entities pool entity-name where
+                         (get-entity-fields pool metadata-cache rw-lock entity-name)))
 
 
   sp/StorageBatchCRUD
 
   (create-entities
     [_this entity-name data-seq]
-    (let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)
-          fields (extract-entity-fields cached-metadata entity-name)]
-      (crud/create-entities pool entity-name data-seq fields)))
+    (crud/create-entities pool entity-name data-seq
+                          (get-entity-fields pool metadata-cache rw-lock entity-name)))
 
 
   (read-entities

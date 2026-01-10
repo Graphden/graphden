@@ -446,8 +446,11 @@
     (testing "allows int for numeric type"
       (is (nil? (v/validate-where-clause-types! :user fields {:score 100}))))
 
-    (testing "allows text for jsonb type"
-      (is (nil? (v/validate-where-clause-types! :user fields {:data "{\"key\": \"value\"}"}))))
+    (testing "rejects text for jsonb type (only maps and vectors)"
+      ;; ft/valid-type? for jsonb only accepts maps and vectors, not JSON strings
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch"
+            (v/validate-where-clause-types! :user fields {:data "{\"key\": \"value\"}"}))))
 
     (testing "allows any value for union type"
       (is (nil? (v/validate-where-clause-types! :user fields {:meta "string"})))
@@ -523,8 +526,11 @@
     (testing "passes for Instant timestamp"
       (is (nil? (v/validate-where-clause-types! :entity fields {:timestamp (java.time.Instant/now)}))))
 
-    (testing "passes for sequential as jsonb"
-      (is (nil? (v/validate-where-clause-types! :entity fields {:list-data (list 1 2 3)}))))
+    (testing "fails for list as jsonb (only maps and vectors accepted)"
+      ;; ft/valid-type? for jsonb only accepts maps and vectors, not lists
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch"
+            (v/validate-where-clause-types! :entity fields {:list-data (list 1 2 3)}))))
 
     (testing "passes for vector as jsonb"
       (is (nil? (v/validate-where-clause-types! :entity fields {:list-data [1 2 3]}))))

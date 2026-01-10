@@ -553,6 +553,17 @@
 (def execute-with-timeout! config/execute-with-timeout!)
 
 
+;; === Collection generation limits re-exports ===
+(def ^:dynamic *max-range-size*
+  "Maximum elements in range to prevent memory exhaustion. Default: 1000000."
+  config/*max-range-size*)
+
+
+(def ^:dynamic *max-repeat-size*
+  "Maximum elements in repeat to prevent memory exhaustion. Default: 1000000."
+  config/*max-repeat-size*)
+
+
 ;; ============================================================================
 ;; ADDITIONAL HELPERS
 ;; ============================================================================

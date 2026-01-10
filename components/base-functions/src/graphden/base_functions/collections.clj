@@ -7,7 +7,8 @@
   (:require
     [clojure.math :as math]
     [graphden.base-functions.validation :as v]
-    [graphden.fn-registry.macros :refer [defbase]]))
+    [graphden.fn-registry.macros :refer [defbase]]
+    [graphden.storage-protocol.interface :as sp]))
 
 
 (defbase first-fn
@@ -94,17 +95,12 @@
   (into to from))
 
 
-(def ^:private max-range-size
-  "Maximum number of elements allowed in range to prevent memory exhaustion.
-   Default: 1 million elements."
-  1000000)
-
-
 (defbase range-fn
   {:args {:start {:type :int :required false}, :end :int, :step {:type :int :required false}}
    :return-type :jsonb}
   (let [actual-step (or step 1)
-        actual-start (or start 0)]
+        actual-start (or start 0)
+        max-size sp/*max-range-size*]
     (v/validate-non-zero! actual-step :step "step cannot be zero (would cause infinite loop)")
     ;; Calculate range size to check against limit
     (let [range-size (if (or (and (pos? actual-step) (< actual-start end))
@@ -112,26 +108,21 @@
                        (long (math/ceil (/ (abs (double (- end actual-start)))
                                            (abs (double actual-step)))))
                        0)]
-      (v/validate-collection-size! range-size max-range-size
+      (v/validate-collection-size! range-size max-size
                                    :execution-error/range-too-large
                                    {:start actual-start :end end :step actual-step}
-                                   (str "range would produce " range-size " elements, max allowed " max-range-size))
+                                   (str "range would produce " range-size " elements, max allowed " max-size))
       (vec (range actual-start end actual-step)))))
-
-
-(def ^:private max-repeat-size
-  "Maximum number of elements allowed in repeat to prevent memory exhaustion.
-   Default: 1 million elements."
-  1000000)
 
 
 (defbase repeat-fn
   {:args {:n :int, :x :any}
    :return-type :jsonb}
-  (v/validate-non-negative-count! n :n "repeat count cannot be negative")
-  (v/validate-collection-size! n max-repeat-size :execution-error/repeat-too-large {:n n}
-                               (str "repeat count " n " exceeds max allowed " max-repeat-size))
-  (vec (repeat n x)))
+  (let [max-size sp/*max-repeat-size*]
+    (v/validate-non-negative-count! n :n "repeat count cannot be negative")
+    (v/validate-collection-size! n max-size :execution-error/repeat-too-large {:n n}
+                                 (str "repeat count " n " exceeds max allowed " max-size))
+    (vec (repeat n x))))
 
 
 (defbase take-fn

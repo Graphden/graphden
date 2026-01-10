@@ -408,3 +408,22 @@
    Prevents stack overflow from deeply nested structures.
    Default: 100 levels."
   100)
+
+
+;; ============================================================================
+;; Collection Generation Limits
+;; ============================================================================
+;;
+;; Configurable limits for collection-generating functions (range, repeat)
+;; to prevent memory exhaustion from large collections.
+
+(def ^:dynamic *max-range-size*
+  "Maximum number of elements allowed in range to prevent memory exhaustion.
+   Default: 1000000 elements (1 million)."
+  1000000)
+
+
+(def ^:dynamic *max-repeat-size*
+  "Maximum number of elements allowed in repeat to prevent memory exhaustion.
+   Default: 1000000 elements (1 million)."
+  1000000)

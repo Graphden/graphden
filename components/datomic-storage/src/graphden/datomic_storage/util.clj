@@ -337,7 +337,14 @@
     (wrap-datomic-error exception "Datomic error" operation context)))
 
 
-(defn create-error-classifier
-  "Creates a Datomic error classifier instance."
-  []
+(def ^:private error-classifier-singleton
+  "Cached singleton instance of DatomicErrorClassifier.
+   Since the classifier is stateless, we only need one instance."
   (->DatomicErrorClassifier))
+
+
+(defn create-error-classifier
+  "Returns the Datomic error classifier singleton.
+   Since the classifier is stateless, this always returns the same instance."
+  []
+  error-classifier-singleton)

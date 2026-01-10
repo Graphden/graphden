@@ -187,10 +187,17 @@
                  exception)))))
 
 
-(defn create-error-classifier
-  "Creates a PostgreSQL error classifier instance."
-  []
+(def ^:private error-classifier-singleton
+  "Cached singleton instance of PostgresErrorClassifier.
+   Since the classifier is stateless, we only need one instance."
   (->PostgresErrorClassifier))
+
+
+(defn create-error-classifier
+  "Returns the PostgreSQL error classifier singleton.
+   Since the classifier is stateless, this always returns the same instance."
+  []
+  error-classifier-singleton)
 
 
 ;; === Error Handling Macro ===

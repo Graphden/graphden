@@ -311,18 +311,18 @@
            (util/classify-datomic-error
              (ex-info "error" {:db/error :db.error/unique-conflict})))))
 
-  (testing "classifies :db.error/invalid-entity-id as :invalid-data"
-    (is (= :invalid-data
+  (testing "classifies :db.error/invalid-entity-id as :not-found"
+    (is (= :not-found
            (util/classify-datomic-error
              (ex-info "error" {:db/error :db.error/invalid-entity-id})))))
 
-  (testing "classifies :db.error/datoms-conflict as :constraint-violation/conflict"
-    (is (= :constraint-violation/conflict
+  (testing "classifies :db.error/datoms-conflict as :constraint-violation/unique"
+    (is (= :constraint-violation/unique
            (util/classify-datomic-error
              (ex-info "error" {:db/error :db.error/datoms-conflict})))))
 
-  (testing "classifies :db.error/cas-failed as :constraint-violation/cas-failed"
-    (is (= :constraint-violation/cas-failed
+  (testing "classifies :db.error/cas-failed as :concurrent-modification"
+    (is (= :concurrent-modification
            (util/classify-datomic-error
              (ex-info "error" {:db/error :db.error/cas-failed})))))
 
@@ -330,7 +330,7 @@
     (is (= :not-found
            (util/classify-datomic-error
              (ex-info "error" {:cognitect.anomalies/category :cognitect.anomalies/not-found}))))
-    (is (= :constraint-violation/conflict
+    (is (= :constraint-violation/unique
            (util/classify-datomic-error
              (ex-info "error" {:cognitect.anomalies/category :cognitect.anomalies/conflict}))))
     (is (= :transient-error/busy
@@ -363,8 +363,8 @@
            (util/classify-datomic-error
              (ex-info "unknown" {:some :data})))))
 
-  (testing "classifies other exceptions as :unknown-datomic-error"
-    (is (= :unknown-datomic-error
+  (testing "classifies other exceptions as :datomic-error"
+    (is (= :datomic-error
            (util/classify-datomic-error
              (Exception. "some exception"))))))
 

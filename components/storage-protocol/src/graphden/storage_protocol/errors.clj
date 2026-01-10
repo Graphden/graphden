@@ -263,7 +263,41 @@
 
          :not-found
          {:category :validation :retryable? false
-          :description "Entity/record not found by ID"}}]
+          :description "Entity/record not found by ID"}
+
+         ;; Transient errors (retryable)
+         :transient-error/busy
+         {:category :connection :retryable? true
+          :description "Backend is temporarily busy"}
+
+         :transient-error/unavailable
+         {:category :connection :retryable? true
+          :description "Backend is temporarily unavailable"}
+
+         :transient-error/interrupted
+         {:category :connection :retryable? true
+          :description "Operation was interrupted"}
+
+         :transient-error/execution
+         {:category :execution :retryable? true
+          :description "Execution failed, may succeed on retry"}
+
+         ;; IO and unknown errors
+         :io-error
+         {:category :connection :retryable? true
+          :description "I/O error during database operation"}
+
+         :concurrent-modification
+         {:category :constraint :retryable? true
+          :description "Concurrent modification detected (CAS failure)"}
+
+         :datomic-error
+         {:category :unknown :retryable? false
+          :description "Unclassified Datomic error"}
+
+         :unknown-error
+         {:category :unknown :retryable? false
+          :description "Unclassified error"}}]
   (register-error-type! error-type metadata))
 
 

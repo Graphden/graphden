@@ -6,6 +6,7 @@
               reverse, sort, concat, flatten, distinct"
   (:require
     [clojure.math :as math]
+    [graphden.base-functions.validation :as v]
     [graphden.fn-registry.macros :refer [defbase]]))
 
 
@@ -104,21 +105,17 @@
    :return-type :jsonb}
   (let [actual-step (or step 1)
         actual-start (or start 0)]
-    (when (zero? actual-step)
-      (throw (ex-info "step cannot be zero (would cause infinite loop)"
-                      {:type :execution-error/invalid-step
-                       :start actual-start :end end :step step})))
+    (v/validate-non-zero! actual-step :step "step cannot be zero (would cause infinite loop)")
     ;; Calculate range size to check against limit
     (let [range-size (if (or (and (pos? actual-step) (< actual-start end))
                              (and (neg? actual-step) (> actual-start end)))
                        (long (math/ceil (/ (abs (double (- end actual-start)))
                                            (abs (double actual-step)))))
                        0)]
-      (when (> range-size max-range-size)
-        (throw (ex-info (str "range would produce " range-size " elements, max allowed is " max-range-size)
-                        {:type :execution-error/range-too-large
-                         :start actual-start :end end :step actual-step
-                         :range-size range-size :max-size max-range-size})))
+      (v/validate-collection-size! range-size max-range-size
+                                   :execution-error/range-too-large
+                                   {:start actual-start :end end :step actual-step}
+                                   (str "range would produce " range-size " elements, max allowed " max-range-size))
       (vec (range actual-start end actual-step)))))
 
 
@@ -131,14 +128,9 @@
 (defbase repeat-fn
   {:args {:n :int, :x :any}
    :return-type :jsonb}
-  (when (neg? n)
-    (throw (ex-info "repeat count cannot be negative"
-                    {:type :execution-error/invalid-repeat-count
-                     :n n})))
-  (when (> n max-repeat-size)
-    (throw (ex-info (str "repeat count " n " exceeds max allowed " max-repeat-size)
-                    {:type :execution-error/repeat-too-large
-                     :n n :max-size max-repeat-size})))
+  (v/validate-non-negative-count! n :n "repeat count cannot be negative")
+  (v/validate-collection-size! n max-repeat-size :execution-error/repeat-too-large {:n n}
+                               (str "repeat count " n " exceeds max allowed " max-repeat-size))
   (vec (repeat n x)))
 
 

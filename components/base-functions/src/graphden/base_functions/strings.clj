@@ -4,6 +4,7 @@
    Functions: str, subs, str-len, str-upper, str-lower, str-trim, str-split, str-join"
   (:require
     [clojure.string :as str]
+    [graphden.base-functions.validation :as v]
     [graphden.fn-registry.macros :refer [defbase]]
     [graphden.storage-protocol.config :as config]))
 
@@ -18,24 +19,11 @@
   {:args {:s :text, :start :int, :end {:type :int :required false}}
    :return-type :text}
   (let [len (count s)]
-    (when (neg? start)
-      (throw (ex-info "start index cannot be negative"
-                      {:type :execution-error/invalid-index
-                       :start start :string-length len})))
-    (when (> start len)
-      (throw (ex-info "start index out of bounds"
-                      {:type :execution-error/index-out-of-bounds
-                       :start start :string-length len})))
+    (v/validate-string-index! start len :start)
     (if end
       (do
-        (when (< end start)
-          (throw (ex-info "end index cannot be less than start"
-                          {:type :execution-error/invalid-index
-                           :start start :end end})))
-        (when (> end len)
-          (throw (ex-info "end index out of bounds"
-                          {:type :execution-error/index-out-of-bounds
-                           :end end :string-length len})))
+        (v/validate-start-end-order! start end)
+        (v/validate-string-index! end len :end)
         (subs s start end))
       (subs s start))))
 

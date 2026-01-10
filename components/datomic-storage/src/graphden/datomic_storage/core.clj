@@ -313,39 +313,14 @@
 
   (classify-error
     [_this exception]
-    (cond
-      ;; ExceptionInfo with :db/error key is a Datomic-specific error
-      (and (instance? clojure.lang.ExceptionInfo exception)
-           (:db/error (ex-data exception)))
-      (let [db-error (:db/error (ex-data exception))]
-        (case db-error
-          :db.error/unique-conflict :unique-violation
-          :db.error/not-found :not-found
-          :db.error/datoms-conflict :unique-violation
-          :db.error/invalid-entity-id :not-found
-          :db.error/cas-failed :concurrent-modification
-          :unknown-datomic-error))
-
-      ;; ExceptionInfo with our own :type key
-      (and (instance? clojure.lang.ExceptionInfo exception)
-           (:type (ex-data exception)))
-      (:type (ex-data exception))
-
-      :else :unknown-datomic-error))
+    ;; Delegate to util/classify-datomic-error for consistent classification
+    (util/classify-datomic-error exception))
 
 
   (wrap-error
-    [this exception operation context]
-    (let [error-type (sp/classify-error this exception)
-          error-data (merge {:type error-type
-                             :operation operation
-                             :message (ex-message exception)}
-                            context
-                            (when (instance? clojure.lang.ExceptionInfo exception)
-                              (select-keys (ex-data exception) [:db/error])))]
-      (ex-info (str "Datomic error during " (name operation) ": " (ex-message exception))
-               error-data
-               exception))))
+    [_this exception operation context]
+    ;; Delegate to util/wrap-datomic-error for consistent error wrapping
+    (util/wrap-datomic-error exception "Datomic error" operation context)))
 
 
 (defn create-storage

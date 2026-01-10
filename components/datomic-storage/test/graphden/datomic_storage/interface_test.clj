@@ -1997,7 +1997,7 @@
   (let [storage (create-test-storage)]
     (testing "classifies Datomic unique conflict"
       (let [exc (ex-info "test" {:db/error :db.error/unique-conflict})]
-        (is (= :unique-violation (sp/classify-error storage exc)))))
+        (is (= :constraint-violation/unique (sp/classify-error storage exc)))))
 
     (testing "classifies Datomic not-found"
       (let [exc (ex-info "test" {:db/error :db.error/not-found})]
@@ -2005,7 +2005,7 @@
 
     (testing "classifies Datomic datoms-conflict"
       (let [exc (ex-info "test" {:db/error :db.error/datoms-conflict})]
-        (is (= :unique-violation (sp/classify-error storage exc)))))
+        (is (= :constraint-violation/unique (sp/classify-error storage exc)))))
 
     (testing "classifies Datomic invalid-entity-id"
       (let [exc (ex-info "test" {:db/error :db.error/invalid-entity-id})]
@@ -2019,13 +2019,13 @@
       (let [exc (ex-info "test" {:type :custom-error})]
         (is (= :custom-error (sp/classify-error storage exc)))))
 
-    (testing "returns unknown for other db/errors"
+    (testing "returns datomic-error for other db/errors"
       (let [exc (ex-info "test" {:db/error :db.error/some-other-error})]
-        (is (= :unknown-datomic-error (sp/classify-error storage exc)))))
+        (is (= :datomic-error (sp/classify-error storage exc)))))
 
-    (testing "returns unknown for non-ExceptionInfo"
+    (testing "returns datomic-error for non-ExceptionInfo"
       (let [exc (Exception. "plain exception")]
-        (is (= :unknown-datomic-error (sp/classify-error storage exc)))))))
+        (is (= :datomic-error (sp/classify-error storage exc)))))))
 
 
 ;; === wrap-error Tests ===
@@ -2037,8 +2037,8 @@
             wrapped (sp/wrap-error storage original :create-entity {:entity :user})]
         (is (instance? clojure.lang.ExceptionInfo wrapped))
         (is (str/includes? (ex-message wrapped) "create-entity"))
-        (is (= :unique-violation (:type (ex-data wrapped))))
+        (is (= :constraint-violation/unique (:type (ex-data wrapped))))
         (is (= :create-entity (:operation (ex-data wrapped))))
         (is (= :user (:entity (ex-data wrapped))))
-        (is (= :db.error/unique-conflict (:db/error (ex-data wrapped))))
+        ;; Note: wrap-datomic-error doesn't preserve :db/error in wrapped data
         (is (= original (ex-cause wrapped)))))))

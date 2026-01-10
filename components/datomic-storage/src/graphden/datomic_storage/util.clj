@@ -217,30 +217,49 @@
 
 (defn classify-datomic-error
   "Classifies a Datomic exception into a canonical error type.
-   Returns a keyword like :not-found, :constraint-violation, etc."
+   Returns a keyword registered in storage-protocol error registry.
+
+   Classification order:
+   1. ExceptionInfo with our :type - pass through (already classified)
+   2. ExceptionInfo with :db/error - Datomic-specific errors
+   3. ExceptionInfo with cognitect anomaly - Datomic Client API errors
+   4. Java exception types - connection/IO errors
+   5. Fallback to :datomic-error"
   [e]
   (cond
+    ;; ExceptionInfo with our own :type key - already classified
+    (and (instance? clojure.lang.ExceptionInfo e)
+         (:type (ex-data e)))
+    (:type (ex-data e))
+
     ;; ExceptionInfo with :db/error key (Datomic-specific errors)
     (instance? clojure.lang.ExceptionInfo e)
     (let [data (ex-data e)
           db-error (:db/error data)
           cognitect-anomaly (:cognitect.anomalies/category data)]
       (cond
-        ;; Datomic error codes
-        (= db-error :db.error/not-an-entity) :not-found
-        (= db-error :db.error/unique-conflict) :constraint-violation/unique
-        (= db-error :db.error/invalid-entity-id) :invalid-data
-        (= db-error :db.error/datoms-conflict) :constraint-violation/conflict
-        (= db-error :db.error/cas-failed) :constraint-violation/cas-failed
+        ;; Not-found errors (Datomic and Cognitect anomalies)
+        (or (= db-error :db.error/not-an-entity)
+            (= db-error :db.error/invalid-entity-id)
+            (= db-error :db.error/not-found)
+            (= cognitect-anomaly :cognitect.anomalies/not-found))
+        :not-found
 
-        ;; Cognitect anomalies (Datomic Client API)
-        (= cognitect-anomaly :cognitect.anomalies/not-found) :not-found
-        (= cognitect-anomaly :cognitect.anomalies/conflict) :constraint-violation/conflict
+        ;; Unique constraint violations
+        (or (= db-error :db.error/unique-conflict)
+            (= db-error :db.error/datoms-conflict)
+            (= cognitect-anomaly :cognitect.anomalies/conflict))
+        :constraint-violation/unique
+
+        ;; CAS conflict (optimistic locking)
+        (= db-error :db.error/cas-failed) :concurrent-modification
+
+        ;; Transient errors (Cognitect anomalies)
         (= cognitect-anomaly :cognitect.anomalies/busy) :transient-error/busy
         (= cognitect-anomaly :cognitect.anomalies/unavailable) :transient-error/unavailable
         (= cognitect-anomaly :cognitect.anomalies/interrupted) :transient-error/interrupted
 
-        ;; Fall back to generic error
+        ;; Fall back to generic Datomic error
         :else :datomic-error))
 
     ;; Connection/runtime errors
@@ -253,7 +272,7 @@
     (instance? java.io.IOException e)
     :io-error
 
-    :else :unknown-datomic-error))
+    :else :datomic-error))
 
 
 (defn wrap-datomic-error

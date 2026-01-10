@@ -276,26 +276,20 @@
 ;; All storage backends and the executor use these patterns for consistent
 ;; security across the entire Graphden system.
 
-(def sensitive-field-names
-  "Explicit field names that should always be redacted.
-   These are checked with exact match (case-insensitive)."
+;; === Extensible Sensitive Field Registry ===
+;;
+;; Applications can register custom sensitive field names and patterns
+;; for domain-specific requirements (PII, HIPAA, GDPR, etc.).
+
+(def ^:private default-sensitive-field-names
+  "Default field names that should always be redacted."
   #{:password :secret :token :api-key :auth-token
     :access-key :private-key :jdbc-url :connection-string
     :credentials :passphrase :pin :ssn :credit-card})
 
 
-(def sensitive-field-patterns
-  "Regex patterns for identifying sensitive field names that should be redacted.
-   Used across all storage backends and executor for consistent security.
-
-   Pattern matching is case-insensitive and matches partial field names:
-   - password, pass, passwd → matches 'user-password', 'passwd123'
-   - secret → matches 'client-secret', 'secret-key'
-   - token → matches 'auth-token', 'access-token', 'refresh-token'
-   - api[_-]?key → matches 'api-key', 'apikey', 'api_key'
-   - auth → matches 'auth-header', 'oauth-token'
-   - credential → matches 'user-credentials', 'db-credential'
-   - private[_-]?key → matches 'private-key', 'privatekey'"
+(def ^:private default-sensitive-field-patterns
+  "Default regex patterns for identifying sensitive field names."
   [#"(?i)pass(word|wd)?"
    #"(?i)secret"
    #"(?i)token"
@@ -308,20 +302,135 @@
    #"(?i)jdbc[_-]?url"])
 
 
+(def ^:private sensitive-field-registry
+  "Extensible registry for sensitive field detection.
+   Contains:
+   - :names - set of explicit field name keywords
+   - :patterns - vector of regex patterns
+   - :predicates - vector of custom predicate functions"
+  (atom {:names default-sensitive-field-names
+         :patterns default-sensitive-field-patterns
+         :predicates []}))
+
+
+(defn register-sensitive-field-name!
+  "Registers an explicit field name as sensitive.
+   The name will be matched exactly (case-insensitive for keywords).
+
+   Arguments:
+   - field-name: keyword to treat as sensitive (e.g., :social-security-number)
+
+   Example:
+     (register-sensitive-field-name! :employee-id)
+     (register-sensitive-field-name! :medical-record-number)"
+  [field-name]
+  (when-not (keyword? field-name)
+    (throw (ex-info "field-name must be a keyword"
+                    {:type :invalid-argument
+                     :field-name field-name})))
+  (swap! sensitive-field-registry update :names conj field-name)
+  field-name)
+
+
+(defn register-sensitive-field-pattern!
+  "Registers a regex pattern for matching sensitive field names.
+   Pattern will be tested against field name strings.
+
+   Arguments:
+   - pattern: compiled regex pattern (java.util.regex.Pattern)
+
+   Example:
+     (register-sensitive-field-pattern! #\"(?i)patient[_-]?id\")
+     (register-sensitive-field-pattern! #\"(?i)hipaa\")
+     (register-sensitive-field-pattern! #\"(?i)gdpr[_-]?data\")"
+  [pattern]
+  (when-not (instance? java.util.regex.Pattern pattern)
+    (throw (ex-info "pattern must be a compiled regex"
+                    {:type :invalid-argument
+                     :pattern pattern
+                     :pattern-type (type pattern)})))
+  (swap! sensitive-field-registry update :patterns conj pattern)
+  pattern)
+
+
+(defn register-sensitive-field-predicate!
+  "Registers a custom predicate function for sensitive field detection.
+   The predicate receives a field name keyword and returns truthy if sensitive.
+
+   Use this for complex matching logic that can't be expressed as regex.
+
+   Arguments:
+   - pred-fn: (fn [field-name-keyword] -> boolean)
+
+   Example:
+     ;; Mark all fields in specific namespace as sensitive
+     (register-sensitive-field-predicate!
+       (fn [k] (= \"pii\" (namespace k))))
+
+     ;; Mark fields with certain metadata
+     (register-sensitive-field-predicate!
+       (fn [k] (some-> k resolve meta :sensitive)))"
+  [pred-fn]
+  (when-not (fn? pred-fn)
+    (throw (ex-info "pred-fn must be a function"
+                    {:type :invalid-argument
+                     :pred-fn pred-fn})))
+  (swap! sensitive-field-registry update :predicates conj pred-fn)
+  pred-fn)
+
+
+(defn reset-sensitive-field-registry!
+  "Resets the sensitive field registry to defaults.
+   Useful for testing or when reconfiguring the application.
+
+   WARNING: This removes all custom registrations."
+  []
+  (reset! sensitive-field-registry
+          {:names default-sensitive-field-names
+           :patterns default-sensitive-field-patterns
+           :predicates []})
+  nil)
+
+
+(defn sensitive-field-names
+  "Returns the current set of explicitly registered sensitive field names.
+   Includes both default and custom registered names."
+  []
+  (:names @sensitive-field-registry))
+
+
+(defn sensitive-field-patterns
+  "Returns the current vector of sensitive field regex patterns.
+   Includes both default and custom registered patterns."
+  []
+  (:patterns @sensitive-field-registry))
+
+
 (defn sensitive-field?
   "Returns true if field name matches known sensitive patterns.
-   Checks both explicit field names and regex patterns.
-   Handles keywords, strings, and nil gracefully."
+   Checks in order:
+   1. Explicit field names (fast exact match)
+   2. Regex patterns
+   3. Custom predicate functions
+
+   Handles keywords, strings, and nil gracefully.
+
+   This function uses the extensible sensitive field registry.
+   Use register-sensitive-field-name!, register-sensitive-field-pattern!,
+   or register-sensitive-field-predicate! to add custom detection rules."
   [field-name]
   (when field-name
     (let [kw (if (keyword? field-name) field-name (keyword field-name))
-          name-str (name kw)]
+          name-str (name kw)
+          {:keys [names patterns predicates]} @sensitive-field-registry]
       (when (seq name-str)
         (or
           ;; Check explicit names first (fast exact match)
-          (contains? sensitive-field-names kw)
+          (contains? names kw)
           ;; Then check patterns (regex matching)
-          (some #(re-find % name-str) sensitive-field-patterns))))))
+          (some #(re-find % name-str) patterns)
+          ;; Finally check custom predicates
+          (some #(% kw) predicates))))))
 
 
 (defn redact-sensitive-map

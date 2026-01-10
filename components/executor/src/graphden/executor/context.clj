@@ -26,12 +26,14 @@
    result-cache     ; Atom: {fn-result-value-id -> computed-value} for caching
    ;; LIFECYCLE: result-cache is created in create-context (atom {}), populated
    ;; during execution by execute-fn-result-value (memoizes fn results), and
-   ;; becomes eligible for GC when context goes out of scope. Cache is NOT bounded -
-   ;; for very large execution graphs, memory usage scales with unique fn-result-value
-   ;; count. Use max-depth to bound graph size if memory is a concern.
+   ;; becomes eligible for GC when context goes out of scope. Cache is bounded by
+   ;; cache-max-size to prevent OOM in unbounded execution graphs.
    strict-type-validation?  ; If true, throw on unknown types; if false, warn and accept
    max-unknown-types        ; Limit for unknown types in forward compat mode (circuit breaker)
-   unknown-type-counter])   ; Atom: count of unknown types (circuit breaker for forward compat)
+   unknown-type-counter     ; Atom: count of unknown types (circuit breaker for forward compat)
+   clock                    ; Function returning current time in millis (for testing)
+   cache-warning-threshold  ; Threshold for warning about large cache
+   cache-max-size])         ; Maximum cache size before error
 
 
 ;; === Execution Limits ===
@@ -59,8 +61,8 @@
 ;; Default value is sp/default-max-unknown-types (10)
 
 
-(def result-cache-size-warning-threshold
-  "Threshold for result-cache size that triggers a warning log.
+(def default-cache-warning-threshold
+  "Default threshold for result-cache size that triggers a warning log.
    Large caches indicate potentially unbounded execution graphs.
    When exceeded, a warning is logged to help diagnose memory issues.
 
@@ -71,8 +73,8 @@
   1000)
 
 
-(def result-cache-max-size
-  "Maximum size for result-cache before rejecting new entries.
+(def default-cache-max-size
+  "Default maximum size for result-cache before rejecting new entries.
    Provides hard limit to prevent OOM in unbounded execution graphs.
    When reached, new fn-result-values will throw an error.
 
@@ -80,6 +82,11 @@
    fn-result-values, the graph is almost certainly unbounded or misconfigured.
    At ~1KB per cached value average, this limits memory to ~10MB per execution."
   10000)
+
+
+;; Legacy aliases for backward compatibility
+(def result-cache-size-warning-threshold default-cache-warning-threshold)
+(def result-cache-max-size default-cache-max-size)
 
 
 (def timeout-warning-window-ms
@@ -231,6 +238,10 @@
                                 If false, warn and accept (forward compatibility mode).
    - :max-unknown-types - Maximum unknown types allowed in forward compat mode (default 10).
                           Acts as circuit breaker to detect schema version mismatches.
+   - :clock - Function returning current time in milliseconds (default: System/currentTimeMillis).
+              Inject a custom clock for deterministic timeout testing.
+   - :cache-warning-threshold - Threshold for result-cache size warning (default: 1000).
+   - :cache-max-size - Maximum result-cache size before error (default: 10000).
 
    ## Forward Compatibility Mode (:strict-type-validation? false)
 
@@ -264,17 +275,29 @@
    - timeout-ms must be at least 50ms (allows for fast test cases)
    - max-depth must be positive and <= 100000
    - path-args must be a map if provided"
-  [{:keys [storage base-fns max-depth timeout-ms path-args strict-type-validation? max-unknown-types]
+  [{:keys [storage base-fns max-depth timeout-ms path-args strict-type-validation?
+           max-unknown-types clock cache-warning-threshold cache-max-size]
     :or {max-depth sp/default-max-depth
          timeout-ms default-timeout-ms
          path-args {}
          strict-type-validation? true
-         max-unknown-types sp/default-max-unknown-types}}]
+         max-unknown-types sp/default-max-unknown-types
+         cache-warning-threshold default-cache-warning-threshold
+         cache-max-size default-cache-max-size}}]
   (validate-context-options! storage timeout-ms max-depth path-args)
-  (let [fns (or base-fns (registry/get-default-registry))]
-    (->ExecutionContext storage nil fns max-depth timeout-ms (System/currentTimeMillis) 0
+  (let [fns (or base-fns (registry/get-default-registry))
+        clock-fn (or clock #(System/currentTimeMillis))]
+    (->ExecutionContext storage nil fns max-depth timeout-ms (clock-fn) 0
                         (or path-args {}) nil (atom {}) strict-type-validation?
-                        max-unknown-types (atom 0))))
+                        max-unknown-types (atom 0) clock-fn
+                        cache-warning-threshold cache-max-size)))
+
+
+(defn current-time-ms
+  "Returns current time in milliseconds using the context's clock.
+   This allows for deterministic testing of timeout behavior."
+  [context]
+  ((:clock context)))
 
 
 (defn clear-result-cache!

@@ -21,6 +21,15 @@
 (defonce ^:private default-registry (atom {}))
 
 
+;; Thread-local registry override for parallel testing.
+;; When bound, get-default-registry returns this instead of the global atom.
+(def ^:dynamic *thread-local-registry*
+  "Thread-local override for base-fns registry.
+   When non-nil, get-default-registry returns this map instead of the global registry.
+   Use with-base-fns macro to bind this safely."
+  nil)
+
+
 (defn register-base-fn!
   "Registers a base function in the default global registry.
    fn-name - keyword identifying the function (must match fn-schema name)
@@ -42,7 +51,7 @@
 
    For context-aware lookup, use get-base-fn-from-context."
   [fn-name]
-  (get @default-registry fn-name))
+  (get (or *thread-local-registry* @default-registry) fn-name))
 
 
 (defn clear-base-fns!
@@ -58,15 +67,16 @@
 
 (defn get-default-registry
   "Returns the current state of the default global registry.
-   Useful for passing to create-context."
+   If *thread-local-registry* is bound (via with-base-fns), returns that instead.
+   This allows parallel tests to have isolated registries."
   []
-  @default-registry)
+  (or *thread-local-registry* @default-registry))
 
 
 (defmacro with-base-fns
-  "Executes body with a temporary base-fns registry.
-   The registry is isolated to this execution - other threads and tests
-   are not affected. After body completes, the original registry is restored.
+  "Executes body with a thread-local base-fns registry.
+   The registry is completely isolated to this thread - other threads and tests
+   are not affected. Uses Clojure's binding which is thread-safe.
 
    This is the recommended approach for parallel testing.
 
@@ -77,15 +87,12 @@
        (execute ctx fn-id)))
    ```
 
-   Note: This binds the default-registry atom temporarily. For complete
-   isolation, pass :base-fns directly to create-context instead."
+   Thread safety: Uses dynamic binding, so each thread gets its own registry.
+   Parallel tests can safely use different base-fns without interference."
   [fns-map & body]
-  `(let [old-registry# @default-registry]
-     (try
-       (reset! default-registry ~fns-map)
-       ~@body
-       (finally
-         (reset! default-registry old-registry#)))))
+  `(binding [*thread-local-registry* ~fns-map]
+     (let [res# (do ~@body)]
+       res#)))
 
 
 (defn get-base-fn-from-context

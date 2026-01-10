@@ -1684,3 +1684,73 @@
           parent-map (zipmap (rest ids) (butlast ids))
           helpers (->MockConstraintHelpers {} {} parent-map {} {})]
       (is (set? (storage/collect-parent-chain-impl helpers (last ids)))))))
+
+
+;; === Sensitive Field Registry Tests ===
+
+(deftest sensitive-field-registry-test
+  (testing "default sensitive fields are detected"
+    (is (storage/sensitive-field? :password))
+    (is (storage/sensitive-field? :api-key))
+    (is (storage/sensitive-field? :secret))
+    (is (storage/sensitive-field? :auth-token)))
+
+  (testing "non-sensitive fields are not detected"
+    (is (not (storage/sensitive-field? :username)))
+    (is (not (storage/sensitive-field? :email)))
+    (is (not (storage/sensitive-field? :name)))))
+
+
+(deftest register-sensitive-field-name!-test
+  (testing "registers custom field name"
+    (try
+      (storage/register-sensitive-field-name! :employee-id)
+      (is (storage/sensitive-field? :employee-id))
+      (finally
+        (storage/reset-sensitive-field-registry!))))
+
+  (testing "throws on non-keyword"
+    (is (thrown? clojure.lang.ExceptionInfo
+          (storage/register-sensitive-field-name! "not-a-keyword")))))
+
+
+(deftest register-sensitive-field-pattern!-test
+  (testing "registers custom pattern"
+    (try
+      (storage/register-sensitive-field-pattern! #"(?i)hipaa")
+      (is (storage/sensitive-field? :hipaa-data))
+      (is (storage/sensitive-field? :patient-hipaa-record))
+      (finally
+        (storage/reset-sensitive-field-registry!))))
+
+  (testing "throws on non-pattern"
+    (is (thrown? clojure.lang.ExceptionInfo
+          (storage/register-sensitive-field-pattern! "not-a-pattern")))))
+
+
+(deftest register-sensitive-field-predicate!-test
+  (testing "registers custom predicate"
+    (try
+      ;; Mark all fields in pii namespace as sensitive
+      (storage/register-sensitive-field-predicate!
+        (fn [k] (= "pii" (namespace k))))
+      (is (storage/sensitive-field? :pii/social-security))
+      (is (storage/sensitive-field? :pii/date-of-birth))
+      (is (not (storage/sensitive-field? :user/email)))
+      (finally
+        (storage/reset-sensitive-field-registry!))))
+
+  (testing "throws on non-function"
+    (is (thrown? clojure.lang.ExceptionInfo
+          (storage/register-sensitive-field-predicate! :not-a-function)))))
+
+
+(deftest reset-sensitive-field-registry!-test
+  (testing "resets to defaults"
+    ;; Use a field name that doesn't match any default patterns
+    (storage/register-sensitive-field-name! :custom-field-xyz)
+    (is (storage/sensitive-field? :custom-field-xyz))
+    (storage/reset-sensitive-field-registry!)
+    (is (not (storage/sensitive-field? :custom-field-xyz)))
+    ;; Defaults still work
+    (is (storage/sensitive-field? :password))))

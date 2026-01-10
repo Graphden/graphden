@@ -336,6 +336,14 @@
 (def redact-sensitive-deep errors/redact-sensitive-deep)
 
 
+;; Sensitive field registry (extensible)
+(def register-sensitive-field-name! errors/register-sensitive-field-name!)
+(def register-sensitive-field-pattern! errors/register-sensitive-field-pattern!)
+(def register-sensitive-field-predicate! errors/register-sensitive-field-predicate!)
+(def reset-sensitive-field-registry! errors/reset-sensitive-field-registry!)
+(def sensitive-field? errors/sensitive-field?)
+
+
 ;; === Metadata re-exports ===
 
 (defn types-equivalent?

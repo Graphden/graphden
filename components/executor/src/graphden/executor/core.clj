@@ -137,15 +137,17 @@
                     :cache-size (count @result-cache)})
         cached)
       ;; Cache miss - check limit before executing
-      (let [current-size (count @result-cache)]
+      (let [current-size (count @result-cache)
+            cache-max-size (:cache-max-size context)
+            cache-warning-threshold (:cache-warning-threshold context)]
         ;; Hard limit check BEFORE adding new entry
-        (when (>= current-size ctx/result-cache-max-size)
+        (when (>= current-size cache-max-size)
           (throw (ex-info "Result cache size limit exceeded - execution graph too large"
                           {:type :execution-error/cache-limit-exceeded
                            :cache-size current-size
-                           :max-size ctx/result-cache-max-size
+                           :max-size cache-max-size
                            :fn-result-value-id fn-result-value-id
-                           :hint "Reduce graph complexity or increase max-depth to fail earlier"})))
+                           :hint "Reduce graph complexity or increase cache-max-size"})))
         ;; Execute and cache
         (let [execution-graph (:execution-graph context)
               fn-result-values (:fn-result-values execution-graph)
@@ -161,11 +163,11 @@
                 result (execute-internal context fn-id nil)
                 new-size (count (swap! result-cache assoc fn-result-value-id result))]
             ;; Warn once when cache crosses threshold (check if we just crossed)
-            (when (= new-size ctx/result-cache-size-warning-threshold)
+            (when (= new-size cache-warning-threshold)
               (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
                         {:cache-size new-size
-                         :threshold ctx/result-cache-size-warning-threshold
-                         :max-size ctx/result-cache-max-size
+                         :threshold cache-warning-threshold
+                         :max-size cache-max-size
                          :hint "Large caches may indicate unbounded execution graphs"}))
             result))))))
 
@@ -199,9 +201,11 @@
    execution. This means a long-running base function will complete fully even
    if it exceeds the timeout. The timeout is a best-effort limit, not a hard
    guarantee. For precise timeout control, base functions should implement
-   their own timeout logic (e.g., using futures with deref timeout)."
+   their own timeout logic (e.g., using futures with deref timeout).
+
+   Uses the context's clock for time measurement, allowing deterministic testing."
   [context]
-  (let [elapsed (- (System/currentTimeMillis) (:start-time context))
+  (let [elapsed (- (ctx/current-time-ms context) (:start-time context))
         timeout-ms (:timeout-ms context)
         timeout-threshold (long (* timeout-ms ctx/warning-threshold-ratio))]
     (when (and (>= elapsed timeout-threshold)

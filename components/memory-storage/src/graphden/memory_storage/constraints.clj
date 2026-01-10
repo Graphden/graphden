@@ -29,8 +29,24 @@
 
 
   (collect-parent-chain
-    [this fn-id]
-    (sp/collect-parent-chain-impl this fn-id))
+    [_this fn-id]
+    ;; Optimized: build parent-map once and traverse in memory.
+    ;; This avoids multiple state-atom derefs during traversal.
+    (let [state @state-atom
+          fns-data (crud/get-entity-data state :fn)
+          ;; Build fn-id -> parent-fn-id map
+          parent-map (->> fns-data
+                          vals
+                          (filter :parent-fn-id)
+                          (map (juxt :id :parent-fn-id))
+                          (into {}))]
+      ;; Traverse parent chain in memory
+      (loop [current-id (get parent-map fn-id)
+             ancestor-ids #{}]
+        (if (or (nil? current-id) (contains? ancestor-ids current-id))
+          ancestor-ids
+          (recur (get parent-map current-id)
+                 (conj ancestor-ids current-id))))))
 
 
   (collect-arg-schema-ids-in-chain

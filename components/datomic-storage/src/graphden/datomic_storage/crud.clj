@@ -6,6 +6,7 @@
    - Batch operations (create-entities, read-entities, delete-entities)"
   (:require
     [datomic.client.api :as d]
+    [graphden.datomic-storage.codec :as codec]
     [graphden.datomic-storage.introspection :as introspection]
     [graphden.datomic-storage.util :as util]
     [graphden.storage-protocol.interface :as sp]))
@@ -13,32 +14,12 @@
 
 ;; === CRUD helpers ===
 
-(defn- convert-field-value
-  "Converts field values for Datomic storage:
-   - Enum values (keywords) -> entity idents
-   - Ref values (UUIDs) -> lookup refs
-   Returns the original value for other field types."
-  [field-specs field-name v]
-  (let [field-spec (get field-specs field-name)]
-    (case (:type field-spec)
-      :enum (if (keyword? v)
-              (util/enum-value-ident (:enum-name field-spec) v)
-              v)
-      :ref (if (uuid? v)
-             ;; Convert UUID to lookup ref for the referenced entity type
-             (let [ref-entity (:ref-entity field-spec)]
-               [(util/entity-attr ref-entity :id) v])
-             v)
-      ;; Default: return as-is
-      v)))
-
 
 (defn- entity->tx
   "Converts entity map to Datomic transaction data.
    Uses namespaced attributes for the entity type.
    The :id field is stored as :entity-name/id (UUID).
-   Enum fields are converted to entity idents.
-   Ref fields are converted to lookup refs.
+   Field values are encoded using the Datomic codec (handles enum, ref, union types).
    Type hints for hot-path performance (called during batch operations)."
   ^clojure.lang.IPersistentMap [entity-name ^clojure.lang.IPersistentMap data id temp-id ^clojure.lang.IPersistentMap field-specs]
   (let [base-tx {:db/id temp-id
@@ -46,7 +27,8 @@
     (reduce-kv (fn [acc k v]
                  (if (= k :id)
                    acc  ; Already handled above
-                   (let [converted-v (convert-field-value field-specs k v)]
+                   (let [field-spec (get field-specs k)
+                         converted-v (codec/encode-value v field-spec)]
                      (assoc acc (util/entity-attr entity-name k) converted-v))))
                base-tx
                data)))

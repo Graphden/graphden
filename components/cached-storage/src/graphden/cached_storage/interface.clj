@@ -121,96 +121,98 @@
                           #(cache/find-caches-by-arg-schema-dep % arg-schema-id)))
 
 
-;; === Cache invalidation multimethods ===
-;; Extensible invalidation strategies for different entity types and operations.
+;; === Cache invalidation strategy map ===
+;; Centralized invalidation strategies grouped by entity type.
+;; Each entity can define :on-create, :on-update, :on-delete handlers.
+;;
+;; Benefits over multimethods:
+;; - All strategies for an entity visible in one place
+;; - Easier to see what entities have what invalidation behavior
+;; - Simple to extend for new entities
+;; - Data-driven: can be introspected/tested declaratively
 
-(defmulti invalidate-after-create!
-  "Invalidates caches after entity creation.
-   Dispatches on entity-name keyword."
-  (fn [_base-storage _cache-storage entity-name _result] entity-name))
+(def ^:private invalidation-strategies
+  "Map of entity-name -> {:on-create fn, :on-update fn, :on-delete fn}.
 
+   Handler signatures:
+   - :on-create (fn [base-storage cache-storage result])
+   - :on-update (fn [base-storage cache-storage id data result old-record])
+   - :on-delete (fn [base-storage cache-storage id record])"
+  {:fn
+   {:on-create
+    (fn [base-storage cache-storage result]
+      (rebuild-cache! base-storage cache-storage (:id result)))
 
-(defmethod invalidate-after-create! :fn
-  [base-storage cache-storage _entity-name result]
-  (rebuild-cache! base-storage cache-storage (:id result)))
+    :on-update
+    (fn [base-storage cache-storage id data _result old-record]
+      (when (or (contains? data :parent-fn-id)
+                (not= (:fn-schema-id old-record) (:fn-schema-id data)))
+        (invalidate-fn-and-dependents! base-storage cache-storage id)))
 
+    :on-delete
+    (fn [base-storage cache-storage id _record]
+      (cache/delete-cache! cache-storage id)
+      (invalidate-fn-and-dependents! base-storage cache-storage id))}
 
-(defmethod invalidate-after-create! :arg-value
-  [base-storage cache-storage _entity-name result]
-  (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result)))
+   :arg-value
+   {:on-create
+    (fn [base-storage cache-storage result]
+      (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result)))
 
+    :on-update
+    (fn [base-storage cache-storage _id _data result _old-record]
+      (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result)))
 
-(defmethod invalidate-after-create! :default
-  [_base-storage _cache-storage _entity-name _result]
-  nil)
+    :on-delete
+    (fn [base-storage cache-storage _id record]
+      (when record
+        (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id record))))}
 
+   :fn-schema
+   {:on-update
+    (fn [base-storage cache-storage id _data _result _old-record]
+      (invalidate-fn-schema-dependents! base-storage cache-storage id))
 
-(defmulti invalidate-after-update!
-  "Invalidates caches after entity update.
-   Dispatches on entity-name keyword.
-   For :fn entities, old-record contains the pre-update state."
-  (fn [_base-storage _cache-storage entity-name _id _data _result _old-record] entity-name))
+    :on-delete
+    (fn [base-storage cache-storage id _record]
+      (invalidate-fn-schema-dependents! base-storage cache-storage id))}
 
+   :arg-schema
+   {:on-update
+    (fn [base-storage cache-storage id _data _result _old-record]
+      (invalidate-arg-schema-dependents! base-storage cache-storage id))
 
-(defmethod invalidate-after-update! :fn
-  [base-storage cache-storage _entity-name id data _result old-record]
-  (when (or (contains? data :parent-fn-id)
-            (not= (:fn-schema-id old-record) (:fn-schema-id data)))
-    (invalidate-fn-and-dependents! base-storage cache-storage id)))
-
-
-(defmethod invalidate-after-update! :arg-value
-  [base-storage cache-storage _entity-name _id _data result _old-record]
-  (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result)))
-
-
-(defmethod invalidate-after-update! :fn-schema
-  [base-storage cache-storage _entity-name id _data _result _old-record]
-  (invalidate-fn-schema-dependents! base-storage cache-storage id))
-
-
-(defmethod invalidate-after-update! :arg-schema
-  [base-storage cache-storage _entity-name id _data _result _old-record]
-  (invalidate-arg-schema-dependents! base-storage cache-storage id))
-
-
-(defmethod invalidate-after-update! :default
-  [_base-storage _cache-storage _entity-name _id _data _result _old-record]
-  nil)
-
-
-(defmulti invalidate-after-delete!
-  "Invalidates caches after entity deletion.
-   Dispatches on entity-name keyword.
-   Record contains the entity data before deletion."
-  (fn [_base-storage _cache-storage entity-name _id _record] entity-name))
-
-
-(defmethod invalidate-after-delete! :fn
-  [base-storage cache-storage _entity-name id _record]
-  (cache/delete-cache! cache-storage id)
-  (invalidate-fn-and-dependents! base-storage cache-storage id))
+    :on-delete
+    (fn [base-storage cache-storage id _record]
+      (invalidate-arg-schema-dependents! base-storage cache-storage id))}})
 
 
-(defmethod invalidate-after-delete! :arg-value
-  [base-storage cache-storage _entity-name _id record]
-  (when record
-    (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id record))))
+(defn- get-strategy
+  "Gets invalidation strategy for entity and operation.
+   Returns nil if no strategy defined (no-op)."
+  [entity-name operation]
+  (get-in invalidation-strategies [entity-name operation]))
 
 
-(defmethod invalidate-after-delete! :fn-schema
-  [base-storage cache-storage _entity-name id _record]
-  (invalidate-fn-schema-dependents! base-storage cache-storage id))
+(defn- invalidate-after-create!
+  "Invokes :on-create strategy for entity if defined."
+  [base-storage cache-storage entity-name result]
+  (when-let [handler (get-strategy entity-name :on-create)]
+    (handler base-storage cache-storage result)))
 
 
-(defmethod invalidate-after-delete! :arg-schema
-  [base-storage cache-storage _entity-name id _record]
-  (invalidate-arg-schema-dependents! base-storage cache-storage id))
+(defn- invalidate-after-update!
+  "Invokes :on-update strategy for entity if defined."
+  [base-storage cache-storage entity-name id data result old-record]
+  (when-let [handler (get-strategy entity-name :on-update)]
+    (handler base-storage cache-storage id data result old-record)))
 
 
-(defmethod invalidate-after-delete! :default
-  [_base-storage _cache-storage _entity-name _id _record]
-  nil)
+(defn- invalidate-after-delete!
+  "Invokes :on-delete strategy for entity if defined."
+  [base-storage cache-storage entity-name id record]
+  (when-let [handler (get-strategy entity-name :on-delete)]
+    (handler base-storage cache-storage id record)))
 
 
 ;; === Cached Storage Record ===

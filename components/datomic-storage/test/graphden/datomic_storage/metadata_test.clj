@@ -4,12 +4,9 @@
     [clojure.test :refer [deftest is testing]]
     [datomic.client.api :as d]
     [graphden.data-schema-protocol.interface :as ds]
-    [graphden.datomic-storage.interface :as dat]
-    [graphden.datomic-storage.introspection :as introspection]
     [graphden.datomic-storage.metadata :as metadata]
     [graphden.datomic-storage.schema :as schema]
-    [graphden.malli-data-schema.interface :as mds]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.malli-data-schema.interface :as mds]))
 
 
 ;; === build-all-metadata-tx-data tests ===

@@ -412,7 +412,6 @@
 
 
 (deftest string-regex-edge-cases-test
-  "Tests edge cases in regex handling for complete coverage."
   (register-strings!)
 
   (testing "str-split - uses configured limits"

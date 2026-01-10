@@ -1,11 +1,15 @@
 (ns graphden.fn-registry.core-test
   "Tests for fn-registry.core - base function registration and storage sync."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.core :as core]
     [graphden.memory-storage.interface :as mem]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.storage-protocol.interface :as sp])
+  (:import
+    (java.util
+      UUID)))
 
 
 ;; Fixture to clean executor registry between tests
@@ -223,4 +227,100 @@
       (is (thrown? clojure.lang.ExceptionInfo
             (core/sync-defs-to-storage! storage defs)))
       ;; Neither should be in storage
-      (is (nil? (sp/read-entity storage :fn-schema (core/fn-schema-uuid :valid)))))))
+      (is (nil? (sp/read-entity storage :fn-schema (core/fn-schema-uuid :valid))))))
+
+  (testing "updates fn-schema when return-type changes"
+    (let [storage (mem/create-storage)
+          defs1 {:compute {:args {:a :int} :return-type :int :impl (fn [_ _] nil)}}
+          defs2 {:compute {:args {:a :int} :return-type :numeric :impl (fn [_ _] nil)}}]
+      (core/sync-defs-to-storage! storage defs1)
+      (let [before (sp/read-entity storage :fn-schema (core/fn-schema-uuid :compute))]
+        (is (= :int (:returned-type before))))
+      (core/sync-defs-to-storage! storage defs2)
+      (let [after (sp/read-entity storage :fn-schema (core/fn-schema-uuid :compute))]
+        (is (= :numeric (:returned-type after))))))
+
+  (testing "updates arg-schema when type changes"
+    (let [storage (mem/create-storage)
+          defs1 {:compute {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}
+          defs2 {:compute {:args {:x :text} :return-type :int :impl (fn [_ _] nil)}}]
+      (core/sync-defs-to-storage! storage defs1)
+      (let [before (sp/read-entity storage :arg-schema (core/arg-schema-uuid :compute :x))]
+        (is (= :int (:type before))))
+      (core/sync-defs-to-storage! storage defs2)
+      (let [after (sp/read-entity storage :arg-schema (core/arg-schema-uuid :compute :x))]
+        (is (= :text (:type after))))))
+
+  (testing "updates arg-schema when required changes"
+    (let [storage (mem/create-storage)
+          defs1 {:compute {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}
+          defs2 {:compute {:args {:x {:type :int :required false}} :return-type :int :impl (fn [_ _] nil)}}]
+      (core/sync-defs-to-storage! storage defs1)
+      (let [before (sp/read-entity storage :arg-schema (core/arg-schema-uuid :compute :x))]
+        (is (true? (:required before))))
+      (core/sync-defs-to-storage! storage defs2)
+      (let [after (sp/read-entity storage :arg-schema (core/arg-schema-uuid :compute :x))]
+        (is (false? (:required after)))))))
+
+
+;; === Additional validation edge case tests ===
+
+(deftest validate-identifier-edge-cases-test
+  (testing "rejects identifier exceeding 128 chars"
+    (let [long-name (keyword (str/join (repeat 130 "a")))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exceeds maximum length"
+            (core/fn-schema-uuid long-name)))))
+
+  (testing "accepts predicate names ending with ?"
+    (is (uuid? (core/fn-schema-uuid :valid?)))
+    (is (uuid? (core/fn-schema-uuid :empty?)))
+    (is (uuid? (core/arg-schema-uuid :every? :pred))))
+
+  (testing "accepts underscore prefix"
+    (is (uuid? (core/fn-schema-uuid :_private)))
+    (is (uuid? (core/arg-schema-uuid :_helper :_arg))))
+
+  (testing "accepts hyphens in names"
+    (is (uuid? (core/fn-schema-uuid :my-func)))
+    (is (uuid? (core/arg-schema-uuid :compute-value :input-data))))
+
+  (testing "accepts mixed case"
+    (is (uuid? (core/fn-schema-uuid :myFunc)))
+    (is (uuid? (core/arg-schema-uuid :getValue :argName)))))
+
+
+;; === UUID v5 internal tests ===
+
+(deftest uuid-v5-internal-test
+  (testing "uuid-v5 throws for non-UUID namespace"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"namespace-uuid must be a UUID"
+          (#'core/uuid-v5 "not-a-uuid" "name"))))
+
+  (testing "uuid-v5 throws for non-string name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"name-str must be a string"
+          (#'core/uuid-v5 (random-uuid) :not-a-string))))
+
+  (testing "uuid-v5 throws for name exceeding max length"
+    (let [long-str (str/join (repeat 300 "x"))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"name-str exceeds maximum length"
+            (#'core/uuid-v5 (random-uuid) long-str)))))
+
+  (testing "uuid-v5 throws for name with null bytes"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"name-str contains null bytes"
+          (#'core/uuid-v5 (random-uuid) "has\u0000null"))))
+
+  (testing "uuid-v5 generates consistent UUIDs"
+    (let [ns-uuid (random-uuid)]
+      (is (= (#'core/uuid-v5 ns-uuid "test")
+             (#'core/uuid-v5 ns-uuid "test")))))
+
+  (testing "uuid-v5 generates version 5 UUIDs"
+    (let [uuid (#'core/uuid-v5 (random-uuid) "test")]
+      ;; UUID version is encoded in bits 12-15 of time_hi_and_version (byte 6)
+      ;; For version 5, this should be 0x5
+      (is (= 5 (UUID/.version uuid))))))

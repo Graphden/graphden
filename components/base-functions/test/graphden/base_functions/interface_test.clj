@@ -1,5 +1,6 @@
 (ns graphden.base-functions.interface-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.base-functions.arithmetic :as arithmetic]
     [graphden.base-functions.core :as core]
@@ -374,6 +375,33 @@
   (testing "str-join"
     (is (= "a,b,c" (call-base-fn :str-join {:coll ["a" "b" "c"] :sep ","})))
     (is (= "abc" (call-base-fn :str-join {:coll ["a" "b" "c"]})))))
+
+
+;; === String Regex Safety Tests ===
+
+(deftest string-regex-safety-test
+  (register-strings!)
+
+  (testing "str-split - regex pattern too long throws"
+    (let [long-pattern (str/join (repeat 200 "a"))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Regex pattern too long"
+            (call-base-fn :str-split {:s "test" :sep long-pattern})))))
+
+  (testing "str-split - input string too long throws"
+    (let [long-input (str/join (repeat 200000 "a"))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Input string too long"
+            (call-base-fn :str-split {:s long-input :sep ","})))))
+
+  (testing "str-split - normal regex works"
+    (is (= ["a" "b" "c"] (call-base-fn :str-split {:s "a-b-c" :sep "-"})))
+    (is (= ["hello" "world"] (call-base-fn :str-split {:s "hello world" :sep " "})))
+    (is (= ["one" "two" "three"] (call-base-fn :str-split {:s "one::two::three" :sep "::"}))))
+
+  (testing "str-split - regex with special chars works"
+    (is (= ["a" "b" "c"] (call-base-fn :str-split {:s "a.b.c" :sep "\\."})))
+    (is (= ["1" "2" "3"] (call-base-fn :str-split {:s "1|2|3" :sep "\\|"})))))
 
 
 ;; === Collection Tests ===

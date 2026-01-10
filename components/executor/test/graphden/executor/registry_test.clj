@@ -97,16 +97,15 @@
 
 
 ;; === with-base-fns tests ===
-;; Note: with-base-fns is a macro that uses a private var.
-;; We test its behavior indirectly through the public API.
+;; Note: The with-base-fns macro uses a private var (default-registry).
+;; The macro is tested indirectly through executor integration tests.
+;; We verify the macro exists and the basic registry behavior works.
 
-(deftest with-base-fns-behavior-test
-  (testing "macro is defined and callable"
-    ;; The macro exists in the namespace
+(deftest with-base-fns-macro-exists-test
+  (testing "macro is defined"
     (is (some? (resolve 'graphden.executor.registry/with-base-fns))))
 
-  (testing "get-default-registry reflects current state"
-    ;; We test the registry behavior through public functions
+  (testing "get-default-registry returns current registry state"
     (registry/register-base-fn! :test-fn (fn [_ _] 1))
     (is (contains? (registry/get-default-registry) :test-fn))
     (registry/clear-base-fns!)

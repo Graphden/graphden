@@ -2,6 +2,9 @@
   "Tests for backend-template helper functions."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.data-schema-protocol.interface :as ds]
+    [graphden.malli-data-schema.interface :as mds]
+    [graphden.memory-storage.interface :as mem]
     [graphden.storage-protocol.backend-template :as tpl]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -305,3 +308,46 @@
                           #"data must be a map"
           (tpl/create-entity-with-validation (atom nil) :user "not a map"
                                              (fn [_ _ _] nil))))))
+
+
+;; === run-basic-contract-tests tests ===
+
+(deftest run-basic-contract-tests-test
+  (testing "runs basic tests on memory storage"
+    (let [storage (mem/create-storage)
+          schema (-> (mds/create-builder)
+                     (ds/add-entity
+                       :test-entity
+                       (random-uuid)
+                       {:name {:uuid (random-uuid) :type :text}})
+                     ds/build)
+          result (tpl/run-basic-contract-tests storage schema)]
+      (is (map? result))
+      (is (contains? result :passed))
+      (is (contains? result :failed))
+      (is (contains? result :errors))
+      (is (>= (:passed result) 1))
+      (is (zero? (count (:errors result))))))
+
+  (testing "catches errors from invalid storage"
+    (let [storage (reify
+                    sp/Storage
+                    (initialize [_ _] (throw (ex-info "Init failed" {})))
+
+                    (close [_] nil)
+
+
+                    sp/StorageIntrospection
+
+                    (schema-metadata [_] nil)
+
+                    (current-entities [_] #{})
+
+                    (current-fields [_ _] {})
+
+                    (current-enums [_] #{})
+
+                    (current-enum-values [_ _] #{}))
+          schema {}
+          result (tpl/run-basic-contract-tests storage schema)]
+      (is (>= (count (:errors result)) 1)))))

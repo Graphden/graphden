@@ -95,6 +95,34 @@
        res#)))
 
 
+(defmacro with-isolated-registry
+  "Executes body with an isolated copy of the global registry.
+   Any modifications to the registry during body execution will be
+   reverted when body completes (even if an exception is thrown).
+
+   Use this when you need to test code that calls register-base-fn!
+   without polluting the global registry for other tests.
+
+   Example:
+   ```clojure
+   (with-isolated-registry
+     (register-base-fn! :my-fn my-impl)
+     (test-something-that-uses-registry))
+   ;; Registry is restored to original state here
+   ```
+
+   Note: For most test cases, prefer with-base-fns which uses thread-local
+   binding. Use with-isolated-registry only when testing code that
+   explicitly modifies the global registry via register-base-fn!."
+  [& body]
+  `(let [registry# @#'default-registry
+         saved# @registry#]
+     (try
+       (do ~@body)
+       (finally
+         (reset! registry# saved#)))))
+
+
 (defn get-base-fn-from-context
   "Retrieves a base function by name from the context's registry.
    Returns the function or nil if not found.

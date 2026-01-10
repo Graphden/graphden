@@ -14,6 +14,7 @@
 
    Use the defbase macro to define functions with automatic argument handling."
   (:require
+    [clojure.string :as str]
     [graphden.executor.interface :as exec]
     [graphden.field-types.interface :as ft]
     [graphden.storage-protocol.interface :as sp])
@@ -70,9 +71,22 @@
   #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d")
 
 
+(def ^:private max-name-length
+  "Maximum allowed length for name strings in UUID v5 generation.
+   Prevents DoS via extremely long strings that would consume
+   excessive memory and CPU during SHA-1 hashing."
+  256)
+
+
 (defn- uuid-v5
   "Generates a UUID v5 (name-based SHA-1) from namespace UUID and name string.
    Returns a deterministic UUID for the same namespace+name combination.
+
+   Security:
+   - Validates namespace-uuid is a UUID
+   - Validates name-str is a non-empty string
+   - Limits name-str length to max-name-length (256) to prevent DoS
+   - Rejects null bytes which could cause injection issues
 
    Optimized: creates byte array directly instead of using intermediate ByteBuffer
    for namespace UUID, reducing object allocations."
@@ -85,6 +99,18 @@
     (throw (ex-info "name-str must be a string"
                     {:type :invalid-argument
                      :name-str name-str})))
+  (when (str/blank? name-str)
+    (throw (ex-info "name-str must not be blank"
+                    {:type :invalid-argument
+                     :name-str name-str})))
+  (when (> (count name-str) max-name-length)
+    (throw (ex-info "name-str exceeds maximum length"
+                    {:type :invalid-argument
+                     :max-length max-name-length
+                     :actual-length (count name-str)})))
+  (when (str/includes? name-str "\u0000")
+    (throw (ex-info "name-str contains null bytes"
+                    {:type :invalid-argument})))
   (let [;; Convert namespace UUID to bytes directly (avoids intermediate ByteBuffer)
         ns-bytes (let [arr (byte-array 16)
                        buf (java.nio.ByteBuffer/wrap arr)]

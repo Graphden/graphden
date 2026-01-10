@@ -308,10 +308,11 @@
           uuid2 (#'core/uuid-v5 ns2 "same-name")]
       (is (not= uuid1 uuid2))))
 
-  (testing "uuid-v5 handles empty string"
-    (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
-          uuid (#'core/uuid-v5 ns-uuid "")]
-      (is (uuid? uuid))))
+  (testing "uuid-v5 throws on empty string"
+    (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"name-str must not be blank"
+            (#'core/uuid-v5 ns-uuid "")))))
 
   (testing "uuid-v5 handles Unicode strings"
     (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"

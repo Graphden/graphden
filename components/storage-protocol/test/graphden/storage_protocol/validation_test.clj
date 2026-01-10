@@ -504,3 +504,47 @@
     (is (= :complex (v/type-category :jsonb)))
     (is (= :complex (v/type-category :union)))
     (is (= :reference (v/type-category :ref)))))
+
+
+;; === Additional type validation edge case tests ===
+
+(deftest validate-where-clause-types-edge-cases-test
+  (let [fields {:float-score {:type :numeric}
+                :raw-data {:type :bytes}
+                :timestamp {:type :timestamptz}
+                :list-data {:type :jsonb}}]
+
+    (testing "passes for decimal value with numeric type"
+      (is (nil? (v/validate-where-clause-types! :entity fields {:float-score 3.14M}))))
+
+    (testing "passes for bytes array"
+      (is (nil? (v/validate-where-clause-types! :entity fields {:raw-data (byte-array [1 2 3])}))))
+
+    (testing "passes for Instant timestamp"
+      (is (nil? (v/validate-where-clause-types! :entity fields {:timestamp (java.time.Instant/now)}))))
+
+    (testing "passes for sequential as jsonb"
+      (is (nil? (v/validate-where-clause-types! :entity fields {:list-data (list 1 2 3)}))))
+
+    (testing "passes for vector as jsonb"
+      (is (nil? (v/validate-where-clause-types! :entity fields {:list-data [1 2 3]}))))
+
+    (testing "passes for unknown field (no spec to check)"
+      (is (nil? (v/validate-where-clause-types! :entity fields {:unknown-field "anything"}))))
+
+    (testing "throws for bool where int expected"
+      (let [int-field {:count {:type :int}}]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Type mismatch"
+              (v/validate-where-clause-types! :entity int-field {:count true})))))
+
+    (testing "throws for enum where text expected"
+      (let [text-field {:name {:type :text}}]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Type mismatch"
+              (v/validate-where-clause-types! :entity text-field {:name :keyword-value})))))
+
+    (testing "throws for text where timestamptz expected"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Type mismatch"
+            (v/validate-where-clause-types! :entity fields {:timestamp "2024-01-01"}))))))

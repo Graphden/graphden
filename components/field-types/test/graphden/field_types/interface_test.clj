@@ -1,5 +1,6 @@
 (ns graphden.field-types.interface-test
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.field-types.interface :as ft]))
 
@@ -170,3 +171,173 @@
     (is (not (ft/valid-type? :int nil)))
     (is (not (ft/valid-type? :bool nil)))
     (is (ft/valid-type? :union nil))))
+
+
+;; === Custom Type Registry Tests ===
+
+(deftest register-custom-type!-test
+  (testing "registers a custom type"
+    (ft/register-custom-type! :email
+                              {:validator #(and (string? %) (re-matches #".+@.+\..+" %))
+                               :encoder identity
+                               :decoder identity
+                               :description "Email address"})
+    (is (ft/custom-type? :email))
+    (ft/unregister-custom-type! :email))
+
+  (testing "throws on non-keyword type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Custom type key must be a keyword"
+          (ft/register-custom-type! "not-keyword" {:validator identity}))))
+
+  (testing "throws when overriding built-in type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Cannot override built-in type"
+          (ft/register-custom-type! :text {:validator identity}))))
+
+  (testing "uses default values when not provided"
+    (ft/register-custom-type! :minimal {})
+    (let [spec (ft/get-custom-type :minimal)]
+      (is (some? (:validator spec)))
+      (is (some? (:encoder spec)))
+      (is (some? (:decoder spec)))
+      (is (= "Custom type" (:description spec))))
+    (ft/unregister-custom-type! :minimal))
+
+  (testing "returns nil"
+    (is (nil? (ft/register-custom-type! :temp {})))
+    (ft/unregister-custom-type! :temp)))
+
+
+(deftest unregister-custom-type!-test
+  (testing "removes registered type"
+    (ft/register-custom-type! :to-remove {})
+    (is (ft/custom-type? :to-remove))
+    (ft/unregister-custom-type! :to-remove)
+    (is (not (ft/custom-type? :to-remove))))
+
+  (testing "handles unregistering non-existent type gracefully"
+    (is (nil? (ft/unregister-custom-type! :never-existed)))))
+
+
+(deftest get-custom-type-test
+  (testing "returns nil for non-existent type"
+    (is (nil? (ft/get-custom-type :nonexistent))))
+
+  (testing "returns spec for registered type"
+    (ft/register-custom-type! :test-type {:description "Test"})
+    (let [spec (ft/get-custom-type :test-type)]
+      (is (map? spec))
+      (is (= "Test" (:description spec))))
+    (ft/unregister-custom-type! :test-type)))
+
+
+(deftest custom-type?-test
+  (testing "returns false for non-existent type"
+    (is (not (ft/custom-type? :nonexistent))))
+
+  (testing "returns true for registered type"
+    (ft/register-custom-type! :check-type {})
+    (is (ft/custom-type? :check-type))
+    (ft/unregister-custom-type! :check-type)))
+
+
+(deftest all-custom-types-test
+  (testing "returns empty set when no custom types"
+    (is (set? (ft/all-custom-types))))
+
+  (testing "includes registered custom types"
+    (ft/register-custom-type! :custom1 {})
+    (ft/register-custom-type! :custom2 {})
+    (let [types (ft/all-custom-types)]
+      (is (contains? types :custom1))
+      (is (contains? types :custom2)))
+    (ft/unregister-custom-type! :custom1)
+    (ft/unregister-custom-type! :custom2)))
+
+
+(deftest all-supported-types-test
+  (testing "includes built-in types"
+    (let [all-types (ft/all-supported-types)]
+      (is (contains? all-types :uuid))
+      (is (contains? all-types :text))
+      (is (contains? all-types :int))))
+
+  (testing "includes custom types"
+    (ft/register-custom-type! :custom-supported {})
+    (is (contains? (ft/all-supported-types) :custom-supported))
+    (ft/unregister-custom-type! :custom-supported)))
+
+
+(deftest get-type-validator-test
+  (testing "returns built-in validator"
+    (let [validator (ft/get-type-validator :text)]
+      (is (fn? validator))
+      (is (validator "hello"))
+      (is (not (validator 123)))))
+
+  (testing "returns custom validator"
+    (ft/register-custom-type! :positive-int
+                              {:validator #(and (int? %) (pos? %))})
+    (let [validator (ft/get-type-validator :positive-int)]
+      (is (validator 5))
+      (is (not (validator -1)))
+      (is (not (validator 0))))
+    (ft/unregister-custom-type! :positive-int))
+
+  (testing "returns constantly true for unknown type"
+    (let [validator (ft/get-type-validator :unknown)]
+      (is (fn? validator))
+      (is (validator 42))
+      (is (validator nil)))))
+
+
+(deftest get-type-encoder-test
+  (testing "returns identity for built-in type"
+    (let [encoder (ft/get-type-encoder :text)]
+      (is (= "hello" (encoder "hello")))))
+
+  (testing "returns custom encoder"
+    (ft/register-custom-type! :upper-text
+                              {:encoder str/upper-case})
+    (let [encoder (ft/get-type-encoder :upper-text)]
+      (is (= "HELLO" (encoder "hello"))))
+    (ft/unregister-custom-type! :upper-text))
+
+  (testing "returns identity for unknown type"
+    (let [encoder (ft/get-type-encoder :unknown)]
+      (is (= 42 (encoder 42))))))
+
+
+(deftest get-type-decoder-test
+  (testing "returns identity for built-in type"
+    (let [decoder (ft/get-type-decoder :text)]
+      (is (= "hello" (decoder "hello")))))
+
+  (testing "returns custom decoder"
+    (ft/register-custom-type! :lower-text
+                              {:decoder str/lower-case})
+    (let [decoder (ft/get-type-decoder :lower-text)]
+      (is (= "hello" (decoder "HELLO"))))
+    (ft/unregister-custom-type! :lower-text))
+
+  (testing "returns identity for unknown type"
+    (let [decoder (ft/get-type-decoder :unknown)]
+      (is (= 42 (decoder 42))))))
+
+
+(deftest get-backend-mapping-test
+  (testing "returns mapping for built-in type"
+    (is (= "UUID" (ft/get-backend-mapping :uuid :postgres)))
+    (is (= :db.type/long (ft/get-backend-mapping :int :datomic)))
+    (is (= :any (ft/get-backend-mapping :text :memory))))
+
+  (testing "returns mapping for custom type"
+    (ft/register-custom-type! :custom-mapped
+                              {:backend-mappings {:postgres "VARCHAR(100)" :datomic :db.type/string :memory :any}})
+    (is (= "VARCHAR(100)" (ft/get-backend-mapping :custom-mapped :postgres)))
+    (is (= :db.type/string (ft/get-backend-mapping :custom-mapped :datomic)))
+    (ft/unregister-custom-type! :custom-mapped))
+
+  (testing "returns nil for unknown type"
+    (is (nil? (ft/get-backend-mapping :unknown-type :postgres)))))

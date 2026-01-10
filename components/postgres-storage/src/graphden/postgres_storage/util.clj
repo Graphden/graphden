@@ -55,10 +55,11 @@
    Reads *query-timeout-ms* and converts to seconds."
   []
   (when (< *query-timeout-ms* min-query-timeout-ms)
-    (throw (IllegalArgumentException.
-             (str "Query timeout must be at least " min-query-timeout-ms "ms. "
-                  "Current value: " *query-timeout-ms* "ms. "
-                  "Use with-query-timeout for safe rebinding."))))
+    (throw (ex-info (str "Query timeout must be at least " min-query-timeout-ms "ms")
+                    {:type :config-error/invalid-timeout
+                     :min-timeout-ms min-query-timeout-ms
+                     :current-timeout-ms *query-timeout-ms*
+                     :hint "Use with-query-timeout for safe rebinding"})))
   (quot *query-timeout-ms* 1000))
 
 

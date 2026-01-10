@@ -263,18 +263,16 @@
   "Returns the current query timeout in seconds for JDBC calls.
    Reads the dynamic var *query-timeout-ms* and converts to seconds.
 
-   Safety: Throws IllegalArgumentException if timeout is below minimum to prevent
-   silent timeout disabling. This catches improper direct binding of
-   *query-timeout-ms* (use with-query-timeout instead).
-
-   Note: Uses explicit throw instead of assert to ensure check runs in production
-   even with -da flag (assertions disabled)."
+   Safety: Throws if timeout is below minimum to prevent silent timeout disabling.
+   This catches improper direct binding of *query-timeout-ms*
+   (use with-query-timeout instead)."
   []
   (when (< *query-timeout-ms* min-query-timeout-ms)
-    (throw (IllegalArgumentException.
-             (str "Query timeout must be at least " min-query-timeout-ms "ms. "
-                  "Current value: " *query-timeout-ms* "ms. "
-                  "Use with-query-timeout for safe rebinding."))))
+    (throw (ex-info (str "Query timeout must be at least " min-query-timeout-ms "ms")
+                    {:type :config-error/invalid-timeout
+                     :min-timeout-ms min-query-timeout-ms
+                     :current-timeout-ms *query-timeout-ms*
+                     :hint "Use with-query-timeout for safe rebinding"})))
   (quot *query-timeout-ms* 1000))
 
 
@@ -306,6 +304,37 @@
                          :operation operation
                          :timeout-ms timeout-ms})))
       result)))
+
+
+;; ============================================================================
+;; Batch Size Configuration
+;; ============================================================================
+;;
+;; Limits for batch operations to prevent OOM from huge batches.
+
+(def ^:dynamic *max-batch-size*
+  "Maximum number of entities in a single batch operation.
+   Batch operations larger than this will throw an error.
+   Default: 1000 entities."
+  1000)
+
+
+(defn validate-batch-size!
+  "Validates that batch size is within allowed limits.
+   Throws :batch-error/batch-too-large if batch exceeds *max-batch-size*.
+
+   Arguments:
+   - batch-size: number of items in the batch
+   - operation: keyword describing the operation (for error messages)
+   - context: additional context map for the error"
+  [batch-size operation context]
+  (when (> batch-size *max-batch-size*)
+    (throw (ex-info (str "Batch size " batch-size " exceeds maximum allowed " *max-batch-size*)
+                    (merge {:type :batch-error/batch-too-large
+                            :batch-size batch-size
+                            :max-batch-size *max-batch-size*
+                            :operation operation}
+                           context)))))
 
 
 ;; ============================================================================

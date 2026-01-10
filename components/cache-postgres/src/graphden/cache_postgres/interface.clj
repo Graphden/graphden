@@ -51,45 +51,56 @@
 
 ;; === Graph loading helpers ===
 
+(defn- load-cached-entities
+  "Generic loader for cached entity records.
+   Returns {id -> record} map.
+
+   Parameters:
+   - ds: datasource
+   - cache-id: cache identifier
+   - table: keyword table name
+   - columns: vector of column keywords to select
+   - id-key: keyword for the id column (e.g., :fn-id)
+   - transforms: optional map of {column-key transform-fn} for value transformations"
+  ([ds cache-id table columns id-key]
+   (load-cached-entities ds cache-id table columns id-key {}))
+  ([ds cache-id table columns id-key transforms]
+   (->> (execute! ds {:select columns
+                      :from [table]
+                      :where [:= :cache-id cache-id]})
+        (map (fn [record]
+               (let [id (get record id-key)
+                     base (-> record
+                              (dissoc id-key)
+                              (assoc :id id))]
+                 [id (reduce-kv update base transforms)])))
+        (into {}))))
+
+
 (defn- load-cached-fns
   "Loads cached fn records for a cache-id."
   [ds cache-id]
-  (->> (execute! ds {:select [:fn-id :name :fn-schema-id :parent-fn-id]
-                     :from [:cached-fn]
-                     :where [:= :cache-id cache-id]})
-       (map (fn [{:keys [fn-id] :as record}]
-              [fn-id (-> record
-                         (dissoc :fn-id)
-                         (assoc :id fn-id))]))
-       (into {})))
+  (load-cached-entities ds cache-id :cached-fn
+                        [:fn-id :name :fn-schema-id :parent-fn-id]
+                        :fn-id))
 
 
 (defn- load-cached-fn-schemas
   "Loads cached fn-schema records for a cache-id."
   [ds cache-id]
-  (->> (execute! ds {:select [:fn-schema-id :name :base-fn-name :returned-type]
-                     :from [:cached-fn-schema]
-                     :where [:= :cache-id cache-id]})
-       (map (fn [{:keys [fn-schema-id] :as record}]
-              [fn-schema-id (-> record
-                                (dissoc :fn-schema-id)
-                                (assoc :id fn-schema-id)
-                                (update :returned-type keyword))]))
-       (into {})))
+  (load-cached-entities ds cache-id :cached-fn-schema
+                        [:fn-schema-id :name :base-fn-name :returned-type]
+                        :fn-schema-id
+                        {:returned-type keyword}))
 
 
 (defn- load-cached-arg-schemas
   "Loads cached arg-schema records for a cache-id."
   [ds cache-id]
-  (->> (execute! ds {:select [:arg-schema-id :fn-schema-id :name :type :required]
-                     :from [:cached-arg-schema]
-                     :where [:= :cache-id cache-id]})
-       (map (fn [{:keys [arg-schema-id] :as record}]
-              [arg-schema-id (-> record
-                                 (dissoc :arg-schema-id)
-                                 (assoc :id arg-schema-id)
-                                 (update :type keyword))]))
-       (into {})))
+  (load-cached-entities ds cache-id :cached-arg-schema
+                        [:arg-schema-id :fn-schema-id :name :type :required]
+                        :arg-schema-id
+                        {:type keyword}))
 
 
 (defn- parse-value

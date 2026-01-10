@@ -344,7 +344,8 @@
 
   (testing "throws for timeout below minimum"
     ;; Use binding directly to simulate improper usage
-    (is (thrown? IllegalArgumentException
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Query timeout must be at least"
           (binding [cfg/*query-timeout-ms* 100]
             (cfg/get-query-timeout-seconds))))))
 

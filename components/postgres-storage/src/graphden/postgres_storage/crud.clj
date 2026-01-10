@@ -6,14 +6,10 @@
     [graphden.postgres-storage.codec :as codec]
     [graphden.postgres-storage.errors :as errors]
     [graphden.postgres-storage.util :as util]
+    [graphden.storage-protocol.config :as config]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]))
-
-
-(defmacro ^:private with-crud-error-handling
-  [operation context & body]
-  `(util/with-sql-error-handling "Database error" ~operation ~context ~@body))
 
 
 (defn- entity->row
@@ -40,9 +36,9 @@
                            :values [values]
                            :returning [:*]}
                           {:quoted true})]
-    (with-crud-error-handling :create-entity {:entity-name entity-name :id id}
-      (-> (jdbc/execute-one! ds query (util/query-opts))
-          codec/row->entity))))
+    (util/with-sql-error-handling "Database error" :create-entity {:entity-name entity-name :id id}
+                                  (-> (jdbc/execute-one! ds query (util/query-opts))
+                                      codec/row->entity))))
 
 
 (defn read-entity
@@ -54,9 +50,9 @@
                            :from [table-name]
                            :where [:= :id id]}
                           {:quoted true})]
-    (with-crud-error-handling :read-entity {:entity-name entity-name :id id}
-      (-> (jdbc/execute-one! ds query (util/query-opts))
-          codec/row->entity))))
+    (util/with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
+                                  (-> (jdbc/execute-one! ds query (util/query-opts))
+                                      codec/row->entity))))
 
 
 (defn update-entity
@@ -81,9 +77,9 @@
                                :where [:= :id id]
                                :returning [:*]}
                               {:quoted true})]
-        (with-crud-error-handling :update-entity {:entity-name entity-name :id id}
-          (-> (jdbc/execute-one! ds query (util/query-opts))
-              codec/row->entity))))))
+        (util/with-sql-error-handling "Database error" :update-entity {:entity-name entity-name :id id}
+                                      (-> (jdbc/execute-one! ds query (util/query-opts))
+                                          codec/row->entity))))))
 
 
 (defn delete-entity
@@ -94,9 +90,9 @@
         query (sql/format {:delete-from table-name
                            :where [:= :id id]}
                           {:quoted true})]
-    (with-crud-error-handling :delete-entity {:entity-name entity-name :id id}
-      (pos? (:next.jdbc/update-count
-              (jdbc/execute-one! ds query (util/query-opts)))))))
+    (util/with-sql-error-handling "Database error" :delete-entity {:entity-name entity-name :id id}
+                                  (pos? (:next.jdbc/update-count
+                                          (jdbc/execute-one! ds query (util/query-opts)))))))
 
 
 (defn query-entities
@@ -126,9 +122,9 @@
                           {:quoted true})]
     (when-not where-clause
       (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
-    (with-crud-error-handling :query-entities {:entity-name entity-name :where where}
-      (let [rows (jdbc/execute! ds query (util/query-opts))]
-        (map codec/row->entity rows)))))
+    (util/with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where}
+                                  (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                    (map codec/row->entity rows)))))
 
 
 ;; === Batch CRUD operations ===
@@ -138,6 +134,7 @@
    Returns a sequence of created records with generated ids.
    Throws :unique-violation if any unique constraint violated.
    Throws :duplicate-ids if duplicate IDs found in batch.
+   Throws :batch-error/batch-too-large if batch exceeds *max-batch-size*.
 
    Note: PostgreSQL batch INSERT uses a single statement, so on failure
    the exact failing record index is unknown. Error context includes
@@ -146,6 +143,7 @@
   (if (empty? data-seq)
     []
     (do
+      (config/validate-batch-size! (count data-seq) :create-entities {:entity-name entity-name})
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name (keyword (util/kw->snake-case entity-name))
             ;; Prepare all records with IDs
@@ -205,12 +203,12 @@
                              :from [table-name]
                              :where [:in :id (vec ids)]}
                             {:quoted true})]
-      (with-crud-error-handling :read-entities {:entity-name entity-name :count (count ids)}
-        (let [rows (jdbc/execute! ds query (util/query-opts))]
-          (->> rows
-               (map codec/row->entity)
-               (map (juxt :id identity))
-               (into {})))))))
+      (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                      (->> rows
+                                           (map codec/row->entity)
+                                           (map (juxt :id identity))
+                                           (into {})))))))
 
 
 (defn delete-entities
@@ -223,6 +221,6 @@
           query (sql/format {:delete-from table-name
                              :where [:in :id (vec ids)]}
                             {:quoted true})]
-      (with-crud-error-handling :delete-entities {:entity-name entity-name :count (count ids)}
-        (:next.jdbc/update-count
-          (jdbc/execute-one! ds query (util/query-opts)))))))
+      (util/with-sql-error-handling "Database error" :delete-entities {:entity-name entity-name :count (count ids)}
+                                    (:next.jdbc/update-count
+                                      (jdbc/execute-one! ds query (util/query-opts)))))))

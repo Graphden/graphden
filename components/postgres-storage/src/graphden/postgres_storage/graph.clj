@@ -11,11 +11,6 @@
     [next.jdbc :as jdbc]))
 
 
-(defmacro ^:private with-crud-error-handling
-  [operation context & body]
-  `(util/with-sql-error-handling "Database error" ~operation ~context ~@body))
-
-
 (def ^:private max-parent-chain-depth
   "Maximum depth for parent chain traversal to prevent runaway recursion.
    Uses shared default-max-depth from storage-protocol for consistency."
@@ -48,30 +43,30 @@
                    :from [:parent_chain]
                    :order-by [:origin :depth]}
                   {:quoted true})]
-      (with-crud-error-handling :collect-parent-chains {:fn-count (count fn-ids)}
-        (let [rows (jdbc/execute! ds query (util/query-opts))
-              ;; Group by origin and extract ordered chain
-              result (->> rows
-                          (group-by :origin)
-                          (map (fn [[origin chain-rows]]
-                                 [origin (mapv :id (sort-by :depth chain-rows))]))
-                          (into {}))
-              ;; Warn if any chain reached the depth limit - helps detect circular refs or very deep inheritance
-              max-depths-by-origin (->> rows
-                                        (group-by :origin)
-                                        (map (fn [[origin chain-rows]]
-                                               [origin (apply max 0 (map :depth chain-rows))]))
-                                        (into {}))
-              truncated-origins (->> max-depths-by-origin
-                                     (filter (fn [[_ depth]] (>= depth max-parent-chain-depth)))
-                                     (map first)
-                                     vec)]
-          (when (seq truncated-origins)
-            (log/warn "Parent chain(s) reached maximum depth limit - possible circular reference or very deep inheritance"
-                      {:max-depth max-parent-chain-depth
-                       :truncated-fn-ids truncated-origins
-                       :hint "Check for circular parent-fn references in these functions"}))
-          result)))))
+      (util/with-sql-error-handling "Database error" :collect-parent-chains {:fn-count (count fn-ids)}
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))
+                                          ;; Group by origin and extract ordered chain
+                                          result (->> rows
+                                                      (group-by :origin)
+                                                      (map (fn [[origin chain-rows]]
+                                                             [origin (mapv :id (sort-by :depth chain-rows))]))
+                                                      (into {}))
+                                          ;; Warn if any chain reached the depth limit - helps detect circular refs or very deep inheritance
+                                          max-depths-by-origin (->> rows
+                                                                    (group-by :origin)
+                                                                    (map (fn [[origin chain-rows]]
+                                                                           [origin (apply max 0 (map :depth chain-rows))]))
+                                                                    (into {}))
+                                          truncated-origins (->> max-depths-by-origin
+                                                                 (filter (fn [[_ depth]] (>= depth max-parent-chain-depth)))
+                                                                 (map first)
+                                                                 vec)]
+                                      (when (seq truncated-origins)
+                                        (log/warn "Parent chain(s) reached maximum depth limit - possible circular reference or very deep inheritance"
+                                                  {:max-depth max-parent-chain-depth
+                                                   :truncated-fn-ids truncated-origins
+                                                   :hint "Check for circular parent-fn references in these functions"}))
+                                      result)))))
 
 
 (defn- load-arg-values-batch
@@ -84,9 +79,9 @@
                              :from [:arg_value]
                              :where [:in :owner_fn_id (vec fn-ids)]}
                             {:quoted true})]
-      (with-crud-error-handling :load-arg-values {:fn-count (count fn-ids)}
-        (let [rows (jdbc/execute! ds query (util/query-opts))]
-          (map codec/row->entity rows))))))
+      (util/with-sql-error-handling "Database error" :load-arg-values {:fn-count (count fn-ids)}
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                      (map codec/row->entity rows))))))
 
 
 (defn- classify-and-load-refs
@@ -106,19 +101,19 @@
                 "SELECT 'frv' as entity_type, id, fn_id FROM fn_result_value WHERE id = ANY(?)")
            (into-array java.util.UUID uuids-vec)
            (into-array java.util.UUID uuids-vec)]]
-      (with-crud-error-handling :classify-and-load-refs {:candidate-count (count uuid-candidates)}
-        (let [rows (jdbc/execute! ds combined-query (util/query-opts))]
-          (reduce
-            (fn [acc row]
-              (case (:entity_type row)
-                "fn" (update acc :fn-ids conj (:id row))
-                "frv" (-> acc
-                          (update :frv-ids conj (:id row))
-                          (assoc-in [:fn-result-values (:id row)]
-                                    {:id (:id row) :fn-id (:fn_id row)}))
-                acc))
-            {:fn-ids #{} :frv-ids #{} :fn-result-values {}}
-            rows))))))
+      (util/with-sql-error-handling "Database error" :classify-and-load-refs {:candidate-count (count uuid-candidates)}
+                                    (let [rows (jdbc/execute! ds combined-query (util/query-opts))]
+                                      (reduce
+                                        (fn [acc row]
+                                          (case (:entity_type row)
+                                            "fn" (update acc :fn-ids conj (:id row))
+                                            "frv" (-> acc
+                                                      (update :frv-ids conj (:id row))
+                                                      (assoc-in [:fn-result-values (:id row)]
+                                                                {:id (:id row) :fn-id (:fn_id row)}))
+                                            acc))
+                                        {:fn-ids #{} :frv-ids #{} :fn-result-values {}}
+                                        rows))))))
 
 
 (defn- load-entities-batch
@@ -131,12 +126,12 @@
                              :from [table]
                              :where [:in key-column (vec values)]}
                             {:quoted true})]
-      (with-crud-error-handling :load-entities-batch {:table table :count (count values)}
-        (let [rows (jdbc/execute! ds query (util/query-opts))]
-          (->> rows
-               (map codec/row->entity)
-               (map (juxt :id identity))
-               (into {})))))))
+      (util/with-sql-error-handling "Database error" :load-entities-batch {:table table :count (count values)}
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                      (->> rows
+                                           (map codec/row->entity)
+                                           (map (juxt :id identity))
+                                           (into {})))))))
 
 
 (defn- load-fns-batch
@@ -163,9 +158,9 @@
   (let [table-name (keyword (util/kw->snake-case entity-name))
         query (sql/format {:select [:*] :from [table-name] :where [:= :id id]}
                           {:quoted true})]
-    (with-crud-error-handling :read-entity {:entity-name entity-name :id id}
-      (-> (jdbc/execute-one! ds query (util/query-opts))
-          codec/row->entity))))
+    (util/with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
+                                  (-> (jdbc/execute-one! ds query (util/query-opts))
+                                      codec/row->entity))))
 
 
 (defn resolve-execution-graph

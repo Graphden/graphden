@@ -92,7 +92,6 @@ HOF (map, filter, reduce) use single-argument model: the passed function must ha
 - Test helpers in `storage-protocol/test_helpers.clj`:
   - `create-test-storage` — in-memory storage for tests
   - `with-test-storage` — macro with cleanup
-  - `create-spy-storage` — wrapper that records method calls
 - PostgreSQL tests use testcontainers (requires Docker)
 - Datomic tests use datomic-local in-memory
 

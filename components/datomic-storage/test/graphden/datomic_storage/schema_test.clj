@@ -453,3 +453,225 @@
                                          :org org-id})
         (finally
           (sp/close storage))))))
+
+
+;; === Error path tests for validate-multi-field-unique-constraint! ===
+
+(deftest validate-multi-field-constraint-error-paths-test
+  (testing "wraps ExceptionInfo from query with constraint-check-failed"
+    ;; This is hard to trigger directly since Datomic queries are well-formed
+    ;; But we can test the error structure from a missing field scenario
+    (let [storage (create-test-storage)
+          s (make-test-schema)]
+      (try
+        (sp/initialize storage s)
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              ;; Constraint references field not in field-specs
+              constraint {:type :unique :fields [:first-name :missing-field]}
+              field-specs {:first-name {:type :text}}]
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Constraint references non-existent field"
+                (schema/validate-multi-field-unique-constraint!
+                  db :user {:first-name "John" :missing-field "X"} constraint field-specs nil))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "error includes available fields in message"
+    (let [storage (create-test-storage)
+          s (make-test-schema)]
+      (try
+        (sp/initialize storage s)
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              constraint {:type :unique :fields [:nonexistent]}
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}
+                           :email {:type :text}}]
+          (try
+            (schema/validate-multi-field-unique-constraint!
+              db :user {:nonexistent "X"} constraint field-specs nil)
+            (is false "should have thrown")
+            (catch clojure.lang.ExceptionInfo e
+              (is (= :validation-error/constraint-check-failed (:type (ex-data e))))
+              (is (= :nonexistent (:missing-field (ex-data e))))
+              (is (contains? (set (:available-fields (ex-data e))) :first-name)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === field-type->datomic edge cases ===
+
+(deftest field-type->datomic-edge-cases-test
+  (testing "handles :fn type (defaults to string)"
+    (is (= :db.type/string (schema/field-type->datomic {:type :fn}))))
+
+  (testing "handles nil type (defaults to string)"
+    (is (= :db.type/string (schema/field-type->datomic {:type nil}))))
+
+  (testing "handles :any type (defaults to string)"
+    (is (= :db.type/string (schema/field-type->datomic {:type :any})))))
+
+
+;; === Constraint validation with regular (non-ref) fields ===
+
+(deftest validate-multi-field-constraint-regular-fields-test
+  (testing "handles three-field constraint"
+    (let [storage (create-test-storage)
+          s (-> (mds/create-builder)
+                (ds/add-entity :event #uuid "00000000-0000-0000-0000-000000000040"
+                               {:year {:uuid #uuid "00000000-0000-0000-0000-000000000041"
+                                       :type :int}
+                                :month {:uuid #uuid "00000000-0000-0000-0000-000000000042"
+                                        :type :int}
+                                :day {:uuid #uuid "00000000-0000-0000-0000-000000000043"
+                                      :type :int}
+                                :name {:uuid #uuid "00000000-0000-0000-0000-000000000044"
+                                       :type :text}})
+                (ds/add-constraint :event {:type :unique :fields [:year :month :day]})
+                ds/build)]
+      (try
+        (sp/initialize storage s)
+        ;; Create first event
+        (sp/create-entity storage :event {:id (random-uuid)
+                                          :year 2024
+                                          :month 1
+                                          :day 15
+                                          :name "Meeting"})
+        ;; Same date should fail
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Unique constraint violation"
+              (sp/create-entity storage :event {:id (random-uuid)
+                                                :year 2024
+                                                :month 1
+                                                :day 15
+                                                :name "Other Event"})))
+        ;; Different day should work
+        (sp/create-entity storage :event {:id (random-uuid)
+                                          :year 2024
+                                          :month 1
+                                          :day 16
+                                          :name "Another Meeting"})
+        (finally
+          (sp/close storage))))))
+
+
+;; === build-field-schema additional tests ===
+
+(deftest build-field-schema-additional-test
+  (testing "handles union type"
+    (let [s (mock-schema [])
+          result (schema/build-field-schema s :user :data {:type :union})]
+      (is (= :db.type/string (:db/valueType result)))))
+
+  (testing "handles int type"
+    (let [s (mock-schema [])
+          result (schema/build-field-schema s :user :age {:type :int})]
+      (is (= :db.type/long (:db/valueType result)))))
+
+  (testing "handles numeric type"
+    (let [s (mock-schema [])
+          result (schema/build-field-schema s :user :balance {:type :numeric})]
+      (is (= :db.type/bigdec (:db/valueType result)))))
+
+  (testing "handles timestamptz type"
+    (let [s (mock-schema [])
+          result (schema/build-field-schema s :user :created-at {:type :timestamptz})]
+      (is (= :db.type/instant (:db/valueType result)))))
+
+  (testing "handles bytes type"
+    (let [s (mock-schema [])
+          result (schema/build-field-schema s :user :avatar {:type :bytes})]
+      (is (= :db.type/bytes (:db/valueType result)))))
+
+  (testing "handles jsonb type"
+    (let [s (mock-schema [])
+          result (schema/build-field-schema s :user :metadata {:type :jsonb})]
+      (is (= :db.type/string (:db/valueType result)))))
+
+  (testing "handles bool type"
+    (let [s (mock-schema [])
+          result (schema/build-field-schema s :user :active {:type :bool})]
+      (is (= :db.type/boolean (:db/valueType result))))))
+
+
+;; === Constraint with partial data ===
+
+(deftest constraint-partial-data-test
+  (testing "constraint not checked when one field is nil"
+    (let [storage (create-test-storage)
+          s (make-test-schema :constraints [{:type :unique :fields [:first-name :last-name]}])]
+      (try
+        (sp/initialize storage s)
+        ;; Create user with both fields
+        (sp/create-entity storage :user {:id (random-uuid)
+                                         :first-name "John"
+                                         :last-name "Doe"
+                                         :email "john@test.com"})
+        ;; Create another user with only first-name (last-name missing)
+        ;; This should work because constraint only applies when all fields present
+        (let [conn-atom (:conn-atom storage)
+              conn @conn-atom
+              db (d/db conn)
+              constraint {:type :unique :fields [:first-name :last-name]}
+              field-specs {:first-name {:type :text}
+                           :last-name {:type :text}}]
+          ;; Should return nil (pass) because last-name is nil
+          (is (nil? (schema/validate-multi-field-unique-constraint!
+                      db :user {:first-name "John"} constraint field-specs nil))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Multiple multi-field constraints ===
+
+(deftest multiple-multi-field-constraints-test
+  (testing "validates multiple constraints independently"
+    (let [storage (create-test-storage)
+          s (-> (mds/create-builder)
+                (ds/add-entity :product #uuid "00000000-0000-0000-0000-000000000050"
+                               {:sku {:uuid #uuid "00000000-0000-0000-0000-000000000051"
+                                      :type :text}
+                                :name {:uuid #uuid "00000000-0000-0000-0000-000000000052"
+                                       :type :text}
+                                :category {:uuid #uuid "00000000-0000-0000-0000-000000000053"
+                                           :type :text}
+                                :brand {:uuid #uuid "00000000-0000-0000-0000-000000000054"
+                                        :type :text}})
+                (ds/add-constraint :product {:type :unique :fields [:sku :category]})
+                (ds/add-constraint :product {:type :unique :fields [:name :brand]})
+                ds/build)]
+      (try
+        (sp/initialize storage s)
+        ;; Create first product
+        (sp/create-entity storage :product {:id (random-uuid)
+                                            :sku "ABC123"
+                                            :name "Widget"
+                                            :category "Electronics"
+                                            :brand "Acme"})
+        ;; Same sku+category should fail
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Unique constraint violation"
+              (sp/create-entity storage :product {:id (random-uuid)
+                                                  :sku "ABC123"
+                                                  :name "Different"
+                                                  :category "Electronics"
+                                                  :brand "Other"})))
+        ;; Same name+brand should also fail
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Unique constraint violation"
+              (sp/create-entity storage :product {:id (random-uuid)
+                                                  :sku "XYZ789"
+                                                  :name "Widget"
+                                                  :category "Different"
+                                                  :brand "Acme"})))
+        ;; All different should work
+        (sp/create-entity storage :product {:id (random-uuid)
+                                            :sku "XYZ789"
+                                            :name "Gadget"
+                                            :category "Electronics"
+                                            :brand "BrandX"})
+        (finally
+          (sp/close storage))))))

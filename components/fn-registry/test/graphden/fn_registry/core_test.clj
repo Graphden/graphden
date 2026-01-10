@@ -436,3 +436,175 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"name-str must not be blank"
           (#'core/uuid-v5 (random-uuid) "\t\n")))))
+
+
+;; === validate-arg-type! internal tests ===
+
+(deftest validate-arg-type-internal-test
+  (testing "accepts supported field types"
+    ;; Note: valid-arg-types is (into ft/supported-types #{:any :fn})
+    ;; ft/supported-types excludes :enum, :ref, :union (storage-specific types)
+    (doseq [t [:text :int :numeric :bool :uuid :timestamptz :bytes :jsonb]]
+      (is (nil? (#'core/validate-arg-type! :arg t)))))
+
+  (testing "accepts executor-specific types"
+    (is (nil? (#'core/validate-arg-type! :arg :any)))
+    (is (nil? (#'core/validate-arg-type! :arg :fn))))
+
+  (testing "rejects unknown type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Unknown arg type"
+          (#'core/validate-arg-type! :myarg :completely-unknown-type)))))
+
+
+;; === parse-arg-spec internal tests ===
+
+(deftest parse-arg-spec-internal-test
+  (testing "parses keyword arg-spec as required with that type"
+    (let [result (#'core/parse-arg-spec :x :int)]
+      (is (= :int (:arg-type result)))
+      (is (true? (:required result)))))
+
+  (testing "parses map arg-spec with explicit :required true"
+    (let [result (#'core/parse-arg-spec :x {:type :text :required true})]
+      (is (= :text (:arg-type result)))
+      (is (true? (:required result)))))
+
+  (testing "parses map arg-spec with explicit :required false"
+    (let [result (#'core/parse-arg-spec :x {:type :numeric :required false})]
+      (is (= :numeric (:arg-type result)))
+      (is (false? (:required result)))))
+
+  (testing "parses map arg-spec with missing :required defaults to true"
+    (let [result (#'core/parse-arg-spec :x {:type :bool})]
+      (is (= :bool (:arg-type result)))
+      (is (true? (:required result)))))
+
+  (testing "rejects map without :type key"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"must contain :type key"
+          (#'core/parse-arg-spec :x {:required false}))))
+
+  (testing "rejects non-keyword non-map arg-spec"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"must be a keyword or map"
+          (#'core/parse-arg-spec :x "string-type")))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"must be a keyword or map"
+          (#'core/parse-arg-spec :x [1 2 3])))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"must be a keyword or map"
+          (#'core/parse-arg-spec :x 42))))
+
+  (testing "rejects non-boolean :required value"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":required must be a boolean"
+          (#'core/parse-arg-spec :x {:type :int :required "yes"})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":required must be a boolean"
+          (#'core/parse-arg-spec :x {:type :int :required 1})))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":required must be a boolean"
+          (#'core/parse-arg-spec :x {:type :int :required nil})))))
+
+
+;; === validate-identifier! internal tests ===
+
+(deftest validate-identifier-internal-test
+  (testing "accepts valid identifiers"
+    (is (nil? (#'core/validate-identifier! "fn-name" :add)))
+    (is (nil? (#'core/validate-identifier! "fn-name" :_private)))
+    (is (nil? (#'core/validate-identifier! "fn-name" :my-func-123)))
+    (is (nil? (#'core/validate-identifier! "fn-name" :valid?))))
+
+  (testing "rejects nil identifier"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"cannot be empty"
+          (#'core/validate-identifier! "fn-name" nil))))
+
+  (testing "rejects empty string identifier"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"cannot be empty"
+          (#'core/validate-identifier! "arg-name" ""))))
+
+  (testing "rejects identifier starting with digit"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (#'core/validate-identifier! "fn-name" :123abc))))
+
+  (testing "rejects identifier with spaces"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (#'core/validate-identifier! "fn-name" (keyword "has space")))))
+
+  (testing "rejects identifier with special chars"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (#'core/validate-identifier! "fn-name" (keyword "has@special")))))
+
+  (testing "rejects identifier over 128 chars"
+    (let [long-id (keyword (str/join (repeat 150 "a")))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"exceeds maximum length"
+            (#'core/validate-identifier! "fn-name" long-id)))))
+
+  (testing "error data contains correct type and values"
+    (try
+      (#'core/validate-identifier! "arg-name" :123invalid)
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-identifier (:type (ex-data e))))
+        (is (= "arg-name" (:name-type (ex-data e))))
+        (is (= "123invalid" (:name-value (ex-data e))))))))
+
+
+;; === sync-fn-schema! edge cases ===
+
+(deftest sync-fn-schema-edge-cases-test
+  (testing "creates fn-schema with base-fn-name field"
+    (let [storage (mem/create-storage)
+          defs {:my-func {:args {} :return-type :text :impl (fn [_ _] nil)}}]
+      (core/sync-defs-to-storage! storage defs)
+      (let [fn-schema (sp/read-entity storage :fn-schema (core/fn-schema-uuid :my-func))]
+        (is (= "my-func" (:base-fn-name fn-schema))))))
+
+  (testing "handles function with no arguments"
+    (let [storage (mem/create-storage)
+          defs {:constant {:args {} :return-type :int :impl (fn [_ _] 42)}}
+          result (core/sync-defs-to-storage! storage defs)]
+      (is (= 1 (get-in result [:fn-schemas :created])))
+      (is (zero? (get-in result [:arg-schemas :created])))))
+
+  (testing "handles function with many arguments"
+    (let [storage (mem/create-storage)
+          defs {:multi-arg {:args {:a :int :b :int :c :int :d :int :e :int}
+                            :return-type :int
+                            :impl (fn [_ _] nil)}}
+          result (core/sync-defs-to-storage! storage defs)]
+      (is (= 1 (get-in result [:fn-schemas :created])))
+      (is (= 5 (get-in result [:arg-schemas :created]))))))
+
+
+;; === Multiple functions sync ===
+
+(deftest sync-multiple-functions-test
+  (testing "syncs multiple functions in one call"
+    (let [storage (mem/create-storage)
+          defs {:add {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}
+                :sub {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}
+                :mul {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}}
+          result (core/sync-defs-to-storage! storage defs)]
+      (is (= 3 (get-in result [:fn-schemas :created])))
+      (is (= 6 (get-in result [:arg-schemas :created])))))
+
+  (testing "partial update - some functions new, some existing"
+    (let [storage (mem/create-storage)
+          defs1 {:add {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}}
+          defs2 {:add {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}
+                 :sub {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}}]
+      (core/sync-defs-to-storage! storage defs1)
+      (let [result (core/sync-defs-to-storage! storage defs2)]
+        (is (= 1 (get-in result [:fn-schemas :created])))  ; sub is new
+        (is (= 1 (get-in result [:fn-schemas :updated])))  ; add exists
+        (is (= 2 (get-in result [:arg-schemas :created]))) ; sub's args
+        (is (= 2 (get-in result [:arg-schemas :updated])))))))  ; add's args

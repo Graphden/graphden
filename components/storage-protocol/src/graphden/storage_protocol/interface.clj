@@ -417,6 +417,29 @@
   errors/reset-sensitive-field-registry!)
 
 
+(def get-sensitive-field-registry
+  "Returns current sensitive field registry state. Useful for tests."
+  errors/get-sensitive-field-registry)
+
+
+(def set-sensitive-field-registry!
+  "Sets sensitive field registry to a specific state. Useful for tests."
+  errors/set-sensitive-field-registry!)
+
+
+(defmacro with-sensitive-field-registry
+  "Executes body with isolated sensitive field registry.
+   Automatically saves and restores registry state for test isolation.
+
+   Example:
+     (with-sensitive-field-registry
+       (register-sensitive-field-name! :test-field)
+       (is (sensitive-field? :test-field)))
+     ;; :test-field is no longer registered"
+  [& body]
+  `(errors/with-sensitive-field-registry (do ~@body)))
+
+
 (def sensitive-field?
   "Returns true if field name matches sensitive patterns.
    Checks explicit names, regex patterns, and custom predicates."
@@ -538,6 +561,10 @@
 
 
 ;; === Query timeout re-exports ===
+;; Note: We create our own dynamic var here for interface consistency.
+;; config/*query-timeout-ms* is the canonical source, but this var allows
+;; users to read sp/*query-timeout-ms* directly. The with-query-timeout
+;; wrapper below ensures both vars are bound together.
 (def ^:dynamic *query-timeout-ms*
   "Timeout for storage queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use with-query-timeout for safe rebinding."
@@ -546,7 +573,19 @@
 
 (def min-query-timeout-ms config/min-query-timeout-ms)
 (def validate-query-timeout! config/validate-query-timeout!)
-(def with-query-timeout config/with-query-timeout)
+
+
+(defn with-query-timeout
+  "Executes f with a custom query timeout (in milliseconds).
+   Binds both config/*query-timeout-ms* and this namespace's *query-timeout-ms*
+   for consistent behavior regardless of which var code reads."
+  [timeout-ms f]
+  (config/validate-query-timeout! timeout-ms)
+  (binding [config/*query-timeout-ms* timeout-ms
+            *query-timeout-ms* timeout-ms]
+    (f)))
+
+
 (def get-query-timeout-seconds config/get-query-timeout-seconds)
 (def execute-with-timeout! config/execute-with-timeout!)
 

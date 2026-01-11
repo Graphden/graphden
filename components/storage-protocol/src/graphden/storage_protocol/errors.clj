@@ -426,6 +426,50 @@
   nil)
 
 
+(defn get-sensitive-field-registry
+  "Returns the current sensitive field registry state.
+   Useful for saving state before modifications in tests."
+  []
+  @sensitive-field-registry)
+
+
+(defn set-sensitive-field-registry!
+  "Sets the sensitive field registry to a specific state.
+   Useful for restoring state after tests.
+
+   Arguments:
+   - state: map with :names, :patterns, :predicates keys"
+  [state]
+  (reset! sensitive-field-registry state)
+  nil)
+
+
+(defmacro with-sensitive-field-registry
+  "Executes body with an isolated sensitive field registry.
+   Saves the current registry state before body and restores it after.
+
+   This macro ensures test isolation - any registrations made within
+   the body are automatically cleaned up, preventing test pollution.
+
+   Example:
+     (with-sensitive-field-registry
+       (register-sensitive-field-name! :test-field)
+       (is (sensitive-field? :test-field)))
+     ;; :test-field is no longer registered here
+
+   For tests that need a completely clean registry:
+     (with-sensitive-field-registry
+       (reset-sensitive-field-registry!)
+       ;; Only default fields are registered
+       ...)"
+  [& body]
+  `(let [saved-state# (get-sensitive-field-registry)]
+     (try
+       (do ~@body)
+       (finally
+         (set-sensitive-field-registry! saved-state#)))))
+
+
 (defn sensitive-field-names
   "Returns the current set of explicitly registered sensitive field names.
    Includes both default and custom registered names."

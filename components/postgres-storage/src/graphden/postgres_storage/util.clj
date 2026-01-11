@@ -25,42 +25,21 @@
 
 
 ;; === Configuration ===
-;; Query timeout - local var that delegates to storage-protocol for actual value.
-;; We maintain a local var for binding compatibility in tests.
+;; Query timeout is centralized in storage-protocol.config.
+;; Re-export functions for backward compatibility.
 
-(def ^:dynamic *query-timeout-ms*
-  "Timeout for SQL queries in milliseconds. Can be rebound per-thread.
-   Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
-   Note: Internally converted to seconds for JDBC calls."
-  sp/default-query-timeout-ms)
-
-
-(def min-query-timeout-ms
-  "Minimum allowed query timeout in milliseconds."
-  sp/min-query-timeout-ms)
-
-
-(defn with-query-timeout
+(def with-query-timeout
   "Executes f with a custom query timeout (in milliseconds).
-   Binds both local *query-timeout-ms* and sp/*query-timeout-ms* for consistency."
-  [timeout-ms f]
-  (sp/validate-query-timeout! timeout-ms)
-  (binding [*query-timeout-ms* timeout-ms
-            sp/*query-timeout-ms* timeout-ms]
-    (f)))
+   Delegates to storage-protocol for centralized configuration."
+  sp/with-query-timeout)
 
 
 (defn get-query-timeout-seconds
   "Returns the current query timeout in seconds for JDBC calls.
-   Reads *query-timeout-ms* and converts to seconds."
+   Reads sp/*query-timeout-ms* and converts to seconds."
   []
-  (when (< *query-timeout-ms* min-query-timeout-ms)
-    (throw (ex-info (str "Query timeout must be at least " min-query-timeout-ms "ms")
-                    {:type :config-error/invalid-timeout
-                     :min-timeout-ms min-query-timeout-ms
-                     :current-timeout-ms *query-timeout-ms*
-                     :hint "Use with-query-timeout for safe rebinding"})))
-  (quot *query-timeout-ms* 1000))
+  (sp/validate-query-timeout! sp/*query-timeout-ms*)
+  (quot sp/*query-timeout-ms* 1000))
 
 
 ;; === Error handling (re-exports from errors.clj) ===

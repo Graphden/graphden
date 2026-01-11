@@ -327,6 +327,12 @@
     (validate-fn-def! fn-name fn-def)))
 
 
+(def ^:private max-sync-batch-size
+  "Maximum number of function definitions to sync in a single call.
+   Prevents DoS via extremely large definition maps."
+  500)
+
+
 (defn sync-defs-to-storage!
   "Syncs function definitions to storage.
    Creates fn-schema and arg-schema entries for each function.
@@ -342,8 +348,19 @@
 
    Returns a map with counts:
    {:fn-schemas {:created n :updated m}
-    :arg-schemas {:created n :updated m}}"
+    :arg-schemas {:created n :updated m}}
+
+   Throws:
+   - :batch-error/batch-too-large if defs count exceeds max-sync-batch-size (500)"
   [storage defs]
+  ;; Validate batch size to prevent DoS
+  (when (> (count defs) max-sync-batch-size)
+    (throw (ex-info (str "Too many function definitions to sync: " (count defs)
+                         " (max " max-sync-batch-size ")")
+                    {:type :batch-error/batch-too-large
+                     :batch-size (count defs)
+                     :max-batch-size max-sync-batch-size
+                     :operation :sync-defs-to-storage})))
   ;; Validate all definitions upfront for fail-fast behavior
   (validate-all-defs! defs)
   (let [fn-schema-stats (atom {:created 0 :updated 0})

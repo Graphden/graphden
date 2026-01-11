@@ -440,3 +440,281 @@
   [storage]
   (when (cached-storage? storage)
     (:cache-storage storage)))
+
+
+;; === Cache Metrics ===
+
+(defrecord CacheMetrics
+  [hits misses invalidations])
+
+
+(defn create-metrics
+  "Creates a new metrics tracker for cache operations.
+   Returns an atom containing {:hits 0 :misses 0 :invalidations 0}."
+  []
+  (atom (->CacheMetrics 0 0 0)))
+
+
+(defn get-metrics
+  "Returns current metrics snapshot as a map.
+   Includes :hits, :misses, :invalidations, :hit-rate."
+  [metrics]
+  (let [{:keys [hits misses invalidations]} @metrics
+        total (+ hits misses)
+        hit-rate (if (pos? total) (double (/ hits total)) 0.0)]
+    {:hits hits
+     :misses misses
+     :invalidations invalidations
+     :total-requests total
+     :hit-rate hit-rate}))
+
+
+(defn reset-metrics!
+  "Resets all metrics counters to zero. Returns previous metrics."
+  [metrics]
+  (let [prev @metrics]
+    (reset! metrics (->CacheMetrics 0 0 0))
+    {:hits (:hits prev)
+     :misses (:misses prev)
+     :invalidations (:invalidations prev)}))
+
+
+(defn- inc-hits!
+  [metrics]
+  (swap! metrics update :hits inc))
+
+
+(defn- inc-misses!
+  [metrics]
+  (swap! metrics update :misses inc))
+
+
+(defn- inc-invalidations!
+  [metrics]
+  (swap! metrics update :invalidations inc))
+
+
+;; === Cached Storage with Metrics ===
+
+(defrecord CachedStorageWithMetrics
+  [base-storage cache-storage metrics]
+
+  sp/Storage
+
+  (initialize
+    [_ schema]
+    (sp/initialize base-storage schema))
+
+
+  (close
+    [_]
+    (sp/close base-storage))
+
+
+  sp/StorageIntrospection
+
+  (current-entities
+    [_]
+    (sp/current-entities base-storage))
+
+
+  (current-fields
+    [_ entity-name]
+    (sp/current-fields base-storage entity-name))
+
+
+  (current-enums
+    [_]
+    (sp/current-enums base-storage))
+
+
+  (current-enum-values
+    [_ enum-name]
+    (sp/current-enum-values base-storage enum-name))
+
+
+  (schema-metadata
+    [_]
+    (sp/schema-metadata base-storage))
+
+
+  sp/StorageCRUD
+
+  (create-entity
+    [_ entity-name data]
+    (let [result (sp/create-entity base-storage entity-name data)]
+      (when (get-strategy entity-name :on-create)
+        (inc-invalidations! metrics))
+      (invalidate-after-create! base-storage cache-storage entity-name result)
+      result))
+
+
+  (read-entity
+    [_ entity-name id]
+    (sp/read-entity base-storage entity-name id))
+
+
+  (update-entity
+    [_ entity-name id data]
+    (let [old-record (when (= entity-name :fn)
+                       (sp/read-entity base-storage entity-name id))
+          result (sp/update-entity base-storage entity-name id data)]
+      (when (get-strategy entity-name :on-update)
+        (inc-invalidations! metrics))
+      (invalidate-after-update! base-storage cache-storage entity-name id data result old-record)
+      result))
+
+
+  (delete-entity
+    [_ entity-name id]
+    (let [record (sp/read-entity base-storage entity-name id)
+          result (sp/delete-entity base-storage entity-name id)]
+      (when (and result (get-strategy entity-name :on-delete))
+        (inc-invalidations! metrics))
+      (when result
+        (invalidate-after-delete! base-storage cache-storage entity-name id record))
+      result))
+
+
+  (query-entities
+    [_ entity-name where]
+    (sp/query-entities base-storage entity-name where))
+
+
+  sp/StorageBatchCRUD
+
+  (create-entities
+    [_ entity-name data-seq]
+    (let [results (sp/create-entities base-storage entity-name data-seq)]
+      (when (and (seq results) (get-strategy entity-name :on-create))
+        (dotimes [_ (count results)]
+          (inc-invalidations! metrics)))
+      (doseq [result results]
+        (invalidate-after-create! base-storage cache-storage entity-name result))
+      results))
+
+
+  (read-entities
+    [_ entity-name ids]
+    (sp/read-entities base-storage entity-name ids))
+
+
+  (delete-entities
+    [_ entity-name ids]
+    (let [records (sp/read-entities base-storage entity-name ids)
+          result (sp/delete-entities base-storage entity-name ids)]
+      (when (and (pos? result) (get-strategy entity-name :on-delete))
+        (dotimes [_ result]
+          (inc-invalidations! metrics)))
+      (when (pos? result)
+        (doseq [id ids]
+          (invalidate-after-delete! base-storage cache-storage entity-name id (get records id))))
+      result))
+
+
+  sp/GraphConstraints
+
+  (validate-parent-same-schema!
+    [_ fn-id parent-fn-id]
+    (sp/validate-parent-same-schema! base-storage fn-id parent-fn-id))
+
+
+  (validate-no-arg-override!
+    [_ fn-id arg-schema-id]
+    (sp/validate-no-arg-override! base-storage fn-id arg-schema-id))
+
+
+  (validate-arg-schema-belongs-to-fn!
+    [_ fn-id arg-schema-id]
+    (sp/validate-arg-schema-belongs-to-fn! base-storage fn-id arg-schema-id))
+
+
+  (validate-no-inheritance-cycle!
+    [_ fn-id parent-fn-id]
+    (sp/validate-no-inheritance-cycle! base-storage fn-id parent-fn-id))
+
+
+  (validate-no-dependency-cycle!
+    [_ owner-fn-id value-fn-id]
+    (sp/validate-no-dependency-cycle! base-storage owner-fn-id value-fn-id))
+
+
+  sp/ConstraintHelpers
+
+  (get-fn-schema-id-for-fn
+    [_ fn-id]
+    (sp/get-fn-schema-id-for-fn base-storage fn-id))
+
+
+  (get-fn-schema-id-for-arg-schema
+    [_ arg-schema-id]
+    (sp/get-fn-schema-id-for-arg-schema base-storage arg-schema-id))
+
+
+  (get-parent-fn-id
+    [_ fn-id]
+    (sp/get-parent-fn-id base-storage fn-id))
+
+
+  (collect-parent-chain
+    [_ fn-id]
+    (sp/collect-parent-chain base-storage fn-id))
+
+
+  (collect-arg-schema-ids-in-chain
+    [_ fn-id]
+    (sp/collect-arg-schema-ids-in-chain base-storage fn-id))
+
+
+  (collect-dependency-chain
+    [_ fn-id]
+    (sp/collect-dependency-chain base-storage fn-id))
+
+
+  sp/ExecutionGraph
+
+  (resolve-execution-graph
+    [_ fn-id]
+    (if-let [cached-graph (cache/get-cached-graph cache-storage fn-id)]
+      (do
+        (inc-hits! metrics)
+        cached-graph)
+      (do
+        (inc-misses! metrics)
+        (let [graph (sp/resolve-execution-graph base-storage fn-id)
+              deps (compute-dependencies graph)]
+          (cache/save-cache! cache-storage fn-id graph deps)
+          graph)))))
+
+
+(defn wrap-with-cache-and-metrics
+  "Wraps a storage with caching and metrics tracking.
+
+   Arguments:
+   - base-storage: Any storage implementing GraphStorage protocols
+   - cache-storage: Cache implementation
+   - metrics: Metrics atom from create-metrics (optional, creates new if nil)
+
+   Returns a new storage that:
+   - Delegates CRUD to base-storage
+   - Uses cache for resolve-execution-graph
+   - Invalidates cache on mutations
+   - Tracks cache hit/miss/invalidation metrics
+
+   Example:
+   (def metrics (create-metrics))
+   (def cached-storage (wrap-with-cache-and-metrics storage cache metrics))
+   ;; Later:
+   (get-metrics metrics) ; => {:hits 10 :misses 2 :hit-rate 0.833...}"
+  ([base-storage cache-storage]
+   (wrap-with-cache-and-metrics base-storage cache-storage (create-metrics)))
+  ([base-storage cache-storage metrics]
+   (->CachedStorageWithMetrics base-storage cache-storage (or metrics (create-metrics)))))
+
+
+(defn get-storage-metrics
+  "Returns metrics from a CachedStorageWithMetrics wrapper.
+   Returns nil if storage doesn't have metrics."
+  [storage]
+  (when (instance? CachedStorageWithMetrics storage)
+    (get-metrics (:metrics storage))))

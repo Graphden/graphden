@@ -119,21 +119,47 @@
 
 ;; === fn-result-value Execution ===
 
+(def ^:private cache-eviction-ratio
+  "Ratio of cache entries to evict when cache is full.
+   0.2 means evict 20% of entries (oldest first by insertion order)."
+  0.2)
+
+
+(defn- evict-cache-entries!
+  "Evicts oldest entries from cache when limit is reached.
+   Uses insertion order (first entries added are evicted first).
+   Returns the number of entries evicted."
+  [result-cache target-size]
+  (let [current @result-cache
+        current-size (count current)
+        entries-to-remove (- current-size target-size)]
+    (when (pos? entries-to-remove)
+      (let [keys-to-remove (take entries-to-remove (keys current))]
+        (swap! result-cache #(apply dissoc % keys-to-remove))
+        (log/debug "Evicted cache entries"
+                   {:evicted-count entries-to-remove
+                    :new-size (count @result-cache)})
+        entries-to-remove))))
+
+
 (defn- check-cache-limit!
-  "Checks if result cache has reached its hard limit.
-   Throws if cache size >= max-size (before adding new entry).
-   This prevents OOM from unbounded execution graphs."
+  "Checks if result cache has reached its limit.
+   If at limit, evicts oldest entries (by insertion order) to make room.
+   This prevents OOM from unbounded execution graphs while allowing
+   execution to continue with reduced caching."
   [context fn-result-value-id]
   (let [result-cache (:result-cache context)
         current-size (count @result-cache)
         cache-max-size (:cache-max-size context)]
     (when (>= current-size cache-max-size)
-      (throw (ex-info "Result cache size limit exceeded - execution graph too large"
-                      {:type :execution-error/cache-limit-exceeded
-                       :cache-size current-size
-                       :max-size cache-max-size
-                       :fn-result-value-id fn-result-value-id
-                       :hint "Reduce graph complexity or increase cache-max-size"})))))
+      (let [target-size (long (* cache-max-size (- 1.0 cache-eviction-ratio)))
+            evicted (evict-cache-entries! result-cache target-size)]
+        (log/warn "Result cache reached limit, evicted entries"
+                  {:cache-max-size cache-max-size
+                   :evicted-count evicted
+                   :new-size (count @result-cache)
+                   :fn-result-value-id fn-result-value-id
+                   :hint "Large caches may indicate deep recursion or unbounded graphs"})))))
 
 
 (defn- get-fn-result-value!

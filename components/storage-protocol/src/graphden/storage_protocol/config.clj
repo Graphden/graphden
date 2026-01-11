@@ -1,13 +1,64 @@
 (ns graphden.storage-protocol.config
-  "Declarative configuration validation using Malli.
+  "Declarative configuration validation and shared runtime settings.
 
-   Provides reusable schemas and validation functions for storage backend
-   configurations. Uses Malli for:
-   - Declarative schema definitions
-   - Human-readable error messages
-   - Schema composition and reuse
+   ## Configuration Schemas
+   Provides reusable Malli schemas and validation functions for storage backend
+   configurations (PostgreSQL, Datomic).
 
-   Also provides shared query timeout infrastructure for all storage backends."
+   ## Runtime Configuration (Dynamic Variables)
+
+   All dynamic variables can be rebound using `binding` or their `with-*` helpers.
+   Default values are designed for production use cases.
+
+   ### Query & Execution Limits
+   | Variable                        | Default  | Description                           |
+   |---------------------------------|----------|---------------------------------------|
+   | `*query-timeout-ms*`            | 30000    | Query timeout (min 1000ms for JDBC)   |
+   | `*max-batch-size*`              | 1000     | Max entities per batch operation      |
+   | `*max-graph-iterations*`        | 10000    | Max BFS iterations for graph resolve  |
+
+   ### DoS Prevention Limits
+   | Variable                        | Default  | Description                           |
+   |---------------------------------|----------|---------------------------------------|
+   | `*max-lazy-seq-size*`           | 100000   | Max elements when realizing lazy seq  |
+   | `*max-nested-collection-depth*` | 100      | Max recursion depth for collections   |
+   | `*max-range-size*`              | 1000000  | Max elements for range function       |
+   | `*max-repeat-size*`             | 1000000  | Max elements for repeat function      |
+
+   ### Regex Safety
+   | Variable                        | Default  | Description                           |
+   |---------------------------------|----------|---------------------------------------|
+   | `*max-regex-length*`            | 100      | Max regex pattern length              |
+   | `*max-regex-input-length*`      | 100000   | Max input string length for regex     |
+   | `*regex-compile-timeout-ms*`    | 100      | Regex compilation timeout             |
+
+   ### Cache Settings (in cache-protocol)
+   | Variable                        | Default  | Description                           |
+   |---------------------------------|----------|---------------------------------------|
+   | `*cache-load-timeout-ms*`       | 5000     | Timeout for cache load operations     |
+
+   ### Executor Settings (in executor/context)
+   | Variable                        | Default  | Description                           |
+   |---------------------------------|----------|---------------------------------------|
+   | `cache-max-size`                | 10000    | Max result cache entries (context)    |
+   | `cache-warning-threshold`       | 1000     | Warning threshold for cache size      |
+   | `max-depth`                     | 1000     | Max recursion depth (context)         |
+
+   ## Usage Examples
+
+   ```clojure
+   ;; Increase query timeout for slow queries
+   (config/with-query-timeout 60000
+     #(sp/query-entities storage :large-table {}))
+
+   ;; Increase batch size for bulk import
+   (binding [config/*max-batch-size* 5000]
+     (sp/create-entities storage :entity large-dataset))
+
+   ;; Stricter regex limits for user input
+   (config/with-regex-limits {:max-pattern-length 50}
+     #(validate-user-regex pattern))
+   ```"
   (:require
     [clojure.string :as str]
     [graphden.storage-protocol.graph :as graph]

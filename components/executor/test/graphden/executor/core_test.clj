@@ -5,6 +5,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.context :as ctx]
+    [graphden.executor.core :as core]
     [graphden.executor.types :as types]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -442,3 +443,34 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown argument type"
             (#'types/validate-provided-arg-type! "any-value" arg-schema true 10 counter))))))
+
+
+;; === Cache eviction tests ===
+
+(deftest cache-eviction-test
+  (testing "evict-cache-entries! removes oldest entries"
+    (let [cache (atom {})
+          ;; Add entries in order - Clojure maps preserve insertion order
+          _ (swap! cache assoc :a 1)
+          _ (swap! cache assoc :b 2)
+          _ (swap! cache assoc :c 3)
+          _ (swap! cache assoc :d 4)
+          _ (swap! cache assoc :e 5)
+          ;; Evict to target size 3 (should remove :a and :b)
+          evicted (#'core/evict-cache-entries! cache 3)]
+      (is (= 2 evicted))
+      (is (= 3 (count @cache)))
+      (is (not (contains? @cache :a)))
+      (is (not (contains? @cache :b)))
+      (is (contains? @cache :c))
+      (is (contains? @cache :d))
+      (is (contains? @cache :e))))
+
+  (testing "evict-cache-entries! handles empty cache"
+    (let [cache (atom {})]
+      (is (nil? (#'core/evict-cache-entries! cache 10)))))
+
+  (testing "evict-cache-entries! handles target >= current size"
+    (let [cache (atom {:a 1 :b 2})]
+      (is (nil? (#'core/evict-cache-entries! cache 5)))
+      (is (= 2 (count @cache))))))

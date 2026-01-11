@@ -902,7 +902,46 @@ Pure functions (no I/O) can be distributed freely. Functions with side effects n
 
 ---
 
-## Appendix A: Component Dependency Graph
+## Appendix A: Three-Tier Pattern Rationale
+
+Nine components follow the `*-{memory|postgres|datomic}` naming pattern:
+- `memory-storage`, `postgres-storage`, `datomic-storage`
+- `cache-memory`, `cache-postgres`, `cache-datomic`
+- `graph-storage-memory`, `graph-storage-postgres`, `graph-storage-datomic`
+
+**Why not a single shared implementation?**
+
+Each backend has fundamentally different constraints and optimal implementations:
+
+| Operation | PostgreSQL | Datomic | Memory |
+|-----------|------------|---------|--------|
+| Parent chain traversal | Recursive CTE (single query) | Datalog recursive rule | In-memory loop |
+| Dependency cycle detection | WITH RECURSIVE + array tracking | d/q with accumulator | BFS with visited set |
+| Unique constraint | DB-level UNIQUE constraint | :db.unique/identity | In-memory index check |
+| Transaction isolation | SERIALIZABLE isolation | Datomic ACID transactions | Clojure atoms |
+
+**Trade-offs accepted:**
+
+1. **Code duplication** (~30% similar code across 3 backends) in exchange for:
+   - Optimal performance per backend
+   - Backend-specific error handling
+   - Simpler debugging (no abstraction layers)
+
+2. **Maintenance cost** mitigated by:
+   - Contract tests validating all backends identically (`contract_tests.clj`)
+   - Protocol-first design ensuring consistent interfaces
+   - Shared validation logic in `storage-protocol`
+
+**When to add a new backend:**
+
+1. Implement all protocols from `storage-protocol/interface.clj`
+2. Use `backend_template.clj` as starting point
+3. Run contract tests to verify compliance
+4. Add backend-specific optimizations (e.g., recursive CTEs for SQL)
+
+---
+
+## Appendix B: Component Dependency Graph
 
 ```
                     ┌─────────────────────┐
@@ -975,7 +1014,7 @@ Pure functions (no I/O) can be distributed freely. Functions with side effects n
 
 ---
 
-## Appendix B: Error Types
+## Appendix C: Error Types
 
 All errors use canonical `:type` keys for programmatic handling:
 

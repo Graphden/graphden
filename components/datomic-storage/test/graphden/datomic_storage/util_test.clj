@@ -23,31 +23,31 @@
 
 (deftest query-timeout-ms-test
   (testing "default timeout is 30000ms"
-    (is (= 30000 util/*query-timeout-ms*))))
+    (is (= 30000 sp/*query-timeout-ms*))))
 
 
 (deftest with-query-timeout-test
   (testing "binds timeout for duration of function"
     (is (= 60000
            (util/with-query-timeout 60000
-                                    #(identity util/*query-timeout-ms*)))))
+                                    #(identity sp/*query-timeout-ms*)))))
 
   (testing "restores original timeout after function"
-    (let [original util/*query-timeout-ms*]
+    (let [original sp/*query-timeout-ms*]
       (util/with-query-timeout 99999 #(identity nil))
-      (is (= original util/*query-timeout-ms*))))
+      (is (= original sp/*query-timeout-ms*))))
 
   (testing "works with nested calls"
     (is (= [30000 50000 100000 50000 30000]
            (let [results (atom [])]
-             (swap! results conj util/*query-timeout-ms*)
+             (swap! results conj sp/*query-timeout-ms*)
              (util/with-query-timeout 50000
                                       #(do
-                                         (swap! results conj util/*query-timeout-ms*)
+                                         (swap! results conj sp/*query-timeout-ms*)
                                          (util/with-query-timeout 100000
-                                                                  (fn [] (swap! results conj util/*query-timeout-ms*)))
-                                         (swap! results conj util/*query-timeout-ms*)))
-             (swap! results conj util/*query-timeout-ms*)
+                                                                  (fn [] (swap! results conj sp/*query-timeout-ms*)))
+                                         (swap! results conj sp/*query-timeout-ms*)))
+             (swap! results conj sp/*query-timeout-ms*)
              @results)))))
 
 

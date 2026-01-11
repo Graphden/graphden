@@ -1795,19 +1795,19 @@
   (testing "with-query-timeout binds timeout value"
     (is (= 5000
            (dat/with-query-timeout 5000
-                                   #(identity util/*query-timeout-ms*)))))
+                                   #(identity sp/*query-timeout-ms*)))))
 
   (testing "with-query-timeout restores original value after execution"
-    (let [original util/*query-timeout-ms*]
+    (let [original sp/*query-timeout-ms*]
       (dat/with-query-timeout 99999 #(identity :done))
-      (is (= original util/*query-timeout-ms*))))
+      (is (= original sp/*query-timeout-ms*))))
 
   (testing "with-query-timeout restores value after exception"
-    (let [original util/*query-timeout-ms*]
+    (let [original sp/*query-timeout-ms*]
       (try
         (dat/with-query-timeout 99999 #(throw (ex-info "test" {})))
         (catch Exception _))
-      (is (= original util/*query-timeout-ms*)))))
+      (is (= original sp/*query-timeout-ms*)))))
 
 
 ;; === Input validation tests ===
@@ -1971,24 +1971,24 @@
 
 (deftest with-query-timeout-custom-test
   (testing "custom timeout can be set"
-    (let [original-timeout util/*query-timeout-ms*]
+    (let [original-timeout sp/*query-timeout-ms*]
       (util/with-query-timeout 60000
                                (fn []
-                                 (is (= 60000 util/*query-timeout-ms*))))
+                                 (is (= 60000 sp/*query-timeout-ms*))))
       ;; Verify original is restored
-      (is (= original-timeout util/*query-timeout-ms*))))
+      (is (= original-timeout sp/*query-timeout-ms*))))
 
   (testing "nested timeouts work correctly"
-    (let [original-timeout util/*query-timeout-ms*]
+    (let [original-timeout sp/*query-timeout-ms*]
       (util/with-query-timeout 30000
                                (fn []
-                                 (is (= 30000 util/*query-timeout-ms*))
+                                 (is (= 30000 sp/*query-timeout-ms*))
                                  (util/with-query-timeout 10000
                                                           (fn []
-                                                            (is (= 10000 util/*query-timeout-ms*))))
+                                                            (is (= 10000 sp/*query-timeout-ms*))))
                                  ;; After inner binding ends, outer binding is restored
-                                 (is (= 30000 util/*query-timeout-ms*))))
-      (is (= original-timeout util/*query-timeout-ms*)))))
+                                 (is (= 30000 sp/*query-timeout-ms*))))
+      (is (= original-timeout sp/*query-timeout-ms*)))))
 
 
 ;; === Error classifier Tests ===

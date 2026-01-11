@@ -5,8 +5,8 @@
     [graphden.datomic-storage.util :as util]))
 
 
-;; Re-export timeout configuration from util for API compatibility
-;; NOTE: Use util/*query-timeout-ms* as the canonical var for reading timeout value.
+;; Re-export timeout configuration from util for API compatibility.
+;; Query timeout is centralized in storage-protocol.
 
 (def with-query-timeout
   "Executes f with a custom query timeout binding.

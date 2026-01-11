@@ -31,9 +31,8 @@
 
 
 ;; === Configuration ===
-;; Query timeout is managed by util.clj for this component.
+;; Query timeout is centralized in storage-protocol.
 ;; Re-export from util for backward compatibility.
-;; NOTE: Use util/*query-timeout-ms* as the canonical var.
 
 (def with-query-timeout
   "Executes f with a custom query timeout binding.

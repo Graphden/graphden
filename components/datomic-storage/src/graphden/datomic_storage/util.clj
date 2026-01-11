@@ -33,24 +33,13 @@
 
 
 ;; === Configuration ===
-;; Query timeout - local var that delegates to storage-protocol for actual value.
-;; We maintain a local var for binding compatibility in tests.
+;; Query timeout is centralized in storage-protocol.
+;; Re-export functions for backward compatibility.
 
-(def ^:dynamic *query-timeout-ms*
-  "Query timeout in milliseconds for API consistency with postgres-storage.
-   Default is 30000 ms (30 seconds)."
-  sp/default-query-timeout-ms)
-
-
-(defn with-query-timeout
-  "Executes f with a custom query timeout binding.
-   Delegates to sp/with-query-timeout which properly binds config/*query-timeout-ms*.
-   Also binds local *query-timeout-ms* for API compatibility."
-  [timeout-ms f]
-  (sp/with-query-timeout timeout-ms
-                         (fn []
-                           (binding [*query-timeout-ms* timeout-ms]
-                             (f)))))
+(def with-query-timeout
+  "Executes f with a custom query timeout (in milliseconds).
+   Delegates to storage-protocol for centralized configuration."
+  sp/with-query-timeout)
 
 
 (def execute-with-timeout!

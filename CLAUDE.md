@@ -118,3 +118,18 @@ These are enforced by `GraphConstraints` protocol at write time.
 - Component tests: `components/<name>/test/graphden/<name_snake>/`
 - Development project: `development/`
 - Architecture docs: `docs/ARCHITECTURE.md`
+
+## CI Workflow
+
+**IMPORTANT**: Run `bb ci` only ONCE and save output to a file for analysis:
+
+```bash
+bb ci 2>&1 | tee /tmp/ci-output.txt
+```
+
+Then analyze the saved output:
+- Check final line for PASSED/FAILED status
+- If failed: grep for specific errors, check which linter/test failed
+- If passed: review coverage numbers
+
+DO NOT run `bb ci` multiple times to check different parts of output. All information is in the single run.

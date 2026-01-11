@@ -1171,7 +1171,7 @@
     (is (contains? storage/storage-error-types :check-constraint-violation))
     (is (contains? storage/storage-error-types :table-not-found))
     (is (contains? storage/storage-error-types :connection-error))
-    (is (contains? storage/storage-error-types :query-timeout))
+    (is (contains? storage/storage-error-types :system-error/query-timeout))
     (is (contains? storage/storage-error-types :parse-error))
     (is (contains? storage/storage-error-types :unknown-sql-error)))
 

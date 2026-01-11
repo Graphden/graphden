@@ -351,7 +351,7 @@
       (do
         (future-cancel fut)
         (throw (ex-info (str "Query timeout after " timeout-ms "ms")
-                        {:type :query-timeout
+                        {:type :system-error/query-timeout
                          :operation operation
                          :timeout-ms timeout-ms})))
       result)))

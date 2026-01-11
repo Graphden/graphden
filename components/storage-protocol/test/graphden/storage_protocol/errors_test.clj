@@ -29,7 +29,7 @@
       (is (= 123 (:id ctx)))))
 
   (testing "merges all context keys"
-    (let [ctx (errors/make-error-context :query-timeout :query-entities "Query timed out"
+    (let [ctx (errors/make-error-context :system-error/query-timeout :query-entities "Query timed out"
                                          {:sql-state "57014" :query "SELECT *" :timeout 5000})]
       (is (= "57014" (:sql-state ctx)))
       (is (= "SELECT *" (:query ctx)))
@@ -108,7 +108,7 @@
 (deftest error-retryable-test
   (testing "returns true for retryable errors"
     (is (errors/error-retryable? :connection-error))
-    (is (errors/error-retryable? :query-timeout))
+    (is (errors/error-retryable? :system-error/query-timeout))
     (is (errors/error-retryable? :transient-error/busy)))
 
   (testing "returns false for non-retryable errors"
@@ -136,7 +136,7 @@
       (is (contains? types :not-found))
       (is (contains? types :connection-error))
       (is (contains? types :constraint-violation/unique))
-      (is (contains? types :query-timeout)))))
+      (is (contains? types :system-error/query-timeout)))))
 
 
 (deftest error-categories-test
@@ -364,5 +364,5 @@
     (is (contains? errors/storage-error-types :foreign-key-violation))
     (is (contains? errors/storage-error-types :not-null-violation))
     (is (contains? errors/storage-error-types :connection-error))
-    (is (contains? errors/storage-error-types :query-timeout))
+    (is (contains? errors/storage-error-types :system-error/query-timeout))
     (is (contains? errors/storage-error-types :table-not-found))))

@@ -30,7 +30,7 @@
     :entity-not-in-schema
     :table-not-found
     :connection-error
-    :query-timeout
+    :system-error/query-timeout
     :parse-error
     :unknown-sql-error})
 
@@ -235,7 +235,7 @@
          {:category :connection :retryable? true
           :description "Database connection failed"}
 
-         :query-timeout
+         :system-error/query-timeout
          {:category :connection :retryable? true
           :description "Query exceeded timeout"}
 
@@ -335,7 +335,9 @@
    #"(?i)private[_-]?key"
    #"(?i)access[_-]?key"
    #"(?i)connection[_-]?string"
-   #"(?i)jdbc[_-]?url"])
+   #"(?i)jdbc[_-]?url"
+   #"(?i)db[_-]?(password|user|pass)"
+   #"(?i)database[_-]?(password|user|pass)"])
 
 
 (def ^:private sensitive-field-registry

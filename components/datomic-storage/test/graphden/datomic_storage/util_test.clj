@@ -288,7 +288,7 @@
                                     nil)))
       (is false "should have thrown")
       (catch clojure.lang.ExceptionInfo e
-        (is (= :query-timeout (:type (ex-data e))))
+        (is (= :system-error/query-timeout (:type (ex-data e))))
         (is (= :my-operation (:operation (ex-data e))))
         (is (= 1000 (:timeout-ms (ex-data e)))))))
 

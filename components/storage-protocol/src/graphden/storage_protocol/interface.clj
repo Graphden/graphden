@@ -16,6 +16,27 @@
    3. Use storage for CRUD operations
    4. Call (close storage) when done
 
+   ## Facade Pattern (Re-exports)
+
+   This namespace serves as a unified facade for the storage-protocol component,
+   re-exporting functions from internal modules (errors, config, validation, etc.).
+   This is an intentional Polylith pattern that provides:
+
+   - **Single import point** - Users only need `[graphden.storage-protocol.interface :as sp]`
+   - **Stable API** - Internal refactoring doesn't break user code
+   - **Discoverability** - All public functions visible in one place
+
+   Internal modules (not for direct import by users):
+   - `errors.clj` - Error types, classification, sensitive data redaction
+   - `config.clj` - Dynamic vars, timeouts, limits
+   - `validation.clj` - Input validation helpers
+   - `constraints.clj` - Graph constraint implementations
+   - `graph.clj` - BFS traversal, execution graph resolution
+   - `metadata.clj` - Schema migration helpers
+   - `naming.clj` - Keyword/snake_case conversions
+   - `locks.clj` - Read-write lock utilities
+   - `codec.clj` - Value encoding/decoding utilities
+
    ## Naming Conventions
 
    Functions follow these naming patterns:

@@ -2506,3 +2506,13 @@
           (is (= original-ex (ex-cause wrapped))))
         (finally
           (sp/close storage))))))
+
+
+;; === Contract Tests for Concurrency and Deep Chains ===
+
+(deftest concurrent-read-write-contract-test
+  (contract/concurrent-read-write-test mem/create-storage sp/close))
+
+
+(deftest deep-inheritance-chain-contract-test
+  (contract/deep-inheritance-chain-test mem/create-storage sp/close))

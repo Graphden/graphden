@@ -667,3 +667,105 @@
           )
         (finally
           (close-storage-fn storage))))))
+
+
+(defn concurrent-read-write-test
+  "Tests that concurrent reads and writes don't produce stale or corrupt data.
+   This is a contract test - implementations must handle concurrency safely."
+  [create-storage-fn close-storage-fn]
+  (testing "concurrent reads during write don't see partial state"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "concurrent-schema" :returned-type "int"})
+              ;; Create initial fn
+              fn-record (sp/create-entity storage :fn
+                                          {:name "concurrent-fn"
+                                           :fn-schema-id (:id schema)})
+              fn-id (:id fn-record)
+              ;; Run concurrent reads while updating
+              read-results (atom [])
+              update-done (promise)
+              num-readers 5]
+          ;; Start readers
+          (dotimes [_ num-readers]
+            (future
+              (dotimes [_ 10]
+                (when-let [result (sp/read-entity storage :fn fn-id)]
+                  (swap! read-results conj result))
+                (Thread/sleep 1))))
+          ;; Perform update
+          (sp/update-entity storage :fn fn-id {:name "updated-concurrent-fn"})
+          (deliver update-done true)
+          ;; Wait for readers
+          (Thread/sleep 100)
+          ;; All reads should be valid (either old or new name, never partial)
+          (doseq [result @read-results]
+            (is (contains? #{"concurrent-fn" "updated-concurrent-fn"} (:name result))
+                "Read should return complete record, not partial state")))
+        (finally
+          (close-storage-fn storage)))))
+
+  (testing "batch create maintains consistency under concurrent access"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "batch-schema" :returned-type "int"})
+              ;; Create fns concurrently from multiple threads
+              results (atom [])
+              num-threads 3
+              fns-per-thread 5
+              latch (java.util.concurrent.CountDownLatch. num-threads)]
+          (dotimes [t num-threads]
+            (future
+              (try
+                (let [fns (for [i (range fns-per-thread)]
+                            {:name (str "batch-fn-" t "-" i)
+                             :fn-schema-id (:id schema)})]
+                  (swap! results concat (sp/create-entities storage :fn fns)))
+                (finally
+                  (java.util.concurrent.CountDownLatch/.countDown latch)))))
+          (java.util.concurrent.CountDownLatch/.await latch 5000 java.util.concurrent.TimeUnit/MILLISECONDS)
+          ;; All fns should be created with unique IDs
+          (is (= (* num-threads fns-per-thread) (count @results))
+              "All batch creates should succeed")
+          (is (= (count @results) (count (set (map :id @results))))
+              "All IDs should be unique"))
+        (finally
+          (close-storage-fn storage))))))
+
+
+(defn deep-inheritance-chain-test
+  "Tests that deep inheritance chains (100+ levels) are handled correctly.
+   This is a contract test - implementations must handle deep chains."
+  [create-storage-fn close-storage-fn]
+  (testing "deep inheritance chain resolution"
+    (let [storage (create-storage-fn)]
+      (try
+        (sp/initialize storage graph-schema)
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:name "deep-schema" :returned-type "int"})
+              chain-depth 100
+              ;; Create chain: fn-0 <- fn-1 <- fn-2 <- ... <- fn-99
+              fn-ids (reduce
+                       (fn [ids i]
+                         (let [parent-id (last ids)
+                               new-fn (sp/create-entity storage :fn
+                                                        (cond-> {:name (str "chain-fn-" i)
+                                                                 :fn-schema-id (:id schema)}
+                                                          parent-id (assoc :parent-fn-id parent-id)))]
+                           (conj ids (:id new-fn))))
+                       []
+                       (range chain-depth))
+              ;; Read the deepest fn
+              deepest-fn (sp/read-entity storage :fn (last fn-ids))]
+          (is (some? deepest-fn) "Should read deepest fn in chain")
+          (is (= (str "chain-fn-" (dec chain-depth)) (:name deepest-fn)))
+          ;; Validate no cycle in deep chain
+          (is (nil? (sp/validate-no-inheritance-cycle!
+                      storage (last fn-ids) (first fn-ids)))
+              "Deep chain should not be detected as cycle"))
+        (finally
+          (close-storage-fn storage))))))

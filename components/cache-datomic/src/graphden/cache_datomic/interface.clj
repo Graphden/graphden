@@ -26,18 +26,52 @@
 
 ;; === Graph loading helpers ===
 
+(defn- load-datomic-entities
+  "Generic loader for cached entity records from Datomic.
+   Returns {id -> record} map.
+
+   Parameters:
+   - db: Datomic database value
+   - cache-id: cache identifier (UUID)
+   - query: Datalog query with ?cache-id input and results as [id-val & field-vals]
+   - field-keys: vector of keywords for each field in query result (excluding id)
+   - transforms: optional map of {field-key transform-fn} for value transformations
+
+   Example:
+     (load-datomic-entities db cache-id
+       '[:find ?id ?name ?type :in $ ?cache-id :where ...]
+       [:name :type]
+       {:type keyword})"
+  ([db cache-id query field-keys]
+   (load-datomic-entities db cache-id query field-keys {}))
+  ([db cache-id query field-keys transforms]
+   (let [results (d/q query db cache-id)]
+     (->> results
+          (map (fn [[id-val & field-vals]]
+                 (let [base-record (zipmap (cons :id field-keys)
+                                           (cons id-val field-vals))]
+                   [id-val (reduce-kv (fn [acc k transform-fn]
+                                        (if (contains? acc k)
+                                          (update acc k transform-fn)
+                                          acc))
+                                      base-record
+                                      transforms)])))
+          (into {})))))
+
+
 (defn- load-cached-fns
   "Loads cached fn records for a cache-id."
   [db cache-id]
-  ;; First get fns without parent-fn-id
-  (let [base-results (d/q '[:find ?fn-id ?name ?fn-schema-id
-                            :in $ ?cache-id
-                            :where
-                            [?e :graphden.cache/cached-fn-cache-id ?cache-id]
-                            [?e :graphden.cache/cached-fn-fn-id ?fn-id]
-                            [?e :graphden.cache/cached-fn-name ?name]
-                            [?e :graphden.cache/cached-fn-fn-schema-id ?fn-schema-id]]
-                          db cache-id)
+  ;; First get fns without parent-fn-id using generic loader
+  (let [base-results (load-datomic-entities db cache-id
+                                            '[:find ?fn-id ?name ?fn-schema-id
+                                              :in $ ?cache-id
+                                              :where
+                                              [?e :graphden.cache/cached-fn-cache-id ?cache-id]
+                                              [?e :graphden.cache/cached-fn-fn-id ?fn-id]
+                                              [?e :graphden.cache/cached-fn-name ?name]
+                                              [?e :graphden.cache/cached-fn-fn-schema-id ?fn-schema-id]]
+                                            [:name :fn-schema-id])
         ;; Get parent-fn-ids separately (only for those that have it)
         parent-results (d/q '[:find ?fn-id ?parent-fn-id
                               :in $ ?cache-id
@@ -47,57 +81,42 @@
                               [?e :graphden.cache/cached-fn-parent-fn-id ?parent-fn-id]]
                             db cache-id)
         fn-id->parent (into {} parent-results)]
-    (->> base-results
-         (map (fn [[fn-id name-str fn-schema-id]]
-                [fn-id {:id fn-id
-                        :name name-str
-                        :fn-schema-id fn-schema-id
-                        :parent-fn-id (get fn-id->parent fn-id)}]))
-         (into {}))))
+    ;; Merge parent-fn-ids into base results
+    (reduce-kv (fn [acc fn-id record]
+                 (assoc acc fn-id (assoc record :parent-fn-id (get fn-id->parent fn-id))))
+               {}
+               base-results)))
 
 
 (defn- load-cached-fn-schemas
   "Loads cached fn-schema records for a cache-id."
   [db cache-id]
-  (let [results (d/q '[:find ?fn-schema-id ?name ?base-fn-name ?returned-type
-                       :in $ ?cache-id
-                       :where
-                       [?e :graphden.cache/cached-fn-schema-cache-id ?cache-id]
-                       [?e :graphden.cache/cached-fn-schema-id ?fn-schema-id]
-                       [?e :graphden.cache/cached-fn-schema-name ?name]
-                       [?e :graphden.cache/cached-fn-schema-base-fn-name ?base-fn-name]
-                       [?e :graphden.cache/cached-fn-schema-returned-type ?returned-type]]
-                     db cache-id)]
-    (->> results
-         (map (fn [[fn-schema-id name-str base-fn-name returned-type]]
-                [fn-schema-id {:id fn-schema-id
-                               :name name-str
-                               :base-fn-name base-fn-name
-                               :returned-type returned-type}]))
-         (into {}))))
+  (load-datomic-entities db cache-id
+                         '[:find ?fn-schema-id ?name ?base-fn-name ?returned-type
+                           :in $ ?cache-id
+                           :where
+                           [?e :graphden.cache/cached-fn-schema-cache-id ?cache-id]
+                           [?e :graphden.cache/cached-fn-schema-id ?fn-schema-id]
+                           [?e :graphden.cache/cached-fn-schema-name ?name]
+                           [?e :graphden.cache/cached-fn-schema-base-fn-name ?base-fn-name]
+                           [?e :graphden.cache/cached-fn-schema-returned-type ?returned-type]]
+                         [:name :base-fn-name :returned-type]))
 
 
 (defn- load-cached-arg-schemas
   "Loads cached arg-schema records for a cache-id."
   [db cache-id]
-  (let [results (d/q '[:find ?arg-schema-id ?fn-schema-id ?name ?type ?required
-                       :in $ ?cache-id
-                       :where
-                       [?e :graphden.cache/cached-arg-schema-cache-id ?cache-id]
-                       [?e :graphden.cache/cached-arg-schema-id ?arg-schema-id]
-                       [?e :graphden.cache/cached-arg-schema-fn-schema-id ?fn-schema-id]
-                       [?e :graphden.cache/cached-arg-schema-name ?name]
-                       [?e :graphden.cache/cached-arg-schema-type ?type]
-                       [?e :graphden.cache/cached-arg-schema-required ?required]]
-                     db cache-id)]
-    (->> results
-         (map (fn [[arg-schema-id fn-schema-id name-str type-kw required]]
-                [arg-schema-id {:id arg-schema-id
-                                :fn-schema-id fn-schema-id
-                                :name name-str
-                                :type type-kw
-                                :required required}]))
-         (into {}))))
+  (load-datomic-entities db cache-id
+                         '[:find ?arg-schema-id ?fn-schema-id ?name ?type ?required
+                           :in $ ?cache-id
+                           :where
+                           [?e :graphden.cache/cached-arg-schema-cache-id ?cache-id]
+                           [?e :graphden.cache/cached-arg-schema-id ?arg-schema-id]
+                           [?e :graphden.cache/cached-arg-schema-fn-schema-id ?fn-schema-id]
+                           [?e :graphden.cache/cached-arg-schema-name ?name]
+                           [?e :graphden.cache/cached-arg-schema-type ?type]
+                           [?e :graphden.cache/cached-arg-schema-required ?required]]
+                         [:fn-schema-id :name :type :required]))
 
 
 (defn- parse-value

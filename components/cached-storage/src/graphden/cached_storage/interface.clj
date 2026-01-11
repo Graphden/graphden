@@ -1,7 +1,8 @@
 (ns graphden.cached-storage.interface
   "Decorator that wraps any storage with execution graph caching.
 
-   Usage:
+   ## Usage
+
    (def storage (postgres/create-storage config))
    (def cache (cache-postgres/create-cache config))
    (def cached (wrap-with-cache storage cache))
@@ -11,14 +12,112 @@
    - Uses cache for resolve-execution-graph (O(1) instead of O(depth))
    - Invalidates affected caches after mutations
 
-   Cache invalidation strategy:
-   - fn created: create cache for new fn
-   - fn updated (parent-fn-id changed): invalidate fn + all dependents
-   - fn deleted: delete cache + invalidate all dependents
-   - arg-value created/updated/deleted: invalidate owner-fn + dependents
-   - fn-result-value created/deleted: invalidate referencing caches
-   - fn-schema updated: invalidate all caches depending on it
-   - arg-schema updated: invalidate all caches depending on it"
+   ## Cache Invalidation Strategy
+
+   Cache invalidation is data-driven via `invalidation-strategies` map.
+   Each entity type defines handlers for :on-create, :on-update, :on-delete.
+
+   ### Invalidation Flow (ASCII State Diagram)
+
+   ```
+   MUTATION EVENT
+        │
+        ▼
+   ┌─────────────┐
+   │ Get Strategy │ ◄── invalidation-strategies map
+   │ for Entity   │     {:fn {:on-create ...} ...}
+   └──────┬──────┘
+          │
+          ▼
+   ┌─────────────────┐    no strategy
+   │ Strategy exists? │───────────────► NO-OP (passthrough)
+   └──────┬──────────┘
+          │ yes
+          ▼
+   ┌──────────────────┐
+   │ Execute Strategy │
+   │ (invalidate/     │
+   │  rebuild caches) │
+   └──────┬───────────┘
+          │
+          ▼
+   ┌─────────────────────┐
+   │ find-caches-by-*-dep│ ◄── Find all dependent caches
+   └──────┬──────────────┘
+          │
+          ▼
+   ┌─────────────────┐     ┌──────────────────┐
+   │ batch-delete-   │────►│ batch-rebuild-   │
+   │ caches!         │     │ existing-caches! │
+   └─────────────────┘     └──────────────────┘
+   ```
+
+   ### Entity-Specific Strategies
+
+   | Entity     | Create              | Update                       | Delete                  |
+   |------------|---------------------|------------------------------|-------------------------|
+   | :fn        | rebuild own cache   | if parent-fn-id changed:     | delete + invalidate     |
+   |            |                     | invalidate fn + dependents   | all dependents          |
+   | :arg-value | invalidate owner-fn | invalidate owner-fn          | invalidate owner-fn     |
+   |            | + dependents        | + dependents                 | + dependents            |
+   | :fn-schema | no-op               | invalidate all fns using it  | invalidate all dependents|
+   | :arg-schema| no-op               | invalidate all fns using it  | invalidate all dependents|
+
+   ### Complex Scenarios
+
+   **Scenario 1: Parent function changed**
+   ```
+   fn-A (parent) ──► fn-B (child) ──► fn-C (grandchild)
+
+   UPDATE fn-B SET parent-fn-id = fn-X
+   1. Delete cache for fn-B
+   2. Find caches depending on fn-B (fn-C)
+   3. Delete cache for fn-C
+   4. Rebuild caches for fn-B, fn-C (if they exist)
+   ```
+
+   **Scenario 2: arg-value created for parent function**
+   ```
+   fn-A (has arg-value) ──► fn-B (inherits) ──► fn-C
+
+   CREATE arg-value for fn-A
+   1. Invalidate fn-A cache
+   2. Find fn-A dependents (fn-B)
+   3. Invalidate fn-B cache
+   4. Find fn-B dependents (fn-C)
+   5. Invalidate fn-C cache
+   6. Rebuild fn-A, fn-B, fn-C (cascading)
+   ```
+
+   **Scenario 3: fn-schema updated**
+   ```
+   fn-schema-1 used by fn-A, fn-B, fn-C
+
+   UPDATE fn-schema-1
+   1. Find all caches depending on fn-schema-1
+   2. Delete all found caches
+   3. Rebuild caches for fns that still exist
+   ```
+
+   ### Consistency Guarantees
+
+   - **Atomicity**: Each mutation triggers invalidation before returning
+   - **No stale reads**: After write returns, subsequent reads see fresh data
+   - **Cascading**: Dependencies are followed transitively (fn → child-fn → grandchild-fn)
+
+   ### Troubleshooting
+
+   **Q: Cache returns stale data after update**
+   A: Check that entity type has strategy in `invalidation-strategies` map.
+      Only :fn, :arg-value, :fn-schema, :arg-schema trigger invalidation.
+
+   **Q: Performance degradation after large batch update**
+   A: Batch updates invalidate caches one-by-one. For bulk migrations,
+      consider clearing all caches first, then rebuilding lazily.
+
+   **Q: Cache not rebuilt after invalidation**
+   A: Caches are only rebuilt for fns that exist. If fn was deleted
+      during invalidation, its cache is not rebuilt (expected behavior)."
   (:require
     [clojure.tools.logging :as log]
     [graphden.cache-protocol.interface :as cache]

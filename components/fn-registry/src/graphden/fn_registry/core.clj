@@ -12,7 +12,48 @@
    - :impl - the implementation function (receives delays, uses @ to deref)
    - :lazy - (optional) set of arg names that should NOT be auto-deref'd
 
-   Use the defbase macro to define functions with automatic argument handling."
+   Use the defbase macro to define functions with automatic argument handling.
+
+   ## Security Considerations (UUID v5)
+
+   This namespace uses UUID v5 (RFC 4122 name-based SHA-1) for deterministic
+   UUID generation. Key security properties:
+
+   ### Why UUID v5 is Safe Here
+
+   1. **Threat model**: We need deterministic, collision-resistant IDs for
+      base function schemas. We do NOT need:
+      - Unpredictability (IDs are not secrets)
+      - Privacy (function names are public)
+      - Cryptographic binding (IDs are just identifiers)
+
+   2. **SHA-1 weakness irrelevant**: SHA-1's collision vulnerability requires
+      attacker-controlled input and ~2^63 operations. Our inputs are:
+      - Fixed namespace UUID (not attacker-controlled)
+      - Function names from trusted code (not user input)
+
+   3. **Collision resistance sufficient**: UUID v5 uses 122 bits of SHA-1 hash.
+      For our use case (< 10,000 base functions), collision probability is
+      negligible (~10^-33).
+
+   ### Namespace UUID Confidentiality
+
+   The namespace UUID (`base-fn-namespace-uuid`) is NOT a secret:
+   - It's compiled into the application and visible in bytecode
+   - Knowing it doesn't enable any attack (inputs are trusted)
+   - Changing it would break all existing fn-schema references
+
+   DO NOT treat this as a cryptographic key. It's a namespace identifier.
+
+   ### DoS Protection (max-name-length)
+
+   The 256-byte name limit prevents:
+   - Memory exhaustion from very long strings
+   - CPU exhaustion during SHA-1 hashing
+   - Hash collision attacks (shorter inputs = fewer collision opportunities)
+
+   Benchmark: SHA-1 processes ~500MB/s on modern CPUs.
+   256 bytes takes ~0.5μs - negligible even for 10,000 functions."
   (:require
     [clojure.string :as str]
     [graphden.executor.interface :as exec]

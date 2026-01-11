@@ -18,7 +18,82 @@
    - Lazy evaluation (delays)
    - Recursion protection (max-depth)
    - Timeout protection
-   - Base function registry"
+   - Base function registry
+
+   ## Performance Tuning Guide
+
+   The executor has several configurable limits that interact with each other.
+   Understanding these interactions helps optimize for different workloads.
+
+   ### Limit Interaction Matrix
+
+   | Limit           | Default  | Affects                | First to hit         |
+   |-----------------|----------|------------------------|----------------------|
+   | :max-depth      | 1000     | Recursion depth        | Deep inheritance     |
+   | :timeout-ms     | 30000    | Total execution time   | Complex computations |
+   | :cache-max-size | 10000    | Result cache entries   | Wide graphs          |
+
+   **Which limit fires first?**
+
+   - **Deep linear chains** (A→B→C→...→Z): :max-depth fires first
+   - **Wide branching graphs** (A calls B,C,D,...,Z): :cache-max-size fires first
+   - **Slow base functions** (API calls, heavy computation): :timeout-ms fires first
+
+   ### Recommended Values by Workload
+
+   **Simple functions** (typical use):
+   ```clojure
+   {:max-depth 100
+    :timeout-ms 5000
+    :cache-max-size 1000}
+   ```
+
+   **Deep inheritance chains** (>50 parent levels):
+   ```clojure
+   {:max-depth 1000
+    :timeout-ms 30000
+    :cache-max-size 5000}
+   ```
+
+   **Wide parallel graphs** (map over large collections):
+   ```clojure
+   {:max-depth 100
+    :timeout-ms 60000
+    :cache-max-size 50000}
+   ```
+
+   **API-bound functions** (external service calls):
+   ```clojure
+   {:max-depth 50
+    :timeout-ms 120000  ; 2 minutes for slow APIs
+    :cache-max-size 1000}
+   ```
+
+   ### Warning Thresholds
+
+   The executor logs warnings at 80% of each limit:
+
+   - `Approaching max recursion depth` - Consider flattening inheritance
+   - `Approaching execution timeout` - Consider async execution
+   - `Result cache size reached warning threshold` - Consider limiting graph depth
+
+   ### Cache Behavior
+
+   Result cache stores fn-result-value computations for memoization.
+
+   - **Cache hit**: O(1) lookup, no recomputation
+   - **Cache miss**: Execute function, store result
+   - **Cache full**: Evict 20% oldest entries (LRU-like)
+
+   **Memory estimation**: ~1KB per cached value average.
+   Default 10,000 entries ≈ 10MB memory overhead.
+
+   ### Monitoring
+
+   Enable debug logging to see:
+   - Cache hit/miss events
+   - Depth/timeout warnings at 80% threshold
+   - Cache eviction events"
   (:require
     [graphden.executor.context :as ctx]
     [graphden.executor.core :as core]

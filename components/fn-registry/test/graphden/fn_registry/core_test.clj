@@ -585,6 +585,45 @@
       (is (= 5 (get-in result [:arg-schemas :created]))))))
 
 
+;; === Batch size limit tests ===
+
+(deftest sync-defs-batch-size-limit-test
+  (testing "throws when defs exceed max-sync-batch-size"
+    (let [storage (mem/create-storage)
+          ;; Create 501 function definitions (max is 500)
+          large-defs (into {}
+                           (for [i (range 501)]
+                             [(keyword (str "fn-" i))
+                              {:args {} :return-type :int :impl (fn [_ _] i)}]))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Too many function definitions to sync"
+            (core/sync-defs-to-storage! storage large-defs)))))
+
+  (testing "error data contains batch size info"
+    (let [storage (mem/create-storage)
+          large-defs (into {}
+                           (for [i (range 501)]
+                             [(keyword (str "fn-" i))
+                              {:args {} :return-type :int :impl (fn [_ _] i)}]))]
+      (try
+        (core/sync-defs-to-storage! storage large-defs)
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :batch-error/batch-too-large (:type (ex-data e))))
+          (is (= 501 (:batch-size (ex-data e))))
+          (is (= 500 (:max-batch-size (ex-data e))))
+          (is (= :sync-defs-to-storage (:operation (ex-data e))))))))
+
+  (testing "accepts exactly max-sync-batch-size (500) definitions"
+    (let [storage (mem/create-storage)
+          max-defs (into {}
+                         (for [i (range 500)]
+                           [(keyword (str "fn-" i))
+                            {:args {} :return-type :int :impl (fn [_ _] i)}]))
+          result (core/sync-defs-to-storage! storage max-defs)]
+      (is (= 500 (get-in result [:fn-schemas :created]))))))
+
+
 ;; === Multiple functions sync ===
 
 (deftest sync-multiple-functions-test

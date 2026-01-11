@@ -199,10 +199,11 @@
                           #"Invalid regex pattern syntax"
           (#'strings/safe-compile-regex "(unclosed"))))
 
-  ;; Note: Testing regex timeout is difficult because compilation is too fast
-  ;; The timeout path in safe-compile-regex handles slow pattern compilation
-  ;; but we can't reliably trigger it in tests without blocking for too long.
-  ;; The timeout code path is covered by code review rather than unit test.
+  ;; Note: Testing regex timeout is challenging because:
+  ;; - Compilation is typically very fast
+  ;; - Setting timeout=0 is racy (compilation may complete before timeout check)
+  ;; The timeout path is verified by code inspection and is a safety net for
+  ;; pathological regexes that are rare in practice.
   )
 
 

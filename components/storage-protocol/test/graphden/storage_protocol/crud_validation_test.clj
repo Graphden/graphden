@@ -3,7 +3,10 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage-protocol.crud-validation :as crud]))
+    [graphden.storage-protocol.crud-validation :as crud])
+  (:import
+    (java.time
+      Instant)))
 
 
 ;; === infer-actual-type coverage via validate-where-clause-types! ===
@@ -446,3 +449,188 @@
         (is (= :my-entity (:entity (ex-data e))))
         (is (= :unknown (:field (ex-data e))))
         (is (= [:name] (:known-fields (ex-data e))))))))
+
+
+;; === Additional type inference tests for complete coverage ===
+
+(deftest type-inference-additional-coverage-test
+  (testing "nil values are allowed for any field type"
+    ;; nil value should pass validation regardless of field type
+    (doseq [field-type [:uuid :text :int :bool :numeric :timestamptz :bytes :enum :jsonb]]
+      (is (nil? (crud/validate-where-clause-types!
+                  :entity {:f {:type field-type}} {:f nil})))))
+
+  (testing "field not in fields map is skipped"
+    ;; When field is not defined, validation is skipped
+    (is (nil? (crud/validate-where-clause-types!
+                :entity {} {:unknown-field "any-value"}))))
+
+  (testing "Instant values are valid for timestamptz"
+    (is (nil? (crud/validate-where-clause-types!
+                :entity {:ts {:type :timestamptz}} {:ts (Instant/now)}))))
+
+  (testing "list value is not inferred as :jsonb (only vector/map)"
+    ;; Lists are not recognized as jsonb, they become :unknown
+    (is (thrown? clojure.lang.ExceptionInfo
+          (crud/validate-where-clause-types!
+            :entity {:data {:type :jsonb}} {:data '(1 2 3)}))))
+
+  (testing "set value fails - only vector/map are jsonb"
+    ;; Sets are not recognized as jsonb, they become :unknown
+    (is (thrown? clojure.lang.ExceptionInfo
+          (crud/validate-where-clause-types!
+            :entity {:data {:type :jsonb}} {:data #{1 2 3}}))))
+
+  (testing "custom object infers as :unknown"
+    ;; Objects that don't match any type are inferred as :unknown
+    (let [custom (Object.)]
+      (is (thrown? clojure.lang.ExceptionInfo
+            (crud/validate-where-clause-types!
+              :entity {:data {:type :text}} {:data custom})))))
+
+  (testing "ratio value infers as :numeric"
+    ;; Clojure ratios are numeric
+    (is (nil? (crud/validate-where-clause-types!
+                :entity {:n {:type :numeric}} {:n 1/3})))))
+
+
+;; === validate-data-is-map! additional tests ===
+
+(deftest validate-data-is-map-additional-test
+  (testing "fails for string"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"data must be a map"
+          (crud/validate-data-is-map! :entity "not a map"))))
+
+  (testing "fails for nil"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"data must be a map"
+          (crud/validate-data-is-map! :entity nil))))
+
+  (testing "passes for hash-map"
+    (is (nil? (crud/validate-data-is-map! :entity (hash-map :a 1 :b 2))))))
+
+
+;; === validate-entity-name! additional tests ===
+
+(deftest validate-entity-name-additional-test
+  (testing "rejects entity name starting with hyphen"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (crud/validate-entity-name! (keyword "-starts-with-hyphen") "test"))))
+
+  (testing "rejects entity name starting with underscore"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (crud/validate-entity-name! (keyword "_starts-with-underscore") "test"))))
+
+  (testing "accepts entity name with all allowed chars"
+    (is (nil? (crud/validate-entity-name! :abc123-def_ghi "test"))))
+
+  (testing "error message includes operation"
+    (try
+      (crud/validate-entity-name! :UPPER "my-op")
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (str/includes? (ex-message e) "my-op"))))))
+
+
+;; === validate-required-fields! additional tests ===
+
+(deftest validate-required-fields-additional-test
+  (testing "multiple required fields - first missing throws"
+    (let [fields {:a {:type :text :nullable? false}
+                  :b {:type :text :nullable? false}
+                  :c {:type :text :nullable? false}}]
+      ;; Only provide :a, :b and :c are missing
+      (is (thrown? clojure.lang.ExceptionInfo
+            (crud/validate-required-fields! :entity fields {:a "value"})))))
+
+  (testing "all nullable fields pass with no data"
+    (let [fields {:a {:type :text :nullable? true}
+                  :b {:type :int :nullable? true}}]
+      (is (nil? (crud/validate-required-fields! :entity fields {})))))
+
+  (testing ":id field is always skipped"
+    (let [fields {:id {:type :uuid :nullable? false}}]
+      (is (nil? (crud/validate-required-fields! :entity fields {}))))))
+
+
+;; === validate-no-duplicate-ids! additional tests ===
+
+(deftest validate-no-duplicate-ids-additional-test
+  (testing "multiple different ids pass"
+    (let [ids (repeatedly 10 random-uuid)
+          data (mapv (fn [id] {:id id :name "test"}) ids)]
+      (is (nil? (crud/validate-no-duplicate-ids! :entity data)))))
+
+  (testing "mixed explicit and implicit ids (nil) pass"
+    (let [id1 (random-uuid)
+          id2 (random-uuid)]
+      (is (nil? (crud/validate-no-duplicate-ids! :entity
+                                                 [{:id id1}
+                                                  {:name "no-id"}
+                                                  {:id id2}
+                                                  {:name "also-no-id"}])))))
+
+  (testing "multiple duplicates reported"
+    (let [id1 (random-uuid)
+          id2 (random-uuid)]
+      (try
+        (crud/validate-no-duplicate-ids! :entity
+                                         [{:id id1} {:id id1}
+                                          {:id id2} {:id id2}])
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          ;; Both ids should be in duplicates
+          (is (= 2 (count (:duplicate-ids (ex-data e))))))))))
+
+
+;; === validate-where-clause! additional tests ===
+
+(deftest validate-where-clause-additional-test
+  (testing "passes for nested map"
+    (is (nil? (crud/validate-where-clause! {:nested {:key "value"}}))))
+
+  (testing "error includes actual type"
+    (try
+      (crud/validate-where-clause! 42)
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= java.lang.Long (:where-type (ex-data e))))))))
+
+
+;; === validate-where-clause-types! with :any type ===
+
+(deftest validate-where-clause-types-any-test
+  (testing ":any type accepts any value"
+    (let [any-field {:f {:type :any}}]
+      (is (nil? (crud/validate-where-clause-types! :e any-field {:f "string"})))
+      (is (nil? (crud/validate-where-clause-types! :e any-field {:f 123})))
+      (is (nil? (crud/validate-where-clause-types! :e any-field {:f true})))
+      (is (nil? (crud/validate-where-clause-types! :e any-field {:f {:nested "map"}})))
+      (is (nil? (crud/validate-where-clause-types! :e any-field {:f [1 2 3]}))))))
+
+
+;; === Edge cases for field type matching ===
+
+(deftest field-type-edge-cases-test
+  (testing "long value matches :int"
+    (is (nil? (crud/validate-where-clause-types!
+                :entity {:n {:type :int}} {:n (long 42)}))))
+
+  (testing "BigDecimal matches :numeric"
+    (is (nil? (crud/validate-where-clause-types!
+                :entity {:n {:type :numeric}} {:n (bigdec "123.456")}))))
+
+  (testing "empty string is valid :text"
+    (is (nil? (crud/validate-where-clause-types!
+                :entity {:s {:type :text}} {:s ""}))))
+
+  (testing "empty vector is valid :jsonb"
+    (is (nil? (crud/validate-where-clause-types!
+                :entity {:j {:type :jsonb}} {:j []}))))
+
+  (testing "empty map is valid :jsonb"
+    (is (nil? (crud/validate-where-clause-types!
+                :entity {:j {:type :jsonb}} {:j {}})))))

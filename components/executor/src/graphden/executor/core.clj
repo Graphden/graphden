@@ -48,14 +48,18 @@
     (when-not fn-rec
       (throw (ex-info "Function not found in execution graph"
                       {:type :execution-error/fn-not-found
-                       :fn-id fn-id})))
+                       :fn-id fn-id
+                       :available-fn-ids (vec (keys fns))
+                       :hint "Check that fn-id is correct and included in the execution graph"})))
     (let [fn-schema-id (:fn-schema-id fn-rec)
           fn-schema (get fn-schemas fn-schema-id)]
       (when-not fn-schema
         (throw (ex-info "Function schema not found in execution graph"
                         {:type :execution-error/fn-schema-not-found
                          :fn-id fn-id
-                         :fn-schema-id fn-schema-id})))
+                         :fn-schema-id fn-schema-id
+                         :available-schema-ids (vec (keys fn-schemas))
+                         :hint "Function references a schema that wasn't included in the graph"})))
       ;; Filter arg-schemas to only those belonging to this fn-schema
       (let [fn-arg-schemas (->> arg-schemas
                                 (filter (fn [[_ as]] (= (:fn-schema-id as) fn-schema-id)))

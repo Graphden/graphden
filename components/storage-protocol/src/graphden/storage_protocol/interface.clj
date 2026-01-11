@@ -23,7 +23,8 @@
    - `read-*` - Returns value or throws if not found (required lookup)
    - `create-*` / `update-*` / `delete-*` - Mutating operations
    - `query-*` - Returns collection (possibly empty)
-   - `validate-*!` - Validates and throws on failure
+   - `validate-*!` - Validates input, throws on failure (public API)
+   - `check-*!` - Checks conditions, throws on failure (migration/internal)
    - `*-impl` - Internal implementation (not for direct use)
 
    ## Security

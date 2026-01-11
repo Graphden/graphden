@@ -68,6 +68,22 @@
    Write lock is only acquired when cache needs to be populated.
    Cache is invalidated on schema changes (initialize).
 
+   ## Double-Check Locking Pattern
+
+   State machine:
+   ```
+   [nil] ---(first access)---> [loading] ---(success)---> [cached]
+     ^                            |                           |
+     |                            v                           |
+     +-------(table not found)----+                           |
+     +-------(initialize called)------------------------------+
+   ```
+
+   Thread safety:
+   1. Fast path: Read @metadata-cache without lock (safe for concurrent reads)
+   2. Slow path: Acquire write lock, double-check cache (another thread may have populated it)
+   3. On success: Cache result; on table-not-found: return nil without caching
+
    NOTE: Returns nil without caching if table not found (not initialized yet).
    This prevents caching stale nil values during initialization race conditions.
 

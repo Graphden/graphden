@@ -34,10 +34,12 @@
 
 
 (defn- parse-union
-  "Parses a union value from EDN storage format."
+  "Parses a union value from EDN storage format.
+   Uses {:readers {}} to prevent arbitrary code execution from
+   untrusted EDN with custom tagged literals."
   [v]
   (when (string? v)
-    (edn/read-string v)))
+    (edn/read-string {:readers {}} v)))
 
 
 ;; === DatomicValueCodec implementation ===

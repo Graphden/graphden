@@ -33,8 +33,9 @@
 
 
 (defn read-edn
+  "Reads EDN from file with safe reader settings."
   [path]
-  (edn/read-string (slurp path)))
+  (edn/read-string {:readers {}} (slurp path)))
 
 
 (defn write-edn

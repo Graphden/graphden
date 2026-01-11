@@ -359,6 +359,47 @@
 (def redact-sensitive-deep errors/redact-sensitive-deep)
 
 
+;; === Error Registry ===
+;;
+;; Extensible error type registry for custom application errors.
+;; Pre-registered types cover common storage scenarios.
+
+(def error-categories
+  "Valid error categories for classification."
+  errors/error-categories)
+
+
+(def error-severities
+  "Valid error severities."
+  errors/error-severities)
+
+
+(def register-error-type!
+  "Registers a custom error type with metadata.
+   See errors/register-error-type! for details."
+  errors/register-error-type!)
+
+
+(def get-error-metadata
+  "Returns metadata for an error type, or nil if not registered."
+  errors/get-error-metadata)
+
+
+(def error-retryable?
+  "Returns true if the error type is marked as retryable."
+  errors/error-retryable?)
+
+
+(def error-category
+  "Returns the category of an error type."
+  errors/error-category)
+
+
+(def registered-error-types
+  "Returns a set of all registered error type keywords."
+  errors/registered-error-types)
+
+
 ;; === Sensitive Field Registry ===
 ;;
 ;; Extensible system for identifying and redacting sensitive data in logs
@@ -560,6 +601,34 @@
 
 (def merge-arg-values-for-chain graph/merge-arg-values-for-chain)
 (def extract-uuid-refs-from-arg-values graph/extract-uuid-refs-from-arg-values)
+
+
+;; === ExecutionGraph accessor functions ===
+;; These provide stable API for accessing graph data.
+
+(def get-graph-fns
+  "Returns the fns map from an execution graph."
+  graph/get-graph-fns)
+
+
+(def get-graph-fn-schemas
+  "Returns the fn-schemas map from an execution graph."
+  graph/get-graph-fn-schemas)
+
+
+(def get-graph-arg-schemas
+  "Returns the arg-schemas map from an execution graph."
+  graph/get-graph-arg-schemas)
+
+
+(def get-graph-resolved-args
+  "Returns the resolved-args map from an execution graph."
+  graph/get-graph-resolved-args)
+
+
+(def get-graph-fn-result-values
+  "Returns the fn-result-values map from an execution graph."
+  graph/get-graph-fn-result-values)
 
 
 ;; === Constraint limits re-exports ===

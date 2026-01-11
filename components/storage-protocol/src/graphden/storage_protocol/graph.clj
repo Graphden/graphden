@@ -230,6 +230,46 @@
   (instance? ExecutionGraphResult x))
 
 
+;; === ExecutionGraph Accessor Functions ===
+;;
+;; These provide stable API for accessing graph data, insulating callers
+;; from internal record structure changes.
+
+(defn get-graph-fns
+  "Returns the fns map from an execution graph.
+   Prefer this over direct :fns access for forward compatibility."
+  [graph]
+  (:fns graph))
+
+
+(defn get-graph-fn-schemas
+  "Returns the fn-schemas map from an execution graph.
+   Prefer this over direct :fn-schemas access for forward compatibility."
+  [graph]
+  (:fn-schemas graph))
+
+
+(defn get-graph-arg-schemas
+  "Returns the arg-schemas map from an execution graph.
+   Prefer this over direct :arg-schemas access for forward compatibility."
+  [graph]
+  (:arg-schemas graph))
+
+
+(defn get-graph-resolved-args
+  "Returns the resolved-args map from an execution graph.
+   Prefer this over direct :resolved-args access for forward compatibility."
+  [graph]
+  (:resolved-args graph))
+
+
+(defn get-graph-fn-result-values
+  "Returns the fn-result-values map from an execution graph.
+   Prefer this over direct :fn-result-values access for forward compatibility."
+  [graph]
+  (:fn-result-values graph))
+
+
 ;; === Execution Graph Utilities ===
 
 (defn merge-arg-values-for-chain

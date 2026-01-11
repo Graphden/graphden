@@ -57,17 +57,19 @@
    Control characters (ASCII 0-31, 127) in credentials can indicate:
    - Null byte injection attempts
    - Escape sequence attacks
+   - Log injection via newlines
    - Binary data mistakenly passed as string
 
-   Excludes tabs (9), newlines (10), and carriage returns (13) as they
-   may appear legitimately in some credential formats."
+   ALL control characters are rejected including tabs, newlines, and carriage
+   returns. While these may appear in some formats, they are security risks in
+   credentials (can be used for log injection, header splitting, etc.)."
   [value param-name]
   (when (string? value)
-    (when-let [_dangerous-chars (re-find #"[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]" value)]
+    (when-let [_dangerous-chars (re-find #"[\x00-\x1F\x7F]" value)]
       (throw (ex-info (str param-name " contains invalid control characters")
                       {:type :config-error/invalid-credential
                        :param param-name
-                       :reason "contains control characters"})))))
+                       :reason "contains control characters (including tabs, newlines, carriage returns)"})))))
 
 
 (defn validate-credentials!

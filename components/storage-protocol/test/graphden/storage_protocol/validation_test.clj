@@ -283,10 +283,20 @@
   (testing "passes for normal strings"
     (is (nil? (v/validate-no-control-chars! "normal text" "test"))))
 
-  (testing "passes for strings with allowed whitespace"
-    (is (nil? (v/validate-no-control-chars! "has\ttab" "test")))
-    (is (nil? (v/validate-no-control-chars! "has\nnewline" "test")))
-    (is (nil? (v/validate-no-control-chars! "has\rcarriage-return" "test"))))
+  (testing "rejects tab (log injection prevention)"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"contains invalid control characters"
+          (v/validate-no-control-chars! "has\ttab" "test"))))
+
+  (testing "rejects newline (log injection prevention)"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"contains invalid control characters"
+          (v/validate-no-control-chars! "has\nnewline" "test"))))
+
+  (testing "rejects carriage return (log injection prevention)"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"contains invalid control characters"
+          (v/validate-no-control-chars! "has\rcarriage-return" "test"))))
 
   (testing "throws for null byte"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo

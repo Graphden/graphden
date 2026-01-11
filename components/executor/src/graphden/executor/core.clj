@@ -123,10 +123,11 @@
 
 ;; === fn-result-value Execution ===
 
+;; Use centralized limit from storage-protocol config
 (def ^:private cache-eviction-ratio
   "Ratio of cache entries to evict when cache is full.
-   0.2 means evict 20% of entries (oldest first by insertion order)."
-  0.2)
+   Uses centralized value from sp/cache-eviction-ratio."
+  sp/cache-eviction-ratio)
 
 
 (defn- evict-cache-entries!

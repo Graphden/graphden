@@ -1,7 +1,8 @@
 (ns graphden.malli-data-schema.validators
   "Validation functions for malli-data-schema."
   (:require
-    [graphden.malli-data-schema.types :as types]))
+    [graphden.malli-data-schema.types :as types]
+    [graphden.storage-protocol.interface :as sp]))
 
 
 ;; === Identifier validation ===
@@ -15,12 +16,10 @@
   #"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 
+;; Use centralized limit from storage-protocol config
 (def ^:private max-identifier-length
-  "Maximum length for identifiers in characters.
-   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1).
-   We enforce this limit early at schema definition time to prevent silent
-   truncation issues in the database layer."
-  63)
+  "Maximum length for identifiers. Uses centralized value from sp/max-identifier-length."
+  sp/max-identifier-length)
 
 
 (defn- valid-identifier-name?

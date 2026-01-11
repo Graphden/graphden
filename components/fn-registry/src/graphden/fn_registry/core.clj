@@ -327,10 +327,11 @@
     (validate-fn-def! fn-name fn-def)))
 
 
+;; Use centralized limit from storage-protocol config
 (def ^:private max-sync-batch-size
   "Maximum number of function definitions to sync in a single call.
-   Prevents DoS via extremely large definition maps."
-  500)
+   Uses centralized value from sp/max-sync-batch-size."
+  sp/max-sync-batch-size)
 
 
 (defn sync-defs-to-storage!

@@ -478,3 +478,104 @@
   "Maximum number of elements allowed in repeat to prevent memory exhaustion.
    Default: 1000000 elements (1 million)."
   1000000)
+
+
+;; ============================================================================
+;; Centralized Limits Registry
+;; ============================================================================
+;;
+;; All hardcoded limits are defined here for easy discovery and configuration.
+;; These are grouped by category and documented with rationale.
+
+;; === Identifier Limits ===
+
+(def ^:const max-identifier-length
+  "Maximum length for SQL identifiers (entity names, field names, enum values).
+   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1).
+   We enforce this limit early at schema definition time to prevent silent
+   truncation issues in the database layer."
+  63)
+
+
+(def ^:const max-fn-name-length
+  "Maximum length for function names in fn-registry.
+   Matches PostgreSQL identifier limit for consistency."
+  63)
+
+
+;; === Credential Limits ===
+;; Note: These are also defined in credential_validation.clj for backwards compatibility.
+;; New code should use these directly from config.
+
+(def ^:const max-credential-username-length
+  "Maximum length for database username.
+   Reasonable limit that covers all common database systems."
+  128)
+
+
+(def ^:const max-credential-password-length
+  "Maximum length for database password.
+   1024 allows for long generated passwords and passphrases."
+  1024)
+
+
+(def ^:const max-credential-jdbc-url-length
+  "Maximum length for JDBC connection URLs.
+   Generous limit to handle complex URLs with query parameters."
+  4096)
+
+
+;; === Batch Limits ===
+
+(def ^:const max-sync-batch-size
+  "Maximum definitions in a single sync-defs-to-storage! call.
+   Prevents memory exhaustion from huge batch operations."
+  500)
+
+
+;; === Graph Traversal Limits ===
+
+(def ^:const default-max-parent-chain-depth
+  "Default maximum depth for parent chain traversal.
+   Prevents stack overflow from deeply nested inheritance."
+  1000)
+
+
+(def ^:const default-max-dependency-chain-depth
+  "Default maximum depth for dependency chain traversal.
+   Prevents infinite loops in graph resolution."
+  1000)
+
+
+;; === Cache Limits ===
+
+(def ^:const default-cache-max-size
+  "Default maximum entries in result cache.
+   Prevents OOM from unbounded execution graphs."
+  10000)
+
+
+(def ^:const default-cache-warning-threshold
+  "Default threshold for cache size warnings.
+   Logs warning when cache reaches this size."
+  1000)
+
+
+(def ^:const cache-eviction-ratio
+  "Ratio of cache entries to evict when cache is full.
+   0.2 means evict 20% of entries (oldest first)."
+  0.2)
+
+
+;; === Execution Limits ===
+
+(def ^:const max-path-args-count
+  "Maximum number of path arguments in a request.
+   Prevents excessive path segments."
+  100)
+
+
+(def ^:const warning-threshold-ratio
+  "Ratio of limit at which to log warnings.
+   0.8 means warn at 80% of limit."
+  0.8)

@@ -381,6 +381,29 @@
 (def redact-sensitive-deep errors/redact-sensitive-deep)
 
 
+;; === Unified Validation Error Factory ===
+;;
+;; Use these functions for consistent error creation across all validators.
+
+(def create-validation-error
+  "Creates a validation error with consistent structure.
+   See errors/create-validation-error for details."
+  errors/create-validation-error)
+
+
+(def throw-validation-error!
+  "Creates and throws a validation error with consistent structure.
+   See errors/throw-validation-error! for details."
+  errors/throw-validation-error!)
+
+
+(defmacro with-storage-error-handling
+  "Executes body with consistent error handling and wrapping.
+   See errors/with-storage-error-handling for details."
+  [error-type operation context & body]
+  `(errors/with-storage-error-handling ~error-type ~operation ~context ~@body))
+
+
 ;; === Error Registry ===
 ;;
 ;; Extensible error type registry for custom application errors.
@@ -726,6 +749,71 @@
 (def validate-batch-size!
   "Validates batch size is within allowed limits. Throws if exceeded."
   config/validate-batch-size!)
+
+
+;; === Centralized Limits Re-exports ===
+;;
+;; All hardcoded limits from config.clj for easy access.
+;; See config.clj for documentation and rationale.
+
+;; Identifier limits
+(def max-identifier-length
+  "Maximum length for SQL identifiers. Default: 63 (PostgreSQL limit)."
+  config/max-identifier-length)
+
+
+(def max-fn-name-length
+  "Maximum length for function names. Default: 63."
+  config/max-fn-name-length)
+
+
+;; Credential limits
+(def max-credential-username-length
+  "Maximum length for database username. Default: 128."
+  config/max-credential-username-length)
+
+
+(def max-credential-password-length
+  "Maximum length for database password. Default: 1024."
+  config/max-credential-password-length)
+
+
+(def max-credential-jdbc-url-length
+  "Maximum length for JDBC URLs. Default: 4096."
+  config/max-credential-jdbc-url-length)
+
+
+;; Batch limits
+(def max-sync-batch-size
+  "Maximum definitions in a single sync-defs-to-storage! call. Default: 500."
+  config/max-sync-batch-size)
+
+
+;; Cache limits
+(def default-cache-max-size
+  "Default maximum entries in result cache. Default: 10000."
+  config/default-cache-max-size)
+
+
+(def default-cache-warning-threshold
+  "Default threshold for cache size warnings. Default: 1000."
+  config/default-cache-warning-threshold)
+
+
+(def cache-eviction-ratio
+  "Ratio of cache entries to evict when cache is full. Default: 0.2."
+  config/cache-eviction-ratio)
+
+
+;; Execution limits
+(def max-path-args-count
+  "Maximum number of path arguments. Default: 100."
+  config/max-path-args-count)
+
+
+(def warning-threshold-ratio
+  "Ratio of limit at which to log warnings. Default: 0.8."
+  config/warning-threshold-ratio)
 
 
 ;; ============================================================================

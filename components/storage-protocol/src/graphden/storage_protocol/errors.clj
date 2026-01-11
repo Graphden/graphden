@@ -599,3 +599,94 @@
     (map redact-sensitive-deep data)
 
     :else data))
+
+
+;; ============================================================================
+;; Unified Validation Error Factory
+;; ============================================================================
+;;
+;; Provides consistent error creation across all validation code.
+;; All validators should use these functions for consistency.
+
+(defn create-validation-error
+  "Creates a validation error with consistent structure.
+   Use this for all validation failures to ensure consistent error shape.
+
+   Arguments:
+   - error-type: Namespaced keyword (e.g., :validation-error/required-field-missing)
+   - message: Human-readable error message
+   - context: Map with additional context (entity, field, value, etc.)
+
+   The error-type MUST be a namespaced keyword. Common namespaces:
+   - :validation-error/* - Input validation failures
+   - :schema-error/* - Schema definition errors
+   - :constraint-violation/* - Constraint check failures
+   - :config-error/* - Configuration errors
+
+   Returns an ex-info exception (does not throw).
+
+   Example:
+     (throw (create-validation-error
+              :validation-error/required-field-missing
+              \"Required field :name is missing\"
+              {:entity :user :field :name}))"
+  [error-type message context]
+  (when-not (and (keyword? error-type) (namespace error-type))
+    (throw (ex-info "error-type must be a namespaced keyword"
+                    {:type :internal-error/invalid-error-type
+                     :error-type error-type
+                     :hint "Use namespaced keywords like :validation-error/field-missing"})))
+  (ex-info message (assoc context :type error-type)))
+
+
+(defn throw-validation-error!
+  "Creates and throws a validation error with consistent structure.
+   Convenience wrapper around create-validation-error.
+
+   Arguments:
+   - error-type: Namespaced keyword (e.g., :validation-error/required-field-missing)
+   - message: Human-readable error message
+   - context: Map with additional context
+
+   Example:
+     (throw-validation-error!
+       :schema-error/invalid-identifier
+       \"Identifier too long\"
+       {:value :my-very-long-name :max-length 63})"
+  [error-type message context]
+  (throw (create-validation-error error-type message context)))
+
+
+(defmacro with-storage-error-handling
+  "Executes body with consistent error handling and wrapping.
+   Catches exceptions and wraps them with operation context.
+
+   Arguments:
+   - error-type: Default error type if exception is not ExceptionInfo
+   - operation: Keyword describing the operation (e.g., :create-entity)
+   - context: Map with additional context
+   - body: Code to execute
+
+   If body throws ExceptionInfo, re-throws with merged context.
+   If body throws other Exception, wraps in ExceptionInfo with error-type.
+
+   Example:
+     (with-storage-error-handling :storage-error/query-failed :query-entities
+       {:entity-name :user}
+       (execute-query sql-query))"
+  [error-type operation context & body]
+  `(try
+     (do ~@body)
+     (catch clojure.lang.ExceptionInfo e#
+       ;; ExceptionInfo: merge context and re-throw
+       (throw (ex-info (ex-message e#)
+                       (merge {:operation ~operation} ~context (ex-data e#))
+                       (ex-cause e#))))
+     (catch Exception e#
+       ;; Other exceptions: wrap with error-type
+       (throw (ex-info (or (ex-message e#) "Storage operation failed")
+                       (merge {:type ~error-type
+                               :operation ~operation
+                               :cause-type (type e#)}
+                              ~context)
+                       e#)))))

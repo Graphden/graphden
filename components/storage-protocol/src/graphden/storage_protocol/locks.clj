@@ -46,3 +46,35 @@
    Use with-read-lock and with-write-lock for locking operations."
   []
   (ReentrantReadWriteLock.))
+
+
+(defn with-double-check-locking
+  "Implements double-check locking pattern for lazy initialization.
+
+   This pattern is useful for expensive initialization that should only
+   happen once, even under concurrent access. The fast path checks the
+   cache-atom without locking; if nil, acquires write lock and re-checks.
+
+   Arguments:
+   - cache-atom: atom holding cached value (nil means not initialized)
+   - rw-lock: ReentrantReadWriteLock for synchronization
+   - compute-fn: zero-arg function to compute value if not cached
+
+   Returns cached value or newly computed value.
+
+   Example:
+   (with-double-check-locking metadata-cache rw-lock
+     (fn [] (expensive-metadata-fetch)))
+
+   Thread safety:
+   - Fast path: returns cached value without locking
+   - Slow path: acquires write lock, re-checks cache, computes if needed
+   - compute-fn is called at most once even with concurrent callers"
+  [cache-atom rw-lock compute-fn]
+  (or @cache-atom
+      (with-write-lock rw-lock
+        (fn []
+          (or @cache-atom
+              (let [result (compute-fn)]
+                (reset! cache-atom result)
+                result))))))

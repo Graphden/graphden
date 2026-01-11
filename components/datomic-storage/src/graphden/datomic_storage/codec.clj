@@ -84,28 +84,12 @@
 
   (encode-row
     [this row field-specs]
-    (reduce-kv
-      (fn [acc field-name value]
-        (let [field-spec (get field-specs field-name)
-              encoded (if field-spec
-                        (sp/encode-value this value field-spec)
-                        value)]
-          (assoc acc field-name encoded)))
-      {}
-      row))
+    (sp/generic-encode-row (partial sp/encode-value this) row field-specs))
 
 
   (decode-row
     [this row field-specs]
-    (reduce-kv
-      (fn [acc field-name value]
-        (let [field-spec (get field-specs field-name)
-              decoded (if field-spec
-                        (sp/decode-value this value field-spec)
-                        value)]
-          (assoc acc field-name decoded)))
-      {}
-      row)))
+    (sp/generic-decode-row (partial sp/decode-value this) row field-specs)))
 
 
 (defn create-codec

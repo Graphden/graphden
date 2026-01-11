@@ -39,6 +39,7 @@
    - `with-query-timeout` - Macro for temporary timeout change
    - `get-query-timeout-seconds` - Get timeout in seconds for JDBC"
   (:require
+    [graphden.storage-protocol.codec :as codec]
     [graphden.storage-protocol.config :as config]
     [graphden.storage-protocol.constraints :as constraints]
     [graphden.storage-protocol.errors :as errors]
@@ -446,6 +447,24 @@
   errors/sensitive-field?)
 
 
+(def critical-sensitive-patterns
+  "Critical patterns that must be matched for security."
+  errors/critical-sensitive-patterns)
+
+
+(def validate-sensitive-field-coverage!
+  "Validates that all critical sensitive patterns are properly matched.
+   Throws if any critical pattern would not be detected as sensitive.
+   Use this at application startup to verify security configuration."
+  errors/validate-sensitive-field-coverage!)
+
+
+(def warn-on-suspicious-field
+  "Logs warning if field looks sensitive but isn't registered.
+   Returns true if field looks suspicious but not registered."
+  errors/warn-on-suspicious-field)
+
+
 ;; === Metadata re-exports ===
 
 (defn types-equivalent?
@@ -552,6 +571,12 @@
 (def with-read-lock locks/with-read-lock)
 (def with-write-lock locks/with-write-lock)
 (def create-rw-lock locks/create-rw-lock)
+
+
+(def with-double-check-locking
+  "Double-check locking for lazy cached initialization.
+   See locks/with-double-check-locking for details."
+  locks/with-double-check-locking)
 
 
 ;; === Naming re-exports ===
@@ -687,3 +712,17 @@
     (catch Exception e
       (close storage)
       (throw e))))
+
+
+;; === Codec utilities re-exports ===
+
+(def generic-encode-row
+  "Generic row encoding that applies encode-value to each field.
+   See codec/generic-encode-row for details."
+  codec/generic-encode-row)
+
+
+(def generic-decode-row
+  "Generic row decoding that applies decode-value to each field.
+   See codec/generic-decode-row for details."
+  codec/generic-decode-row)

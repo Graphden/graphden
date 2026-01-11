@@ -104,31 +104,21 @@
 
   (encode-row
     [this row field-specs]
-    (reduce-kv
-      (fn [acc field-name value]
-        (let [col-name (keyword (util/kw->snake-case field-name))
-              field-spec (or (get field-specs field-name)
-                             ;; Fallback for known JSONB columns
-                             (when (contains? fallback-jsonb-columns field-name)
-                               {:type :jsonb}))
-              encoded (if field-spec
-                        (sp/encode-value this value field-spec)
-                        value)]
-          (assoc acc col-name encoded)))
-      {}
-      row))
+    (sp/generic-encode-row
+      (partial sp/encode-value this)
+      row
+      field-specs
+      {:key-transform (comp keyword util/kw->snake-case)
+       :fallback-specs (into {} (map (fn [k] [k {:type :jsonb}]) fallback-jsonb-columns))}))
 
 
   (decode-row
     [this row field-specs]
-    (reduce-kv
-      (fn [acc col-key value]
-        (let [field-name (util/snake->kw (name col-key))
-              field-spec (get field-specs field-name)
-              decoded (sp/decode-value this value field-spec)]
-          (assoc acc field-name decoded)))
-      {}
-      row)))
+    (sp/generic-decode-row
+      (partial sp/decode-value this)
+      row
+      field-specs
+      {:key-transform (fn [col-key] (util/snake->kw (name col-key)))})))
 
 
 (defn create-codec

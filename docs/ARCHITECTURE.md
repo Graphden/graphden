@@ -1,6 +1,6 @@
 # Graphden: Visual Functional Programming System
 
-> **Last updated:** 2026-01-10
+> **Last updated:** 2026-01-11
 >
 > This document describes the technical architecture of graphden.
 > For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
@@ -397,37 +397,49 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 
 ## Part 5: Execution Model
 
-### Laziness and Thunks
+### Laziness via Clojure Delays
 
-**File:** `components/executor/src/graphden/executor/core.clj`
+**File:** `components/executor/src/graphden/executor/argument_resolution.clj`
+
+Arguments are wrapped in Clojure `delay` objects for lazy evaluation. This native approach:
+- Leverages Clojure's built-in memoization (delays compute once, cache result)
+- Enables lazy evaluation — values are only computed when dereferenced with `@`
+- Provides simple, idiomatic error handling
 
 ```clojure
-(defprotocol IThunk
-  (force-value [this context]))
+;; Literal value → immediate delay
+(delay value)
 
-(defrecord LiteralThunk [value]
-  IThunk
-  (force-value [_ _] value))
+;; fn reference (type = :fn) → delay returning UUID for HOF
+(delay uuid-value)
 
-(defrecord FnRefThunk [fn-id provided-args]
-  IThunk
-  (force-value [_ context]
-    (execute-internal context fn-id provided-args)))
+;; fn reference (other type) → delay that executes function
+(wrap-delay-with-context arg-name :fn-ref
+  #(execute-internal context uuid-value nil))
 
-(defrecord LazyFnThunk [fn-id]
-  ;; For arguments of type :fn - don't evaluate, pass as-is
-  IThunk
-  (force-value [_ _] fn-id))  ; Return fn-id, not the result
+;; fn-result-value reference → delay with caching
+(wrap-delay-with-context arg-name :fn-result-value
+  #(execute-fn-result-value context uuid-value))
 ```
+
+### Argument Resolution Priority
+
+Arguments are resolved in this order (highest priority first):
+
+1. **provided-args** — Explicitly passed at execute time (from HOF callables)
+2. **path-args** — Runtime args from context (for root and nested fns)
+3. **arg-values** — Stored values from database (resolved-args in graph)
+4. Required arg with no value → error
+5. Optional arg with no value → delay returning nil
 
 ### Argument Types and Their Handling
 
-| type in arg-schema | Value in arg-value | Thunk | Behavior |
-|--------------------|-------------------|-------|----------|
-| :int, :text, etc. | Literal | LiteralThunk | force -> literal |
-| :int, :text, etc. | ref<fn> | FnRefThunk | force -> execute fn (each time) |
-| :int, :text, etc. | ref<fn-result-value> | FnResultValueThunk | force -> execute fn (cached) |
-| :fn | ref<fn> | LazyFnThunk | force -> fn-id (for HOF) |
+| type in arg-schema | Value in arg-value | Delay Behavior |
+|--------------------|-------------------|----------------|
+| :int, :text, etc. | Literal | `@delay` → literal value |
+| :int, :text, etc. | ref<fn> | `@delay` → executes fn each time forced |
+| :int, :text, etc. | ref<fn-result-value> | `@delay` → executes fn (cached in result-cache) |
+| :fn | ref<fn> | `@delay` → fn-id UUID (for HOF) |
 
 ### fn-result-value: Cached Computation
 
@@ -456,75 +468,105 @@ fn: report
 
 ### Base Functions and Their Types
 
+Base functions receive arguments as delays and use `@` (deref) to get values:
+
 ```clojure
-;; Regular function - all arguments are evaluated before call
+;; Regular function - deref all arguments
+;; Uses defbase macro from fn-registry for automatic delay handling
+(defbase add
+  {:args {:nums :jsonb}
+   :return-type :numeric}
+  (apply + nums))  ; defbase auto-derefs, so 'nums' is the value
+
+;; Manual implementation shows the raw delay handling:
 (def add-def
   {:args {:nums :jsonb}
    :return-type :numeric
-   :impl (fn [{:keys [nums]} _ctx]
-           (apply + nums))})
+   :impl (fn [delays _ctx]
+           (apply + @(:nums delays)))})  ; must deref manually
 
-;; Conditional - lazy branches via :lazy-args
-(def if-def
+;; Conditional - only deref the branch we need (true laziness)
+(defbase if-fn
   {:args {:condition :bool, :then :any, :else :any}
-   :lazy-args #{:then :else}
-   :return-type :any
-   :impl (fn [{:keys [condition then else]} ctx]
-           (if condition
-             (exec/force-value then ctx)
-             (exec/force-value else ctx)))})
+   :lazy-args #{:then :else}  ; don't auto-deref these
+   :return-type :any}
+  (if condition
+    @then    ; manually deref chosen branch
+    @else))
 
-;; HOF - f is passed as fn-id (type :fn)
+;; HOF - f is passed as fn-id (type :fn), not executed
 ;; The target function must have exactly 1 required argument (any name)
-(def map-def
+(defbase map-fn
   {:args {:f :fn, :coll :jsonb}
-   :return-type :jsonb
-   :impl (fn [{:keys [f coll]} ctx]
-           (let [callable (exec/make-single-arg-callable ctx f)]
-             (mapv callable coll)))})
+   :return-type :jsonb}
+  (let [callable (exec/make-single-arg-callable ctx f)]
+    (mapv callable coll)))
 ```
 
 ### Execution Context
 
+**File:** `components/executor/src/graphden/executor/context.clj`
+
 ```clojure
 (defrecord ExecutionContext
-  [storage          ; Storage instance for graph resolution
-   execution-graph  ; Cached graph data (performance optimization)
-   base-fns         ; Registry of base function implementations
-   max-depth        ; Maximum recursion depth
-   timeout-ms       ; Maximum execution time
-   start-time       ; Execution start time
-   depth            ; Current recursion depth
-   path-args        ; Runtime args: {arg-schema-id -> value} for root,
-                    ;               {[fn-result-value-id arg-schema-id] -> value} for nested
-   current-frv-id   ; Current fn-result-value-id (nil for root function)
-   result-cache])   ; Atom: {fn-result-value-id -> computed-result}
+  [storage           ; Storage instance for graph resolution
+   execution-graph   ; Cached graph data (resolved once at top level)
+   base-fns          ; Registry of base function implementations
+   max-depth         ; Maximum recursion depth (default: 1000)
+   timeout-ms        ; Maximum execution time (default: 30000ms)
+   start-time        ; Execution start time
+   depth             ; Current recursion depth
+   path-args         ; Runtime args: {arg-schema-id -> value} for root,
+                     ;               {[fn-result-value-id arg-schema-id] -> value} for nested
+   current-frv-id    ; Current fn-result-value-id (nil for root function)
+   result-cache      ; Atom: {fn-result-value-id -> computed-result}
+   strict-type-validation?  ; If true (default), throw on unknown types
+   max-unknown-types ; Circuit breaker for forward compat mode (default: 10)
+   unknown-type-counter     ; Atom: count of unknown types encountered
+   clock             ; Function returning current time (for testing)
+   cache-warning-threshold  ; Warn when cache reaches this size (default: 1000)
+   cache-max-size])  ; Hard limit on cache size (default: 10000)
 ```
 
 **Key design decisions:**
-1. **`execution-graph` caching** - Graph resolved once at top level, reused for all nested calls
-2. **`base-fns` registry** - Direct access to implementations without global state
-3. **`storage` reference** - Enables `ExecutionGraph` protocol calls if needed
-4. **`result-cache`** - Shared cache for `fn-result-value` computations within execution
-5. **`path-args`** - Runtime values for free arguments, keyed by arg-schema-id or [frv-id arg-schema-id]
-6. **`current-frv-id`** - Tracks which fn-result-value is being evaluated (for path-args lookup)
+1. **`execution-graph` caching** — Graph resolved once at top level, reused for all nested calls
+2. **`base-fns` registry** — Direct access to implementations without global state
+3. **`storage` reference** — Enables `ExecutionGraph` protocol calls if needed
+4. **`result-cache`** — Shared cache for `fn-result-value` computations within execution
+5. **`path-args`** — Runtime values for free arguments, keyed by arg-schema-id or [frv-id arg-schema-id]
+6. **`current-frv-id`** — Tracks which fn-result-value is being evaluated (for path-args lookup)
+7. **`clock`** — Injectable time source for deterministic timeout testing
+8. **Forward compatibility** — `strict-type-validation?` + circuit breaker for schema migrations
 
 ### Limit Checking
 
 ```clojure
 (defn- check-limits! [context]
-  (when (> (:depth context) (:max-depth context))
-    (throw (ex-info "Max recursion depth exceeded"
-                    {:type :execution-error/max-depth-exceeded
-                     :depth (:depth context)
-                     :max-depth (:max-depth context)})))
-  (let [elapsed (- (System/currentTimeMillis) (:start-time context))]
-    (when (> elapsed (:timeout-ms context))
-      (throw (ex-info "Execution timeout"
-                      {:type :execution-error/timeout
-                       :elapsed-ms elapsed
-                       :timeout-ms (:timeout-ms context)})))))
+  (check-depth-limit! context)   ; throws :execution-error/max-depth-exceeded
+  (check-timeout-limit! context)) ; throws :execution-error/timeout
 ```
+
+**Important**: Timeout is checked at the START of each function call, not during execution. A long-running base function will complete fully even if it exceeds the timeout. For precise timeout control, base functions should implement their own timeout logic.
+
+### Lazy Sequence Protection
+
+**File:** `components/executor/src/graphden/executor/argument_resolution.clj`
+
+Lazy sequences are a potential DoS vector — an attacker could pass `(range)` (infinite sequence) as an argument. The executor protects against this:
+
+```clojure
+;; Configuration (in storage-protocol/config.clj)
+(def ^:dynamic *max-lazy-seq-size* 100000)        ; max elements
+(def ^:dynamic *max-nested-collection-depth* 100) ; max nesting
+
+;; Lazy sequences are realized with bounds when creating delays
+(realize-lazy-value value)
+;; - Lazy seqs → vectors (with size limit)
+;; - Nested maps → recursively realized (with depth limit)
+;; - Throws :execution-error/lazy-seq-too-large or :collection-too-deep
+```
+
+This ensures errors occur at argument evaluation time, not during consumption by base functions.
 
 ### Addressing Free Arguments (path-args)
 

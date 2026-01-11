@@ -5,7 +5,9 @@
    - Canonical storage error types
    - Extensible error registry with metadata
    - Error context helpers
-   - Sensitive data redaction utilities")
+   - Sensitive data redaction utilities"
+  (:require
+    [clojure.string :as str]))
 
 
 ;; === Storage Error Classification ===
@@ -509,6 +511,51 @@
           (some #(re-find % name-str) patterns)
           ;; Finally check custom predicates
           (some #(% kw) predicates))))))
+
+
+;; === Critical sensitive field patterns ===
+;; These are the minimum patterns that MUST be covered for security.
+
+(def critical-sensitive-patterns
+  "Critical patterns that must be matched for security.
+   Used by validate-sensitive-field-coverage! to ensure minimum protection."
+  #{:password :secret :token :api-key :credentials :auth-token :private-key})
+
+
+(defn validate-sensitive-field-coverage!
+  "Validates that all critical sensitive patterns are properly matched.
+   Throws if any critical pattern would not be detected as sensitive.
+
+   Use this at application startup to verify security configuration.
+
+   Returns nil on success, throws on failure."
+  []
+  (let [unmatched (remove sensitive-field? critical-sensitive-patterns)]
+    (when (seq unmatched)
+      (throw (ex-info "Critical sensitive patterns not covered by registry"
+                      {:type :security-error/incomplete-sensitive-field-coverage
+                       :unmatched-patterns (set unmatched)
+                       :hint "Ensure default sensitive field patterns are registered"})))))
+
+
+(defn warn-on-suspicious-field
+  "Logs a warning if a field name looks sensitive but isn't registered.
+   Call this when logging/displaying data to catch potential misses.
+
+   Returns true if field looks suspicious but not registered."
+  [field-name]
+  (when field-name
+    (let [name-str (name (if (keyword? field-name) field-name (keyword field-name)))
+          ;; Check for common sensitive-looking substrings not in registry
+          suspicious-substrings ["key" "pwd" "pass" "cred" "secret" "token" "auth"]
+          looks-suspicious? (some #(str/includes? (str/lower-case name-str) %)
+                                  suspicious-substrings)]
+      (when (and looks-suspicious? (not (sensitive-field? field-name)))
+        ;; Log warning (lazy require to avoid circular deps)
+        (require 'clojure.tools.logging)
+        ((resolve 'clojure.tools.logging/warn)
+         "Potentially sensitive field not in registry:" field-name)
+        true))))
 
 
 (defn redact-sensitive-map

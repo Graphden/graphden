@@ -316,9 +316,9 @@
                        :fn-name fn-name
                        :registry-size (count registry)})))
     (let [new-context (update context :depth inc)
-          ;; Pass execute functions to argument resolution for recursive execution
+          ;; Pass execute-fn-result-value for resolving fn-result-value references
           arg-delays (arg-res/build-arg-delays new-context fn-data provided-args
-                                               execute-fn-result-value execute-internal)]
+                                               execute-fn-result-value)]
       (base-fn arg-delays new-context))))
 
 

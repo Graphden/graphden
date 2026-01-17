@@ -494,7 +494,7 @@
 
       ;; Create
       (let [result (sp/create-entity wrapped :fn-result-value
-                                     {:id frv-id :fn-id fn-id :value "result"})]
+                                     {:id frv-id :fn-id fn-id :value "result" :name "test-frv"})]
         (is (= frv-id (:id result))))
 
       ;; Delete
@@ -633,7 +633,7 @@
           wrapped (cached/wrap-with-cache storage (create-mock-cache))
           frv-id (random-uuid)]
       ;; Create fn-result-value
-      (sp/create-entity storage :fn-result-value {:id frv-id :fn-id (random-uuid) :value "test"})
+      (sp/create-entity storage :fn-result-value {:id frv-id :fn-id (random-uuid) :value "test" :name "test-frv"})
       ;; Update - should not throw (default case)
       (let [result (sp/update-entity wrapped :fn-result-value frv-id {:value "updated"})]
         (is (= "updated" (:value result)))))))
@@ -721,7 +721,7 @@
       (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
       ;; Create fn-result-value - should not throw and not invalidate cache
       (let [frv (sp/create-entity wrapped :fn-result-value
-                                  {:fn-id fn-id :value "result"})]
+                                  {:fn-id fn-id :value "result" :name "test-frv"})]
         (is (some? frv))
         (is (= "result" (:value frv)))))))
 
@@ -735,7 +735,7 @@
           frv-id (random-uuid)]
       (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
       (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
-      (sp/create-entity storage :fn-result-value {:id frv-id :fn-id fn-id :value "result"})
+      (sp/create-entity storage :fn-result-value {:id frv-id :fn-id fn-id :value "result" :name "test-frv"})
       ;; Delete fn-result-value - should not throw
       (is (sp/delete-entity wrapped :fn-result-value frv-id)))))
 

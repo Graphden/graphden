@@ -4,8 +4,25 @@
    Provides a router that creates Ring handlers from route definitions."
   (:require
     [clojure.string :as str]
+    [clojure.walk :as walk]
     [graphden.fn-registry.macros :refer [defbase]]
     [reitit.core :as r]))
+
+
+(defn- keywordize-map-keys
+  "Recursively converts string map keys to keywords.
+   This allows routes to be built with string keys (to avoid fn-defs
+   resolving keywords as fn refs) and still work with reitit."
+  [m]
+  (walk/postwalk
+    (fn [x]
+      (if (map? x)
+        (into {}
+              (map (fn [[k v]]
+                     [(if (string? k) (keyword k) k) v])
+                   x))
+        x))
+    m))
 
 
 (defbase router
@@ -27,7 +44,9 @@
    3. Returns 404 if no match"
   {:args {:routes :jsonb}
    :return-type :fn}
-  (let [compiled-router (r/router routes)]
+  (let [;; Convert string keys to keywords (fn-defs uses strings for literal keys)
+        normalized-routes (keywordize-map-keys routes)
+        compiled-router (r/router normalized-routes)]
     (fn [request]
       (if-let [match (r/match-by-path compiled-router (:uri request))]
         (let [method (if (keyword? (:method request))

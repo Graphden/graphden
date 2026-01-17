@@ -18,6 +18,21 @@
   (gsm/create-storage))
 
 
+(defn create-fn-result-value!
+  "Creates a fn-result-value entity pointing to a fn.
+   Returns the fn-result-value id (for use as arg-value :value).
+
+   Use this when you want the referenced fn to be EXECUTED and its
+   result used as the argument value. If you want to pass the fn
+   itself (e.g., for HOF), use the fn-id directly.
+
+   Optional second arg is the result-name for deduplication (defaults to random UUID string)."
+  ([storage fn-id]
+   (create-fn-result-value! storage fn-id (str (random-uuid))))
+  ([storage fn-id result-name]
+   (:id (sp/create-entity storage :fn-result-value {:fn-id fn-id :name result-name}))))
+
+
 (defn setup-add-function!
   "Sets up an 'add' function that adds two numbers.
    Returns {:fn-schema fn-schema :arg-a arg-schema-a :arg-b arg-schema-b :fn fn-rec}"
@@ -179,15 +194,16 @@
                                :value 5})
           ;; Create add fn-schema
           {:keys [fn-rec arg-a arg-b]} (setup-add-function! storage)
-          ;; Set arg-values to reference const functions
+          ;; Set arg-values to reference const functions via fn-result-value
+          ;; (fn-result-value means: execute the fn and use its result)
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-rec)
                                :arg-schema-id (:id arg-a)
-                               :value (:id const-3)})  ; Reference to const-3
+                               :value (create-fn-result-value! storage (:id const-3))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-rec)
                                :arg-schema-id (:id arg-b)
-                               :value (:id const-5)})  ; Reference to const-5
+                               :value (create-fn-result-value! storage (:id const-5))})
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id fn-rec) {})]
       (is (= 8 result))
@@ -215,15 +231,15 @@
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
-          ;; fn-a -> fn-b -> fn-c -> literal
+          ;; fn-a -> fn-b -> fn-c -> literal (via fn-result-value to trigger execution)
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-a)
                                :arg-schema-id (:id id-arg)
-                               :value (:id fn-b)})
+                               :value (create-fn-result-value! storage (:id fn-b))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-b)
                                :arg-schema-id (:id id-arg)
-                               :value (:id fn-c)})
+                               :value (create-fn-result-value! storage (:id fn-c))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-c)
                                :arg-schema-id (:id id-arg)
@@ -308,11 +324,11 @@
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-a)
                                :arg-schema-id (:id slow-arg)
-                               :value (:id fn-b)})
+                               :value (create-fn-result-value! storage (:id fn-b))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-b)
                                :arg-schema-id (:id slow-arg)
-                               :value (:id fn-c)})
+                               :value (create-fn-result-value! storage (:id fn-c))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-c)
                                :arg-schema-id (:id slow-arg)
@@ -474,7 +490,7 @@
 
 
 (deftest fn-not-found-in-graph-test
-  (testing "throws when fn reference points to non-existent fn during execution"
+  (testing "throws when fn-result-value references non-existent fn during execution"
     (let [storage (create-test-storage)
           ;; Register identity function that forces its arg
           _ (exec/register-base-fn!
@@ -488,21 +504,24 @@
           id-arg (sp/create-entity storage :arg-schema
                                    {:fn-schema-id (:id id-schema)
                                     :name "x"
-                                    :type :int  ; NOT :fn, so will try to execute the ref
+                                    :type :int
                                     :required true})
           ;; Create identity fn instance
           id-fn (sp/create-entity storage :fn
                                   {:name "my-identity"
                                    :fn-schema-id (:id id-schema)})
-          ;; Create arg-value with UUID that doesn't exist as a fn
+          ;; Create fn-result-value pointing to non-existent fn
           non-existent-fn-id (random-uuid)
+          bad-frv (sp/create-entity storage :fn-result-value
+                                    {:fn-id non-existent-fn-id
+                                     :name "bad-frv"})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id id-fn)
                                :arg-schema-id (:id id-arg)
-                               :value non-existent-fn-id})
+                               :value (:id bad-frv)})
           ctx (exec/create-context {:storage storage})]
-      ;; When we execute, it will try to force the arg, which creates a FnRefThunk
-      ;; The FnRefThunk will try to execute the non-existent fn, which should throw
+      ;; When we execute, it will try to resolve the fn-result-value which points
+      ;; to a non-existent fn - should throw
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found in execution graph"
             (exec/execute ctx (:id id-fn) {})))
       (sp/close storage))))
@@ -1357,15 +1376,15 @@
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
-          ;; fn-a -> fn-b -> fn-c -> literal
+          ;; fn-a -> fn-b -> fn-c -> literal (via fn-result-value to trigger execution)
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-a)
                                :arg-schema-id (:id id-arg)
-                               :value (:id fn-b)})
+                               :value (create-fn-result-value! storage (:id fn-b))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-b)
                                :arg-schema-id (:id id-arg)
-                               :value (:id fn-c)})
+                               :value (create-fn-result-value! storage (:id fn-c))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-c)
                                :arg-schema-id (:id id-arg)
@@ -1396,11 +1415,11 @@
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-a)
                                :arg-schema-id (:id id-arg)
-                               :value (:id fn-b)})
+                               :value (create-fn-result-value! storage (:id fn-b))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-b)
                                :arg-schema-id (:id id-arg)
-                               :value (:id fn-c)})
+                               :value (create-fn-result-value! storage (:id fn-c))})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id fn-c)
                                :arg-schema-id (:id id-arg)
@@ -1855,7 +1874,8 @@
                                       :fn-schema-id (:id id-schema)})
           ;; Create fn-result-value for inner
           inner-frv (sp/create-entity storage :fn-result-value
-                                      {:fn-id (:id inner-fn)})
+                                      {:fn-id (:id inner-fn)
+                                       :name "inner-frv"})
           ;; outer's x -> fn-result-value (which points to inner)
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id outer-fn)
@@ -1908,9 +1928,11 @@
                                    :fn-schema-id (:id id-schema)})
           ;; Create TWO fn-result-values for same id-fn (different computations)
           frv-a (sp/create-entity storage :fn-result-value
-                                  {:fn-id (:id id-fn)})
+                                  {:fn-id (:id id-fn)
+                                   :name "frv-a"})
           frv-b (sp/create-entity storage :fn-result-value
-                                  {:fn-id (:id id-fn)})
+                                  {:fn-id (:id id-fn)
+                                   :name "frv-b"})
           ;; Create add function instance
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
@@ -2050,7 +2072,8 @@
                                         :fn-schema-id (:id counter-schema)})
           ;; Create fn-result-value for counter-fn
           counter-result (sp/create-entity storage :fn-result-value
-                                           {:fn-id (:id counter-fn)})
+                                           {:fn-id (:id counter-fn)
+                                            :name "counter-result"})
           ;; Create add fn-schema that takes two int args
           _ (exec/register-base-fn!
               :add
@@ -2107,9 +2130,11 @@
                                     :fn-schema-id (:id inc-schema)})
           ;; Create TWO different fn-result-values for the same fn
           result-1 (sp/create-entity storage :fn-result-value
-                                     {:fn-id (:id inc-fn)})
+                                     {:fn-id (:id inc-fn)
+                                      :name "result-1"})
           result-2 (sp/create-entity storage :fn-result-value
-                                     {:fn-id (:id inc-fn)})
+                                     {:fn-id (:id inc-fn)
+                                      :name "result-2"})
           ;; Create add fn that uses result-1 and result-2
           _ (exec/register-base-fn!
               :add
@@ -2148,7 +2173,7 @@
       (is (= 3 result))
       (sp/close storage)))
 
-  (testing "fn-result-value vs direct fn reference"
+  (testing "fn-result-value executes fn, direct fn reference passes fn-id"
     (let [storage (create-test-storage)
           call-count (atom 0)
           ;; Register a function that tracks calls
@@ -2163,9 +2188,13 @@
           counter-fn (sp/create-entity storage :fn
                                        {:name "counter-fn"
                                         :fn-schema-id (:id counter-schema)})
-          ;; Create fn-result-value
-          counter-result (sp/create-entity storage :fn-result-value
-                                           {:fn-id (:id counter-fn)})
+          ;; Create TWO fn-result-values pointing to same fn
+          counter-result-1 (sp/create-entity storage :fn-result-value
+                                             {:fn-id (:id counter-fn)
+                                              :name "counter-result-1"})
+          counter-result-2 (sp/create-entity storage :fn-result-value
+                                             {:fn-id (:id counter-fn)
+                                              :name "counter-result-2"})
           ;; Create add fn
           _ (exec/register-base-fn!
               :add
@@ -2187,22 +2216,20 @@
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
-          ;; a -> fn-result-value (cached)
-          ;; b -> direct fn reference (not cached)
+          ;; a -> fn-result-value-1 (executes counter)
+          ;; b -> fn-result-value-2 (executes counter again - different frv)
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id add-fn)
                                :arg-schema-id (:id add-arg-a)
-                               :value (:id counter-result)})
+                               :value (:id counter-result-1)})
           _ (sp/create-entity storage :arg-value
                               {:owner-fn-id (:id add-fn)
                                :arg-schema-id (:id add-arg-b)
-                               :value (:id counter-fn)})
+                               :value (:id counter-result-2)})
           ctx (exec/create-context {:storage storage})]
       (exec/execute ctx (:id add-fn) nil)
-      ;; counter should be called TWICE:
-      ;; - once for fn-result-value (cached)
-      ;; - once for direct fn reference (not cached)
-      (is (= 2 @call-count) "Direct fn ref and fn-result-value should execute separately")
+      ;; counter should be called TWICE - once for each fn-result-value
+      (is (= 2 @call-count) "Different fn-result-values should each execute the fn")
       (sp/close storage))))
 
 

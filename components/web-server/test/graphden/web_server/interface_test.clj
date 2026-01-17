@@ -5,33 +5,39 @@
 
 
 (deftest fn-defs-test
-  (testing "fn-defs is a vector of 4 definitions"
+  (testing "fn-defs contains all expected definitions"
     (is (vector? web-server/fn-defs))
-    (is (= 4 (count web-server/fn-defs)))
-    (is (= #{:hello-handler-fn :health-handler-fn :router-fn :web-server-fn}
-           (set (map :name web-server/fn-defs)))))
+    ;; 14 fns: handlers, route maps, route tuples, routes collection, router, server
+    (is (= 14 (count web-server/fn-defs)))
+    (let [names (set (map :name web-server/fn-defs))]
+      ;; Core fns
+      (is (contains? names :web-server-fn))
+      (is (contains? names :router-fn))
+      (is (contains? names :routes-fn))
+      ;; Handlers
+      (is (contains? names :hello-handler-fn))
+      (is (contains? names :health-handler-fn))
+      ;; Route building fns
+      (is (contains? names :hello-route-fn))
+      (is (contains? names :health-route-fn))))
 
   (testing "web-server-fn has correct parent and args"
     (let [ws-def (first (filter #(= :web-server-fn (:name %)) web-server/fn-defs))]
       (is (= :http-server (:parent ws-def)))
-      (is (= :router-fn (get-in ws-def [:args :handler])))
+      ;; handler uses :router-fn> (execute router and use result as handler)
+      (is (= :router-fn> (get-in ws-def [:args :handler])))
       (is (= 8080 (get-in ws-def [:args :port])))))
 
-  (testing "router-fn uses router with inline handlers"
-    (let [router-def (first (filter #(= :router-fn (:name %)) web-server/fn-defs))
-          routes (get-in router-def [:args :routes])]
+  (testing "router-fn references routes-fn (via fn-result-value)"
+    (let [router-def (first (filter #(= :router-fn (:name %)) web-server/fn-defs))]
       (is (= :router (:parent router-def)))
-      (is (vector? routes))
-      (is (= 2 (count routes)))
-      ;; Handlers are inline in routes
-      (is (= :hello-handler-fn (get-in routes [0 1 :get :handler])))
-      (is (= :health-handler-fn (get-in routes [1 1 :get :handler])))))
+      (is (= :routes-fn> (get-in router-def [:args :routes])))))
 
-  (testing "handlers use constantly base-fn"
+  (testing "handlers use const base-fn"
     (let [hello-def (first (filter #(= :hello-handler-fn (:name %)) web-server/fn-defs))
           health-def (first (filter #(= :health-handler-fn (:name %)) web-server/fn-defs))]
-      (is (= :constantly (:parent hello-def)))
-      (is (= :constantly (:parent health-def)))
+      (is (= :const (:parent hello-def)))
+      (is (= :const (:parent health-def)))
       (is (= 200 (get-in hello-def [:args :x :status])))
       (is (= 200 (get-in health-def [:args :x :status]))))))
 

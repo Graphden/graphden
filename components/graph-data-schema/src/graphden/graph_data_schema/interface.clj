@@ -134,6 +134,10 @@
   #uuid "e5a9b3c2-8d4f-5e0a-b6c7-9f2d3e4a5b6c")
 
 
+(def ^:private fn-result-value-name-field-uuid
+  #uuid "da238d29-4cd4-4077-9a75-3ad3436b7466")
+
+
 (defn- value-kind-enum-values
   "Generates enum values for :value-kind.
    Includes :null (void), :any, :fn plus all supported field types."
@@ -208,9 +212,13 @@
 
       ;; fn_result_value: represents a cached computation result of a function
       ;; Multiple arg-values can reference the same fn-result-value to reuse computed value
+      ;; name: unique identifier for caching (same name = same cached result)
       (ds/add-entity :fn-result-value fn-result-value-entity-uuid
                      {:fn-id {:uuid fn-result-value-fn-id-field-uuid
-                              :type :ref :ref-entity :fn}})
+                              :type :ref :ref-entity :fn}
+                      :name {:uuid fn-result-value-name-field-uuid
+                             :type :text}})
+      (ds/add-constraint :fn-result-value {:type :unique :fields [:name]})
 
       ;; arg_value: argument values for function instances
       ;; value is a union: ref to fn (HOF), ref to fn-result-value (computed), or literal

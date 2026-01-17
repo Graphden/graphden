@@ -18,6 +18,24 @@
             :port 8080}}]              ; literal value
    ```
 
+   ## Arg Value Syntax
+
+   - `:fn-name` - ref<fn>: pass fn as callable (for HOF, won't execute)
+   - `:fn-name>` - ref<fn-result-value>: execute fn and use result
+   - `:fn-name>result-name` - ref<fn-result-value> with explicit name
+
+   Example:
+   ```clojure
+   {:name :hello-handler-map
+    :parent :assoc
+    :args {:m {}
+           :k \"handler\"
+           :v :hello-handler>}}  ; executes hello-handler, uses result
+   ```
+
+   Multiple references to `:fn-name>` create one fn-result-value (same name).
+   Use `:fn-name>name1`, `:fn-name>name2` for different fn-result-values.
+
    ## Name Resolution
 
    Names in :parent and :args are resolved in this order:
@@ -38,6 +56,43 @@
     [clojure.string :as str]
     [graphden.fn-registry.interface :as registry]
     [graphden.storage-protocol.interface :as sp]))
+
+
+;; === Arg Value Parsing ===
+
+(defn- parse-fn-result-ref
+  "Parses a keyword that might be a fn-result-value reference.
+   :fn-name> means execute fn-name, result name defaults to fn-name
+   :fn-name>result-name means execute fn-name, result name is result-name
+   Returns [fn-name result-name] or nil if not a fn-result-value ref."
+  [kw]
+  (when (keyword? kw)
+    (let [kw-name (name kw)
+          kw-ns (namespace kw)]
+      (when (str/includes? kw-name ">")
+        (let [parts (str/split kw-name #">" 2)
+              fn-name (first parts)
+              result-name (second parts)]
+          (when (seq fn-name)
+            ;; Reconstruct keyword with namespace if present
+            (let [fn-kw (if kw-ns (keyword kw-ns fn-name) (keyword fn-name))
+                  ;; If result-name is empty (just ":fn>"), use fn-name as default
+                  result-kw (if (or (nil? result-name) (str/blank? result-name))
+                              fn-kw
+                              (if kw-ns (keyword kw-ns result-name) (keyword result-name)))]
+              [fn-kw result-kw])))))))
+
+
+(defn- extract-fn-ref
+  "Extracts the fn name from an arg value.
+   Returns [fn-name :fn nil] for keyword refs (pass as callable).
+   Returns [fn-name :fn-result-value result-name] for :fn-name> refs (execute and use result).
+   Returns nil for literal values."
+  [arg-value]
+  (when (keyword? arg-value)
+    (if-let [[fn-name result-name] (parse-fn-result-ref arg-value)]
+      [fn-name :fn-result-value result-name]
+      [arg-value :fn nil])))
 
 
 ;; === Name Resolution ===
@@ -89,11 +144,13 @@
 
 (defn- extract-dependencies
   "Extracts fn names that this fn-def depends on (from args).
+   Handles both :fn-name and :fn-name> syntax.
    Returns set of keywords."
   [fn-def fn-names-in-set]
   (let [arg-values (vals (:args fn-def {}))]
     (->> arg-values
-         (filter keyword?)
+         (keep extract-fn-ref)
+         (map first)
          (filter fn-names-in-set)
          set)))
 
@@ -212,16 +269,46 @@
 
 (defn- create-arg-values!
   "Creates arg-value entities for a fn.
-   Resolves references to other fns."
-  [storage fn-entity fn-def created-fns]
+   Resolves references to other fns.
+
+   For :fn-name> syntax:
+   1. Looks up or creates fn-result-value entity by name
+   2. Uses fn-result-value id as the arg-value (executor will execute it)
+
+   The created-fn-result-values atom tracks fn-result-values created
+   in this sync batch, keyed by their name (keyword)."
+  [storage fn-entity fn-def created-fns created-fn-result-values]
   (let [{:keys [parent args]} fn-def
         owner-fn-id (:id fn-entity)]
     (doseq [[arg-name arg-value] args]
       (let [arg-schema-id (resolve-arg-schema-id parent arg-name)
-            ;; Resolve value: keyword = fn ref, else = literal
-            resolved-value (if (keyword? arg-value)
-                             (resolve-fn-id storage created-fns arg-value)
-                             arg-value)]
+            ;; Parse the arg value
+            ref-info (extract-fn-ref arg-value)
+            resolved-value
+            (cond
+              ;; :fn-name> or :fn-name>result-name - get or create fn-result-value
+              (and ref-info (= :fn-result-value (second ref-info)))
+              (let [fn-name (first ref-info)
+                    result-name (nth ref-info 2)
+                    result-name-str (name result-name)]
+                ;; Check if fn-result-value with this name already exists
+                (if-let [existing-frv-id (get @created-fn-result-values result-name)]
+                  existing-frv-id
+                  ;; Create new fn-result-value
+                  (let [fn-id (resolve-fn-id storage created-fns fn-name)
+                        frv (sp/create-entity storage :fn-result-value
+                                              {:fn-id fn-id
+                                               :name result-name-str})]
+                    (swap! created-fn-result-values assoc result-name (:id frv))
+                    (:id frv))))
+
+              ;; :fn-name - resolve to fn id (pass as callable)
+              (and ref-info (= :fn (second ref-info)))
+              (resolve-fn-id storage created-fns (first ref-info))
+
+              ;; literal value
+              :else
+              arg-value)]
         (sp/create-entity storage :arg-value
                           {:owner-fn-id owner-fn-id
                            :arg-schema-id arg-schema-id
@@ -240,7 +327,7 @@
    2. Topologically sorts by dependencies
    3. Warns if original order was wrong
    4. Creates all fn entities
-   5. Creates all arg-value entities
+   5. Creates all arg-value entities (with fn-result-value deduplication by name)
 
    Returns map of {fn-name -> fn-id} for created fns.
 
@@ -255,7 +342,9 @@
       ;; 1. Validate
       (validate-all-defs! fn-defs)
       ;; 2. Topological sort
-      (let [sorted-defs (topological-sort fn-defs)]
+      (let [sorted-defs (topological-sort fn-defs)
+            ;; Track fn-result-values created during sync for deduplication
+            created-fn-result-values (atom {})]
         ;; 3. Warn if order was wrong
         (check-order-and-warn fn-defs sorted-defs)
         ;; 4. Create fns in sorted order, tracking created ids
@@ -267,5 +356,5 @@
                   fn-entity (create-fn-entity! storage fn-def)
                   new-created (assoc created-fns (:name fn-def) (:id fn-entity))]
               ;; 5. Create arg-values for this fn
-              (create-arg-values! storage fn-entity fn-def new-created)
+              (create-arg-values! storage fn-entity fn-def new-created created-fn-result-values)
               (recur (rest remaining) new-created))))))))

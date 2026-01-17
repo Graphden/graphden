@@ -16,7 +16,7 @@
       (is (map? http-server-def))
       (is (contains? (:args http-server-def) :handler))
       (is (contains? (:args http-server-def) :port))
-      (is (= :fn (:handler (:args http-server-def))))
+      (is (= :any (:handler (:args http-server-def))))
       (is (= :int (:port (:args http-server-def))))
       (is (= :any (:return-type http-server-def)))
       (is (fn? (:impl http-server-def)))))

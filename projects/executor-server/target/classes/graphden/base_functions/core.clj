@@ -38,7 +38,6 @@
     [graphden.base-functions.strings :as strings]))
 
 
-;; Re-export individual def maps for consumers who want subsets
 (def arithmetic-defs arithmetic/arithmetic-defs)
 (def comparison-defs arithmetic/comparison-defs)
 (def logic-defs logic/logic-defs)
@@ -48,13 +47,20 @@
 (def hof-defs hof/hof-defs)
 
 
-;; All definitions merged
-(def all-defs
-  "All base function definitions as a map of {fn-name -> fn-def}."
-  (merge arithmetic-defs
-         comparison-defs
-         logic-defs
-         conditional-defs
-         string-defs
-         collection-defs
-         hof-defs))
+;; === Introspection ===
+
+(defonce ^:private all-defs-cache
+  (delay (merge arithmetic-defs
+                comparison-defs
+                logic-defs
+                conditional-defs
+                string-defs
+                collection-defs
+                hof-defs)))
+
+
+(defn get-all-defs
+  "Returns all base function definitions with metadata.
+   Result is cached on first call."
+  []
+  @all-defs-cache)

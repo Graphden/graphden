@@ -33,19 +33,11 @@
     [graphden.base-functions.core :as core]))
 
 
-;; All definitions as a simple map
-(def all-defs
-  "All base function definitions as a map of {fn-name -> fn-def}.
-   Each entry is {:args {...} :return-type :type :impl fn}.
+(defn get-all-defs
+  "Returns all base function definitions with metadata.
+   Each entry is {fn-name {:args {...} :return-type :type :impl fn}}.
 
    Use fn-registry/register-base-fns! to register these functions.
    Use fn-registry/sync-defs-to-storage! to sync to storage."
-  core/all-defs)
-
-
-;; For backwards compatibility
-(defn get-all-defs
-  "Returns all base function definitions.
-   Deprecated: use `all-defs` directly."
   []
-  all-defs)
+  (core/get-all-defs))

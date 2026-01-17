@@ -3,6 +3,9 @@
  [{:id :unit,
    :test-paths
    ["components/base-functions/test"
+    "components/http-kit-fns/test"
+    "components/reitit-fns/test"
+    "components/web-server/test"
     "components/cache-data-schema/test"
     "components/cache-datomic/test"
     "components/cache-memory/test"

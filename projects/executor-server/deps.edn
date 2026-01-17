@@ -1,0 +1,24 @@
+{:paths ["../../bases/executor-runtime/src"
+         "../../bases/executor-runtime/resources"
+         "../../components/base-functions/src"
+         "../../components/executor/src"
+         "../../components/fn-registry/src"
+         "../../components/http-kit-fns/src"
+         "../../components/reitit-fns/src"
+         "../../components/web-server/src"
+         "../../components/graph-storage-memory/src"
+         "../../components/graph-data-schema/src"
+         "../../components/malli-data-schema/src"
+         "../../components/memory-storage/src"
+         "../../components/data-schema-protocol/src"
+         "../../components/storage-protocol/src"
+         "../../components/field-types/src"]
+ :deps {org.clojure/clojure {:mvn/version "1.12.4"}
+        http-kit/http-kit {:mvn/version "2.8.0"}
+        metosin/reitit {:mvn/version "0.7.2"}
+        metosin/malli {:mvn/version "0.20.0"}
+        org.clojure/tools.logging {:mvn/version "1.3.1"}
+        ch.qos.logback/logback-classic {:mvn/version "1.5.24"}}
+ :aliases {:run {:main-opts ["-m" "graphden.executor-runtime.core"]}
+           :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
+                   :ns-default build}}}

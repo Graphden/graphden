@@ -23,6 +23,43 @@ Graphden is an experimental platform where:
 
 See [Architecture](docs/ARCHITECTURE.md) for detailed design decisions and technical documentation.
 
+## Example: Building a Web Server from fn-defs
+
+Graphden separates **base functions** (Clojure implementations) from **fn entities** (pure data compositions):
+
+```clojure
+;; fn-defs are pure data — no Clojure code
+(def fn-defs
+  [;; Create constant handler: (fn [_] response)
+   {:name :hello-handler-fn
+    :parent :const
+    :args {:x {:status 200 :body "Hello from Graphden!"}}}
+
+   ;; Build route map: {"handler" <fn>}
+   ;; Note: :hello-handler-fn> means "execute and use result"
+   {:name :hello-route-data-fn
+    :parent :assoc
+    :args {:m {}, :k "handler", :v :hello-handler-fn>}}
+
+   ;; Create router from routes
+   {:name :router-fn
+    :parent :router
+    :args {:routes [["/" {:get :hello-route-data-fn>}]]}}
+
+   ;; Start HTTP server
+   ;; :router-fn> executes router, passes resulting Ring handler
+   {:name :web-server-fn
+    :parent :http-server
+    :args {:handler :router-fn>
+           :port 8080}}])
+
+;; Reference syntax:
+;; :fn-name  = pass fn-id (for HOF like map/filter)
+;; :fn-name> = execute fn and use result
+```
+
+The executor resolves this graph and starts a working HTTP server.
+
 ## Quick Start
 
 ### Requirements

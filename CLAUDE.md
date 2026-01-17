@@ -76,7 +76,128 @@ This is a Polylith monorepo. Top namespace: `graphden`. Each component has an `i
 - `arg-value` — bound argument value (literal or reference to another fn)
 - `fn-result-value` — cached computation reference (memoization within execution)
 
-### Executor Model
+## Function Composition Model
+
+### Two Layers: Base Functions vs Fn Entities
+
+**Base functions** (`base-functions`, `http-kit-fns`, `reitit-fns`):
+- Clojure implementations wrapping pure functions
+- Defined with `defbase` macro
+- Registered in storage as `fn-schema` with `base-fn-name`
+- Examples: `add`, `const`, `assoc`, `conj`, `map-fn`, `router`, `http-server`
+
+**Fn entities** (`fn-defs`):
+- Compositions of base functions stored in DB
+- Define concrete values and wiring between functions
+- No Clojure code — pure data structures
+- Example: `web-server/fn-defs` builds HTTP server from base-fns
+
+### Fn-def Syntax
+
+Fn-defs are vectors of maps describing function compositions:
+
+```clojure
+{:name :my-fn           ; unique function name (keyword)
+ :parent :base-fn-name  ; base function or another fn to inherit from
+ :args {:arg1 value     ; argument values
+        :arg2 :other-fn>}}  ; reference with > suffix
+```
+
+### Argument Value Reference Syntax
+
+When referencing other functions in args:
+
+| Syntax | Meaning | When to use |
+|--------|---------|-------------|
+| `:fn-name` | Pass fn-id (UUID) without executing | HOF (map, filter, reduce) |
+| `:fn-name>` | Execute fn and use result | When you need the computed value |
+
+**Examples:**
+
+```clojure
+;; const returns a function, we need that function as value
+{:name :handler-map-fn
+ :parent :assoc
+ :args {:m {}, :k "handler", :v :my-handler-fn>}}  ; > = execute const, get fn
+
+;; router returns Ring handler fn, http-server needs that fn
+{:name :web-server-fn
+ :parent :http-server
+ :args {:handler :router-fn>   ; > = execute router, get Ring handler
+        :port 8080}}
+
+;; map-fn needs fn-id to call for each element (HOF pattern)
+{:name :double-all-fn
+ :parent :map-fn
+ :args {:f :double-fn    ; NO > = pass fn-id, don't execute
+        :coll [1 2 3]}}
+```
+
+### Base Function Arg Types
+
+In `defbase`, arg types control how values are processed:
+
+| Arg Type | Behavior |
+|----------|----------|
+| `:int`, `:text`, etc. | Normal value, auto-deref from delay |
+| `:fn` | Expects fn-id (UUID), auto-wrapped in `make-single-arg-callable` |
+| `:any` | Accepts any value, no special processing |
+| `:jsonb` | Map or vector |
+
+**Important**: `:fn` type args are auto-wrapped by defbase macro. If your base-fn receives an already-executed Clojure fn (not a fn-id to execute), use `:any` type instead.
+
+### Complete Example: Web Server
+
+```clojure
+;; Base functions used (from different components):
+;; - const: (fn [x] (fn [_] x)) - returns constant function
+;; - assoc: (fn [m k v] (assoc m k v)) - associates key in map
+;; - conj: (fn [coll x] (conj coll x)) - adds to collection
+;; - router: creates Ring router from routes vector
+;; - http-server: starts http-kit server with handler
+
+;; Fn-defs compose these into a web server:
+[{:name :hello-handler-fn
+  :parent :const
+  :args {:x {:status 200 :body "Hello"}}}
+
+ ;; Build route data: {"handler" <fn>}
+ {:name :hello-handler-map-fn
+  :parent :assoc
+  :args {:m {}, :k "handler", :v :hello-handler-fn>}}  ; > executes const
+
+ ;; Build method map: {"get" {"handler" <fn>}}
+ {:name :hello-method-map-fn
+  :parent :assoc
+  :args {:m {}, :k "get", :v :hello-handler-map-fn>}}
+
+ ;; Build route tuple: ["/" {"get" {"handler" <fn>}}]
+ {:name :hello-route-path-fn
+  :parent :conj
+  :args {:coll [], :x "/"}}
+
+ {:name :hello-route-fn
+  :parent :conj
+  :args {:coll :hello-route-path-fn>, :x :hello-method-map-fn>}}
+
+ ;; Collect routes into vector
+ {:name :routes-fn
+  :parent :conj
+  :args {:coll [], :x :hello-route-fn>}}
+
+ ;; Create router from routes
+ {:name :router-fn
+  :parent :router
+  :args {:routes :routes-fn>}}
+
+ ;; Start server with router as handler
+ {:name :web-server-fn
+  :parent :http-server
+  :args {:handler :router-fn>   ; router returns Clojure fn
+         :port 8080}}]
+```
+
+## Executor Model
 
 Arguments are wrapped in `delay` for lazy evaluation. Key patterns:
 - Literal values → immediate
@@ -85,6 +206,23 @@ Arguments are wrapped in `delay` for lazy evaluation. Key patterns:
 - `ref<fn-result-value>` → execute once, cache result
 
 HOF (map, filter, reduce) use single-argument model: the passed function must have exactly one required argument.
+
+## Type System
+
+Types are used for:
+1. **Runtime validation** of user-provided arguments (not stored values)
+2. **Storage mapping** (PostgreSQL JSONB, Datomic EDN string, etc.)
+3. **defbase arg handling** (`:fn` type triggers HOF callable creation)
+
+Supported types: `:int`, `:text`, `:bool`, `:numeric`, `:jsonb`, `:uuid`, `:fn`, `:ref`, `:any`, `:union`
+
+**Storage of arg-value.value (union type):**
+
+| Storage | Format |
+|---------|--------|
+| PostgreSQL | JSONB |
+| Datomic | EDN string (pr-str/edn-read) |
+| Memory | Clojure value as-is |
 
 ## Testing Patterns
 

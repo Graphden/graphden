@@ -1,6 +1,6 @@
 # Graphden: Visual Functional Programming System
 
-> **Last updated:** 2026-01-11
+> **Last updated:** 2026-01-18
 >
 > This document describes the technical architecture of graphden.
 > For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
@@ -672,6 +672,173 @@ fn: map-doubles
 ;; 3. Execute: map calls double-fn with each element
 ;; Result: [2, 4, 6]
 ```
+
+---
+
+## Part 5.5: Function Composition (fn-defs)
+
+### Two-Layer Architecture
+
+Graphden separates function definitions into two layers:
+
+**Layer 1: Base Functions** — Clojure implementations
+
+```clojure
+;; In base-functions, http-kit-fns, reitit-fns components
+(defbase const
+  "Returns a constant function that ignores input and returns x."
+  {:args {:x :any}
+   :return-type :fn}
+  (fn [_] x))
+
+(defbase assoc-fn
+  {:args {:m :jsonb, :k :text, :v :any}
+   :return-type :jsonb}
+  (assoc m k v))
+```
+
+**Layer 2: Fn Entities (fn-defs)** — Pure data compositions
+
+```clojure
+;; In web-server/core.clj - no Clojure code, only data
+[{:name :hello-handler-fn
+  :parent :const
+  :args {:x {:status 200 :body "Hello"}}}
+
+ {:name :web-server-fn
+  :parent :http-server
+  :args {:handler :router-fn>
+         :port 8080}}]
+```
+
+### Fn-def Syntax
+
+Each fn-def is a map with:
+- `:name` — unique keyword identifier
+- `:parent` — base function or another fn-def to inherit from
+- `:args` — argument values (literals or references)
+
+### Reference Syntax: `:fn-name` vs `:fn-name>`
+
+The `>` suffix determines whether to execute the referenced function:
+
+| Syntax | Storage Entity | Execution Behavior |
+|--------|---------------|-------------------|
+| `:fn-name` | `ref<fn>` | Pass fn-id (UUID), don't execute |
+| `:fn-name>` | `ref<fn-result-value>` | Execute fn, use result value |
+
+**When to use each:**
+
+```clojure
+;; WITHOUT > — Pass fn as value (for HOF)
+{:name :double-all
+ :parent :map-fn
+ :args {:f :double-fn     ; map-fn will call double-fn for each element
+        :coll [1 2 3]}}
+
+;; WITH > — Execute and use result
+{:name :web-server-fn
+ :parent :http-server
+ :args {:handler :router-fn>  ; router returns Clojure fn, pass that fn
+        :port 8080}}
+```
+
+### defbase Arg Type `:fn` vs `:any`
+
+The arg type in defbase controls special handling:
+
+| Arg Type | What defbase does |
+|----------|-------------------|
+| `:fn` | Auto-wraps with `make-single-arg-callable` for HOF |
+| `:any` | No special processing, receives value as-is |
+
+**Critical distinction:**
+
+```clojure
+;; map-fn receives fn-id, needs to create callable from it
+(defbase map-fn
+  {:args {:f :fn, :coll :jsonb}  ; :fn → f will be wrapped in callable
+   :return-type :jsonb}
+  (let [callable (exec/make-single-arg-callable ctx f)]
+    (mapv callable coll)))
+
+;; http-server receives already-executed Clojure fn
+(defbase http-server
+  {:args {:handler :any, :port :int}  ; :any → handler is Clojure fn, not fn-id
+   :return-type :any}
+  (http-kit/run-server handler {:port port}))
+```
+
+### Complete Example: Building a Web Server
+
+```clojure
+;; === Base functions (Clojure implementations) ===
+;; const: returns (fn [_] x) — a constant function
+;; assoc: returns (assoc m k v)
+;; conj: returns (conj coll x)
+;; router: creates Ring router from routes, returns Ring handler fn
+;; http-server: starts http-kit with handler fn
+
+;; === Fn-defs (data composition) ===
+[;; 1. Handler: const returns (fn [_] response)
+ {:name :hello-handler-fn
+  :parent :const
+  :args {:x {:status 200 :body "Hello"}}}
+
+ ;; 2. Route data: {"handler" <clojure-fn>}
+ ;; Note: :hello-handler-fn> executes const, gets the fn it returns
+ {:name :hello-handler-map-fn
+  :parent :assoc
+  :args {:m {}, :k "handler", :v :hello-handler-fn>}}
+
+ ;; 3. Method map: {"get" {"handler" <fn>}}
+ {:name :hello-method-map-fn
+  :parent :assoc
+  :args {:m {}, :k "get", :v :hello-handler-map-fn>}}
+
+ ;; 4. Route tuple: ["/" {"get" {"handler" <fn>}}]
+ {:name :hello-route-path-fn
+  :parent :conj
+  :args {:coll [], :x "/"}}
+
+ {:name :hello-route-fn
+  :parent :conj
+  :args {:coll :hello-route-path-fn>, :x :hello-method-map-fn>}}
+
+ ;; 5. Routes collection: [["/" {...}]]
+ {:name :routes-fn
+  :parent :conj
+  :args {:coll [], :x :hello-route-fn>}}
+
+ ;; 6. Router: creates Ring handler from routes
+ {:name :router-fn
+  :parent :router
+  :args {:routes :routes-fn>}}
+
+ ;; 7. Server: starts http-kit with router as handler
+ ;; :router-fn> executes router and passes the Ring handler fn
+ {:name :web-server-fn
+  :parent :http-server
+  :args {:handler :router-fn>
+         :port 8080}}]
+```
+
+### Execution Flow
+
+When executing `:web-server-fn`:
+
+1. Resolve `:router-fn>` → execute `:router-fn`
+2. `:router-fn` needs `:routes-fn>` → execute `:routes-fn`
+3. Continue recursively until all `>` refs are resolved
+4. `:const` returns `(fn [_] response)` — this Clojure fn propagates up
+5. `:http-server` receives Clojure fn as `:handler`, starts server
+
+### Key Insight
+
+The `>` suffix creates a **fn-result-value** entity in storage, which means:
+- Result is computed once and cached within execution
+- Multiple references to same `:fn-name>` share the cached result
+- Without `>`, you pass the fn-id for HOF to call multiple times
 
 ---
 

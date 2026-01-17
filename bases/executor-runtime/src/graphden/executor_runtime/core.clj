@@ -11,18 +11,32 @@
    The web server is built as a graph of fn entities:
 
    web-server-fn
-     ├── inherits from: http-server base-fn
-     ├── handler -> default-router-handler-fn
+     ├── parent: http-server (base-fn)
+     ├── handler -> router-handler-fn
      └── port -> 8080
 
-   This allows users to:
-   - Override port by creating a child of web-server-fn
-   - Replace the router by creating a new fn that references a different handler
-   - Add routes by extending the system
+   router-handler-fn
+     ├── parent: reitit-ring-handler (base-fn)
+     ├── routes -> hello-routes
+     └── handlers -> {:hello hello-handler-fn, :health health-handler-fn}
+
+   hello-handler-fn
+     └── parent: constantly (base-fn, returns static response)
+
+   health-handler-fn
+     └── parent: constantly (base-fn, returns static response)
+
+   ## Base Functions vs Fn Entities
+
+   Base-fns are wrappers around pure functions (Clojure core or libraries).
+   They are low-level building blocks added by experienced developers.
+
+   Fn entities compose base-fns with concrete values through inheritance.
+   All configuration and data binding happens via fn entities.
 
    ## Configuration
 
-   The runtime is configured via environment variables or config map:
+   The runtime is configured via environment variables:
    - PORT: HTTP server port (default: 8080)
    - STORAGE_TYPE: 'memory', 'postgres', or 'datomic' (default: memory)
 
@@ -34,11 +48,12 @@
   (:gen-class)
   (:require
     [graphden.base-functions.interface :as bf]
-    [graphden.executor-runtime.fn-definitions :as fn-defs]
-    [graphden.executor-runtime.handlers :as handlers]
     [graphden.executor.interface :as exec]
+    [graphden.fn-defs.interface :as fn-defs]
     [graphden.fn-registry.interface :as registry]
     [graphden.graph-storage-memory.interface :as gsm]
+    [graphden.http-kit-fns.interface :as http-kit-fns]
+    [graphden.reitit-fns.interface :as reitit-fns]
     [graphden.storage-protocol.interface :as sp]
     [graphden.web-server.interface :as web-server]))
 
@@ -69,19 +84,27 @@
 
 (defn initialize-base-fns!
   "Registers and syncs all base functions to storage.
+
+   Base-fns come from:
+   - base-functions: arithmetic, strings, collections, HOF (constantly, etc.)
+   - http-kit-fns: http-server, http-stop
+   - reitit-fns: router
+
+   Note: web-server component has NO base-fns, only fn-defs.
+
    Returns the storage instance."
   [storage]
   (registry/initialize-all! storage
-                            [(bf/get-all-defs)      ; arithmetic, strings, etc.
-                             web-server/all-defs    ; http-kit, reitit
-                             handlers/all-defs]))   ; hello, health, router
+                            [(bf/get-all-defs)       ; arithmetic, strings, HOF (constantly), etc.
+                             http-kit-fns/all-defs   ; http-server, http-stop
+                             reitit-fns/all-defs]))  ; router
 
 
 (defn create-fn-entities!
   "Creates fn entities in storage from definitions.
    Returns a map of created fn entities."
-  [storage port]
-  (fn-defs/create-all-fns! storage port))
+  [storage]
+  (fn-defs/sync-fns-to-storage! storage web-server/fn-defs))
 
 
 ;; === Server Startup ===
@@ -108,13 +131,13 @@
   (let [storage (-> (create-storage config)
                     (initialize-base-fns!))
         ;; 2. Create fn entities
-        fns (create-fn-entities! storage (:port config))
+        fns (create-fn-entities! storage)
         ;; 3. Create executor context
         ctx (exec/create-context {:storage storage})
         ;; 4. Execute web-server-fn
-        ;; http-server returns server handle (stop function)
-        _ (println "Executing" fn-defs/startup-fn-name "...")
-        server (exec/execute-by-name ctx fn-defs/startup-fn-name nil)]
+        startup-fn (name web-server/startup-fn-name)
+        _ (println "Executing" startup-fn "...")
+        server (exec/execute-by-name ctx startup-fn nil)]
 
     (println "Server started on port" (:port config))
     (println "  http://localhost:" (:port config) "/")

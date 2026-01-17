@@ -1,63 +1,56 @@
 (ns graphden.reitit-fns.core
   "Reitit routing base functions.
 
-   Provides a simple matcher function for HTTP routing.
-
-   ## Route Format
-
-   Routes use native reitit format - vector of [path data] pairs:
-   [[\"/\" {:get {:handler home-handler}}]
-    [\"/api/users\" {:get {:handler list-users}
-                     :post {:handler create-user}}]
-    [\"/api/users/:id\" {:get {:handler get-user}}]]
-
-   ## Usage
-
-   Create a matcher once, then use it for each request:
-   (let [matcher (reitit-matcher routes)]
-     (matcher request))  ; returns match or nil"
+   Provides a router that creates Ring handlers from route definitions."
   (:require
     [clojure.string :as str]
     [graphden.fn-registry.macros :refer [defbase]]
     [reitit.core :as r]))
 
 
-(defbase reitit-matcher
-  "Creates a route matcher from route definitions.
+(defbase router
+  "Creates a Ring handler from routes.
 
    Arguments:
-   - routes: Vector of routes in native reitit format: [[path data] ...]
+   - routes: Vector of routes in reitit format with handlers inline:
+             [[path {:method {:handler handler-fn}}] ...]
 
    Example:
-   [[\"/\" {:get {:handler home-handler}}]
-    [\"/api/users\" {:get {:handler list-users}
-                     :post {:handler create-user}}]
-    [\"/api/users/:id\" {:get {:handler get-user}}]]
+   [[\"/\" {:get {:handler hello-fn}}]
+    [\"/health\" {:get {:handler health-fn}}]
+    [\"/users/:id\" {:get {:handler get-user-fn}
+                     :delete {:handler delete-user-fn}}]]
 
-   Returns a function that takes a request and returns a match map:
-   {:handler - The handler for the matched route
-    :path-params - Map of path parameters
-    :method - HTTP method as keyword}
-
-   Or nil if no route matches."
+   Returns a Ring handler function that:
+   1. Matches request URI and method
+   2. Calls the handler with request (+ path-params)
+   3. Returns 404 if no match"
   {:args {:routes :jsonb}
    :return-type :fn}
-  (let [router (r/router routes)]
+  (let [compiled-router (r/router routes)]
     (fn [request]
-      (when-let [match (r/match-by-path router (:uri request))]
+      (if-let [match (r/match-by-path compiled-router (:uri request))]
         (let [method (if (keyword? (:method request))
                        (:method request)
-                       (keyword (str/lower-case (:method request))))
+                       (keyword (str/lower-case (str (:method request)))))
               route-data (:data match)
               method-data (get route-data method)]
-          (when method-data
-            {:handler (:handler method-data)
-             :path-params (:path-params match)
-             :method method}))))))
+          (if method-data
+            (if-let [handler-fn (:handler method-data)]
+              (handler-fn (assoc request :path-params (:path-params match)))
+              {:status 500
+               :headers {"Content-Type" "text/plain"}
+               :body "Handler not configured"})
+            {:status 405
+             :headers {"Content-Type" "text/plain"}
+             :body "Method Not Allowed"}))
+        {:status 404
+         :headers {"Content-Type" "text/plain"}
+         :body "Not Found"}))))
 
 
 ;; === All Definitions ===
 
 (def all-defs
   "All reitit base function definitions."
-  {:reitit-matcher reitit-matcher})
+  {:router router})

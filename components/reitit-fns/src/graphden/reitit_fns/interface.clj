@@ -2,7 +2,7 @@
   "Reitit routing base functions.
 
    Provides:
-   - reitit-matcher: Create a matcher function from routes"
+   - router: Creates Ring handler from routes and handlers map"
   (:require
     [graphden.reitit-fns.core :as core]))
 

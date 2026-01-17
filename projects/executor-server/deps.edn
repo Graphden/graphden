@@ -2,6 +2,7 @@
          "../../bases/executor-runtime/resources"
          "../../components/base-functions/src"
          "../../components/executor/src"
+         "../../components/fn-defs/src"
          "../../components/fn-registry/src"
          "../../components/http-kit-fns/src"
          "../../components/reitit-fns/src"
@@ -18,7 +19,7 @@
         metosin/reitit {:mvn/version "0.7.2"}
         metosin/malli {:mvn/version "0.20.0"}
         org.clojure/tools.logging {:mvn/version "1.3.1"}
-        ch.qos.logback/logback-classic {:mvn/version "1.5.24"}}
+        ch.qos.logback/logback-classic {:mvn/version "1.5.25"}}
  :aliases {:run {:main-opts ["-m" "graphden.executor-runtime.core"]}
            :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
                    :ns-default build}}}

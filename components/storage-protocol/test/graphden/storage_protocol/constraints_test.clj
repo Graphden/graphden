@@ -39,7 +39,7 @@
 
   (collect-dependency-chain
     [_this fn-id]
-    (get dependency-chain-map fn-id #{fn-id})))
+    (get dependency-chain-map fn-id #{})))
 
 
 ;; === collect-parent-chain-impl tests ===
@@ -254,6 +254,72 @@
           (is (= :constraint-violation/inheritance-cycle (:type (ex-data e))))
           (is (= fn-id (:fn-id (ex-data e))))
           (is (= fn-id (:parent-fn-id (ex-data e)))))))))
+
+
+;; === validate-no-dependency-cycle-impl tests ===
+
+(deftest validate-no-dependency-cycle-impl-test
+  (testing "nil value-fn-id doesn't throw"
+    (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (is (nil? (storage/validate-no-dependency-cycle-impl helpers (random-uuid) nil)))))
+
+  (testing "self-reference throws"
+    (let [fn-id (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Reference would create dependency cycle"
+            (storage/validate-no-dependency-cycle-impl helpers fn-id fn-id)))))
+
+  (testing "exception contains correct data for self-reference"
+    (let [fn-id (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (try
+        (storage/validate-no-dependency-cycle-impl helpers fn-id fn-id)
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
+          (is (= fn-id (:owner-fn-id (ex-data e))))
+          (is (= fn-id (:value-fn-id (ex-data e))))))))
+
+  (testing "non-cyclic dependency doesn't throw"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          ;; fn-a depends on fn-b (not a cycle)
+          helpers (->MockConstraintHelpers {} {} {} {} {fn-b #{}})]
+      (is (nil? (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)))))
+
+  (testing "cycle through dependency chain throws"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          fn-c (random-uuid)
+          ;; Dependency chain: fn-c -> fn-b -> fn-a
+          ;; Trying to add fn-a -> fn-c (would create cycle)
+          helpers (->MockConstraintHelpers {} {} {} {} {fn-c #{fn-a fn-b}})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Reference would create dependency cycle"
+            (storage/validate-no-dependency-cycle-impl helpers fn-a fn-c)))))
+
+  (testing "exception contains data for chain cycle"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {} {} {fn-b #{fn-a}})]
+      (try
+        (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
+          (is (= fn-a (:owner-fn-id (ex-data e))))
+          (is (= fn-b (:value-fn-id (ex-data e)))))))))
+
+
+;; === Chain depth limit tests ===
+
+(deftest chain-depth-limit-test
+  (testing "default-max-parent-chain-depth is defined"
+    (is (= 100 storage/default-max-parent-chain-depth)))
+
+  (testing "default-max-dependency-chain-depth is defined"
+    (is (= 1000 storage/default-max-dependency-chain-depth))))
 
 
 ;; === StorageBatchCRUD protocol tests ===

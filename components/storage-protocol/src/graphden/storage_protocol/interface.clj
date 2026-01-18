@@ -204,7 +204,7 @@
 
   (collect-dependency-chain
     [this fn-id]
-    "Returns a set of all fn-ids that fn-id depends on."))
+    "Returns a set of all fn-ids that fn-id depends on (transitive)."))
 
 
 (defprotocol StorageValueCodec

@@ -1,4 +1,4 @@
-(ns graphden.fn-defs.core
+(ns graphden.fn-composition.core
   "Data-driven fn definitions and storage sync.
 
    This component provides a declarative way to define fn entities
@@ -107,7 +107,7 @@
     (when-not (sp/read-entity storage :fn-schema fn-schema-id)
       (throw (ex-info (str "Parent base-fn not found: " parent-name
                            ". Did you forget to add base-functions?")
-                      {:type :fn-defs/unresolved-parent
+                      {:type :fn-composition/unresolved-parent
                        :parent-name parent-name})))
     fn-schema-id))
 
@@ -129,7 +129,7 @@
     ;; Not found
     (throw (ex-info (str "Referenced fn not found: " fn-name
                          ". It must be defined earlier in the set or exist in storage.")
-                    {:type :fn-defs/unresolved-fn-ref
+                    {:type :fn-composition/unresolved-fn-ref
                      :fn-name fn-name
                      :available-fns (keys created-fns)}))))
 
@@ -189,7 +189,7 @@
                  (conj visited ready))
           ;; No ready fn - cycle detected
           (throw (ex-info "Circular dependency detected in fn definitions"
-                          {:type :fn-defs/circular-dependency
+                          {:type :fn-composition/circular-dependency
                            :remaining remaining
                            :dep-graph (select-keys dep-graph remaining)})))))))
 
@@ -215,19 +215,19 @@
   (let [fn-name (:name fn-def)]
     (when-not fn-name
       (throw (ex-info "fn-def must have :name"
-                      {:type :fn-defs/invalid-def
+                      {:type :fn-composition/invalid-def
                        :fn-def fn-def})))
     (when-not (keyword? fn-name)
       (throw (ex-info "fn-def :name must be a keyword"
-                      {:type :fn-defs/invalid-def
+                      {:type :fn-composition/invalid-def
                        :name fn-name})))
     (when-not parent
       (throw (ex-info (str "fn-def " fn-name " must have :parent (base-fn name)")
-                      {:type :fn-defs/invalid-def
+                      {:type :fn-composition/invalid-def
                        :fn-def fn-def})))
     (when (and args (not (map? args)))
       (throw (ex-info (str "fn-def " fn-name " :args must be a map")
-                      {:type :fn-defs/invalid-def
+                      {:type :fn-composition/invalid-def
                        :fn-def fn-def})))))
 
 
@@ -236,7 +236,7 @@
   [fn-defs]
   (when-not (sequential? fn-defs)
     (throw (ex-info "fn-defs must be a vector/list"
-                    {:type :fn-defs/invalid-defs
+                    {:type :fn-composition/invalid-defs
                      :fn-defs-type (type fn-defs)})))
   ;; Check for duplicate names
   (let [names (map :name fn-defs)
@@ -246,7 +246,7 @@
                         keys)]
     (when (seq duplicates)
       (throw (ex-info "Duplicate fn names in definitions"
-                      {:type :fn-defs/duplicate-names
+                      {:type :fn-composition/duplicate-names
                        :duplicates duplicates}))))
   ;; Validate each def
   (doseq [fn-def fn-defs]

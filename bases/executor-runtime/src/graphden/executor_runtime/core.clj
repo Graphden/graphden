@@ -49,13 +49,13 @@
   (:require
     [graphden.base-functions.interface :as bf]
     [graphden.executor.interface :as exec]
-    [graphden.fn-defs.interface :as fn-defs]
+    [graphden.fn-composition.interface :as fn-composition]
     [graphden.fn-registry.interface :as registry]
     [graphden.graph-storage-memory.interface :as gsm]
     [graphden.http-kit-fns.interface :as http-kit-fns]
     [graphden.reitit-fns.interface :as reitit-fns]
     [graphden.storage-protocol.interface :as sp]
-    [graphden.web-server.interface :as web-server]))
+    [graphden.web-server-fns.interface :as web-server-fns]))
 
 
 ;; === Configuration ===
@@ -104,7 +104,7 @@
   "Creates fn entities in storage from definitions.
    Returns a map of created fn entities."
   [storage]
-  (fn-defs/sync-fns-to-storage! storage web-server/fn-defs))
+  (fn-composition/sync-fns-to-storage! storage web-server-fns/fn-defs))
 
 
 ;; === Server Startup ===
@@ -135,7 +135,7 @@
         ;; 3. Create executor context
         ctx (exec/create-context {:storage storage})
         ;; 4. Execute web-server-fn
-        startup-fn (name web-server/startup-fn-name)
+        startup-fn (name web-server-fns/startup-fn-name)
         _ (println "Executing" startup-fn "...")
         server (exec/execute-by-name ctx startup-fn nil)]
 

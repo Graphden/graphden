@@ -86,11 +86,11 @@ This is a Polylith monorepo. Top namespace: `graphden`. Each component has an `i
 - Registered in storage as `fn-schema` with `base-fn-name`
 - Examples: `add`, `const`, `assoc`, `conj`, `map-fn`, `router`, `http-server`
 
-**Fn entities** (`fn-defs`):
+**Fn entities** (`fn-composition`):
 - Compositions of base functions stored in DB
 - Define concrete values and wiring between functions
 - No Clojure code — pure data structures
-- Example: `web-server/fn-defs` builds HTTP server from base-fns
+- Example: `web-server-fns/fn-defs` builds HTTP server from base-fns
 
 ### Fn-def Syntax
 

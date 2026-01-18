@@ -1,4 +1,4 @@
-(ns graphden.web-server.core
+(ns graphden.web-server-fns.core
   "Web server component - defines fn entities for HTTP server setup.
 
    This component defines fn entities (NOT base-fns) that compose

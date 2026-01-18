@@ -1,9 +1,9 @@
-(ns graphden.fn-defs.interface-test
+(ns graphden.fn-composition.interface-test
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.fn-defs.core :as core]
-    [graphden.fn-defs.interface :as fn-defs]
+    [graphden.fn-composition.core :as core]
+    [graphden.fn-composition.interface :as fn-composition]
     [graphden.fn-registry.interface :as registry]
     [graphden.graph-storage-memory.interface :as gsm]
     [graphden.storage-protocol.interface :as sp]))
@@ -23,14 +23,14 @@
                                          :return-type :any
                                          :impl (fn [_ _] nil)}}])
           ;; Define fns
-          fn-defs-data [{:name :my-fn
-                         :parent :test-base-fn
-                         :args {:a 1 :b 2}}
-                        {:name :wrapper-fn
-                         :parent :other-base-fn
-                         :args {:x :my-fn}}]
+          fn-composition-data [{:name :my-fn
+                                :parent :test-base-fn
+                                :args {:a 1 :b 2}}
+                               {:name :wrapper-fn
+                                :parent :other-base-fn
+                                :args {:x :my-fn}}]
           ;; Sync
-          result (fn-defs/sync-fns-to-storage! storage fn-defs-data)]
+          result (fn-composition/sync-fns-to-storage! storage fn-composition-data)]
 
       (testing "returns map of fn-name -> fn-id"
         (is (map? result))
@@ -48,27 +48,27 @@
     (let [storage (gsm/create-storage)]
       (testing "throws on missing :name"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must have :name"
-              (fn-defs/sync-fns-to-storage! storage [{:parent :foo}]))))
+              (fn-composition/sync-fns-to-storage! storage [{:parent :foo}]))))
 
       (testing "throws on missing :parent"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must have :parent"
-              (fn-defs/sync-fns-to-storage! storage [{:name :foo}]))))
+              (fn-composition/sync-fns-to-storage! storage [{:name :foo}]))))
 
       (testing "throws on duplicate names"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate"
-              (fn-defs/sync-fns-to-storage! storage
-                                            [{:name :foo :parent :bar}
-                                             {:name :foo :parent :baz}]))))))
+              (fn-composition/sync-fns-to-storage! storage
+                                                   [{:name :foo :parent :bar}
+                                                    {:name :foo :parent :baz}]))))))
 
   (testing "throws on unresolved parent"
     (let [storage (gsm/create-storage)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
-            (fn-defs/sync-fns-to-storage! storage
-                                          [{:name :foo :parent :nonexistent}])))))
+            (fn-composition/sync-fns-to-storage! storage
+                                                 [{:name :foo :parent :nonexistent}])))))
 
   (testing "handles empty definitions"
     (let [storage (gsm/create-storage)
-          result (fn-defs/sync-fns-to-storage! storage [])]
+          result (fn-composition/sync-fns-to-storage! storage [])]
       (is (= {} result)))))
 
 
@@ -79,11 +79,11 @@
                                       [{:base-a {:args {} :return-type :int :impl (fn [_ _] 1)}
                                         :base-b {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])
           ;; Wrong order: wrapper depends on target, but defined first
-          fn-defs-data [{:name :wrapper :parent :base-b :args {:ref :target}}
-                        {:name :target :parent :base-a}]
+          fn-composition-data [{:name :wrapper :parent :base-b :args {:ref :target}}
+                               {:name :target :parent :base-a}]
           ;; Should still work (with warning)
           output (with-out-str
-                   (fn-defs/sync-fns-to-storage! storage fn-defs-data))]
+                   (fn-composition/sync-fns-to-storage! storage fn-composition-data))]
 
       (testing "prints warning about order"
         (is (clojure.string/includes? output "WARNING"))
@@ -96,10 +96,10 @@
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])
           ;; A -> B -> A
-          fn-defs-data [{:name :fn-a :parent :base-fn :args {:ref :fn-b}}
-                        {:name :fn-b :parent :base-fn :args {:ref :fn-a}}]]
+          fn-composition-data [{:name :fn-a :parent :base-fn :args {:ref :fn-b}}
+                               {:name :fn-b :parent :base-fn :args {:ref :fn-a}}]]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
-            (fn-defs/sync-fns-to-storage! storage fn-defs-data))))))
+            (fn-composition/sync-fns-to-storage! storage fn-composition-data))))))
 
 
 ;; === Test internal parsing functions via core namespace ===
@@ -151,15 +151,15 @@
                                                    :return-type :jsonb
                                                    :impl (fn [_ _] {})}}])
           ;; Define fns with fn-result-value ref
-          fn-defs-data [{:name :handler-fn
-                         :parent :const
-                         :args {:x {:status 200}}}
-                        {:name :handler-map
-                         :parent :assoc-fn
-                         :args {:m {}
-                                :k "handler"
-                                :v :handler-fn>}}]  ; This should create fn-result-value
-          result (fn-defs/sync-fns-to-storage! storage fn-defs-data)
+          fn-composition-data [{:name :handler-fn
+                                :parent :const
+                                :args {:x {:status 200}}}
+                               {:name :handler-map
+                                :parent :assoc-fn
+                                :args {:m {}
+                                       :k "handler"
+                                       :v :handler-fn>}}]  ; This should create fn-result-value
+          result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
           ;; Verify fn-result-value was created
           frvs (sp/query-entities storage :fn-result-value {:fn-id handler-fn-id})]
@@ -179,16 +179,16 @@
                                                   :return-type :jsonb
                                                   :impl (fn [_ _] [])}}])
           ;; Two refs to same :handler-fn>
-          fn-defs-data [{:name :handler-fn
-                         :parent :const
-                         :args {:x {:status 200}}}
-                        {:name :map1
-                         :parent :assoc-fn
-                         :args {:m {} :k "a" :v :handler-fn>}}
-                        {:name :map2
-                         :parent :assoc-fn
-                         :args {:m {} :k "b" :v :handler-fn>}}]  ; Same ref, should reuse
-          result (fn-defs/sync-fns-to-storage! storage fn-defs-data)
+          fn-composition-data [{:name :handler-fn
+                                :parent :const
+                                :args {:x {:status 200}}}
+                               {:name :map1
+                                :parent :assoc-fn
+                                :args {:m {} :k "a" :v :handler-fn>}}
+                               {:name :map2
+                                :parent :assoc-fn
+                                :args {:m {} :k "b" :v :handler-fn>}}]  ; Same ref, should reuse
+          result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
           ;; Should have only ONE fn-result-value (deduplicated)
           frvs (sp/query-entities storage :fn-result-value {:fn-id handler-fn-id})]
@@ -204,16 +204,16 @@
                                                    :return-type :jsonb
                                                    :impl (fn [_ _] {})}}])
           ;; Different explicit names: :handler-fn>result1, :handler-fn>result2
-          fn-defs-data [{:name :handler-fn
-                         :parent :const
-                         :args {:x {:status 200}}}
-                        {:name :map1
-                         :parent :assoc-fn
-                         :args {:m {} :k "a" :v :handler-fn>result1}}
-                        {:name :map2
-                         :parent :assoc-fn
-                         :args {:m {} :k "b" :v :handler-fn>result2}}]
-          result (fn-defs/sync-fns-to-storage! storage fn-defs-data)
+          fn-composition-data [{:name :handler-fn
+                                :parent :const
+                                :args {:x {:status 200}}}
+                               {:name :map1
+                                :parent :assoc-fn
+                                :args {:m {} :k "a" :v :handler-fn>result1}}
+                               {:name :map2
+                                :parent :assoc-fn
+                                :args {:m {} :k "b" :v :handler-fn>result2}}]
+          result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
           ;; Should have TWO fn-result-values with different names
           frvs (sp/query-entities storage :fn-result-value {:fn-id handler-fn-id})]
@@ -225,24 +225,24 @@
   (testing "throws on non-keyword name"
     (let [storage (gsm/create-storage)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword"
-            (fn-defs/sync-fns-to-storage! storage [{:name "string-name" :parent :foo}])))))
+            (fn-composition/sync-fns-to-storage! storage [{:name "string-name" :parent :foo}])))))
 
   (testing "throws on non-map args"
     (let [storage (gsm/create-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:a :int} :return-type :int :impl (fn [_ _] 1)}}])]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"args must be a map"
-            (fn-defs/sync-fns-to-storage! storage [{:name :foo :parent :base-fn :args [1 2 3]}])))))
+            (fn-composition/sync-fns-to-storage! storage [{:name :foo :parent :base-fn :args [1 2 3]}])))))
 
-  (testing "throws on non-sequential fn-defs"
+  (testing "throws on non-sequential fn-composition"
     (let [storage (gsm/create-storage)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a vector"
-            (fn-defs/sync-fns-to-storage! storage {:not "a vector"})))))
+            (fn-composition/sync-fns-to-storage! storage {:not "a vector"})))))
 
   (testing "throws on unresolved fn reference in args"
     (let [storage (gsm/create-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
-            (fn-defs/sync-fns-to-storage! storage
-                                          [{:name :foo :parent :base-fn :args {:ref :nonexistent-fn}}]))))))
+            (fn-composition/sync-fns-to-storage! storage
+                                                 [{:name :foo :parent :base-fn :args {:ref :nonexistent-fn}}]))))))

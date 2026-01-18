@@ -1,4 +1,4 @@
-(ns graphden.web-server.interface
+(ns graphden.web-server-fns.interface
   "Web server component interface.
 
    This component defines fn entities (NOT base-fns) for a web server.
@@ -15,22 +15,22 @@
    ## Usage
 
    ```clojure
-   (require '[graphden.web-server.interface :as web-server])
-   (require '[graphden.fn-defs.interface :as fn-defs])
+   (require '[graphden.web-server-fns.interface :as web-server-fns])
+   (require '[graphden.fn-composition.interface :as fn-composition])
 
    ;; Create fn entities (no base-fns to register!)
-   (fn-defs/sync-fns-to-storage! storage (web-server/fn-defs 8080))
+   (fn-composition/sync-fns-to-storage! storage (web-server-fns/fn-defs 8080))
 
    ;; Execute startup function
-   (exec/execute-by-name ctx (name web-server/startup-fn-name) nil)
+   (exec/execute-by-name ctx (name web-server-fns/startup-fn-name) nil)
    ```"
   (:require
-    [graphden.web-server.core :as core]))
+    [graphden.web-server-fns.core :as core]))
 
 
 (def fn-defs
   "Fn definitions for creating web server.
-   Vector of fn-def maps for use with fn-defs/sync-fns-to-storage!"
+   Vector of fn-def maps for use with fn-composition/sync-fns-to-storage!"
   core/fn-defs)
 
 

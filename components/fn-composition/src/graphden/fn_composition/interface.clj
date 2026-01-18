@@ -1,4 +1,4 @@
-(ns graphden.fn-defs.interface
+(ns graphden.fn-composition.interface
   "Data-driven fn definitions and storage sync.
 
    This component provides a declarative way to define fn entities
@@ -7,7 +7,7 @@
    ## Usage
 
    ```clojure
-   (require '[graphden.fn-defs.interface :as fn-defs])
+   (require '[graphden.fn-composition.interface :as fn-composition])
 
    ;; Define fns as data
    (def my-fns
@@ -20,7 +20,7 @@
               :port 8080}}])
 
    ;; Sync to storage (after base-fns are synced)
-   (fn-defs/sync-fns-to-storage! storage my-fns)
+   (fn-composition/sync-fns-to-storage! storage my-fns)
    ;; => {:router-handler-fn #uuid \"...\"
    ;;     :web-server-fn #uuid \"...\"}
    ```
@@ -39,7 +39,7 @@
    Define fns AFTER their dependencies. If order is wrong,
    a warning is printed with suggested fix."
   (:require
-    [graphden.fn-defs.core :as core]))
+    [graphden.fn-composition.core :as core]))
 
 
 (defn sync-fns-to-storage!

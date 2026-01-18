@@ -15,6 +15,6 @@
             "executor-server" {:alias "exec"
                                ;; These components are used by executor-runtime base
                                ;; but polylith doesn't detect the transitive usage
-                               :necessary ["executor" "fn-defs" "fn-registry"
+                               :necessary ["executor" "fn-composition" "fn-registry"
                                           "base-functions" "http-kit-fns"
-                                          "reitit-fns" "web-server"]}}}
+                                          "reitit-fns" "web-server-fns"]}}}

@@ -16,8 +16,7 @@
     [clojure.tools.logging :as log]
     [datomic.client.api :as d]
     [graphden.cache-datomic.schema :as schema]
-    [graphden.cache-protocol.interface :as cache]
-    [graphden.cache-protocol.value-codec :as codec]))
+    [graphden.cache-protocol.interface :as cache]))
 
 
 (def cache-schema schema/cache-schema)
@@ -128,7 +127,7 @@
                    ;; Use empty :readers to prevent arbitrary code execution
                    (edn/read-string {:readers {}} value-edn)
                    value-edn)]
-      (codec/parse-cached-value parsed))))
+      (cache/parse-cached-value parsed))))
 
 
 (defn- load-cached-merged-args
@@ -179,7 +178,7 @@
 (defn- encode-value
   "Encodes a value for EDN storage."
   [value]
-  (when-let [formatted (codec/format-cached-value value)]
+  (when-let [formatted (cache/format-cached-value value)]
     (pr-str formatted)))
 
 

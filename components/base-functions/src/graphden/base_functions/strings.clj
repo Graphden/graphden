@@ -6,7 +6,7 @@
     [clojure.string :as str]
     [graphden.base-functions.validation :as v]
     [graphden.fn-registry.macros :refer [defbase]]
-    [graphden.storage-protocol.config :as config]))
+    [graphden.storage-protocol.interface :as sp]))
 
 
 (defbase str-fn
@@ -72,8 +72,8 @@
    While regex compilation doesn't respond to thread interruption,
    cancelling prevents result delivery and allows GC of the future."
   [pattern-str]
-  (let [max-len config/*max-regex-length*
-        timeout-ms config/*regex-compile-timeout-ms*]
+  (let [max-len sp/*max-regex-length*
+        timeout-ms sp/*regex-compile-timeout-ms*]
     (when (> (count pattern-str) max-len)
       (throw (ex-info "Regex pattern too long"
                       {:type :execution-error/regex-too-complex
@@ -123,7 +123,7 @@
     (throw (ex-info "separator cannot be empty"
                     {:type :execution-error/invalid-separator
                      :separator sep})))
-  (let [max-input-len config/*max-regex-input-length*]
+  (let [max-input-len sp/*max-regex-input-length*]
     (when (> (count s) max-input-len)
       (throw (ex-info "Input string too long for regex split"
                       {:type :execution-error/input-too-large

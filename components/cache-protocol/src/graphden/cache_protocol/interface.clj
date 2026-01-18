@@ -7,9 +7,16 @@
    Implementations maintain cache consistency by:
    1. Storing denormalized graph data (fns, schemas, merged args)
    2. Tracking dependencies with ref-counts for proper invalidation
-   3. Rebuilding affected caches when source entities change"
+   3. Rebuilding affected caches when source entities change
+
+   ## Value Codec
+
+   This namespace also re-exports value encoding/decoding functions from
+   `value-codec` for cache implementations. Use these instead of importing
+   the internal module directly."
   (:require
-    [clojure.tools.logging :as log]))
+    [clojure.tools.logging :as log]
+    [graphden.cache-protocol.value-codec :as codec]))
 
 
 (defprotocol CacheStorage
@@ -196,3 +203,32 @@
           :arg-schemas arg-schemas
           :resolved-args resolved-args
           :fn-result-values fn-result-values})))))
+
+
+;; ============================================================================
+;; VALUE CODEC RE-EXPORTS
+;; ============================================================================
+;;
+;; Re-export value encoding/decoding functions from value-codec.
+;; Use these instead of importing graphden.cache-protocol.value-codec directly.
+
+(def parse-cached-value
+  "Parses a cached value from the union format.
+   See codec/parse-cached-value for details."
+  codec/parse-cached-value)
+
+
+(def format-cached-value
+  "Formats a value for caching in the union format.
+   See codec/format-cached-value for details."
+  codec/format-cached-value)
+
+
+(def fn-ref?
+  "Returns true if the value is a function reference."
+  codec/fn-ref?)
+
+
+(def literal-value?
+  "Returns true if the value is a wrapped literal value."
+  codec/literal-value?)

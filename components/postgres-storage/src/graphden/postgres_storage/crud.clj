@@ -6,7 +6,6 @@
     [graphden.postgres-storage.codec :as codec]
     [graphden.postgres-storage.errors :as errors]
     [graphden.postgres-storage.util :as util]
-    [graphden.storage-protocol.config :as config]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]))
@@ -143,7 +142,7 @@
   (if (empty? data-seq)
     []
     (do
-      (config/validate-batch-size! (count data-seq) :create-entities {:entity-name entity-name})
+      (sp/validate-batch-size! (count data-seq) :create-entities {:entity-name entity-name})
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name (keyword (util/kw->snake-case entity-name))
             ;; Prepare all records with IDs

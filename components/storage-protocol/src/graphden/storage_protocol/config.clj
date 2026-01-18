@@ -61,6 +61,7 @@
    ```"
   (:require
     [clojure.string :as str]
+    [graphden.field-types.interface :as ft]
     [graphden.storage-protocol.graph :as graph]
     [malli.core :as m]
     [malli.error :as me]))
@@ -489,12 +490,11 @@
 
 ;; === Identifier Limits ===
 
-(def ^:const max-identifier-length
+(def max-identifier-length
   "Maximum length for SQL identifiers (entity names, field names, enum values).
-   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1).
-   We enforce this limit early at schema definition time to prevent silent
-   truncation issues in the database layer."
-  63)
+   Re-exported from field-types for backwards compatibility.
+   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1)."
+  ft/max-identifier-length)
 
 
 (def ^:const max-fn-name-length

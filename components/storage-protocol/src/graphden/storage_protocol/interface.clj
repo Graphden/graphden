@@ -740,6 +740,49 @@
   config/*max-repeat-size*)
 
 
+;; === Regex safety configuration re-exports ===
+;;
+;; These are independent dynamic vars that can be bound separately from config.
+;; Use with-regex-limits to bind both sets of vars for full compatibility.
+
+(def ^:dynamic *max-regex-length*
+  "Maximum regex pattern length to prevent complex pattern attacks. Default: 100."
+  config/*max-regex-length*)
+
+
+(def ^:dynamic *max-regex-input-length*
+  "Maximum input string length for regex operations. Default: 100000."
+  config/*max-regex-input-length*)
+
+
+(def ^:dynamic *regex-compile-timeout-ms*
+  "Timeout for regex compilation in milliseconds. Default: 100."
+  config/*regex-compile-timeout-ms*)
+
+
+(defn with-regex-limits
+  "Executes f with custom regex safety limits.
+   Binds both config and interface vars for compatibility.
+
+   Arguments:
+   - opts: map with optional keys:
+     - :max-pattern-length - maximum regex pattern length
+     - :max-input-length - maximum input string length
+     - :compile-timeout-ms - regex compilation timeout
+   - f: zero-arg function to execute"
+  [opts f]
+  (let [pattern-len (get opts :max-pattern-length config/*max-regex-length*)
+        input-len (get opts :max-input-length config/*max-regex-input-length*)
+        timeout (get opts :compile-timeout-ms config/*regex-compile-timeout-ms*)]
+    (binding [config/*max-regex-length* pattern-len
+              config/*max-regex-input-length* input-len
+              config/*regex-compile-timeout-ms* timeout
+              *max-regex-length* pattern-len
+              *max-regex-input-length* input-len
+              *regex-compile-timeout-ms* timeout]
+      (f))))
+
+
 ;; === Batch size validation re-exports ===
 (def ^:dynamic *max-batch-size*
   "Maximum entities in a single batch operation. Default: 1000."

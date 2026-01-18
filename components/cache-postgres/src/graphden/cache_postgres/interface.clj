@@ -15,7 +15,6 @@
     [cheshire.core :as json]
     [clojure.tools.logging :as log]
     [graphden.cache-protocol.interface :as cache]
-    [graphden.cache-protocol.value-codec :as codec]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
@@ -117,7 +116,7 @@
                       :else nil)
           parsed (when raw-value
                    (json/parse-string raw-value true))]
-      (codec/parse-cached-value parsed))))
+      (cache/parse-cached-value parsed))))
 
 
 (defn- load-cached-merged-args
@@ -161,7 +160,7 @@
 (defn- encode-value
   "Encodes a value for JSON storage."
   [value]
-  (when-let [formatted (codec/format-cached-value value)]
+  (when-let [formatted (cache/format-cached-value value)]
     (json/generate-string formatted)))
 
 

@@ -1,8 +1,8 @@
 (ns graphden.malli-data-schema.validators
   "Validation functions for malli-data-schema."
   (:require
-    [graphden.malli-data-schema.types :as types]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.field-types.interface :as ft]
+    [graphden.malli-data-schema.types :as types]))
 
 
 ;; === Identifier validation ===
@@ -16,10 +16,10 @@
   #"^[a-z][a-z0-9]*(-[a-z0-9]+)*$")
 
 
-;; Use centralized limit from storage-protocol config
+;; Use centralized limit from field-types
 (def ^:private max-identifier-length
-  "Maximum length for identifiers. Uses centralized value from sp/max-identifier-length."
-  sp/max-identifier-length)
+  "Maximum length for identifiers. Uses centralized value from ft/max-identifier-length."
+  ft/max-identifier-length)
 
 
 (defn- valid-identifier-name?

@@ -8,7 +8,6 @@
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.interface :as registry]
     [graphden.graph-storage-memory.interface :as gsm]
-    [graphden.storage-protocol.config :as config]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -418,14 +417,14 @@
     ;; Verify that with-regex-limits correctly applies custom limits
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Regex pattern too long"
-          (config/with-regex-limits
+          (sp/with-regex-limits
             {:max-pattern-length 5}
             #(call-base-fn :str-split {:s "test" :sep "longer-pattern"})))))
 
   (testing "str-split - input length limit applies"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Input string too long"
-          (config/with-regex-limits
+          (sp/with-regex-limits
             {:max-input-length 10}
             #(call-base-fn :str-split {:s "this is a longer string" :sep " "}))))))
 

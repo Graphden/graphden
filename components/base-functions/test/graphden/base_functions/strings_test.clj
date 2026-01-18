@@ -3,7 +3,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.base-functions.strings :as strings]
-    [graphden.storage-protocol.config :as config]))
+    [graphden.storage-protocol.interface :as sp]))
 
 
 ;; === str-fn tests ===
@@ -141,13 +141,13 @@
           ((:impl strings/str-split-fn) {:s (delay "hello") :sep (delay "")} nil))))
 
   (testing "throws for input too long"
-    (binding [config/*max-regex-input-length* 10]
+    (binding [sp/*max-regex-input-length* 10]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Input string too long"
             ((:impl strings/str-split-fn) {:s (delay "hello world this is too long") :sep (delay " ")} nil)))))
 
   (testing "throws for pattern too long"
-    (binding [config/*max-regex-length* 5]
+    (binding [sp/*max-regex-length* 5]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Regex pattern too long"
             ((:impl strings/str-split-fn) {:s (delay "hello") :sep (delay "very-long-pattern")} nil)))))
@@ -186,7 +186,7 @@
       (is (instance? java.util.regex.Pattern pattern))))
 
   (testing "throws for pattern too long"
-    (binding [config/*max-regex-length* 5]
+    (binding [sp/*max-regex-length* 5]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Regex pattern too long"
             (#'strings/safe-compile-regex "this-is-a-long-pattern")))))

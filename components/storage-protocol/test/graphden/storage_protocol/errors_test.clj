@@ -366,3 +366,131 @@
     (is (contains? errors/storage-error-types :connection-error))
     (is (contains? errors/storage-error-types :system-error/query-timeout))
     (is (contains? errors/storage-error-types :table-not-found))))
+
+
+;; === Validation Error Factory Tests ===
+
+(deftest create-validation-error-test
+  (testing "creates ExceptionInfo with correct structure"
+    (let [ex (errors/create-validation-error
+               :validation-error/field-missing
+               "Field :name is required"
+               {:entity :user :field :name})]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (= "Field :name is required" (ex-message ex)))
+      (is (= :validation-error/field-missing (:type (ex-data ex))))
+      (is (= :user (:entity (ex-data ex))))
+      (is (= :name (:field (ex-data ex))))))
+
+  (testing "requires namespaced keyword for error-type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"error-type must be a namespaced keyword"
+          (errors/create-validation-error :not-namespaced "message" {}))))
+
+  (testing "rejects non-keyword error-type"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"error-type must be a namespaced keyword"
+          (errors/create-validation-error "string" "message" {})))))
+
+
+(deftest throw-validation-error-test
+  (testing "throws validation error"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Test error"
+          (errors/throw-validation-error!
+            :validation-error/test
+            "Test error"
+            {:context "value"}))))
+
+  (testing "exception contains correct data"
+    (try
+      (errors/throw-validation-error!
+        :schema-error/invalid-type
+        "Invalid type"
+        {:expected :int :actual :string})
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :schema-error/invalid-type (:type (ex-data e))))
+        (is (= :int (:expected (ex-data e))))
+        (is (= :string (:actual (ex-data e))))))))
+
+
+(deftest with-storage-error-handling-test
+  (testing "returns body result on success"
+    (let [result (errors/with-storage-error-handling
+                   :storage-error/test :test-op {:ctx "value"}
+                   :success-result)]
+      (is (= :success-result result))))
+
+  (testing "wraps ExceptionInfo with merged context"
+    (try
+      (errors/with-storage-error-handling
+        :storage-error/test :query-entities {:entity-name :user}
+        (throw (ex-info "Original error" {:original true})))
+      (is false "Should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (is (= "Original error" (ex-message e)))
+          (is (= :query-entities (:operation data)))
+          (is (= :user (:entity-name data)))
+          (is (true? (:original data)))))))
+
+  (testing "wraps non-ExceptionInfo with error-type"
+    (try
+      (errors/with-storage-error-handling
+        :storage-error/io-failed :write-entity {:file "test.txt"}
+        (throw (RuntimeException. "IO failed")))
+      (is false "Should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (let [data (ex-data e)]
+          (is (= :storage-error/io-failed (:type data)))
+          (is (= :write-entity (:operation data)))
+          (is (= "test.txt" (:file data)))
+          (is (instance? RuntimeException (ex-cause e)))))))
+
+  (testing "handles exception with nil message"
+    (try
+      (errors/with-storage-error-handling
+        :storage-error/test :op {}
+        (throw (RuntimeException.)))
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "Storage operation failed" (ex-message e)))))))
+
+
+;; === Warn on Suspicious Field Tests ===
+
+(deftest warn-on-suspicious-field-test
+  (testing "returns nil for nil input"
+    (is (nil? (errors/warn-on-suspicious-field nil))))
+
+  (testing "returns nil for non-suspicious registered field"
+    (is (nil? (errors/warn-on-suspicious-field :password))))  ; registered, not suspicious
+
+  (testing "returns nil for clearly non-sensitive field"
+    (is (nil? (errors/warn-on-suspicious-field :username))))
+
+  (testing "returns true for suspicious unregistered field"
+    ;; This field looks suspicious (has 'key' in name) but isn't registered
+    ;; Note: may actually be caught by patterns - test different field
+    (errors/with-sensitive-field-registry
+      (errors/reset-sensitive-field-registry!)
+      ;; With empty registry, 'api-key-backup' should be suspicious
+      (errors/set-sensitive-field-registry! {:names #{} :patterns [] :predicates []})
+      (is (true? (errors/warn-on-suspicious-field :api-key-backup))))))
+
+
+;; === Redact deep with sequences ===
+
+(deftest redact-sensitive-deep-sequences-test
+  (testing "handles lists (sequences)"
+    (let [data {:items (list {:password "secret"} {:name "john"})}
+          result (errors/redact-sensitive-deep data)]
+      ;; Result should have redacted password
+      (is (= "[REDACTED]" (:password (first (:items result))))))))
+
+
+;; === Empty name string edge case ===
+
+(deftest sensitive-field-empty-name-test
+  (testing "handles keyword with empty name"
+    ;; This is an edge case - empty keyword name
+    (is (not (errors/sensitive-field? (keyword ""))))))

@@ -1,6 +1,11 @@
 {;; clj-kondo configuration
  ;; https://github.com/clj-kondo/clj-kondo/blob/master/doc/config.md
 
+ :config-paths ["imports/http-kit/http-kit"
+                "imports/metosin/malli"
+                "imports/com.gfredericks/test.chuck"
+                "imports/taoensso/encore"]
+
  :hooks
  {:analyze-call {graphden.fn-registry.macros/defbase hooks.defbase/defbase}}
 

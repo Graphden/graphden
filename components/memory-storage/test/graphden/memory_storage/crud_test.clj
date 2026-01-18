@@ -1,287 +1,264 @@
 (ns graphden.memory-storage.crud-test
-  "Tests for memory-storage.crud module."
+  "Tests for memory storage CRUD operations.
+
+   Covers:
+   - StorageCRUD protocol (create, read, update, delete, query)
+   - StorageBatchCRUD protocol (batch create, read, delete)"
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.memory-storage.crud :as crud]))
+    [graphden.data-schema-protocol.interface :as ds]
+    [graphden.malli-data-schema.interface :as mds]
+    [graphden.memory-storage.interface :as mem]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.test-helpers :as th]))
 
 
-;; === Test fixtures ===
+;; === CRUD tests ===
 
-(def test-schema
-  {:entities {:user {:fields {:id {:type :uuid :nullable? false}
-                              :name {:type :text :nullable? false}
-                              :email {:type :text :nullable? true}
-                              :age {:type :int :nullable? true}}
-                     :constraints [{:type :unique :fields [:email]}]}}})
+(deftest crud-basic-test
+  (testing "create-entity creates record with generated id"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [record (sp/create-entity storage :user {:name "Alice"})]
+        (is (uuid? (:id record)))
+        (is (= "Alice" (:name record))))))
 
-
-(defn make-test-state
-  []
-  (merge test-schema {:data {}}))
-
-
-;; === get-entity-data tests ===
-
-(deftest get-entity-data-test
-  (testing "returns empty map when no data"
-    (is (= {} (crud/get-entity-data (make-test-state) :user))))
-
-  (testing "returns data when present"
-    (let [id (random-uuid)
-          state (assoc-in (make-test-state) [:data :user id] {:id id :name "Alice"})]
-      (is (= {id {:id id :name "Alice"}} (crud/get-entity-data state :user)))))
-
-  (testing "returns empty map for unknown entity"
-    (is (= {} (crud/get-entity-data (make-test-state) :unknown)))))
-
-
-;; === get-entity-fields tests ===
-
-(deftest get-entity-fields-test
-  (testing "returns fields for known entity"
-    (let [fields (crud/get-entity-fields (make-test-state) :user)]
-      (is (contains? fields :name))
-      (is (contains? fields :email))))
-
-  (testing "returns nil for unknown entity"
-    (is (nil? (crud/get-entity-fields (make-test-state) :unknown)))))
-
-
-;; === validate-entity-exists! tests ===
-
-(deftest validate-entity-exists!-test
-  (testing "passes for known entity"
-    (is (nil? (crud/validate-entity-exists! (make-test-state) :user))))
-
-  (testing "throws for unknown entity"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Entity not found in schema"
-          (crud/validate-entity-exists! (make-test-state) :unknown))))
-
-  (testing "error has correct type"
-    (try
-      (crud/validate-entity-exists! (make-test-state) :bad)
-      (is false "should throw")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= :entity-not-in-schema (:type (ex-data e))))
-        (is (= :bad (:entity (ex-data e))))))))
-
-
-;; === get-record tests ===
-
-(deftest get-record-test
-  (testing "returns record when exists"
-    (let [id (random-uuid)
-          record {:id id :name "Alice"}
-          state (assoc-in (make-test-state) [:data :user id] record)]
-      (is (= record (crud/get-record state :user id)))))
-
-  (testing "returns nil when not exists"
-    (is (nil? (crud/get-record (make-test-state) :user (random-uuid))))))
-
-
-;; === validate-required-fields! tests ===
-
-(deftest validate-required-fields!-test
-  (testing "passes when required fields present"
-    (is (nil? (crud/validate-required-fields! (make-test-state) :user
-                                              {:name "Alice"}))))
-
-  (testing "throws when required field missing"
-    (is (thrown? clojure.lang.ExceptionInfo
-          (crud/validate-required-fields! (make-test-state) :user {})))))
-
-
-;; === validate-unique-constraints! tests ===
-
-(deftest validate-unique-constraints!-test
-  (testing "passes when no conflicts"
-    (is (nil? (crud/validate-unique-constraints! (make-test-state) :user
-                                                 {:email "new@test.com"} nil))))
-
-  (testing "passes when value is nil (NULL handling)"
-    (let [id1 (random-uuid)
-          state (assoc-in (make-test-state) [:data :user id1]
-                          {:id id1 :name "Alice" :email nil})]
-      ;; Both records have nil email - should not conflict
-      (is (nil? (crud/validate-unique-constraints! state :user
-                                                   {:email nil} nil)))))
-
-  (testing "throws when email conflicts"
-    (let [id1 (random-uuid)
-          state (assoc-in (make-test-state) [:data :user id1]
-                          {:id id1 :name "Alice" :email "test@test.com"})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Unique constraint violation"
-            (crud/validate-unique-constraints! state :user
-                                               {:email "test@test.com"} nil)))))
-
-  (testing "passes when conflict is excluded by id (for updates)"
-    (let [id1 (random-uuid)
-          state (assoc-in (make-test-state) [:data :user id1]
-                          {:id id1 :name "Alice" :email "test@test.com"})]
-      ;; Same email is ok when updating the same record
-      (is (nil? (crud/validate-unique-constraints! state :user
-                                                   {:email "test@test.com"} id1))))))
-
-
-;; === create-record-atomic! tests ===
-
-(deftest create-record-atomic!-test
-  (testing "creates record successfully"
-    (let [state-atom (atom (make-test-state))
-          id (random-uuid)
-          record {:id id :name "Alice" :email "alice@test.com"}
-          result (crud/create-record-atomic! state-atom :user record)]
-      (is (= record result))
-      (is (= record (get-in @state-atom [:data :user id])))))
-
-  (testing "throws on required field missing"
-    (let [state-atom (atom (make-test-state))
+  (testing "create-entity uses provided id"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)
           id (random-uuid)]
-      (is (thrown? clojure.lang.ExceptionInfo
-            (crud/create-record-atomic! state-atom :user {:id id})))))
+      (sp/initialize storage schema)
+      (let [record (sp/create-entity storage :user {:id id :name "Bob"})]
+        (is (= id (:id record)))
+        (is (= "Bob" (:name record))))))
 
-  (testing "throws on unique constraint violation"
-    (let [state-atom (atom (make-test-state))
-          id1 (random-uuid)
-          id2 (random-uuid)]
-      (crud/create-record-atomic! state-atom :user {:id id1 :name "Alice" :email "test@test.com"})
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Unique constraint violation"
-            (crud/create-record-atomic! state-atom :user {:id id2 :name "Bob" :email "test@test.com"}))))))
+  (testing "read-entity returns record by id"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [created (sp/create-entity storage :user {:name "Charlie"})
+            read-result (sp/read-entity storage :user (:id created))]
+        (is (= created read-result)))))
 
+  (testing "read-entity returns nil for unknown id"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (is (nil? (sp/read-entity storage :user (random-uuid))))))
 
-;; === update-record-atomic! tests ===
+  (testing "update-entity updates record"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [created (sp/create-entity storage :user {:name "Dave"})
+            updated (sp/update-entity storage :user (:id created) {:name "David"})]
+        (is (= "David" (:name updated)))
+        (is (= (:id created) (:id updated))))))
 
-(deftest update-record-atomic!-test
-  (testing "updates record successfully"
-    (let [state-atom (atom (make-test-state))
-          id (random-uuid)
-          _ (crud/create-record-atomic! state-atom :user {:id id :name "Alice" :email "alice@test.com"})
-          result (crud/update-record-atomic! state-atom :user id {:name "Alicia"})]
-      (is (= "Alicia" (:name result)))
-      (is (= "alice@test.com" (:email result)))))
+  (testing "update-entity throws for unknown id"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Entity not found"
+            (sp/update-entity storage :user (random-uuid) {:name "Nobody"})))))
 
-  (testing "throws when record not found"
-    (let [state-atom (atom (make-test-state))]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Entity not found"
-            (crud/update-record-atomic! state-atom :user (random-uuid) {:name "Bob"})))))
+  (testing "delete-entity removes record"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [created (sp/create-entity storage :user {:name "Eve"})]
+        (is (true? (sp/delete-entity storage :user (:id created))))
+        (is (nil? (sp/read-entity storage :user (:id created)))))))
 
-  (testing "error data has correct type"
-    (let [state-atom (atom (make-test-state))
-          id (random-uuid)]
-      (try
-        (crud/update-record-atomic! state-atom :user id {:name "Bob"})
-        (is false "should throw")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :not-found (:type (ex-data e))))
-          (is (= :user (:entity (ex-data e))))
-          (is (= id (:id (ex-data e)))))))))
-
-
-;; === remove-record! tests ===
-
-(deftest remove-record!-test
-  (testing "returns true when record existed"
-    (let [state-atom (atom (make-test-state))
-          id (random-uuid)]
-      (crud/create-record-atomic! state-atom :user {:id id :name "Alice"})
-      (is (true? (crud/remove-record! state-atom :user id)))
-      (is (nil? (get-in @state-atom [:data :user id])))))
-
-  (testing "returns false when record did not exist"
-    (let [state-atom (atom (make-test-state))]
-      (is (false? (crud/remove-record! state-atom :user (random-uuid)))))))
+  (testing "delete-entity returns false for unknown id"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (is (false? (sp/delete-entity storage :user (random-uuid)))))))
 
 
-;; === create-records-atomic! tests ===
+(deftest query-entities-test
+  (testing "query-entities returns all records when where is empty"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:name "Alice"})
+      (sp/create-entity storage :user {:name "Bob"})
+      (let [results (sp/query-entities storage :user {})]
+        (is (= 2 (count results)))
+        (is (= #{"Alice" "Bob"} (set (map :name results)))))))
 
-(deftest create-records-atomic!-test
-  (testing "creates multiple records"
-    (let [state-atom (atom (make-test-state))
-          id1 (random-uuid)
-          id2 (random-uuid)
-          records [{:id id1 :name "Alice"} {:id id2 :name "Bob"}]
-          result (crud/create-records-atomic! state-atom :user records)]
-      (is (= 2 (count result)))
-      (is (some? (get-in @state-atom [:data :user id1])))
-      (is (some? (get-in @state-atom [:data :user id2])))))
+  (testing "query-entities filters by field"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:name "Alice"})
+      (sp/create-entity storage :user {:name "Bob"})
+      (let [results (sp/query-entities storage :user {:name "Alice"})]
+        (is (= 1 (count results)))
+        (is (= "Alice" (:name (first results)))))))
 
-  (testing "wraps error with batch context on failure"
-    (let [state-atom (atom (make-test-state))
-          id1 (random-uuid)
-          id2 (random-uuid)
-          records [{:id id1 :name "Alice"}
-                   {:id id2}]]  ; missing required field
-      (try
-        (crud/create-records-atomic! state-atom :user records)
-        (is false "should throw")
-        (catch clojure.lang.ExceptionInfo e
-          ;; The outer type is the original error type, but batch info is added
-          (is (= 1 (:batch-index (ex-data e))))
-          (is (= 2 (:batch-size (ex-data e))))
-          (is (= id2 (:failed-id (ex-data e)))))))))
-
-
-;; === read-records tests ===
-
-(deftest read-records-test
-  (testing "returns found records"
-    (let [id1 (random-uuid)
-          id2 (random-uuid)
-          id3 (random-uuid)
-          state (-> (make-test-state)
-                    (assoc-in [:data :user id1] {:id id1 :name "Alice"})
-                    (assoc-in [:data :user id2] {:id id2 :name "Bob"}))
-          result (crud/read-records state :user [id1 id2 id3])]
-      (is (= 2 (count result)))
-      (is (contains? result id1))
-      (is (contains? result id2))
-      (is (not (contains? result id3)))))
-
-  (testing "returns empty map for no matches"
-    (is (= {} (crud/read-records (make-test-state) :user [(random-uuid)]))))
-
-  (testing "handles empty ids list"
-    (is (= {} (crud/read-records (make-test-state) :user [])))))
+  (testing "query-entities returns empty seq when no match"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:name "Alice"})
+      (let [results (sp/query-entities storage :user {:name "Nobody"})]
+        (is (empty? results))))))
 
 
-;; === remove-records! tests ===
+;; === StorageBatchCRUD tests ===
 
-(deftest remove-records!-test
-  (testing "removes multiple records and returns count"
-    (let [state-atom (atom (make-test-state))
-          id1 (random-uuid)
-          id2 (random-uuid)
-          id3 (random-uuid)]
-      (crud/create-record-atomic! state-atom :user {:id id1 :name "Alice"})
-      (crud/create-record-atomic! state-atom :user {:id id2 :name "Bob"})
-      (let [removed (crud/remove-records! state-atom :user [id1 id2 id3])]
-        (is (= 2 removed))
-        (is (nil? (get-in @state-atom [:data :user id1])))
-        (is (nil? (get-in @state-atom [:data :user id2]))))))
+(deftest batch-create-entities-test
+  (testing "create-entities creates multiple entities"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [data [{:name "Alice"} {:name "Bob"} {:name "Charlie"}]
+            results (sp/create-entities storage :user data)]
+        (is (= 3 (count results)))
+        (is (= #{"Alice" "Bob" "Charlie"} (set (map :name results))))
+        (is (every? uuid? (map :id results)))
+        ;; Verify persistence
+        (is (= 3 (count (sp/query-entities storage :user {})))))))
 
-  (testing "returns 0 for empty ids"
-    (let [state-atom (atom (make-test-state))]
-      (is (zero? (crud/remove-records! state-atom :user [])))))
+  (testing "create-entities with provided ids"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id2 #uuid "22222222-2222-2222-2222-222222222222"
+            data [{:id id1 :name "Alice"} {:id id2 :name "Bob"}]
+            results (sp/create-entities storage :user data)]
+        (is (= #{id1 id2} (set (map :id results)))))))
 
-  (testing "returns 0 for nil ids"
-    (let [state-atom (atom (make-test-state))]
-      (is (zero? (crud/remove-records! state-atom :user nil)))))
+  (testing "create-entities with empty sequence returns empty"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [results (sp/create-entities storage :user [])]
+        (is (empty? results))))))
 
-  (testing "throws for non-sequential ids"
-    (let [state-atom (atom (make-test-state))]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"ids must be a sequential collection"
-            (crud/remove-records! state-atom :user #{1 2 3})))))  ; set is not sequential
 
-  (testing "error has correct type for non-sequential"
-    (let [state-atom (atom (make-test-state))]
-      (try
-        (crud/remove-records! state-atom :user {:a 1})
-        (is false "should throw")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :invalid-data (:type (ex-data e))))
-          (is (= :user (:entity-name (ex-data e)))))))))
+(deftest batch-read-entities-test
+  (testing "read-entities returns map of found entities"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id2 #uuid "22222222-2222-2222-2222-222222222222"
+            _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+            _ (sp/create-entity storage :user {:id id2 :name "Bob"})
+            results (sp/read-entities storage :user [id1 id2])]
+        (is (= 2 (count results)))
+        (is (= "Alice" (:name (get results id1))))
+        (is (= "Bob" (:name (get results id2)))))))
+
+  (testing "read-entities excludes non-existent ids"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id-nonexistent #uuid "99999999-9999-9999-9999-999999999999"
+            _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+            results (sp/read-entities storage :user [id1 id-nonexistent])]
+        (is (= 1 (count results)))
+        (is (= "Alice" (:name (get results id1))))
+        (is (nil? (get results id-nonexistent))))))
+
+  (testing "read-entities with empty ids returns empty map"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [results (sp/read-entities storage :user [])]
+        (is (= {} results))))))
+
+
+(deftest batch-delete-entities-test
+  (testing "delete-entities deletes multiple entities and returns count"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id2 #uuid "22222222-2222-2222-2222-222222222222"
+            id3 #uuid "33333333-3333-3333-3333-333333333333"
+            _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+            _ (sp/create-entity storage :user {:id id2 :name "Bob"})
+            _ (sp/create-entity storage :user {:id id3 :name "Charlie"})
+            deleted-count (sp/delete-entities storage :user [id1 id2])]
+        (is (= 2 deleted-count))
+        ;; Verify entities are gone
+        (is (nil? (sp/read-entity storage :user id1)))
+        (is (nil? (sp/read-entity storage :user id2)))
+        ;; Charlie should still exist
+        (is (= "Charlie" (:name (sp/read-entity storage :user id3)))))))
+
+  (testing "delete-entities with non-existent ids returns count of actually deleted"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [id1 #uuid "11111111-1111-1111-1111-111111111111"
+            id-nonexistent #uuid "99999999-9999-9999-9999-999999999999"
+            _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+            deleted-count (sp/delete-entities storage :user [id1 id-nonexistent])]
+        (is (= 1 deleted-count)))))
+
+  (testing "delete-entities with empty ids returns 0"
+    (let [storage (mem/create-storage)
+          schema (th/make-schema)]
+      (sp/initialize storage schema)
+      (let [deleted-count (sp/delete-entities storage :user [])]
+        (is (zero? deleted-count))))))
+
+
+(deftest batch-create-error-index-test
+  (testing "batch create error includes index of failed record"
+    (let [storage (mem/create-storage)
+          ;; Schema with unique constraint on email
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000001"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                             :type :text}
+                                     :name {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                            :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      ;; Insert a record first
+      (sp/create-entity storage :user {:email "existing@example.com" :name "Existing"})
+      ;; Try batch create where 3rd record (index 2) violates unique constraint
+      (let [data [{:email "alice@example.com" :name "Alice"}
+                  {:email "bob@example.com" :name "Bob"}
+                  {:email "existing@example.com" :name "Duplicate"}  ; Will fail
+                  {:email "charlie@example.com" :name "Charlie"}]]
+        (try
+          (sp/create-entities storage :user data)
+          (is false "Should have thrown exception")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :constraint-violation/unique (:type (ex-data e))))
+            (is (= 2 (:batch-index (ex-data e)))
+                "Should indicate record at index 2 failed")
+            (is (= 4 (:batch-size (ex-data e)))
+                "Should indicate total batch size"))))))
+
+  (testing "batch create error at first record has index 0"
+    (let [storage (mem/create-storage)
+          ;; Schema with unique constraint on email
+          schema (-> (mds/create-builder)
+                     (ds/add-entity :user #uuid "00000000-0000-0000-0000-000000000011"
+                                    {:email {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                             :type :text}})
+                     (ds/add-constraint :user {:type :unique :fields [:email]})
+                     ds/build)]
+      (sp/initialize storage schema)
+      (sp/create-entity storage :user {:email "existing@example.com"})
+      ;; First record in batch violates constraint
+      (let [data [{:email "existing@example.com"}  ; Will fail at index 0
+                  {:email "new@example.com"}]]
+        (try
+          (sp/create-entities storage :user data)
+          (is false "Should have thrown exception")
+          (catch clojure.lang.ExceptionInfo e
+            (is (zero? (:batch-index (ex-data e))))
+            (is (= 2 (:batch-size (ex-data e))))))))))

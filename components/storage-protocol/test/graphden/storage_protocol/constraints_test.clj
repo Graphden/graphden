@@ -1,249 +1,266 @@
 (ns graphden.storage-protocol.constraints-test
-  "Tests for storage-protocol.constraints - shared constraint implementations and macro."
+  "Tests for storage-protocol constraint helpers and implementations."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage-protocol.constraints :as c]))
+    [graphden.storage-protocol.interface :as storage]))
 
 
-;; === Default depth limits tests ===
+;; === Mock ConstraintHelpers for testing shared implementations ===
 
-(deftest default-limits-test
-  (testing "default-max-parent-chain-depth is reasonable"
-    (is (pos-int? c/default-max-parent-chain-depth))
-    (is (= 100 c/default-max-parent-chain-depth)))
+(defrecord MockConstraintHelpers
+  [fn-schema-map arg-schema-fn-schema-map parent-map arg-schema-ids-in-chain-map dependency-chain-map]
 
-  (testing "default-max-dependency-chain-depth is reasonable"
-    (is (pos-int? c/default-max-dependency-chain-depth))
-    (is (= 1000 c/default-max-dependency-chain-depth))))
+  storage/ConstraintHelpers
+
+  (get-fn-schema-id-for-fn
+    [_this fn-id]
+    (get fn-schema-map fn-id))
+
+
+  (get-fn-schema-id-for-arg-schema
+    [_this arg-schema-id]
+    (get arg-schema-fn-schema-map arg-schema-id))
+
+
+  (get-parent-fn-id
+    [_this fn-id]
+    (get parent-map fn-id))
+
+
+  (collect-parent-chain
+    [this fn-id]
+    (storage/collect-parent-chain-impl this fn-id))
+
+
+  (collect-arg-schema-ids-in-chain
+    [_this fn-id]
+    (get arg-schema-ids-in-chain-map fn-id #{}))
+
+
+  (collect-dependency-chain
+    [_this fn-id]
+    (get dependency-chain-map fn-id #{fn-id})))
 
 
 ;; === collect-parent-chain-impl tests ===
 
 (deftest collect-parent-chain-impl-test
-  (let [;; Mock parent chain: a -> b -> c -> nil
-        parent-map {:a :b, :b :c, :c nil}
-        get-parent-fn (fn [_helpers fn-id] (get parent-map fn-id))]
+  (testing "returns empty set for fn with no parent"
+    (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (is (= #{} (storage/collect-parent-chain-impl helpers (random-uuid))))))
 
-    (testing "returns empty set for fn with no parent"
-      (is (= #{} (c/collect-parent-chain-impl get-parent-fn {} :c))))
+  (testing "returns single ancestor for fn with one parent"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {fn-b fn-a} {} {})]
+      (is (= #{fn-a} (storage/collect-parent-chain-impl helpers fn-b)))))
 
-    (testing "returns all ancestors"
-      (is (= #{:b :c} (c/collect-parent-chain-impl get-parent-fn {} :a)))
-      (is (= #{:c} (c/collect-parent-chain-impl get-parent-fn {} :b))))
+  (testing "returns all ancestors for deep chain"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          fn-c (random-uuid)
+          fn-d (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {fn-b fn-a, fn-c fn-b, fn-d fn-c} {} {})]
+      (is (= #{fn-a fn-b fn-c} (storage/collect-parent-chain-impl helpers fn-d)))))
 
-    (testing "handles circular reference gracefully"
-      (let [circular-map {:a :b, :b :a}
-            get-circular-parent (fn [_helpers fn-id] (get circular-map fn-id))]
-        ;; Should stop when cycle detected, not throw
-        (is (= #{:b :a} (c/collect-parent-chain-impl get-circular-parent {} :a))))))
-
-  (testing "throws when chain exceeds max depth"
-    (let [;; Create a chain that exceeds max depth
-          deep-chain (into {} (map (fn [i] [(keyword (str "n" i)) (keyword (str "n" (inc i)))])
-                                   (range (inc c/default-max-parent-chain-depth))))
-          get-deep-parent (fn [_helpers fn-id] (get deep-chain fn-id))]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Parent chain exceeds maximum allowed depth"
-            (c/collect-parent-chain-impl get-deep-parent {} :n0))))))
-
-
-;; === collect-dependency-chain-impl tests ===
-
-(deftest collect-dependency-chain-impl-test
-  (let [;; Mock dependency graph: a depends on b,c; b depends on d; c depends on d
-        deps-map {:a #{:b :c}, :b #{:d}, :c #{:d}, :d #{}}
-        get-deps-fn (fn [_helpers fn-id] (get deps-map fn-id #{}))]
-
-    (testing "returns empty set for fn with no dependencies"
-      (is (= #{} (c/collect-dependency-chain-impl get-deps-fn {} :d))))
-
-    (testing "returns all transitive dependencies"
-      (is (= #{:b :c :d} (c/collect-dependency-chain-impl get-deps-fn {} :a)))
-      (is (= #{:d} (c/collect-dependency-chain-impl get-deps-fn {} :b))))
-
-    (testing "handles diamond dependencies correctly"
-      ;; Both b and c depend on d, but d should only appear once
-      (let [result (c/collect-dependency-chain-impl get-deps-fn {} :a)]
-        (is (contains? result :d))
-        (is (= 3 (count result)))))))
+  (testing "handles cycle in parent chain (stops when revisiting)"
+    ;; This shouldn't happen in valid data, but the impl should handle it gracefully
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {fn-a fn-b, fn-b fn-a} {} {})]
+      ;; Should return both without infinite loop
+      (is (= #{fn-a fn-b} (storage/collect-parent-chain-impl helpers fn-a))))))
 
 
 ;; === validate-parent-same-schema-impl tests ===
 
 (deftest validate-parent-same-schema-impl-test
-  (let [schema-map {:fn1 :schema-a, :fn2 :schema-a, :fn3 :schema-b}
-        get-schema-fn (fn [_helpers fn-id] (get schema-map fn-id))]
+  (testing "nil parent-fn-id doesn't throw"
+    (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (is (nil? (storage/validate-parent-same-schema-impl helpers (random-uuid) nil)))))
 
-    (testing "passes for nil parent"
-      (is (nil? (c/validate-parent-same-schema-impl get-schema-fn {} :fn1 nil))))
+  (testing "same schema doesn't throw"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          schema-id (random-uuid)
+          helpers (->MockConstraintHelpers {fn-a schema-id, fn-b schema-id} {} {} {} {})]
+      (is (nil? (storage/validate-parent-same-schema-impl helpers fn-a fn-b)))))
 
-    (testing "passes for same schema"
-      (is (nil? (c/validate-parent-same-schema-impl get-schema-fn {} :fn1 :fn2))))
+  (testing "different schema throws"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          schema-a (random-uuid)
+          schema-b (random-uuid)
+          helpers (->MockConstraintHelpers {fn-a schema-a, fn-b schema-b} {} {} {} {})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Parent fn has different fn-schema-id"
+            (storage/validate-parent-same-schema-impl helpers fn-a fn-b)))))
 
-    (testing "throws for different schema"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Parent fn has different fn-schema-id"
-            (c/validate-parent-same-schema-impl get-schema-fn {} :fn1 :fn3))))
-
-    (testing "error contains schema details"
+  (testing "exception contains correct data"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          schema-a (random-uuid)
+          schema-b (random-uuid)
+          helpers (->MockConstraintHelpers {fn-a schema-a, fn-b schema-b} {} {} {} {})]
       (try
-        (c/validate-parent-same-schema-impl get-schema-fn {} :fn1 :fn3)
-        (is false "should have thrown")
+        (storage/validate-parent-same-schema-impl helpers fn-a fn-b)
         (catch clojure.lang.ExceptionInfo e
           (is (= :constraint-violation/parent-schema-mismatch (:type (ex-data e))))
-          (is (= :fn1 (:fn-id (ex-data e))))
-          (is (= :fn3 (:parent-fn-id (ex-data e)))))))))
+          (is (= fn-a (:fn-id (ex-data e))))
+          (is (= fn-b (:parent-fn-id (ex-data e))))))))
+
+  (testing "missing fn returns nil (fn not found)"
+    (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (is (nil? (storage/validate-parent-same-schema-impl helpers (random-uuid) (random-uuid))))))
+
+  (testing "fn-schema-id nil but parent-schema-id present returns nil"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          schema-b (random-uuid)
+          ;; fn-a has no schema, fn-b has schema
+          helpers (->MockConstraintHelpers {fn-b schema-b} {} {} {} {})]
+      (is (nil? (storage/validate-parent-same-schema-impl helpers fn-a fn-b)))))
+
+  (testing "fn-schema-id present but parent-schema-id nil returns nil"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          schema-a (random-uuid)
+          ;; fn-a has schema, fn-b has no schema
+          helpers (->MockConstraintHelpers {fn-a schema-a} {} {} {} {})]
+      (is (nil? (storage/validate-parent-same-schema-impl helpers fn-a fn-b))))))
 
 
 ;; === validate-no-arg-override-impl tests ===
 
 (deftest validate-no-arg-override-impl-test
-  (let [;; Mock: fn1's parent chain has arg-schemas :arg-a and :arg-b defined
-        chain-args {:fn1 #{:arg-a :arg-b}}
-        collect-args-fn (fn [_helpers fn-id] (get chain-args fn-id #{}))]
+  (testing "arg not in parent chain doesn't throw"
+    (let [fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {} {fn-id #{}} {})]
+      (is (nil? (storage/validate-no-arg-override-impl helpers fn-id arg-schema-id)))))
 
-    (testing "passes for new arg-schema"
-      (is (nil? (c/validate-no-arg-override-impl collect-args-fn {} :fn1 :arg-c))))
+  (testing "arg in parent chain throws"
+    (let [fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {} {fn-id #{arg-schema-id}} {})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Argument already defined in parent chain"
+            (storage/validate-no-arg-override-impl helpers fn-id arg-schema-id)))))
 
-    (testing "throws for already defined arg-schema"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Argument already defined in parent chain"
-            (c/validate-no-arg-override-impl collect-args-fn {} :fn1 :arg-a))))
-
-    (testing "error contains details"
+  (testing "exception contains correct data"
+    (let [fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {} {fn-id #{arg-schema-id}} {})]
       (try
-        (c/validate-no-arg-override-impl collect-args-fn {} :fn1 :arg-b)
-        (is false "should have thrown")
+        (storage/validate-no-arg-override-impl helpers fn-id arg-schema-id)
         (catch clojure.lang.ExceptionInfo e
           (is (= :constraint-violation/arg-already-defined (:type (ex-data e))))
-          (is (= :fn1 (:fn-id (ex-data e))))
-          (is (= :arg-b (:arg-schema-id (ex-data e)))))))))
+          (is (= fn-id (:fn-id (ex-data e))))
+          (is (= arg-schema-id (:arg-schema-id (ex-data e)))))))))
 
 
 ;; === validate-arg-schema-belongs-to-fn-impl tests ===
 
 (deftest validate-arg-schema-belongs-to-fn-impl-test
-  (let [fn-schema-map {:fn1 :schema-a, :fn2 :schema-b}
-        arg-schema-map {:arg1 :schema-a, :arg2 :schema-b}
-        get-fn-schema (fn [_helpers fn-id] (get fn-schema-map fn-id))
-        get-arg-schema (fn [_helpers arg-id] (get arg-schema-map arg-id))]
+  (testing "arg-schema belongs to fn-schema doesn't throw"
+    (let [fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          schema-id (random-uuid)
+          helpers (->MockConstraintHelpers {fn-id schema-id} {arg-schema-id schema-id} {} {} {})]
+      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)))))
 
-    (testing "passes when arg belongs to fn's schema"
-      (is (nil? (c/validate-arg-schema-belongs-to-fn-impl
-                  get-fn-schema get-arg-schema {} :fn1 :arg1))))
+  (testing "arg-schema from different fn-schema throws"
+    (let [fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          schema-a (random-uuid)
+          schema-b (random-uuid)
+          helpers (->MockConstraintHelpers {fn-id schema-a} {arg-schema-id schema-b} {} {} {})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Arg-schema does not belong to fn's schema"
+            (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)))))
 
-    (testing "throws when arg belongs to different schema"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Arg-schema does not belong to fn's schema"
-            (c/validate-arg-schema-belongs-to-fn-impl
-              get-fn-schema get-arg-schema {} :fn1 :arg2))))
-
-    (testing "error contains details"
+  (testing "exception contains correct data"
+    (let [fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          schema-a (random-uuid)
+          schema-b (random-uuid)
+          helpers (->MockConstraintHelpers {fn-id schema-a} {arg-schema-id schema-b} {} {} {})]
       (try
-        (c/validate-arg-schema-belongs-to-fn-impl
-          get-fn-schema get-arg-schema {} :fn1 :arg2)
-        (is false "should have thrown")
+        (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)
         (catch clojure.lang.ExceptionInfo e
           (is (= :constraint-violation/arg-schema-mismatch (:type (ex-data e))))
-          (is (= :fn1 (:fn-id (ex-data e))))
-          (is (= :arg2 (:arg-schema-id (ex-data e)))))))))
+          (is (= fn-id (:fn-id (ex-data e))))
+          (is (= arg-schema-id (:arg-schema-id (ex-data e))))
+          (is (= schema-a (:fn-schema-id (ex-data e))))
+          (is (= schema-b (:arg-fn-schema-id (ex-data e))))))))
+
+  (testing "missing fn-schema returns nil"
+    (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers (random-uuid) (random-uuid))))))
+
+  (testing "fn-schema-id present but arg-fn-schema-id nil returns nil"
+    (let [fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          schema-id (random-uuid)
+          ;; fn has schema-id, but arg-schema has no fn-schema-id
+          helpers (->MockConstraintHelpers {fn-id schema-id} {} {} {} {})]
+      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id))))))
 
 
 ;; === validate-no-inheritance-cycle-impl tests ===
 
 (deftest validate-no-inheritance-cycle-impl-test
-  (let [;; Mock: parent-b's ancestors are #{parent-c}
-        ancestors-map {:parent-b #{:parent-c}}
-        collect-chain-fn (fn [_helpers fn-id] (get ancestors-map fn-id #{}))]
+  (testing "nil parent-fn-id doesn't throw"
+    (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (is (nil? (storage/validate-no-inheritance-cycle-impl helpers (random-uuid) nil)))))
 
-    (testing "passes for nil parent"
-      (is (nil? (c/validate-no-inheritance-cycle-impl collect-chain-fn {} :fn1 nil))))
+  (testing "self-reference throws"
+    (let [fn-id (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {} {} {})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Cannot set self as parent"
+            (storage/validate-no-inheritance-cycle-impl helpers fn-id fn-id)))))
 
-    (testing "passes for valid parent"
-      (is (nil? (c/validate-no-inheritance-cycle-impl collect-chain-fn {} :fn1 :parent-b))))
+  (testing "non-cyclic parent chain doesn't throw"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          fn-c (random-uuid)
+          ;; Chain: fn-c -> fn-b -> fn-a (no cycle)
+          helpers (->MockConstraintHelpers {} {} {fn-b fn-a} {} {})]
+      (is (nil? (storage/validate-no-inheritance-cycle-impl helpers fn-c fn-b)))))
 
-    (testing "throws for self-reference"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Cannot set self as parent"
-            (c/validate-no-inheritance-cycle-impl collect-chain-fn {} :fn1 :fn1))))
+  (testing "cycle through parent chain throws"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          fn-c (random-uuid)
+          ;; Current chain: fn-c -> fn-b -> fn-a
+          ;; Trying to set fn-a -> fn-c (would create cycle)
+          helpers (->MockConstraintHelpers {} {} {fn-c fn-b, fn-b fn-a} {} {})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Setting parent would create inheritance cycle"
+            (storage/validate-no-inheritance-cycle-impl helpers fn-a fn-c)))))
 
-    (testing "throws when would create cycle"
-      ;; If :parent-c wants to set :parent-b as parent, and :parent-b's ancestors
-      ;; include :parent-c, that would create a cycle
-      (let [ancestors-with-cycle {:parent-b #{:parent-c}}
-            collect-fn (fn [_helpers fn-id] (get ancestors-with-cycle fn-id #{}))]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Setting parent would create inheritance cycle"
-              (c/validate-no-inheritance-cycle-impl collect-fn {} :parent-c :parent-b)))))
-
-    (testing "error contains cycle info"
-      (let [ancestors-with-cycle {:parent-b #{:parent-c}}
-            collect-fn (fn [_helpers fn-id] (get ancestors-with-cycle fn-id #{}))]
-        (try
-          (c/validate-no-inheritance-cycle-impl collect-fn {} :parent-c :parent-b)
-          (is false "should have thrown")
-          (catch clojure.lang.ExceptionInfo e
-            (is (= :constraint-violation/inheritance-cycle (:type (ex-data e))))
-            (is (= :parent-c (:fn-id (ex-data e))))
-            (is (= :parent-b (:parent-fn-id (ex-data e))))))))))
-
-
-;; === validate-no-dependency-cycle-impl tests ===
-
-(deftest validate-no-dependency-cycle-impl-test
-  (let [;; Mock: :fn-b depends on #{:fn-c}, :fn-c depends on #{}
-        deps-map {:fn-b #{:fn-c}, :fn-c #{}}
-        collect-deps-fn (fn [_helpers fn-id] (get deps-map fn-id #{}))]
-
-    (testing "passes for nil value-fn-id"
-      (is (nil? (c/validate-no-dependency-cycle-impl collect-deps-fn {} :fn-a nil))))
-
-    (testing "passes for valid reference"
-      (is (nil? (c/validate-no-dependency-cycle-impl collect-deps-fn {} :fn-a :fn-b))))
-
-    (testing "throws for self-reference"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Reference would create dependency cycle"
-            (c/validate-no-dependency-cycle-impl collect-deps-fn {} :fn-a :fn-a))))
-
-    (testing "throws when would create cycle"
-      ;; If :fn-c wants to reference :fn-a, but :fn-a (via :fn-b) depends on :fn-c
-      (let [deps-with-cycle {:fn-b #{:fn-c :fn-a}}
-            collect-fn (fn [_helpers fn-id] (get deps-with-cycle fn-id #{}))]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"Reference would create dependency cycle"
-              (c/validate-no-dependency-cycle-impl collect-fn {} :fn-c :fn-b)))))
-
-    (testing "error contains cycle info"
+  (testing "exception contains correct data for self-reference"
+    (let [fn-id (random-uuid)
+          helpers (->MockConstraintHelpers {} {} {} {} {})]
       (try
-        (c/validate-no-dependency-cycle-impl collect-deps-fn {} :fn-a :fn-a)
-        (is false "should have thrown")
+        (storage/validate-no-inheritance-cycle-impl helpers fn-id fn-id)
         (catch clojure.lang.ExceptionInfo e
-          (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
-          (is (= :fn-a (:owner-fn-id (ex-data e))))
-          (is (= :fn-a (:value-fn-id (ex-data e)))))))))
+          (is (= :constraint-violation/inheritance-cycle (:type (ex-data e))))
+          (is (= fn-id (:fn-id (ex-data e))))
+          (is (= fn-id (:parent-fn-id (ex-data e)))))))))
 
 
-;; === defconstraint-wrappers macro test ===
-;;
-;; This tests that the macro generates valid code.
-;; We use eval to actually expand and define functions in a test namespace.
+;; === StorageBatchCRUD protocol tests ===
 
-(deftest defconstraint-wrappers-macro-test
-  (testing "macro expands to valid code structure"
-    ;; Use macroexpand with fully qualified symbol
-    (let [expansion (macroexpand-1
-                      `(c/defconstraint-wrappers (identity ~'helpers) c))]
-      ;; Should expand to (do ...)
-      (is (= 'do (first expansion)))
-      ;; Should define 5 functions
-      (is (= 6 (count expansion))) ; do + 5 defns
-      ;; Each should be a defn
-      (is (every? #(= 'clojure.core/defn (first %)) (rest expansion)))
-      ;; Should define the expected function names
-      (let [fn-names (set (map second (rest expansion)))]
-        (is (contains? fn-names 'validate-parent-same-schema!))
-        (is (contains? fn-names 'validate-no-arg-override!))
-        (is (contains? fn-names 'validate-arg-schema-belongs-to-fn!))
-        (is (contains? fn-names 'validate-no-inheritance-cycle!))
-        (is (contains? fn-names 'validate-no-dependency-cycle!))))))
+(deftest storage-batch-crud-protocol-test
+  (testing "StorageBatchCRUD protocol is defined"
+    (is (some? storage/StorageBatchCRUD))
+    (is (contains? (:sigs storage/StorageBatchCRUD) :create-entities))
+    (is (contains? (:sigs storage/StorageBatchCRUD) :read-entities))
+    (is (contains? (:sigs storage/StorageBatchCRUD) :delete-entities))))

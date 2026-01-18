@@ -1,476 +1,478 @@
 (ns graphden.executor.core-test
-  "Unit tests for executor core functions.
-   Tests internal functions like truncate-value without requiring database."
+  "Core tests for executor.
+
+   Covers:
+   - Base function registry
+   - Basic execution
+   - Literal arg values
+   - Partial application (currying)
+   - Function references
+   - Error handling
+   - Mutual references"
   (:require
-    [clojure.string :as str]
-    [clojure.test :refer [deftest is testing]]
-    [graphden.executor.context :as ctx]
-    [graphden.executor.core :as core]
-    [graphden.executor.types :as types]
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.interface :as exec]
+    [graphden.executor.test-setup :as setup]
     [graphden.storage-protocol.interface :as sp]))
 
 
-;; === Mock storage for validation tests ===
-;; Minimal implementation that satisfies ExecutionGraph protocol
-;; Used only for context creation validation, not actual execution
-
-(defrecord MockStorage
-  []
-
-  sp/ExecutionGraph
-
-  (resolve-execution-graph
-    [_this _fn-id]
-    ;; Not used in validation tests
-    nil))
+(use-fixtures :each exec/with-clean-registry)
 
 
-;; === truncate-value tests ===
+;; === Tests ===
 
-(deftest truncate-value-test
-  (testing "returns original string when under limit"
-    (is (= "\"hello\"" (#'types/truncate-value "hello" 100)))
-    (is (= "42" (#'types/truncate-value 42 100)))
-    (is (= ":keyword" (#'types/truncate-value :keyword 100))))
+(deftest base-fn-registry-test
+  (testing "register and get base function"
+    (let [add-fn (fn [args _ctx] (+ (:a args) (:b args)))]
+      (exec/register-base-fn! :test-add add-fn)
+      (is (= add-fn (exec/get-base-fn :test-add)))))
 
-  (testing "truncates long strings with ellipsis"
-    (let [long-str "abcdefghij"  ; 10 chars, pr-str adds quotes -> 12 chars
-          result (#'types/truncate-value long-str 10)]
-      (is (= 13 (count result)))  ; 10 chars + "..."
-      (is (str/ends-with? result "..."))))
+  (testing "get-base-fn returns nil for unknown function"
+    (is (nil? (exec/get-base-fn :unknown-fn))))
 
-  (testing "handles exact boundary - string exactly at limit"
-    (let [str-5 "abcde"  ; pr-str -> "\"abcde\"" = 7 chars
-          result (#'types/truncate-value str-5 7)]
-      ;; Exactly at limit, no truncation
-      (is (= "\"abcde\"" result))
-      (is (not (str/ends-with? result "...")))))
+  (testing "clear-base-fns! removes all functions"
+    (exec/register-base-fn! :fn1 identity)
+    (exec/register-base-fn! :fn2 identity)
+    (exec/clear-base-fns!)
+    (is (nil? (exec/get-base-fn :fn1)))
+    (is (nil? (exec/get-base-fn :fn2))))
 
-  (testing "handles exact boundary - string one over limit"
-    (let [str-6 "abcdef"  ; pr-str -> "\"abcdef\"" = 8 chars
-          result (#'types/truncate-value str-6 7)]
-      ;; One over limit, should truncate
-      (is (= 10 (count result)))  ; 7 + "..."
-      (is (str/ends-with? result "..."))))
+  (testing "get-default-registry returns registered functions"
+    (exec/register-base-fn! :reg-test-1 identity)
+    (exec/register-base-fn! :reg-test-2 str)
+    (let [registry (exec/get-default-registry)]
+      (is (map? registry))
+      (is (= identity (get registry :reg-test-1)))
+      (is (= str (get registry :reg-test-2)))))
 
-  (testing "handles empty string"
-    (is (= "\"\"" (#'types/truncate-value "" 100))))
-
-  (testing "handles nil"
-    (is (= "nil" (#'types/truncate-value nil 100))))
-
-  (testing "handles complex data structures"
-    ;; Map
-    (let [m {:a 1 :b 2}
-          result (#'types/truncate-value m 100)]
-      (is (str/includes? result ":a")))
-
-    ;; Vector
-    (let [v [1 2 3 4 5]
-          result (#'types/truncate-value v 100)]
-      (is (= "[1 2 3 4 5]" result)))
-
-    ;; Large nested structure truncates properly
-    (let [large {:keys (vec (range 100))}
-          result (#'types/truncate-value large 20)]
-      (is (= 23 (count result)))  ; 20 + "..."
-      (is (str/ends-with? result "..."))))
-
-  (testing "handles special characters in strings"
-    (is (= "\"line1\\nline2\"" (#'types/truncate-value "line1\nline2" 100)))
-    (is (= "\"tab\\there\"" (#'types/truncate-value "tab\there" 100))))
-
-  (testing "handles Unicode characters"
-    ;; Unicode chars: pr-str preserves them
-    (let [unicode "привет"  ; Russian "hello"
-          result (#'types/truncate-value unicode 100)]
-      (is (str/includes? result "привет"))))
-
-  (testing "handles max-len of 0"
-    (let [result (#'types/truncate-value "test" 0)]
-      ;; Should truncate to 0 chars + "..."
-      (is (= "..." result))))
-
-  (testing "handles max-len of 1"
-    (let [result (#'types/truncate-value "test" 1)]
-      ;; Should truncate to 1 char + "..."
-      (is (= "\"..." result))))
-
-  (testing "edge case: truncation mid-escape sequence"
-    ;; pr-str of "a\nb" is "\"a\\nb\"" (7 chars)
-    ;; If we truncate at 4, we get "\"a\\" + "..." which may look odd but is safe
-    (let [result (#'types/truncate-value "a\nb" 4)]
-      (is (= 7 (count result)))  ; 4 + "..."
-      (is (str/ends-with? result "..."))))
-
-  (testing "redacts sensitive keys in maps"
-    (is (str/includes? (#'types/truncate-value {:password "secret123"} 100) "[REDACTED]"))
-    (is (str/includes? (#'types/truncate-value {:api-key "abc123"} 100) "[REDACTED]"))
-    (is (str/includes? (#'types/truncate-value {:auth-token "xyz"} 100) "[REDACTED]"))
-    (is (str/includes? (#'types/truncate-value {:secret "hidden"} 100) "[REDACTED]"))
-    (is (str/includes? (#'types/truncate-value {:private-key "key"} 100) "[REDACTED]"))
-    (is (str/includes? (#'types/truncate-value {:credential "cred"} 100) "[REDACTED]")))
-
-  (testing "redacts nested sensitive keys"
-    (let [nested {:config {:db {:password "secret"}} :name "test"}
-          result (#'types/truncate-value nested 200)]
-      (is (str/includes? result "[REDACTED]"))
-      (is (str/includes? result ":name"))
-      (is (str/includes? result "\"test\""))))
-
-  (testing "preserves non-sensitive keys"
-    (let [result (#'types/truncate-value {:username "john" :email "john@test.com"} 100)]
-      (is (str/includes? result "john"))
-      (is (str/includes? result "john@test.com"))))
-
-  (testing "redacts sensitive values in sequences"
-    (let [result (#'types/truncate-value [{:password "p1"} {:password "p2"}] 100)]
-      (is (str/includes? result "[REDACTED]"))
-      (is (not (str/includes? result "p1"))))))
+  (testing "get-base-fn-from-context returns function from context"
+    (let [storage (setup/create-test-storage)
+          my-fn (fn [_ _] 42)
+          ctx (exec/create-context {:storage storage
+                                    :base-fns {:my-custom-fn my-fn}})]
+      (is (= my-fn (exec/get-base-fn-from-context ctx :my-custom-fn)))
+      (is (nil? (exec/get-base-fn-from-context ctx :nonexistent)))
+      (sp/close storage))))
 
 
-;; === create-context validation tests ===
-
-(deftest create-context-validation-test
-  (testing "rejects missing storage"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Storage is required"
-          (ctx/create-context {}))))
-
-  (testing "rejects storage without ExecutionGraph protocol"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"storage must implement ExecutionGraph protocol"
-          (ctx/create-context {:storage :not-a-storage})))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"storage must implement ExecutionGraph protocol"
-          (ctx/create-context {:storage {:fake "storage"}}))))
-
-  (testing "rejects timeout below minimum"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"timeout-ms must be at least"
-          (ctx/create-context {:storage (->MockStorage) :timeout-ms 10}))))
-
-  (testing "rejects non-positive max-depth"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"max-depth must be a positive integer"
-          (ctx/create-context {:storage (->MockStorage) :max-depth 0})))
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"max-depth must be a positive integer"
-          (ctx/create-context {:storage (->MockStorage) :max-depth -1}))))
-
-  (testing "rejects max-depth exceeding limit"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"max-depth exceeds maximum allowed"
-          (ctx/create-context {:storage (->MockStorage) :max-depth 200000}))))
-
-  (testing "rejects non-map path-args"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"path-args must be a map"
-          (ctx/create-context {:storage (->MockStorage) :path-args [1 2 3]}))))
-
-  (testing "rejects invalid path-args keys"
-    (let [uuid1 (random-uuid)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"path-args keys must be UUID"
-            (ctx/create-context {:storage (->MockStorage)
-                                 :path-args {"string-key" 42}})))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"path-args keys must be UUID"
-            (ctx/create-context {:storage (->MockStorage)
-                                 :path-args {:keyword-key 42}})))
-      ;; Vector with wrong size
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"path-args keys must be UUID"
-            (ctx/create-context {:storage (->MockStorage)
-                                 :path-args {[uuid1] 42}})))
-      ;; Vector with non-UUID
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"path-args keys must be UUID"
-            (ctx/create-context {:storage (->MockStorage)
-                                 :path-args {[uuid1 "not-uuid"] 42}})))))
-
-  (testing "accepts valid path-args keys"
-    (let [uuid1 (random-uuid)
-          uuid2 (random-uuid)
-          ctx (ctx/create-context {:storage (->MockStorage)
-                                   :path-args {uuid1 42
-                                               [uuid1 uuid2] "nested"}})]
+(deftest create-context-test
+  (testing "creates context with required storage"
+    (let [storage (setup/create-test-storage)
+          ctx (exec/create-context {:storage storage})]
       (is (some? ctx))
-      (is (= 42 (get (:path-args ctx) uuid1)))
-      (is (= "nested" (get (:path-args ctx) [uuid1 uuid2]))))))
+      (sp/close storage)))
+
+  (testing "throws when storage is missing"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Storage is required"
+          (exec/create-context {})))))
 
 
-(deftest create-context-path-args-count-test
-  (testing "accepts reasonable number of path-args"
-    (let [path-args (into {} (map (fn [_] [(random-uuid) "value"]) (range 100)))]
-      (is (some? (ctx/create-context {:storage (->MockStorage) :path-args path-args})))))
-
-  (testing "rejects excessive path-args count"
-    ;; This tests the max-path-args-count limit (1000)
-    ;; Reduced from 10000 to prevent DoS via oversized path-args
-    (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 1001)))]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"path-args count exceeds maximum"
-            (ctx/create-context {:storage (->MockStorage) :path-args large-path-args})))))
-
-  (testing "path-args count error includes details"
-    (let [large-path-args (into {} (map (fn [i] [(random-uuid) i]) (range 1001)))]
-      (try
-        (ctx/create-context {:storage (->MockStorage) :path-args large-path-args})
-        (is false "should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (let [data (ex-data e)
-                ;; New structure: errors in :validation-errors vector
-                err (first (:validation-errors data))]
-            (is (= :execution-error/invalid-context (:type data)))
-            (is (= 1001 (:path-args-count err)))
-            (is (= 1000 (:max-allowed err)))))))))
+(deftest execute-simple-function-test
+  (testing "executes function with literal arg-values"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          ;; Create arg-values with literals
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 3})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 5})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id fn-rec) {})]
+      (is (= 8 result))
+      (sp/close storage))))
 
 
-;; === register-type-hint! tests ===
-
-(deftest register-type-hint!-test
-  (testing "registers custom type hint"
-    ;; Clean state
-    (reset! types/custom-type-hints {})
-    (types/register-type-hint! :email "string in email format")
-    (is (= "string in email format" (get @types/custom-type-hints :email))))
-
-  (testing "rejects non-keyword type"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"type-keyword must be a keyword"
-          (types/register-type-hint! "email" "hint"))))
-
-  (testing "rejects non-string hint"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"hint-string must be a string"
-          (types/register-type-hint! :email :not-a-string))))
-
-  (testing "custom hint overrides default"
-    (reset! types/custom-type-hints {})
-    (types/register-type-hint! :int "custom integer hint")
-    (is (= "custom integer hint" (#'types/get-type-hint :int)))
-    ;; Cleanup
-    (reset! types/custom-type-hints {}))
-
-  (testing "get-type-hint returns type name for unknown types"
-    (reset! types/custom-type-hints {})
-    ;; For unknown types not in default-type-hints or custom-type-hints,
-    ;; get-type-hint falls back to (name arg-type)
-    (is (= "unknown-custom-type" (#'types/get-type-hint :unknown-custom-type)))
-    (is (= "my-special-type" (#'types/get-type-hint :my-special-type)))))
+(deftest execute-with-parent-chain-test
+  (testing "inherits arg-values from parent"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b fn-schema]} (setup/setup-add-function! storage)
+          ;; Parent has :a = 10
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 10})
+          ;; Create child fn with :b = 5
+          child-fn (sp/create-entity storage :fn
+                                     {:name "child-add"
+                                      :fn-schema-id (:id fn-schema)
+                                      :parent-fn-id (:id fn-rec)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id child-fn)
+                               :arg-schema-id (:id arg-b)
+                               :value 5})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id child-fn) {})]
+      ;; Should use a=10 from parent, b=5 from child
+      (is (= 15 result))
+      (sp/close storage))))
 
 
-;; === truncate-value additional tests ===
-
-(deftest truncate-value-edge-cases-test
-  (testing "handles deeply nested structures"
-    (let [deep {:a {:b {:c {:d {:e "value"}}}}}
-          result (#'types/truncate-value deep 50)]
-      (is (<= (count result) 53))))  ; 50 + "..."
-
-  (testing "handles very long strings"
-    (let [long-str (str/join (repeat 1000 "x"))
-          result (#'types/truncate-value long-str 20)]
-      (is (= 23 (count result)))))  ; 20 + "..."
-
-  (testing "handles collections with many elements"
-    (let [big-vec (vec (range 100))
-          result (#'types/truncate-value big-vec 30)]
-      (is (<= (count result) 33)))))
-
-
-;; === check-unknown-type-circuit-breaker! tests ===
-
-(deftest check-unknown-type-circuit-breaker!-test
-  (testing "increments counter and allows under limit"
-    (let [counter (atom 0)]
-      (dotimes [_ 5]
-        (#'types/check-unknown-type-circuit-breaker! counter 10 :custom-type))
-      (is (= 5 @counter))))
-
-  (testing "throws when reaching limit"
-    ;; With >= check and swap-vals!, throws exactly when reaching the limit
-    ;; Counter at 9, after increment becomes 10, which triggers (>= 10 10)
-    (let [counter (atom 9)]  ; One below limit
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Too many unknown types"
-            (#'types/check-unknown-type-circuit-breaker! counter 10 :custom-type)))))
-
-  (testing "exception contains correct data"
-    ;; Counter at 9, after increment becomes 10 (the trigger point)
-    (let [counter (atom 9)]
-      (try
-        (#'types/check-unknown-type-circuit-breaker! counter 10 :my-custom-type)
-        (is false "should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :execution-error/unknown-type-limit-exceeded (:type (ex-data e))))
-          (is (= 10 (:unknown-type-count (ex-data e))))  ; Now throws at exactly limit
-          (is (= 10 (:max-allowed (ex-data e))))
-          (is (= :my-custom-type (:last-unknown-type (ex-data e))))))))
-
-  (testing "respects configurable limit"
-    (let [counter (atom 0)]
-      ;; With limit of 3 and >= check, allows calls while counter < 3
-      ;; 0→1, 1→2 are allowed; 2→3 throws because (>= 3 3)
-      (dotimes [_ 2]
-        (#'types/check-unknown-type-circuit-breaker! counter 3 :custom-type))
-      (is (= 2 @counter))
-      ;; Third call should throw (reaching limit of 3)
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Too many unknown types"
-            (#'types/check-unknown-type-circuit-breaker! counter 3 :custom-type))))))
+(deftest execute-fn-reference-test
+  (testing "executes referenced function and uses result"
+    (let [storage (setup/create-test-storage)
+          ;; Register a constant function
+          _ (exec/register-base-fn!
+              :const
+              (fn [{:keys [value]} _ctx]
+                @value))
+          ;; Create const fn-schema
+          const-schema (sp/create-entity storage :fn-schema
+                                         {:name "const"
+                                          :returned-type :int})
+          const-arg (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id const-schema)
+                                       :name "value"
+                                       :type :int
+                                       :required true})
+          ;; Create two const functions
+          const-3 (sp/create-entity storage :fn
+                                    {:name "const-3"
+                                     :fn-schema-id (:id const-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id const-3)
+                               :arg-schema-id (:id const-arg)
+                               :value 3})
+          const-5 (sp/create-entity storage :fn
+                                    {:name "const-5"
+                                     :fn-schema-id (:id const-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id const-5)
+                               :arg-schema-id (:id const-arg)
+                               :value 5})
+          ;; Create add fn-schema
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          ;; Set arg-values to reference const functions via fn-result-value
+          ;; (fn-result-value means: execute the fn and use its result)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value (setup/create-fn-result-value! storage (:id const-3))})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value (setup/create-fn-result-value! storage (:id const-5))})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id fn-rec) {})]
+      (is (= 8 result))
+      (sp/close storage))))
 
 
-;; === Multiple validation errors test ===
-
-(deftest create-context-multiple-errors-test
-  (testing "multiple validation errors produces combined message"
-    (try
-      ;; Trigger multiple errors: bad timeout AND bad max-depth
-      (ctx/create-context {:storage (->MockStorage)
-                           :timeout-ms 10    ; too low
-                           :max-depth 0})    ; invalid
-      (is false "should have thrown")
-      (catch clojure.lang.ExceptionInfo e
-        (is (= :execution-error/invalid-context (:type (ex-data e))))
-        (let [errors (:validation-errors (ex-data e))]
-          (is (>= (count errors) 2))
-          (is (re-find #"Multiple validation errors" (ex-message e))))))))
-
-
-;; === type-mismatch? tests ===
-
-(deftest type-mismatch-test
-  (testing "returns false for matching known types"
-    (let [counter (atom 0)]
-      (is (not (#'types/type-mismatch? :int 42 true 10 counter)))
-      (is (not (#'types/type-mismatch? :text "hello" true 10 counter)))
-      (is (not (#'types/type-mismatch? :bool true true 10 counter)))
-      (is (not (#'types/type-mismatch? :uuid (random-uuid) true 10 counter)))))
-
-  (testing "returns true for mismatched known types"
-    (let [counter (atom 0)]
-      (is (#'types/type-mismatch? :int "not an int" true 10 counter))
-      (is (#'types/type-mismatch? :text 42 true 10 counter))
-      (is (#'types/type-mismatch? :bool "not a bool" true 10 counter))
-      (is (#'types/type-mismatch? :uuid "not a uuid" true 10 counter))))
-
-  (testing "union type accepts any value"
-    (let [counter (atom 0)]
-      (is (not (#'types/type-mismatch? :union 42 true 10 counter)))
-      (is (not (#'types/type-mismatch? :union "string" true 10 counter)))
-      (is (not (#'types/type-mismatch? :union {:a 1} true 10 counter)))
-      (is (not (#'types/type-mismatch? :union nil true 10 counter)))))
-
-  (testing "unknown type in strict mode throws exception"
-    (let [counter (atom 0)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Unknown argument type"
-            (#'types/type-mismatch? :custom-unknown-type "value" true 10 counter)))))
-
-  (testing "unknown type in non-strict mode returns false with circuit breaker"
-    (let [counter (atom 0)]
-      (is (not (#'types/type-mismatch? :custom-unknown-type "value" false 10 counter)))
-      (is (= 1 @counter))))  ; Counter incremented
-
-  (testing "nil value for non-nullable types"
-    (let [counter (atom 0)]
-      ;; Most types don't accept nil
-      (is (#'types/type-mismatch? :int nil true 10 counter))
-      (is (#'types/type-mismatch? :text nil true 10 counter))
-      (is (#'types/type-mismatch? :uuid nil true 10 counter))
-      ;; Union accepts nil
-      (is (not (#'types/type-mismatch? :union nil true 10 counter))))))
+(deftest max-depth-protection-test
+  (testing "throws when max depth is exceeded"
+    (let [storage (setup/create-test-storage)
+          ;; Register identity function
+          _ (exec/register-base-fn!
+              :identity
+              (fn [{:keys [x]} _ctx]
+                @x))
+          ;; Create identity fn-schema
+          id-schema (sp/create-entity storage :fn-schema
+                                      {:name "identity"
+                                       :returned-type :int})
+          id-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id id-schema)
+                                    :name "x"
+                                    :type :int
+                                    :required true})
+          ;; Create chain of functions that reference each other
+          fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
+          fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
+          fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
+          ;; fn-a -> fn-b -> fn-c -> literal (via fn-result-value to trigger execution)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-a)
+                               :arg-schema-id (:id id-arg)
+                               :value (setup/create-fn-result-value! storage (:id fn-b))})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-b)
+                               :arg-schema-id (:id id-arg)
+                               :value (setup/create-fn-result-value! storage (:id fn-c))})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-c)
+                               :arg-schema-id (:id id-arg)
+                               :value 42})
+          ;; Execute with max-depth=1 (should fail at fn-c which runs at depth=2)
+          ctx (exec/create-context {:storage storage :max-depth 1})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Maximum recursion depth exceeded"
+            (exec/execute ctx (:id fn-a) {})))
+      (sp/close storage))))
 
 
-;; === validate-provided-arg-type! tests ===
-
-(deftest validate-provided-arg-type-test
-  (testing "accepts valid typed value"
-    (let [counter (atom 0)
-          arg-schema {:name "x" :type :int :required true}]
-      (is (nil? (#'types/validate-provided-arg-type! 42 arg-schema true 10 counter)))))
-
-  (testing "throws on type mismatch"
-    (let [counter (atom 0)
-          arg-schema {:name "x" :type :int :required true}]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Type mismatch"
-            (#'types/validate-provided-arg-type! "not-an-int" arg-schema true 10 counter)))))
-
-  (testing "throws on nil arg-schema"
-    (let [counter (atom 0)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid arg-schema.*missing type"
-            (#'types/validate-provided-arg-type! 42 nil true 10 counter)))))
-
-  (testing "throws on arg-schema without type"
-    (let [counter (atom 0)
-          arg-schema {:name "x" :required true}]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid arg-schema.*missing type"
-            (#'types/validate-provided-arg-type! 42 arg-schema true 10 counter)))))
-
-  (testing "type mismatch error includes arg name"
-    (let [counter (atom 0)
-          arg-schema {:name "my-arg" :type :int :required true}]
-      (try
-        (#'types/validate-provided-arg-type! "wrong-type" arg-schema true 10 counter)
-        (is false "should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :execution-error/type-mismatch (:type (ex-data e))))
-          (is (= "my-arg" (:arg-name (ex-data e))))
-          (is (= :int (:expected-type (ex-data e))))))))
-
-  (testing "accepts union type with any value"
-    (let [counter (atom 0)
-          arg-schema {:name "x" :type :union :required false}]
-      (is (nil? (#'types/validate-provided-arg-type! 42 arg-schema true 10 counter)))
-      (is (nil? (#'types/validate-provided-arg-type! "string" arg-schema true 10 counter)))
-      (is (nil? (#'types/validate-provided-arg-type! {:map "value"} arg-schema true 10 counter)))))
-
-  (testing "non-strict mode accepts unknown types"
-    (let [counter (atom 0)
-          arg-schema {:name "x" :type :custom-type :required true}]
-      ;; Non-strict mode should not throw for unknown types
-      (is (nil? (#'types/validate-provided-arg-type! "any-value" arg-schema false 10 counter)))
-      (is (= 1 @counter))))  ; Circuit breaker counter incremented
-
-  (testing "strict mode rejects unknown types"
-    (let [counter (atom 0)
-          arg-schema {:name "x" :type :custom-type :required true}]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Unknown argument type"
-            (#'types/validate-provided-arg-type! "any-value" arg-schema true 10 counter))))))
+(deftest missing-base-fn-test
+  (testing "throws when base function is not registered"
+    (let [storage (setup/create-test-storage)
+          ;; Create fn-schema without registering base function
+          fn-schema (sp/create-entity storage :fn-schema
+                                      {:name "unknown-fn"
+                                       :returned-type :int})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-unknown"
+                                    :fn-schema-id (:id fn-schema)})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Base function 'unknown-fn' not found"
+            (exec/execute ctx (:id fn-rec) {})))
+      (sp/close storage))))
 
 
-;; === Cache eviction tests ===
+(deftest missing-required-arg-test
+  (testing "throws when required argument is not provided"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)
+          ;; Only provide :a, not :b
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 3})
+          ctx (exec/create-context {:storage storage})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required argument 'b' not provided"
+            (exec/execute ctx (:id fn-rec) {})))
+      (sp/close storage))))
 
-(deftest cache-eviction-test
-  (testing "evict-cache-entries! removes oldest entries"
-    (let [cache (atom {})
-          ;; Add entries in order - Clojure maps preserve insertion order
-          _ (swap! cache assoc :a 1)
-          _ (swap! cache assoc :b 2)
-          _ (swap! cache assoc :c 3)
-          _ (swap! cache assoc :d 4)
-          _ (swap! cache assoc :e 5)
-          ;; Evict to target size 3 (should remove :a and :b)
-          evicted (#'core/evict-cache-entries! cache 3)]
-      (is (= 2 evicted))
-      (is (= 3 (count @cache)))
-      (is (not (contains? @cache :a)))
-      (is (not (contains? @cache :b)))
-      (is (contains? @cache :c))
-      (is (contains? @cache :d))
-      (is (contains? @cache :e))))
 
-  (testing "evict-cache-entries! handles empty cache"
-    (let [cache (atom {})]
-      (is (nil? (#'core/evict-cache-entries! cache 10)))))
+(deftest fn-not-found-test
+  (testing "throws when function id doesn't exist"
+    (let [storage (setup/create-test-storage)
+          ctx (exec/create-context {:storage storage})
+          fake-id (random-uuid)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found"
+            (exec/execute ctx fake-id {})))
+      (sp/close storage))))
 
-  (testing "evict-cache-entries! handles target >= current size"
-    (let [cache (atom {:a 1 :b 2})]
-      (is (nil? (#'core/evict-cache-entries! cache 5)))
-      (is (= 2 (count @cache))))))
+
+(deftest timeout-protection-test
+  (testing "throws when execution timeout is exceeded"
+    (let [storage (setup/create-test-storage)
+          ;; Register a slow function that sleeps and calls another fn
+          _ (exec/register-base-fn!
+              :slow-fn
+              (fn [{:keys [x]} _ctx]
+                (Thread/sleep 50) ; Sleep for 50ms
+                @x))
+          ;; Create slow fn-schema
+          slow-schema (sp/create-entity storage :fn-schema
+                                        {:name "slow-fn"
+                                         :returned-type :int})
+          slow-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id slow-schema)
+                                      :name "x"
+                                      :type :int
+                                      :required true})
+          ;; Create a chain: fn-a -> fn-b -> fn-c -> literal
+          ;; Each step sleeps 50ms, so by fn-c the timeout should be exceeded
+          fn-a (sp/create-entity storage :fn
+                                 {:name "slow-a"
+                                  :fn-schema-id (:id slow-schema)})
+          fn-b (sp/create-entity storage :fn
+                                 {:name "slow-b"
+                                  :fn-schema-id (:id slow-schema)})
+          fn-c (sp/create-entity storage :fn
+                                 {:name "slow-c"
+                                  :fn-schema-id (:id slow-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-a)
+                               :arg-schema-id (:id slow-arg)
+                               :value (setup/create-fn-result-value! storage (:id fn-b))})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-b)
+                               :arg-schema-id (:id slow-arg)
+                               :value (setup/create-fn-result-value! storage (:id fn-c))})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-c)
+                               :arg-schema-id (:id slow-arg)
+                               :value 42})
+          ;; Create context with 80ms timeout (fn-a sleeps 50ms, fn-b starts, sleeps 50ms = 100ms > 80ms)
+          ctx (exec/create-context {:storage storage :timeout-ms 80})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Execution timeout exceeded"
+            (exec/execute ctx (:id fn-a) {})))
+      (sp/close storage))))
+
+
+(deftest lazy-fn-callable-test
+  (testing "HOF: fn-type arg returns fn-id, use make-single-arg-callable"
+    (let [storage (setup/create-test-storage)
+          ;; Register a higher-order function that receives another fn
+          _ (exec/register-base-fn!
+              :apply-fn
+              (fn [{:keys [f value]} ctx]
+                ;; f is now a fn-id (UUID), use make-single-arg-callable
+                (let [fn-id @f
+                      v @value
+                      callable (exec/make-single-arg-callable ctx fn-id)]
+                  (callable v))))
+          ;; Register a simple function
+          _ (exec/register-base-fn!
+              :double
+              (fn [{:keys [x]} _ctx]
+                (* 2 @x)))
+          ;; Create apply-fn schema
+          apply-schema (sp/create-entity storage :fn-schema
+                                         {:name "apply-fn"
+                                          :returned-type :int})
+          apply-f-arg (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id apply-schema)
+                                         :name "f"
+                                         :type :fn  ; This is HOF - returns a callable
+                                         :required true})
+          apply-value-arg (sp/create-entity storage :arg-schema
+                                            {:fn-schema-id (:id apply-schema)
+                                             :name "value"
+                                             :type :int
+                                             :required true})
+          ;; Create double fn-schema
+          double-schema (sp/create-entity storage :fn-schema
+                                          {:name "double"
+                                           :returned-type :int})
+          double-arg (sp/create-entity storage :arg-schema
+                                       {:fn-schema-id (:id double-schema)
+                                        :name "x"
+                                        :type :int
+                                        :required true})
+          ;; Create double fn instance (with default value 10, but we'll override)
+          double-fn (sp/create-entity storage :fn
+                                      {:name "my-double"
+                                       :fn-schema-id (:id double-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id double-fn)
+                               :arg-schema-id (:id double-arg)
+                               :value 10})
+          ;; Create apply-fn instance
+          apply-fn (sp/create-entity storage :fn
+                                     {:name "my-apply"
+                                      :fn-schema-id (:id apply-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id apply-fn)
+                               :arg-schema-id (:id apply-f-arg)
+                               :value (:id double-fn)})  ; Reference to double-fn
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id apply-fn)
+                               :arg-schema-id (:id apply-value-arg)
+                               :value 5})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id apply-fn) {})]
+      ;; The f arg is a callable, so calling it with {:x 5} should return 10 (5 * 2)
+      (is (= 10 result))
+      (sp/close storage))))
+
+
+(deftest optional-args-test
+  (testing "optional arguments that are not provided are not in thunks"
+    (let [storage (setup/create-test-storage)
+          ;; Register a function that uses optional args
+          _ (exec/register-base-fn!
+              :greet
+              (fn [{:keys [the-name suffix]} _ctx]
+                (let [n @the-name
+                      s (when suffix @suffix)]
+                  (if s
+                    (str "Hello, " n s)
+                    (str "Hello, " n)))))
+          ;; Create greet fn-schema
+          greet-schema (sp/create-entity storage :fn-schema
+                                         {:name "greet"
+                                          :returned-type :text})
+          name-arg (sp/create-entity storage :arg-schema
+                                     {:fn-schema-id (:id greet-schema)
+                                      :name "the-name"
+                                      :type :text
+                                      :required true})
+          ;; Optional arg - just need to define it in schema
+          _ (sp/create-entity storage :arg-schema
+                              {:fn-schema-id (:id greet-schema)
+                               :name "suffix"
+                               :type :text
+                               :required false})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "greet-world"
+                                    :fn-schema-id (:id greet-schema)})
+          ;; Only provide required arg, not optional
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id name-arg)
+                               :value "World"})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id fn-rec) {})]
+      (is (= "Hello, World" result))
+      (sp/close storage))))
+
+
+(deftest provided-args-override-test
+  (testing "provided args override stored arg-values"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          ;; Create arg-values with literals
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 3})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 5})
+          ctx (exec/create-context {:storage storage})
+          ;; Execute with provided args that override the stored values
+          result (exec/execute ctx (:id fn-rec) {(:id arg-a) 100
+                                                 (:id arg-b) 200})]
+      ;; Should use provided values (100 + 200) not stored values (3 + 5)
+      (is (= 300 result))
+      (sp/close storage)))
+
+  (testing "provided args partially override stored arg-values"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          ;; Create arg-values with literals
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 3})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 5})
+          ctx (exec/create-context {:storage storage})
+          ;; Execute with only :a overridden
+          result (exec/execute ctx (:id fn-rec) {(:id arg-a) 100})]
+      ;; Should use provided :a (100) and stored :b (5)
+      (is (= 105 result))
+      (sp/close storage))))
+
+
+(deftest fn-not-found-in-graph-test
+  (testing "throws when fn-result-value references non-existent fn during execution"
+    (let [storage (setup/create-test-storage)
+          ;; Register identity function that forces its arg
+          _ (exec/register-base-fn!
+              :identity
+              (fn [{:keys [x]} _ctx]
+                @x))
+          ;; Create identity fn-schema
+          id-schema (sp/create-entity storage :fn-schema
+                                      {:name "identity"
+                                       :returned-type :int})
+          id-arg (sp/create-entity storage :arg-schema
+                                   {:fn-schema-id (:id id-schema)
+                                    :name "x"
+                                    :type :int
+                                    :required true})
+          ;; Create identity fn instance
+          id-fn (sp/create-entity storage :fn
+                                  {:name "my-identity"
+                                   :fn-schema-id (:id id-schema)})
+          ;; Create fn-result-value pointing to non-existent fn
+          non-existent-fn-id (random-uuid)
+          bad-frv (sp/create-entity storage :fn-result-value
+                                    {:fn-id non-existent-fn-id
+                                     :name "bad-frv"})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id id-fn)
+                               :arg-schema-id (:id id-arg)
+                               :value (:id bad-frv)})
+          ctx (exec/create-context {:storage storage})]
+      ;; When we execute, it will try to resolve the fn-result-value which points
+      ;; to a non-existent fn - should throw
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found in execution graph"
+            (exec/execute ctx (:id id-fn) {})))
+      (sp/close storage))))

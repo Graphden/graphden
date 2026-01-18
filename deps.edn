@@ -127,9 +127,7 @@
     "components/postgres-storage/src"
     "components/postgres-storage/test"
     "components/storage-protocol/src"
-    "components/storage-protocol/test"
-    "bases/.gitkeep/src"
-    "bases/.gitkeep/resources"],
+    "components/storage-protocol/test"],
    :extra-deps
    {http-kit/http-kit #:mvn{:version "2.8.1"},
     metosin/reitit #:mvn{:version "0.10.0"},
@@ -201,9 +199,7 @@
     "components/postgres-storage/src"
     "components/postgres-storage/test"
     "components/storage-protocol/src"
-    "components/storage-protocol/test"
-    "bases/.gitkeep/src"
-    "bases/.gitkeep/resources"],
+    "components/storage-protocol/test"],
    :extra-deps
    {http-kit/http-kit #:mvn{:version "2.8.1"},
     metosin/reitit #:mvn{:version "0.10.0"},

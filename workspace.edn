@@ -11,4 +11,10 @@
 
 
  ;; Projects
- :projects {"development" {:alias "dev"}}}
+ :projects {"development" {:alias "dev"}
+            "executor-server" {:alias "exec"
+                               ;; These components are used by executor-runtime base
+                               ;; but polylith doesn't detect the transitive usage
+                               :necessary ["executor" "fn-defs" "fn-registry"
+                                          "base-functions" "http-kit-fns"
+                                          "reitit-fns" "web-server"]}}}

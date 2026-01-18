@@ -1,7 +1,2 @@
 {:paths ["src" "resources"]
- :deps {graphden/executor {:local/root "../../components/executor"}
-        graphden/fn-registry {:local/root "../../components/fn-registry"}
-        graphden/base-functions {:local/root "../../components/base-functions"}
-        graphden/web-server {:local/root "../../components/web-server"}
-        graphden/graph-storage-memory {:local/root "../../components/graph-storage-memory"}
-        graphden/storage-protocol {:local/root "../../components/storage-protocol"}}}
+ :deps {}}

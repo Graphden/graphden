@@ -35,16 +35,17 @@
    The ExecutionGraphReader extension is done in interface.clj."
   (:require
     [clojure.set :as set]
-    [clojure.tools.logging :as log]))
+    [clojure.tools.logging :as log]
+    [graphden.storage-protocol.config :as config]))
 
 
 ;; === Shared constants ===
 
+;; Re-export from config for backwards compatibility
 (def default-query-timeout-ms
   "Default timeout for storage queries in milliseconds.
-   Used by PostgreSQL (via JDBC setQueryTimeout) and Datomic backends.
-   Value: 30000ms (30 seconds) - reasonable default for most queries."
-  30000)
+   Re-exported from config - see config/default-query-timeout-ms for details."
+  config/default-query-timeout-ms)
 
 
 (def default-max-depth

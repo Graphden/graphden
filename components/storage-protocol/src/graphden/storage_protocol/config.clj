@@ -62,7 +62,6 @@
   (:require
     [clojure.string :as str]
     [graphden.field-types.interface :as ft]
-    [graphden.storage-protocol.graph :as graph]
     [malli.core :as m]
     [malli.error :as me]))
 
@@ -252,6 +251,13 @@
 ;; Shared query timeout handling for all storage backends.
 ;; Each backend can use these primitives to implement timeout consistently.
 
+(def default-query-timeout-ms
+  "Default timeout for storage queries in milliseconds.
+   Used by PostgreSQL (via JDBC setQueryTimeout) and Datomic backends.
+   Value: 30000ms (30 seconds) - reasonable default for most queries."
+  30000)
+
+
 (def ^:dynamic *query-timeout-ms*
   "Timeout for storage queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
@@ -260,7 +266,7 @@
    - PostgreSQL: Converted to seconds for JDBC setQueryTimeout
    - Datomic: Enforced via future+deref (no native timeout support)
    - Memory: Not applicable (in-memory operations are instant)"
-  graph/default-query-timeout-ms)
+  default-query-timeout-ms)
 
 
 (def min-query-timeout-ms

@@ -614,7 +614,9 @@
 
 
 ;; === Graph re-exports ===
-(def default-query-timeout-ms graph/default-query-timeout-ms)
+;; Note: default-query-timeout-ms is re-exported from config (authoritative source)
+;; graph.clj also re-exports it for internal consistency
+(def default-query-timeout-ms config/default-query-timeout-ms)
 (def default-max-depth graph/default-max-depth)
 (def default-max-unknown-types graph/default-max-unknown-types)
 

@@ -40,22 +40,6 @@
   util/with-query-timeout)
 
 
-;; === Connection validation ===
-
-(defn- ensure-connection!
-  "Ensures connection is available for CRUD operations.
-   Throws :storage-not-initialized if conn-atom is nil.
-   Returns the connection if valid."
-  [conn-atom operation-name]
-  (if-let [conn @conn-atom]
-    conn
-    (do
-      (log/error "CRUD operation failed: storage not initialized" {:operation operation-name})
-      (throw (ex-info "Cannot perform operation: storage not initialized"
-                      {:type :storage-not-initialized
-                       :operation operation-name})))))
-
-
 ;; === Storage record ===
 
 (defrecord DatomicStorage
@@ -186,7 +170,7 @@
     (sp/validate-data-is-map! entity-name data)
     (sp/with-write-lock rw-lock
                         (fn []
-                          (let [conn (ensure-connection! conn-atom :create-entity)
+                          (let [conn (util/ensure-connection! conn-atom :create-entity)
                                 db (d/db conn)
                                 field-specs (crud/get-fields-with-specs db entity-name)]
                             ;; Validate multi-field unique constraints before creating
@@ -199,7 +183,7 @@
     [_this entity-name id]
     (sp/with-read-lock rw-lock
                        (fn []
-                         (let [conn (ensure-connection! conn-atom :read-entity)]
+                         (let [conn (util/ensure-connection! conn-atom :read-entity)]
                            (crud/read-entity-impl conn entity-name id)))))
 
 
@@ -207,7 +191,7 @@
     [_this entity-name id data]
     (sp/with-write-lock rw-lock
                         (fn []
-                          (let [conn (ensure-connection! conn-atom :update-entity)
+                          (let [conn (util/ensure-connection! conn-atom :update-entity)
                                 db (d/db conn)
                                 field-specs (crud/get-fields-with-specs db entity-name)]
                             ;; Validate multi-field unique constraints before updating
@@ -220,7 +204,7 @@
     [_this entity-name id]
     (sp/with-write-lock rw-lock
                         (fn []
-                          (let [conn (ensure-connection! conn-atom :delete-entity)]
+                          (let [conn (util/ensure-connection! conn-atom :delete-entity)]
                             (crud/delete-entity-impl conn entity-name id)))))
 
 
@@ -228,7 +212,7 @@
     [_this entity-name where]
     (sp/with-read-lock rw-lock
                        (fn []
-                         (let [conn (ensure-connection! conn-atom :query-entities)]
+                         (let [conn (util/ensure-connection! conn-atom :query-entities)]
                            (util/execute-with-timeout! :query-entities
                                                        #(crud/query-entities-impl conn entity-name where))))))
 
@@ -242,7 +226,7 @@
                           (when (seq data-seq)
                             (sp/validate-batch-size! (count data-seq) :create-entities
                                                      {:entity-name entity-name}))
-                          (let [conn (ensure-connection! conn-atom :create-entities)
+                          (let [conn (util/ensure-connection! conn-atom :create-entities)
                                 db (d/db conn)
                                 field-specs (crud/get-fields-with-specs db entity-name)]
                             ;; Validate multi-field unique constraints for each entity
@@ -256,7 +240,7 @@
     [_this entity-name ids]
     (sp/with-read-lock rw-lock
                        (fn []
-                         (let [conn (ensure-connection! conn-atom :read-entities)]
+                         (let [conn (util/ensure-connection! conn-atom :read-entities)]
                            (util/execute-with-timeout! :read-entities
                                                        #(crud/read-entities-impl conn entity-name ids))))))
 
@@ -265,7 +249,7 @@
     [_this entity-name ids]
     (sp/with-write-lock rw-lock
                         (fn []
-                          (let [conn (ensure-connection! conn-atom :delete-entities)]
+                          (let [conn (util/ensure-connection! conn-atom :delete-entities)]
                             (crud/delete-entities-impl conn entity-name ids)))))
 
 
@@ -307,7 +291,7 @@
     [_this fn-id]
     (sp/with-read-lock rw-lock
                        (fn []
-                         (let [conn (ensure-connection! conn-atom :resolve-execution-graph)]
+                         (let [conn (util/ensure-connection! conn-atom :resolve-execution-graph)]
                            (graph/resolve-execution-graph-impl conn fn-id)))))
 
 

@@ -88,7 +88,7 @@
   30000)
 
 
-(defn deref-with-timeout
+(defn- deref-with-timeout
   "Derefs a future with timeout. Returns ::timeout if timed out.
    Logs a warning on timeout for visibility."
   [fut timeout-ms future-name]

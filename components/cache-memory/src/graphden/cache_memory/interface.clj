@@ -70,7 +70,7 @@
 ;; === Pure state computation functions ===
 ;; These functions compute new state without side effects for testability.
 
-(defn compute-save-cache-state
+(defn- compute-save-cache-state
   "Computes the new graphs and deps state after saving a cache.
    Pure function for testability.
 
@@ -92,7 +92,7 @@
      :deps new-deps}))
 
 
-(defn compute-delete-cache-state
+(defn- compute-delete-cache-state
   "Computes the new graphs and deps state after deleting a cache.
    Pure function for testability.
 

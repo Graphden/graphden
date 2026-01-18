@@ -69,7 +69,8 @@
                   "--ns-regex" "graphden\\..*"
                   "--ns-exclude-regex" ".*-test"
                   "--ns-exclude-regex" ".*contract-tests"
-                  "--ns-exclude-regex" ".*test-helpers"]
+                  "--ns-exclude-regex" ".*test-helpers"
+                  "--ns-exclude-regex" ".*test-mocks"]
         outdated-cmd ["clojure" "-M:outdated"]
         security-cmd ["clojure" "-M:watson" "-p" "deps.edn"]
 

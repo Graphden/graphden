@@ -57,7 +57,7 @@
 
   coverage
   {:doc "Run tests with coverage report"
-   :task (clojure "-M:dev:test:cloverage --src-ns-path components --test-ns-path components --ns-regex \"graphden\\..*\" --ns-exclude-regex \".*-test\" --ns-exclude-regex \".*contract-tests\" --ns-exclude-regex \".*test-helpers\"")}
+   :task (clojure "-M:dev:test:cloverage --src-ns-path components --test-ns-path components --ns-regex \"graphden\\..*\" --ns-exclude-regex \".*-test\" --ns-exclude-regex \".*contract-tests\" --ns-exclude-regex \".*test-helpers\" --ns-exclude-regex \".*test-mocks\"")}
 
   ;; === FULL CHECK ===
 

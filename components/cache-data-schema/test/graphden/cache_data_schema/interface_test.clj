@@ -25,7 +25,8 @@
         (is (some #{:cached-merged-arg} (ds/entities schema)))
         (is (some #{:cache-fn-dep} (ds/entities schema)))
         (is (some #{:cache-fn-schema-dep} (ds/entities schema)))
-        (is (some #{:cache-arg-schema-dep} (ds/entities schema))))
+        (is (some #{:cache-arg-schema-dep} (ds/entities schema)))
+        (is (some #{:cache-fn-result-value-dep} (ds/entities schema))))
 
       (testing "includes value-kind enum"
         (is (contains? (ds/enums schema) :value-kind))))))
@@ -77,7 +78,12 @@
       (testing "cache-arg-schema-dep"
         (let [fields (ds/entity-fields schema :cache-arg-schema-dep)]
           (is (= :int (:type (:ref-count fields))))
-          (is (= :ref (:type (:dep-arg-schema-id fields)))))))))
+          (is (= :ref (:type (:dep-arg-schema-id fields))))))
+
+      (testing "cache-fn-result-value-dep"
+        (let [fields (ds/entity-fields schema :cache-fn-result-value-dep)]
+          (is (= :int (:type (:ref-count fields))))
+          (is (= :ref (:type (:dep-fn-result-value-id fields)))))))))
 
 
 (deftest cache-entities-constant-test
@@ -88,7 +94,8 @@
              :cached-merged-arg
              :cache-fn-dep
              :cache-fn-schema-dep
-             :cache-arg-schema-dep}
+             :cache-arg-schema-dep
+             :cache-fn-result-value-dep}
            cds/cache-entities))))
 
 

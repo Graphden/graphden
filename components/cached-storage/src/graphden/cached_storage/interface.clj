@@ -54,14 +54,15 @@
 
    ### Entity-Specific Strategies
 
-   | Entity     | Create              | Update                       | Delete                  |
-   |------------|---------------------|------------------------------|-------------------------|
-   | :fn        | rebuild own cache   | if parent-fn-id changed:     | delete + invalidate     |
-   |            |                     | invalidate fn + dependents   | all dependents          |
-   | :arg-value | invalidate owner-fn | invalidate owner-fn          | invalidate owner-fn     |
-   |            | + dependents        | + dependents                 | + dependents            |
-   | :fn-schema | no-op               | invalidate all fns using it  | invalidate all dependents|
-   | :arg-schema| no-op               | invalidate all fns using it  | invalidate all dependents|
+   | Entity          | Create              | Update                       | Delete                  |
+   |-----------------|---------------------|------------------------------|-------------------------|
+   | :fn             | rebuild own cache   | if parent-fn-id changed:     | delete + invalidate     |
+   |                 |                     | invalidate fn + dependents   | all dependents          |
+   | :arg-value      | invalidate owner-fn | invalidate owner-fn          | invalidate owner-fn     |
+   |                 | + dependents        | + dependents                 | + dependents            |
+   | :fn-schema      | no-op               | invalidate all fns using it  | invalidate all dependents|
+   | :arg-schema     | no-op               | invalidate all fns using it  | invalidate all dependents|
+   | :fn-result-value| invalidate deps     | invalidate all dependents    | invalidate all dependents|
 
    ### Complex Scenarios
 
@@ -109,7 +110,7 @@
 
    **Q: Cache returns stale data after update**
    A: Check that entity type has strategy in `invalidation-strategies` map.
-      Only :fn, :arg-value, :fn-schema, :arg-schema trigger invalidation.
+      Only :fn, :arg-value, :fn-schema, :arg-schema, :fn-result-value trigger invalidation.
 
    **Q: Performance degradation after large batch update**
    A: Batch updates invalidate caches one-by-one. For bulk migrations,
@@ -130,11 +131,13 @@
   "Computes dependency counts from an execution graph.
    Returns {:fn-ids {fn-id -> count}
             :fn-schema-ids {schema-id -> count}
-            :arg-schema-ids {arg-schema-id -> count}}"
+            :arg-schema-ids {arg-schema-id -> count}
+            :fn-result-value-ids {frv-id -> count}}"
   [graph]
   {:fn-ids (frequencies (keys (:fns graph)))
    :fn-schema-ids (frequencies (keys (:fn-schemas graph)))
-   :arg-schema-ids (frequencies (keys (:arg-schemas graph)))})
+   :arg-schema-ids (frequencies (keys (:arg-schemas graph)))
+   :fn-result-value-ids (frequencies (keys (:fn-result-values graph)))})
 
 
 (defn- rebuild-cache!
@@ -220,6 +223,14 @@
                           #(cache/find-caches-by-arg-schema-dep % arg-schema-id)))
 
 
+(defn- invalidate-fn-result-value-dependents!
+  "Invalidates all caches that depend on a fn-result-value."
+  [base-storage cache-storage fn-result-value-id]
+  (log/debug "Invalidating fn-result-value dependents" {:fn-result-value-id fn-result-value-id})
+  (invalidate-dependents! base-storage cache-storage
+                          #(cache/find-caches-by-fn-result-value-dep % fn-result-value-id)))
+
+
 ;; === Cache invalidation strategy map ===
 ;; Centralized invalidation strategies grouped by entity type.
 ;; Each entity can define :on-create, :on-update, :on-delete handlers.
@@ -283,7 +294,20 @@
 
     :on-delete
     (fn [base-storage cache-storage id _record]
-      (invalidate-arg-schema-dependents! base-storage cache-storage id))}})
+      (invalidate-arg-schema-dependents! base-storage cache-storage id))}
+
+   :fn-result-value
+   {:on-create
+    (fn [base-storage cache-storage result]
+      (invalidate-fn-result-value-dependents! base-storage cache-storage (:id result)))
+
+    :on-update
+    (fn [base-storage cache-storage id _data _result _old-record]
+      (invalidate-fn-result-value-dependents! base-storage cache-storage id))
+
+    :on-delete
+    (fn [base-storage cache-storage id _record]
+      (invalidate-fn-result-value-dependents! base-storage cache-storage id))}})
 
 
 (defn- get-strategy

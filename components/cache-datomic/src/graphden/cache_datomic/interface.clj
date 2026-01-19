@@ -5,7 +5,8 @@
    namespaced attributes for denormalized graph data:
    - :graphden.cache/cached-fn, cached-fn-schema, cached-arg-schema
    - :graphden.cache/cached-merged-arg: precomputed merged argument values
-   - :graphden.cache/cache-fn-dep, cache-fn-schema-dep, cache-arg-schema-dep
+   - :graphden.cache/cache-fn-dep, cache-fn-schema-dep, cache-arg-schema-dep,
+     cache-fn-result-value-dep: dependency tracking
 
    Usage:
    (def cache (create-cache conn))
@@ -249,6 +250,14 @@
    :graphden.cache/cache-arg-schema-dep-ref-count ref-count})
 
 
+(defn- build-fn-result-value-dep-tx
+  "Builds transaction data for a fn-result-value dependency."
+  [cache-id dep-fn-result-value-id ref-count]
+  {:graphden.cache/cache-fn-result-value-dep-cache-id cache-id
+   :graphden.cache/cache-fn-result-value-dep-dep-fn-result-value-id dep-fn-result-value-id
+   :graphden.cache/cache-fn-result-value-dep-ref-count ref-count})
+
+
 ;; === Cache deletion ===
 
 (defn- find-entities-to-retract
@@ -274,14 +283,18 @@
                             db cache-id)
         arg-schema-deps (d/q '[:find ?e :in $ ?cache-id :where
                                [?e :graphden.cache/cache-arg-schema-dep-cache-id ?cache-id]]
-                             db cache-id)]
+                             db cache-id)
+        fn-result-value-deps (d/q '[:find ?e :in $ ?cache-id :where
+                                    [?e :graphden.cache/cache-fn-result-value-dep-cache-id ?cache-id]]
+                                  db cache-id)]
     (concat (map first cached-fns)
             (map first cached-fn-schemas)
             (map first cached-arg-schemas)
             (map first cached-merged-args)
             (map first fn-deps)
             (map first fn-schema-deps)
-            (map first arg-schema-deps))))
+            (map first arg-schema-deps)
+            (map first fn-result-value-deps))))
 
 
 (defn- delete-cache-data!
@@ -332,6 +345,19 @@
               [?e :graphden.cache/cache-arg-schema-dep-dep-arg-schema-id ?dep-arg-schema-id]
               [?e :graphden.cache/cache-arg-schema-dep-cache-id ?cache-id]]
             db dep-arg-schema-id)
+       (map first)
+       (into #{})))
+
+
+(defn- find-caches-by-fn-result-value-dep-impl
+  "Returns set of cache-ids that depend on dep-fn-result-value-id."
+  [db dep-fn-result-value-id]
+  (->> (d/q '[:find ?cache-id
+              :in $ ?dep-fn-result-value-id
+              :where
+              [?e :graphden.cache/cache-fn-result-value-dep-dep-fn-result-value-id ?dep-fn-result-value-id]
+              [?e :graphden.cache/cache-fn-result-value-dep-cache-id ?cache-id]]
+            db dep-fn-result-value-id)
        (map first)
        (into #{})))
 
@@ -392,8 +418,11 @@
           arg-schema-dep-txs (mapv (fn [[dep-id ref-count]]
                                      (build-arg-schema-dep-tx fn-id dep-id ref-count))
                                    (:arg-schema-ids dependencies))
+          fn-result-value-dep-txs (mapv (fn [[dep-id ref-count]]
+                                          (build-fn-result-value-dep-tx fn-id dep-id ref-count))
+                                        (:fn-result-value-ids dependencies))
           all-txs (concat fn-txs fn-schema-txs arg-schema-txs merged-arg-txs
-                          fn-dep-txs fn-schema-dep-txs arg-schema-dep-txs)]
+                          fn-dep-txs fn-schema-dep-txs arg-schema-dep-txs fn-result-value-dep-txs)]
       (when (seq all-txs)
         (d/transact conn {:tx-data (vec all-txs)}))))
 
@@ -416,7 +445,12 @@
 
   (find-caches-by-arg-schema-dep
     [_ dep-arg-schema-id]
-    (find-caches-by-arg-schema-dep-impl (d/db conn) dep-arg-schema-id)))
+    (find-caches-by-arg-schema-dep-impl (d/db conn) dep-arg-schema-id))
+
+
+  (find-caches-by-fn-result-value-dep
+    [_ dep-fn-result-value-id]
+    (find-caches-by-fn-result-value-dep-impl (d/db conn) dep-fn-result-value-id)))
 
 
 (defn create-cache

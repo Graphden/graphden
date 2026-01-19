@@ -5,7 +5,8 @@
    tables defined by cache-data-schema:
    - cached_fn, cached_fn_schema, cached_arg_schema: denormalized graph data
    - cached_merged_arg: precomputed merged argument values
-   - cache_fn_dep, cache_fn_schema_dep, cache_arg_schema_dep: dependency tracking
+   - cache_fn_dep, cache_fn_schema_dep, cache_arg_schema_dep,
+     cache_fn_result_value_dep: dependency tracking
 
    Usage:
    (def cache (create-cache datasource))
@@ -270,6 +271,9 @@
                                             :where [:= :cache-id fn-id]}))
                         (:next.jdbc/update-count
                           (execute-one! ds {:delete-from :cache-arg-schema-dep
+                                            :where [:= :cache-id fn-id]}))
+                        (:next.jdbc/update-count
+                          (execute-one! ds {:delete-from :cache-fn-result-value-dep
                                             :where [:= :cache-id fn-id]})))
         deleted-merged (:next.jdbc/update-count
                          (execute-one! ds {:delete-from :cached-merged-arg
@@ -341,7 +345,8 @@
                            ;; Save dependencies
                            (save-deps! tx fn-id :cache-fn-dep :dep-fn-id (:fn-ids dependencies))
                            (save-deps! tx fn-id :cache-fn-schema-dep :dep-fn-schema-id (:fn-schema-ids dependencies))
-                           (save-deps! tx fn-id :cache-arg-schema-dep :dep-arg-schema-id (:arg-schema-ids dependencies))))
+                           (save-deps! tx fn-id :cache-arg-schema-dep :dep-arg-schema-id (:arg-schema-ids dependencies))
+                           (save-deps! tx fn-id :cache-fn-result-value-dep :dep-fn-result-value-id (:fn-result-value-ids dependencies))))
 
 
   (delete-cache!
@@ -363,7 +368,12 @@
 
   (find-caches-by-arg-schema-dep
     [_ dep-arg-schema-id]
-    (find-caches-by-dep datasource :cache-arg-schema-dep :dep-arg-schema-id dep-arg-schema-id)))
+    (find-caches-by-dep datasource :cache-arg-schema-dep :dep-arg-schema-id dep-arg-schema-id))
+
+
+  (find-caches-by-fn-result-value-dep
+    [_ dep-fn-result-value-id]
+    (find-caches-by-dep datasource :cache-fn-result-value-dep :dep-fn-result-value-id dep-fn-result-value-id)))
 
 
 (defn create-cache

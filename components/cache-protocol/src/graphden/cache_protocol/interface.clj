@@ -52,7 +52,8 @@
      - dependencies: Map of dependency counts
        {:fn-ids {dep-fn-id -> count}
         :fn-schema-ids {schema-id -> count}
-        :arg-schema-ids {arg-schema-id -> count}}
+        :arg-schema-ids {arg-schema-id -> count}
+        :fn-result-value-ids {frv-id -> count}}
 
      The ref-counts in dependencies allow proper cache invalidation when
      a dependency is used multiple times in the graph.")
@@ -71,7 +72,11 @@
 
   (find-caches-by-arg-schema-dep
     [this dep-arg-schema-id]
-    "Returns set of cache-ids that depend on dep-arg-schema-id."))
+    "Returns set of cache-ids that depend on dep-arg-schema-id.")
+
+  (find-caches-by-fn-result-value-dep
+    [this dep-fn-result-value-id]
+    "Returns set of cache-ids that depend on dep-fn-result-value-id."))
 
 
 (defn cached-storage?
@@ -163,6 +168,10 @@
     (throw (ex-info "Dependencies :fn-schema-ids must be a map" {:type :invalid-dependencies :key :fn-schema-ids :value (:fn-schema-ids dependencies)})))
   (when-not (map? (:arg-schema-ids dependencies))
     (throw (ex-info "Dependencies :arg-schema-ids must be a map" {:type :invalid-dependencies :key :arg-schema-ids :value (:arg-schema-ids dependencies)})))
+  ;; fn-result-value-ids is optional for backward compatibility, but if present must be a map
+  (when (and (contains? dependencies :fn-result-value-ids)
+             (not (map? (:fn-result-value-ids dependencies))))
+    (throw (ex-info "Dependencies :fn-result-value-ids must be a map" {:type :invalid-dependencies :key :fn-result-value-ids :value (:fn-result-value-ids dependencies)})))
   true)
 
 

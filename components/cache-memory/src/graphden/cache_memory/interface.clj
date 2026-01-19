@@ -24,7 +24,7 @@
 
 (def ^:private dep-keys
   "Keys for all dependency types in the deps atom."
-  [:fn-deps :fn-schema-deps :arg-schema-deps])
+  [:fn-deps :fn-schema-deps :arg-schema-deps :fn-result-value-deps])
 
 
 (defn- remove-cache-from-dep-map
@@ -64,7 +64,8 @@
   (-> deps
       (update :fn-deps add-to-dep-map cache-id (keys (:fn-ids dependencies)))
       (update :fn-schema-deps add-to-dep-map cache-id (keys (:fn-schema-ids dependencies)))
-      (update :arg-schema-deps add-to-dep-map cache-id (keys (:arg-schema-ids dependencies)))))
+      (update :arg-schema-deps add-to-dep-map cache-id (keys (:arg-schema-ids dependencies)))
+      (update :fn-result-value-deps add-to-dep-map cache-id (keys (:fn-result-value-ids dependencies)))))
 
 
 ;; === Pure state computation functions ===
@@ -112,7 +113,8 @@
    ;; Atom containing dependencies:
    ;; {:fn-deps {dep-fn-id -> #{cache-id ...}}
    ;;  :fn-schema-deps {dep-fn-schema-id -> #{cache-id ...}}
-   ;;  :arg-schema-deps {dep-arg-schema-id -> #{cache-id ...}}}
+   ;;  :arg-schema-deps {dep-arg-schema-id -> #{cache-id ...}}
+   ;;  :fn-result-value-deps {dep-frv-id -> #{cache-id ...}}}
    deps-atom
    ;; ReentrantReadWriteLock for thread safety
    ^ReentrantReadWriteLock rw-lock]
@@ -177,7 +179,13 @@
   (find-caches-by-arg-schema-dep
     [_ dep-arg-schema-id]
     (sp/with-read-lock rw-lock
-                       #(get-in @deps-atom [:arg-schema-deps dep-arg-schema-id] #{}))))
+                       #(get-in @deps-atom [:arg-schema-deps dep-arg-schema-id] #{})))
+
+
+  (find-caches-by-fn-result-value-dep
+    [_ dep-fn-result-value-id]
+    (sp/with-read-lock rw-lock
+                       #(get-in @deps-atom [:fn-result-value-deps dep-fn-result-value-id] #{}))))
 
 
 (defn create-cache
@@ -193,5 +201,6 @@
     (atom {})
     (atom {:fn-deps {}
            :fn-schema-deps {}
-           :arg-schema-deps {}})
+           :arg-schema-deps {}
+           :fn-result-value-deps {}})
     (ReentrantReadWriteLock.)))

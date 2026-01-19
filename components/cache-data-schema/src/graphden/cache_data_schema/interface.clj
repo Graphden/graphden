@@ -50,6 +50,10 @@
   #uuid "f7a8b9c0-d1e2-4f3a-4b5c-6d7e8f9a0b1c")
 
 
+(def ^:private cache-fn-result-value-dep-entity-uuid
+  #uuid "a8b9c0d1-e2f3-4a4b-5c6d-7e8f9a0b1c2d")
+
+
 ;; Field UUIDs for :cached-fn
 (def ^:private cached-fn-cache-id-field-uuid
   #uuid "01a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c")
@@ -173,6 +177,19 @@
   #uuid "63c4d5e6-f7a8-4b9c-0d1e-2f3a4b5c6d7e")
 
 
+;; Field UUIDs for :cache-fn-result-value-dep
+(def ^:private cache-fn-result-value-dep-cache-id-field-uuid
+  #uuid "71a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c")
+
+
+(def ^:private cache-fn-result-value-dep-fn-result-value-id-field-uuid
+  #uuid "72b3c4d5-e6f7-4a8b-9c0d-1e2f3a4b5c6d")
+
+
+(def ^:private cache-fn-result-value-dep-ref-count-field-uuid
+  #uuid "73c4d5e6-f7a8-4b9c-0d1e-2f3a4b5c6d7e")
+
+
 (defn extend-builder
   "Extends a builder (that already has graph-data-schema entities) with cache entities.
    Returns the builder for further extension or finalization.
@@ -266,7 +283,17 @@
                                           :type :ref :ref-entity :arg-schema}
                       :ref-count {:uuid cache-arg-schema-dep-ref-count-field-uuid
                                   :type :int}})
-      (ds/add-constraint :cache-arg-schema-dep {:type :unique :fields [:cache-id :dep-arg-schema-id]})))
+      (ds/add-constraint :cache-arg-schema-dep {:type :unique :fields [:cache-id :dep-arg-schema-id]})
+
+      ;; cache-fn-result-value-dep: tracks which fn-result-values are used in each cache
+      (ds/add-entity :cache-fn-result-value-dep cache-fn-result-value-dep-entity-uuid
+                     {:cache-id {:uuid cache-fn-result-value-dep-cache-id-field-uuid
+                                 :type :ref :ref-entity :fn}
+                      :dep-fn-result-value-id {:uuid cache-fn-result-value-dep-fn-result-value-id-field-uuid
+                                               :type :ref :ref-entity :fn-result-value}
+                      :ref-count {:uuid cache-fn-result-value-dep-ref-count-field-uuid
+                                  :type :int}})
+      (ds/add-constraint :cache-fn-result-value-dep {:type :unique :fields [:cache-id :dep-fn-result-value-id]})))
 
 
 (defn build-schema
@@ -288,4 +315,5 @@
     :cached-merged-arg
     :cache-fn-dep
     :cache-fn-schema-dep
-    :cache-arg-schema-dep})
+    :cache-arg-schema-dep
+    :cache-fn-result-value-dep})

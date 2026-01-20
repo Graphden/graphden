@@ -1183,18 +1183,4 @@ Each backend has fundamentally different constraints and optimal implementations
 
 ## Appendix C: Error Types
 
-All errors use canonical `:type` keys for programmatic handling:
-
-| Error Type | Description |
-|------------|-------------|
-| `:constraint-violation/parent-schema-mismatch` | Parent fn has different schema |
-| `:constraint-violation/arg-already-defined` | Arg already defined in parent chain |
-| `:constraint-violation/arg-schema-mismatch` | Arg schema doesn't belong to fn schema |
-| `:constraint-violation/inheritance-cycle` | Circular inheritance detected |
-| `:constraint-violation/dependency-cycle` | Circular dependency detected |
-| `:execution-error/max-depth-exceeded` | Recursion limit reached |
-| `:execution-error/timeout` | Execution time limit reached |
-| `:execution-error/invalid-args` | Invalid arguments to base function |
-| `:execution-error/division-by-zero` | Division by zero |
-| `:execution-error/index-out-of-bounds` | Index out of bounds |
-| `:storage-error/*` | Storage-specific errors |
+See [ERROR_CODES.md](ERROR_CODES.md) for the complete error types reference.

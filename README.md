@@ -60,6 +60,8 @@ Graphden separates **base functions** (Clojure implementations) from **fn entiti
 
 The executor resolves this graph and starts a working HTTP server.
 
+For a complete step-by-step example, see [ARCHITECTURE.md Part 5.5](docs/ARCHITECTURE.md#part-55-function-composition-fn-defs).
+
 ## Quick Start
 
 ### Requirements

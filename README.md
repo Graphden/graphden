@@ -156,6 +156,7 @@ bb fix       # Auto-fix formatting
 
 | Document | Description |
 |----------|-------------|
+| [PHILOSOPHY.md](docs/PHILOSOPHY.md) | Core principles and design philosophy |
 | [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Design decisions, data model, constraints, execution model |
 | [ROADMAP.md](docs/ROADMAP.md) | Implementation status, phases, future plans |
 | [CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications |

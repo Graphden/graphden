@@ -54,6 +54,7 @@
    All entities are created atomically - if any fails, all roll back."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.fn-registry.interface :as registry]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -196,15 +197,15 @@
 
 (defn- check-order-and-warn
   "Checks if fn-defs are in valid topological order.
-   Prints warning if not, with suggested order."
+   Logs warning if not, with suggested order."
   [fn-defs sorted-defs]
   (let [original-order (mapv :name fn-defs)
         sorted-order (mapv :name sorted-defs)]
     (when (not= original-order sorted-order)
-      (println "WARNING: fn-defs are not in dependency order.")
-      (println "  Current order:" (str/join " -> " (map name original-order)))
-      (println "  Suggested order:" (str/join " -> " (map name sorted-order)))
-      (println "  Consider reordering for clarity."))))
+      (log/warn "fn-defs are not in dependency order."
+                "Current order:" (str/join " -> " (map name original-order))
+                "Suggested order:" (str/join " -> " (map name sorted-order))
+                "Consider reordering for clarity."))))
 
 
 ;; === Validation ===

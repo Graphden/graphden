@@ -2,6 +2,7 @@
   "Tests for storage-protocol constraint helpers and implementations."
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.storage-protocol.constraints :as constraints]
     [graphden.storage-protocol.interface :as storage]))
 
 
@@ -312,7 +313,193 @@
           (is (= fn-b (:value-fn-id (ex-data e)))))))))
 
 
-;; === Chain depth limit tests ===
+;; === collect-dependency-chain-impl tests ===
+
+(defrecord MockDependencyHelpers
+  [dependencies-map]
+
+  storage/ConstraintHelpers
+
+  (get-fn-schema-id-for-fn [_this _fn-id] nil)
+
+
+  (get-fn-schema-id-for-arg-schema [_this _arg-schema-id] nil)
+
+
+  (get-parent-fn-id [_this _fn-id] nil)
+
+
+  (collect-parent-chain [_this _fn-id] #{})
+
+
+  (collect-arg-schema-ids-in-chain [_this _fn-id] #{})
+
+
+  (collect-dependency-chain
+    [this fn-id]
+    (constraints/collect-dependency-chain-impl
+      (fn [_helpers fid] (get dependencies-map fid #{}))
+      this
+      fn-id)))
+
+
+(deftest collect-dependency-chain-impl-test
+  (testing "returns empty set for fn with no dependencies"
+    (let [fn-a (random-uuid)
+          helpers (->MockDependencyHelpers {fn-a #{}})]
+      (is (= #{} (storage/collect-dependency-chain helpers fn-a)))))
+
+  (testing "returns single dependency"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          helpers (->MockDependencyHelpers {fn-a #{fn-b} fn-b #{}})]
+      (is (= #{fn-b} (storage/collect-dependency-chain helpers fn-a)))))
+
+  (testing "returns all transitive dependencies (linear chain)"
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          fn-c (random-uuid)
+          fn-d (random-uuid)
+          ;; fn-a -> fn-b -> fn-c -> fn-d
+          helpers (->MockDependencyHelpers {fn-a #{fn-b}
+                                            fn-b #{fn-c}
+                                            fn-c #{fn-d}
+                                            fn-d #{}})]
+      (is (= #{fn-b fn-c fn-d} (storage/collect-dependency-chain helpers fn-a)))))
+
+  (testing "returns all dependencies for diamond graph"
+    ;; Diamond: A -> B, A -> C, B -> D, C -> D
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          fn-c (random-uuid)
+          fn-d (random-uuid)
+          helpers (->MockDependencyHelpers {fn-a #{fn-b fn-c}
+                                            fn-b #{fn-d}
+                                            fn-c #{fn-d}
+                                            fn-d #{}})]
+      (is (= #{fn-b fn-c fn-d} (storage/collect-dependency-chain helpers fn-a)))))
+
+  (testing "handles already visited nodes (no duplicates)"
+    ;; Dense graph with shared dependencies
+    (let [fn-a (random-uuid)
+          fn-b (random-uuid)
+          fn-c (random-uuid)
+          fn-shared (random-uuid)
+          helpers (->MockDependencyHelpers {fn-a #{fn-b fn-c}
+                                            fn-b #{fn-shared}
+                                            fn-c #{fn-shared}
+                                            fn-shared #{}})]
+      (is (= #{fn-b fn-c fn-shared} (storage/collect-dependency-chain helpers fn-a)))))
+
+  (testing "handles wide graph (many direct dependencies)"
+    (let [root (random-uuid)
+          deps (repeatedly 50 random-uuid)
+          deps-set (set deps)
+          deps-map (into {root deps-set}
+                         (map (fn [d] [d #{}]) deps))
+          helpers (->MockDependencyHelpers deps-map)]
+      (is (= deps-set (storage/collect-dependency-chain helpers root)))))
+
+  (testing "handles deep chain at boundary (999 nodes - under limit)"
+    ;; Create chain of 999 nodes (just under default limit of 1000)
+    (let [nodes (vec (repeatedly 999 random-uuid))
+          root (random-uuid)
+          ;; root -> node0 -> node1 -> ... -> node998
+          deps-map (reduce (fn [m i]
+                             (assoc m (nth nodes i)
+                                    (if (< i 998)
+                                      #{(nth nodes (inc i))}
+                                      #{})))
+                           {root #{(first nodes)}}
+                           (range 999))
+          helpers (->MockDependencyHelpers deps-map)]
+      (is (= (set nodes) (storage/collect-dependency-chain helpers root))))))
+
+
+(deftest collect-dependency-chain-depth-limit-test
+  (testing "throws when dependency chain exceeds max depth"
+    ;; Create chain longer than default-max-dependency-chain-depth (1000)
+    (let [nodes (vec (repeatedly 1002 random-uuid))
+          root (random-uuid)
+          deps-map (reduce (fn [m i]
+                             (assoc m (nth nodes i)
+                                    (if (< i 1001)
+                                      #{(nth nodes (inc i))}
+                                      #{})))
+                           {root #{(first nodes)}}
+                           (range 1002))
+          helpers (->MockDependencyHelpers deps-map)]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Dependency chain exceeds maximum allowed depth"
+            (storage/collect-dependency-chain helpers root)))))
+
+  (testing "depth limit exception contains correct data"
+    (let [nodes (vec (repeatedly 1002 random-uuid))
+          root (random-uuid)
+          deps-map (reduce (fn [m i]
+                             (assoc m (nth nodes i)
+                                    (if (< i 1001)
+                                      #{(nth nodes (inc i))}
+                                      #{})))
+                           {root #{(first nodes)}}
+                           (range 1002))
+          helpers (->MockDependencyHelpers deps-map)]
+      (try
+        (storage/collect-dependency-chain helpers root)
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :constraint-violation/chain-too-deep (:type (ex-data e))))
+          (is (= :dependency (:chain-type (ex-data e))))
+          (is (= 1000 (:max-depth (ex-data e)))))))))
+
+
+(deftest collect-parent-chain-depth-limit-test
+  (testing "throws when parent chain exceeds max depth"
+    ;; Create chain longer than default-max-parent-chain-depth (100)
+    (let [nodes (vec (repeatedly 102 random-uuid))
+          ;; node0 -> node1 -> ... -> node101
+          parent-map (reduce (fn [m i]
+                               (assoc m (nth nodes i)
+                                      (when (< i 101)
+                                        (nth nodes (inc i)))))
+                             {}
+                             (range 102))
+          helpers (->MockConstraintHelpers {} {} parent-map {} {})]
+      (is (thrown-with-msg?
+            clojure.lang.ExceptionInfo
+            #"Parent chain exceeds maximum allowed depth"
+            (storage/collect-parent-chain-impl helpers (first nodes))))))
+
+  (testing "depth limit exception contains correct data"
+    (let [nodes (vec (repeatedly 102 random-uuid))
+          parent-map (reduce (fn [m i]
+                               (assoc m (nth nodes i)
+                                      (when (< i 101)
+                                        (nth nodes (inc i)))))
+                             {}
+                             (range 102))
+          helpers (->MockConstraintHelpers {} {} parent-map {} {})]
+      (try
+        (storage/collect-parent-chain-impl helpers (first nodes))
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :constraint-violation/chain-too-deep (:type (ex-data e))))
+          (is (= :parent (:chain-type (ex-data e))))
+          (is (= 100 (:max-depth (ex-data e))))))))
+
+  (testing "parent chain at boundary (99 nodes) succeeds"
+    (let [nodes (vec (repeatedly 99 random-uuid))
+          parent-map (reduce (fn [m i]
+                               (assoc m (nth nodes i)
+                                      (when (< i 98)
+                                        (nth nodes (inc i)))))
+                             {}
+                             (range 99))
+          helpers (->MockConstraintHelpers {} {} parent-map {} {})]
+      (is (= (set (rest nodes))
+             (storage/collect-parent-chain-impl helpers (first nodes)))))))
+
+
+;; === Chain depth limit constants tests ===
 
 (deftest chain-depth-limit-test
   (testing "default-max-parent-chain-depth is defined"

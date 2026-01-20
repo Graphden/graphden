@@ -256,7 +256,8 @@
     :on-update
     (fn [base-storage cache-storage id data _result old-record]
       (when (or (contains? data :parent-fn-id)
-                (not= (:fn-schema-id old-record) (:fn-schema-id data)))
+                (and (contains? data :fn-schema-id)
+                     (not= (:fn-schema-id old-record) (:fn-schema-id data))))
         (invalidate-fn-and-dependents! base-storage cache-storage id)))
 
     :on-delete

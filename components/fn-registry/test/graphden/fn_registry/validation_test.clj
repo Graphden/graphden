@@ -262,7 +262,14 @@
       (catch clojure.lang.ExceptionInfo e
         (is (= :invalid-identifier (:type (ex-data e))))
         (is (= "arg-name" (:name-type (ex-data e))))
-        (is (= "bad name" (:name-value (ex-data e))))))))
+        (is (= "bad name" (:name-value (ex-data e)))))))
+
+  (testing "handles non-keyword non-string values (converts via str)"
+    ;; Numbers get converted to strings (starts with digit, invalid)
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo #"invalid characters"
+          (#'core/validate-identifier! "fn-name" 123)))
+    ;; Symbol gets converted to string (valid)
+    (is (nil? (#'core/validate-identifier! "fn-name" 'valid-symbol)))))
 
 
 ;; === validate-fn-def! Tests ===

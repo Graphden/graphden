@@ -1,6 +1,7 @@
 (ns graphden.fn-registry.uuid-test
   "Tests for fn-registry UUID generation."
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.core :as core]
@@ -170,3 +171,58 @@
     (let [uuid1 (core/arg-schema-uuid :fn-a :x)
           uuid2 (core/arg-schema-uuid :fn-b :x)]
       (is (not= uuid1 uuid2)))))
+
+
+;; === uuid-v5 Name Length and Null Byte Tests ===
+
+(deftest uuid-v5-name-length-test
+  (testing "throws when name-str exceeds max length (256 bytes)"
+    (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
+          long-name (str/join (repeat 257 "a"))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"name-str exceeds maximum length"
+            (#'core/uuid-v5 ns-uuid long-name)))))
+
+  (testing "error data contains length info"
+    (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
+          long-name (str/join (repeat 300 "x"))]
+      (try
+        (#'core/uuid-v5 ns-uuid long-name)
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :invalid-argument (:type (ex-data e))))
+          (is (= 256 (:max-length (ex-data e))))
+          (is (= 300 (:actual-length (ex-data e))))))))
+
+  (testing "accepts name-str at exactly max length (256 bytes)"
+    (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
+          max-name (str/join (repeat 256 "b"))]
+      (is (uuid? (#'core/uuid-v5 ns-uuid max-name))))))
+
+
+(deftest uuid-v5-null-byte-test
+  (testing "throws when name-str contains null bytes"
+    (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"
+          null-name "test\u0000name"]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"name-str contains null bytes"
+            (#'core/uuid-v5 ns-uuid null-name)))))
+
+  (testing "error data for null byte"
+    (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"]
+      (try
+        (#'core/uuid-v5 ns-uuid "foo\u0000bar")
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :invalid-argument (:type (ex-data e)))))))))
+
+
+(deftest uuid-v5-whitespace-test
+  (testing "throws when name-str is only whitespace"
+    (let [ns-uuid #uuid "a1b2c3d4-e5f6-4a5b-8c9d-0e1f2a3b4c5d"]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"name-str must not be blank"
+            (#'core/uuid-v5 ns-uuid "   ")))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"name-str must not be blank"
+            (#'core/uuid-v5 ns-uuid "\t\n"))))))

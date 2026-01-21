@@ -451,3 +451,91 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found in execution graph"
             (exec/execute ctx (:id id-fn) {})))
       (sp/close storage))))
+
+
+;; === Context validation edge case tests ===
+
+(deftest create-context-validation-test
+  (testing "throws when storage doesn't implement ExecutionGraph protocol"
+    (let [invalid-storage {:fake "storage"}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"storage must implement ExecutionGraph protocol"
+            (exec/create-context {:storage invalid-storage})))))
+
+  (testing "throws when path-args exceed max count"
+    (let [storage (setup/create-test-storage)
+          ;; Create 1001 path-args (max is 1000)
+          large-path-args (into {}
+                                (for [i (range 1001)]
+                                  [(random-uuid) i]))]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"path-args count exceeds maximum"
+              (exec/create-context {:storage storage :path-args large-path-args})))
+        (finally
+          (sp/close storage)))))
+
+  (testing "throws when path-args keys have invalid format"
+    (let [storage (setup/create-test-storage)]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"path-args keys must be UUID or"
+              (exec/create-context {:storage storage
+                                    :path-args {"string-key" 42}})))
+        (finally
+          (sp/close storage)))))
+
+  (testing "throws with multiple validation errors combined"
+    (let [invalid-storage {:fake "storage"}]
+      ;; Missing storage + path-args not a map
+      (try
+        (exec/create-context {:storage invalid-storage
+                              :path-args "not-a-map"
+                              :max-depth -1
+                              :timeout-ms 10})
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (let [errors (:validation-errors (ex-data e))]
+            (is (> (count errors) 1) "should have multiple errors"))))))
+
+  (testing "accepts path-args with valid UUID keys"
+    (let [storage (setup/create-test-storage)
+          path-args {(random-uuid) 42}]
+      (try
+        (let [ctx (exec/create-context {:storage storage :path-args path-args})]
+          (is (some? ctx)))
+        (finally
+          (sp/close storage)))))
+
+  (testing "accepts path-args with valid [UUID UUID] vector keys"
+    (let [storage (setup/create-test-storage)
+          path-args {[(random-uuid) (random-uuid)] 42}]
+      (try
+        (let [ctx (exec/create-context {:storage storage :path-args path-args})]
+          (is (some? ctx)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest clear-result-cache-test
+  (testing "clear-result-cache! clears the cache and returns count"
+    (let [storage (setup/create-test-storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        ;; Manually populate the cache
+        (reset! (:result-cache ctx) {:a 1 :b 2 :c 3})
+        (is (= 3 (count @(:result-cache ctx))))
+        ;; Clear and check count returned
+        (let [cleared-count (exec/clear-result-cache! ctx)]
+          (is (= 3 cleared-count))
+          (is (empty? @(:result-cache ctx))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "clear-result-cache! on empty cache returns 0"
+    (let [storage (setup/create-test-storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (is (zero? (exec/clear-result-cache! ctx)))
+        (finally
+          (sp/close storage))))))

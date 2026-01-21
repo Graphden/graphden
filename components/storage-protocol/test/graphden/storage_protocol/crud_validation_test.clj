@@ -33,7 +33,35 @@
           (storage/standard-crud-validations!
             :user
             {:other "field"}
-            {:name {:required true}})))))
+            {:name {:required true}}))))
+
+  (testing "passes when field is nullable and missing"
+    (is (nil? (storage/standard-crud-validations!
+                :user
+                {}
+                {:name {:nullable? true}}))))
+
+  (testing "passes when field is nullable and nil"
+    (is (nil? (storage/standard-crud-validations!
+                :user
+                {:name nil}
+                {:name {:nullable? true}}))))
+
+  (testing "throws when required field is nil"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Required field.*missing"
+          (storage/standard-crud-validations!
+            :user
+            {:name nil}
+            {:name {:required true}}))))
+
+  (testing "skips :id field validation"
+    ;; :id is auto-generated so should not be validated as required
+    (is (nil? (storage/standard-crud-validations!
+                :user
+                {:name "test"}
+                {:id {:required true}
+                 :name {:required true}})))))
 
 
 (deftest standard-batch-validations!-test
@@ -191,7 +219,57 @@
         (is (= :validation-error/type-mismatch (:type (ex-data e))))
         (is (= :user (:entity (ex-data e))))
         (is (= :age (:field (ex-data e))))
-        (is (= :int (:expected-type (ex-data e))))))))
+        (is (= :int (:expected-type (ex-data e)))))))
+
+  ;; Additional type coverage tests
+  (testing "correct type passes - numeric (float)"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:balance {:type :numeric}}
+                {:balance 123.45}))))
+
+  (testing "correct type passes - numeric (decimal)"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:balance {:type :numeric}}
+                {:balance 123.45M}))))
+
+  (testing "correct type passes - timestamptz"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:created-at {:type :timestamptz}}
+                {:created-at (java.util.Date.)}))))
+
+  (testing "correct type passes - bytes"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:data {:type :bytes}}
+                {:data (byte-array [1 2 3])}))))
+
+  (testing "correct type passes - jsonb (map)"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:metadata {:type :jsonb}}
+                {:metadata {:key "value"}}))))
+
+  (testing "correct type passes - jsonb (vector)"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:tags {:type :jsonb}}
+                {:tags ["a" "b" "c"]}))))
+
+  (testing "correct type passes - enum (keyword)"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:status {:type :enum}}
+                {:status :active}))))
+
+  (testing "unknown field in where is ignored for type check"
+    ;; If field is not in fields spec, no type check happens
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                {:unknown-field 123})))))
 
 
 ;; === validate-entity-name! tests ===

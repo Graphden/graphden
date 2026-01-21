@@ -145,6 +145,52 @@
           (sp/close storage))))))
 
 
+;; === initialize-all! Tests ===
+
+(deftest initialize-all-test
+  (testing "initializes storage with multiple def-sets"
+    (let [storage (gsm/create-storage)
+          defs1 {:test-fn1 {:args {:x :int} :return-type :int :impl (fn [_ _] 1)}}
+          defs2 {:test-fn2 {:args {:y :text} :return-type :text :impl (fn [_ _] "ok")}}
+          defs3 {:test-fn3 {:args {} :return-type :bool :impl (fn [_ _] true)}}]
+      (try
+        (let [result (registry/initialize-all! storage [defs1 defs2 defs3])]
+          ;; Should return the same storage
+          (is (= storage result))
+          ;; All functions should be registered
+          (is (some? (exec/get-base-fn :test-fn1)))
+          (is (some? (exec/get-base-fn :test-fn2)))
+          (is (some? (exec/get-base-fn :test-fn3)))
+          ;; All fn-schemas should be in storage
+          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :test-fn1))))
+          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :test-fn2))))
+          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :test-fn3)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "handles empty def-sets sequence"
+    (let [storage (gsm/create-storage)]
+      (try
+        (let [result (registry/initialize-all! storage [])]
+          (is (= storage result)))
+        (finally
+          (sp/close storage)))))
+
+  (testing "handles def-sets with overlap - second sync updates"
+    (let [storage (gsm/create-storage)
+          ;; Both sets define same function
+          defs1 {:overlap-fn {:args {:x :int} :return-type :int :impl (fn [_ _] 1)}}
+          defs2 {:overlap-fn {:args {:x :int} :return-type :int :impl (fn [_ _] 2)}}]
+      (try
+        (registry/initialize-all! storage [defs1 defs2])
+        ;; Function should be registered (second impl wins)
+        (is (some? (exec/get-base-fn :overlap-fn)))
+        ;; fn-schema should exist
+        (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :overlap-fn))))
+        (finally
+          (sp/close storage))))))
+
+
 ;; === initialize-with-base-fns! Error Handling Tests ===
 
 (defrecord FailingStorage

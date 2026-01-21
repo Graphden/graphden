@@ -57,21 +57,21 @@
 
 
 (deftest fn-update-cache-invalidation-test
-  (testing "fn update with parent-fn-id change invalidates cache"
+  (testing "fn update with fn-schema-id change invalidates cache"
     (let [storage (mocks/create-mock-storage)
           cache (mocks/create-mock-cache)
           wrapped (cached/wrap-with-cache storage cache)
-          schema-id (random-uuid)
-          _ (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
-          parent-id (random-uuid)
+          schema-id-1 (random-uuid)
+          schema-id-2 (random-uuid)
+          _ (sp/create-entity storage :fn-schema {:id schema-id-1 :name "test1" :returned-type :int})
+          _ (sp/create-entity storage :fn-schema {:id schema-id-2 :name "test2" :returned-type :text})
           fn-id (random-uuid)]
 
-      ;; Create fns
-      (sp/create-entity wrapped :fn {:id parent-id :name "parent" :fn-schema-id schema-id})
-      (sp/create-entity wrapped :fn {:id fn-id :name "child" :fn-schema-id schema-id})
+      ;; Create fn
+      (sp/create-entity wrapped :fn {:id fn-id :name "my-fn" :fn-schema-id schema-id-1})
 
-      ;; Update with parent-fn-id change
-      (sp/update-entity wrapped :fn fn-id {:parent-fn-id parent-id})
+      ;; Update with fn-schema-id change
+      (sp/update-entity wrapped :fn fn-id {:fn-schema-id schema-id-2})
 
       ;; Cache should still exist (rebuilt after invalidation)
       (is (cache/cache-exists? cache fn-id)))))
@@ -179,8 +179,8 @@
       (is (sp/delete-entity wrapped :fn-result-value frv-id)))))
 
 
-(deftest fn-update-without-parent-change-test
-  (testing "fn update without parent-fn-id does not invalidate cache"
+(deftest fn-update-without-schema-change-test
+  (testing "fn update without fn-schema-id does not invalidate cache"
     (let [storage (mocks/create-mock-storage)
           cache (mocks/create-mock-cache)
           wrapped (cached/wrap-with-cache storage cache)
@@ -190,7 +190,7 @@
       (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
       (is (cache/cache-exists? cache fn-id))
 
-      ;; Update without parent-fn-id change
+      ;; Update without fn-schema-id change
       (sp/update-entity wrapped :fn fn-id {:name "renamed"})
       ;; Cache should still exist (not invalidated)
       (is (cache/cache-exists? cache fn-id)))))
@@ -272,22 +272,22 @@
       (is (sp/delete-entity wrapped :fn-result-value frv-id)))))
 
 
-(deftest update-fn-with-parent-fn-id-change-test
-  (testing "update-entity for :fn with parent-fn-id invalidates cache"
+(deftest update-fn-with-fn-schema-id-change-test
+  (testing "update-entity for :fn with fn-schema-id invalidates cache"
     (let [storage (mocks/create-mock-storage)
           cache (mocks/create-mock-cache)
           wrapped (cached/wrap-with-cache storage cache)
-          schema-id (random-uuid)
-          parent-fn-id (random-uuid)
-          child-fn-id (random-uuid)]
-      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
-      (sp/create-entity wrapped :fn {:id parent-fn-id :name "parent" :fn-schema-id schema-id})
-      (sp/create-entity wrapped :fn {:id child-fn-id :name "child" :fn-schema-id schema-id})
-      (is (cache/cache-exists? cache child-fn-id))
-      ;; Update with parent-fn-id - should invalidate
-      (sp/update-entity wrapped :fn child-fn-id {:parent-fn-id parent-fn-id})
+          schema-id-1 (random-uuid)
+          schema-id-2 (random-uuid)
+          fn-id (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id-1 :name "test1" :returned-type :int})
+      (sp/create-entity storage :fn-schema {:id schema-id-2 :name "test2" :returned-type :text})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id-1})
+      (is (cache/cache-exists? cache fn-id))
+      ;; Update with fn-schema-id - should invalidate
+      (sp/update-entity wrapped :fn fn-id {:fn-schema-id schema-id-2})
       ;; Cache should be rebuilt (still exists)
-      (is (cache/cache-exists? cache child-fn-id)))))
+      (is (cache/cache-exists? cache fn-id)))))
 
 
 (deftest resolve-execution-graph-cache-miss-test

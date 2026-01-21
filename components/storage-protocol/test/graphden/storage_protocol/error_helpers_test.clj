@@ -48,21 +48,22 @@
 
 (deftest validate-no-dependency-cycle-impl-test
   (testing "nil value-fn-id doesn't throw"
-    (let [helpers (->MockConstraintHelpers {} {} {} {} {})]
+    ;; MockConstraintHelpers takes: fn-schema-map, arg-schema-fn-schema-map, dependency-chain-map
+    (let [helpers (->MockConstraintHelpers {} {} {})]
       (is (nil? (storage/validate-no-dependency-cycle-impl helpers (random-uuid) nil)))))
 
   (testing "no cycle in dependencies doesn't throw"
     (let [fn-a (random-uuid)
           fn-b (random-uuid)
           ;; fn-b depends on nothing special, fn-a not in its chain
-          helpers (->MockConstraintHelpers {} {} {} {} {fn-b #{fn-b}})]
+          helpers (->MockConstraintHelpers {} {} {fn-b #{fn-b}})]
       (is (nil? (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)))))
 
   (testing "cycle in dependencies throws"
     (let [fn-a (random-uuid)
           fn-b (random-uuid)
           ;; fn-b already depends on fn-a
-          helpers (->MockConstraintHelpers {} {} {} {} {fn-b #{fn-a fn-b}})]
+          helpers (->MockConstraintHelpers {} {} {fn-b #{fn-a fn-b}})]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
             #"Reference would create dependency cycle"
@@ -71,7 +72,7 @@
   (testing "exception contains correct data"
     (let [fn-a (random-uuid)
           fn-b (random-uuid)
-          helpers (->MockConstraintHelpers {} {} {} {} {fn-b #{fn-a fn-b}})]
+          helpers (->MockConstraintHelpers {} {} {fn-b #{fn-a fn-b}})]
       (try
         (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)
         (catch clojure.lang.ExceptionInfo e

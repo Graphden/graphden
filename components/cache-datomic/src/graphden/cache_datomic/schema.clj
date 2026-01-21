@@ -40,10 +40,6 @@
     :db/valueType :db.type/uuid
     :db/cardinality :db.cardinality/one
     :db/doc "Function schema ID"}
-   {:db/ident (cache-attr :cached-fn-parent-fn-id)
-    :db/valueType :db.type/uuid
-    :db/cardinality :db.cardinality/one
-    :db/doc "Parent function ID (optional)"}
 
    ;; cached-fn-schema entity
    {:db/ident (cache-attr :cached-fn-schema-cache-id)

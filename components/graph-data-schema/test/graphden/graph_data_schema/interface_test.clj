@@ -41,13 +41,10 @@
       (is (= :enum (get-in fields [:type :type])))
       (is (= :bool (get-in fields [:required :type])))))
 
-  (testing "fn has expected fields including parent-fn-id"
+  (testing "fn has expected fields"
     (let [fields (ds/entity-fields schema :fn)]
       (is (= :text (get-in fields [:name :type])))
-      (is (= :ref (get-in fields [:fn-schema-id :type])))
-      (is (= :ref (get-in fields [:parent-fn-id :type])))
-      (is (= :fn (get-in fields [:parent-fn-id :ref-entity])))
-      (is (true? (get-in fields [:parent-fn-id :nullable?])))))
+      (is (= :ref (get-in fields [:fn-schema-id :type])))))
 
   (testing "arg-value has union type for value"
     (let [fields (ds/entity-fields schema :arg-value)]
@@ -90,19 +87,11 @@
                                    :arg-schema-id (random-uuid)
                                    :value (random-uuid)}))))
 
-  (testing "valid fn without parent"
+  (testing "valid fn"
     (is (nil? (ds/validate-entity schema :fn
                                   {:id (random-uuid)
                                    :name "my-fn"
-                                   :fn-schema-id (random-uuid)
-                                   :parent-fn-id nil}))))
-
-  (testing "valid fn with parent"
-    (is (nil? (ds/validate-entity schema :fn
-                                  {:id (random-uuid)
-                                   :name "child-fn"
-                                   :fn-schema-id (random-uuid)
-                                   :parent-fn-id (random-uuid)}))))
+                                   :fn-schema-id (random-uuid)}))))
 
   (testing "valid arg-schema with required true"
     (is (nil? (ds/validate-entity schema :arg-schema

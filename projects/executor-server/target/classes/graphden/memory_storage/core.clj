@@ -208,28 +208,10 @@
   ;; Note: helpers is created once at storage creation and reused.
   ;; It reads current state via the state atom on each call.
 
-  (validate-parent-same-schema!
-    [_this fn-id parent-fn-id]
-    (sp/with-read-lock rw-lock
-                       #(sp/validate-parent-same-schema-impl helpers fn-id parent-fn-id)))
-
-
-  (validate-no-arg-override!
-    [_this fn-id arg-schema-id]
-    (sp/with-read-lock rw-lock
-                       #(sp/validate-no-arg-override-impl helpers fn-id arg-schema-id)))
-
-
   (validate-arg-schema-belongs-to-fn!
     [_this fn-id arg-schema-id]
     (sp/with-read-lock rw-lock
                        #(sp/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)))
-
-
-  (validate-no-inheritance-cycle!
-    [_this fn-id parent-fn-id]
-    (sp/with-read-lock rw-lock
-                       #(sp/validate-no-inheritance-cycle-impl helpers fn-id parent-fn-id)))
 
 
   (validate-no-dependency-cycle!

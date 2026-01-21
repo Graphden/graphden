@@ -269,54 +269,6 @@
     (is (false? (graph/execution-graph? [])))))
 
 
-;; === merge-arg-values-for-chain tests ===
-
-(deftest merge-arg-values-for-chain-test
-  (testing "returns nil for empty chain"
-    (is (nil? (graph/merge-arg-values-for-chain [] []))))
-
-  (testing "returns nil for nil chain"
-    (is (nil? (graph/merge-arg-values-for-chain [] nil))))
-
-  (testing "single fn with single arg"
-    (let [fn-id (random-uuid)
-          arg-id (random-uuid)
-          arg-values [{:owner-fn-id fn-id :arg-schema-id arg-id :value 42}]
-          result (graph/merge-arg-values-for-chain arg-values [fn-id])]
-      (is (= 42 (:value (get result arg-id))))))
-
-  (testing "child overrides parent"
-    (let [parent-id (random-uuid)
-          child-id (random-uuid)
-          arg-id (random-uuid)
-          arg-values [{:owner-fn-id parent-id :arg-schema-id arg-id :value "parent"}
-                      {:owner-fn-id child-id :arg-schema-id arg-id :value "child"}]
-          chain [child-id parent-id]
-          result (graph/merge-arg-values-for-chain arg-values chain)]
-      (is (= "child" (:value (get result arg-id))))))
-
-  (testing "multiple arg-schemas are handled"
-    (let [fn-id (random-uuid)
-          arg-a (random-uuid)
-          arg-b (random-uuid)
-          arg-values [{:owner-fn-id fn-id :arg-schema-id arg-a :value 1}
-                      {:owner-fn-id fn-id :arg-schema-id arg-b :value 2}]
-          chain [fn-id]
-          result (graph/merge-arg-values-for-chain arg-values chain)]
-      (is (= 1 (:value (get result arg-a))))
-      (is (= 2 (:value (get result arg-b))))))
-
-  (testing "filters out arg-values not in chain"
-    (let [in-chain-id (random-uuid)
-          out-of-chain-id (random-uuid)
-          arg-id (random-uuid)
-          arg-values [{:owner-fn-id in-chain-id :arg-schema-id arg-id :value "in"}
-                      {:owner-fn-id out-of-chain-id :arg-schema-id arg-id :value "out"}]
-          chain [in-chain-id]
-          result (graph/merge-arg-values-for-chain arg-values chain)]
-      (is (= "in" (:value (get result arg-id)))))))
-
-
 ;; === extract-uuid-refs-from-arg-values tests ===
 
 (deftest extract-uuid-refs-from-arg-values-test
@@ -372,7 +324,7 @@
     (testing "returns empty when fn not found"
       (let [load-fn (constantly nil)
             result (graph/process-fn-node
-                     load-fn nil nil nil nil nil fn-id
+                     load-fn nil nil nil nil fn-id
                      {:fns {} :fn-schemas {} :arg-schemas {}
                       :resolved-args {} :fn-result-values {}})]
         (is (= {} (:fns (:graph result))))
@@ -384,14 +336,13 @@
             load-fn (fn [id] (when (= id fn-id) fn-rec))
             load-fn-schema (fn [id] (when (= id fn-schema-id) fn-schema))
             load-arg-schemas (constantly {arg-schema-id {:id arg-schema-id}})
-            load-chain (fn [id] [id])
             load-arg-values (constantly [])
             classify-refs (constantly {:fn-refs #{} :frvs {}})
             init-graph {:fns {} :fn-schemas {} :arg-schemas {}
                         :resolved-args {} :fn-result-values {}}
             result (graph/process-fn-node
                      load-fn load-fn-schema load-arg-schemas
-                     load-chain load-arg-values classify-refs
+                     load-arg-values classify-refs
                      fn-id init-graph)]
         (is (= fn-rec (get-in result [:graph :fns fn-id])))
         (is (= fn-schema (get-in result [:graph :fn-schemas fn-schema-id])))
@@ -410,12 +361,11 @@
             load-fn (fn [id] (when (= id fn-id) fn-rec))
             load-fn-schema (fn [id] (when (= id fn-schema-id) fn-schema))
             load-arg-schemas (constantly {})
-            load-chain (fn [id] [id])
             load-arg-values (constantly [])
             classify-refs (constantly {:fn-refs #{} :frvs {}})
             result (graph/resolve-execution-graph-bfs
                      load-fn load-fn-schema load-arg-schemas
-                     load-chain load-arg-values classify-refs
+                     load-arg-values classify-refs
                      fn-id)]
         (is (graph/execution-graph? result))
         (is (= fn-rec (get (:fns result) fn-id)))
@@ -430,7 +380,6 @@
             load-fn #(get fns %)
             load-fn-schema (fn [_] {:id fn-schema-id :name "test"})
             load-arg-schemas (constantly {})
-            load-chain (fn [id] [id])
             load-arg-values (constantly [])
             ;; First call returns reference to fn-id-b, subsequent calls return empty
             calls (atom 0)
@@ -441,7 +390,7 @@
                               {:fn-refs #{} :frvs {}}))
             result (graph/resolve-execution-graph-bfs
                      load-fn load-fn-schema load-arg-schemas
-                     load-chain load-arg-values classify-refs
+                     load-arg-values classify-refs
                      fn-id-a)]
         (is (contains? (:fns result) fn-id-a))
         (is (contains? (:fns result) fn-id-b))))))

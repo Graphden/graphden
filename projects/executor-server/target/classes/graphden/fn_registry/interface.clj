@@ -117,6 +117,31 @@
       (throw e))))
 
 
+(defn initialize-all!
+  "Initializes storage with multiple sets of base function definitions.
+
+   This function:
+   1. Registers all base functions in the executor (for runtime lookup)
+   2. Syncs fn-schema and arg-schema to storage (for graph references)
+
+   Arguments:
+   - storage: an initialized storage instance
+   - def-sets: sequence of base-fn definition maps (each is {fn-name -> fn-def})
+
+   Returns the storage instance.
+
+   Example:
+     (initialize-all! storage
+       [(bf/get-all-defs)           ; arithmetic, strings
+        web-server/all-defs         ; http-kit, reitit
+        handlers/all-defs])         ; hello, health, router"
+  [storage def-sets]
+  (doseq [defs def-sets]
+    (register-base-fns! defs)
+    (sync-defs-to-storage! storage defs))
+  storage)
+
+
 (defn create-storage-with-base-fns
   "Generic factory that creates storage and initializes with base functions.
 

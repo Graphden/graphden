@@ -38,8 +38,7 @@
               ref-fn-id (:id ref-fn)
               graph {:fns {fn-id {:id fn-id
                                   :name "test-fn"
-                                  :fn-schema-id fn-schema-id
-                                  :parent-fn-id nil}}
+                                  :fn-schema-id fn-schema-id}}
                      :fn-schemas {fn-schema-id {:id fn-schema-id
                                                 :name "schema"
                                                 :base-fn-name "base"
@@ -84,8 +83,7 @@
               fn-id (:id fn-record)
               graph {:fns {fn-id {:id fn-id
                                   :name "test-fn"
-                                  :fn-schema-id fn-schema-id
-                                  :parent-fn-id nil}}
+                                  :fn-schema-id fn-schema-id}}
                      :fn-schemas {fn-schema-id {:id fn-schema-id
                                                 :name "schema"
                                                 :base-fn-name "base"
@@ -133,8 +131,7 @@
                                       :boolean true}}
               graph {:fns {fn-id {:id fn-id
                                   :name "test-fn"
-                                  :fn-schema-id fn-schema-id
-                                  :parent-fn-id nil}}
+                                  :fn-schema-id fn-schema-id}}
                      :fn-schemas {fn-schema-id {:id fn-schema-id
                                                 :name "schema"
                                                 :base-fn-name "base"
@@ -189,8 +186,7 @@
               fn-id (:id fn-record)
               graph {:fns {fn-id {:id fn-id
                                   :name "test-fn"
-                                  :fn-schema-id fn-schema-id
-                                  :parent-fn-id nil}}
+                                  :fn-schema-id fn-schema-id}}
                      :fn-schemas {fn-schema-id {:id fn-schema-id
                                                 :name "schema"
                                                 :base-fn-name "base"

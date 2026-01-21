@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 1 | **Correctness first** | No feature justifies bugs. Comprehensive tests required. |
 | 2 | **Minimal entities** | Resist adding new entity types, fields, or edge types. Each addition increases complexity everywhere. |
 | 3 | **Explicit over implicit** | Behavior must be visible in graph structure. No magic, no context-dependent semantics. |
-| 4 | **DRY** | Never define the same thing twice. Use inheritance and fn-result-value for reuse. |
+| 4 | **DRY** | Never define the same thing twice. Use base-functions and fn-result-value for reuse. |
 | 5 | **Expressiveness parity** | Can do everything classical languages can. No "sorry, you can't do that." |
 | 6 | **No unnecessary expressiveness** | Don't add features just because we can. |
 | 7 | **Locality of changes** | Changing one node shouldn't require changes elsewhere. |
@@ -30,14 +30,13 @@ Graphden is a visual functional programming environment where functions and thei
 
 **Key concepts:**
 - **Code = Graph in DB** — functions, schemas, and argument values stored as entities
-- **Currying via Inheritance** — partial application through parent-fn chains
 - **Lazy Execution** — delay-based evaluation, only computes what's needed
 - **Three storage backends** — memory (tests), PostgreSQL (production), Datomic (immutable history)
 
 **Core entities** (only 5 — kept minimal by design):
 - `fn-schema` — function signature
 - `arg-schema` — argument definition
-- `fn` — function instance with optional parent (inheritance)
+- `fn` — function instance
 - `arg-value` — bound argument value
 - `fn-result-value` — cached computation reference
 
@@ -109,7 +108,7 @@ See [README.md](README.md) for component list.
 
 ```clojure
 {:name :my-fn           ; unique function name
- :parent :base-fn-name  ; function to inherit from
+ :parent :base-fn-name  ; base function to use
  :args {:arg1 value     ; literal value
         :arg2 :other-fn>}}  ; reference (> = execute)
 ```
@@ -135,11 +134,8 @@ For complete examples, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) Part 5.5
 
 Enforced at write time by `GraphConstraints` protocol:
 
-1. **No arg override** — cannot redefine argument from parent chain
-2. **Same schema inheritance** — parent must have same fn-schema-id
-3. **No dependency cycles** — A→B→A forbidden (self-recursion allowed with depth limit)
-4. **No inheritance cycles** — parent chain must be acyclic
-5. **Arg-schema belongs to fn-schema** — type safety for argument binding
+1. **No dependency cycles** — A→B→A forbidden (self-recursion allowed with depth limit)
+2. **Arg-schema belongs to fn-schema** — type safety for argument binding
 
 See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 

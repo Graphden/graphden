@@ -180,21 +180,9 @@
          {:category :constraint :retryable? false
           :description "Unique constraint violated"}
 
-         :constraint-violation/parent-schema-mismatch
-         {:category :constraint :retryable? false
-          :description "Parent fn has different schema"}
-
-         :constraint-violation/arg-already-defined
-         {:category :constraint :retryable? false
-          :description "Arg already defined in parent chain"}
-
          :constraint-violation/arg-schema-mismatch
          {:category :constraint :retryable? false
           :description "Arg schema doesn't belong to fn"}
-
-         :constraint-violation/inheritance-cycle
-         {:category :constraint :retryable? false
-          :description "Cycle in parent-fn-id chain"}
 
          :constraint-violation/dependency-cycle
          {:category :constraint :retryable? false

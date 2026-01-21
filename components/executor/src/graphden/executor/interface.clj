@@ -2,7 +2,7 @@
   "Function graph executor.
 
    Executes functions stored in the graph by:
-   1. Resolving the function with its arg-values and parent chain
+   1. Resolving the function with its arg-values
    2. Building delays for lazy evaluation
    3. Calling the base function with delays
 
@@ -29,7 +29,7 @@
 
    | Limit           | Default  | Affects                | First to hit         |
    |-----------------|----------|------------------------|----------------------|
-   | :max-depth      | 1000     | Recursion depth        | Deep inheritance     |
+   | :max-depth      | 1000     | Recursion depth        | Deep graphs          |
    | :timeout-ms     | 30000    | Total execution time   | Complex computations |
    | :cache-max-size | 10000    | Result cache entries   | Wide graphs          |
 
@@ -48,7 +48,7 @@
     :cache-max-size 1000}
    ```
 
-   **Deep inheritance chains** (>50 parent levels):
+   **Deep recursive graphs** (>50 levels):
    ```clojure
    {:max-depth 1000
     :timeout-ms 30000
@@ -73,7 +73,7 @@
 
    The executor logs warnings at 80% of each limit:
 
-   - `Approaching max recursion depth` - Consider flattening inheritance
+   - `Approaching max recursion depth` - Consider simplifying graph structure
    - `Approaching execution timeout` - Consider async execution
    - `Result cache size reached warning threshold` - Consider limiting graph depth
 

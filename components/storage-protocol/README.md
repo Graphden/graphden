@@ -161,16 +161,13 @@ Defines interfaces that all storage backends (memory, PostgreSQL, Datomic) must 
   (query [this entity-name where]))
 ```
 
-### GraphConstraints (in development)
+### GraphConstraints
 
 Protocol for function graph integrity constraints:
 
 ```clojure
 (defprotocol GraphConstraints
-  (validate-parent-same-schema! [this fn-id parent-fn-id])
-  (validate-no-arg-override! [this fn-id arg-schema-id])
   (validate-arg-schema-belongs-to-fn! [this fn-id arg-schema-id])
-  (validate-no-inheritance-cycle! [this fn-id parent-fn-id])
   (validate-no-dependency-cycle! [this owner-fn-id target-fn-id]))
 ```
 

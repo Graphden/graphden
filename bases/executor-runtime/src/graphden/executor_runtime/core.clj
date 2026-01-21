@@ -31,7 +31,7 @@
    Base-fns are wrappers around pure functions (Clojure core or libraries).
    They are low-level building blocks added by experienced developers.
 
-   Fn entities compose base-fns with concrete values through inheritance.
+   Fn entities compose base-fns with concrete values and references.
    All configuration and data binding happens via fn entities.
 
    ## Configuration

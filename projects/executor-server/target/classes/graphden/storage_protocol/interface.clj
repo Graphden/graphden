@@ -158,21 +158,9 @@
 (defprotocol GraphConstraints
   "Constraints for graph integrity."
 
-  (validate-parent-same-schema!
-    [this fn-id parent-fn-id]
-    "Validates that parent-fn has the same fn-schema-id.")
-
-  (validate-no-arg-override!
-    [this fn-id arg-schema-id]
-    "Validates that arg-schema-id is not already defined in parent chain.")
-
   (validate-arg-schema-belongs-to-fn!
     [this fn-id arg-schema-id]
     "Validates that arg-schema belongs to the fn-schema of this fn.")
-
-  (validate-no-inheritance-cycle!
-    [this fn-id parent-fn-id]
-    "Validates that setting parent-fn-id does not create inheritance cycle.")
 
   (validate-no-dependency-cycle!
     [this owner-fn-id value-fn-id]
@@ -190,21 +178,9 @@
     [this arg-schema-id]
     "Returns the fn-schema-id for the given arg-schema-id.")
 
-  (get-parent-fn-id
-    [this fn-id]
-    "Returns the parent-fn-id for the given fn-id.")
-
-  (collect-parent-chain
-    [this fn-id]
-    "Returns a set of all ancestor fn-ids.")
-
-  (collect-arg-schema-ids-in-chain
-    [this fn-id]
-    "Returns a set of arg-schema-ids defined in the parent chain.")
-
   (collect-dependency-chain
     [this fn-id]
-    "Returns a set of all fn-ids that fn-id depends on."))
+    "Returns a set of all fn-ids that fn-id depends on (transitive)."))
 
 
 (defprotocol StorageValueCodec
@@ -262,13 +238,9 @@
     [this fn-schema-id]
     "Loads all arg-schemas for a fn-schema.")
 
-  (load-parent-chain
+  (load-arg-values-for-fn
     [this fn-id]
-    "Loads the parent chain for a fn.")
-
-  (load-arg-values-for-fns
-    [this fn-ids]
-    "Loads all arg-values for a set of fn-ids.")
+    "Loads all arg-values for a single fn.")
 
   (classify-uuid-refs
     [this uuid-refs]
@@ -303,39 +275,12 @@
 ;; CONSTRAINT HELPER IMPLEMENTATIONS
 ;; ============================================================================
 
-(defn collect-parent-chain-impl
-  "Default implementation of collect-parent-chain."
-  [helpers fn-id]
-  (constraints/collect-parent-chain-impl get-parent-fn-id helpers fn-id))
-
-
-(defn validate-parent-same-schema-impl
-  "Shared implementation of parent-same-schema validation."
-  [helpers fn-id parent-fn-id]
-  (constraints/validate-parent-same-schema-impl
-    get-fn-schema-id-for-fn helpers fn-id parent-fn-id))
-
-
-(defn validate-no-arg-override-impl
-  "Shared implementation of no-arg-override validation."
-  [helpers fn-id arg-schema-id]
-  (constraints/validate-no-arg-override-impl
-    collect-arg-schema-ids-in-chain helpers fn-id arg-schema-id))
-
-
 (defn validate-arg-schema-belongs-to-fn-impl
   "Shared implementation of arg-schema-belongs-to-fn validation."
   [helpers fn-id arg-schema-id]
   (constraints/validate-arg-schema-belongs-to-fn-impl
     get-fn-schema-id-for-fn get-fn-schema-id-for-arg-schema
     helpers fn-id arg-schema-id))
-
-
-(defn validate-no-inheritance-cycle-impl
-  "Shared implementation of no-inheritance-cycle validation."
-  [helpers fn-id parent-fn-id]
-  (constraints/validate-no-inheritance-cycle-impl
-    collect-parent-chain helpers fn-id parent-fn-id))
 
 
 (defn validate-no-dependency-cycle-impl
@@ -614,7 +559,9 @@
 
 
 ;; === Graph re-exports ===
-(def default-query-timeout-ms graph/default-query-timeout-ms)
+;; Note: default-query-timeout-ms is re-exported from config (authoritative source)
+;; graph.clj also re-exports it for internal consistency
+(def default-query-timeout-ms config/default-query-timeout-ms)
 (def default-max-depth graph/default-max-depth)
 (def default-max-unknown-types graph/default-max-unknown-types)
 
@@ -644,7 +591,6 @@
   (graph/execution-graph? x))
 
 
-(def merge-arg-values-for-chain graph/merge-arg-values-for-chain)
 (def extract-uuid-refs-from-arg-values graph/extract-uuid-refs-from-arg-values)
 
 
@@ -677,7 +623,6 @@
 
 
 ;; === Constraint limits re-exports ===
-(def default-max-parent-chain-depth constraints/default-max-parent-chain-depth)
 (def default-max-dependency-chain-depth constraints/default-max-dependency-chain-depth)
 
 
@@ -738,6 +683,49 @@
 (def ^:dynamic *max-repeat-size*
   "Maximum elements in repeat to prevent memory exhaustion. Default: 1000000."
   config/*max-repeat-size*)
+
+
+;; === Regex safety configuration re-exports ===
+;;
+;; These are independent dynamic vars that can be bound separately from config.
+;; Use with-regex-limits to bind both sets of vars for full compatibility.
+
+(def ^:dynamic *max-regex-length*
+  "Maximum regex pattern length to prevent complex pattern attacks. Default: 100."
+  config/*max-regex-length*)
+
+
+(def ^:dynamic *max-regex-input-length*
+  "Maximum input string length for regex operations. Default: 100000."
+  config/*max-regex-input-length*)
+
+
+(def ^:dynamic *regex-compile-timeout-ms*
+  "Timeout for regex compilation in milliseconds. Default: 100."
+  config/*regex-compile-timeout-ms*)
+
+
+(defn with-regex-limits
+  "Executes f with custom regex safety limits.
+   Binds both config and interface vars for compatibility.
+
+   Arguments:
+   - opts: map with optional keys:
+     - :max-pattern-length - maximum regex pattern length
+     - :max-input-length - maximum input string length
+     - :compile-timeout-ms - regex compilation timeout
+   - f: zero-arg function to execute"
+  [opts f]
+  (let [pattern-len (get opts :max-pattern-length config/*max-regex-length*)
+        input-len (get opts :max-input-length config/*max-regex-input-length*)
+        timeout (get opts :compile-timeout-ms config/*regex-compile-timeout-ms*)]
+    (binding [config/*max-regex-length* pattern-len
+              config/*max-regex-input-length* input-len
+              config/*regex-compile-timeout-ms* timeout
+              *max-regex-length* pattern-len
+              *max-regex-input-length* input-len
+              *regex-compile-timeout-ms* timeout]
+      (f))))
 
 
 ;; === Batch size validation re-exports ===

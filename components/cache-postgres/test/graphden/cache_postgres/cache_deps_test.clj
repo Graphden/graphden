@@ -47,8 +47,7 @@
               make-graph (fn [fid fname]
                            {:fns {fid {:id fid
                                        :name fname
-                                       :fn-schema-id fn-schema-id
-                                       :parent-fn-id nil}}
+                                       :fn-schema-id fn-schema-id}}
                             :fn-schemas {fn-schema-id {:id fn-schema-id
                                                        :name "schema"
                                                        :base-fn-name "base"
@@ -82,52 +81,6 @@
           (sp/close storage))))))
 
 
-(deftest cache-with-parent-fn-integration-test
-  (testing "handles parent-fn-id correctly"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (let [cache (cache-pg/create-cache (setup/get-datasource storage))
-              fn-schema (sp/create-entity storage :fn-schema
-                                          {:name "schema"
-                                           :returned-type :int
-                                           :base-fn-name "base"})
-              fn-schema-id (:id fn-schema)
-              parent-fn (sp/create-entity storage :fn
-                                          {:name "parent"
-                                           :fn-schema-id fn-schema-id})
-              parent-fn-id (:id parent-fn)
-              child-fn (sp/create-entity storage :fn
-                                         {:name "child"
-                                          :fn-schema-id fn-schema-id
-                                          :parent-fn-id parent-fn-id})
-              child-fn-id (:id child-fn)
-              graph {:fns {parent-fn-id {:id parent-fn-id
-                                         :name "parent"
-                                         :fn-schema-id fn-schema-id
-                                         :parent-fn-id nil}
-                           child-fn-id {:id child-fn-id
-                                        :name "child"
-                                        :fn-schema-id fn-schema-id
-                                        :parent-fn-id parent-fn-id}}
-                     :fn-schemas {fn-schema-id {:id fn-schema-id
-                                                :name "schema"
-                                                :base-fn-name "base"
-                                                :returned-type :int}}
-                     :arg-schemas {}
-                     :resolved-args {}
-                     :fn-result-values {}}
-              dependencies {:fn-ids {parent-fn-id 1 child-fn-id 1}
-                            :fn-schema-ids {fn-schema-id 1}
-                            :arg-schema-ids {}}]
-          (cache/save-cache! cache child-fn-id graph dependencies)
-          (let [cached (cache/get-cached-graph cache child-fn-id)]
-            (is (= 2 (count (:fns cached))))
-            (is (nil? (get-in cached [:fns parent-fn-id :parent-fn-id])))
-            (is (= parent-fn-id (get-in cached [:fns child-fn-id :parent-fn-id])))))
-        (finally
-          (sp/close storage))))))
-
-
 (deftest dependency-cleanup-on-overwrite-integration-test
   (testing "old dependencies are cleaned up when cache is overwritten"
     (let [storage (setup/create-test-storage)]
@@ -153,8 +106,7 @@
               fn-id (:id cache-fn)
               graph {:fns {fn-id {:id fn-id
                                   :name "cache-fn"
-                                  :fn-schema-id fn-schema-id
-                                  :parent-fn-id nil}}
+                                  :fn-schema-id fn-schema-id}}
                      :fn-schemas {fn-schema-id {:id fn-schema-id
                                                 :name "schema"
                                                 :base-fn-name "base"

@@ -244,24 +244,9 @@
 
   sp/GraphConstraints
 
-  (validate-parent-same-schema!
-    [_this fn-id parent-fn-id]
-    (constraints/validate-parent-same-schema! pool fn-id parent-fn-id))
-
-
-  (validate-no-arg-override!
-    [_this fn-id arg-schema-id]
-    (constraints/validate-no-arg-override! pool fn-id arg-schema-id))
-
-
   (validate-arg-schema-belongs-to-fn!
     [_this fn-id arg-schema-id]
     (constraints/validate-arg-schema-belongs-to-fn! pool fn-id arg-schema-id))
-
-
-  (validate-no-inheritance-cycle!
-    [_this fn-id parent-fn-id]
-    (constraints/validate-no-inheritance-cycle! pool fn-id parent-fn-id))
 
 
   (validate-no-dependency-cycle!

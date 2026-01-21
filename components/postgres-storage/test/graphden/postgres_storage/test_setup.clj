@@ -80,10 +80,7 @@
                      {:name {:uuid #uuid "00000000-0000-0000-0003-000000000002"
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
-                                     :type :ref :ref-entity :fn-schema}
-                      :parent-fn-id {:uuid #uuid "00000000-0000-0000-0003-000000000004"
-                                     :type :ref :ref-entity :fn
-                                     :nullable? true}})
+                                     :type :ref :ref-entity :fn-schema}})
       (ds/add-entity :fn-result-value #uuid "00000000-0000-0000-0005-000000000001"
                      {:fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000002"
                               :type :ref :ref-entity :fn}})

@@ -56,7 +56,7 @@
 
    | Entity          | Create              | Update                       | Delete                  |
    |-----------------|---------------------|------------------------------|-------------------------|
-   | :fn             | rebuild own cache   | if parent-fn-id changed:     | delete + invalidate     |
+   | :fn             | rebuild own cache   | if fn-schema-id changed:     | delete + invalidate     |
    |                 |                     | invalidate fn + dependents   | all dependents          |
    | :arg-value      | invalidate owner-fn | invalidate owner-fn          | invalidate owner-fn     |
    |                 | + dependents        | + dependents                 | + dependents            |
@@ -66,31 +66,18 @@
 
    ### Complex Scenarios
 
-   **Scenario 1: Parent function changed**
+   **Scenario 1: arg-value changed for function**
    ```
-   fn-A (parent) ──► fn-B (child) ──► fn-C (grandchild)
+   fn-A (has arg-value) ──► fn-B (references fn-A)
 
-   UPDATE fn-B SET parent-fn-id = fn-X
-   1. Delete cache for fn-B
-   2. Find caches depending on fn-B (fn-C)
-   3. Delete cache for fn-C
-   4. Rebuild caches for fn-B, fn-C (if they exist)
-   ```
-
-   **Scenario 2: arg-value created for parent function**
-   ```
-   fn-A (has arg-value) ──► fn-B (inherits) ──► fn-C
-
-   CREATE arg-value for fn-A
+   CREATE/UPDATE/DELETE arg-value for fn-A
    1. Invalidate fn-A cache
-   2. Find fn-A dependents (fn-B)
+   2. Find caches depending on fn-A (fn-B)
    3. Invalidate fn-B cache
-   4. Find fn-B dependents (fn-C)
-   5. Invalidate fn-C cache
-   6. Rebuild fn-A, fn-B, fn-C (cascading)
+   4. Rebuild fn-A, fn-B (if they exist)
    ```
 
-   **Scenario 3: fn-schema updated**
+   **Scenario 2: fn-schema updated**
    ```
    fn-schema-1 used by fn-A, fn-B, fn-C
 
@@ -98,6 +85,17 @@
    1. Find all caches depending on fn-schema-1
    2. Delete all found caches
    3. Rebuild caches for fns that still exist
+   ```
+
+   **Scenario 3: fn references another fn**
+   ```
+   fn-A (referenced by arg-value of fn-B)
+
+   DELETE fn-A
+   1. Delete cache for fn-A
+   2. Find caches depending on fn-A (fn-B)
+   3. Invalidate fn-B cache
+   4. Rebuild fn-B (if it still exists)
    ```
 
    ### Consistency Guarantees
@@ -255,9 +253,9 @@
 
     :on-update
     (fn [base-storage cache-storage id data _result old-record]
-      (when (or (contains? data :parent-fn-id)
-                (and (contains? data :fn-schema-id)
-                     (not= (:fn-schema-id old-record) (:fn-schema-id data))))
+      ;; Invalidate if fn-schema-id changed (rare but affects execution graph)
+      (when (and (contains? data :fn-schema-id)
+                 (not= (:fn-schema-id old-record) (:fn-schema-id data)))
         (invalidate-fn-and-dependents! base-storage cache-storage id)))
 
     :on-delete
@@ -452,24 +450,9 @@
 
   sp/GraphConstraints
 
-  (validate-parent-same-schema!
-    [_ fn-id parent-fn-id]
-    (sp/validate-parent-same-schema! base-storage fn-id parent-fn-id))
-
-
-  (validate-no-arg-override!
-    [_ fn-id arg-schema-id]
-    (sp/validate-no-arg-override! base-storage fn-id arg-schema-id))
-
-
   (validate-arg-schema-belongs-to-fn!
     [_ fn-id arg-schema-id]
     (sp/validate-arg-schema-belongs-to-fn! base-storage fn-id arg-schema-id))
-
-
-  (validate-no-inheritance-cycle!
-    [_ fn-id parent-fn-id]
-    (sp/validate-no-inheritance-cycle! base-storage fn-id parent-fn-id))
 
 
   (validate-no-dependency-cycle!
@@ -487,21 +470,6 @@
   (get-fn-schema-id-for-arg-schema
     [_ arg-schema-id]
     (sp/get-fn-schema-id-for-arg-schema base-storage arg-schema-id))
-
-
-  (get-parent-fn-id
-    [_ fn-id]
-    (sp/get-parent-fn-id base-storage fn-id))
-
-
-  (collect-parent-chain
-    [_ fn-id]
-    (sp/collect-parent-chain base-storage fn-id))
-
-
-  (collect-arg-schema-ids-in-chain
-    [_ fn-id]
-    (sp/collect-arg-schema-ids-in-chain base-storage fn-id))
 
 
   (collect-dependency-chain
@@ -699,24 +667,9 @@
 
   sp/GraphConstraints
 
-  (validate-parent-same-schema!
-    [_ fn-id parent-fn-id]
-    (sp/validate-parent-same-schema! delegate fn-id parent-fn-id))
-
-
-  (validate-no-arg-override!
-    [_ fn-id arg-schema-id]
-    (sp/validate-no-arg-override! delegate fn-id arg-schema-id))
-
-
   (validate-arg-schema-belongs-to-fn!
     [_ fn-id arg-schema-id]
     (sp/validate-arg-schema-belongs-to-fn! delegate fn-id arg-schema-id))
-
-
-  (validate-no-inheritance-cycle!
-    [_ fn-id parent-fn-id]
-    (sp/validate-no-inheritance-cycle! delegate fn-id parent-fn-id))
 
 
   (validate-no-dependency-cycle!
@@ -734,21 +687,6 @@
   (get-fn-schema-id-for-arg-schema
     [_ arg-schema-id]
     (sp/get-fn-schema-id-for-arg-schema delegate arg-schema-id))
-
-
-  (get-parent-fn-id
-    [_ fn-id]
-    (sp/get-parent-fn-id delegate fn-id))
-
-
-  (collect-parent-chain
-    [_ fn-id]
-    (sp/collect-parent-chain delegate fn-id))
-
-
-  (collect-arg-schema-ids-in-chain
-    [_ fn-id]
-    (sp/collect-arg-schema-ids-in-chain delegate fn-id))
 
 
   (collect-dependency-chain

@@ -2,24 +2,12 @@
   "ExecutionGraph resolution for memory storage.
 
    Provides functions for:
-   - Function parent chain collection
    - UUID reference classification (fn vs fn-result-value)
    - BFS-based execution graph resolution"
   (:require
     [clojure.set :as set]
     [graphden.memory-storage.crud :as crud]
     [graphden.storage-protocol.interface :as sp]))
-
-
-(defn- collect-fn-parent-chain
-  "Collects all fn-ids in the parent chain (including the fn itself)."
-  [state fn-id]
-  (loop [current-id fn-id
-         chain []]
-    (if-not current-id
-      chain
-      (let [fn-rec (crud/get-record state :fn current-id)]
-        (recur (:parent-fn-id fn-rec) (conj chain current-id))))))
 
 
 (defn- classify-refs
@@ -47,6 +35,12 @@
           all-refs))
 
 
+(defn- arg-values-to-map
+  "Converts a sequence of arg-value records to {arg-schema-id -> arg-value}."
+  [arg-values]
+  (into {} (map (juxt :arg-schema-id identity) arg-values)))
+
+
 (defn- process-fn-node
   "Processes a single function node during graph resolution.
    Returns updated graph state with the function's data added."
@@ -65,19 +59,18 @@
                               (->> (get arg-schemas-by-fn-schema fn-schema-id [])
                                    (map (juxt :id identity))
                                    (into {})))
-            ;; Merge arg-values from parent chain
-            chain (collect-fn-parent-chain state current-fn-id)
-            chain-arg-values (mapcat #(get arg-values-by-owner % []) chain)
-            merged-args (sp/merge-arg-values-for-chain chain-arg-values chain)
+            ;; Get arg-values directly for this fn
+            arg-values (get arg-values-by-owner current-fn-id [])
+            resolved-args (arg-values-to-map arg-values)
             ;; Extract and classify UUID refs
-            all-refs (sp/extract-uuid-refs-from-arg-values merged-args)
+            all-refs (sp/extract-uuid-refs-from-arg-values resolved-args)
             {new-fn-refs :fn-refs new-frvs :frvs}
             (classify-refs all-refs fns-data fn-result-values-data)]
         {:graph (-> graph
                     (update :fns assoc current-fn-id fn-rec)
                     (update :fn-schemas #(if fn-schema (assoc % fn-schema-id fn-schema) %))
                     (update :arg-schemas merge new-arg-schemas)
-                    (update :resolved-args assoc current-fn-id merged-args)
+                    (update :resolved-args assoc current-fn-id resolved-args)
                     (update :fn-result-values merge new-frvs))
          :new-fn-refs new-fn-refs}))))
 

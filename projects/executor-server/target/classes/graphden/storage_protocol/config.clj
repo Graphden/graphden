@@ -61,7 +61,7 @@
    ```"
   (:require
     [clojure.string :as str]
-    [graphden.storage-protocol.graph :as graph]
+    [graphden.field-types.interface :as ft]
     [malli.core :as m]
     [malli.error :as me]))
 
@@ -251,6 +251,13 @@
 ;; Shared query timeout handling for all storage backends.
 ;; Each backend can use these primitives to implement timeout consistently.
 
+(def default-query-timeout-ms
+  "Default timeout for storage queries in milliseconds.
+   Used by PostgreSQL (via JDBC setQueryTimeout) and Datomic backends.
+   Value: 30000ms (30 seconds) - reasonable default for most queries."
+  30000)
+
+
 (def ^:dynamic *query-timeout-ms*
   "Timeout for storage queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use `with-query-timeout` to temporarily change.
@@ -259,7 +266,7 @@
    - PostgreSQL: Converted to seconds for JDBC setQueryTimeout
    - Datomic: Enforced via future+deref (no native timeout support)
    - Memory: Not applicable (in-memory operations are instant)"
-  graph/default-query-timeout-ms)
+  default-query-timeout-ms)
 
 
 (def min-query-timeout-ms
@@ -489,12 +496,11 @@
 
 ;; === Identifier Limits ===
 
-(def ^:const max-identifier-length
+(def max-identifier-length
   "Maximum length for SQL identifiers (entity names, field names, enum values).
-   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1).
-   We enforce this limit early at schema definition time to prevent silent
-   truncation issues in the database layer."
-  63)
+   Re-exported from field-types for backwards compatibility.
+   PostgreSQL truncates identifiers longer than 63 bytes (NAMEDATALEN - 1)."
+  ft/max-identifier-length)
 
 
 (def ^:const max-fn-name-length
@@ -534,12 +540,6 @@
 
 
 ;; === Graph Traversal Limits ===
-
-(def ^:const default-max-parent-chain-depth
-  "Default maximum depth for parent chain traversal.
-   Prevents stack overflow from deeply nested inheritance."
-  1000)
-
 
 (def ^:const default-max-dependency-chain-depth
   "Default maximum depth for dependency chain traversal.

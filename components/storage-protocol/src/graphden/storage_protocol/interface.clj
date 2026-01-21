@@ -158,21 +158,9 @@
 (defprotocol GraphConstraints
   "Constraints for graph integrity."
 
-  (validate-parent-same-schema!
-    [this fn-id parent-fn-id]
-    "Validates that parent-fn has the same fn-schema-id.")
-
-  (validate-no-arg-override!
-    [this fn-id arg-schema-id]
-    "Validates that arg-schema-id is not already defined in parent chain.")
-
   (validate-arg-schema-belongs-to-fn!
     [this fn-id arg-schema-id]
     "Validates that arg-schema belongs to the fn-schema of this fn.")
-
-  (validate-no-inheritance-cycle!
-    [this fn-id parent-fn-id]
-    "Validates that setting parent-fn-id does not create inheritance cycle.")
 
   (validate-no-dependency-cycle!
     [this owner-fn-id value-fn-id]
@@ -189,18 +177,6 @@
   (get-fn-schema-id-for-arg-schema
     [this arg-schema-id]
     "Returns the fn-schema-id for the given arg-schema-id.")
-
-  (get-parent-fn-id
-    [this fn-id]
-    "Returns the parent-fn-id for the given fn-id.")
-
-  (collect-parent-chain
-    [this fn-id]
-    "Returns a set of all ancestor fn-ids.")
-
-  (collect-arg-schema-ids-in-chain
-    [this fn-id]
-    "Returns a set of arg-schema-ids defined in the parent chain.")
 
   (collect-dependency-chain
     [this fn-id]
@@ -262,13 +238,9 @@
     [this fn-schema-id]
     "Loads all arg-schemas for a fn-schema.")
 
-  (load-parent-chain
+  (load-arg-values-for-fn
     [this fn-id]
-    "Loads the parent chain for a fn.")
-
-  (load-arg-values-for-fns
-    [this fn-ids]
-    "Loads all arg-values for a set of fn-ids.")
+    "Loads all arg-values for a single fn.")
 
   (classify-uuid-refs
     [this uuid-refs]
@@ -303,39 +275,12 @@
 ;; CONSTRAINT HELPER IMPLEMENTATIONS
 ;; ============================================================================
 
-(defn collect-parent-chain-impl
-  "Default implementation of collect-parent-chain."
-  [helpers fn-id]
-  (constraints/collect-parent-chain-impl get-parent-fn-id helpers fn-id))
-
-
-(defn validate-parent-same-schema-impl
-  "Shared implementation of parent-same-schema validation."
-  [helpers fn-id parent-fn-id]
-  (constraints/validate-parent-same-schema-impl
-    get-fn-schema-id-for-fn helpers fn-id parent-fn-id))
-
-
-(defn validate-no-arg-override-impl
-  "Shared implementation of no-arg-override validation."
-  [helpers fn-id arg-schema-id]
-  (constraints/validate-no-arg-override-impl
-    collect-arg-schema-ids-in-chain helpers fn-id arg-schema-id))
-
-
 (defn validate-arg-schema-belongs-to-fn-impl
   "Shared implementation of arg-schema-belongs-to-fn validation."
   [helpers fn-id arg-schema-id]
   (constraints/validate-arg-schema-belongs-to-fn-impl
     get-fn-schema-id-for-fn get-fn-schema-id-for-arg-schema
     helpers fn-id arg-schema-id))
-
-
-(defn validate-no-inheritance-cycle-impl
-  "Shared implementation of no-inheritance-cycle validation."
-  [helpers fn-id parent-fn-id]
-  (constraints/validate-no-inheritance-cycle-impl
-    collect-parent-chain helpers fn-id parent-fn-id))
 
 
 (defn validate-no-dependency-cycle-impl
@@ -646,7 +591,6 @@
   (graph/execution-graph? x))
 
 
-(def merge-arg-values-for-chain graph/merge-arg-values-for-chain)
 (def extract-uuid-refs-from-arg-values graph/extract-uuid-refs-from-arg-values)
 
 
@@ -679,7 +623,6 @@
 
 
 ;; === Constraint limits re-exports ===
-(def default-max-parent-chain-depth constraints/default-max-parent-chain-depth)
 (def default-max-dependency-chain-depth constraints/default-max-dependency-chain-depth)
 
 

@@ -40,7 +40,7 @@
 **1.1 graph-data-schema** - All entities with all fields:
 - `fn-schema` with `base-fn-name`
 - `arg-schema` with `required`
-- `fn` with `parent-fn-id`
+- `fn` (function instance)
 - `fn-result-value` for cached computation results
 - `arg-value` with union types (including refs to fn-result-value)
 
@@ -230,9 +230,7 @@ free-arg-alias:
 
 **Lifecycle:**
 - Created manually via UI when naming free arguments
-- **Auto-deleted** when the argument gets a value:
-  - When arg-value is created for the referenced function
-  - When arg-value is created in any parent function (inheritance chain)
+- **Auto-deleted** when the argument gets a value (arg-value is created for the referenced function)
 - This ensures aliases only exist for truly "free" arguments
 
 **UI Usage:**
@@ -246,7 +244,7 @@ Execute function: calculate-report
 ```
 
 **Implementation notes:**
-- Storage constraint: validate that arg is actually free (no value in fn or parent chain)
+- Storage constraint: validate that arg is actually free (no arg-value exists for this fn + arg-schema)
 - Cascade delete via trigger/transaction function when arg-value is created
 - Root function free args don't need aliases — they already have human-readable names via `arg-schema.name`
 

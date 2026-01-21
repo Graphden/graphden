@@ -220,16 +220,7 @@
 
   sp/GraphConstraints
 
-  (validate-parent-same-schema! [_ _fn-id _parent-fn-id] nil)
-
-
-  (validate-no-arg-override! [_ _fn-id _arg-schema-id] nil)
-
-
   (validate-arg-schema-belongs-to-fn! [_ _fn-id _arg-schema-id] nil)
-
-
-  (validate-no-inheritance-cycle! [_ _fn-id _parent-fn-id] nil)
 
 
   (validate-no-dependency-cycle! [_ _owner-fn-id _value-fn-id] nil)
@@ -245,17 +236,6 @@
   (get-fn-schema-id-for-arg-schema
     [_ arg-schema-id]
     (:fn-schema-id (get-in @state [:arg-schema arg-schema-id])))
-
-
-  (get-parent-fn-id
-    [_ fn-id]
-    (:parent-fn-id (get-in @state [:fn fn-id])))
-
-
-  (collect-parent-chain [_ _fn-id] #{})
-
-
-  (collect-arg-schema-ids-in-chain [_ _fn-id] #{})
 
 
   (collect-dependency-chain [_ fn-id] #{fn-id})

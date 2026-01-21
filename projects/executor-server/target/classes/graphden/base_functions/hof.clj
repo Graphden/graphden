@@ -88,6 +88,20 @@
   x)
 
 
+(defbase const-fn
+  "Returns a function that always returns x, ignoring its argument.
+   Like Clojure's constantly but returns an actual function.
+
+   Use this when you need a function value (e.g., as a Ring handler)
+   that always returns the same response.
+
+   Example:
+   const-fn with x={:status 200 :body \"ok\"} returns (fn [_] {:status 200 :body \"ok\"})"
+  {:args {:x :any}
+   :return-type :fn}
+  (fn [_] x))
+
+
 ;; === Exports ===
 
 (def hof-defs
@@ -101,4 +115,5 @@
    :sort-by sort-by-fn
    :apply apply-fn
    :identity identity-fn
-   :constantly constantly-fn})
+   :constantly constantly-fn
+   :const const-fn})

@@ -2,9 +2,6 @@
   "Tests for memory storage GraphConstraints protocol.
 
    Covers:
-   - validate-parent-same-schema!
-   - validate-no-inheritance-cycle!
-   - validate-no-arg-override!
    - validate-arg-schema-belongs-to-fn!
    - validate-no-dependency-cycle!
    - GraphConstraints contract tests
@@ -19,161 +16,6 @@
 
 
 ;; === GraphConstraints tests ===
-
-(deftest validate-parent-same-schema-test
-  (testing "passes when parent has same fn-schema-id"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn-schema #uuid "10000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002" :type :text}})
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
-                                                 :fn-schema-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
-                                                                :type :ref :ref-entity :fn-schema}
-                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
-                                                                :type :ref :ref-entity :fn :nullable? true}})
-                                 ds/build))
-      (let [schema-id (random-uuid)
-            parent (sp/create-entity storage :fn {:name "parent" :fn-schema-id schema-id :parent-fn-id nil})
-            child (sp/create-entity storage :fn {:name "child" :fn-schema-id schema-id :parent-fn-id (:id parent)})]
-        ;; Should not throw
-        (sp/validate-parent-same-schema! storage (:id child) (:id parent)))))
-
-  (testing "throws when parent has different fn-schema-id"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn-schema #uuid "10000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002" :type :text}})
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
-                                                 :fn-schema-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
-                                                                :type :ref :ref-entity :fn-schema}
-                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
-                                                                :type :ref :ref-entity :fn :nullable? true}})
-                                 ds/build))
-      (let [schema1-id (random-uuid)
-            schema2-id (random-uuid)
-            parent (sp/create-entity storage :fn {:name "parent" :fn-schema-id schema1-id :parent-fn-id nil})
-            child (sp/create-entity storage :fn {:name "child" :fn-schema-id schema2-id :parent-fn-id (:id parent)})]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"different fn-schema-id"
-              (sp/validate-parent-same-schema! storage (:id child) (:id parent))))))))
-
-
-(deftest validate-no-inheritance-cycle-test
-  (testing "passes when no cycle"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
-                                                 :fn-schema-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
-                                                                :type :ref :ref-entity :fn :nullable? true}
-                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
-                                                                :type :ref :ref-entity :fn :nullable? true}})
-                                 ds/build))
-      (let [a (sp/create-entity storage :fn {:name "a" :parent-fn-id nil})
-            b (sp/create-entity storage :fn {:name "b" :parent-fn-id (:id a)})]
-        ;; c -> b -> a: no cycle
-        (sp/validate-no-inheritance-cycle! storage (random-uuid) (:id b)))))
-
-  (testing "throws when self-reference"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
-                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
-                                                                :type :ref :ref-entity :fn :nullable? true}})
-                                 ds/build))
-      (let [a (sp/create-entity storage :fn {:name "a" :parent-fn-id nil})]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Cannot set self as parent"
-              (sp/validate-no-inheritance-cycle! storage (:id a) (:id a)))))))
-
-  (testing "throws when cycle detected"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
-                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
-                                                                :type :ref :ref-entity :fn :nullable? true}})
-                                 ds/build))
-      (let [a (sp/create-entity storage :fn {:name "a" :parent-fn-id nil})
-            _ (sp/update-entity storage :fn (:id a) {:parent-fn-id nil})
-            b (sp/create-entity storage :fn {:name "b" :parent-fn-id (:id a)})
-            c (sp/create-entity storage :fn {:name "c" :parent-fn-id (:id b)})]
-        ;; Try to make a -> c, which would create c -> b -> a -> c cycle
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"inheritance cycle"
-              (sp/validate-no-inheritance-cycle! storage (:id a) (:id c))))))))
-
-
-(deftest validate-no-arg-override-test
-  (testing "passes when arg-schema not in parent chain"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn-schema #uuid "10000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002" :type :text}})
-                                 (ds/add-entity :arg-schema #uuid "11000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "11000000-0000-0000-0000-000000000002" :type :text}
-                                                 :fn-schema-id {:uuid #uuid "11000000-0000-0000-0000-000000000003"
-                                                                :type :ref :ref-entity :fn-schema}})
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
-                                                 :fn-schema-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
-                                                                :type :ref :ref-entity :fn-schema}
-                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
-                                                                :type :ref :ref-entity :fn :nullable? true}})
-                                 (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
-                                                {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
-                                                               :type :ref :ref-entity :fn}
-                                                 :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
-                                                                 :type :ref :ref-entity :arg-schema}
-                                                 :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
-                                                         :type :int}})
-                                 ds/build))
-      (let [schema-id (random-uuid)
-            arg-schema-1 (sp/create-entity storage :arg-schema {:name "x" :fn-schema-id schema-id})
-            arg-schema-2 (sp/create-entity storage :arg-schema {:name "y" :fn-schema-id schema-id})
-            parent-fn (sp/create-entity storage :fn {:name "parent" :fn-schema-id schema-id})
-            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id parent-fn)
-                                                    :arg-schema-id (:id arg-schema-1)
-                                                    :value 42})
-            child-fn (sp/create-entity storage :fn {:name "child" :fn-schema-id schema-id
-                                                    :parent-fn-id (:id parent-fn)})]
-        ;; arg-schema-2 is not in parent chain, should pass
-        (sp/validate-no-arg-override! storage (:id child-fn) (:id arg-schema-2)))))
-
-  (testing "throws when arg-schema already in parent chain"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn-schema #uuid "10000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002" :type :text}})
-                                 (ds/add-entity :arg-schema #uuid "11000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "11000000-0000-0000-0000-000000000002" :type :text}
-                                                 :fn-schema-id {:uuid #uuid "11000000-0000-0000-0000-000000000003"
-                                                                :type :ref :ref-entity :fn-schema}})
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
-                                                 :fn-schema-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
-                                                                :type :ref :ref-entity :fn-schema}
-                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000004"
-                                                                :type :ref :ref-entity :fn :nullable? true}})
-                                 (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
-                                                {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
-                                                               :type :ref :ref-entity :fn}
-                                                 :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
-                                                                 :type :ref :ref-entity :arg-schema}
-                                                 :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
-                                                         :type :int}})
-                                 ds/build))
-      (let [schema-id (random-uuid)
-            arg-schema (sp/create-entity storage :arg-schema {:name "x" :fn-schema-id schema-id})
-            parent-fn (sp/create-entity storage :fn {:name "parent" :fn-schema-id schema-id})
-            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id parent-fn)
-                                                    :arg-schema-id (:id arg-schema)
-                                                    :value 42})
-            child-fn (sp/create-entity storage :fn {:name "child" :fn-schema-id schema-id
-                                                    :parent-fn-id (:id parent-fn)})]
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"already defined in parent"
-              (sp/validate-no-arg-override! storage (:id child-fn) (:id arg-schema))))))))
-
 
 (deftest validate-arg-schema-belongs-to-fn-test
   (testing "passes when arg-schema belongs to fn's schema"
@@ -363,24 +205,6 @@
 
 
 (deftest graphconstraints-edge-cases-test
-  (testing "validate-parent-same-schema! passes when parent-fn-id is nil"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
-                                 ds/build))
-      ;; Should not throw for nil parent, returns nil
-      (is (nil? (sp/validate-parent-same-schema! storage (random-uuid) nil)))))
-
-  (testing "validate-no-inheritance-cycle! passes when parent-fn-id is nil"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
-                                 ds/build))
-      ;; Should not throw for nil parent, returns nil
-      (is (nil? (sp/validate-no-inheritance-cycle! storage (random-uuid) nil)))))
-
   (testing "validate-no-dependency-cycle! passes when value-fn-id is nil"
     (let [storage (mem/create-storage)]
       (sp/initialize storage (-> (mds/create-builder)
@@ -388,19 +212,7 @@
                                                 {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
                                  ds/build))
       ;; Should not throw for nil value, returns nil
-      (is (nil? (sp/validate-no-dependency-cycle! storage (random-uuid) nil)))))
-
-  (testing "validate-no-arg-override! passes when no parent chain"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}
-                                                 :parent-fn-id {:uuid #uuid "20000000-0000-0000-0000-000000000003"
-                                                                :type :ref :ref-entity :fn :nullable? true}})
-                                 ds/build))
-      (let [fn-rec (sp/create-entity storage :fn {:name "orphan" :parent-fn-id nil})]
-        ;; Should not throw when fn has no parent, returns nil
-        (is (nil? (sp/validate-no-arg-override! storage (:id fn-rec) (random-uuid))))))))
+      (is (nil? (sp/validate-no-dependency-cycle! storage (random-uuid) nil))))))
 
 
 (deftest required-field-validation-test

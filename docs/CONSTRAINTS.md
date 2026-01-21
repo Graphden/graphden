@@ -8,7 +8,6 @@ Graphden uses a graph of functions where:
 - **fn-schema** defines a function's signature (arguments and return type)
 - **fn** is an instance of a fn-schema with concrete argument values
 - **arg-value** binds a value to an argument of a function
-- Functions can inherit from parent functions via `parent-fn-id`
 - Arguments can reference other functions, creating a dependency graph
 
 ## Constraint Protocol
@@ -17,63 +16,13 @@ All storage implementations must implement the `GraphConstraints` protocol:
 
 ```clojure
 (defprotocol GraphConstraints
-  (validate-parent-same-schema! [this fn-id parent-fn-id])
-  (validate-no-arg-override! [this fn-id arg-schema-id])
   (validate-arg-schema-belongs-to-fn! [this fn-id arg-schema-id])
-  (validate-no-inheritance-cycle! [this fn-id parent-fn-id])
   (validate-no-dependency-cycle! [this owner-fn-id value-fn-id]))
 ```
 
 ## Constraints
 
-### 1. Parent Same Schema
-
-**Rule:** A function's parent must have the same fn-schema-id.
-
-**Rationale:** Inheritance in graphden means "use parent's arg-values as defaults". This only makes sense if parent and child have the same arguments, i.e., the same schema.
-
-**Example:**
-```
-fn-schema: http-request
-  args: [url, method, headers, body]
-
-fn: base-api (schema: http-request)
-  url: "https://api.example.com"
-  method: "GET"
-
-fn: get-users (schema: http-request, parent: base-api)  ✓
-  headers: {"Authorization": "Bearer ..."}
-
-fn: bad-fn (schema: some-other-schema, parent: base-api)  ✗
-  // Error: parent-schema-mismatch
-```
-
-**Error:** `:constraint-violation/parent-schema-mismatch`
-
-### 2. No Argument Override
-
-**Rule:** An argument cannot be redefined if it's already set in an ancestor function.
-
-**Rationale:** Prevents confusion about which value is used. The inheritance chain should only add new values, not override existing ones.
-
-**Example:**
-```
-fn: base-api
-  url: "https://api.example.com"
-
-fn: v2-api (parent: base-api)
-  method: "POST"  ✓
-
-fn: broken (parent: base-api)
-  url: "https://other.com"  ✗
-  // Error: arg-already-defined
-```
-
-**Error:** `:constraint-violation/arg-already-defined`
-
-**Note:** To change an inherited value, create a new function without the parent relationship.
-
-### 3. Arg-Schema Belongs to Fn
+### 1. Arg-Schema Belongs to Fn
 
 **Rule:** An arg-value can only reference an arg-schema that belongs to the function's fn-schema.
 
@@ -95,27 +44,7 @@ fn: api-call (schema: http-request)
 
 **Error:** `:constraint-violation/arg-schema-mismatch`
 
-### 4. No Inheritance Cycle
-
-**Rule:** The parent chain cannot form a cycle.
-
-**Rationale:** Cycles in inheritance would cause infinite loops when resolving inherited values.
-
-**Example:**
-```
-fn: A (parent: B)  ← Created first
-fn: B (parent: A)  ✗ Error: inheritance-cycle
-
-fn: X (parent: Y)
-fn: Y (parent: Z)
-fn: Z (parent: X)  ✗ Error: inheritance-cycle (X → Y → Z → X)
-```
-
-**Error:** `:constraint-violation/inheritance-cycle`
-
-**Detection:** Uses depth-first search through the parent chain.
-
-### 5. No Dependency Cycle
+### 2. No Dependency Cycle
 
 **Rule:** The dependency graph (via arg-value references to other functions) cannot form a cycle.
 
@@ -158,10 +87,7 @@ The `storage-protocol` component provides shared validation functions that work 
 (defprotocol ConstraintHelpers
   (get-fn-schema-id-for-fn [this fn-id])
   (get-fn-schema-id-for-arg-schema [this arg-schema-id])
-  (get-parent-fn-id [this fn-id])
-  (collect-parent-chain [this fn-id])
-  (has-arg-value-for-schema? [this fn-id arg-schema-id])
-  (collect-fn-dependencies [this fn-id]))
+  (collect-dependency-chain [this fn-id]))
 ```
 
 ### Storage-Specific Implementations
@@ -169,7 +95,7 @@ The `storage-protocol` component provides shared validation functions that work 
 | Storage | Location | Notes |
 |---------|----------|-------|
 | memory | `memory-storage/core.clj` | Direct atom access |
-| postgres | `postgres-storage/constraints.clj` | SQL queries with recursive CTEs |
+| postgres | `postgres-storage/constraints.clj` | SQL queries |
 | datomic | `datomic-storage/constraints.clj` | Datalog queries |
 
 ### Performance Considerations
@@ -178,10 +104,6 @@ The `storage-protocol` component provides shared validation functions that work 
 - Uses iterative DFS with visited set
 - Worst case O(V + E) where V = functions, E = references
 - Early termination on cycle detection
-
-**Parent Chain Collection:**
-- Iterative traversal (no recursion)
-- Capped by function graph depth
 
 **Caching:**
 - Postgres: Metadata cached with lock-protected invalidation
@@ -198,8 +120,5 @@ bb test
 ```
 
 Key test categories:
-- `parent-same-schema-test`
-- `no-arg-override-test`
 - `arg-schema-belongs-to-fn-test`
-- `no-inheritance-cycle-test`
 - `no-dependency-cycle-test`

@@ -10,21 +10,21 @@
 
    Arguments are wrapped in Clojure `delay` objects for lazy evaluation:
    - Values are only computed when dereferenced with @
-   - For :fn type arguments, the delay contains a callable function
    - Enables memoization of fn-result-values across the execution graph
+
+   ## Reference Types
+
+   Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
+   - ref<fn> → pass fn-id directly (for HOF, handlers, etc. - don't execute)
+   - ref<fn-result-value> → execute fn and use result (with caching)
+
+   This means HOF (map, filter, reduce) receive fn-id and create callables themselves.
 
    ## Argument Resolution Priority
 
    1. `provided-args` - Explicitly passed at execute time (highest priority)
    2. `path-args` - Runtime args from context (for root and nested fns)
    3. `arg-values` - Stored values from database (resolved-args in graph)
-
-   ## HOF (Higher-Order Functions) Support
-
-   For :fn type arguments, the delay contains a callable function:
-   - The callable accepts a map of named arguments
-   - It internally calls execute-internal to run the referenced function
-   - This enables map, filter, reduce and other HOF patterns
 
    ## Error Handling
 
@@ -141,60 +141,51 @@
 (defn- build-uuid-ref-delay
   "Builds a delay for a UUID reference (fn or fn-result-value).
 
+   Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
+   - ref<fn-result-value> → execute fn and use result (with caching)
+   - ref<fn> → pass fn-id directly (for HOF, handlers, etc.)
+
    Parameters:
    - context: Execution context
    - uuid-value: The UUID reference
    - arg-name: Argument name for error context
-   - arg-type: Type from arg-schema (:fn for HOF)
    - fn-result-values: Map of fn-result-values from execution graph
-   - execute-fn-result-value-fn: Function to execute fn-result-values (injected)
-   - execute-internal-fn: Function for internal execution (injected)"
-  [context uuid-value arg-name arg-type fn-result-values
-   execute-fn-result-value-fn execute-internal-fn]
-  (cond
-    ;; fn-result-value reference: execute with caching
-    (contains? fn-result-values uuid-value)
+   - execute-fn-result-value-fn: Function to execute fn-result-values (injected)"
+  [context uuid-value arg-name fn-result-values execute-fn-result-value-fn]
+  (if (contains? fn-result-values uuid-value)
+    ;; ref<fn-result-value>: execute with caching
     (let [frv-context (assoc context :current-frv-id uuid-value)]
       (wrap-delay-with-context arg-name :fn-result-value
                                #(execute-fn-result-value-fn frv-context uuid-value)))
-
-    ;; HOF (type=:fn): return fn-id directly for later callable creation
-    (= arg-type :fn)
-    (delay uuid-value)
-
-    ;; Direct fn ref: execute immediately
-    :else
-    (wrap-delay-with-context arg-name :fn-ref
-                             #(execute-internal-fn context uuid-value nil))))
+    ;; ref<fn>: pass fn-id directly (don't execute)
+    (delay uuid-value)))
 
 
 (defn build-delay
   "Builds a delay for an arg-value with error context.
 
-   - If value is a UUID referencing fn-result-value -> delay with cached execution
-   - If value is a UUID referencing fn and arg-schema type is :fn -> delay with callable (HOF)
-   - If value is a UUID referencing fn and arg-schema type is not :fn -> delay that executes fn
-   - Otherwise -> delay with literal value
+   Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
+   - UUID in fn-result-values map → execute fn and use result (cached)
+   - UUID not in fn-result-values → pass as fn-id (for HOF, handlers, etc.)
+   - Non-UUID → literal value
 
    Parameters:
    - context: Execution context
    - arg-value: The argument value record
    - arg-schema: The argument schema
    - execute-fn-result-value-fn: Injected function to execute fn-result-values
-   - execute-internal-fn: Injected function for internal execution
 
    All delays include error context (arg-name, source) for better diagnostics."
   ^clojure.lang.Delay [context ^clojure.lang.IPersistentMap arg-value
                        ^clojure.lang.IPersistentMap arg-schema
-                       execute-fn-result-value-fn execute-internal-fn]
+                       execute-fn-result-value-fn]
   (let [value (:value arg-value)
         arg-name (:name arg-schema)]
     (if (uuid? value)
       ;; UUID: reference to fn or fn-result-value
-      (let [arg-type (:type arg-schema)
-            fn-result-values (-> context :execution-graph :fn-result-values)]
-        (build-uuid-ref-delay context value arg-name arg-type fn-result-values
-                              execute-fn-result-value-fn execute-internal-fn))
+      (let [fn-result-values (-> context :execution-graph :fn-result-values)]
+        (build-uuid-ref-delay context value arg-name fn-result-values
+                              execute-fn-result-value-fn))
       ;; Literal value
       (delay value))))
 
@@ -243,7 +234,7 @@
    SECURITY: Does NOT log actual values to prevent sensitive data leakage.
    Only logs type information which is safe for debugging."
   [context arg-value arg-schema arg-schema-id arg-name _path-arg-value
-   execute-fn-result-value-fn execute-internal-fn]
+   execute-fn-result-value-fn]
   (log/warn "Path-arg ignored: argument already defined in DB (DB value takes precedence)"
             {:arg-schema-id arg-schema-id
              :current-frv-id (:current-frv-id context)
@@ -252,7 +243,7 @@
              :db-value-type (type (:value arg-value))
              :arg-type (:type arg-schema)
              :hint "Use provided-args in execute call or update DB arg-value to override"})
-  (build-delay context arg-value arg-schema execute-fn-result-value-fn execute-internal-fn))
+  (build-delay context arg-value arg-schema execute-fn-result-value-fn))
 
 
 (defn throw-missing-required-arg!
@@ -290,9 +281,8 @@
    - context: Execution context
    - fn-data: Function data from graph {:arg-schemas {...} :arg-values {...}}
    - provided-args: Map of {arg-schema-id -> value} provided at call time
-   - execute-fn-result-value-fn: Injected function to execute fn-result-values
-   - execute-internal-fn: Injected function for internal execution"
-  [context fn-data provided-args execute-fn-result-value-fn execute-internal-fn]
+   - execute-fn-result-value-fn: Injected function to execute fn-result-values"
+  [context fn-data provided-args execute-fn-result-value-fn]
   (let [{:keys [arg-schemas arg-values]} fn-data
         current-frv-id (:current-frv-id context)
         strict? (:strict-type-validation? context)
@@ -317,14 +307,14 @@
                      ;; DB value takes precedence
                      (handle-path-arg-with-db-value context arg-value arg-schema
                                                     arg-schema-id arg-name path-arg-value
-                                                    execute-fn-result-value-fn execute-internal-fn)
+                                                    execute-fn-result-value-fn)
                      ;; No DB value - use path-arg
                      (handle-validated-arg path-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :path-arg)))
 
             ;; 3. Stored arg-value exists
             arg-value
             (assoc acc arg-name-kw (build-delay context arg-value arg-schema
-                                                execute-fn-result-value-fn execute-internal-fn))
+                                                execute-fn-result-value-fn))
 
             ;; 4. Required arg with no value -> error
             (:required arg-schema)

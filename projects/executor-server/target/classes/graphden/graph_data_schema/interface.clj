@@ -112,10 +112,6 @@
   #uuid "3a685253-07f7-4469-be8b-1a585ba3e7d4")
 
 
-(def ^:private fn-parent-fn-id-field-uuid
-  #uuid "7c8e2f4a-9b31-4d56-a8e7-3f2c1b5d9a0e")
-
-
 ;; Field UUIDs for :arg-value entity
 (def ^:private arg-value-owner-fn-id-field-uuid
   #uuid "d9331598-36b3-4238-83f8-16558d8b3a7e")
@@ -132,6 +128,10 @@
 ;; Field UUIDs for :fn-result-value entity
 (def ^:private fn-result-value-fn-id-field-uuid
   #uuid "e5a9b3c2-8d4f-5e0a-b6c7-9f2d3e4a5b6c")
+
+
+(def ^:private fn-result-value-name-field-uuid
+  #uuid "da238d29-4cd4-4077-9a75-3ad3436b7466")
 
 
 (defn- value-kind-enum-values
@@ -196,21 +196,21 @@
       (ds/add-constraint :arg-schema {:type :unique :fields [:fn-schema-id :name]})
 
       ;; fn: actual function instances
-      ;; parent-fn-id enables inheritance chain for partial application
       (ds/add-entity :fn fn-entity-uuid
                      {:name {:uuid fn-name-field-uuid :type :text}
                       :fn-schema-id {:uuid fn-fn-schema-id-field-uuid
-                                     :type :ref :ref-entity :fn-schema}
-                      :parent-fn-id {:uuid fn-parent-fn-id-field-uuid
-                                     :type :ref :ref-entity :fn
-                                     :nullable? true}})
+                                     :type :ref :ref-entity :fn-schema}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
       ;; fn_result_value: represents a cached computation result of a function
       ;; Multiple arg-values can reference the same fn-result-value to reuse computed value
+      ;; name: unique identifier for caching (same name = same cached result)
       (ds/add-entity :fn-result-value fn-result-value-entity-uuid
                      {:fn-id {:uuid fn-result-value-fn-id-field-uuid
-                              :type :ref :ref-entity :fn}})
+                              :type :ref :ref-entity :fn}
+                      :name {:uuid fn-result-value-name-field-uuid
+                             :type :text}})
+      (ds/add-constraint :fn-result-value {:type :unique :fields [:name]})
 
       ;; arg_value: argument values for function instances
       ;; value is a union: ref to fn (HOF), ref to fn-result-value (computed), or literal

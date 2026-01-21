@@ -255,28 +255,10 @@
 
   sp/GraphConstraints
 
-  (validate-parent-same-schema!
-    [_this fn-id parent-fn-id]
-    (sp/with-read-lock rw-lock
-                       #(constraints/validate-parent-same-schema! conn-atom fn-id parent-fn-id)))
-
-
-  (validate-no-arg-override!
-    [_this fn-id arg-schema-id]
-    (sp/with-read-lock rw-lock
-                       #(constraints/validate-no-arg-override! conn-atom fn-id arg-schema-id)))
-
-
   (validate-arg-schema-belongs-to-fn!
     [_this fn-id arg-schema-id]
     (sp/with-read-lock rw-lock
                        #(constraints/validate-arg-schema-belongs-to-fn! conn-atom fn-id arg-schema-id)))
-
-
-  (validate-no-inheritance-cycle!
-    [_this fn-id parent-fn-id]
-    (sp/with-read-lock rw-lock
-                       #(constraints/validate-no-inheritance-cycle! conn-atom fn-id parent-fn-id)))
 
 
   (validate-no-dependency-cycle!

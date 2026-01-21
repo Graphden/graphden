@@ -235,28 +235,6 @@
 
 
 (deftest batch-operations-empty-sequences-test
-  (testing "load-arg-values-batch returns empty for empty fn-ids"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (sp/initialize storage (setup/make-graph-schema))
-        (let [pool (:pool storage)
-              load-fn #'graph/load-arg-values-batch
-              result (load-fn pool #{})]
-          (is (empty? result)))
-        (finally
-          (sp/close storage)))))
-
-  (testing "collect-parent-chains-batch returns empty for empty fn-ids"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (sp/initialize storage (setup/make-graph-schema))
-        (let [pool (:pool storage)
-              collect-fn #'graph/collect-parent-chains-batch
-              result (collect-fn pool #{})]
-          (is (= {} result)))
-        (finally
-          (sp/close storage)))))
-
   (testing "classify-and-load-refs returns empty for empty candidates"
     (let [storage (setup/create-test-storage)]
       (try
@@ -277,11 +255,7 @@
               result (load-fn pool :fn :id #{})]
           (is (= {} result)))
         (finally
-          (sp/close storage)))))
-
-  (testing "merge-arg-values-for-chain returns nil for empty chain"
-    (let [result (sp/merge-arg-values-for-chain [] [])]
-      (is (nil? result)))))
+          (sp/close storage))))))
 
 
 ;; === Mock-based SQL Error Tests ===
@@ -352,30 +326,6 @@
 
 
 (deftest sql-error-graph-operations-mock-test
-  (testing "collect-parent-chains-batch throws wrapped error on SQLException"
-    (let [collect-fn #'graph/collect-parent-chains-batch
-          connection-ex (SQLException. "connection failed" "08001")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw connection-ex))]
-        (try
-          (collect-fn nil #{(random-uuid)})
-          (is false "Should have thrown")
-          (catch clojure.lang.ExceptionInfo e
-            (is (= :connection-error (:type (ex-data e))))
-            (is (= :collect-parent-chains (:operation (ex-data e)))))))))
-
-  (testing "load-arg-values-batch throws wrapped error on SQLException"
-    (let [load-fn #'graph/load-arg-values-batch
-          timeout-ex (SQLException. "query canceled" "57014")]
-      (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
-                                    (throw timeout-ex))]
-        (try
-          (load-fn nil #{(random-uuid)})
-          (is false "Should have thrown")
-          (catch clojure.lang.ExceptionInfo e
-            (is (= :query-timeout (:type (ex-data e))))
-            (is (= :load-arg-values (:operation (ex-data e)))))))))
-
   (testing "classify-and-load-refs throws wrapped error on SQLException"
     (let [classify-fn #'graph/classify-and-load-refs
           not-null-ex (SQLException. "not null violation" "23502")]

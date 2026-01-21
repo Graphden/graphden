@@ -95,10 +95,7 @@
           fn-id (random-uuid)]
 
       ;; These should not throw (mock returns nil)
-      (is (nil? (sp/validate-parent-same-schema! wrapped fn-id fn-id)))
-      (is (nil? (sp/validate-no-arg-override! wrapped fn-id fn-id)))
       (is (nil? (sp/validate-arg-schema-belongs-to-fn! wrapped fn-id fn-id)))
-      (is (nil? (sp/validate-no-inheritance-cycle! wrapped fn-id fn-id)))
       (is (nil? (sp/validate-no-dependency-cycle! wrapped fn-id fn-id))))))
 
 
@@ -119,9 +116,6 @@
       ;; Test helper methods
       (is (= schema-id (sp/get-fn-schema-id-for-fn wrapped fn-id)))
       (is (= schema-id (sp/get-fn-schema-id-for-arg-schema wrapped arg-schema-id)))
-      (is (nil? (sp/get-parent-fn-id wrapped fn-id)))
-      (is (set? (sp/collect-parent-chain wrapped fn-id)))
-      (is (set? (sp/collect-arg-schema-ids-in-chain wrapped fn-id)))
       (is (set? (sp/collect-dependency-chain wrapped fn-id))))))
 
 

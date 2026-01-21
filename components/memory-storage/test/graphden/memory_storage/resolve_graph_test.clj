@@ -30,9 +30,7 @@
       (ds/add-entity :fn #uuid "986e8a2a-39ba-41ae-8449-d06c31515486"
                      {:name {:uuid #uuid "af336498-6d1e-4879-b2a5-b0d6c1994d12" :type :text}
                       :fn-schema-id {:uuid #uuid "3a685253-07f7-4469-be8b-1a585ba3e7d4"
-                                     :type :ref :ref-entity :fn-schema}
-                      :parent-fn-id {:uuid #uuid "7c8e2f4a-9b31-4d56-a8e7-3f2c1b5d9a0e"
-                                     :type :ref :ref-entity :fn :nullable? true}})
+                                     :type :ref :ref-entity :fn-schema}})
       (ds/add-entity :arg-value #uuid "afb02fb7-0174-496b-9b21-a61063de0c04"
                      {:owner-fn-id {:uuid #uuid "d9331598-36b3-4238-83f8-16558d8b3a7e"
                                     :type :ref :ref-entity :fn}
@@ -59,8 +57,7 @@
             ;; Create fn instance
             fn-add (sp/create-entity storage :fn
                                      {:name "add-1-2"
-                                      :fn-schema-id (:id fn-schema)
-                                      :parent-fn-id nil})
+                                      :fn-schema-id (:id fn-schema)})
             ;; Create arg-values
             _ (sp/create-entity storage :arg-value
                                 {:owner-fn-id (:id fn-add)
@@ -82,45 +79,6 @@
         (let [args (get (:resolved-args graph) (:id fn-add))]
           (is (= 1 (:value (get args (:id arg-a)))))
           (is (= 2 (:value (get args (:id arg-b))))))))))
-
-
-(deftest resolve-execution-graph-with-parent-test
-  (testing "resolves function with parent chain - child overrides parent"
-    (let [storage (mem/create-storage)]
-      (sp/initialize storage (make-graph-schema))
-      (let [fn-schema (sp/create-entity storage :fn-schema
-                                        {:name "greet" :returned-type :text})
-            arg-name (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id fn-schema)
-                                        :name "name" :type :text :required true})
-            arg-greeting (sp/create-entity storage :arg-schema
-                                           {:fn-schema-id (:id fn-schema)
-                                            :name "greeting" :type :text :required true})
-            ;; Parent fn with greeting="Hello"
-            parent-fn (sp/create-entity storage :fn
-                                        {:name "greet-hello"
-                                         :fn-schema-id (:id fn-schema)
-                                         :parent-fn-id nil})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id parent-fn)
-                                 :arg-schema-id (:id arg-greeting)
-                                 :value "Hello"})
-            ;; Child fn with name="World" - inherits greeting from parent
-            child-fn (sp/create-entity storage :fn
-                                       {:name "greet-hello-world"
-                                        :fn-schema-id (:id fn-schema)
-                                        :parent-fn-id (:id parent-fn)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id child-fn)
-                                 :arg-schema-id (:id arg-name)
-                                 :value "World"})
-            graph (sp/resolve-execution-graph storage (:id child-fn))]
-        ;; Both fns should be in graph
-        (is (contains? (:fns graph) (:id child-fn)))
-        ;; Resolved args should have both - name from child, greeting from parent
-        (let [args (get (:resolved-args graph) (:id child-fn))]
-          (is (= "World" (:value (get args (:id arg-name)))))
-          (is (= "Hello" (:value (get args (:id arg-greeting))))))))))
 
 
 (deftest resolve-execution-graph-with-fn-refs-test
@@ -145,8 +103,7 @@
             ;; const-3 fn
             const-3 (sp/create-entity storage :fn
                                       {:name "const-3"
-                                       :fn-schema-id (:id const-schema)
-                                       :parent-fn-id nil})
+                                       :fn-schema-id (:id const-schema)})
             _ (sp/create-entity storage :arg-value
                                 {:owner-fn-id (:id const-3)
                                  :arg-schema-id (:id const-arg)
@@ -154,8 +111,7 @@
             ;; const-5 fn
             const-5 (sp/create-entity storage :fn
                                       {:name "const-5"
-                                       :fn-schema-id (:id const-schema)
-                                       :parent-fn-id nil})
+                                       :fn-schema-id (:id const-schema)})
             _ (sp/create-entity storage :arg-value
                                 {:owner-fn-id (:id const-5)
                                  :arg-schema-id (:id const-arg)
@@ -163,8 +119,7 @@
             ;; add-3-5 fn referencing const-3 and const-5
             add-3-5 (sp/create-entity storage :fn
                                       {:name "add-3-5"
-                                       :fn-schema-id (:id add-schema)
-                                       :parent-fn-id nil})
+                                       :fn-schema-id (:id add-schema)})
             _ (sp/create-entity storage :arg-value
                                 {:owner-fn-id (:id add-3-5)
                                  :arg-schema-id (:id add-arg-a)
@@ -288,8 +243,7 @@
             ;; const-5 fn - will be referenced TWICE
             const-5 (sp/create-entity storage :fn
                                       {:name "const-5"
-                                       :fn-schema-id (:id const-schema)
-                                       :parent-fn-id nil})
+                                       :fn-schema-id (:id const-schema)})
             _ (sp/create-entity storage :arg-value
                                 {:owner-fn-id (:id const-5)
                                  :arg-schema-id (:id const-arg)
@@ -298,8 +252,7 @@
             ;; This creates a shared reference that triggers the "already visited" branch
             add-5-5 (sp/create-entity storage :fn
                                       {:name "add-5-5"
-                                       :fn-schema-id (:id add-schema)
-                                       :parent-fn-id nil})
+                                       :fn-schema-id (:id add-schema)})
             _ (sp/create-entity storage :arg-value
                                 {:owner-fn-id (:id add-5-5)
                                  :arg-schema-id (:id add-arg-a)
@@ -336,8 +289,7 @@
             ;; Create fn instance that references itself
             rec-fn (sp/create-entity storage :fn
                                      {:name "factorial"
-                                      :fn-schema-id (:id rec-schema)
-                                      :parent-fn-id nil})
+                                      :fn-schema-id (:id rec-schema)})
             ;; Self-reference: arg-value points to the fn itself
             _ (sp/create-entity storage :arg-value
                                 {:owner-fn-id (:id rec-fn)

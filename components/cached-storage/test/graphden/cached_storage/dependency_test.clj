@@ -92,50 +92,51 @@
 
 
 (deftest fn-deletion-invalidates-fn-dependents-test
-  (testing "fn deletion invalidates all caches that depend on it"
+  (testing "fn deletion invalidates all caches that depend on it via arg-value references"
     (let [storage (mocks/create-mock-storage)
           cache (mocks/create-mock-cache-with-deps)
           wrapped (cached/wrap-with-cache storage cache)
           schema-id (random-uuid)
-          parent-fn-id (random-uuid)
-          child-fn-id (random-uuid)]
-      ;; Setup
+          referenced-fn-id (random-uuid)
+          referencing-fn-id (random-uuid)]
+      ;; Setup - referencing-fn references referenced-fn via arg-value
       (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
-      (sp/create-entity wrapped :fn {:id parent-fn-id :name "parent" :fn-schema-id schema-id})
-      (sp/create-entity wrapped :fn {:id child-fn-id :name "child" :fn-schema-id schema-id
-                                     :parent-fn-id parent-fn-id})
-      ;; Manually add fn dependency (child depends on parent)
-      (swap! (:state cache) update-in [:fn-deps parent-fn-id] (fnil conj #{}) child-fn-id)
-      (is (cache/cache-exists? cache parent-fn-id))
-      (is (cache/cache-exists? cache child-fn-id))
-      ;; Delete parent - should invalidate child's cache too
-      (sp/delete-entity wrapped :fn parent-fn-id)
-      (is (not (cache/cache-exists? cache parent-fn-id)))
-      ;; Child cache should be rebuilt (child fn still exists)
-      (is (cache/cache-exists? cache child-fn-id)))))
+      (sp/create-entity wrapped :fn {:id referenced-fn-id :name "referenced" :fn-schema-id schema-id})
+      (sp/create-entity wrapped :fn {:id referencing-fn-id :name "referencing" :fn-schema-id schema-id})
+      ;; Manually add fn dependency (referencing depends on referenced)
+      (swap! (:state cache) update-in [:fn-deps referenced-fn-id] (fnil conj #{}) referencing-fn-id)
+      (is (cache/cache-exists? cache referenced-fn-id))
+      (is (cache/cache-exists? cache referencing-fn-id))
+      ;; Delete referenced - should invalidate referencing's cache too
+      (sp/delete-entity wrapped :fn referenced-fn-id)
+      (is (not (cache/cache-exists? cache referenced-fn-id)))
+      ;; Referencing fn cache should be rebuilt (fn still exists)
+      (is (cache/cache-exists? cache referencing-fn-id)))))
 
 
 (deftest fn-update-invalidates-fn-dependents-test
-  (testing "fn update with parent change invalidates all dependent caches"
+  (testing "fn update with schema change invalidates all dependent caches"
     (let [storage (mocks/create-mock-storage)
           cache (mocks/create-mock-cache-with-deps)
           wrapped (cached/wrap-with-cache storage cache)
-          schema-id (random-uuid)
+          schema-id-1 (random-uuid)
+          schema-id-2 (random-uuid)
           fn-id (random-uuid)
-          child-fn-id (random-uuid)]
+          dependent-fn-id (random-uuid)]
       ;; Setup
-      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
-      (sp/create-entity wrapped :fn {:id fn-id :name "parent" :fn-schema-id schema-id})
-      (sp/create-entity wrapped :fn {:id child-fn-id :name "child" :fn-schema-id schema-id})
-      ;; Manually add fn dependency (child will depend on fn-id after update)
-      (swap! (:state cache) update-in [:fn-deps fn-id] (fnil conj #{}) child-fn-id)
+      (sp/create-entity storage :fn-schema {:id schema-id-1 :name "test1" :returned-type :int})
+      (sp/create-entity storage :fn-schema {:id schema-id-2 :name "test2" :returned-type :text})
+      (sp/create-entity wrapped :fn {:id fn-id :name "original" :fn-schema-id schema-id-1})
+      (sp/create-entity wrapped :fn {:id dependent-fn-id :name "dependent" :fn-schema-id schema-id-1})
+      ;; Manually add fn dependency
+      (swap! (:state cache) update-in [:fn-deps fn-id] (fnil conj #{}) dependent-fn-id)
       (is (cache/cache-exists? cache fn-id))
-      (is (cache/cache-exists? cache child-fn-id))
-      ;; Update child with parent - should invalidate dependent caches
-      (sp/update-entity wrapped :fn child-fn-id {:parent-fn-id fn-id})
+      (is (cache/cache-exists? cache dependent-fn-id))
+      ;; Update fn with new schema - should invalidate dependent caches
+      (sp/update-entity wrapped :fn fn-id {:fn-schema-id schema-id-2})
       ;; Both caches should be rebuilt
       (is (cache/cache-exists? cache fn-id))
-      (is (cache/cache-exists? cache child-fn-id)))))
+      (is (cache/cache-exists? cache dependent-fn-id)))))
 
 
 (deftest arg-value-delete-with-nil-record-test
@@ -197,7 +198,7 @@
 
 
 (deftest fn-update-without-fn-schema-id-in-data-test
-  (testing "fn update without fn-schema-id in data does not compare schemas"
+  (testing "fn update without fn-schema-id in data does not invalidate cache"
     (let [storage (mocks/create-mock-storage)
           cache (mocks/create-mock-cache-with-deps)
           wrapped (cached/wrap-with-cache storage cache)
@@ -207,7 +208,7 @@
       (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
       (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
       (is (cache/cache-exists? cache fn-id))
-      ;; Update without parent-fn-id or fn-schema-id - should NOT invalidate
+      ;; Update without fn-schema-id - should NOT invalidate
       (sp/update-entity wrapped :fn fn-id {:name "renamed"})
       ;; Cache should still exist (not rebuilt)
       (is (cache/cache-exists? cache fn-id)))))
@@ -230,23 +231,21 @@
       (is (cache/cache-exists? cache fn-id)))))
 
 
-(deftest fn-update-with-both-parent-and-schema-change-test
-  (testing "fn update with both parent-fn-id and fn-schema-id change"
+(deftest fn-update-with-schema-change-test
+  (testing "fn update with fn-schema-id change invalidates cache"
     (let [storage (mocks/create-mock-storage)
           cache (mocks/create-mock-cache-with-deps)
           wrapped (cached/wrap-with-cache storage cache)
           schema-id-1 (random-uuid)
           schema-id-2 (random-uuid)
-          parent-fn-id (random-uuid)
           fn-id (random-uuid)]
       ;; Setup
       (sp/create-entity storage :fn-schema {:id schema-id-1 :name "schema1" :returned-type :int})
       (sp/create-entity storage :fn-schema {:id schema-id-2 :name "schema2" :returned-type :text})
-      (sp/create-entity wrapped :fn {:id parent-fn-id :name "parent" :fn-schema-id schema-id-1})
-      (sp/create-entity wrapped :fn {:id fn-id :name "child" :fn-schema-id schema-id-1})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id-1})
       (is (cache/cache-exists? cache fn-id))
-      ;; Update with BOTH parent-fn-id and fn-schema-id change
-      (sp/update-entity wrapped :fn fn-id {:parent-fn-id parent-fn-id :fn-schema-id schema-id-2})
+      ;; Update with fn-schema-id change
+      (sp/update-entity wrapped :fn fn-id {:fn-schema-id schema-id-2})
       ;; Cache should be rebuilt
       (is (cache/cache-exists? cache fn-id)))))
 
@@ -278,32 +277,30 @@
           cache (mocks/create-mock-cache-with-deps)
           wrapped (cached/wrap-with-cache storage cache)
           schema-id (random-uuid)
-          ;; Create chain: grandparent -> parent -> child
-          grandparent-id (random-uuid)
-          parent-id (random-uuid)
-          child-id (random-uuid)]
-      ;; Setup
+          ;; Create chain of dependencies via arg-value references
+          fn-a-id (random-uuid)
+          fn-b-id (random-uuid)
+          fn-c-id (random-uuid)]
+      ;; Setup - fn-b references fn-a, fn-c references fn-b
       (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
-      (sp/create-entity wrapped :fn {:id grandparent-id :name "grandparent" :fn-schema-id schema-id})
-      (sp/create-entity wrapped :fn {:id parent-id :name "parent" :fn-schema-id schema-id
-                                     :parent-fn-id grandparent-id})
-      (sp/create-entity wrapped :fn {:id child-id :name "child" :fn-schema-id schema-id
-                                     :parent-fn-id parent-id})
+      (sp/create-entity wrapped :fn {:id fn-a-id :name "fn-a" :fn-schema-id schema-id})
+      (sp/create-entity wrapped :fn {:id fn-b-id :name "fn-b" :fn-schema-id schema-id})
+      (sp/create-entity wrapped :fn {:id fn-c-id :name "fn-c" :fn-schema-id schema-id})
       ;; Add fn dependencies
-      (swap! (:state cache) update-in [:fn-deps grandparent-id] (fnil conj #{}) parent-id)
-      (swap! (:state cache) update-in [:fn-deps parent-id] (fnil conj #{}) child-id)
+      (swap! (:state cache) update-in [:fn-deps fn-a-id] (fnil conj #{}) fn-b-id)
+      (swap! (:state cache) update-in [:fn-deps fn-b-id] (fnil conj #{}) fn-c-id)
       ;; All should be cached
-      (is (cache/cache-exists? cache grandparent-id))
-      (is (cache/cache-exists? cache parent-id))
-      (is (cache/cache-exists? cache child-id))
-      ;; Delete grandparent - should cascade to parent's cache
-      (sp/delete-entity wrapped :fn grandparent-id)
-      ;; grandparent cache deleted
-      (is (not (cache/cache-exists? cache grandparent-id)))
-      ;; parent cache should be rebuilt (parent fn still exists)
-      (is (cache/cache-exists? cache parent-id))
-      ;; child cache unchanged (wasn't directly dependent on grandparent)
-      (is (cache/cache-exists? cache child-id)))))
+      (is (cache/cache-exists? cache fn-a-id))
+      (is (cache/cache-exists? cache fn-b-id))
+      (is (cache/cache-exists? cache fn-c-id))
+      ;; Delete fn-a - should cascade to fn-b's cache
+      (sp/delete-entity wrapped :fn fn-a-id)
+      ;; fn-a cache deleted
+      (is (not (cache/cache-exists? cache fn-a-id)))
+      ;; fn-b cache should be rebuilt (fn still exists)
+      (is (cache/cache-exists? cache fn-b-id))
+      ;; fn-c cache unchanged (wasn't directly dependent on fn-a)
+      (is (cache/cache-exists? cache fn-c-id)))))
 
 
 (deftest arg-value-update-with-owner-fn-id-test

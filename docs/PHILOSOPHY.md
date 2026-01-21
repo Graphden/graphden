@@ -101,16 +101,16 @@ Following SICP, a language has three aspects:
 In graphden:
 - **Primitives**: Nodes (fn, fn-schema, arg-schema, arg-value, fn-result-value)
 - **Combination**: Edges (references between nodes)
-- **Abstraction**: Inheritance (fn → parent-fn-id) and result caching (fn-result-value)
+- **Abstraction**: Base functions (reusable implementations) and result caching (fn-result-value)
 
 **We resist adding new entity types or edge types.** Every addition increases cognitive load and implementation complexity.
 
 #### 2.2 DRY (Don't Repeat Yourself)
 
 Abstractions must minimize the need to define anything twice:
-- Inheritance chains allow partial application without copying
 - fn-result-value enables sharing computed results
 - Base functions provide reusable implementations
+- UI can offer "create based on" = copying with ability to change
 
 #### 2.3 Expressiveness Parity
 
@@ -143,14 +143,13 @@ The system should support (or enable) development tools:
 |--------|---------|
 | `fn-schema` | Function signature (args, return type, optional base-fn-name) |
 | `arg-schema` | Argument definition (name, type, required) |
-| `fn` | Function instance (implements schema, optional parent for inheritance) |
+| `fn` | Function instance (implements schema) |
 | `arg-value` | Bound argument value (literal or reference) |
 | `fn-result-value` | Cached computation reference (memoization within execution) |
 
 **Why these five?** They are the minimal set needed to express:
 - Function definitions (fn-schema + arg-schema)
 - Function instances with values (fn + arg-value)
-- Partial application / inheritance (fn.parent-fn-id)
 - Result caching / sharing (fn-result-value)
 
 ### Means of Combination
@@ -169,21 +168,6 @@ Two types of references in arg-value:
 - Single reference type with explicit "execute" node — more entities
 
 ### Means of Abstraction
-
-#### Inheritance (Currying)
-
-```
-fn: A (parent: null)
-  arg-values: {x: 1}
-
-fn: B (parent: A)
-  arg-values: {y: 2}  ← B inherits x from A, adds y
-```
-
-This enables:
-- Partial application without copying values
-- "Live" updates — changing A's values affects B
-- Layered specialization — each fn adds its own values
 
 #### fn-result-value (Named Intermediate Results)
 
@@ -284,10 +268,7 @@ This section maps each system component to the principles it serves. Use this to
 
 | Constraint | Principles Served | How |
 |------------|-------------------|-----|
-| No arg override | Correctness, Explicit | Prevents silent value shadowing |
-| Same schema inheritance | Correctness | Type safety in inheritance chains |
 | No dependency cycles | Correctness | Prevents infinite loops at write time |
-| No inheritance cycles | Correctness | Prevents infinite parent traversal |
 | Arg-schema belongs to fn-schema | Correctness | Type safety for argument binding |
 
 ### Protocol Design Decisions
@@ -296,7 +277,6 @@ This section maps each system component to the principles it serves. Use this to
 |----------|-------------------|-----------|
 | Two reference types (`ref<fn>` vs `ref<fn-result-value>`) | Expressiveness (HOF support) | +1 concept, but minimum for HOF |
 | Union type for arg-value.value | Minimal entities | Single field instead of multiple tables |
-| parent-fn-id (live inheritance) | DRY | Complexity in constraint validation |
 | fn-result-value as separate entity | DRY, Performance | +1 entity, but enables caching and sharing |
 
 ### Bundles

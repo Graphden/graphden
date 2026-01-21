@@ -19,129 +19,30 @@
 
 ---
 
-## Part 1: Critical Model Analysis
+## Part 1: Design Overview
 
-### The "Argument Override" Problem
+### Simple Graph Model
 
-**Current approach (inheritance via parent-fn-id):**
-
-```
-fn: A (parent: null)
-  arg-values: {x: 1}
-
-fn: B (parent: A)
-  arg-values: {y: 2}  <- OK
-
-fn: C (parent: B)
-  arg-values: {x: 5}  <- FORBIDDEN: x is already defined in A
-```
-
-**How to enforce this?**
-
-| Storage | Implementation | Issues |
-|---------|----------------|--------|
-| PostgreSQL | Trigger + recursive CTE | Complex, slow on deep chains |
-| Datomic | Transaction function + query | Complex, requires additional query |
-| Memory | Code at write time | Logic duplication |
-
-**This is BAD** - the constraint is not declarative, requires code, easy to break.
-
----
-
-### Alternative 1: Immutability + Copying
-
-**Idea**: Abandon "live" inheritance. When creating fn, copy arg-values from the "base".
-
-```
-fn: A
-  arg-values: {x: 1}
-
-fn: B (based-on: A)
-  // When created, copied x: 1 from A
-  arg-values: {x: 1, y: 2}
-
-fn: C (based-on: B)
-  // When created, copied x: 1, y: 2 from B
-  arg-values: {x: 1, y: 2, z: 3}
-```
-
-**Pros:**
-- No parent-fn-id -> no recursive checks
-- Each fn is self-contained
-- Constraint "one arg-schema-id per fn" = simple unique(owner-fn-id, arg-schema-id)
-
-**Cons:**
-- No "live" updates: changed A -> B and C won't update
-- Data duplication
-
-**Mitigating cons:**
-- "Live" updates are rarely needed in practice
-- Can add "update from base" operation if needed
-- Duplication is not a problem for small values
-
----
-
-### Alternative 2: Versioning
-
-**Idea**: Each fn is immutable, change = new version.
-
-```
-fn: base-api@v1 {url: "https://old.api"}
-fn: base-api@v2 {url: "https://new.api"}
-
-fn: create-user (based-on: base-api@v1)
-  // Bound to a specific version
-```
-
-**Pros:**
-- Complete predictability
-- Change history
-- Can rollback
-
-**Cons:**
-- More complex UX
-- More data
-
----
-
-### Alternative 3: Graph Without Inheritance
-
-**Idea**: Abandon the "inheritance" concept. Each fn fully defines its arguments.
+Each function (`fn`) directly defines its arguments through `arg-value` entities:
 
 ```
 fn: create-user
   fn-schema: http-request
   arg-values: {
-    url: "https://api.example.com",  // Can copy from another fn via UI
+    url: "https://api.example.com",
     method: "POST",
     headers: {...},
-    body: {...},
-    timeout: 30
+    body: {...}
   }
 ```
 
-**Pros:**
-- Maximum simplicity
-- No override problem at all
-
-**Cons:**
-- Duplication when manually creating
-- Loss of "partial application" concept
-
-**However**: UI can offer "create based on" = copying with ability to change.
-
----
-
-### Chosen Approach: Live Inheritance + Explicit Constraints
-
-**Schema with inheritance:**
+**Schema:**
 
 ```
 fn:
   id: uuid (PK)
   name: text (UNIQUE)
   fn-schema-id: ref<fn-schema>
-  parent-fn-id: ref<fn> (nullable)  // Live inheritance
 
 arg-value:
   id: uuid (PK)
@@ -150,6 +51,12 @@ arg-value:
   value: union<ref<fn> | literal-types...>
   UNIQUE(owner-fn-id, arg-schema-id)
 ```
+
+**Benefits:**
+- Each fn is self-contained
+- Simple constraint: one arg-schema-id per fn = simple `UNIQUE(owner-fn-id, arg-schema-id)`
+- No recursive checks needed
+- UI can offer "create based on" = copying with ability to change
 
 **Constraints are extracted into an explicit protocol** - each storage MUST implement them.
 
@@ -167,29 +74,11 @@ arg-value:
    Each storage MUST implement this protocol.
    Violation of any constraint = exception thrown."
 
-  (validate-parent-same-schema!
-    [this fn-id parent-fn-id]
-    "Constraint: parent-fn must have the same fn-schema-id as fn.
-     Called when creating/modifying fn with parent-fn-id.
-     Throws: :constraint-violation/parent-schema-mismatch")
-
-  (validate-no-arg-override!
-    [this fn-id arg-schema-id]
-    "Constraint: arg-schema-id must not already be defined in the parent chain.
-     Called when creating arg-value.
-     Throws: :constraint-violation/arg-already-defined")
-
   (validate-arg-schema-belongs-to-fn!
     [this fn-id arg-schema-id]
     "Constraint: arg-schema must belong to this fn's fn-schema.
      Called when creating arg-value.
      Throws: :constraint-violation/arg-schema-mismatch")
-
-  (validate-no-inheritance-cycle!
-    [this fn-id parent-fn-id]
-    "Constraint: setting parent-fn-id must not create an inheritance cycle.
-     Called when creating/modifying fn with parent-fn-id.
-     Throws: :constraint-violation/inheritance-cycle")
 
   (validate-no-dependency-cycle!
     [this owner-fn-id target-fn-id]
@@ -205,23 +94,14 @@ The implementation uses a **shared validation logic** pattern with pluggable hel
 ```clojure
 ;; ConstraintHelpers protocol - each storage implements this
 (defprotocol ConstraintHelpers
-  (get-fn-schema-id [this fn-id])
-  (get-parent-fn-id [this fn-id])
-  (get-arg-schema-fn-schema-id [this arg-schema-id])
-  (arg-defined-for-fn? [this fn-id arg-schema-id])
-  (get-dependency-targets [this fn-id]))
-
-;; Shared implementations use helpers
-(defn validate-parent-same-schema-impl [storage fn-id parent-fn-id]
-  (let [fn-schema (get-fn-schema-id storage fn-id)
-        parent-schema (get-fn-schema-id storage parent-fn-id)]
-    (when (not= fn-schema parent-schema)
-      (throw ...))))
+  (get-fn-schema-id-for-fn [this fn-id])
+  (get-fn-schema-id-for-arg-schema [this arg-schema-id])
+  (collect-dependency-chain [this fn-id]))
 ```
 
 **Benefits of this approach:**
 - Code reuse across all storage backends
-- Each backend optimizes its helpers (SQL CTEs, Datomic queries, in-memory traversal)
+- Each backend optimizes its helpers (SQL queries, Datomic queries, in-memory traversal)
 - Consistent error messages and behavior
 
 ### Implementation in Each Storage
@@ -229,8 +109,8 @@ The implementation uses a **shared validation logic** pattern with pluggable hel
 | Storage | Implementation | Optimization |
 |---------|----------------|--------------|
 | memory | `memory-storage/core.clj` | In-memory maps, O(1) lookups |
-| postgres | `postgres-storage/constraints.clj` | SQL recursive CTEs |
-| datomic | `datomic-storage/constraints.clj` | Datomic query batching |
+| postgres | `postgres-storage/constraints.clj` | SQL queries |
+| datomic | `datomic-storage/constraints.clj` | Datomic queries |
 
 ---
 
@@ -340,7 +220,6 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | id: uuid (PK)                                                     |
 | name: text (UNIQUE)                                               |
 | fn-schema-id: ref<fn-schema>                                      |
-| parent-fn-id: ref<fn> (nullable) - live inheritance              |
 +------------------------------------------------------------------+
          |
          | 1:N
@@ -375,15 +254,15 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | 3 | arg-schema is unique within fn-schema | UNIQUE(fn-schema-id, name) | Composite tuple + unique | Map<[fn-schema-id, name], id> |
 | 4 | arg-value is unique within fn | UNIQUE(owner-fn-id, arg-schema-id) | Composite tuple + unique | Map<[fn-id, arg-schema-id], id> |
 | 5 | arg-value.arg-schema-id matches owner-fn.fn-schema-id | Clojure validation | Clojure validation | Clojure validation |
-| 6 | No cycles in fn graph through arg-value | Recursive CTE | Datalog query | DFS |
+| 6 | No cycles in fn graph through arg-value | SQL query | Datalog query | DFS |
 
-### Constraint #5 in Detail
+### Constraint #5 in Detail (Arg-Schema Belongs to Fn)
 
 **Problem**: arg-value references arg-schema, which belongs to fn-schema. owner-fn also references fn-schema. They must match.
 
 **Implementation**: All storage backends use shared Clojure validation via `validate-arg-schema-belongs-to-fn!`.
 
-### Constraint #6 in Detail (Cycles)
+### Constraint #6 in Detail (No Dependency Cycles)
 
 **When creating arg-value with value = ref<fn>:**
 
@@ -848,10 +727,10 @@ The `>` suffix creates a **fn-result-value** entity in storage, which means:
 
 Without caching, every function execution requires:
 1. Resolve the execution graph (recursive queries to load fns, schemas, args)
-2. Merge arguments from parent chain
+2. Resolve all argument values and their references
 3. Classify UUID references
 
-For deep graphs, this means O(depth) database queries per execution.
+For complex graphs, this means multiple database queries per execution.
 
 ### Solution: CacheStorage Protocol
 
@@ -907,7 +786,7 @@ The cache tracks dependencies with ref-counts for proper invalidation:
 | Entity | Operation | Action |
 |--------|-----------|--------|
 | fn | created | Create cache for new fn |
-| fn | updated (parent changed) | Invalidate fn + all dependents |
+| fn | updated | Invalidate fn + all dependents |
 | fn | deleted | Delete cache + invalidate dependents |
 | arg-value | created/updated/deleted | Invalidate owner-fn + dependents |
 | fn-schema | updated | Invalidate all caches using this schema |

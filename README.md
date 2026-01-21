@@ -13,7 +13,6 @@ Graphden is an experimental platform where:
 
 - **Code = Graph in DB** — functions and their compositions are stored as structured data
 - **Visual Editing** — graphical interface instead of text
-- **Currying via Inheritance** — partial function application through parent chains
 - **Lazy Execution** — only computes what's needed
 - **Execution Graph Caching** — O(1) graph resolution instead of O(depth) recursive queries
 

@@ -50,7 +50,6 @@
 
 (def default-max-depth
   "Default maximum recursion depth for function execution.
-   Used by executor as default and by storage for parent chain limits.
    Value: 1000 - reasonable default for most use cases."
   1000)
 
@@ -273,22 +272,6 @@
 
 ;; === Execution Graph Utilities ===
 
-(defn merge-arg-values-for-chain
-  "Merges arg-values from a parent chain where child overrides parent.
-   Given a chain [child grandparent great-grandparent ...] and all arg-values,
-   returns {arg-schema-id -> arg-value-record} with closest-to-child values winning."
-  [all-arg-values chain]
-  (when (seq chain)
-    (let [chain-set (set chain)
-          chain-pos (zipmap chain (range))
-          chain-arg-values (filter #(chain-set (:owner-fn-id %)) all-arg-values)]
-      (->> chain-arg-values
-           (group-by :arg-schema-id)
-           (map (fn [[arg-schema-id avs]]
-                  [arg-schema-id (apply min-key #(get chain-pos (:owner-fn-id %) Long/MAX_VALUE) avs)]))
-           (into {})))))
-
-
 (defn extract-uuid-refs-from-arg-values
   "Extracts UUIDs referenced in arg-values.
    Returns set of UUIDs that could be fn or fn-result-value references."
@@ -297,6 +280,12 @@
        (map :value)
        (keep try-parse-uuid)
        (set)))
+
+
+(defn- arg-values-to-map
+  "Converts a sequence of arg-value records to {arg-schema-id -> arg-value}."
+  [arg-values]
+  (into {} (map (juxt :arg-schema-id identity) arg-values)))
 
 
 ;; === Graph Resolution BFS Algorithm ===
@@ -312,13 +301,12 @@
    - load-fn-record: (fn [fn-id] -> fn-record)
    - load-fn-schema-record: (fn [fn-schema-id] -> fn-schema-record)
    - load-arg-schemas-for-fn-schema: (fn [fn-schema-id] -> {arg-schema-id -> record})
-   - load-parent-chain: (fn [fn-id] -> [fn-id parent-id ...])
-   - load-arg-values-for-fns: (fn [fn-ids] -> [arg-value-records])
+   - load-arg-values-for-fn: (fn [fn-id] -> [arg-value-records])
    - classify-uuid-refs: (fn [uuid-refs] -> {:fn-refs #{} :frvs {}})
    - current-fn-id: UUID of fn to process
    - graph: current accumulated graph state"
   [load-fn-record load-fn-schema-record load-arg-schemas-for-fn-schema
-   load-parent-chain load-arg-values-for-fns classify-uuid-refs
+   load-arg-values-for-fn classify-uuid-refs
    current-fn-id graph]
   (if-let [fn-rec (load-fn-record current-fn-id)]
     (let [fn-schema-id (:fn-schema-id fn-rec)
@@ -327,16 +315,16 @@
           new-arg-schemas (if fn-schema
                             (load-arg-schemas-for-fn-schema fn-schema-id)
                             {})
-          chain (load-parent-chain current-fn-id)
-          chain-arg-values (load-arg-values-for-fns chain)
-          merged-args (merge-arg-values-for-chain chain-arg-values chain)
-          all-refs (extract-uuid-refs-from-arg-values merged-args)
+          ;; Load arg-values directly for this fn
+          arg-values (load-arg-values-for-fn current-fn-id)
+          resolved-args (arg-values-to-map arg-values)
+          all-refs (extract-uuid-refs-from-arg-values resolved-args)
           {:keys [fn-refs frvs]} (classify-uuid-refs all-refs)]
       {:graph (-> graph
                   (update :fns assoc current-fn-id fn-rec)
                   (update :fn-schemas #(if fn-schema (assoc % fn-schema-id fn-schema) %))
                   (update :arg-schemas merge new-arg-schemas)
-                  (update :resolved-args assoc current-fn-id merged-args)
+                  (update :resolved-args assoc current-fn-id resolved-args)
                   (update :fn-result-values merge frvs))
        :new-fn-refs fn-refs})
     {:graph graph :new-fn-refs #{}}))
@@ -350,14 +338,13 @@
    - load-fn-record: (fn [fn-id] -> fn-record)
    - load-fn-schema-record: (fn [fn-schema-id] -> fn-schema-record)
    - load-arg-schemas-for-fn-schema: (fn [fn-schema-id] -> {arg-schema-id -> record})
-   - load-parent-chain: (fn [fn-id] -> [fn-id parent-id ...])
-   - load-arg-values-for-fns: (fn [fn-ids] -> [arg-value-records])
+   - load-arg-values-for-fn: (fn [fn-id] -> [arg-value-records])
    - classify-uuid-refs: (fn [uuid-refs] -> {:fn-refs #{} :frvs {}})
    - fn-id: starting function UUID
 
    Returns ExecutionGraphResult record."
   [load-fn-record load-fn-schema-record load-arg-schemas-for-fn-schema
-   load-parent-chain load-arg-values-for-fns classify-uuid-refs
+   load-arg-values-for-fn classify-uuid-refs
    fn-id]
   (let [init-graph {:fns {} :fn-schemas {} :arg-schemas {}
                     :resolved-args {} :fn-result-values {}}]
@@ -372,8 +359,8 @@
               rest-to-visit (disj to-visit current-fn-id)
               {:keys [graph new-fn-refs]}
               (process-fn-node load-fn-record load-fn-schema-record
-                               load-arg-schemas-for-fn-schema load-parent-chain
-                               load-arg-values-for-fns classify-uuid-refs
+                               load-arg-schemas-for-fn-schema
+                               load-arg-values-for-fn classify-uuid-refs
                                current-fn-id graph)
               new-to-visit (set/difference new-fn-refs visited)
               new-visited (set/union visited new-to-visit)]

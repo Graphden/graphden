@@ -78,11 +78,7 @@
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000032"
                                      :type :ref
-                                     :ref-entity :fn-schema}
-                      :parent-fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000033"
-                                     :type :ref
-                                     :ref-entity :fn
-                                     :nullable? true}})
+                                     :ref-entity :fn-schema}})
       (ds/add-entity :arg-value
                      #uuid "00000000-0000-0000-0000-000000000040"
                      {:owner-fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000041"

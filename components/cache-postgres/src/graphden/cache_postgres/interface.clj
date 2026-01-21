@@ -81,7 +81,7 @@
   "Loads cached fn records for a cache-id."
   [ds cache-id]
   (load-cached-entities ds cache-id :cached-fn
-                        [:fn-id :name :fn-schema-id :parent-fn-id]
+                        [:fn-id :name :fn-schema-id]
                         :fn-id))
 
 
@@ -173,13 +173,12 @@
                          {:cache-id cache-id
                           :fn-id fn-id
                           :name (:name fn-record)
-                          :fn-schema-id (:fn-schema-id fn-record)
-                          :parent-fn-id (:parent-fn-id fn-record)})
+                          :fn-schema-id (:fn-schema-id fn-record)})
                        fns)]
       (execute! ds {:insert-into :cached-fn
                     :values values
                     :on-conflict [:cache-id :fn-id]
-                    :do-update-set [:name :fn-schema-id :parent-fn-id]}))))
+                    :do-update-set [:name :fn-schema-id]}))))
 
 
 (defn- save-cached-fn-schemas!

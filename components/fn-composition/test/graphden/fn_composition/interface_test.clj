@@ -2,6 +2,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
+    [clojure.tools.logging]
     [graphden.fn-composition.core :as core]
     [graphden.fn-composition.interface :as fn-composition]
     [graphden.fn-registry.interface :as registry]
@@ -81,13 +82,19 @@
           ;; Wrong order: wrapper depends on target, but defined first
           fn-composition-data [{:name :wrapper :parent :base-b :args {:ref :target}}
                                {:name :target :parent :base-a}]
-          ;; Should still work (with warning)
-          output (with-out-str
-                   (fn-composition/sync-fns-to-storage! storage fn-composition-data))]
+          ;; Capture log messages
+          logged-messages (atom [])
+          _ (with-redefs [clojure.tools.logging/log*
+                          (fn [_logger level _throwable message]
+                            (swap! logged-messages conj {:level level :message message}))]
+              (fn-composition/sync-fns-to-storage! storage fn-composition-data))]
 
-      (testing "prints warning about order"
-        (is (clojure.string/includes? output "WARNING"))
-        (is (clojure.string/includes? output "Suggested order"))))))
+      (testing "logs warning about order"
+        (is (= 1 (count @logged-messages)))
+        (let [{:keys [level message]} (first @logged-messages)]
+          (is (= :warn level))
+          (is (str/includes? message "not in dependency order"))
+          (is (str/includes? message "Suggested order")))))))
 
 
 (deftest circular-dependency-test

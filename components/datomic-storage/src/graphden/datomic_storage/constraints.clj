@@ -51,58 +51,6 @@
                    (d/db conn) arg-schema-id))))
 
 
-  (get-parent-fn-id
-    [_this fn-id]
-    (let [conn (get-conn! conn-atom)]
-      (ffirst (d/q '[:find ?parent-id
-                     :in $ ?fn-id
-                     :where
-                     [?e :fn/id ?fn-id]
-                     [?e :fn/parent-fn-id ?parent-id]]
-                   (d/db conn) fn-id))))
-
-
-  (collect-parent-chain
-    [this fn-id]
-    ;; First check if there's a parent at all (using get-parent-fn-id for coverage)
-    (let [parent-id (sp/get-parent-fn-id this fn-id)]
-      (if-not parent-id
-        #{}
-        ;; Optimized: fetch all fn parent relationships in one query, then traverse in memory.
-        ;; This reduces O(N) database queries to O(1) for deep inheritance chains.
-        (let [conn (get-conn! conn-atom)
-              db (d/db conn)
-              ;; Fetch all fn-id -> parent-fn-id mappings
-              all-parents (d/q '[:find ?fn-id ?parent-id
-                                 :where
-                                 [?e :fn/id ?fn-id]
-                                 [?e :fn/parent-fn-id ?parent-id]]
-                               db)
-              parent-map (into {} all-parents)]
-          ;; Traverse parent chain in memory
-          (loop [current-id (get parent-map fn-id)
-                 ancestor-ids #{}]
-            (if (or (nil? current-id) (contains? ancestor-ids current-id))
-              ancestor-ids
-              (recur (get parent-map current-id)
-                     (conj ancestor-ids current-id))))))))
-
-
-  (collect-arg-schema-ids-in-chain
-    [this fn-id]
-    (let [ancestor-ids (sp/collect-parent-chain this fn-id)]
-      (if (empty? ancestor-ids)
-        #{}
-        (let [conn (get-conn! conn-atom)
-              results (d/q '[:find ?arg-schema-id
-                             :in $ [?owner-id ...]
-                             :where
-                             [?e :arg-value/owner-fn-id ?owner-id]
-                             [?e :arg-value/arg-schema-id ?arg-schema-id]]
-                           (d/db conn) (vec ancestor-ids))]
-          (set (map first results))))))
-
-
   (collect-dependency-chain
     [_this owner-fn-id]
     (let [conn (get-conn! conn-atom)
@@ -142,29 +90,10 @@
 
 
 ;; === Validation functions using shared implementations ===
-;;
-;; Note: Connection validation happens inside ConstraintHelpers methods via get-conn!.
-;; No need for separate ensure-connection! call - the helpers already throw
-;; :storage-not-initialized if connection is nil.
-
-(defn validate-parent-same-schema!
-  [conn-atom fn-id parent-fn-id]
-  (sp/validate-parent-same-schema-impl (create-helpers conn-atom) fn-id parent-fn-id))
-
-
-(defn validate-no-arg-override!
-  [conn-atom fn-id arg-schema-id]
-  (sp/validate-no-arg-override-impl (create-helpers conn-atom) fn-id arg-schema-id))
-
 
 (defn validate-arg-schema-belongs-to-fn!
   [conn-atom fn-id arg-schema-id]
   (sp/validate-arg-schema-belongs-to-fn-impl (create-helpers conn-atom) fn-id arg-schema-id))
-
-
-(defn validate-no-inheritance-cycle!
-  [conn-atom fn-id parent-fn-id]
-  (sp/validate-no-inheritance-cycle-impl (create-helpers conn-atom) fn-id parent-fn-id))
 
 
 (defn validate-no-dependency-cycle!

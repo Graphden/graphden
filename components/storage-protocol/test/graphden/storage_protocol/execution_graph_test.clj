@@ -97,8 +97,7 @@
     (is (contains? (:sigs storage/GraphDataLoader) :load-fn-record))
     (is (contains? (:sigs storage/GraphDataLoader) :load-fn-schema-record))
     (is (contains? (:sigs storage/GraphDataLoader) :load-arg-schemas-for-fn-schema))
-    (is (contains? (:sigs storage/GraphDataLoader) :load-parent-chain))
-    (is (contains? (:sigs storage/GraphDataLoader) :load-arg-values-for-fns))
+    (is (contains? (:sigs storage/GraphDataLoader) :load-arg-values-for-fn))
     (is (contains? (:sigs storage/GraphDataLoader) :classify-uuid-refs))))
 
 

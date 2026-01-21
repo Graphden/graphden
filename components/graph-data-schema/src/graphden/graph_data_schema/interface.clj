@@ -112,10 +112,6 @@
   #uuid "3a685253-07f7-4469-be8b-1a585ba3e7d4")
 
 
-(def ^:private fn-parent-fn-id-field-uuid
-  #uuid "7c8e2f4a-9b31-4d56-a8e7-3f2c1b5d9a0e")
-
-
 ;; Field UUIDs for :arg-value entity
 (def ^:private arg-value-owner-fn-id-field-uuid
   #uuid "d9331598-36b3-4238-83f8-16558d8b3a7e")
@@ -200,14 +196,10 @@
       (ds/add-constraint :arg-schema {:type :unique :fields [:fn-schema-id :name]})
 
       ;; fn: actual function instances
-      ;; parent-fn-id enables inheritance chain for partial application
       (ds/add-entity :fn fn-entity-uuid
                      {:name {:uuid fn-name-field-uuid :type :text}
                       :fn-schema-id {:uuid fn-fn-schema-id-field-uuid
-                                     :type :ref :ref-entity :fn-schema}
-                      :parent-fn-id {:uuid fn-parent-fn-id-field-uuid
-                                     :type :ref :ref-entity :fn
-                                     :nullable? true}})
+                                     :type :ref :ref-entity :fn-schema}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
       ;; fn_result_value: represents a cached computation result of a function

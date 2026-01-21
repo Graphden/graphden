@@ -40,14 +40,10 @@
       (is (contains? fields :fn-id))
       (is (contains? fields :name))
       (is (contains? fields :fn-schema-id))
-      (is (contains? fields :parent-fn-id))
 
       (testing "cache-id is ref to fn"
         (is (= :ref (:type (:cache-id fields))))
-        (is (= :fn (:ref-entity (:cache-id fields)))))
-
-      (testing "parent-fn-id is nullable"
-        (is (:nullable? (:parent-fn-id fields)))))))
+        (is (= :fn (:ref-entity (:cache-id fields))))))))
 
 
 (deftest cached-merged-arg-entity-test

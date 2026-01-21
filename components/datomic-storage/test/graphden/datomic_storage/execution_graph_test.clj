@@ -32,10 +32,7 @@
                      {:name {:uuid #uuid "00000000-0000-0000-0003-000000000002"
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
-                                     :type :uuid}
-                      :parent-fn-id {:uuid #uuid "00000000-0000-0000-0003-000000000004"
-                                     :type :uuid
-                                     :nullable? true}})
+                                     :type :uuid}})
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
                      {:owner-fn-id {:uuid #uuid "00000000-0000-0000-0004-000000000002"
                                     :type :uuid}
@@ -81,43 +78,6 @@
           (let [args (get (:resolved-args graph) (:id fn-add))]
             (is (= "1" (:value (get args (:id arg-a)))))
             (is (= "2" (:value (get args (:id arg-b))))))
-          (finally
-            (sp/close storage)))))))
-
-
-(deftest resolve-execution-graph-with-parent-test
-  (testing "resolves function with parent chain - child overrides parent"
-    (let [storage (setup/create-test-storage)]
-      (sp/initialize storage (make-graph-schema))
-      (let [fn-schema (sp/create-entity storage :fn-schema
-                                        {:name "greet" :returned-type "text"})
-            arg-name (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id fn-schema)
-                                        :name "name" :type "text" :required true})
-            arg-greeting (sp/create-entity storage :arg-schema
-                                           {:fn-schema-id (:id fn-schema)
-                                            :name "greeting" :type "text" :required true})
-            parent-fn (sp/create-entity storage :fn
-                                        {:name "greet-hello"
-                                         :fn-schema-id (:id fn-schema)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id parent-fn)
-                                 :arg-schema-id (:id arg-greeting)
-                                 :value "Hello"})
-            child-fn (sp/create-entity storage :fn
-                                       {:name "greet-hello-world"
-                                        :fn-schema-id (:id fn-schema)
-                                        :parent-fn-id (:id parent-fn)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id child-fn)
-                                 :arg-schema-id (:id arg-name)
-                                 :value "World"})
-            graph (sp/resolve-execution-graph storage (:id child-fn))]
-        (try
-          (is (contains? (:fns graph) (:id child-fn)))
-          (let [args (get (:resolved-args graph) (:id child-fn))]
-            (is (= "World" (:value (get args (:id arg-name)))))
-            (is (= "Hello" (:value (get args (:id arg-greeting))))))
           (finally
             (sp/close storage)))))))
 

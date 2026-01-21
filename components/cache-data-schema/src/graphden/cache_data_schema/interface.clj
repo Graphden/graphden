@@ -71,10 +71,6 @@
   #uuid "04d5e6f7-a8b9-4c0d-1e2f-3a4b5c6d7e8f")
 
 
-(def ^:private cached-fn-parent-fn-id-field-uuid
-  #uuid "05e6f7a8-b9c0-4d1e-2f3a-4b5c6d7e8f9a")
-
-
 ;; Field UUIDs for :cached-fn-schema
 (def ^:private cached-fn-schema-cache-id-field-uuid
   #uuid "11a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c")
@@ -206,10 +202,7 @@
                       :name {:uuid cached-fn-name-field-uuid
                              :type :text}
                       :fn-schema-id {:uuid cached-fn-fn-schema-id-field-uuid
-                                     :type :uuid}
-                      :parent-fn-id {:uuid cached-fn-parent-fn-id-field-uuid
-                                     :type :uuid
-                                     :nullable? true}})
+                                     :type :uuid}})
       (ds/add-constraint :cached-fn {:type :unique :fields [:cache-id :fn-id]})
 
       ;; cached-fn-schema: denormalized copy of fn-schema data

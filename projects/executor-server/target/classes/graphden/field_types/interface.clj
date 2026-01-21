@@ -3,6 +3,17 @@
    This is the single source of truth for type information across all backends.")
 
 
+;; === SQL Identifier Limits ===
+;;
+;; PostgreSQL limits unquoted identifiers to 63 characters.
+;; This constant is used for validation in data schema builders and storage.
+
+(def max-identifier-length
+  "Maximum length for SQL identifiers (PostgreSQL limit).
+   Entity names, field names, enum values must fit within this limit."
+  63)
+
+
 ;; === Base Types ===
 
 (def types

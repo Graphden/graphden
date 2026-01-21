@@ -161,25 +161,7 @@ value-kind-enum-uuid   = #uuid "b79e6e8b-..."
 
 This allows storage backends to track renames via UUID.
 
-## Extensions (in development)
-
-### parent-fn-id for Inheritance
-
-```clojure
-fn:
-  parent-fn-id: ref<fn> (nullable)
-```
-
-Allows inheriting arg-values from a parent function:
-
-```
-fn: base-api
-  arg-values: {url: "https://api.example.com", timeout: 30}
-
-fn: auth-api (parent: base-api)
-  arg-values: {headers: {"Authorization": "..."}}
-  ; Inherits: url, timeout
-```
+## Extensions
 
 ### base-fn-name for Base Functions
 

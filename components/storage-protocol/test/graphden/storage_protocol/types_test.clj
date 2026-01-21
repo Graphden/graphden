@@ -259,10 +259,7 @@
 
   (testing "GraphConstraints protocol is defined"
     (is (some? storage/GraphConstraints))
-    (is (contains? (:sigs storage/GraphConstraints) :validate-parent-same-schema!))
-    (is (contains? (:sigs storage/GraphConstraints) :validate-no-arg-override!))
     (is (contains? (:sigs storage/GraphConstraints) :validate-arg-schema-belongs-to-fn!))
-    (is (contains? (:sigs storage/GraphConstraints) :validate-no-inheritance-cycle!))
     (is (contains? (:sigs storage/GraphConstraints) :validate-no-dependency-cycle!)))
 
   (testing "StorageValueCodec protocol is defined"

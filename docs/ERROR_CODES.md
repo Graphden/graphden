@@ -121,23 +121,6 @@ Error types follow the pattern `:category/specific-error` where:
 - `:field` - Field that violated uniqueness
 - `:value` - The duplicate value
 
-### `:constraint-violation/parent-schema-mismatch`
-**Component:** storage-protocol (GraphConstraints)
-**Description:** Parent function must have the same fn-schema-id as the child function.
-**Ex-data keys:**
-- `:fn-id` - The function being created/updated
-- `:parent-fn-id` - The parent function
-- `:fn-schema-id` - Schema of the child
-- `:parent-schema-id` - Schema of the parent
-
-### `:constraint-violation/arg-already-defined`
-**Component:** storage-protocol (GraphConstraints)
-**Description:** Argument is already defined in the parent chain and cannot be redefined.
-**Ex-data keys:**
-- `:fn-id` - Current function
-- `:arg-schema-id` - The arg-schema being set
-- `:defined-in-fn-id` - Function where arg is already defined
-
 ### `:constraint-violation/arg-schema-mismatch`
 **Component:** storage-protocol (GraphConstraints)
 **Description:** Arg-schema does not belong to the fn-schema of this function.
@@ -146,14 +129,6 @@ Error types follow the pattern `:category/specific-error` where:
 - `:arg-schema-id` - The mismatched arg-schema
 - `:fn-schema-id` - Expected fn-schema
 - `:arg-schema-fn-schema-id` - Actual fn-schema of the arg
-
-### `:constraint-violation/inheritance-cycle`
-**Component:** storage-protocol (GraphConstraints)
-**Description:** Setting parent-fn-id would create a cycle in the inheritance chain.
-**Ex-data keys:**
-- `:fn-id` - Function being modified
-- `:parent-fn-id` - Proposed parent
-- `:cycle-path` - Path showing the cycle
 
 ### `:constraint-violation/dependency-cycle`
 **Component:** storage-protocol (GraphConstraints)

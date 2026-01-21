@@ -541,12 +541,6 @@
 
 ;; === Graph Traversal Limits ===
 
-(def ^:const default-max-parent-chain-depth
-  "Default maximum depth for parent chain traversal.
-   Prevents stack overflow from deeply nested inheritance."
-  1000)
-
-
 (def ^:const default-max-dependency-chain-depth
   "Default maximum depth for dependency chain traversal.
    Prevents infinite loops in graph resolution."

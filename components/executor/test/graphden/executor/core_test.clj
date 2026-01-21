@@ -86,31 +86,6 @@
       (sp/close storage))))
 
 
-(deftest execute-with-parent-chain-test
-  (testing "inherits arg-values from parent"
-    (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b fn-schema]} (setup/setup-add-function! storage)
-          ;; Parent has :a = 10
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 10})
-          ;; Create child fn with :b = 5
-          child-fn (sp/create-entity storage :fn
-                                     {:name "child-add"
-                                      :fn-schema-id (:id fn-schema)
-                                      :parent-fn-id (:id fn-rec)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id child-fn)
-                               :arg-schema-id (:id arg-b)
-                               :value 5})
-          ctx (exec/create-context {:storage storage})
-          result (exec/execute ctx (:id child-fn) {})]
-      ;; Should use a=10 from parent, b=5 from child
-      (is (= 15 result))
-      (sp/close storage))))
-
-
 (deftest execute-fn-reference-test
   (testing "executes referenced function and uses result"
     (let [storage (setup/create-test-storage)

@@ -62,30 +62,15 @@
 (defn- load-cached-fns
   "Loads cached fn records for a cache-id."
   [db cache-id]
-  ;; First get fns without parent-fn-id using generic loader
-  (let [base-results (load-datomic-entities db cache-id
-                                            '[:find ?fn-id ?name ?fn-schema-id
-                                              :in $ ?cache-id
-                                              :where
-                                              [?e :graphden.cache/cached-fn-cache-id ?cache-id]
-                                              [?e :graphden.cache/cached-fn-fn-id ?fn-id]
-                                              [?e :graphden.cache/cached-fn-name ?name]
-                                              [?e :graphden.cache/cached-fn-fn-schema-id ?fn-schema-id]]
-                                            [:name :fn-schema-id])
-        ;; Get parent-fn-ids separately (only for those that have it)
-        parent-results (d/q '[:find ?fn-id ?parent-fn-id
-                              :in $ ?cache-id
-                              :where
-                              [?e :graphden.cache/cached-fn-cache-id ?cache-id]
-                              [?e :graphden.cache/cached-fn-fn-id ?fn-id]
-                              [?e :graphden.cache/cached-fn-parent-fn-id ?parent-fn-id]]
-                            db cache-id)
-        fn-id->parent (into {} parent-results)]
-    ;; Merge parent-fn-ids into base results
-    (reduce-kv (fn [acc fn-id record]
-                 (assoc acc fn-id (assoc record :parent-fn-id (get fn-id->parent fn-id))))
-               {}
-               base-results)))
+  (load-datomic-entities db cache-id
+                         '[:find ?fn-id ?name ?fn-schema-id
+                           :in $ ?cache-id
+                           :where
+                           [?e :graphden.cache/cached-fn-cache-id ?cache-id]
+                           [?e :graphden.cache/cached-fn-fn-id ?fn-id]
+                           [?e :graphden.cache/cached-fn-name ?name]
+                           [?e :graphden.cache/cached-fn-fn-schema-id ?fn-schema-id]]
+                         [:name :fn-schema-id]))
 
 
 (defn- load-cached-fn-schemas
@@ -186,13 +171,10 @@
 (defn- build-cached-fn-tx
   "Builds transaction data for a cached fn."
   [cache-id fn-id fn-record]
-  (let [base-tx {:graphden.cache/cached-fn-cache-id cache-id
-                 :graphden.cache/cached-fn-fn-id fn-id
-                 :graphden.cache/cached-fn-name (:name fn-record)
-                 :graphden.cache/cached-fn-fn-schema-id (:fn-schema-id fn-record)}]
-    (if (:parent-fn-id fn-record)
-      (assoc base-tx :graphden.cache/cached-fn-parent-fn-id (:parent-fn-id fn-record))
-      base-tx)))
+  {:graphden.cache/cached-fn-cache-id cache-id
+   :graphden.cache/cached-fn-fn-id fn-id
+   :graphden.cache/cached-fn-name (:name fn-record)
+   :graphden.cache/cached-fn-fn-schema-id (:fn-schema-id fn-record)})
 
 
 (defn- build-cached-fn-schema-tx

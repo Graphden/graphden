@@ -30,8 +30,7 @@
           arg-schema-id (random-uuid)
           graph {:fns {fn-id {:id fn-id
                               :name "test-fn"
-                              :fn-schema-id fn-schema-id
-                              :parent-fn-id nil}}
+                              :fn-schema-id fn-schema-id}}
                  :fn-schemas {fn-schema-id {:id fn-schema-id
                                             :name "test-schema"
                                             :base-fn-name "base-fn"
@@ -76,8 +75,7 @@
           fn-schema-id (random-uuid)
           graph {:fns {fn-id {:id fn-id
                               :name "test-fn"
-                              :fn-schema-id fn-schema-id
-                              :parent-fn-id nil}}
+                              :fn-schema-id fn-schema-id}}
                  :fn-schemas {fn-schema-id {:id fn-schema-id
                                             :name "test-schema"
                                             :base-fn-name "base-fn"
@@ -109,8 +107,7 @@
           ;; First cache depends on shared-dep-fn-id
           graph-1 {:fns {fn-id-1 {:id fn-id-1
                                   :name "fn-1"
-                                  :fn-schema-id fn-schema-id
-                                  :parent-fn-id nil}}
+                                  :fn-schema-id fn-schema-id}}
                    :fn-schemas {fn-schema-id {:id fn-schema-id
                                               :name "schema"
                                               :base-fn-name "base"
@@ -128,8 +125,7 @@
           ;; Second cache also depends on shared-dep-fn-id
           graph-2 {:fns {fn-id-2 {:id fn-id-2
                                   :name "fn-2"
-                                  :fn-schema-id fn-schema-id
-                                  :parent-fn-id nil}}
+                                  :fn-schema-id fn-schema-id}}
                    :fn-schemas {fn-schema-id {:id fn-schema-id
                                               :name "schema"
                                               :base-fn-name "base"
@@ -161,37 +157,6 @@
         (is (= 2 (count affected)))))))
 
 
-(deftest cache-with-parent-fn-test
-  (testing "handles parent-fn-id correctly"
-    (let [c (cache-memory/create-cache)
-          parent-fn-id (random-uuid)
-          child-fn-id (random-uuid)
-          fn-schema-id (random-uuid)
-          graph {:fns {parent-fn-id {:id parent-fn-id
-                                     :name "parent"
-                                     :fn-schema-id fn-schema-id
-                                     :parent-fn-id nil}
-                       child-fn-id {:id child-fn-id
-                                    :name "child"
-                                    :fn-schema-id fn-schema-id
-                                    :parent-fn-id parent-fn-id}}
-                 :fn-schemas {fn-schema-id {:id fn-schema-id
-                                            :name "schema"
-                                            :base-fn-name "base"
-                                            :returned-type :int}}
-                 :arg-schemas {}
-                 :resolved-args {}
-                 :fn-result-values {}}
-          dependencies {:fn-ids {parent-fn-id 1 child-fn-id 1}
-                        :fn-schema-ids {fn-schema-id 1}
-                        :arg-schema-ids {}}]
-      (cache/save-cache! c child-fn-id graph dependencies)
-      (let [cached (cache/get-cached-graph c child-fn-id)]
-        (is (= 2 (count (:fns cached))))
-        (is (nil? (get-in cached [:fns parent-fn-id :parent-fn-id])))
-        (is (= parent-fn-id (get-in cached [:fns child-fn-id :parent-fn-id])))))))
-
-
 (deftest cache-overwrites-existing-test
   (testing "save-cache! overwrites existing cache"
     (let [c (cache-memory/create-cache)
@@ -199,8 +164,7 @@
           fn-schema-id (random-uuid)
           graph-v1 {:fns {fn-id {:id fn-id
                                  :name "v1"
-                                 :fn-schema-id fn-schema-id
-                                 :parent-fn-id nil}}
+                                 :fn-schema-id fn-schema-id}}
                     :fn-schemas {fn-schema-id {:id fn-schema-id
                                                :name "schema"
                                                :base-fn-name "base"
@@ -210,8 +174,7 @@
                     :fn-result-values {}}
           graph-v2 {:fns {fn-id {:id fn-id
                                  :name "v2"
-                                 :fn-schema-id fn-schema-id
-                                 :parent-fn-id nil}}
+                                 :fn-schema-id fn-schema-id}}
                     :fn-schemas {fn-schema-id {:id fn-schema-id
                                                :name "schema"
                                                :base-fn-name "base"
@@ -237,8 +200,7 @@
           new-dep-fn-id (random-uuid)
           graph {:fns {fn-id {:id fn-id
                               :name "test"
-                              :fn-schema-id fn-schema-id
-                              :parent-fn-id nil}}
+                              :fn-schema-id fn-schema-id}}
                  :fn-schemas {fn-schema-id {:id fn-schema-id
                                             :name "schema"
                                             :base-fn-name "base"
@@ -272,8 +234,7 @@
           dep-fn-id (random-uuid)
           graph {:fns {fn-id {:id fn-id
                               :name "test"
-                              :fn-schema-id fn-schema-id
-                              :parent-fn-id nil}}
+                              :fn-schema-id fn-schema-id}}
                  :fn-schemas {fn-schema-id {:id fn-schema-id
                                             :name "schema"
                                             :base-fn-name "base"
@@ -326,7 +287,7 @@
           fn-id-2 (random-uuid)
           fn-id-3 (random-uuid)
           make-graph (fn [fid]
-                       {:fns {fid {:id fid :name "fn" :fn-schema-id shared-schema-id :parent-fn-id nil}}
+                       {:fns {fid {:id fid :name "fn" :fn-schema-id shared-schema-id}}
                         :fn-schemas {shared-schema-id {:id shared-schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                         :arg-schemas {}
                         :resolved-args {}
@@ -357,7 +318,7 @@
           schema-id (random-uuid)
           ;; Pass a proper ExecutionGraphResult
           graph (sp/->execution-graph
-                  {:fns {fn-id {:id fn-id :name "fn" :fn-schema-id schema-id :parent-fn-id nil}}
+                  {:fns {fn-id {:id fn-id :name "fn" :fn-schema-id schema-id}}
                    :fn-schemas {schema-id {:id schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                    :arg-schemas {}
                    :resolved-args {}
@@ -375,7 +336,7 @@
     (let [c (cache-memory/create-cache)
           schema-id (random-uuid)
           make-graph (fn [fid]
-                       {:fns {fid {:id fid :name "fn" :fn-schema-id schema-id :parent-fn-id nil}}
+                       {:fns {fid {:id fid :name "fn" :fn-schema-id schema-id}}
                         :fn-schemas {schema-id {:id schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                         :arg-schemas {}
                         :resolved-args {}
@@ -413,13 +374,13 @@
           fn-id-1 (random-uuid)
           fn-id-2 (random-uuid)
           dep-fn-id (random-uuid)
-          graph-1 {:fns {fn-id-1 {:id fn-id-1 :name "fn1" :fn-schema-id fn-schema-id :parent-fn-id nil}}
+          graph-1 {:fns {fn-id-1 {:id fn-id-1 :name "fn1" :fn-schema-id fn-schema-id}}
                    :fn-schemas {fn-schema-id {:id fn-schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                    :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id
                                                 :name "a" :type :int :required true}}
                    :resolved-args {}
                    :fn-result-values {}}
-          graph-2 {:fns {fn-id-2 {:id fn-id-2 :name "fn2" :fn-schema-id fn-schema-id :parent-fn-id nil}}
+          graph-2 {:fns {fn-id-2 {:id fn-id-2 :name "fn2" :fn-schema-id fn-schema-id}}
                    :fn-schemas {fn-schema-id {:id fn-schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                    :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id
                                                 :name "a" :type :int :required true}}
@@ -459,7 +420,7 @@
           shared-dep-fn-id (random-uuid)
           new-dep-fn-id (random-uuid)
           make-graph (fn [fid]
-                       {:fns {fid {:id fid :name "fn" :fn-schema-id fn-schema-id :parent-fn-id nil}}
+                       {:fns {fid {:id fid :name "fn" :fn-schema-id fn-schema-id}}
                         :fn-schemas {fn-schema-id {:id fn-schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                         :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id
                                                      :name "a" :type :int :required true}}
@@ -500,7 +461,7 @@
           arg-schema-id-2 (random-uuid)
           dep-fn-id-1 (random-uuid)
           dep-fn-id-2 (random-uuid)
-          graph {:fns {fn-id {:id fn-id :name "fn" :fn-schema-id fn-schema-id :parent-fn-id nil}}
+          graph {:fns {fn-id {:id fn-id :name "fn" :fn-schema-id fn-schema-id}}
                  :fn-schemas {fn-schema-id {:id fn-schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                  :arg-schemas {arg-schema-id-1 {:id arg-schema-id-1 :fn-schema-id fn-schema-id
                                                 :name "a1" :type :int :required true}

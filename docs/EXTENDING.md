@@ -205,10 +205,7 @@ To implement a custom storage backend, implement these protocols from `graphden.
    - `query-entities` - Query with conditions
 
 4. **GraphConstraints** - Graph integrity
-   - `validate-parent-same-schema!`
-   - `validate-no-arg-override!`
    - `validate-arg-schema-belongs-to-fn!`
-   - `validate-no-inheritance-cycle!`
    - `validate-no-dependency-cycle!`
 
 5. **ExecutionGraph** - Graph resolution
@@ -267,7 +264,7 @@ The default graph schema includes these entities:
 |--------|--------|-------------|
 | `fn-schema` | id, name, returned-type | Function type definition |
 | `arg-schema` | id, fn-schema-id, name, type, required | Argument definition |
-| `fn` | id, name, fn-schema-id, parent-fn-id | Function instance |
+| `fn` | id, name, fn-schema-id | Function instance |
 | `fn-result-value` | id, fn-id | Cached computation reference |
 | `arg-value` | id, owner-fn-id, arg-schema-id, value | Argument value |
 

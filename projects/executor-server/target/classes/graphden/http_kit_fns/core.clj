@@ -31,7 +31,9 @@
   "Starts an HTTP server on the specified port with the given handler.
 
    Arguments:
-   - handler: Function that handles requests (takes request map, returns response map)
+   - handler: Ring handler function (Clojure fn that takes request map, returns response map).
+              This should be the RESULT of executing a router function, not a fn-id.
+              Use :router-fn> syntax in fn-defs to pass the executed result.
    - port: Port number to listen on
 
    The handler function must accept a single argument (request map) and return
@@ -54,7 +56,7 @@
 
    NOTE: This function starts the server but returns immediately.
    The server runs in background threads managed by http-kit."
-  {:args {:handler :fn
+  {:args {:handler :any  ; Changed from :fn - handler is already a Clojure fn, not fn-id
           :port :int}
    :return-type :any}
   (let [ring-handler (fn [request]
@@ -65,7 +67,7 @@
                                       :headers (:headers request)
                                       :body (when-let [b (:body request)]
                                               (slurp b))}
-                             ;; Call the graphden handler function
+                             ;; Call the Clojure handler function directly
                              response (handler req-map)]
                          ;; Ensure response has required keys
                          {:status (or (:status response) 200)
@@ -92,12 +94,7 @@
 
 ;; === All Definitions ===
 
-(defonce ^:private all-defs-cache
-  (delay {:http-server http-server
-          :http-stop http-stop}))
-
-
-(defn get-all-defs
-  "Returns all http-kit base function definitions."
-  []
-  @all-defs-cache)
+(def all-defs
+  "All http-kit base function definitions."
+  {:http-server http-server
+   :http-stop http-stop})

@@ -88,8 +88,53 @@
    :task (clojure "-M:outdated")}
 
   security
-  {:doc "Scan for CVE vulnerabilities"
-   :task (clojure "-M:watson -p deps.edn -w cljwatson.properties")}
+  {:doc "Scan for CVE vulnerabilities (set GITHUB_TOKEN or NVD_API_KEY, or use --slow)"
+   :task (let [github-token (System/getenv "GITHUB_TOKEN")
+               nvd-api-key (System/getenv "NVD_API_KEY")
+               slow-mode? (some #{"--slow"} *command-line-args*)
+               warn-color "\u001b[33m"
+               reset-color "\u001b[0m"
+               props-file ".clj-watson.properties"]
+           (cond
+             ;; Prefer GitHub Advisory (faster)
+             (and github-token (not (str/blank? github-token)))
+             (do
+               (println "Using GitHub Advisory Database...")
+               (clojure "-M:watson -p deps.edn -t github-advisory"))
+
+             ;; Fall back to NVD with API key
+             (and nvd-api-key (not (str/blank? nvd-api-key)))
+             (do
+               (println "Using NVD Database...")
+               (spit props-file (str "nvd.api.key=" nvd-api-key))
+               (try
+                 (clojure (str "-M:watson -p deps.edn -t dependency-check -w " props-file))
+                 (finally
+                   (fs/delete-if-exists props-file))))
+
+             ;; Slow mode without API key
+             slow-mode?
+             (do
+               (println (str warn-color "Running in slow mode without API key..." reset-color))
+               (clojure "-M:watson -p deps.edn -t dependency-check --run-without-nvd-api-key"))
+
+             ;; No tokens - show help
+             :else
+             (do
+               (println (str warn-color "No API tokens configured." reset-color))
+               (println)
+               (println "Options:")
+               (println "  1. Set GITHUB_TOKEN (recommended, fastest):")
+               (println "     export GITHUB_TOKEN=ghp_...")
+               (println "     Get at: https://github.com/settings/tokens")
+               (println)
+               (println "  2. Set NVD_API_KEY (more comprehensive):")
+               (println "     export NVD_API_KEY=...")
+               (println "     Get at: https://nvd.nist.gov/developers/request-an-api-key")
+               (println)
+               (println "  3. Run without API key (very slow, 10+ minutes):")
+               (println "     bb security --slow")
+               (System/exit 1))))}
 
   bench
   {:doc "Run performance benchmarks [--quick] [--memory|--postgres|--datomic]"

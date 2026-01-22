@@ -563,3 +563,81 @@
             (is (false? (:required after)))))
         (finally
           (sp/close storage))))))
+
+
+;; === Batch Size Limit Tests ===
+
+(deftest sync-defs-batch-limit-test
+  (testing "throws when batch exceeds max-sync-batch-size"
+    (let [storage (gsm/create-storage)
+          ;; Create 501 function definitions (max is 500)
+          large-defs (into {}
+                           (for [i (range 501)]
+                             [(keyword (str "fn-" i))
+                              {:args {} :return-type :int}]))]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Too many function definitions to sync"
+              (core/sync-defs-to-storage! storage large-defs)))
+        (finally
+          (sp/close storage)))))
+
+  (testing "exception contains batch size info"
+    (let [storage (gsm/create-storage)
+          large-defs (into {}
+                           (for [i (range 502)]
+                             [(keyword (str "fn-" i))
+                              {:args {} :return-type :int}]))]
+      (try
+        (try
+          (core/sync-defs-to-storage! storage large-defs)
+          (is false "should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :batch-error/batch-too-large (:type (ex-data e))))
+            (is (= 502 (:batch-size (ex-data e))))
+            (is (= 500 (:max-batch-size (ex-data e))))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "accepts batch at exactly max size"
+    (let [storage (gsm/create-storage)
+          ;; Create exactly 500 function definitions (max allowed)
+          max-defs (into {}
+                         (for [i (range 500)]
+                           [(keyword (str "fn-" i))
+                            {:args {} :return-type :int}]))]
+      (try
+        (let [result (core/sync-defs-to-storage! storage max-defs)]
+          (is (= 500 (:created (:fn-schemas result)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === parse-arg-spec :required Validation Tests ===
+
+(deftest parse-arg-spec-required-validation-test
+  (testing "throws when :required is not a boolean"
+    (let [storage (gsm/create-storage)
+          invalid-defs {:bad-fn {:args {:x {:type :int :required "yes"}}
+                                 :return-type :int}}]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #":required must be a boolean"
+              (core/sync-defs-to-storage! storage invalid-defs)))
+        (finally
+          (sp/close storage)))))
+
+  (testing "exception contains arg-spec info"
+    (let [storage (gsm/create-storage)
+          invalid-defs {:bad-fn {:args {:x {:type :int :required 1}}
+                                 :return-type :int}}]
+      (try
+        (try
+          (core/sync-defs-to-storage! storage invalid-defs)
+          (is false "should have thrown")
+          (catch clojure.lang.ExceptionInfo e
+            (is (= :invalid-arg-spec (:type (ex-data e))))
+            (is (= :x (:arg-name (ex-data e))))
+            (is (= 1 (:required-value (ex-data e))))))
+        (finally
+          (sp/close storage))))))

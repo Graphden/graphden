@@ -253,3 +253,129 @@
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
             (fn-composition/sync-fns-to-storage! storage
                                                  [{:name :foo :parent :base-fn :args {:ref :nonexistent-fn}}]))))))
+
+
+;; === resolve-fn-id edge case tests ===
+
+(deftest resolve-fn-id-from-storage-test
+  (testing "resolves fn by name from storage when not in created-fns"
+    (let [storage (gsm/create-storage)
+          _ (registry/initialize-all! storage
+                                      [{:base-fn {:args {:ref :fn}
+                                                  :return-type :any
+                                                  :impl (fn [_ _] nil)}}
+                                       {:const {:args {:x :any}
+                                                :return-type :int
+                                                :impl (fn [_ _] 42)}}])
+          ;; First, create an fn entity directly in storage
+          fn-schema-id (registry/fn-schema-uuid :const)
+          _ (sp/create-entity storage :fn
+                              {:name "existing-fn"
+                               :fn-schema-id fn-schema-id})
+          ;; Now sync a new fn that references the existing one
+          result (fn-composition/sync-fns-to-storage! storage
+                                                      [{:name :wrapper-fn
+                                                        :parent :base-fn
+                                                        :args {:ref :existing-fn}}])]
+      ;; Should succeed - existing-fn is resolved from storage
+      (is (uuid? (:wrapper-fn result))))))
+
+
+;; === parse-fn-result-ref edge case tests ===
+
+(deftest parse-fn-result-ref-edge-cases-test
+  (testing "handles empty string after >"
+    ;; :fn> should default result name to fn name
+    (is (= [:fn :fn] (#'core/parse-fn-result-ref :fn>))))
+
+  (testing "handles spaces in result name"
+    ;; This is a valid but unusual case
+    (is (= [:fn (keyword "name with space")]
+           (#'core/parse-fn-result-ref (keyword "fn>name with space")))))
+
+  (testing "handles multiple > characters"
+    ;; Only splits on first >
+    (is (= [:fn :a>b] (#'core/parse-fn-result-ref :fn>a>b)))))
+
+
+;; === extract-dependencies edge case tests ===
+
+(deftest extract-dependencies-test
+  (testing "extracts dependencies from fn-def args"
+    (let [fn-def {:name :my-fn
+                  :parent :base
+                  :args {:a :other-fn   ; fn ref
+                         :b :third-fn>  ; fn-result-value ref
+                         :c 42}}        ; literal (ignored)
+          fn-names #{:other-fn :third-fn}
+          deps (#'core/extract-dependencies fn-def fn-names)]
+      (is (= #{:other-fn :third-fn} deps))))
+
+  (testing "ignores refs to fns not in the set"
+    (let [fn-def {:name :my-fn
+                  :parent :base
+                  :args {:a :external-fn}}  ; not in fn-names set
+          fn-names #{:other-fn}
+          deps (#'core/extract-dependencies fn-def fn-names)]
+      (is (empty? deps))))
+
+  (testing "handles empty args"
+    (let [fn-def {:name :my-fn :parent :base}
+          deps (#'core/extract-dependencies fn-def #{})]
+      (is (empty? deps)))))
+
+
+;; === build-dependency-graph test ===
+
+(deftest build-dependency-graph-test
+  (testing "builds correct dependency graph"
+    (let [fn-defs [{:name :a :parent :base :args {:x :b>}}
+                   {:name :b :parent :base :args {:x :c}}
+                   {:name :c :parent :base}]
+          graph (#'core/build-dependency-graph fn-defs)]
+      (is (= {:a #{:b} :b #{:c} :c #{}} graph)))))
+
+
+;; === topological-sort edge cases ===
+
+(deftest topological-sort-edge-cases-test
+  (testing "handles single element"
+    (let [fn-defs [{:name :single :parent :base}]
+          sorted (#'core/topological-sort fn-defs)]
+      (is (= [:single] (mapv :name sorted)))))
+
+  (testing "handles independent elements (no dependencies)"
+    (let [fn-defs [{:name :a :parent :base}
+                   {:name :b :parent :base}
+                   {:name :c :parent :base}]
+          sorted (#'core/topological-sort fn-defs)]
+      ;; Order doesn't matter for independent elements
+      (is (= #{:a :b :c} (set (mapv :name sorted))))))
+
+  (testing "throws on self-reference cycle"
+    (let [fn-defs [{:name :self-ref :parent :base :args {:x :self-ref>}}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
+            (#'core/topological-sort fn-defs)))))
+
+  (testing "throws on three-way cycle"
+    (let [fn-defs [{:name :a :parent :base :args {:x :b>}}
+                   {:name :b :parent :base :args {:x :c>}}
+                   {:name :c :parent :base :args {:x :a>}}]]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
+            (#'core/topological-sort fn-defs))))))
+
+
+;; === fn-result-value edge cases ===
+
+(deftest fn-result-value-unresolved-test
+  (testing "throws when fn-result-value references non-existent fn"
+    (let [storage (gsm/create-storage)
+          _ (registry/initialize-all! storage
+                                      [{:base-fn {:args {:ref :any}
+                                                  :return-type :any
+                                                  :impl (fn [_ _] nil)}}])]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
+            (fn-composition/sync-fns-to-storage! storage
+                                                 [{:name :broken
+                                                   :parent :base-fn
+                                                   :args {:ref :nonexistent>}}]))))))

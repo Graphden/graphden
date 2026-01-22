@@ -1,18 +1,25 @@
 (ns build
-  (:require [clojure.tools.build.api :as b]))
+  (:require
+    [clojure.tools.build.api :as b]))
+
 
 (def lib 'graphden/executor-server)
 (def version "0.1.0")
 (def class-dir "target/classes")
 (def uber-file "target/executor-server.jar")
 
+
 ;; Paths relative to project root (projects/executor-server)
 (def basis (b/create-basis {:project "deps.edn"}))
 
-(defn clean [_]
+
+(defn clean
+  [_]
   (b/delete {:path "target"}))
 
-(defn uber [_]
+
+(defn uber
+  [_]
   (clean nil)
   (b/copy-dir {:src-dirs ["../../bases/executor-runtime/src"
                           "../../bases/executor-runtime/resources"

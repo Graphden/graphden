@@ -539,3 +539,273 @@
         (is (zero? (exec/clear-result-cache! ctx)))
         (finally
           (sp/close storage))))))
+
+
+;; === execute-by-name Tests ===
+
+(deftest execute-by-name-test
+  (testing "executes function by string name"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 10})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 20})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute-by-name ctx (:name fn-rec) nil)]
+      (is (= 30 result))
+      (sp/close storage)))
+
+  (testing "throws when fn-name is not a string"
+    (let [storage (setup/create-test-storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"fn-name must be a string"
+              (exec/execute-by-name ctx :keyword-name nil)))
+        (finally
+          (sp/close storage)))))
+
+  (testing "throws when function with name doesn't exist"
+    (let [storage (setup/create-test-storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function .* not found"
+              (exec/execute-by-name ctx "nonexistent-fn" nil)))
+        (finally
+          (sp/close storage))))))
+
+
+;; === execute args validation Tests ===
+
+(deftest execute-args-validation-test
+  (testing "throws when args is not nil or map"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec]} (setup/setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"args must be nil or a map"
+              (exec/execute ctx (:id fn-rec) "not-a-map")))
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"args must be nil or a map"
+              (exec/execute ctx (:id fn-rec) [1 2 3])))
+        (finally
+          (sp/close storage)))))
+
+  (testing "execute-with-named-args throws when named-args is not nil or map"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec]} (setup/setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"named-args must be nil or a map"
+              (exec/execute-with-named-args ctx (:id fn-rec) "not-a-map")))
+        (finally
+          (sp/close storage))))))
+
+
+;; === HOF Function Tests ===
+
+(deftest hof-invalid-function-test
+  (testing "throws when HOF function has no required args"
+    (let [storage (setup/create-test-storage)
+          ;; Register a HOF function
+          _ (exec/register-base-fn!
+              :hof-caller
+              (fn [{:keys [f]} ctx]
+                (let [fn-id @f
+                      callable (exec/make-single-arg-callable ctx fn-id)]
+                  (callable 42))))
+          ;; Create hof-caller schema
+          hof-schema (sp/create-entity storage :fn-schema
+                                       {:name "hof-caller"
+                                        :returned-type :int})
+          hof-arg (sp/create-entity storage :arg-schema
+                                    {:fn-schema-id (:id hof-schema)
+                                     :name "f"
+                                     :type :fn
+                                     :required true})
+          ;; Create a function with NO required args (all optional)
+          _ (exec/register-base-fn!
+              :no-args-fn
+              (fn [_ _] 0))
+          no-args-schema (sp/create-entity storage :fn-schema
+                                           {:name "no-args-fn"
+                                            :returned-type :int})
+          ;; Only optional arg
+          _ (sp/create-entity storage :arg-schema
+                              {:fn-schema-id (:id no-args-schema)
+                               :name "optional"
+                               :type :int
+                               :required false})
+          no-args-fn (sp/create-entity storage :fn
+                                       {:name "no-args"
+                                        :fn-schema-id (:id no-args-schema)})
+          ;; Create hof-caller instance
+          hof-fn (sp/create-entity storage :fn
+                                   {:name "my-hof"
+                                    :fn-schema-id (:id hof-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id hof-fn)
+                               :arg-schema-id (:id hof-arg)
+                               :value (:id no-args-fn)})
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"HOF function requires exactly 1 required argument"
+              (exec/execute ctx (:id hof-fn) {})))
+        (finally
+          (sp/close storage)))))
+
+  (testing "throws when HOF function has multiple required args"
+    (let [storage (setup/create-test-storage)
+          ;; Register a HOF function
+          _ (exec/register-base-fn!
+              :hof-caller
+              (fn [{:keys [f]} ctx]
+                (let [fn-id @f
+                      callable (exec/make-single-arg-callable ctx fn-id)]
+                  (callable 42))))
+          ;; Create hof-caller schema
+          hof-schema (sp/create-entity storage :fn-schema
+                                       {:name "hof-caller"
+                                        :returned-type :int})
+          hof-arg (sp/create-entity storage :arg-schema
+                                    {:fn-schema-id (:id hof-schema)
+                                     :name "f"
+                                     :type :fn
+                                     :required true})
+          ;; Create a function with multiple required args (like add)
+          {:keys [fn-rec]} (setup/setup-add-function! storage)
+          ;; Create hof-caller instance
+          hof-fn (sp/create-entity storage :fn
+                                   {:name "my-hof"
+                                    :fn-schema-id (:id hof-schema)})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id hof-fn)
+                               :arg-schema-id (:id hof-arg)
+                               :value (:id fn-rec)})
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"HOF function requires exactly 1 required argument"
+              (exec/execute ctx (:id hof-fn) {})))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Unknown arg name test ===
+
+(deftest execute-with-named-args-unknown-arg-test
+  (testing "throws when unknown arg name is provided"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec]} (setup/setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown argument name"
+              (exec/execute-with-named-args ctx (:id fn-rec) {:unknown-arg 42})))
+        (finally
+          (sp/close storage))))))
+
+
+;; === execute-with-named-args with nil or empty args test ===
+
+(deftest execute-with-named-args-empty-args-test
+  (testing "passes nil named-args to execute"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 5})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 7})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute-with-named-args ctx (:id fn-rec) nil)]
+      (is (= 12 result))
+      (sp/close storage)))
+
+  (testing "passes empty map named-args to execute"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 3})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 4})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute-with-named-args ctx (:id fn-rec) {})]
+      (is (= 7 result))
+      (sp/close storage))))
+
+
+;; === fn-result-value cache eviction test ===
+
+(deftest cache-eviction-test
+  (testing "evicts oldest entries when cache limit reached"
+    (let [storage (setup/create-test-storage)
+          ;; Register const function
+          _ (exec/register-base-fn!
+              :const
+              (fn [{:keys [value]} _ctx]
+                @value))
+          ;; Create const fn-schema
+          const-schema (sp/create-entity storage :fn-schema
+                                         {:name "const"
+                                          :returned-type :int})
+          const-arg (sp/create-entity storage :arg-schema
+                                      {:fn-schema-id (:id const-schema)
+                                       :name "value"
+                                       :type :int
+                                       :required true})
+          ;; Create 10 const functions
+          fns (doall
+                (for [i (range 10)]
+                  (let [fn-rec (sp/create-entity storage :fn
+                                                 {:name (str "const-" i)
+                                                  :fn-schema-id (:id const-schema)})]
+                    (sp/create-entity storage :arg-value
+                                      {:owner-fn-id (:id fn-rec)
+                                       :arg-schema-id (:id const-arg)
+                                       :value i})
+                    fn-rec)))
+          ;; Create context with very small cache (2 entries)
+          ctx (exec/create-context {:storage storage
+                                    :cache-max-size 3
+                                    :cache-warning-threshold 2})]
+      (try
+        ;; Execute all 10 functions
+        (doseq [fn-rec fns]
+          (exec/execute ctx (:id fn-rec) nil))
+        ;; Cache should not exceed max size due to eviction
+        (is (<= (count @(:result-cache ctx)) 3))
+        (finally
+          (sp/close storage))))))
+
+
+;; === execute-by-name with named-args test ===
+
+(deftest execute-by-name-with-named-args-test
+  (testing "executes function by name with named-args"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          ;; Set default values
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-a)
+                               :value 10})
+          _ (sp/create-entity storage :arg-value
+                              {:owner-fn-id (:id fn-rec)
+                               :arg-schema-id (:id arg-b)
+                               :value 20})
+          ctx (exec/create-context {:storage storage})
+          ;; Override with named args
+          result (exec/execute-by-name ctx (:name fn-rec) {:a 100 :b 200})]
+      (is (= 300 result))
+      (sp/close storage))))

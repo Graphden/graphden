@@ -34,11 +34,49 @@ Graphden is a visual functional programming environment where functions and thei
 - **Three storage backends** — memory (tests), PostgreSQL (production), Datomic (immutable history)
 
 **Core entities** (only 5 — kept minimal by design):
-- `fn-schema` — function signature
-- `arg-schema` — argument definition
-- `fn` — function instance
-- `arg-value` — bound argument value
-- `fn-result-value` — cached computation reference
+- `fn-schema` — function signature (name, return type, optional base-fn-name linking to Clojure impl)
+- `arg-schema` — argument definition (belongs to fn-schema)
+- `fn` — function instance (references fn-schema, has bound arg-values)
+- `arg-value` — bound argument value (literal or reference to fn/fn-result-value)
+- `fn-result-value` — reference to a function call site (NOT cached result — see below)
+
+## Core Concept: fn-result-value
+
+**fn-result-value is NOT primarily about caching. Its main purpose is structural:**
+
+It distinguishes between the same function called at different points in the execution graph.
+
+**Example:** Get current time, sleep 5 seconds, get current time again, print both.
+```
+fn: current-time (base function)
+fn: sleep (base function)
+fn: print-two-times (base function with args: t1, t2)
+
+;; These are TWO DIFFERENT fn-result-values pointing to the SAME fn
+fn-result-value: time-before  → fn: current-time
+fn-result-value: time-after   → fn: current-time
+
+fn: my-program
+  arg: t1 = ref<fn-result-value:time-before>   ;; first call
+  arg: wait = ref<fn-result-value:sleep-5s>
+  arg: t2 = ref<fn-result-value:time-after>    ;; second call (different!)
+```
+
+Without fn-result-value, we couldn't distinguish "time before sleep" from "time after sleep" — they'd be the same function reference.
+
+**Free arguments are passed at execution time via path-args:**
+```clojure
+;; fn-a has free argument arg-schema-a (not bound in DB)
+;; fn-result-value-a references fn-a
+
+;; At execution time, pass value for the free argument:
+(execute ctx root-fn-id
+         {[fn-result-value-a-id arg-schema-a-id] 42})
+
+;; The executor resolves this when it reaches fn-result-value-a
+```
+
+**Key insight:** No new schema fields needed. The graph structure (fn-result-value pointing to fn) plus runtime path-args is sufficient.
 
 ## Documentation Map
 

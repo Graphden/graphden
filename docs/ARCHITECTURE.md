@@ -225,13 +225,19 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
          | 1:N
          v
 +------------------------------------------------------------------+
-| fn-result-value (cached computation reference)                    |
+| fn-result-value (function call site reference)                    |
 +------------------------------------------------------------------+
 | id: uuid (PK)                                                     |
-| fn-id: ref<fn> - function to execute and cache                   |
+| fn-id: ref<fn> - function to execute at this call site           |
+| name: text (UNIQUE) - identifier for this call site              |
 +------------------------------------------------------------------+
-| Multiple arg-values can reference the same fn-result-value       |
-| to share the cached computation result.                          |
+| PRIMARY PURPOSE: Distinguish same function at different call     |
+| sites. Example: current-time before sleep vs after sleep.        |
+|                                                                  |
+| SECONDARY: Results are cached within execution (memoization).    |
+|                                                                  |
+| FREE ARGUMENTS: If fn has unbound args, pass them at runtime     |
+| via path-args: {[fn-result-value-id arg-schema-id] value}        |
 +------------------------------------------------------------------+
 
 +------------------------------------------------------------------+
@@ -320,9 +326,25 @@ Arguments are resolved in this order (highest priority first):
 | :int, :text, etc. | ref<fn-result-value> | `@delay` → executes fn (cached in result-cache) |
 | :fn | ref<fn> | `@delay` → fn-id UUID (for HOF) |
 
-### fn-result-value: Cached Computation
+### fn-result-value: Call Site Identity
 
-The `fn-result-value` entity enables **caching of function results** within a single execution:
+**Primary purpose:** Distinguish the same function called at different points in the graph.
+
+```
+;; Problem: How to get time BEFORE and AFTER sleep?
+;; Both would reference the same fn: current-time
+
+;; Solution: Two fn-result-values pointing to the same fn
+fn-result-value: time-before  → fn: current-time
+fn-result-value: time-after   → fn: current-time
+
+fn: my-program
+  t1: ref<fn-result-value:time-before>   ← first call site
+  wait: ref<fn-result-value:sleep-5s>
+  t2: ref<fn-result-value:time-after>    ← second call site (different!)
+```
+
+**Secondary purpose:** Results are cached within execution (memoization).
 
 ```
 fn: report
@@ -332,10 +354,15 @@ fn: report
 // calculate-sales executes ONCE, result shared between sales and summary
 ```
 
-**Use cases:**
-1. **Expensive computations** — compute once, reuse result
-2. **Consistent snapshots** — same value for multiple consumers
-3. **Explicit caching** — user controls what gets cached
+**Free arguments:** If the referenced fn has unbound arguments, pass them at runtime:
+
+```clojure
+;; fn-a has free argument arg-schema-a
+;; fn-result-value-a points to fn-a
+
+(execute ctx root-fn-id
+         {[fn-result-value-a-id arg-schema-a-id] 42})
+```
 
 **Comparison with direct fn reference:**
 
@@ -343,7 +370,7 @@ fn: report
 |---------------|----------|
 | `ref<fn>` with type=:fn | HOF: pass function as value, don't execute |
 | `ref<fn>` with other type | Execute function each time arg is forced |
-| `ref<fn-result-value>` | Execute function once, cache and reuse result |
+| `ref<fn-result-value>` | Execute at this call site, cache result, support free args |
 
 ### Base Functions and Their Types
 

@@ -168,6 +168,15 @@ See [README.md](README.md) for component list.
 
 For complete examples, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) Part 5.5.
 
+### Base Function impl-hash
+
+Each base function has an `impl-hash` stored in `fn-schema` for version tracking:
+- SHA-256 hash of canonical form (args, return-type, impl-source)
+- Detects: body changes, arg changes, return-type changes
+- Ignores: whitespace, comments, map key ordering
+
+See [docs/EXTENDING.md](docs/EXTENDING.md) for details.
+
 ## Graph Constraints
 
 Enforced at write time by `GraphConstraints` protocol:

@@ -342,3 +342,85 @@
       (let [fn-map (nth expanded 2)]
         ;; Args should be preserved (note: symbols become keywords after parsing)
         (is (= 2 (count (:args fn-map))))))))
+
+
+;; === impl-source Tests ===
+
+(deftest defbase-impl-source-test
+  (testing "defbase includes :impl-source with original body"
+    (let [expanded (macroexpand-1
+                     '(graphden.fn-registry.macros/defbase impl-source-fn
+                                                           {:args {:a :int, :b :int}
+                                                            :return-type :int}
+                                                           (+ a b)))
+          fn-map (nth expanded 2)
+          impl-source-form (:impl-source fn-map)]
+      (is (some? impl-source-form))
+      ;; In expanded form: (quote [(+ a b)])
+      (is (= 'quote (first impl-source-form)))
+      (is (= ['(+ a b)] (second impl-source-form)))))
+
+  (testing "defbase preserves multiple body forms in :impl-source"
+    (let [expanded (macroexpand-1
+                     '(graphden.fn-registry.macros/defbase multi-body-fn
+                                                           {:args {:x :int}
+                                                            :return-type :int}
+                                                           (println "debug")
+                                                           (inc x)))
+          fn-map (nth expanded 2)
+          impl-source-form (:impl-source fn-map)]
+      (is (= 'quote (first impl-source-form)))
+      (is (= ['(println "debug") '(inc x)] (second impl-source-form)))))
+
+  (testing "defbase :impl-source is quoted (not evaluated)"
+    (let [expanded (macroexpand-1
+                     '(graphden.fn-registry.macros/defbase quoted-fn
+                                                           {:args {:coll :jsonb}
+                                                            :return-type :int}
+                                                           (count coll)))
+          fn-map (nth expanded 2)
+          impl-source-form (:impl-source fn-map)]
+      ;; impl-source in expanded form is (quote [...])
+      ;; When evaluated, it becomes the vector
+      (is (seq? impl-source-form))
+      (is (= 'quote (first impl-source-form)))))
+
+  (testing "defbase with docstring includes :impl-source"
+    (let [expanded (macroexpand-1
+                     '(graphden.fn-registry.macros/defbase doc-impl-fn
+                                                           "A function with docstring."
+                                                           {:args {:n :int}
+                                                            :return-type :int}
+                                                           (* n 2)))
+          ;; With docstring: (def name docstring map)
+          fn-map (nth expanded 3)
+          impl-source-form (:impl-source fn-map)]
+      (is (some? impl-source-form))
+      ;; In expanded form: (quote [(* n 2)])
+      (is (= 'quote (first impl-source-form))))))
+
+
+(deftest impl-source-content-test
+  (testing ":impl-source contains raw body, not transformed body"
+    ;; This verifies that impl-source is the original code, not with @deref transformations
+    (eval '(do
+             (require '[graphden.fn-registry.macros :refer [defbase]])
+             (defbase raw-body-fn
+               {:args {:a :int :b :int}
+                :return-type :int}
+               (+ a b))))
+    (let [fn-def (eval 'raw-body-fn)]
+      ;; impl-source should be the raw form
+      (is (= ['(+ a b)] (:impl-source fn-def)))
+      ;; impl should be the transformed function that works with delays
+      (is (fn? (:impl fn-def)))))
+
+  (testing ":impl-source captures complex expressions unchanged"
+    (eval '(do
+             (require '[graphden.fn-registry.macros :refer [defbase]])
+             (defbase complex-body-fn
+               {:args {:pred :fn :coll :jsonb}
+                :return-type :jsonb}
+               (filter pred coll))))
+    (let [fn-def (eval 'complex-body-fn)]
+      (is (= ['(filter pred coll)] (:impl-source fn-def))))))

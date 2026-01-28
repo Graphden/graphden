@@ -17,10 +17,11 @@
 | PostgreSQL Storage | Done | Full protocol support |
 | Datomic Storage | Done | Full protocol support |
 | Execution Graph Caching | Done | O(1) resolution, auto-invalidation |
+| Base Function impl-hash | Done | SHA-256 hash for version tracking |
 | REST API | Planned | Phase 5 |
 | Web UI | Planned | Phase 5 |
 | Type System | Planned | Future work |
-| Versioning | Planned | Future work |
+| Versioning | Partial | impl-hash done; full system planned |
 | Permissions | Planned | Future work |
 
 ---
@@ -266,6 +267,34 @@ Execute function: calculate-report
 
 ---
 
+### Base Function Version Tracking [DONE]
+
+**Goal**: Detect when base function implementations change to enable safe upgrades.
+
+**Implementation (Phase 1):**
+- `impl-hash` field in `fn-schema` entity (SHA-256 hash)
+- `impl-source` stored in `defbase` macro output
+- Hash computed from: args, return-type, impl-source (body forms)
+- Canonical form normalization (sorted maps, pr-str)
+
+**What the hash detects:**
+- Function body changes
+- Argument type changes
+- Argument additions/removals
+- Return type changes
+
+**What the hash ignores:**
+- Whitespace/formatting changes
+- Comments
+- Map key ordering
+
+**Files:**
+- `graph-data-schema/interface.clj` - impl-hash field
+- `fn-registry/core.clj` - compute-impl-hash function
+- `fn-registry/macros.clj` - impl-source in defbase
+
+---
+
 ### Git-like Versioning
 
 **Goal**: Change history, rollback, branches, merge.
@@ -280,6 +309,7 @@ Execute function: calculate-report
 - Either event sourcing (store all changes)
 - Or snapshot + diff
 - Integration with real git for export/import
+- Uses `impl-hash` for detecting base function changes
 
 ---
 

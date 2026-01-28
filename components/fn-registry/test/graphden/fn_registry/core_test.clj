@@ -647,3 +647,201 @@
         (is (= 1 (get-in result [:fn-schemas :updated])))  ; add exists
         (is (= 2 (get-in result [:arg-schemas :created]))) ; sub's args
         (is (= 2 (get-in result [:arg-schemas :updated])))))))  ; add's args
+
+
+;; === compute-impl-hash tests ===
+
+(deftest compute-impl-hash-test
+  (testing "generates 64-character lowercase hex string"
+    (let [fn-def {:args {:a :int :b :int}
+                  :return-type :int
+                  :impl-source ['(+ a b)]}
+          result-hash (core/compute-impl-hash fn-def)]
+      (is (string? result-hash))
+      (is (= 64 (count result-hash)))
+      (is (re-matches #"[0-9a-f]{64}" result-hash))))
+
+  (testing "same definition produces same hash (deterministic)"
+    (let [fn-def {:args {:a :int :b :int}
+                  :return-type :int
+                  :impl-source ['(+ a b)]}]
+      (is (= (core/compute-impl-hash fn-def)
+             (core/compute-impl-hash fn-def)))))
+
+  (testing "different body produces different hash"
+    (let [fn-def1 {:args {:a :int :b :int}
+                   :return-type :int
+                   :impl-source ['(+ a b)]}
+          fn-def2 {:args {:a :int :b :int}
+                   :return-type :int
+                   :impl-source ['(- a b)]}]
+      (is (not= (core/compute-impl-hash fn-def1)
+                (core/compute-impl-hash fn-def2)))))
+
+  (testing "different arg types produce different hash"
+    (let [fn-def1 {:args {:a :int :b :int}
+                   :return-type :int
+                   :impl-source ['(+ a b)]}
+          fn-def2 {:args {:a :numeric :b :numeric}
+                   :return-type :int
+                   :impl-source ['(+ a b)]}]
+      (is (not= (core/compute-impl-hash fn-def1)
+                (core/compute-impl-hash fn-def2)))))
+
+  (testing "different return type produces different hash"
+    (let [fn-def1 {:args {:a :int}
+                   :return-type :int
+                   :impl-source ['a]}
+          fn-def2 {:args {:a :int}
+                   :return-type :numeric
+                   :impl-source ['a]}]
+      (is (not= (core/compute-impl-hash fn-def1)
+                (core/compute-impl-hash fn-def2)))))
+
+  (testing "adding an argument produces different hash"
+    (let [fn-def1 {:args {:a :int}
+                   :return-type :int
+                   :impl-source ['a]}
+          fn-def2 {:args {:a :int :b :int}
+                   :return-type :int
+                   :impl-source ['a]}]
+      (is (not= (core/compute-impl-hash fn-def1)
+                (core/compute-impl-hash fn-def2)))))
+
+  (testing "map key order does not affect hash (stable sorting)"
+    (let [fn-def1 {:args {:a :int :b :int :c :int}
+                   :return-type :int
+                   :impl-source ['(+ a b c)]}
+          fn-def2 {:args {:c :int :a :int :b :int}
+                   :return-type :int
+                   :impl-source ['(+ a b c)]}]
+      (is (= (core/compute-impl-hash fn-def1)
+             (core/compute-impl-hash fn-def2)))))
+
+  (testing "handles nil impl-source gracefully"
+    (let [fn-def {:args {:a :int}
+                  :return-type :int
+                  :impl-source nil}
+          result-hash (core/compute-impl-hash fn-def)]
+      (is (string? result-hash))
+      (is (= 64 (count result-hash)))))
+
+  (testing "handles missing impl-source gracefully"
+    (let [fn-def {:args {:a :int}
+                  :return-type :int}
+          result-hash (core/compute-impl-hash fn-def)]
+      (is (string? result-hash))
+      (is (= 64 (count result-hash)))))
+
+  (testing "handles empty args"
+    (let [fn-def {:args {}
+                  :return-type :int
+                  :impl-source ['42]}
+          result-hash (core/compute-impl-hash fn-def)]
+      (is (string? result-hash))
+      (is (= 64 (count result-hash)))))
+
+  (testing "nested maps in impl-source are sorted"
+    (let [fn-def1 {:args {:a :jsonb}
+                   :return-type :jsonb
+                   :impl-source ['{:z 1 :a 2 :m 3}]}
+          fn-def2 {:args {:a :jsonb}
+                   :return-type :jsonb
+                   :impl-source ['{:a 2 :m 3 :z 1}]}]
+      (is (= (core/compute-impl-hash fn-def1)
+             (core/compute-impl-hash fn-def2))))))
+
+
+;; === impl-hash in storage tests ===
+
+(deftest impl-hash-storage-test
+  (testing "sync-defs-to-storage! saves impl-hash to fn-schema"
+    (let [storage (mem/create-storage)
+          defs {:add-fn {:args {:a :int :b :int}
+                         :return-type :int
+                         :impl (fn [_ _] nil)
+                         :impl-source ['(+ a b)]}}]
+      (core/sync-defs-to-storage! storage defs)
+      (let [fn-schema (sp/read-entity storage :fn-schema (core/fn-schema-uuid :add-fn))]
+        (is (some? (:impl-hash fn-schema)))
+        (is (= 64 (count (:impl-hash fn-schema))))
+        (is (re-matches #"[0-9a-f]{64}" (:impl-hash fn-schema))))))
+
+  (testing "impl-hash changes when impl-source changes"
+    (let [storage (mem/create-storage)
+          defs1 {:change-fn {:args {:a :int :b :int}
+                             :return-type :int
+                             :impl (fn [_ _] nil)
+                             :impl-source ['(+ a b)]}}
+          defs2 {:change-fn {:args {:a :int :b :int}
+                             :return-type :int
+                             :impl (fn [_ _] nil)
+                             :impl-source ['(- a b)]}}]
+      (core/sync-defs-to-storage! storage defs1)
+      (let [hash1 (:impl-hash (sp/read-entity storage :fn-schema (core/fn-schema-uuid :change-fn)))]
+        (core/sync-defs-to-storage! storage defs2)
+        (let [hash2 (:impl-hash (sp/read-entity storage :fn-schema (core/fn-schema-uuid :change-fn)))]
+          (is (not= hash1 hash2))))))
+
+  (testing "impl-hash remains same when impl-source unchanged"
+    (let [storage (mem/create-storage)
+          defs {:stable-fn {:args {:x :int}
+                            :return-type :int
+                            :impl (fn [_ _] nil)
+                            :impl-source ['x]}}]
+      (core/sync-defs-to-storage! storage defs)
+      (let [hash1 (:impl-hash (sp/read-entity storage :fn-schema (core/fn-schema-uuid :stable-fn)))]
+        (core/sync-defs-to-storage! storage defs)
+        (let [hash2 (:impl-hash (sp/read-entity storage :fn-schema (core/fn-schema-uuid :stable-fn)))]
+          (is (= hash1 hash2))))))
+
+  (testing "updates fn-schema when only impl-hash changes"
+    (let [storage (mem/create-storage)
+          defs1 {:impl-change {:args {:a :int}
+                               :return-type :int
+                               :impl (fn [_ _] nil)
+                               :impl-source ['a]}}
+          defs2 {:impl-change {:args {:a :int}
+                               :return-type :int
+                               :impl (fn [_ _] nil)
+                               :impl-source ['(identity a)]}}]
+      (core/sync-defs-to-storage! storage defs1)
+      (let [result (core/sync-defs-to-storage! storage defs2)]
+        ;; Should update because impl-hash changed
+        (is (= 1 (get-in result [:fn-schemas :updated])))))))
+
+
+;; === sort-maps-recursively tests ===
+
+(deftest sort-maps-recursively-test
+  (testing "sorts top-level map keys"
+    (let [input {:z 1 :a 2 :m 3}
+          result (#'core/sort-maps-recursively input)]
+      (is (sorted? result))
+      (is (= [:a :m :z] (keys result)))))
+
+  (testing "sorts nested maps"
+    (let [input {:outer {:z 1 :a 2}}
+          result (#'core/sort-maps-recursively input)]
+      (is (sorted? result))
+      (is (sorted? (:outer result)))))
+
+  (testing "sorts maps inside vectors"
+    (let [input [{:z 1 :a 2} {:m 3 :b 4}]
+          result (#'core/sort-maps-recursively input)]
+      (is (every? sorted? result))))
+
+  (testing "preserves non-map values"
+    (let [input {:a [1 2 3] :b "string" :c 42}
+          result (#'core/sort-maps-recursively input)]
+      (is (= [1 2 3] (:a result)))
+      (is (= "string" (:b result)))
+      (is (= 42 (:c result)))))
+
+  (testing "handles deeply nested structures"
+    (let [input {:a {:b {:c {:z 1 :a 2}}}}
+          result (#'core/sort-maps-recursively input)]
+      (is (sorted? result))
+      (is (sorted? (:a result)))
+      (is (sorted? (get-in result [:a :b])))
+      (is (sorted? (get-in result [:a :b :c]))))))

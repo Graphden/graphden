@@ -97,6 +97,12 @@
   #uuid "8f3d2e1c-4a5b-6c7d-8e9f-0a1b2c3d4e5f")
 
 
+(def ^:private fn-schema-impl-hash-field-uuid
+  "Hash of base function implementation for version tracking.
+   Only set for base functions (when base-fn-name is non-nil)."
+  #uuid "e2f3a4b5-c6d7-8e9f-0a1b-2c3d4e5f6a7b")
+
+
 ;; Field UUIDs for :arg-schema entity
 (def ^:private arg-schema-fn-schema-id-field-uuid
   #uuid "c100ed37-f3d8-4a93-becc-17ae2b91f64a")
@@ -208,13 +214,17 @@
 
       ;; fn_schema: defines function signatures
       ;; base-fn-name links to Clojure impl (nil for user-defined composite fns)
+      ;; impl-hash is SHA-256 hash of implementation (for base fns only)
       (ds/add-entity :fn-schema fn-schema-entity-uuid
                      {:name {:uuid fn-schema-name-field-uuid :type :text}
                       :returned-type {:uuid fn-schema-returned-type-field-uuid
                                       :type :enum :enum-name :value-kind}
                       :base-fn-name {:uuid fn-schema-base-fn-name-field-uuid
                                      :type :text
-                                     :nullable? true}})
+                                     :nullable? true}
+                      :impl-hash {:uuid fn-schema-impl-hash-field-uuid
+                                  :type :text
+                                  :nullable? true}})
       (ds/add-constraint :fn-schema {:type :unique :fields [:name]})
 
       ;; arg_schema: defines function arguments

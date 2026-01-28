@@ -56,6 +56,7 @@
    256 bytes takes ~0.5μs - negligible even for 10,000 functions."
   (:require
     [clojure.string :as str]
+    [clojure.walk :as walk]
     [graphden.executor.interface :as exec]
     [graphden.field-types.interface :as ft]
     [graphden.storage-protocol.interface :as sp])
@@ -66,6 +67,65 @@
       MessageDigest)
     (java.util
       UUID)))
+
+
+;; === Implementation Hash ===
+;;
+;; The impl-hash is a SHA-256 hash of the canonical form of a base function's
+;; implementation. It enables detecting when a base function's behavior changes,
+;; which is critical for version control of base functions.
+;;
+;; The hash is computed from:
+;; - :args (map of argument specs, sorted by key)
+;; - :return-type
+;; - :impl-source (the original body forms before macro transformation)
+;;
+;; This means:
+;; - Formatting changes (whitespace, newlines) don't affect the hash
+;; - Comments don't affect the hash (they're not in the read form)
+;; - Reordering args in the map doesn't affect the hash (sorted)
+;; - Any semantic change (body, types, args) DOES affect the hash
+
+(defn- sort-maps-recursively
+  "Recursively sorts all maps by keys for stable hash computation."
+  [form]
+  (walk/postwalk
+    (fn [x]
+      (if (map? x)
+        (into (sorted-map) x)
+        x))
+    form))
+
+
+(defn compute-impl-hash
+  "Computes SHA-256 hash of a base function's implementation.
+
+   The hash is computed from a canonical form that includes:
+   - :args - argument specifications (sorted by key)
+   - :return-type - the return type
+   - :impl-source - the original body forms (if provided)
+
+   Returns a 64-character lowercase hex string (full SHA-256).
+
+   This hash changes when:
+   - Function body changes
+   - Argument types change
+   - Arguments are added/removed
+   - Return type changes
+
+   This hash does NOT change when:
+   - Whitespace/formatting changes
+   - Comments change
+   - Order of args in map changes"
+  [{:keys [args return-type impl-source]}]
+  (let [canonical {:args (sort-maps-recursively args)
+                   :return-type return-type
+                   :impl-source (when impl-source
+                                  (mapv sort-maps-recursively impl-source))}
+        s (pr-str canonical)
+        md (MessageDigest/getInstance "SHA-256")
+        hash-bytes (MessageDigest/.digest md (String/.getBytes s StandardCharsets/UTF_8))]
+    (str/join (map #(format "%02x" %) hash-bytes))))
 
 
 (defn register-base-fns!
@@ -307,25 +367,31 @@
 
 
 (defn- sync-fn-schema!
-  "Syncs a single fn-schema to storage. Creates or updates."
-  [storage fn-name {:keys [return-type]}]
-  (let [id (fn-schema-uuid fn-name)
+  "Syncs a single fn-schema to storage. Creates or updates.
+   Computes and stores impl-hash for version tracking."
+  [storage fn-name fn-def]
+  (let [{:keys [return-type]} fn-def
+        id (fn-schema-uuid fn-name)
+        impl-hash (compute-impl-hash fn-def)
         existing (sp/read-entity storage :fn-schema id)]
     (if existing
       ;; Update if changed
       (let [new-data {:name (name fn-name)
                       :returned-type return-type
-                      :base-fn-name (name fn-name)}]
+                      :base-fn-name (name fn-name)
+                      :impl-hash impl-hash}]
         (when (or (not= (:name existing) (:name new-data))
                   (not= (:returned-type existing) (:returned-type new-data))
-                  (not= (:base-fn-name existing) (:base-fn-name new-data)))
+                  (not= (:base-fn-name existing) (:base-fn-name new-data))
+                  (not= (:impl-hash existing) (:impl-hash new-data)))
           (sp/update-entity storage :fn-schema id new-data)))
       ;; Create new
       (sp/create-entity storage :fn-schema
                         {:id id
                          :name (name fn-name)
                          :returned-type return-type
-                         :base-fn-name (name fn-name)}))
+                         :base-fn-name (name fn-name)
+                         :impl-hash impl-hash}))
     id))
 
 

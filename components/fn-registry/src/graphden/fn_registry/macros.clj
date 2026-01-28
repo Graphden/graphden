@@ -454,7 +454,8 @@
        ~@(when docstring [docstring])
        {:args ~args
         :return-type ~return-type
-        :impl ~impl-fn})))
+        :impl ~impl-fn
+        :impl-source '~(vec body)})))
 
 
 (comment

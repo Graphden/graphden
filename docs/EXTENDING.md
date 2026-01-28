@@ -313,6 +313,53 @@ You can extend the schema by modifying `graph-data-schema`:
                         :data {:type :jsonb :nullable true}}))))
 ```
 
+## Base Function Version Tracking
+
+When a base function is synced to storage, an `impl-hash` is computed and stored in the `fn-schema` entity. This hash enables detecting when implementations change.
+
+### How impl-hash Works
+
+The hash is computed from:
+- `:args` - argument specifications (types, required flags)
+- `:return-type` - the function's return type
+- `:impl-source` - the original body forms (captured by defbase macro)
+
+```clojure
+;; defbase automatically captures impl-source
+(defbase my-fn
+  {:args {:x :int :y :int}
+   :return-type :int}
+  (+ x y))  ; This body is stored in :impl-source
+
+;; The generated definition includes:
+;; {:args {:x :int :y :int}
+;;  :return-type :int
+;;  :impl <fn>
+;;  :impl-source [(+ x y)]}  ; Original body for hashing
+```
+
+### What Changes the Hash
+
+| Change | Hash Changes? |
+|--------|---------------|
+| Function body changes | Yes |
+| Argument type changes | Yes |
+| Arguments added/removed | Yes |
+| Return type changes | Yes |
+| Whitespace/formatting | No |
+| Comments | No |
+| Map key ordering | No |
+
+### Checking impl-hash
+
+```clojure
+(require '[graphden.storage-protocol.interface :as sp])
+
+;; Read fn-schema to see impl-hash
+(let [fn-schema (sp/read-entity storage :fn-schema fn-schema-id)]
+  (println "impl-hash:" (:impl-hash fn-schema)))
+```
+
 ## Best Practices
 
 1. **Register base functions at startup** - Before any execution
@@ -320,3 +367,4 @@ You can extend the schema by modifying `graph-data-schema`:
 3. **Set reasonable limits** - Adjust max-depth and timeout for your use case
 4. **Handle errors gracefully** - Catch and log execution errors
 5. **Test with contract tests** - Ensure storage implementations are correct
+6. **Monitor impl-hash changes** - Track when base function implementations change

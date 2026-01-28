@@ -268,16 +268,17 @@
           double-schema (sp/create-entity storage :fn-schema
                                           {:name "double"
                                            :returned-type :int})
-          double-arg (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id double-schema)
-                                        :name "x"
-                                        :type :int
-                                        :required true})
-          ;; Create double fn instance (with default value 10, but we'll override)
+          _double-arg (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id double-schema)
+                                         :name "x"
+                                         :type :int
+                                         :required true})
+          ;; Create double fn instance WITHOUT x value - it's a FREE arg
+          ;; HOF will provide the value at call time
           double-fn (sp/create-entity storage :fn
                                       {:name "my-double"
                                        :fn-schema-id (:id double-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id double-fn) (:id double-arg) 10)
+          ;; NOTE: No arg-value for double-fn.x - it's a free arg for HOF to provide
           ;; Create apply-fn instance
           apply-fn (sp/create-entity storage :fn
                                      {:name "my-apply"
@@ -286,8 +287,61 @@
           _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-value-arg) 5)
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id apply-fn) {})]
-      ;; The f arg is a callable, so calling it with {:x 5} should return 10 (5 * 2)
+      ;; The f arg is a callable with free arg x, so calling it with 5 should return 10 (5 * 2)
       (is (= 10 result))
+      (sp/close storage)))
+
+  (testing "HOF cannot override DB-defined arg in called fn"
+    (let [storage (setup/create-test-storage)
+          ;; Register same functions as above
+          _ (exec/register-base-fn!
+              :apply-fn-override
+              (fn [{:keys [f value]} ctx]
+                (let [fn-id @f
+                      v @value
+                      callable (exec/make-single-arg-callable ctx fn-id)]
+                  (callable v))))
+          _ (exec/register-base-fn!
+              :double-fixed
+              (fn [{:keys [x]} _ctx]
+                (* 2 @x)))
+          ;; Create schemas
+          apply-schema (sp/create-entity storage :fn-schema
+                                         {:name "apply-fn-override"
+                                          :returned-type :int})
+          apply-f-arg (sp/create-entity storage :arg-schema
+                                        {:fn-schema-id (:id apply-schema)
+                                         :name "f"
+                                         :type :fn
+                                         :required true})
+          apply-value-arg (sp/create-entity storage :arg-schema
+                                            {:fn-schema-id (:id apply-schema)
+                                             :name "value"
+                                             :type :int
+                                             :required true})
+          double-schema (sp/create-entity storage :fn-schema
+                                          {:name "double-fixed"
+                                           :returned-type :int})
+          double-arg (sp/create-entity storage :arg-schema
+                                       {:fn-schema-id (:id double-schema)
+                                        :name "x"
+                                        :type :int
+                                        :required true})
+          ;; Create double fn WITH x=10 in DB - it's FIXED
+          double-fn (sp/create-entity storage :fn
+                                      {:name "my-double-fixed"
+                                       :fn-schema-id (:id double-schema)})
+          _ (setup/create-arg-value-with-binding! storage (:id double-fn) (:id double-arg) 10)
+          ;; Create apply-fn instance with value=5
+          apply-fn (sp/create-entity storage :fn
+                                     {:name "my-apply-override"
+                                      :fn-schema-id (:id apply-schema)})
+          _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-f-arg) (:id double-fn))
+          _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-value-arg) 5)
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id apply-fn) {})]
+      ;; double-fn has x=10 in DB, so HOF's 5 is IGNORED, result is 10*2=20
+      (is (= 20 result))
       (sp/close storage))))
 
 
@@ -329,32 +383,44 @@
       (sp/close storage))))
 
 
-(deftest provided-args-override-test
-  (testing "provided args override stored arg-values"
+(deftest provided-args-no-override-test
+  (testing "provided args cannot override stored arg-values (DB takes precedence)"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Create arg-values with literals
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 5)
           ctx (exec/create-context {:storage storage})
-          ;; Execute with provided args that override the stored values
+          ;; Execute with provided args - they should be IGNORED (DB values used)
           result (exec/execute ctx (:id fn-rec) {(:id arg-a) 100
                                                  (:id arg-b) 200})]
-      ;; Should use provided values (100 + 200) not stored values (3 + 5)
-      (is (= 300 result))
+      ;; Should use DB values (3 + 5) NOT provided values
+      (is (= 8 result))
       (sp/close storage)))
 
-  (testing "provided args partially override stored arg-values"
+  (testing "provided args work for free args (not in DB)"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          ;; Create arg-values with literals
+          ;; Only create arg-value for arg-a, leave arg-b free
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 5)
           ctx (exec/create-context {:storage storage})
-          ;; Execute with only :a overridden
-          result (exec/execute ctx (:id fn-rec) {(:id arg-a) 100})]
-      ;; Should use provided :a (100) and stored :b (5)
-      (is (= 105 result))
+          ;; Execute with provided value for free arg-b
+          result (exec/execute ctx (:id fn-rec) {(:id arg-b) 7})]
+      ;; Should use DB :a (3) and provided :b (7)
+      (is (= 10 result))
+      (sp/close storage)))
+
+  (testing "provided args ignored for DB args, used for free args"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
+          ;; Only create arg-value for arg-a
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
+          ctx (exec/create-context {:storage storage})
+          ;; Try to override arg-a (should be ignored) and provide arg-b (should work)
+          result (exec/execute ctx (:id fn-rec) {(:id arg-a) 100
+                                                 (:id arg-b) 7})]
+      ;; Should use DB :a (3) and provided :b (7)
+      (is (= 10 result))
       (sp/close storage))))
 
 
@@ -705,14 +771,27 @@
 ;; === execute-by-name with named-args test ===
 
 (deftest execute-by-name-with-named-args-test
-  (testing "executes function by name with named-args"
+  (testing "executes function by name with named-args for free args"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)
+          ;; Only set arg-a in DB, leave arg-b free
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
+          ctx (exec/create-context {:storage storage})
+          ;; Provide free arg-b via named args
+          result (exec/execute-by-name ctx (:name fn-rec) {:b 20})]
+      ;; Should use DB :a (10) and provided :b (20)
+      (is (= 30 result))
+      (sp/close storage)))
+
+  (testing "named-args cannot override DB-defined args"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          ;; Set default values
+          ;; Both args defined in DB
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 20)
           ctx (exec/create-context {:storage storage})
-          ;; Override with named args
+          ;; Try to override with named args - should be ignored
           result (exec/execute-by-name ctx (:name fn-rec) {:a 100 :b 200})]
-      (is (= 300 result))
+      ;; Should use DB values (10 + 20) NOT provided values
+      (is (= 30 result))
       (sp/close storage))))

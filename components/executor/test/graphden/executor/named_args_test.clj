@@ -18,17 +18,23 @@
 ;; === execute-with-named-args Tests ===
 
 (deftest execute-with-named-args-test
-  (testing "executes with named args mapped to schema ids"
+  (testing "executes with named args mapped to schema ids for free args"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          ;; Create default arg-values
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
+          {:keys [fn-rec]} (setup/setup-add-function! storage)
+          ;; No arg-values in DB - both args are free
           ctx (exec/create-context {:storage storage})]
-      ;; Override args by name
+      ;; Provide both free args by name
       (is (= 30 (exec/execute-with-named-args ctx (:id fn-rec) {:a 10 :b 20})))
-      ;; Override only one arg
-      (is (= 102 (exec/execute-with-named-args ctx (:id fn-rec) {:a 100})))
+      (sp/close storage)))
+
+  (testing "executes with named args - partial free args"
+    (let [storage (setup/create-test-storage)
+          {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)
+          ;; Only arg-a in DB, arg-b is free
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 100)
+          ctx (exec/create-context {:storage storage})]
+      ;; Provide free arg-b by name (arg-a from DB)
+      (is (= 102 (exec/execute-with-named-args ctx (:id fn-rec) {:b 2})))
       (sp/close storage)))
 
   (testing "executes with nil named-args (uses defaults)"

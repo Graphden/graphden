@@ -228,7 +228,7 @@
                        For nested fns via call-site: {[call-site-id arg-schema-id] -> value}
                        IMPORTANT: call-site-args can only set args that have NO value in DB.
                        If arg-value exists in DB, call-site-arg is ignored (warning logged).
-                       To override DB values, use provided-args in execute call instead.
+                       To change an arg value, update the arg-value in the database.
    - :strict-type-validation? - If true (default), throw on unknown types.
                                 If false, warn and accept (forward compatibility mode).
    - :max-unknown-types - Maximum unknown types allowed in forward compat mode (default 10).

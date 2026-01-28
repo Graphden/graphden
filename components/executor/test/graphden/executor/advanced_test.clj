@@ -41,9 +41,9 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-union"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) {:default "value"})
+          ;; No arg-value in DB - test provides values via execute (free arg)
           ctx (exec/create-context {:storage storage})]
-      ;; Union type should accept any value
+      ;; Union type should accept any value (provided at runtime since no DB value)
       (is (= "a string" (exec/execute ctx (:id fn-rec) {(:id data-arg) "a string"})))
       (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
       (is (= {:key "value"} (exec/execute ctx (:id fn-rec) {(:id data-arg) {:key "value"}})))
@@ -78,11 +78,12 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-int"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id n-arg) 42)
+          ;; No arg-value in DB - arg is free, test provides invalid type via execute
           ctx (exec/create-context {:storage storage})
           ;; Create a very large string (> 100 chars) that will be truncated
           large-string (str/join (repeat 200 "x"))]
       (try
+        ;; Providing string to :int type arg should trigger type mismatch error
         (exec/execute ctx (:id fn-rec) {(:id n-arg) large-string})
         (is false "Should have thrown")
         (catch clojure.lang.ExceptionInfo e
@@ -206,7 +207,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-timestamp"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id ts-arg) (java.time.Instant/now))
+          ;; No arg-value in DB - arg is free for runtime provision
           ctx (exec/create-context {:storage storage})
           test-ldt (java.time.LocalDateTime/of 2024 1 1 12 0 0)]
       (is (= test-ldt (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-ldt})))
@@ -285,9 +286,9 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-custom"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) "default")
+          ;; No arg-value in DB - arg is free, test checks type validation on provided args
           ctx (exec/create-context {:storage storage})]
-      ;; Strict mode: unknown type should throw
+      ;; Strict mode: unknown type should throw when arg is provided at runtime
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown argument type encountered"
             (exec/execute ctx (:id fn-rec) {(:id data-arg) "test-value"})))
@@ -311,10 +312,10 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-custom"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) "default")
+          ;; No arg-value in DB - arg is free, test checks type validation on provided args
           ctx (exec/create-context {:storage storage
                                     :strict-type-validation? false})]
-      ;; Non-strict mode: unknown type should accept any value
+      ;; Non-strict mode: unknown type should accept any value (provided at runtime)
       (is (= "test-value" (exec/execute ctx (:id fn-rec) {(:id data-arg) "test-value"})))
       (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
       (sp/close storage))))

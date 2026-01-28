@@ -1,5 +1,6 @@
 (ns graphden.executor.provided-arg-type-test
-  "Type validation tests for provided arguments."
+  "Tests for type validation when providing args at runtime for FREE args.
+   These tests verify that type checking works for args NOT defined in DB."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -13,7 +14,6 @@
 (deftest provided-arg-type-validation-test
   (testing "throws when :fn type arg is provided with non-UUID value"
     (let [storage (setup/create-test-storage)
-          ;; Register HOF that takes a function
           _ (exec/register-base-fn!
               :apply-fn
               (fn [{:keys [f]} _ctx]
@@ -29,8 +29,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-apply"
                                     :fn-schema-id (:id fn-schema)})
-          ;; Create dummy arg-value (will be overridden)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id f-arg) (random-uuid))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       ;; Provide a string instead of UUID for :fn type
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -55,7 +54,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-ref"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id r-arg) (random-uuid))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'r': expected ref"
@@ -64,9 +63,8 @@
 
   (testing "throws when :int type arg is provided with non-integer value"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
+          {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       ;; Provide a string instead of int
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -91,7 +89,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-bool"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id flag-arg) true)
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'flag': expected bool"
@@ -115,7 +113,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-text"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id msg-arg) "hello")
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'msg': expected text"
@@ -125,8 +123,7 @@
   (testing "valid types pass without throwing"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
+          ;; No arg-value in DB - args are free
           ctx (exec/create-context {:storage storage})
           ;; Provide valid int values
           result (exec/execute ctx (:id fn-rec) {(:id arg-a) 10
@@ -134,7 +131,7 @@
       (is (= 30 result))
       (sp/close storage)))
 
-  (testing "other types (like :numeric) pass without strict validation"
+  (testing "other types (like :numeric) pass validation"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn!
               :use-numeric
@@ -151,9 +148,8 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-numeric"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id n-arg) 3.14)
-          ctx (exec/create-context {:storage storage})
-          ;; Numeric allows various number types - should not throw
-          result (exec/execute ctx (:id fn-rec) {(:id n-arg) 2.718})]
-      (is (= 2.718 result))
+          ;; No arg-value in DB - arg is free
+          ctx (exec/create-context {:storage storage})]
+      ;; Numeric accepts numbers
+      (is (= 3.14 (exec/execute ctx (:id fn-rec) {(:id n-arg) 3.14})))
       (sp/close storage))))

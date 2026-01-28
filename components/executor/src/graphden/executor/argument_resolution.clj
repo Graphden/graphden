@@ -220,29 +220,28 @@
   (wrap-delay-with-context arg-name source #(identity value)))
 
 
-(defn handle-call-site-arg-with-db-value
-  "Handles case when call-site-arg exists but DB value takes precedence.
+(defn handle-runtime-arg-with-db-value
+  "Handles case when runtime arg (provided-arg or call-site-arg) exists but DB value takes precedence.
 
-   Design Decision: DB values always win over call-site-args.
+   Design Decision: DB values always win over runtime args.
    This prevents accidental override of validated stored data.
-   If you need to override a stored arg-value:
-   1. Use `provided-args` in `execute` call (for HOF callables)
-   2. Or update the arg-value in the database first
+   To change an arg value, update the arg-value in the database.
 
    Logs warning at WARN level to help debugging when override doesn't work.
 
    SECURITY: Does NOT log actual values to prevent sensitive data leakage.
    Only logs type information which is safe for debugging."
-  [context arg-value arg-schema arg-schema-id arg-name _call-site-arg-value
+  [context arg-value arg-schema arg-schema-id arg-name source
    execute-call-site-fn]
-  (log/warn "Call-site-arg ignored: argument already defined in DB (DB value takes precedence)"
+  (log/warn (str (name source) " ignored: argument already defined in DB (DB value takes precedence)")
             {:arg-schema-id arg-schema-id
              :current-call-site-id (:current-call-site-id context)
              :arg-name arg-name
+             :source source
              ;; SECURITY: Log types only, not actual values
              :db-value-type (type (:value arg-value))
              :arg-type (:type arg-schema)
-             :hint "Use provided-args in execute call or update DB arg-value to override"})
+             :hint "Update DB arg-value to change this argument"})
   (build-delay context arg-value arg-schema execute-call-site-fn))
 
 
@@ -267,12 +266,12 @@
 
    ## Argument Resolution Priority
 
-   1. Direct provided value (from HOF callable calls)
-   2. Call-site-arg value (only if no DB value exists):
+   1. Stored arg-value from DB (ALWAYS takes precedence, cannot be overridden)
+      - If provided-arg or call-site-arg also exists -> warning logged, DB value used
+   2. Provided value (from HOF callable calls) - only if no DB value
+   3. Call-site-arg value - only if no DB value and no provided-arg:
       - For root fn: looked up by arg-schema-id
       - For nested fn via call-site: looked up by [call-site-id arg-schema-id]
-      - If arg-value also exists in DB -> warning, use DB value (no override)
-   3. Stored arg-value from DB
    4. Required arg with no value -> error
    5. Optional arg with no value -> delay returning nil
 
@@ -280,7 +279,7 @@
 
    - context: Execution context
    - fn-data: Function data from graph {:arg-schemas {...} :arg-values {...}}
-   - provided-args: Map of {arg-schema-id -> value} provided at call time
+   - provided-args: Map of {arg-schema-id -> value} provided at call time (only for free args)
    - execute-call-site-fn: Injected function to execute call-sites"
   [context fn-data provided-args execute-call-site-fn]
   (let [{:keys [arg-schemas arg-values]} fn-data
@@ -296,25 +295,28 @@
               call-site-arg-value (get-call-site-arg context arg-schema-id)
               arg-value (get arg-values arg-schema-id)]
           (cond
-            ;; 1. Direct provided value (from HOF callable)
+            ;; 1. Stored arg-value exists - DB always takes precedence
+            ;;    Runtime args (provided-args, call-site-args) are ignored with warning
+            arg-value
+            (do
+              (when (some? provided-value)
+                (handle-runtime-arg-with-db-value context arg-value arg-schema
+                                                  arg-schema-id arg-name :provided-arg
+                                                  execute-call-site-fn))
+              (when (some? call-site-arg-value)
+                (handle-runtime-arg-with-db-value context arg-value arg-schema
+                                                  arg-schema-id arg-name :call-site-arg
+                                                  execute-call-site-fn))
+              (assoc acc arg-name-kw (build-delay context arg-value arg-schema
+                                                  execute-call-site-fn)))
+
+            ;; 2. No DB value - use provided-arg if available
             (some? provided-value)
             (assoc acc arg-name-kw (handle-validated-arg provided-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :provided-arg))
 
-            ;; 2. Call-site-arg value exists
+            ;; 3. No DB value, no provided-arg - use call-site-arg if available
             (some? call-site-arg-value)
-            (assoc acc arg-name-kw
-                   (if arg-value
-                     ;; DB value takes precedence
-                     (handle-call-site-arg-with-db-value context arg-value arg-schema
-                                                         arg-schema-id arg-name call-site-arg-value
-                                                         execute-call-site-fn)
-                     ;; No DB value - use call-site-arg
-                     (handle-validated-arg call-site-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :call-site-arg)))
-
-            ;; 3. Stored arg-value exists
-            arg-value
-            (assoc acc arg-name-kw (build-delay context arg-value arg-schema
-                                                execute-call-site-fn))
+            (assoc acc arg-name-kw (handle-validated-arg call-site-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :call-site-arg))
 
             ;; 4. Required arg with no value -> error
             (:required arg-schema)

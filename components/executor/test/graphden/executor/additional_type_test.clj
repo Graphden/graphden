@@ -1,5 +1,6 @@
 (ns graphden.executor.additional-type-test
-  "Additional type validation tests for numeric, jsonb, bytes, timestamptz, enum, uuid."
+  "Additional type validation tests for numeric, jsonb, bytes, timestamptz, enum, uuid.
+   Tests validation of provided args (free args) - DB values are not set so validation occurs."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -28,7 +29,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-numeric"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id n-arg) 3.14)
+          ;; No arg-value in DB - arg is free, test provides value via execute
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'n': expected numeric"
@@ -52,7 +53,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-numeric"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id n-arg) 3.14)
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (= 2.718M (exec/execute ctx (:id fn-rec) {(:id n-arg) 2.718M})))
       (sp/close storage))))
@@ -76,7 +77,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-jsonb"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) {:a 1})
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'data': expected jsonb"
@@ -100,7 +101,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-jsonb"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) {:a 1})
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (= {:x 1 :y 2} (exec/execute ctx (:id fn-rec) {(:id data-arg) {:x 1 :y 2}})))
       (sp/close storage)))
@@ -122,7 +123,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-jsonb"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) [1 2 3])
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (= [4 5 6] (exec/execute ctx (:id fn-rec) {(:id data-arg) [4 5 6]})))
       (sp/close storage))))
@@ -146,7 +147,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-bytes"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) (byte-array [1 2 3]))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'data': expected bytes"
@@ -170,7 +171,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-bytes"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) (byte-array [1 2 3]))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (= [4 5 6] (exec/execute ctx (:id fn-rec) {(:id data-arg) (byte-array [4 5 6])})))
       (sp/close storage))))
@@ -194,7 +195,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-timestamp"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id ts-arg) (java.time.Instant/now))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'ts': expected timestamptz"
@@ -218,7 +219,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-timestamp"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id ts-arg) (java.time.Instant/now))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})
           test-instant (java.time.Instant/parse "2024-01-01T00:00:00Z")]
       (is (= test-instant (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-instant})))
@@ -241,7 +242,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-timestamp"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id ts-arg) (java.util.Date.))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})
           test-date (java.util.Date. 0)]
       (is (= test-date (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-date})))
@@ -266,7 +267,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-enum"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id status-arg) :active)
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'status': expected enum"
@@ -290,7 +291,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-enum"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id status-arg) :active)
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (= "pending" (exec/execute ctx (:id fn-rec) {(:id status-arg) :pending})))
       (sp/close storage))))
@@ -314,7 +315,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-uuid"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id id-arg) (random-uuid))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'id': expected uuid"
@@ -338,7 +339,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-uuid"
                                     :fn-schema-id (:id fn-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id id-arg) (random-uuid))
+          ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})
           test-uuid #uuid "12345678-1234-1234-1234-123456789abc"]
       (is (= test-uuid (exec/execute ctx (:id fn-rec) {(:id id-arg) test-uuid})))

@@ -61,11 +61,10 @@
                                                            :fn-schema-id fn-schema-id
                                                            :name "x"
                                                            :required true}}
-                          :resolved-args {fn-id
-                                          {bad-arg-schema-id {:arg-schema-id bad-arg-schema-id
-                                                              :value 42}}}})
+                          ;; No resolved-args - arg is free so provided-arg triggers validation
+                          :resolved-args {fn-id {}}})
           ctx (exec/create-context {:storage mock-storage})]
-      ;; When we try to provide an arg that will trigger validation on malformed schema
+      ;; When we provide an arg, validation on malformed schema (no :type) should fail
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Invalid arg-schema: missing type"
             (exec/execute ctx fn-id {bad-arg-schema-id 100}))))))

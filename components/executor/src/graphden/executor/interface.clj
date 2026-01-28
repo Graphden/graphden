@@ -242,8 +242,11 @@
    Arguments:
    - context: Execution context (created with create-context)
    - fn-id: UUID of the function to execute
-   - args: Map of additional arguments to provide (optional, can be nil or {})
-           Keys are arg-schema-ids (UUIDs), values override stored arg-values.
+   - args: Map of arguments for FREE args only (optional, can be nil or {})
+           Keys are arg-schema-ids (UUIDs).
+           IMPORTANT: Can only provide values for args NOT defined in DB.
+           If an arg already has a value in DB, the provided value is IGNORED
+           and a warning is logged. To change an arg value, update the DB.
 
    Returns the result of the function execution.
 

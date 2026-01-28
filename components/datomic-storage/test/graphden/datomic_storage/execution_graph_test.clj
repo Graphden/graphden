@@ -11,7 +11,8 @@
 ;; === Test helpers ===
 
 (defn- make-graph-schema
-  "Creates schema with fn-schema, arg-schema, fn, and arg-value entities."
+  "Creates schema with fn-schema, arg-schema, fn, arg-value, and fn-arg entities.
+   Uses normalized schema where arg-value has no owner, and fn-arg binds fn to arg-value."
   []
   (-> (mds/create-builder)
       (ds/add-entity :fn-schema #uuid "00000000-0000-0000-0001-000000000001"
@@ -33,14 +34,34 @@
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
                                      :type :uuid}})
+      ;; arg-value: pure value (no owner-fn-id)
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
-                     {:owner-fn-id {:uuid #uuid "00000000-0000-0000-0004-000000000002"
-                                    :type :uuid}
-                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
+                     {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
                                       :type :uuid}
                       :value {:uuid #uuid "00000000-0000-0000-0004-000000000004"
                               :type :text}})
+      ;; fn-arg: binding from fn to arg-value
+      (ds/add-entity :fn-arg #uuid "00000000-0000-0000-0006-000000000001"
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0006-000000000002"
+                              :type :uuid}
+                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0006-000000000003"
+                                      :type :uuid}
+                      :arg-value-id {:uuid #uuid "00000000-0000-0000-0006-000000000004"
+                                     :type :uuid}})
       ds/build))
+
+
+(defn- create-arg-value-with-binding!
+  "Creates arg-value and fn-arg binding. Returns the arg-value."
+  [storage fn-id arg-schema-id value]
+  (let [av (sp/create-entity storage :arg-value
+                             {:arg-schema-id arg-schema-id
+                              :value value})]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))
 
 
 ;; === ExecutionGraph tests ===
@@ -60,14 +81,8 @@
             fn-add (sp/create-entity storage :fn
                                      {:name "add-1-2"
                                       :fn-schema-id (:id fn-schema)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id fn-add)
-                                 :arg-schema-id (:id arg-a)
-                                 :value "1"})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id fn-add)
-                                 :arg-schema-id (:id arg-b)
-                                 :value "2"})
+            _ (create-arg-value-with-binding! storage (:id fn-add) (:id arg-a) "1")
+            _ (create-arg-value-with-binding! storage (:id fn-add) (:id arg-b) "2")
             graph (sp/resolve-execution-graph storage (:id fn-add))]
         (try
           (is (contains? (:fns graph) (:id fn-add)))
@@ -102,28 +117,16 @@
             const-3 (sp/create-entity storage :fn
                                       {:name "const-3"
                                        :fn-schema-id (:id const-schema)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id const-3)
-                                 :arg-schema-id (:id const-arg)
-                                 :value "3"})
+            _ (create-arg-value-with-binding! storage (:id const-3) (:id const-arg) "3")
             const-5 (sp/create-entity storage :fn
                                       {:name "const-5"
                                        :fn-schema-id (:id const-schema)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id const-5)
-                                 :arg-schema-id (:id const-arg)
-                                 :value "5"})
+            _ (create-arg-value-with-binding! storage (:id const-5) (:id const-arg) "5")
             add-3-5 (sp/create-entity storage :fn
                                       {:name "add-3-5"
                                        :fn-schema-id (:id add-schema)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id add-3-5)
-                                 :arg-schema-id (:id add-arg-a)
-                                 :value (str (:id const-3))})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id add-3-5)
-                                 :arg-schema-id (:id add-arg-b)
-                                 :value (str (:id const-5))})
+            _ (create-arg-value-with-binding! storage (:id add-3-5) (:id add-arg-a) (str (:id const-3)))
+            _ (create-arg-value-with-binding! storage (:id add-3-5) (:id add-arg-b) (str (:id const-5)))
             graph (sp/resolve-execution-graph storage (:id add-3-5))]
         (try
           (is (= 3 (count (:fns graph))))
@@ -166,14 +169,8 @@
                                      {:name "factorial"
                                       :fn-schema-id (:id rec-schema)})
             ;; Self-reference: arg-value points to the fn itself
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id rec-fn)
-                                 :arg-schema-id (:id arg-self)
-                                 :value (str (:id rec-fn))})  ; Self-reference!
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id rec-fn)
-                                 :arg-schema-id (:id arg-n)
-                                 :value "5"})
+            _ (create-arg-value-with-binding! storage (:id rec-fn) (:id arg-self) (str (:id rec-fn)))
+            _ (create-arg-value-with-binding! storage (:id rec-fn) (:id arg-n) "5")
             graph (sp/resolve-execution-graph storage (:id rec-fn))]
         (try
           ;; Should only have 1 fn (self-reference doesn't create duplicate)
@@ -210,22 +207,13 @@
             const-5 (sp/create-entity storage :fn
                                       {:name "const-5-shared"
                                        :fn-schema-id (:id const-schema)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id const-5)
-                                 :arg-schema-id (:id const-arg)
-                                 :value "5"})
+            _ (create-arg-value-with-binding! storage (:id const-5) (:id const-arg) "5")
             ;; add-5-5 fn referencing const-5 for BOTH args
             add-5-5 (sp/create-entity storage :fn
                                       {:name "add-5-5-shared"
                                        :fn-schema-id (:id add-schema)})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id add-5-5)
-                                 :arg-schema-id (:id add-arg-a)
-                                 :value (str (:id const-5))})
-            _ (sp/create-entity storage :arg-value
-                                {:owner-fn-id (:id add-5-5)
-                                 :arg-schema-id (:id add-arg-b)
-                                 :value (str (:id const-5))})  ; Same fn referenced again!
+            _ (create-arg-value-with-binding! storage (:id add-5-5) (:id add-arg-a) (str (:id const-5)))
+            _ (create-arg-value-with-binding! storage (:id add-5-5) (:id add-arg-b) (str (:id const-5)))
             graph (sp/resolve-execution-graph storage (:id add-5-5))]
         (try
           ;; const-5 should only appear once in the graph despite being referenced twice
@@ -259,13 +247,9 @@
           _ (sp/create-entity storage :fn {:id fn-a-id :name "fn-a" :fn-schema-id fn-schema-id})
           _ (sp/create-entity storage :fn {:id fn-b-id :name "fn-b" :fn-schema-id fn-schema-id})
           ;; Create mutual dependency: a -> b
-          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-a-id
-                                                  :arg-schema-id arg-schema-a-id
-                                                  :value (str fn-b-id)})
+          _ (create-arg-value-with-binding! storage fn-a-id arg-schema-a-id (str fn-b-id))
           ;; b -> a (creating cycle)
-          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-b-id
-                                                  :arg-schema-id arg-schema-b-id
-                                                  :value (str fn-a-id)})]
+          _ (create-arg-value-with-binding! storage fn-b-id arg-schema-b-id (str fn-a-id))]
       (try
         ;; Test validate-no-dependency-cycle! which uses collect-dependency-chain
         ;; When checking if we can add a dependency from X to fn-a,
@@ -294,9 +278,7 @@
                                                    :name "ref" :type "ref" :required false})
           _ (sp/create-entity storage :fn {:id fn-id :name "test-fn" :fn-schema-id fn-schema-id})
           ;; Create arg-value referencing non-existent fn
-          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-id
-                                                  :arg-schema-id arg-schema-id
-                                                  :value (str non-existent-fn-id)})]
+          _ (create-arg-value-with-binding! storage fn-id arg-schema-id (str non-existent-fn-id))]
       (try
         ;; resolve-execution-graph should skip the non-existent fn
         (let [graph (sp/resolve-execution-graph storage fn-id)]

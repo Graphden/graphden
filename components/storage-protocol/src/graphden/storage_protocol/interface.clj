@@ -794,9 +794,9 @@
 
 
 ;; Execution limits
-(def max-path-args-count
-  "Maximum number of path arguments. Default: 100."
-  config/max-path-args-count)
+(def max-call-site-args-count
+  "Maximum number of call-site arguments. Default: 100."
+  config/max-call-site-args-count)
 
 
 (def warning-threshold-ratio

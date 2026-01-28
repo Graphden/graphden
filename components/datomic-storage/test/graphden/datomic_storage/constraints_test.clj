@@ -11,7 +11,8 @@
 ;; === GraphConstraints tests ===
 
 (defn- make-graph-schema
-  "Creates schema with fn-schema, arg-schema, fn, and arg-value entities."
+  "Creates schema with fn-schema, arg-schema, fn, arg-value, and fn-arg entities.
+   Uses normalized schema where arg-value has no owner, and fn-arg binds fn to arg-value."
   []
   (-> (mds/create-builder)
       (ds/add-entity :fn-schema #uuid "00000000-0000-0000-0001-000000000001"
@@ -33,14 +34,34 @@
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
                                      :type :uuid}})
+      ;; arg-value: pure value (no owner-fn-id)
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
-                     {:owner-fn-id {:uuid #uuid "00000000-0000-0000-0004-000000000002"
-                                    :type :uuid}
-                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
+                     {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
                                       :type :uuid}
                       :value {:uuid #uuid "00000000-0000-0000-0004-000000000004"
                               :type :text}})
+      ;; fn-arg: binding from fn to arg-value
+      (ds/add-entity :fn-arg #uuid "00000000-0000-0000-0006-000000000001"
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0006-000000000002"
+                              :type :uuid}
+                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0006-000000000003"
+                                      :type :uuid}
+                      :arg-value-id {:uuid #uuid "00000000-0000-0000-0006-000000000004"
+                                     :type :uuid}})
       ds/build))
+
+
+(defn- create-arg-value-with-binding!
+  "Creates arg-value and fn-arg binding. Returns the arg-value."
+  [storage fn-id arg-schema-id value]
+  (let [av (sp/create-entity storage :arg-value
+                             {:arg-schema-id arg-schema-id
+                              :value value})]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))
 
 
 (deftest validate-arg-schema-belongs-to-fn-test
@@ -122,14 +143,9 @@
           _ (sp/create-entity storage :fn {:id fn-b-id :name "fn-b" :fn-schema-id fn-schema-id})
           _ (sp/create-entity storage :fn {:id fn-c-id :name "fn-c" :fn-schema-id fn-schema-id})
           ;; Create b -> c reference (b depends on c)
-          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-b-id
-                                                  :arg-schema-id arg-schema-id
-                                                  :value (str fn-c-id)})
+          _ (create-arg-value-with-binding! storage fn-b-id arg-schema-id (str fn-c-id))
           ;; Create c -> a reference (c depends on a)
-          _ (sp/create-entity storage :arg-value {:id #uuid "ffffffff-ffff-ffff-ffff-ffffffffffff"
-                                                  :owner-fn-id fn-c-id
-                                                  :arg-schema-id arg-schema-id
-                                                  :value (str fn-a-id)})]
+          _ (create-arg-value-with-binding! storage fn-c-id arg-schema-id (str fn-a-id))]
       (try
         ;; Try to validate a -> b, which would create cycle: a -> b -> c -> a
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"

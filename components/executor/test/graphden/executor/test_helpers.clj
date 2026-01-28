@@ -68,7 +68,7 @@
    - :base-fns - Map of base functions
    - :timeout-ms - Timeout in ms (default: 100ms)
    - :max-depth - Max recursion depth (default: 100)
-   - :path-args - Path arguments map
+   - :call-site-args - Call site arguments map
    - :strict-type-validation? - Type validation strictness (default: true)
    - :max-unknown-types - Unknown type limit (default: 10)
    - :clock - Clock function for time (default: constant 0)
@@ -90,7 +90,7 @@
        (create-test-context {:clock #(deref time-atom)}))"
   ([]
    (create-test-context {}))
-  ([{:keys [storage execution-graph base-fns timeout-ms max-depth path-args
+  ([{:keys [storage execution-graph base-fns timeout-ms max-depth call-site-args
             strict-type-validation? max-unknown-types clock
             cache-warning-threshold cache-max-size]
      :or {timeout-ms default-test-timeout-ms
@@ -112,7 +112,7 @@
                 :max-unknown-types max-unknown-types
                 :clock test-clock}
          base-fns (assoc :base-fns base-fns)
-         path-args (assoc :path-args path-args)
+         call-site-args (assoc :call-site-args call-site-args)
          cache-warning-threshold (assoc :cache-warning-threshold cache-warning-threshold)
          cache-max-size (assoc :cache-max-size cache-max-size))))))
 

@@ -20,6 +20,7 @@
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.postgres-storage.interface :as pg]
+    [graphden.storage-protocol.interface :as sp]
     [graphden.storage-protocol.postgres-test-helpers :as pth]))
 
 
@@ -58,8 +59,9 @@
 
 
 (defn make-graph-schema
-  "Creates schema with fn-schema, arg-schema, fn, fn-result-value, and arg-value entities.
-   This is the standard graph schema used by executor and constraint tests."
+  "Creates schema with fn-schema, arg-schema, fn, fn-result-value, arg-value, and fn-arg entities.
+   This is the standard graph schema used by executor and constraint tests.
+   Uses normalized schema where arg-value has no owner, and fn-arg binds fn to arg-value."
   []
   (-> (mds/create-builder)
       (ds/add-entity :fn-schema #uuid "00000000-0000-0000-0001-000000000001"
@@ -84,11 +86,32 @@
       (ds/add-entity :fn-result-value #uuid "00000000-0000-0000-0005-000000000001"
                      {:fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000002"
                               :type :ref :ref-entity :fn}})
+      ;; arg-value: pure value (no owner-fn-id)
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
-                     {:owner-fn-id {:uuid #uuid "00000000-0000-0000-0004-000000000002"
-                                    :type :ref :ref-entity :fn}
-                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
+                     {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
                                       :type :ref :ref-entity :arg-schema}
                       :value {:uuid #uuid "00000000-0000-0000-0004-000000000004"
                               :type :jsonb}})
+      ;; fn-arg: binding from fn to arg-value
+      (ds/add-entity :fn-arg #uuid "00000000-0000-0000-0006-000000000001"
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0006-000000000002"
+                              :type :ref :ref-entity :fn}
+                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0006-000000000003"
+                                      :type :ref :ref-entity :arg-schema}
+                      :arg-value-id {:uuid #uuid "00000000-0000-0000-0006-000000000004"
+                                     :type :ref :ref-entity :arg-value}})
       ds/build))
+
+
+(defn create-arg-value-with-binding!
+  "Creates arg-value and fn-arg binding. Returns the arg-value.
+   Helper for tests that need to create argument values."
+  [storage fn-id arg-schema-id value]
+  (let [av (sp/create-entity storage :arg-value
+                             {:arg-schema-id arg-schema-id
+                              :value value})]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))

@@ -64,19 +64,19 @@ fn: my-program
 
 Without fn-result-value, we couldn't distinguish "time before sleep" from "time after sleep" — they'd be the same function reference.
 
-**Free arguments are passed at execution time via path-args:**
+**Free arguments are passed at execution time via call-site-args:**
 ```clojure
 ;; fn-a has free argument arg-schema-a (not bound in DB)
-;; fn-result-value-a references fn-a
+;; fn-result-value-a references fn-a (this is a "call site")
 
 ;; At execution time, pass value for the free argument:
-(execute ctx root-fn-id
-         {[fn-result-value-a-id arg-schema-a-id] 42})
+(create-context {:storage s
+                 :call-site-args {[fn-result-value-a-id arg-schema-a-id] 42}})
 
 ;; The executor resolves this when it reaches fn-result-value-a
 ```
 
-**Key insight:** No new schema fields needed. The graph structure (fn-result-value pointing to fn) plus runtime path-args is sufficient.
+**Key insight:** No new schema fields needed. The graph structure (fn-result-value pointing to fn) plus runtime call-site-args is sufficient.
 
 ## Documentation Map
 

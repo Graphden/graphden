@@ -14,7 +14,7 @@
 
 (deftest entities-test
   (testing "schema contains all expected entities"
-    (is (= #{:fn-schema :arg-schema :fn :fn-result-value :arg-value}
+    (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :fn-result-value :call-site-arg}
            (set (ds/entities schema))))))
 
 
@@ -56,7 +56,25 @@
   (testing "fn-result-value has expected fields"
     (let [fields (ds/entity-fields schema :fn-result-value)]
       (is (= :ref (get-in fields [:fn-id :type])))
-      (is (= :fn (get-in fields [:fn-id :ref-entity]))))))
+      (is (= :fn (get-in fields [:fn-id :ref-entity])))))
+
+  (testing "fn-arg has expected fields"
+    (let [fields (ds/entity-fields schema :fn-arg)]
+      (is (= :ref (get-in fields [:fn-id :type])))
+      (is (= :fn (get-in fields [:fn-id :ref-entity])))
+      (is (= :ref (get-in fields [:arg-schema-id :type])))
+      (is (= :arg-schema (get-in fields [:arg-schema-id :ref-entity])))
+      (is (= :ref (get-in fields [:arg-value-id :type])))
+      (is (= :arg-value (get-in fields [:arg-value-id :ref-entity])))))
+
+  (testing "call-site-arg has expected fields"
+    (let [fields (ds/entity-fields schema :call-site-arg)]
+      (is (= :ref (get-in fields [:fn-result-value-id :type])))
+      (is (= :fn-result-value (get-in fields [:fn-result-value-id :ref-entity])))
+      (is (= :ref (get-in fields [:arg-schema-id :type])))
+      (is (= :arg-schema (get-in fields [:arg-schema-id :ref-entity])))
+      (is (= :ref (get-in fields [:arg-value-id :type])))
+      (is (= :arg-value (get-in fields [:arg-value-id :ref-entity]))))))
 
 
 (deftest validation-test
@@ -73,19 +91,31 @@
       (is (some? result))
       (is (contains? (:errors result) :name))))
 
-  (testing "valid arg-value with literal int"
+  (testing "valid arg-value with literal int (no owner)"
     (is (nil? (ds/validate-entity schema :arg-value
                                   {:id (random-uuid)
-                                   :owner-fn-id (random-uuid)
                                    :arg-schema-id (random-uuid)
                                    :value 42}))))
 
-  (testing "valid arg-value with fn reference"
+  (testing "valid arg-value with fn reference (no owner)"
     (is (nil? (ds/validate-entity schema :arg-value
                                   {:id (random-uuid)
-                                   :owner-fn-id (random-uuid)
                                    :arg-schema-id (random-uuid)
                                    :value (random-uuid)}))))
+
+  (testing "valid fn-arg binding"
+    (is (nil? (ds/validate-entity schema :fn-arg
+                                  {:id (random-uuid)
+                                   :fn-id (random-uuid)
+                                   :arg-schema-id (random-uuid)
+                                   :arg-value-id (random-uuid)}))))
+
+  (testing "valid call-site-arg binding"
+    (is (nil? (ds/validate-entity schema :call-site-arg
+                                  {:id (random-uuid)
+                                   :fn-result-value-id (random-uuid)
+                                   :arg-schema-id (random-uuid)
+                                   :arg-value-id (random-uuid)}))))
 
   (testing "valid fn"
     (is (nil? (ds/validate-entity schema :fn

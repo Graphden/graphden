@@ -3,7 +3,7 @@
 
    This module handles:
    - Building delays for lazy argument evaluation
-   - Resolving argument values from various sources (provided, path-args, DB)
+   - Resolving argument values from various sources (provided, call-site-args, DB)
    - Type validation for provided arguments
 
    ## Why Delays?
@@ -23,7 +23,7 @@
    ## Argument Resolution Priority
 
    1. `provided-args` - Explicitly passed at execute time (highest priority)
-   2. `path-args` - Runtime args from context (for root and nested fns)
+   2. `call-site-args` - Runtime args from context for specific call sites
    3. `arg-values` - Stored values from database (resolved-args in graph)
 
    ## Error Handling
@@ -190,40 +190,40 @@
       (delay value))))
 
 
-;; === Path Argument Resolution ===
+;; === Call Site Argument Resolution ===
 
-(defn get-path-arg
-  "Gets a runtime argument value from path-args.
+(defn get-call-site-arg
+  "Gets a runtime argument value from call-site-args.
 
    For root function (current-frv-id is nil): looks up by arg-schema-id directly
-   For nested fns via fn-result-value: looks up by [fn-result-value-id arg-schema-id]
+   For nested fns via fn-result-value (call site): looks up by [fn-result-value-id arg-schema-id]
 
    Returns the value or nil if not found."
   [context arg-schema-id]
   (let [current-frv-id (:current-frv-id context)
-        path-args (:path-args context)]
+        call-site-args (:call-site-args context)]
     (if current-frv-id
-      ;; Nested fn via fn-result-value: use [frv-id arg-schema-id] as key
-      (get path-args [current-frv-id arg-schema-id])
+      ;; Nested fn via fn-result-value (call site): use [frv-id arg-schema-id] as key
+      (get call-site-args [current-frv-id arg-schema-id])
       ;; Root function: use arg-schema-id directly
-      (get path-args arg-schema-id))))
+      (get call-site-args arg-schema-id))))
 
 
 ;; === Argument Validation Helpers ===
 
 (defn handle-validated-arg
   "Validates and wraps a user-provided argument value in a delay.
-   Used for both direct provided args (from HOF) and path-args.
+   Used for both direct provided args (from HOF) and call-site-args.
    The source parameter identifies the origin for debugging."
   [value arg-schema strict? max-unknown-types arg-name unknown-type-counter source]
   (types/validate-provided-arg-type! value arg-schema strict? max-unknown-types unknown-type-counter)
   (wrap-delay-with-context arg-name source #(identity value)))
 
 
-(defn handle-path-arg-with-db-value
-  "Handles case when path-arg exists but DB value takes precedence.
+(defn handle-call-site-arg-with-db-value
+  "Handles case when call-site-arg exists but DB value takes precedence.
 
-   Design Decision: DB values always win over path-args.
+   Design Decision: DB values always win over call-site-args.
    This prevents accidental override of validated stored data.
    If you need to override a stored arg-value:
    1. Use `provided-args` in `execute` call (for HOF callables)
@@ -233,9 +233,9 @@
 
    SECURITY: Does NOT log actual values to prevent sensitive data leakage.
    Only logs type information which is safe for debugging."
-  [context arg-value arg-schema arg-schema-id arg-name _path-arg-value
+  [context arg-value arg-schema arg-schema-id arg-name _call-site-arg-value
    execute-fn-result-value-fn]
-  (log/warn "Path-arg ignored: argument already defined in DB (DB value takes precedence)"
+  (log/warn "Call-site-arg ignored: argument already defined in DB (DB value takes precedence)"
             {:arg-schema-id arg-schema-id
              :current-frv-id (:current-frv-id context)
              :arg-name arg-name
@@ -268,9 +268,9 @@
    ## Argument Resolution Priority
 
    1. Direct provided value (from HOF callable calls)
-   2. Path-arg value (only if no DB value exists):
+   2. Call-site-arg value (only if no DB value exists):
       - For root fn: looked up by arg-schema-id
-      - For nested fn via fn-result-value: looked up by [frv-id arg-schema-id]
+      - For nested fn via fn-result-value (call site): looked up by [frv-id arg-schema-id]
       - If arg-value also exists in DB -> warning, use DB value (no override)
    3. Stored arg-value from DB
    4. Required arg with no value -> error
@@ -293,23 +293,23 @@
         (let [arg-name (:name arg-schema)
               arg-name-kw (keyword arg-name)
               provided-value (get provided-args arg-schema-id)
-              path-arg-value (get-path-arg context arg-schema-id)
+              call-site-arg-value (get-call-site-arg context arg-schema-id)
               arg-value (get arg-values arg-schema-id)]
           (cond
             ;; 1. Direct provided value (from HOF callable)
             (some? provided-value)
             (assoc acc arg-name-kw (handle-validated-arg provided-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :provided-arg))
 
-            ;; 2. Path-arg value exists
-            (some? path-arg-value)
+            ;; 2. Call-site-arg value exists
+            (some? call-site-arg-value)
             (assoc acc arg-name-kw
                    (if arg-value
                      ;; DB value takes precedence
-                     (handle-path-arg-with-db-value context arg-value arg-schema
-                                                    arg-schema-id arg-name path-arg-value
-                                                    execute-fn-result-value-fn)
-                     ;; No DB value - use path-arg
-                     (handle-validated-arg path-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :path-arg)))
+                     (handle-call-site-arg-with-db-value context arg-value arg-schema
+                                                         arg-schema-id arg-name call-site-arg-value
+                                                         execute-fn-result-value-fn)
+                     ;; No DB value - use call-site-arg
+                     (handle-validated-arg call-site-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :call-site-arg)))
 
             ;; 3. Stored arg-value exists
             arg-value

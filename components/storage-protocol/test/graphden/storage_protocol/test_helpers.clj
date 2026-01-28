@@ -50,7 +50,12 @@
 
 
 (defn make-graph-schema
-  "Creates a schema for graph testing with fn, fn-schema, arg-schema, arg-value entities.
+  "Creates a schema for graph testing with normalized entities:
+   fn-schema, arg-schema, fn, arg-value (pure value), fn-arg (binding).
+
+   Schema (normalized):
+   - arg-value: pure value (arg-schema-id, value) - no owner
+   - fn-arg: binding (fn-id, arg-schema-id, arg-value-id)
 
    This is useful for testing ExecutionGraph resolution and related functionality."
   []
@@ -79,21 +84,27 @@
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000032"
                                      :type :ref
                                      :ref-entity :fn-schema}})
+      ;; arg-value: pure value (no owner-fn-id)
       (ds/add-entity :arg-value
                      #uuid "00000000-0000-0000-0000-000000000040"
-                     {:owner-fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000041"
-                                    :type :ref
-                                    :ref-entity :fn}
-                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000042"
+                     {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000042"
                                       :type :ref
                                       :ref-entity :arg-schema}
                       :value {:uuid #uuid "00000000-0000-0000-0000-000000000043"
                               :type :jsonb
-                              :nullable? true}
-                      :value-fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000044"
-                                    :type :ref
-                                    :ref-entity :fn
-                                    :nullable? true}})
+                              :nullable? true}})
+      ;; fn-arg: binding (fn -> arg-value)
+      (ds/add-entity :fn-arg
+                     #uuid "00000000-0000-0000-0000-000000000050"
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000051"
+                              :type :ref
+                              :ref-entity :fn}
+                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000052"
+                                      :type :ref
+                                      :ref-entity :arg-schema}
+                      :arg-value-id {:uuid #uuid "00000000-0000-0000-0000-000000000053"
+                                     :type :ref
+                                     :ref-entity :arg-value}})
       ds/build))
 
 
@@ -144,3 +155,28 @@
        (do ~@body)
        (finally
          (sp/close ~sym)))))
+
+
+(defn create-arg-value-with-binding!
+  "Creates an arg-value and fn-arg binding in one operation.
+   This is the normalized way to bind an argument value to a function.
+
+   Arguments:
+   - storage: initialized storage
+   - fn-id: UUID of the owning function
+   - arg-schema-id: UUID of the arg-schema
+   - value: the argument value
+
+   Returns the created arg-value entity.
+
+   Example:
+     (create-arg-value-with-binding! storage fn-id arg-schema-id 42)"
+  [storage fn-id arg-schema-id value]
+  (let [arg-value (sp/create-entity storage :arg-value
+                                    {:arg-schema-id arg-schema-id
+                                     :value value})
+        _ (sp/create-entity storage :fn-arg
+                            {:fn-id fn-id
+                             :arg-schema-id arg-schema-id
+                             :arg-value-id (:id arg-value)})]
+    arg-value))

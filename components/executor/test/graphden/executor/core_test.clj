@@ -71,15 +71,9 @@
   (testing "executes function with literal arg-values"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          ;; Create arg-values with literals
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 3})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 5})
+          ;; Create arg-values with bindings (normalized schema)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 5)
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id fn-rec) {})]
       (is (= 8 result))
@@ -107,29 +101,19 @@
           const-3 (sp/create-entity storage :fn
                                     {:name "const-3"
                                      :fn-schema-id (:id const-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id const-3)
-                               :arg-schema-id (:id const-arg)
-                               :value 3})
+          _ (setup/create-arg-value-with-binding! storage (:id const-3) (:id const-arg) 3)
           const-5 (sp/create-entity storage :fn
                                     {:name "const-5"
                                      :fn-schema-id (:id const-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id const-5)
-                               :arg-schema-id (:id const-arg)
-                               :value 5})
+          _ (setup/create-arg-value-with-binding! storage (:id const-5) (:id const-arg) 5)
           ;; Create add fn-schema
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Set arg-values to reference const functions via fn-result-value
           ;; (fn-result-value means: execute the fn and use its result)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value (setup/create-fn-result-value! storage (:id const-3))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value (setup/create-fn-result-value! storage (:id const-5))})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a)
+                                                  (setup/create-fn-result-value! storage (:id const-3)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b)
+                                                  (setup/create-fn-result-value! storage (:id const-5)))
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id fn-rec) {})]
       (is (= 8 result))
@@ -158,18 +142,11 @@
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
           ;; fn-a -> fn-b -> fn-c -> literal (via fn-result-value to trigger execution)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-a)
-                               :arg-schema-id (:id id-arg)
-                               :value (setup/create-fn-result-value! storage (:id fn-b))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-b)
-                               :arg-schema-id (:id id-arg)
-                               :value (setup/create-fn-result-value! storage (:id fn-c))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-c)
-                               :arg-schema-id (:id id-arg)
-                               :value 42})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id id-arg)
+                                                  (setup/create-fn-result-value! storage (:id fn-b)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id id-arg)
+                                                  (setup/create-fn-result-value! storage (:id fn-c)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
           ;; Execute with max-depth=1 (should fail at fn-c which runs at depth=2)
           ctx (exec/create-context {:storage storage :max-depth 1})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Maximum recursion depth exceeded"
@@ -198,10 +175,7 @@
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)
           ;; Only provide :a, not :b
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 3})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Required argument 'b' not provided"
             (exec/execute ctx (:id fn-rec) {})))
@@ -247,18 +221,11 @@
           fn-c (sp/create-entity storage :fn
                                  {:name "slow-c"
                                   :fn-schema-id (:id slow-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-a)
-                               :arg-schema-id (:id slow-arg)
-                               :value (setup/create-fn-result-value! storage (:id fn-b))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-b)
-                               :arg-schema-id (:id slow-arg)
-                               :value (setup/create-fn-result-value! storage (:id fn-c))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-c)
-                               :arg-schema-id (:id slow-arg)
-                               :value 42})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id slow-arg)
+                                                  (setup/create-fn-result-value! storage (:id fn-b)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id slow-arg)
+                                                  (setup/create-fn-result-value! storage (:id fn-c)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id slow-arg) 42)
           ;; Create context with 80ms timeout (fn-a sleeps 50ms, fn-b starts, sleeps 50ms = 100ms > 80ms)
           ctx (exec/create-context {:storage storage :timeout-ms 80})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Execution timeout exceeded"
@@ -310,22 +277,13 @@
           double-fn (sp/create-entity storage :fn
                                       {:name "my-double"
                                        :fn-schema-id (:id double-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id double-fn)
-                               :arg-schema-id (:id double-arg)
-                               :value 10})
+          _ (setup/create-arg-value-with-binding! storage (:id double-fn) (:id double-arg) 10)
           ;; Create apply-fn instance
           apply-fn (sp/create-entity storage :fn
                                      {:name "my-apply"
                                       :fn-schema-id (:id apply-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id apply-fn)
-                               :arg-schema-id (:id apply-f-arg)
-                               :value (:id double-fn)})  ; Reference to double-fn
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id apply-fn)
-                               :arg-schema-id (:id apply-value-arg)
-                               :value 5})
+          _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-f-arg) (:id double-fn))  ; Reference to double-fn
+          _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-value-arg) 5)
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id apply-fn) {})]
       ;; The f arg is a callable, so calling it with {:x 5} should return 10 (5 * 2)
@@ -364,10 +322,7 @@
                                    {:name "greet-world"
                                     :fn-schema-id (:id greet-schema)})
           ;; Only provide required arg, not optional
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id name-arg)
-                               :value "World"})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id name-arg) "World")
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id fn-rec) {})]
       (is (= "Hello, World" result))
@@ -379,14 +334,8 @@
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Create arg-values with literals
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 3})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 5})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 5)
           ctx (exec/create-context {:storage storage})
           ;; Execute with provided args that override the stored values
           result (exec/execute ctx (:id fn-rec) {(:id arg-a) 100
@@ -399,14 +348,8 @@
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Create arg-values with literals
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 3})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 5})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 5)
           ctx (exec/create-context {:storage storage})
           ;; Execute with only :a overridden
           result (exec/execute ctx (:id fn-rec) {(:id arg-a) 100})]
@@ -441,10 +384,7 @@
           bad-frv (sp/create-entity storage :fn-result-value
                                     {:fn-id non-existent-fn-id
                                      :name "bad-frv"})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id id-fn)
-                               :arg-schema-id (:id id-arg)
-                               :value (:id bad-frv)})
+          _ (setup/create-arg-value-with-binding! storage (:id id-fn) (:id id-arg) (:id bad-frv))
           ctx (exec/create-context {:storage storage})]
       ;; When we execute, it will try to resolve the fn-result-value which points
       ;; to a non-existent fn - should throw
@@ -462,35 +402,35 @@
                             #"storage must implement ExecutionGraph protocol"
             (exec/create-context {:storage invalid-storage})))))
 
-  (testing "throws when path-args exceed max count"
+  (testing "throws when call-site-args exceed max count"
     (let [storage (setup/create-test-storage)
-          ;; Create 1001 path-args (max is 1000)
-          large-path-args (into {}
-                                (for [i (range 1001)]
-                                  [(random-uuid) i]))]
+          ;; Create 1001 call-site-args (max is 1000)
+          large-call-site-args (into {}
+                                     (for [i (range 1001)]
+                                       [(random-uuid) i]))]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"path-args count exceeds maximum"
-              (exec/create-context {:storage storage :path-args large-path-args})))
+                              #"call-site-args count exceeds maximum"
+              (exec/create-context {:storage storage :call-site-args large-call-site-args})))
         (finally
           (sp/close storage)))))
 
-  (testing "throws when path-args keys have invalid format"
+  (testing "throws when call-site-args keys have invalid format"
     (let [storage (setup/create-test-storage)]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"path-args keys must be UUID or"
+                              #"call-site-args keys must be UUID or"
               (exec/create-context {:storage storage
-                                    :path-args {"string-key" 42}})))
+                                    :call-site-args {"string-key" 42}})))
         (finally
           (sp/close storage)))))
 
   (testing "throws with multiple validation errors combined"
     (let [invalid-storage {:fake "storage"}]
-      ;; Missing storage + path-args not a map
+      ;; Missing storage + call-site-args not a map
       (try
         (exec/create-context {:storage invalid-storage
-                              :path-args "not-a-map"
+                              :call-site-args "not-a-map"
                               :max-depth -1
                               :timeout-ms 10})
         (is false "should have thrown")
@@ -498,20 +438,20 @@
           (let [errors (:validation-errors (ex-data e))]
             (is (> (count errors) 1) "should have multiple errors"))))))
 
-  (testing "accepts path-args with valid UUID keys"
+  (testing "accepts call-site-args with valid UUID keys"
     (let [storage (setup/create-test-storage)
-          path-args {(random-uuid) 42}]
+          call-site-args {(random-uuid) 42}]
       (try
-        (let [ctx (exec/create-context {:storage storage :path-args path-args})]
+        (let [ctx (exec/create-context {:storage storage :call-site-args call-site-args})]
           (is (some? ctx)))
         (finally
           (sp/close storage)))))
 
-  (testing "accepts path-args with valid [UUID UUID] vector keys"
+  (testing "accepts call-site-args with valid [UUID UUID] vector keys"
     (let [storage (setup/create-test-storage)
-          path-args {[(random-uuid) (random-uuid)] 42}]
+          call-site-args {[(random-uuid) (random-uuid)] 42}]
       (try
-        (let [ctx (exec/create-context {:storage storage :path-args path-args})]
+        (let [ctx (exec/create-context {:storage storage :call-site-args call-site-args})]
           (is (some? ctx)))
         (finally
           (sp/close storage))))))
@@ -547,14 +487,8 @@
   (testing "executes function by string name"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 10})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 20})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 20)
           ctx (exec/create-context {:storage storage})
           result (exec/execute-by-name ctx (:name fn-rec) nil)]
       (is (= 30 result))
@@ -646,10 +580,7 @@
           hof-fn (sp/create-entity storage :fn
                                    {:name "my-hof"
                                     :fn-schema-id (:id hof-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id hof-fn)
-                               :arg-schema-id (:id hof-arg)
-                               :value (:id no-args-fn)})
+          _ (setup/create-arg-value-with-binding! storage (:id hof-fn) (:id hof-arg) (:id no-args-fn))
           ctx (exec/create-context {:storage storage})]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -682,10 +613,7 @@
           hof-fn (sp/create-entity storage :fn
                                    {:name "my-hof"
                                     :fn-schema-id (:id hof-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id hof-fn)
-                               :arg-schema-id (:id hof-arg)
-                               :value (:id fn-rec)})
+          _ (setup/create-arg-value-with-binding! storage (:id hof-fn) (:id hof-arg) (:id fn-rec))
           ctx (exec/create-context {:storage storage})]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -715,14 +643,8 @@
   (testing "passes nil named-args to execute"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 5})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 7})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 5)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 7)
           ctx (exec/create-context {:storage storage})
           result (exec/execute-with-named-args ctx (:id fn-rec) nil)]
       (is (= 12 result))
@@ -731,14 +653,8 @@
   (testing "passes empty map named-args to execute"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 3})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 4})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 4)
           ctx (exec/create-context {:storage storage})
           result (exec/execute-with-named-args ctx (:id fn-rec) {})]
       (is (= 7 result))
@@ -770,10 +686,7 @@
                   (let [fn-rec (sp/create-entity storage :fn
                                                  {:name (str "const-" i)
                                                   :fn-schema-id (:id const-schema)})]
-                    (sp/create-entity storage :arg-value
-                                      {:owner-fn-id (:id fn-rec)
-                                       :arg-schema-id (:id const-arg)
-                                       :value i})
+                    (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id const-arg) i)
                     fn-rec)))
           ;; Create context with very small cache (2 entries)
           ctx (exec/create-context {:storage storage
@@ -796,14 +709,8 @@
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Set default values
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 10})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 20})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 20)
           ctx (exec/create-context {:storage storage})
           ;; Override with named args
           result (exec/execute-by-name ctx (:name fn-rec) {:a 100 :b 200})]

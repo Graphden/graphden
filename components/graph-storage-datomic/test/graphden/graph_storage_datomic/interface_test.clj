@@ -10,7 +10,7 @@
   (testing "creates storage with explicit db-name"
     (let [storage (gsd/create-storage {:db-name "test-explicit-db"})]
       (try
-        (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-result-value}
+        (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :fn-result-value :call-site-arg}
                (sp/current-entities storage)))
         (finally
           (sp/close storage)))))
@@ -18,7 +18,7 @@
   (testing "creates storage with graph-data-schema entities"
     (let [storage (gsd/create-storage)]
       (try
-        (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-result-value}
+        (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :fn-result-value :call-site-arg}
                (sp/current-entities storage)))
         (finally
           (sp/close storage)))))
@@ -65,7 +65,6 @@
     (let [storage (gsd/create-storage)
           fields (sp/current-fields storage :arg-value)]
       (try
-        (is (= :ref (:type (get fields :owner-fn-id))))
         (is (= :ref (:type (get fields :arg-schema-id))))
         (is (= :union (:type (get fields :value))))
         (finally

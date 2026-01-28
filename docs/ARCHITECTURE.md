@@ -237,7 +237,7 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | SECONDARY: Results are cached within execution (memoization).    |
 |                                                                  |
 | FREE ARGUMENTS: If fn has unbound args, pass them at runtime     |
-| via path-args: {[fn-result-value-id arg-schema-id] value}        |
+| via call-site-args: {[fn-result-value-id arg-schema-id] value}   |
 +------------------------------------------------------------------+
 
 +------------------------------------------------------------------+
@@ -312,7 +312,7 @@ Arguments are wrapped in Clojure `delay` objects for lazy evaluation. This nativ
 Arguments are resolved in this order (highest priority first):
 
 1. **provided-args** — Explicitly passed at execute time (from HOF callables)
-2. **path-args** — Runtime args from context (for root and nested fns)
+2. **call-site-args** — Runtime args from context for specific call sites
 3. **arg-values** — Stored values from database (resolved-args in graph)
 4. Required arg with no value → error
 5. Optional arg with no value → delay returning nil
@@ -422,8 +422,8 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
    timeout-ms        ; Maximum execution time (default: 30000ms)
    start-time        ; Execution start time
    depth             ; Current recursion depth
-   path-args         ; Runtime args: {arg-schema-id -> value} for root,
-                     ;               {[fn-result-value-id arg-schema-id] -> value} for nested
+   call-site-args    ; Runtime args: {arg-schema-id -> value} for root,
+                     ;               {[fn-result-value-id arg-schema-id] -> value} for call sites
    current-frv-id    ; Current fn-result-value-id (nil for root function)
    result-cache      ; Atom: {fn-result-value-id -> computed-result}
    strict-type-validation?  ; If true (default), throw on unknown types
@@ -439,8 +439,8 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
 2. **`base-fns` registry** — Direct access to implementations without global state
 3. **`storage` reference** — Enables `ExecutionGraph` protocol calls if needed
 4. **`result-cache`** — Shared cache for `fn-result-value` computations within execution
-5. **`path-args`** — Runtime values for free arguments, keyed by arg-schema-id or [frv-id arg-schema-id]
-6. **`current-frv-id`** — Tracks which fn-result-value is being evaluated (for path-args lookup)
+5. **`call-site-args`** — Runtime values for free arguments, keyed by arg-schema-id or [frv-id arg-schema-id]
+6. **`current-frv-id`** — Tracks which fn-result-value is being evaluated (for call-site-args lookup)
 7. **`clock`** — Injectable time source for deterministic timeout testing
 8. **Forward compatibility** — `strict-type-validation?` + circuit breaker for schema migrations
 
@@ -474,39 +474,39 @@ Lazy sequences are a potential DoS vector — an attacker could pass `(range)` (
 
 This ensures errors occur at argument evaluation time, not during consumption by base functions.
 
-### Addressing Free Arguments (path-args)
+### Addressing Free Arguments (call-site-args)
 
 **Problem**: A function may have "free" arguments — arguments without defined values in the database. These must be provided at runtime.
 
-**Solution**: Use `path-args` in the execution context with fixed-length keys.
+**Solution**: Use `call-site-args` in the execution context with fixed-length keys.
 
 **Key format:**
 - **For root function**: `{arg-schema-id -> value}` — direct arg-schema-id lookup
-- **For nested functions via fn-result-value**: `{[fn-result-value-id arg-schema-id] -> value}`
+- **For nested functions via fn-result-value (call site)**: `{[fn-result-value-id arg-schema-id] -> value}`
 
 ```clojure
 ;; Example 1: Root function with free argument
 ;; fn A has free arg with schema-id x-schema-id
 (create-context {:storage s
-                 :path-args {x-schema-id 42}})
+                 :call-site-args {x-schema-id 42}})
 (execute ctx A-id {})
 
-;; Example 2: Nested function via fn-result-value
+;; Example 2: Nested function via fn-result-value (call site)
 ;; fn A uses fn B via fn-result-value (frv-1)
 ;; fn B has free arg with schema-id y-schema-id
 (create-context {:storage s
-                 :path-args {[frv-1-id y-schema-id] 100}})
+                 :call-site-args {[frv-1-id y-schema-id] 100}})
 (execute ctx A-id {})
 
-;; Example 3: Same function used twice with different values
+;; Example 3: Same function used twice with different values at different call sites
 ;; fn A references fn B via two fn-result-values: frv-1 and frv-2
 ;; B has a free arg with schema-id x-schema-id
 (create-context {:storage s
-                 :path-args {[frv-1-id x-schema-id] 100   ; x for first use of B
-                             [frv-2-id x-schema-id] 200}}) ; x for second use of B
+                 :call-site-args {[frv-1-id x-schema-id] 100   ; x for first call site
+                                  [frv-2-id x-schema-id] 200}}) ; x for second call site
 ```
 
-**Important**: Direct fn refs (HOF with type=:fn) cannot receive path-args. They are "black boxes" controlled by map/reduce/filter. Only functions referenced via `fn-result-value` can have their free args set externally.
+**Important**: Direct fn refs (HOF with type=:fn) cannot receive call-site-args. They are "black boxes" controlled by map/reduce/filter. Only functions referenced via `fn-result-value` (call sites) can have their free args set externally.
 
 ### HOF Single-Argument Model
 

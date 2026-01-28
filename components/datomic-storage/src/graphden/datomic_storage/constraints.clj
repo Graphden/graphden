@@ -59,12 +59,15 @@
       (sp/traverse-bfs
         owner-fn-id
         (fn [current-id]
-          ;; Get arg-values for current fn
+          ;; Get arg-values for current fn via fn-arg join
+          ;; fn-arg binds fn-id to arg-value-id
           (let [arg-values (d/q '[:find ?value
-                                  :in $ ?owner-id
+                                  :in $ ?fn-id
                                   :where
-                                  [?e :arg-value/owner-fn-id ?owner-id]
-                                  [?e :arg-value/value ?value]]
+                                  [?fa :fn-arg/fn-id ?fn-id]
+                                  [?fa :fn-arg/arg-value-id ?av-id]
+                                  [?av :arg-value/id ?av-id]
+                                  [?av :arg-value/value ?value]]
                                 db current-id)
                 ;; Extract UUID candidates from arg-values
                 uuid-candidates (->> arg-values

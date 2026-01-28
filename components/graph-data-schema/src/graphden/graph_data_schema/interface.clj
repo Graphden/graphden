@@ -5,7 +5,10 @@
    - fn-schema: function signatures (name, return type)
    - arg-schema: argument definitions for functions
    - fn: actual function instances
-   - arg-value: argument values (literals or references to other functions)"
+   - arg-value: argument values (literals or references) - pure values, no owner
+   - fn-arg: binding from fn to arg-value
+   - fn-result-value: call site reference (function to execute at this point)
+   - call-site-arg: binding from fn-result-value to arg-value (for free args)"
   (:require
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.field-types.interface :as ft]))
@@ -69,8 +72,16 @@
   #uuid "afb02fb7-0174-496b-9b21-a61063de0c04")
 
 
+(def ^:private fn-arg-entity-uuid
+  #uuid "f1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c")
+
+
 (def ^:private fn-result-value-entity-uuid
   #uuid "d4f8a2b1-7c3e-4d9f-a5b6-8e1c2f3d4a5b")
+
+
+(def ^:private call-site-arg-entity-uuid
+  #uuid "a9b8c7d6-e5f4-3a2b-1c0d-9e8f7a6b5c4d")
 
 
 ;; Field UUIDs for :fn-schema entity
@@ -112,17 +123,26 @@
   #uuid "3a685253-07f7-4469-be8b-1a585ba3e7d4")
 
 
-;; Field UUIDs for :arg-value entity
-(def ^:private arg-value-owner-fn-id-field-uuid
-  #uuid "d9331598-36b3-4238-83f8-16558d8b3a7e")
-
-
+;; Field UUIDs for :arg-value entity (no owner - pure value)
 (def ^:private arg-value-arg-schema-id-field-uuid
   #uuid "834336b1-b55c-4557-b580-a62799deb729")
 
 
 (def ^:private arg-value-value-field-uuid
   #uuid "b6780ba3-d050-4162-aba8-5f68ac17bcb8")
+
+
+;; Field UUIDs for :fn-arg entity (binding: fn → arg-value)
+(def ^:private fn-arg-fn-id-field-uuid
+  #uuid "e1f2a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b")
+
+
+(def ^:private fn-arg-arg-schema-id-field-uuid
+  #uuid "f2a3b4c5-d6e7-8f9a-0b1c-2d3e4f5a6b7c")
+
+
+(def ^:private fn-arg-arg-value-id-field-uuid
+  #uuid "a3b4c5d6-e7f8-9a0b-1c2d-3e4f5a6b7c8d")
 
 
 ;; Field UUIDs for :fn-result-value entity
@@ -132,6 +152,19 @@
 
 (def ^:private fn-result-value-name-field-uuid
   #uuid "da238d29-4cd4-4077-9a75-3ad3436b7466")
+
+
+;; Field UUIDs for :call-site-arg entity (binding: fn-result-value → arg-value)
+(def ^:private call-site-arg-fn-result-value-id-field-uuid
+  #uuid "b4c5d6e7-f8a9-0b1c-2d3e-4f5a6b7c8d9e")
+
+
+(def ^:private call-site-arg-arg-schema-id-field-uuid
+  #uuid "c5d6e7f8-a9b0-1c2d-3e4f-5a6b7c8d9e0f")
+
+
+(def ^:private call-site-arg-arg-value-id-field-uuid
+  #uuid "d6e7f8a9-b0c1-2d3e-4f5a-6b7c8d9e0f1a")
 
 
 (defn- value-kind-enum-values
@@ -202,9 +235,30 @@
                                      :type :ref :ref-entity :fn-schema}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
-      ;; fn_result_value: represents a cached computation result of a function
+      ;; arg_value: pure argument values (no owner)
+      ;; value is a union: ref to fn (HOF), ref to fn-result-value (computed), or literal
+      ;; Deduplication: same (arg-schema-id, value) → reuse existing arg-value
+      (ds/add-entity :arg-value arg-value-entity-uuid
+                     {:arg-schema-id {:uuid arg-value-arg-schema-id-field-uuid
+                                      :type :ref :ref-entity :arg-schema}
+                      :value {:uuid arg-value-value-field-uuid
+                              :type :union :variants (value-variants)}})
+      (ds/add-constraint :arg-value {:type :unique :fields [:arg-schema-id :value]})
+
+      ;; fn_arg: binding from fn to arg-value
+      ;; arg-schema-id denormalized for UNIQUE constraint
+      (ds/add-entity :fn-arg fn-arg-entity-uuid
+                     {:fn-id {:uuid fn-arg-fn-id-field-uuid
+                              :type :ref :ref-entity :fn}
+                      :arg-schema-id {:uuid fn-arg-arg-schema-id-field-uuid
+                                      :type :ref :ref-entity :arg-schema}
+                      :arg-value-id {:uuid fn-arg-arg-value-id-field-uuid
+                                     :type :ref :ref-entity :arg-value}})
+      (ds/add-constraint :fn-arg {:type :unique :fields [:fn-id :arg-schema-id]})
+
+      ;; fn_result_value: call site reference (function to execute at this point)
       ;; Multiple arg-values can reference the same fn-result-value to reuse computed value
-      ;; name: unique identifier for caching (same name = same cached result)
+      ;; name: unique identifier for this call site
       (ds/add-entity :fn-result-value fn-result-value-entity-uuid
                      {:fn-id {:uuid fn-result-value-fn-id-field-uuid
                               :type :ref :ref-entity :fn}
@@ -212,16 +266,16 @@
                              :type :text}})
       (ds/add-constraint :fn-result-value {:type :unique :fields [:name]})
 
-      ;; arg_value: argument values for function instances
-      ;; value is a union: ref to fn (HOF), ref to fn-result-value (computed), or literal
-      (ds/add-entity :arg-value arg-value-entity-uuid
-                     {:owner-fn-id {:uuid arg-value-owner-fn-id-field-uuid
-                                    :type :ref :ref-entity :fn}
-                      :arg-schema-id {:uuid arg-value-arg-schema-id-field-uuid
+      ;; call_site_arg: binding from fn-result-value to arg-value (for free args)
+      ;; arg-schema-id denormalized for UNIQUE constraint
+      (ds/add-entity :call-site-arg call-site-arg-entity-uuid
+                     {:fn-result-value-id {:uuid call-site-arg-fn-result-value-id-field-uuid
+                                           :type :ref :ref-entity :fn-result-value}
+                      :arg-schema-id {:uuid call-site-arg-arg-schema-id-field-uuid
                                       :type :ref :ref-entity :arg-schema}
-                      :value {:uuid arg-value-value-field-uuid
-                              :type :union :variants (value-variants)}})
-      (ds/add-constraint :arg-value {:type :unique :fields [:owner-fn-id :arg-schema-id]})))
+                      :arg-value-id {:uuid call-site-arg-arg-value-id-field-uuid
+                                     :type :ref :ref-entity :arg-value}})
+      (ds/add-constraint :call-site-arg {:type :unique :fields [:fn-result-value-id :arg-schema-id]})))
 
 
 (defn build-schema

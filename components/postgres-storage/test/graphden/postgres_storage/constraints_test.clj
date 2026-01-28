@@ -98,14 +98,9 @@
           _ (sp/create-entity storage :fn {:id fn-b-id :name "fn-b" :fn-schema-id fn-schema-id})
           _ (sp/create-entity storage :fn {:id fn-c-id :name "fn-c" :fn-schema-id fn-schema-id})
           ;; Create b -> c reference (b depends on c)
-          _ (sp/create-entity storage :arg-value {:owner-fn-id fn-b-id
-                                                  :arg-schema-id arg-schema-id
-                                                  :value (str fn-c-id)})
+          _ (setup/create-arg-value-with-binding! storage fn-b-id arg-schema-id (str fn-c-id))
           ;; Create c -> a reference (c depends on a)
-          _ (sp/create-entity storage :arg-value {:id #uuid "ffffffff-ffff-ffff-ffff-ffffffffffff"
-                                                  :owner-fn-id fn-c-id
-                                                  :arg-schema-id arg-schema-id
-                                                  :value (str fn-a-id)})]
+          _ (setup/create-arg-value-with-binding! storage fn-c-id arg-schema-id (str fn-a-id))]
       (try
         ;; Try to validate a -> b, which would create cycle: a -> b -> c -> a
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"

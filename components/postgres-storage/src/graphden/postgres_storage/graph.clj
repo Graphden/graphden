@@ -11,12 +11,17 @@
 
 
 (defn- load-arg-values-for-fn
-  "Loads all arg-values for a single fn-id.
-   Returns seq of arg-value records."
+  "Loads all arg-values for a single fn-id via fn_arg join.
+   Returns seq of arg-value records.
+
+   With normalized schema:
+   - fn_arg binds fn_id to arg_value_id
+   - We join fn_arg -> arg_value to get values for this fn"
   [ds fn-id]
-  (let [query (sql/format {:select [:*]
-                           :from [:arg_value]
-                           :where [:= :owner_fn_id fn-id]}
+  (let [query (sql/format {:select [:av.*]
+                           :from [[:fn_arg :fa]]
+                           :join [[:arg_value :av] [:= :av.id :fa.arg_value_id]]
+                           :where [:= :fa.fn_id fn-id]}
                           {:quoted true})]
     (util/with-sql-error-handling "Database error" :load-arg-values {:fn-id fn-id}
                                   (let [rows (jdbc/execute! ds query (util/query-opts))]

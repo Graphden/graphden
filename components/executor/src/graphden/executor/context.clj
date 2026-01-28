@@ -20,8 +20,8 @@
    timeout-ms
    start-time
    depth
-   path-args        ; Map of runtime args: {arg-schema-id -> value} for root fn,
-   ;; {[fn-result-value-id arg-schema-id] -> value} for nested fns
+   call-site-args   ; Map of runtime args: {arg-schema-id -> value} for root fn,
+   ;; {[fn-result-value-id arg-schema-id] -> value} for nested fns (call sites)
    current-frv-id   ; Current fn-result-value-id (nil for root function)
    result-cache     ; Atom: {fn-result-value-id -> computed-value} for caching
    ;; LIFECYCLE: result-cache is created in create-context (atom {}), populated
@@ -113,20 +113,20 @@
   100)
 
 
-(def max-path-args-count
-  "Maximum number of path-args allowed.
-   Prevents potential memory exhaustion from large path-args maps.
+(def max-call-site-args-count
+  "Maximum number of call-site-args allowed.
+   Prevents potential memory exhaustion from large call-site-args maps.
 
-   Why 1000? Typical execution graphs have <100 arguments. 1000 unique path-args
+   Why 1000? Typical execution graphs have <100 arguments. 1000 unique call-site-args
    indicates either a very deep graph or potential abuse. This limit prevents
-   DoS attacks via oversized path-args while accommodating legitimate large graphs."
+   DoS attacks via oversized call-site-args while accommodating legitimate large graphs."
   1000)
 
 
-(def ^:private nested-path-arg-key-length
-  "Length of path-arg key tuple for nested functions.
+(def ^:private nested-call-site-arg-key-length
+  "Length of call-site-arg key tuple for nested functions.
    Format: [fn-result-value-id arg-schema-id]
-   - fn-result-value-id: identifies which fn-result-value references the function
+   - fn-result-value-id: identifies which call site (fn-result-value) references the function
    - arg-schema-id: identifies which argument within that function"
   2)
 
@@ -138,17 +138,17 @@
 
 ;; === Context Validation ===
 
-(defn- valid-path-arg-key?
-  "Returns true if key is a valid path-arg key format.
+(defn- valid-call-site-arg-key?
+  "Returns true if key is a valid call-site-arg key format.
 
    Valid formats:
    - UUID: for root function arguments (looked up by arg-schema-id directly)
-   - [UUID UUID]: for nested function arguments via fn-result-value
+   - [UUID UUID]: for nested function arguments via fn-result-value (call site)
      Format is [fn-result-value-id arg-schema-id]"
   [k]
   (or (uuid? k)
       (and (vector? k)
-           (= nested-path-arg-key-length (count k))
+           (= nested-call-site-arg-key-length (count k))
            (every? uuid? k))))
 
 
@@ -156,7 +156,7 @@
   "Validates context creation options. Throws on invalid options.
    Collects ALL validation errors and reports them together for better UX,
    so users can fix multiple issues in one iteration instead of one at a time."
-  [storage timeout-ms max-depth path-args]
+  [storage timeout-ms max-depth call-site-args]
   (let [errors (cond-> []
                  ;; Required: storage
                  (not storage)
@@ -184,24 +184,24 @@
                         :max-depth max-depth
                         :max-allowed max-depth-limit})
 
-                 ;; Optional path-args type validation
-                 (and (some? path-args) (not (map? path-args)))
-                 (conj {:error "path-args must be a map"
-                        :path-args-type (type path-args)})
+                 ;; Optional call-site-args type validation
+                 (and (some? call-site-args) (not (map? call-site-args)))
+                 (conj {:error "call-site-args must be a map"
+                        :call-site-args-type (type call-site-args)})
 
-                 ;; path-args count validation
-                 (and (map? path-args) (> (count path-args) max-path-args-count))
-                 (conj {:error (str "path-args count exceeds maximum allowed value of " max-path-args-count)
-                        :path-args-count (count path-args)
-                        :max-allowed max-path-args-count}))
-        ;; Validate path-args keys format (collect all invalid keys)
-        invalid-keys (when (map? path-args)
+                 ;; call-site-args count validation
+                 (and (map? call-site-args) (> (count call-site-args) max-call-site-args-count))
+                 (conj {:error (str "call-site-args count exceeds maximum allowed value of " max-call-site-args-count)
+                        :call-site-args-count (count call-site-args)
+                        :max-allowed max-call-site-args-count}))
+        ;; Validate call-site-args keys format (collect all invalid keys)
+        invalid-keys (when (map? call-site-args)
                        (into []
                              (comp (map first)
-                                   (filter (complement valid-path-arg-key?)))
-                             path-args))
+                                   (filter (complement valid-call-site-arg-key?)))
+                             call-site-args))
         errors (if (seq invalid-keys)
-                 (conj errors {:error "path-args keys must be UUID or [UUID UUID] vector"
+                 (conj errors {:error "call-site-args keys must be UUID or [UUID UUID] vector"
                                :invalid-keys invalid-keys})
                  errors)]
     (when (seq errors)
@@ -223,12 +223,12 @@
    - :base-fns - Map of fn-name -> fn for base function lookup (optional, uses default registry if not provided)
    - :max-depth - Maximum recursion depth (default 1000)
    - :timeout-ms - Maximum execution time in ms (default 30000)
-   - :path-args - Map of runtime args (optional):
-                  For root function: {arg-schema-id -> value}
-                  For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
-                  IMPORTANT: path-args can only set args that have NO value in DB.
-                  If arg-value exists in DB, path-arg is ignored (warning logged).
-                  To override DB values, use provided-args in execute call instead.
+   - :call-site-args - Map of runtime args for specific call sites (optional):
+                       For root function: {arg-schema-id -> value}
+                       For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
+                       IMPORTANT: call-site-args can only set args that have NO value in DB.
+                       If arg-value exists in DB, call-site-arg is ignored (warning logged).
+                       To override DB values, use provided-args in execute call instead.
    - :strict-type-validation? - If true (default), throw on unknown types.
                                 If false, warn and accept (forward compatibility mode).
    - :max-unknown-types - Maximum unknown types allowed in forward compat mode (default 10).
@@ -269,21 +269,21 @@
    - storage is required
    - timeout-ms must be at least 50ms (allows for fast test cases)
    - max-depth must be positive and <= 100000
-   - path-args must be a map if provided"
-  [{:keys [storage base-fns max-depth timeout-ms path-args strict-type-validation?
+   - call-site-args must be a map if provided"
+  [{:keys [storage base-fns max-depth timeout-ms call-site-args strict-type-validation?
            max-unknown-types clock cache-warning-threshold cache-max-size]
     :or {max-depth sp/default-max-depth
          timeout-ms default-timeout-ms
-         path-args {}
+         call-site-args {}
          strict-type-validation? true
          max-unknown-types sp/default-max-unknown-types
          cache-warning-threshold default-cache-warning-threshold
          cache-max-size default-cache-max-size}}]
-  (validate-context-options! storage timeout-ms max-depth path-args)
+  (validate-context-options! storage timeout-ms max-depth call-site-args)
   (let [fns (or base-fns (registry/get-default-registry))
         clock-fn (or clock #(System/currentTimeMillis))]
     (->ExecutionContext storage nil fns max-depth timeout-ms (clock-fn) 0
-                        (or path-args {}) nil (atom {}) strict-type-validation?
+                        (or call-site-args {}) nil (atom {}) strict-type-validation?
                         max-unknown-types (atom 0) clock-fn
                         cache-warning-threshold cache-max-size)))
 

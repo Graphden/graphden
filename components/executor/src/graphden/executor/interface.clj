@@ -119,35 +119,35 @@
                    fully even if it exceeds the timeout. For hard timeouts on
                    individual operations, base functions should use their own
                    timeout mechanisms (e.g., future with deref timeout).
-   - :path-args - Map of runtime args for free arguments (optional):
-                  * For root function: {arg-schema-id -> value}
-                  * For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
+   - :call-site-args - Map of runtime args for specific call sites (optional):
+                       * For root function: {arg-schema-id -> value}
+                       * For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
 
-                  OVERRIDE BEHAVIOR (by design):
-                  - Path-args can only set args that have NO value stored in DB
-                  - If an arg-value exists in DB, path-arg is IGNORED (warning logged)
-                  - This prevents accidental override of validated stored data
-                  - To override a stored arg: use `provided-args` in `execute` call,
-                    or update the arg-value in the database first
+                       OVERRIDE BEHAVIOR (by design):
+                       - Call-site-args can only set args that have NO value stored in DB
+                       - If an arg-value exists in DB, call-site-arg is IGNORED (warning logged)
+                       - This prevents accidental override of validated stored data
+                       - To override a stored arg: use `provided-args` in `execute` call,
+                         or update the arg-value in the database first
 
-                  IMPORTANT: Direct fn refs (HOF, type=:fn) cannot receive path-args.
-                  HOF functions are 'black boxes' controlled by map/reduce/etc.
-                  Only functions referenced via fn-result-value can have their
-                  free args set via path-args.
+                       IMPORTANT: Direct fn refs (HOF, type=:fn) cannot receive call-site-args.
+                       HOF functions are 'black boxes' controlled by map/reduce/etc.
+                       Only functions referenced via fn-result-value (call site) can have their
+                       free args set via call-site-args.
 
    Example with custom base-fns:
    (create-context {:storage s
                     :base-fns {:add my-add-fn :if my-if-fn}})
 
-   Example with path-args for root function:
+   Example with call-site-args for root function:
    ;; Root function has free arg with schema-id x-schema-id
    (create-context {:storage s
-                    :path-args {x-schema-id 42}})
+                    :call-site-args {x-schema-id 42}})
 
-   Example with path-args for nested function via fn-result-value:
+   Example with call-site-args for nested function via fn-result-value:
    ;; fn-result-value frv-1 references function B, which has free arg with schema-id y-schema-id
    (create-context {:storage s
-                    :path-args {[frv-1 y-schema-id] 100}})"
+                    :call-site-args {[frv-1 y-schema-id] 100}})"
   [opts]
   (ctx/create-context opts))
 

@@ -268,19 +268,50 @@
                        :fn-schema-id fn-schema-id})))
 
 
+(defn- get-or-create-arg-value!
+  "Gets existing arg-value with same (arg-schema-id, value) or creates new one.
+   Returns arg-value id.
+
+   Deduplication: same (arg-schema-id, value) pair reuses existing arg-value."
+  [storage arg-schema-id resolved-value created-arg-values]
+  (let [cache-key [arg-schema-id resolved-value]]
+    (if-let [existing-id (get @created-arg-values cache-key)]
+      existing-id
+      ;; Check storage for existing arg-value with same (arg-schema-id, value)
+      (let [existing (sp/query-entities storage :arg-value
+                                        {:arg-schema-id arg-schema-id
+                                         :value resolved-value})]
+        (if (seq existing)
+          (let [id (:id (first existing))]
+            (swap! created-arg-values assoc cache-key id)
+            id)
+          ;; Create new arg-value (no owner - pure value)
+          (let [av (sp/create-entity storage :arg-value
+                                     {:arg-schema-id arg-schema-id
+                                      :value resolved-value})]
+            (swap! created-arg-values assoc cache-key (:id av))
+            (:id av)))))))
+
+
 (defn- create-arg-values!
-  "Creates arg-value entities for a fn.
+  "Creates arg-value entities and fn-arg bindings for a fn.
    Resolves references to other fns.
 
    For :fn-name> syntax:
    1. Looks up or creates fn-result-value entity by name
    2. Uses fn-result-value id as the arg-value (executor will execute it)
 
+   With normalized schema:
+   - arg-value is a pure value (no owner-fn-id)
+   - fn-arg binds fn to arg-value
+   - arg-values with same (arg-schema-id, value) are deduplicated
+
    The created-fn-result-values atom tracks fn-result-values created
-   in this sync batch, keyed by their name (keyword)."
-  [storage fn-entity fn-def created-fns created-fn-result-values]
+   in this sync batch, keyed by their name (keyword).
+   The created-arg-values atom tracks arg-values created for deduplication."
+  [storage fn-entity fn-def created-fns created-fn-result-values created-arg-values]
   (let [{:keys [parent args]} fn-def
-        owner-fn-id (:id fn-entity)]
+        fn-id (:id fn-entity)]
     (doseq [[arg-name arg-value] args]
       (let [arg-schema-id (resolve-arg-schema-id parent arg-name)
             ;; Parse the arg value
@@ -296,9 +327,9 @@
                 (if-let [existing-frv-id (get @created-fn-result-values result-name)]
                   existing-frv-id
                   ;; Create new fn-result-value
-                  (let [fn-id (resolve-fn-id storage created-fns fn-name)
+                  (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
                         frv (sp/create-entity storage :fn-result-value
-                                              {:fn-id fn-id
+                                              {:fn-id ref-fn-id
                                                :name result-name-str})]
                     (swap! created-fn-result-values assoc result-name (:id frv))
                     (:id frv))))
@@ -309,11 +340,14 @@
 
               ;; literal value
               :else
-              arg-value)]
-        (sp/create-entity storage :arg-value
-                          {:owner-fn-id owner-fn-id
+              arg-value)
+            ;; Get or create arg-value (deduplicated)
+            arg-value-id (get-or-create-arg-value! storage arg-schema-id resolved-value created-arg-values)]
+        ;; Create fn-arg binding (fn -> arg-value)
+        (sp/create-entity storage :fn-arg
+                          {:fn-id fn-id
                            :arg-schema-id arg-schema-id
-                           :value resolved-value})))))
+                           :arg-value-id arg-value-id})))))
 
 
 (defn sync-fns-to-storage!
@@ -328,7 +362,10 @@
    2. Topologically sorts by dependencies
    3. Warns if original order was wrong
    4. Creates all fn entities
-   5. Creates all arg-value entities (with fn-result-value deduplication by name)
+   5. Creates all arg-value and fn-arg entities
+      - arg-values are deduplicated by (arg-schema-id, value)
+      - fn-arg binds fn to arg-value
+      - fn-result-values are deduplicated by name
 
    Returns map of {fn-name -> fn-id} for created fns.
 
@@ -345,7 +382,9 @@
       ;; 2. Topological sort
       (let [sorted-defs (topological-sort fn-defs)
             ;; Track fn-result-values created during sync for deduplication
-            created-fn-result-values (atom {})]
+            created-fn-result-values (atom {})
+            ;; Track arg-values created during sync for deduplication
+            created-arg-values (atom {})]
         ;; 3. Warn if order was wrong
         (check-order-and-warn fn-defs sorted-defs)
         ;; 4. Create fns in sorted order, tracking created ids
@@ -356,6 +395,7 @@
             (let [fn-def (first remaining)
                   fn-entity (create-fn-entity! storage fn-def)
                   new-created (assoc created-fns (:name fn-def) (:id fn-entity))]
-              ;; 5. Create arg-values for this fn
-              (create-arg-values! storage fn-entity fn-def new-created created-fn-result-values)
+              ;; 5. Create arg-values and fn-arg bindings for this fn
+              (create-arg-values! storage fn-entity fn-def new-created
+                                  created-fn-result-values created-arg-values)
               (recur (rest remaining) new-created))))))))

@@ -60,20 +60,46 @@
               (sp/validate-arg-schema-belongs-to-fn! storage (:id fn-rec) (:id arg-schema))))))))
 
 
+(defn- make-cycle-test-schema
+  "Creates schema with fn, arg-value (pure), and fn-arg for cycle detection tests.
+   Uses normalized schema where arg-value has no owner, and fn-arg binds fn to arg-value."
+  []
+  (-> (mds/create-builder)
+      (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
+                     {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
+      (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
+                     {:arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
+                                      :type :uuid}
+                      :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
+                              :type :uuid}})
+      (ds/add-entity :fn-arg #uuid "40000000-0000-0000-0000-000000000001"
+                     {:fn-id {:uuid #uuid "40000000-0000-0000-0000-000000000002"
+                              :type :ref :ref-entity :fn}
+                      :arg-schema-id {:uuid #uuid "40000000-0000-0000-0000-000000000003"
+                                      :type :uuid}
+                      :arg-value-id {:uuid #uuid "40000000-0000-0000-0000-000000000004"
+                                     :type :ref :ref-entity :arg-value}})
+      ds/build))
+
+
+(defn- create-arg-value-with-binding!
+  "Creates arg-value and fn-arg binding. Returns the arg-value."
+  [storage fn-id value]
+  (let [arg-schema-id (random-uuid)
+        av (sp/create-entity storage :arg-value
+                             {:arg-schema-id arg-schema-id
+                              :value value})]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))
+
+
 (deftest validate-no-dependency-cycle-test
   (testing "passes when no dependency cycle"
     (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
-                                 (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
-                                                {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
-                                                               :type :ref :ref-entity :fn}
-                                                 :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
-                                                                 :type :uuid}
-                                                 :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
-                                                         :type :uuid}})
-                                 ds/build))
+      (sp/initialize storage (make-cycle-test-schema))
       (let [fn-a (sp/create-entity storage :fn {:name "a"})
             fn-b (sp/create-entity storage :fn {:name "b"})]
         ;; a references b, no cycle
@@ -81,49 +107,23 @@
 
   (testing "throws when self-reference creates cycle"
     (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
-                                 (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
-                                                {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
-                                                               :type :ref :ref-entity :fn}
-                                                 :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
-                                                                 :type :uuid}
-                                                 :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
-                                                         :type :uuid}})
-                                 ds/build))
+      (sp/initialize storage (make-cycle-test-schema))
       (let [fn-a (sp/create-entity storage :fn {:name "a"})
-            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-a)
-                                                    :arg-schema-id (random-uuid)
-                                                    :value (:id fn-a)})]
+            _ (create-arg-value-with-binding! storage (:id fn-a) (:id fn-a))]
         ;; a already references itself through arg-value
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"
               (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-a)))))))
 
   (testing "throws when indirect cycle detected"
     (let [storage (mem/create-storage)]
-      (sp/initialize storage (-> (mds/create-builder)
-                                 (ds/add-entity :fn #uuid "20000000-0000-0000-0000-000000000001"
-                                                {:name {:uuid #uuid "20000000-0000-0000-0000-000000000002" :type :text}})
-                                 (ds/add-entity :arg-value #uuid "30000000-0000-0000-0000-000000000001"
-                                                {:owner-fn-id {:uuid #uuid "30000000-0000-0000-0000-000000000002"
-                                                               :type :ref :ref-entity :fn}
-                                                 :arg-schema-id {:uuid #uuid "30000000-0000-0000-0000-000000000003"
-                                                                 :type :uuid}
-                                                 :value {:uuid #uuid "30000000-0000-0000-0000-000000000004"
-                                                         :type :uuid}})
-                                 ds/build))
+      (sp/initialize storage (make-cycle-test-schema))
       (let [fn-a (sp/create-entity storage :fn {:name "a"})
             fn-b (sp/create-entity storage :fn {:name "b"})
             fn-c (sp/create-entity storage :fn {:name "c"})
-            ;; b -> c
-            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-b)
-                                                    :arg-schema-id (random-uuid)
-                                                    :value (:id fn-c)})
-            ;; c -> a
-            _ (sp/create-entity storage :arg-value {:owner-fn-id (:id fn-c)
-                                                    :arg-schema-id (random-uuid)
-                                                    :value (:id fn-a)})]
+            ;; b -> c (via fn-arg -> arg-value)
+            _ (create-arg-value-with-binding! storage (:id fn-b) (:id fn-c))
+            ;; c -> a (via fn-arg -> arg-value)
+            _ (create-arg-value-with-binding! storage (:id fn-c) (:id fn-a))]
         ;; Try to add a -> b, which would create a -> b -> c -> a cycle
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"
               (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b))))))))

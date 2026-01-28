@@ -102,6 +102,29 @@
        :cat-fn-id (:id cat-fn)})))
 
 
+(defn- get-or-create-arg-value!
+  "Gets existing arg-value or creates new one."
+  [storage arg-schema-id value]
+  (if-let [existing (first (sp/query-entities storage :arg-value
+                                              {:arg-schema-id arg-schema-id
+                                               :value value}))]
+    existing
+    (sp/create-entity storage :arg-value
+                      {:arg-schema-id arg-schema-id
+                       :value value})))
+
+
+(defn- create-arg-value-with-binding!
+  "Creates arg-value (or reuses existing) and fn-arg binding."
+  [storage fn-id arg-schema-id value]
+  (let [av (get-or-create-arg-value! storage arg-schema-id value)]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))
+
+
 (defn- create-hof-caller
   "Creates a function that calls a HOF (map/filter/etc) with given fn-id and collection.
    Returns the result of executing the HOF."
@@ -116,15 +139,9 @@
                                  {:name (str "test-" hof-name "-" (random-uuid))
                                   :fn-schema-id (:id hof-schema)})
         ;; Set :f/:pred/:key-fn arg to fn-id
-        _ (sp/create-entity storage :arg-value
-                            {:owner-fn-id (:id hof-fn)
-                             :arg-schema-id (:id f-arg)
-                             :value fn-id})
+        _ (create-arg-value-with-binding! storage (:id hof-fn) (:id f-arg) fn-id)
         ;; Set :coll arg
-        _ (sp/create-entity storage :arg-value
-                            {:owner-fn-id (:id hof-fn)
-                             :arg-schema-id (:id coll-arg)
-                             :value coll})
+        _ (create-arg-value-with-binding! storage (:id hof-fn) (:id coll-arg) coll)
         ctx (exec/create-context {:storage storage})]
     (exec/execute ctx (:id hof-fn) nil)))
 
@@ -140,18 +157,9 @@
         reduce-fn (sp/create-entity storage :fn
                                     {:name (str "test-reduce-" (random-uuid))
                                      :fn-schema-id (:id reduce-schema)})
-        _ (sp/create-entity storage :arg-value
-                            {:owner-fn-id (:id reduce-fn)
-                             :arg-schema-id (:id f-arg)
-                             :value fn-id})
-        _ (sp/create-entity storage :arg-value
-                            {:owner-fn-id (:id reduce-fn)
-                             :arg-schema-id (:id init-arg)
-                             :value init})
-        _ (sp/create-entity storage :arg-value
-                            {:owner-fn-id (:id reduce-fn)
-                             :arg-schema-id (:id coll-arg)
-                             :value coll})
+        _ (create-arg-value-with-binding! storage (:id reduce-fn) (:id f-arg) fn-id)
+        _ (create-arg-value-with-binding! storage (:id reduce-fn) (:id init-arg) init)
+        _ (create-arg-value-with-binding! storage (:id reduce-fn) (:id coll-arg) coll)
         ctx (exec/create-context {:storage storage})]
     (exec/execute ctx (:id reduce-fn) nil)))
 
@@ -166,14 +174,8 @@
         apply-fn (sp/create-entity storage :fn
                                    {:name (str "test-apply-" (random-uuid))
                                     :fn-schema-id (:id apply-schema)})
-        _ (sp/create-entity storage :arg-value
-                            {:owner-fn-id (:id apply-fn)
-                             :arg-schema-id (:id f-arg)
-                             :value fn-id})
-        _ (sp/create-entity storage :arg-value
-                            {:owner-fn-id (:id apply-fn)
-                             :arg-schema-id (:id args-arg)
-                             :value args})
+        _ (create-arg-value-with-binding! storage (:id apply-fn) (:id f-arg) fn-id)
+        _ (create-arg-value-with-binding! storage (:id apply-fn) (:id args-arg) args)
         ctx (exec/create-context {:storage storage})]
     (exec/execute ctx (:id apply-fn) nil)))
 

@@ -119,10 +119,13 @@
               my-fn (sp/create-entity storage :fn
                                       {:name "test-add"
                                        :fn-schema-id (:id add-schema)})
-              _ (sp/create-entity storage :arg-value
-                                  {:owner-fn-id (:id my-fn)
+              av (sp/create-entity storage :arg-value
+                                   {:arg-schema-id (:id nums-arg)
+                                    :value [1 2 3 4 5]})
+              _ (sp/create-entity storage :fn-arg
+                                  {:fn-id (:id my-fn)
                                    :arg-schema-id (:id nums-arg)
-                                   :value [1 2 3 4 5]})
+                                   :arg-value-id (:id av)})
               ctx (exec/create-context {:storage storage})]
           (is (= 15 (exec/execute ctx (:id my-fn) nil))))
         (finally

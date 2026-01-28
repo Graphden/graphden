@@ -58,11 +58,13 @@
    |-----------------|---------------------|------------------------------|-------------------------|
    | :fn             | rebuild own cache   | if fn-schema-id changed:     | delete + invalidate     |
    |                 |                     | invalidate fn + dependents   | all dependents          |
-   | :arg-value      | invalidate owner-fn | invalidate owner-fn          | invalidate owner-fn     |
+   | :fn-arg         | invalidate fn       | invalidate fn                | invalidate fn           |
    |                 | + dependents        | + dependents                 | + dependents            |
+   | :arg-value      | no-op               | find fn-args, invalidate fns | find fn-args, invalidate|
    | :fn-schema      | no-op               | invalidate all fns using it  | invalidate all dependents|
    | :arg-schema     | no-op               | invalidate all fns using it  | invalidate all dependents|
    | :fn-result-value| invalidate deps     | invalidate all dependents    | invalidate all dependents|
+   | :call-site-arg  | invalidate frv deps | invalidate frv dependents    | invalidate frv deps     |
 
    ### Complex Scenarios
 
@@ -263,19 +265,45 @@
       (cache/delete-cache! cache-storage id)
       (invalidate-fn-and-dependents! base-storage cache-storage id))}
 
+   ;; arg-value is now a pure value (no owner-fn-id)
+   ;; To find affected fns, we query fn-arg bindings that reference this arg-value
    :arg-value
    {:on-create
+    (fn [_base-storage _cache-storage _result]
+      ;; arg-value creation alone doesn't affect caches
+      ;; (the fn-arg binding creation will trigger invalidation)
+      nil)
+
+    :on-update
+    (fn [base-storage cache-storage id _data _result _old-record]
+      ;; Find all fn-arg bindings that reference this arg-value and invalidate those fns
+      (let [fn-args (sp/query-entities base-storage :fn-arg {:arg-value-id id})]
+        (doseq [fn-arg fn-args]
+          (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id fn-arg)))))
+
+    :on-delete
+    (fn [base-storage cache-storage id _record]
+      ;; Find all fn-arg bindings that referenced this arg-value
+      ;; Note: fn-arg records should be cascade-deleted first, but we check anyway
+      (let [fn-args (sp/query-entities base-storage :fn-arg {:arg-value-id id})]
+        (doseq [fn-arg fn-args]
+          (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id fn-arg)))))}
+
+   ;; fn-arg is the binding from fn to arg-value
+   ;; When fn-arg changes, invalidate the owning fn
+   :fn-arg
+   {:on-create
     (fn [base-storage cache-storage result]
-      (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result)))
+      (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id result)))
 
     :on-update
     (fn [base-storage cache-storage _id _data result _old-record]
-      (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id result)))
+      (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id result)))
 
     :on-delete
     (fn [base-storage cache-storage _id record]
       (when record
-        (invalidate-fn-and-dependents! base-storage cache-storage (:owner-fn-id record))))}
+        (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id record))))}
 
    :fn-schema
    {:on-update
@@ -306,7 +334,23 @@
 
     :on-delete
     (fn [base-storage cache-storage id _record]
-      (invalidate-fn-result-value-dependents! base-storage cache-storage id))}})
+      (invalidate-fn-result-value-dependents! base-storage cache-storage id))}
+
+   ;; call-site-arg is the binding from fn-result-value to arg-value
+   ;; When call-site-arg changes, invalidate dependents of the fn-result-value
+   :call-site-arg
+   {:on-create
+    (fn [base-storage cache-storage result]
+      (invalidate-fn-result-value-dependents! base-storage cache-storage (:fn-result-value-id result)))
+
+    :on-update
+    (fn [base-storage cache-storage _id _data result _old-record]
+      (invalidate-fn-result-value-dependents! base-storage cache-storage (:fn-result-value-id result)))
+
+    :on-delete
+    (fn [base-storage cache-storage _id record]
+      (when record
+        (invalidate-fn-result-value-dependents! base-storage cache-storage (:fn-result-value-id record))))}})
 
 
 (defn- get-strategy

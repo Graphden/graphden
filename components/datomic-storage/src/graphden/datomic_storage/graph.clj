@@ -11,20 +11,24 @@
 
 
 (defn- load-arg-values-for-fn
-  "Loads all arg-values for a single fn-id.
-   Returns seq of arg-value maps."
+  "Loads all arg-values for a single fn-id via fn-arg join.
+   Returns seq of arg-value maps.
+
+   With normalized schema:
+   - fn-arg binds fn-id to arg-value-id
+   - We join fn-arg -> arg-value to get values for this fn"
   [db fn-id]
-  (let [rows (d/q '[:find ?id ?owner-fn-id ?arg-schema-id ?value
-                    :in $ ?owner-id
+  (let [rows (d/q '[:find ?id ?arg-schema-id ?value
+                    :in $ ?fn-id
                     :where
-                    [?e :arg-value/id ?id]
-                    [?e :arg-value/owner-fn-id ?owner-fn-id]
-                    [?e :arg-value/arg-schema-id ?arg-schema-id]
-                    [?e :arg-value/value ?value]]
+                    [?fa :fn-arg/fn-id ?fn-id]
+                    [?fa :fn-arg/arg-value-id ?av-id]
+                    [?av :arg-value/id ?id]
+                    [?av :arg-value/arg-schema-id ?arg-schema-id]
+                    [?av :arg-value/value ?value]]
                   db fn-id)]
-    (map (fn [[id owner-fn-id arg-schema-id value]]
+    (map (fn [[id arg-schema-id value]]
            {:id id
-            :owner-fn-id owner-fn-id
             :arg-schema-id arg-schema-id
             :value value})
          rows)))

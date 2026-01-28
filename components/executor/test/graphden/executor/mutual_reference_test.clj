@@ -45,24 +45,12 @@
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id fn-schema)})
 
           ;; fn-a's n = 1, partner = fn-b
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-a)
-                               :arg-schema-id (:id arg-n)
-                               :value 1})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-a)
-                               :arg-schema-id (:id arg-partner)
-                               :value (:id fn-b)})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id arg-n) 1)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id arg-partner) (:id fn-b))
 
           ;; fn-b's n = 2, partner = fn-a
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-b)
-                               :arg-schema-id (:id arg-n)
-                               :value 2})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-b)
-                               :arg-schema-id (:id arg-partner)
-                               :value (:id fn-a)})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id arg-n) 2)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id arg-partner) (:id fn-a))
 
           ctx (exec/create-context {:storage storage})]
 
@@ -112,15 +100,9 @@
                                     :fn-schema-id (:id fn-schema)})
 
           ;; n = 42
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-n)
-                               :value 42})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-n) 42)
           ;; Self-reference
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-self)
-                               :value (:id fn-rec)})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-self) (:id fn-rec))
 
           ctx (exec/create-context {:storage storage})]
 

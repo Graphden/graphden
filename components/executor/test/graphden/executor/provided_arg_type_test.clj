@@ -30,10 +30,7 @@
                                    {:name "my-apply"
                                     :fn-schema-id (:id fn-schema)})
           ;; Create dummy arg-value (will be overridden)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id f-arg)
-                               :value (random-uuid)})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id f-arg) (random-uuid))
           ctx (exec/create-context {:storage storage})]
       ;; Provide a string instead of UUID for :fn type
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -58,10 +55,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-ref"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id r-arg)
-                               :value (random-uuid)})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id r-arg) (random-uuid))
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'r': expected ref"
@@ -71,14 +65,8 @@
   (testing "throws when :int type arg is provided with non-integer value"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 1})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 2})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
           ctx (exec/create-context {:storage storage})]
       ;; Provide a string instead of int
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -103,10 +91,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-bool"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id flag-arg)
-                               :value true})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id flag-arg) true)
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'flag': expected bool"
@@ -130,10 +115,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-text"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id msg-arg)
-                               :value "hello"})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id msg-arg) "hello")
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'msg': expected text"
@@ -143,14 +125,8 @@
   (testing "valid types pass without throwing"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 1})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 2})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
           ctx (exec/create-context {:storage storage})
           ;; Provide valid int values
           result (exec/execute ctx (:id fn-rec) {(:id arg-a) 10
@@ -175,10 +151,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-numeric"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id n-arg)
-                               :value 3.14})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id n-arg) 3.14)
           ctx (exec/create-context {:storage storage})
           ;; Numeric allows various number types - should not throw
           result (exec/execute ctx (:id fn-rec) {(:id n-arg) 2.718})]

@@ -41,10 +41,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-union"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id data-arg)
-                               :value {:default "value"}})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) {:default "value"})
           ctx (exec/create-context {:storage storage})]
       ;; Union type should accept any value
       (is (= "a string" (exec/execute ctx (:id fn-rec) {(:id data-arg) "a string"})))
@@ -81,10 +78,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-int"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id n-arg)
-                               :value 42})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id n-arg) 42)
           ctx (exec/create-context {:storage storage})
           ;; Create a very large string (> 100 chars) that will be truncated
           large-string (str/join (repeat 200 "x"))]
@@ -125,18 +119,11 @@
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
           ;; fn-a -> fn-b -> fn-c -> literal (via fn-result-value to trigger execution)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-a)
-                               :arg-schema-id (:id id-arg)
-                               :value (setup/create-fn-result-value! storage (:id fn-b))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-b)
-                               :arg-schema-id (:id id-arg)
-                               :value (setup/create-fn-result-value! storage (:id fn-c))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-c)
-                               :arg-schema-id (:id id-arg)
-                               :value 42})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id id-arg)
+                                                  (setup/create-fn-result-value! storage (:id fn-b)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id id-arg)
+                                                  (setup/create-fn-result-value! storage (:id fn-c)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
           ;; max-depth=3 means: fn-a(0) -> fn-b(1) -> fn-c(2) -> literal
           ;; This should work as 2 < 3
           ctx (exec/create-context {:storage storage :max-depth 3})]
@@ -160,18 +147,11 @@
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-a)
-                               :arg-schema-id (:id id-arg)
-                               :value (setup/create-fn-result-value! storage (:id fn-b))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-b)
-                               :arg-schema-id (:id id-arg)
-                               :value (setup/create-fn-result-value! storage (:id fn-c))})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-c)
-                               :arg-schema-id (:id id-arg)
-                               :value 42})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id id-arg)
+                                                  (setup/create-fn-result-value! storage (:id fn-b)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id id-arg)
+                                                  (setup/create-fn-result-value! storage (:id fn-c)))
+          _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
           ;; max-depth=1: fn-a(0) ok, fn-b(1) ok, fn-c(2) fails because depth=2 > max-depth=1
           ctx (exec/create-context {:storage storage :max-depth 1})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Maximum recursion depth exceeded"
@@ -226,10 +206,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-timestamp"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id ts-arg)
-                               :value (java.time.Instant/now)})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id ts-arg) (java.time.Instant/now))
           ctx (exec/create-context {:storage storage})
           test-ldt (java.time.LocalDateTime/of 2024 1 1 12 0 0)]
       (is (= test-ldt (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-ldt})))
@@ -262,14 +239,8 @@
   (testing "throws when args is not nil or a map"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 1})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 2})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"args must be nil or a map"
@@ -285,14 +256,8 @@
   (testing "accepts nil args"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 1})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 2})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
           ctx (exec/create-context {:storage storage})]
       ;; nil should work fine
       (is (= 3 (exec/execute ctx (:id fn-rec) nil)))
@@ -320,10 +285,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-custom"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id data-arg)
-                               :value "default"})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) "default")
           ctx (exec/create-context {:storage storage})]
       ;; Strict mode: unknown type should throw
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -349,10 +311,7 @@
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-custom"
                                     :fn-schema-id (:id fn-schema)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id data-arg)
-                               :value "default"})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id data-arg) "default")
           ctx (exec/create-context {:storage storage
                                     :strict-type-validation? false})]
       ;; Non-strict mode: unknown type should accept any value

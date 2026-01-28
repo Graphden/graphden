@@ -9,7 +9,7 @@
 (deftest create-storage-test
   (testing "creates storage with graph-data-schema entities"
     (let [storage (gsm/create-storage)]
-      (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-result-value}
+      (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :fn-result-value :call-site-arg}
              (sp/current-entities storage)))
       (sp/close storage)))
 
@@ -46,9 +46,16 @@
   (testing "arg-value has expected fields"
     (let [storage (gsm/create-storage)
           fields (sp/current-fields storage :arg-value)]
-      (is (= :ref (:type (get fields :owner-fn-id))))
       (is (= :ref (:type (get fields :arg-schema-id))))
       (is (= :union (:type (get fields :value))))
+      (sp/close storage)))
+
+  (testing "fn-arg has expected fields (binding from fn to arg-value)"
+    (let [storage (gsm/create-storage)
+          fields (sp/current-fields storage :fn-arg)]
+      (is (= :ref (:type (get fields :fn-id))))
+      (is (= :ref (:type (get fields :arg-schema-id))))
+      (is (= :ref (:type (get fields :arg-value-id))))
       (sp/close storage)))
 
   (testing "schema-metadata is populated"

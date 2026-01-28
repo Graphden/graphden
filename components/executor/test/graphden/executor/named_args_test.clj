@@ -4,7 +4,7 @@
    Covers:
    - execute-with-named-args tests
    - execute-by-name tests
-   - Path-args tests"
+   - Call-site-args tests"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -22,14 +22,8 @@
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Create default arg-values
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 1})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 2})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
           ctx (exec/create-context {:storage storage})]
       ;; Override args by name
       (is (= 30 (exec/execute-with-named-args ctx (:id fn-rec) {:a 10 :b 20})))
@@ -40,14 +34,8 @@
   (testing "executes with nil named-args (uses defaults)"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 5})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 7})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 5)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 7)
           ctx (exec/create-context {:storage storage})]
       (is (= 12 (exec/execute-with-named-args ctx (:id fn-rec) nil)))
       (sp/close storage)))
@@ -55,14 +43,8 @@
   (testing "executes with empty named-args map (uses defaults)"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 3})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 4})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 4)
           ctx (exec/create-context {:storage storage})]
       (is (= 7 (exec/execute-with-named-args ctx (:id fn-rec) {})))
       (sp/close storage)))
@@ -70,14 +52,8 @@
   (testing "throws on invalid named-args type"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 1})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 2})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"named-args must be nil or a map"
@@ -93,14 +69,8 @@
   (testing "throws on unknown arg name"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 1})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 2})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown argument name"
@@ -114,14 +84,8 @@
   (testing "executes function by name"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 10})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 20})
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 20)
           ctx (exec/create-context {:storage storage})]
       ;; Note: the fn entity is named "my-add", not "add"
       (is (= 30 (exec/execute-by-name ctx "my-add" nil)))
@@ -197,51 +161,39 @@
       (sp/close storage))))
 
 
-;; === Path-Args Tests ===
+;; === Call-Site-Args Tests ===
 
-(deftest path-args-basic-test
-  (testing "path-args provides values for free arguments (root function)"
+(deftest call-site-args-basic-test
+  (testing "call-site-args provides values for free arguments (root function)"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Only provide :a, leave :b as free arg
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 10})
-          ;; Use path-args to provide :b by arg-schema-id (root function format)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
+          ;; Use call-site-args to provide :b by arg-schema-id (root function format)
           ctx (exec/create-context {:storage storage
-                                    :path-args {(:id arg-b) 20}})]
+                                    :call-site-args {(:id arg-b) 20}})]
       (is (= 30 (exec/execute ctx (:id fn-rec) nil)))
       (sp/close storage)))
 
-  (testing "path-args ignores override of DB-defined args with warning"
+  (testing "call-site-args ignores override of DB-defined args with warning"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Both args defined in DB
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 10})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-b)
-                               :value 20})
-          ;; Try to override :a via path-args - should be ignored
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 20)
+          ;; Try to override :a via call-site-args - should be ignored
           ctx (exec/create-context {:storage storage
-                                    :path-args {(:id arg-a) 100}})]
-      ;; Should use DB value (10) not path-arg (100)
+                                    :call-site-args {(:id arg-a) 100}})]
+      ;; Should use DB value (10) not call-site-arg (100)
       (is (= 30 (exec/execute ctx (:id fn-rec) nil)))
       (sp/close storage)))
 
-  (testing "path-args throws error for missing required arg"
+  (testing "call-site-args throws error for missing required arg"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)
           ;; Only provide :a, leave :b as free required arg
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id fn-rec)
-                               :arg-schema-id (:id arg-a)
-                               :value 10})
-          ;; Don't provide :b via path-args
+          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
+          ;; Don't provide :b via call-site-args
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Required argument 'b' not provided"
@@ -249,8 +201,8 @@
       (sp/close storage))))
 
 
-(deftest path-args-nested-test
-  (testing "path-args provides values for nested function via fn-result-value"
+(deftest call-site-args-nested-test
+  (testing "call-site-args provides values for nested function via fn-result-value"
     (let [storage (setup/create-test-storage)
           ;; Register identity function
           _ (exec/register-base-fn!
@@ -274,22 +226,19 @@
           inner-fn (sp/create-entity storage :fn
                                      {:name "inner"
                                       :fn-schema-id (:id id-schema)})
-          ;; Create fn-result-value for inner
+          ;; Create fn-result-value for inner (call site)
           inner-frv (sp/create-entity storage :fn-result-value
                                       {:fn-id (:id inner-fn)
                                        :name "inner-frv"})
           ;; outer's x -> fn-result-value (which points to inner)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id outer-fn)
-                               :arg-schema-id (:id id-arg)
-                               :value (:id inner-frv)})
-          ;; inner's x is free - provide via path-args using [frv-id arg-schema-id]
+          _ (setup/create-arg-value-with-binding! storage (:id outer-fn) (:id id-arg) (:id inner-frv))
+          ;; inner's x is free - provide via call-site-args using [frv-id arg-schema-id]
           ctx (exec/create-context {:storage storage
-                                    :path-args {[(:id inner-frv) (:id id-arg)] 42}})]
+                                    :call-site-args {[(:id inner-frv) (:id id-arg)] 42}})]
       (is (= 42 (exec/execute ctx (:id outer-fn) nil)))
       (sp/close storage)))
 
-  (testing "path-args with different fn-result-values for same function"
+  (testing "call-site-args with different fn-result-values for same function"
     (let [storage (setup/create-test-storage)
           ;; A function that takes two args and adds them
           _ (exec/register-base-fn!
@@ -328,7 +277,7 @@
           id-fn (sp/create-entity storage :fn
                                   {:name "id-fn"
                                    :fn-schema-id (:id id-schema)})
-          ;; Create TWO fn-result-values for same id-fn (different computations)
+          ;; Create TWO fn-result-values for same id-fn (different call sites)
           frv-a (sp/create-entity storage :fn-result-value
                                   {:fn-id (:id id-fn)
                                    :name "frv-a"})
@@ -340,19 +289,13 @@
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
           ;; add-fn's a -> frv-a, b -> frv-b
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id add-fn)
-                               :arg-schema-id (:id add-arg-a)
-                               :value (:id frv-a)})
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id add-fn)
-                               :arg-schema-id (:id add-arg-b)
-                               :value (:id frv-b)})
-          ;; Provide different values for id-fn's x via different fn-result-values
+          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id frv-a))
+          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id frv-b))
+          ;; Provide different values for id-fn's x via different call sites
           ;; frv-a's x = 10, frv-b's x = 32
           ctx (exec/create-context {:storage storage
-                                    :path-args {[(:id frv-a) (:id id-arg)] 10
-                                                [(:id frv-b) (:id id-arg)] 32}})]
+                                    :call-site-args {[(:id frv-a) (:id id-arg)] 10
+                                                     [(:id frv-b) (:id id-arg)] 32}})]
       (is (= 42 (exec/execute ctx (:id add-fn) nil)))
       (sp/close storage)))
 
@@ -409,15 +352,9 @@
                                    {:name "map-fn"
                                     :fn-schema-id (:id map-schema)})
           ;; map-fn's f -> rec-fn (direct ref, HOF)
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id map-fn)
-                               :arg-schema-id (:id _map-arg-f)
-                               :value (:id rec-fn)})
+          _ (setup/create-arg-value-with-binding! storage (:id map-fn) (:id _map-arg-f) (:id rec-fn))
           ;; map-fn's coll -> [1 2 3]
-          _ (sp/create-entity storage :arg-value
-                              {:owner-fn-id (:id map-fn)
-                               :arg-schema-id (:id map-arg-coll)
-                               :value [1 2 3]})
+          _ (setup/create-arg-value-with-binding! storage (:id map-fn) (:id map-arg-coll) [1 2 3])
           ctx (exec/create-context {:storage storage})]
       ;; Execute - should map recorder over [1 2 3]
       (is (= [1 2 3] (exec/execute ctx (:id map-fn) nil)))
@@ -426,27 +363,27 @@
       (sp/close storage))))
 
 
-(deftest path-args-context-validation-test
-  (testing "throws when path-args is not a map"
+(deftest call-site-args-context-validation-test
+  (testing "throws when call-site-args is not a map"
     (let [storage (setup/create-test-storage)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"path-args must be a map"
+                            #"call-site-args must be a map"
             (exec/create-context {:storage storage
-                                  :path-args "not a map"})))
+                                  :call-site-args "not a map"})))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"path-args must be a map"
+                            #"call-site-args must be a map"
             (exec/create-context {:storage storage
-                                  :path-args [[:a] 10]})))
+                                  :call-site-args [[:a] 10]})))
       (sp/close storage)))
 
-  (testing "accepts empty path-args map"
+  (testing "accepts empty call-site-args map"
     (let [storage (setup/create-test-storage)
           ctx (exec/create-context {:storage storage
-                                    :path-args {}})]
+                                    :call-site-args {}})]
       (is (some? ctx))
       (sp/close storage)))
 
-  (testing "accepts nil path-args (defaults to empty)"
+  (testing "accepts nil call-site-args (defaults to empty)"
     (let [storage (setup/create-test-storage)
           ctx (exec/create-context {:storage storage})]
       (is (some? ctx))

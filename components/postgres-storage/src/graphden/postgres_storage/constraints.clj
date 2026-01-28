@@ -47,7 +47,7 @@
 
   (collect-dependency-chain
     [_this owner-fn-id]
-    ;; Use recursive CTE to traverse all function dependencies through arg_value.
+    ;; Use recursive CTE to traverse all function dependencies through fn_arg -> arg_value.
     ;; This is used for cycle detection when adding new dependencies.
     ;;
     ;; SQL equivalent:
@@ -55,31 +55,32 @@
     ;;   -- Base case: start with the owner function
     ;;   SELECT <owner-fn-id>::uuid AS fn_id
     ;;   UNION
-    ;;   -- Recursive case: follow references stored in arg_value.value
+    ;;   -- Recursive case: follow references stored in arg_value.value via fn_arg
     ;;   SELECT (av.value #>> '{}')::uuid
     ;;   FROM deps d
-    ;;   JOIN arg_value av ON av.owner_fn_id = d.fn_id
+    ;;   JOIN fn_arg fa ON fa.fn_id = d.fn_id
+    ;;   JOIN arg_value av ON av.id = fa.arg_value_id
     ;;   WHERE av.value #>> '{}' IS NOT NULL
     ;;     AND EXISTS (SELECT 1 FROM fn WHERE id = (av.value #>> '{}')::uuid)
     ;; )
     ;; SELECT DISTINCT fn_id FROM deps
     ;;
     ;; Notes:
-    ;; - UNION (not UNION ALL) is used to prevent infinite loops by
-    ;;   automatically deduplicating already-visited nodes
+    ;; - UNION (not UNION ALL) prevents infinite loops by deduplicating
     ;; - arg_value.value is JSONB; #>> '{}' extracts the root value as text
     ;; - The EXISTS check ensures we only follow valid fn references
-    ;; - The cast to uuid converts the text representation to UUID type
+    ;; - fn_arg joins fn to arg_value (normalized schema)
     (let [query (sql/format
                   {:with-recursive
                    [[:deps
                      {:union
                       [;; Base case: start with owner-fn-id
                        {:select [[[:cast owner-fn-id :uuid] :fn_id]]}
-                       ;; Recursive case: follow fn references in arg_values
+                       ;; Recursive case: join fn_arg -> arg_value to get values
                        {:select [[[:cast [:raw "av.value #>> '{}'"] :uuid]]]
                         :from [[:deps :d]]
-                        :join [[:arg_value :av] [:= :av.owner_fn_id :d.fn_id]]
+                        :join [[:fn_arg :fa] [:= :fa.fn_id :d.fn_id]
+                               [:arg_value :av] [:= :av.id :fa.arg_value_id]]
                         :where [:and
                                 [:is-not [:raw "av.value #>> '{}'"] nil]
                                 [:exists {:select [[[:raw "1"]]]

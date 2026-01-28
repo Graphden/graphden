@@ -22,8 +22,8 @@ Complete graphden stack with in-memory backend. Includes storage, graph schema, 
               {:id (random-uuid)
                :name "my-add"
                :fn-schema-id (:id add-schema)})]
-  ;; Execute with path-args
-  (exec/execute storage (:id my-fn) {nums-arg-schema-id [1 2 3]}))
+  ;; Execute with args
+  (exec/execute ctx (:id my-fn) {nums-arg-schema-id [1 2 3]}))
 ;; => 6
 
 ;; Cleanup

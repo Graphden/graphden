@@ -62,8 +62,7 @@
                                                            :name "x"
                                                            :required true}}
                           :resolved-args {fn-id
-                                          {bad-arg-schema-id {:owner-fn-id fn-id
-                                                              :arg-schema-id bad-arg-schema-id
+                                          {bad-arg-schema-id {:arg-schema-id bad-arg-schema-id
                                                               :value 42}}}})
           ctx (exec/create-context {:storage mock-storage})]
       ;; When we try to provide an arg that will trigger validation on malformed schema

@@ -176,10 +176,13 @@
                                           {:name "main" :fn-schema-id (:id fn-schema)} nil)
               ref-fn (crud/create-entity pool :fn
                                          {:name "ref-target" :fn-schema-id (:id fn-schema)} nil)
-              _ (crud/create-entity pool :arg-value
-                                    {:owner-fn-id (:id main-fn)
+              av (crud/create-entity pool :arg-value
+                                     {:arg-schema-id (:id arg-schema)
+                                      :value (:id ref-fn)} nil)
+              _ (crud/create-entity pool :fn-arg
+                                    {:fn-id (:id main-fn)
                                      :arg-schema-id (:id arg-schema)
-                                     :value (:id ref-fn)} nil)
+                                     :arg-value-id (:id av)} nil)
               ;; Delete the referenced fn directly (bypassing FK check by deleting in correct order)
               _ (jdbc/execute! pool [(str "DELETE FROM \"fn\" WHERE id = '" (:id ref-fn) "'")])
               ;; Now resolve - should handle missing fn gracefully

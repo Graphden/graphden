@@ -22,6 +22,7 @@
 
 (def ^:private graph-schema
   "Schema for graph constraint testing.
+   Uses normalized schema where arg-value has no owner, and fn-arg binds fn to arg-value.
    Note: Uses :uuid type for foreign keys instead of :ref to be compatible
    with all storage backends. Datomic's :db.type/ref requires special handling
    that is not yet implemented consistently across all stores."
@@ -57,15 +58,23 @@
                                      :type :uuid}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
-      ;; arg-value entity
+      ;; arg-value entity (pure value, no owner-fn-id)
       (ds/add-entity :arg-value #uuid "10000000-0000-0000-0000-000000000030"
-                     {:owner-fn-id {:uuid #uuid "10000000-0000-0000-0000-000000000031"
-                                    :type :uuid}
-                      :arg-schema-id {:uuid #uuid "10000000-0000-0000-0000-000000000032"
+                     {:arg-schema-id {:uuid #uuid "10000000-0000-0000-0000-000000000032"
                                       :type :uuid}
                       :value {:uuid #uuid "10000000-0000-0000-0000-000000000033"
                               :type :text}})
-      (ds/add-constraint :arg-value {:type :unique :fields [:owner-fn-id :arg-schema-id]})
+      (ds/add-constraint :arg-value {:type :unique :fields [:arg-schema-id :value]})
+
+      ;; fn-arg entity (binding: fn -> arg-value)
+      (ds/add-entity :fn-arg #uuid "10000000-0000-0000-0000-000000000040"
+                     {:fn-id {:uuid #uuid "10000000-0000-0000-0000-000000000041"
+                              :type :uuid}
+                      :arg-schema-id {:uuid #uuid "10000000-0000-0000-0000-000000000042"
+                                      :type :uuid}
+                      :arg-value-id {:uuid #uuid "10000000-0000-0000-0000-000000000043"
+                                     :type :uuid}})
+      (ds/add-constraint :fn-arg {:type :unique :fields [:fn-id :arg-schema-id]})
       ds/build))
 
 

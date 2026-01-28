@@ -569,9 +569,9 @@
 
 ;; === Execution Limits ===
 
-(def ^:const max-path-args-count
-  "Maximum number of path arguments in a request.
-   Prevents excessive path segments."
+(def ^:const max-call-site-args-count
+  "Maximum number of call-site arguments in a request.
+   Prevents excessive memory usage from large call-site-args maps."
   100)
 
 

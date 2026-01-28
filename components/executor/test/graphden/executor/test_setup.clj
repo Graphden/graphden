@@ -30,6 +30,23 @@
    (:id (sp/create-entity storage :fn-result-value {:fn-id fn-id :name result-name}))))
 
 
+(defn create-arg-value-with-binding!
+  "Creates arg-value and fn-arg binding. Returns the arg-value.
+
+   With normalized schema:
+   - arg-value is a pure value (no owner-fn-id)
+   - fn-arg binds fn to arg-value"
+  [storage fn-id arg-schema-id value]
+  (let [av (sp/create-entity storage :arg-value
+                             {:arg-schema-id arg-schema-id
+                              :value value})]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))
+
+
 (defn setup-add-function!
   "Sets up an 'add' function that adds two numbers.
    Returns {:fn-schema fn-schema :arg-a arg-schema-a :arg-b arg-schema-b :fn fn-rec}"

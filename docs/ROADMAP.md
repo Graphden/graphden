@@ -237,9 +237,9 @@ free-arg-alias:
 ```
 Execute function: calculate-report
 ┌─────────────────────────────────────┐
-│ Sales Region: [_______________]     │  ← alias for frv-1 + region-arg
-│ Start Date:   [_______________]     │  ← alias for frv-2 + date-arg
-│ Currency:     [USD v]               │  ← alias for frv-1 + currency-arg
+│ Sales Region: [_______________]     │  ← alias for cs-1 + region-arg
+│ Start Date:   [_______________]     │  ← alias for cs-2 + date-arg
+│ Currency:     [USD v]               │  ← alias for cs-1 + currency-arg
 └─────────────────────────────────────┘
 ```
 

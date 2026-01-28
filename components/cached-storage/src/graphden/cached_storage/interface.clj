@@ -64,7 +64,7 @@
    | :fn-schema      | no-op               | invalidate all fns using it  | invalidate all dependents|
    | :arg-schema     | no-op               | invalidate all fns using it  | invalidate all dependents|
    | :call-site| invalidate deps     | invalidate all dependents    | invalidate all dependents|
-   | :call-site-arg  | invalidate frv deps | invalidate frv dependents    | invalidate frv deps     |
+   | :call-site-arg  | invalidate cs deps  | invalidate cs dependents     | invalidate cs deps      |
 
    ### Complex Scenarios
 
@@ -132,7 +132,7 @@
    Returns {:fn-ids {fn-id -> count}
             :fn-schema-ids {schema-id -> count}
             :arg-schema-ids {arg-schema-id -> count}
-            :call-site-ids {frv-id -> count}}"
+            :call-site-ids {call-site-id -> count}}"
   [graph]
   {:fn-ids (frequencies (keys (:fns graph)))
    :fn-schema-ids (frequencies (keys (:fn-schemas graph)))

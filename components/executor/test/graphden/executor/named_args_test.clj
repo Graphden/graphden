@@ -227,14 +227,14 @@
                                      {:name "inner"
                                       :fn-schema-id (:id id-schema)})
           ;; Create call-site for inner (call site)
-          inner-frv (sp/create-entity storage :call-site
-                                      {:fn-id (:id inner-fn)
-                                       :name "inner-frv"})
+          inner-call-site (sp/create-entity storage :call-site
+                                            {:fn-id (:id inner-fn)
+                                             :name "inner-call-site"})
           ;; outer's x -> call-site (which points to inner)
-          _ (setup/create-arg-value-with-binding! storage (:id outer-fn) (:id id-arg) (:id inner-frv))
-          ;; inner's x is free - provide via call-site-args using [frv-id arg-schema-id]
+          _ (setup/create-arg-value-with-binding! storage (:id outer-fn) (:id id-arg) (:id inner-call-site))
+          ;; inner's x is free - provide via call-site-args using [call-site-id arg-schema-id]
           ctx (exec/create-context {:storage storage
-                                    :call-site-args {[(:id inner-frv) (:id id-arg)] 42}})]
+                                    :call-site-args {[(:id inner-call-site) (:id id-arg)] 42}})]
       (is (= 42 (exec/execute ctx (:id outer-fn) nil)))
       (sp/close storage)))
 
@@ -278,24 +278,24 @@
                                   {:name "id-fn"
                                    :fn-schema-id (:id id-schema)})
           ;; Create TWO call-sites for same id-fn (different call sites)
-          frv-a (sp/create-entity storage :call-site
-                                  {:fn-id (:id id-fn)
-                                   :name "frv-a"})
-          frv-b (sp/create-entity storage :call-site
-                                  {:fn-id (:id id-fn)
-                                   :name "frv-b"})
+          call-site-a (sp/create-entity storage :call-site
+                                        {:fn-id (:id id-fn)
+                                         :name "call-site-a"})
+          call-site-b (sp/create-entity storage :call-site
+                                        {:fn-id (:id id-fn)
+                                         :name "call-site-b"})
           ;; Create add function instance
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
-          ;; add-fn's a -> frv-a, b -> frv-b
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id frv-a))
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id frv-b))
+          ;; add-fn's a -> call-site-a, b -> call-site-b
+          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id call-site-a))
+          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id call-site-b))
           ;; Provide different values for id-fn's x via different call sites
-          ;; frv-a's x = 10, frv-b's x = 32
+          ;; call-site-a's x = 10, call-site-b's x = 32
           ctx (exec/create-context {:storage storage
-                                    :call-site-args {[(:id frv-a) (:id id-arg)] 10
-                                                     [(:id frv-b) (:id id-arg)] 32}})]
+                                    :call-site-args {[(:id call-site-a) (:id id-arg)] 10
+                                                     [(:id call-site-b) (:id id-arg)] 32}})]
       (is (= 42 (exec/execute ctx (:id add-fn) nil)))
       (sp/close storage)))
 

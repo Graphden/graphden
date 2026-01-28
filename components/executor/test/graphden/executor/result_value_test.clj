@@ -173,7 +173,7 @@
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
           ;; a -> call-site-1 (executes counter)
-          ;; b -> call-site-2 (executes counter again - different frv)
+          ;; b -> call-site-2 (executes counter again - different call-site)
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result-1))
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result-2))
           ctx (exec/create-context {:storage storage})]

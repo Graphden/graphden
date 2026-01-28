@@ -381,10 +381,10 @@
                                    :fn-schema-id (:id id-schema)})
           ;; Create call-site pointing to non-existent fn
           non-existent-fn-id (random-uuid)
-          bad-frv (sp/create-entity storage :call-site
-                                    {:fn-id non-existent-fn-id
-                                     :name "bad-frv"})
-          _ (setup/create-arg-value-with-binding! storage (:id id-fn) (:id id-arg) (:id bad-frv))
+          bad-call-site (sp/create-entity storage :call-site
+                                          {:fn-id non-existent-fn-id
+                                           :name "bad-call-site"})
+          _ (setup/create-arg-value-with-binding! storage (:id id-fn) (:id id-arg) (:id bad-call-site))
           ctx (exec/create-context {:storage storage})]
       ;; When we execute, it will try to resolve the call-site which points
       ;; to a non-existent fn - should throw

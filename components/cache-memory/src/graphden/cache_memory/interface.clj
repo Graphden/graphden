@@ -114,7 +114,7 @@
    ;; {:fn-deps {dep-fn-id -> #{cache-id ...}}
    ;;  :fn-schema-deps {dep-fn-schema-id -> #{cache-id ...}}
    ;;  :arg-schema-deps {dep-arg-schema-id -> #{cache-id ...}}
-   ;;  :call-site-deps {dep-frv-id -> #{cache-id ...}}}
+   ;;  :call-site-deps {dep-call-site-id -> #{cache-id ...}}}
    deps-atom
    ;; ReentrantReadWriteLock for thread safety
    ^ReentrantReadWriteLock rw-lock]

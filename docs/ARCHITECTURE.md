@@ -424,7 +424,7 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
    depth             ; Current recursion depth
    call-site-args    ; Runtime args: {arg-schema-id -> value} for root,
                      ;               {[call-site-id arg-schema-id] -> value} for call sites
-   current-frv-id    ; Current call-site-id (nil for root function)
+   current-call-site-id  ; Current call-site-id (nil for root function)
    result-cache      ; Atom: {call-site-id -> computed-result}
    strict-type-validation?  ; If true (default), throw on unknown types
    max-unknown-types ; Circuit breaker for forward compat mode (default: 10)
@@ -439,8 +439,8 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
 2. **`base-fns` registry** — Direct access to implementations without global state
 3. **`storage` reference** — Enables `ExecutionGraph` protocol calls if needed
 4. **`result-cache`** — Shared cache for `call-site` computations within execution
-5. **`call-site-args`** — Runtime values for free arguments, keyed by arg-schema-id or [frv-id arg-schema-id]
-6. **`current-frv-id`** — Tracks which call-site is being evaluated (for call-site-args lookup)
+5. **`call-site-args`** — Runtime values for free arguments, keyed by arg-schema-id or [call-site-id arg-schema-id]
+6. **`current-call-site-id`** — Tracks which call-site is being evaluated (for call-site-args lookup)
 7. **`clock`** — Injectable time source for deterministic timeout testing
 8. **Forward compatibility** — `strict-type-validation?` + circuit breaker for schema migrations
 
@@ -492,18 +492,18 @@ This ensures errors occur at argument evaluation time, not during consumption by
 (execute ctx A-id {})
 
 ;; Example 2: Nested function via call-site (call site)
-;; fn A uses fn B via call-site (frv-1)
+;; fn A uses fn B via call-site (cs-1)
 ;; fn B has free arg with schema-id y-schema-id
 (create-context {:storage s
-                 :call-site-args {[frv-1-id y-schema-id] 100}})
+                 :call-site-args {[cs-1-id y-schema-id] 100}})
 (execute ctx A-id {})
 
 ;; Example 3: Same function used twice with different values at different call sites
-;; fn A references fn B via two call-sites: frv-1 and frv-2
+;; fn A references fn B via two call-sites: cs-1 and cs-2
 ;; B has a free arg with schema-id x-schema-id
 (create-context {:storage s
-                 :call-site-args {[frv-1-id x-schema-id] 100   ; x for first call site
-                                  [frv-2-id x-schema-id] 200}}) ; x for second call site
+                 :call-site-args {[cs-1-id x-schema-id] 100   ; x for first call site
+                                  [cs-2-id x-schema-id] 200}}) ; x for second call site
 ```
 
 **Important**: Direct fn refs (HOF with type=:fn) cannot receive call-site-args. They are "black boxes" controlled by map/reduce/filter. Only functions referenced via `call-site` (call sites) can have their free args set externally.

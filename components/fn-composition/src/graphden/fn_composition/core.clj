@@ -324,15 +324,15 @@
                     result-name (nth ref-info 2)
                     result-name-str (name result-name)]
                 ;; Check if call-site with this name already exists
-                (if-let [existing-frv-id (get @created-call-sites result-name)]
-                  existing-frv-id
+                (if-let [existing-cs-id (get @created-call-sites result-name)]
+                  existing-cs-id
                   ;; Create new call-site
                   (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                        frv (sp/create-entity storage :call-site
-                                              {:fn-id ref-fn-id
-                                               :name result-name-str})]
-                    (swap! created-call-sites assoc result-name (:id frv))
-                    (:id frv))))
+                        call-site (sp/create-entity storage :call-site
+                                                    {:fn-id ref-fn-id
+                                                     :name result-name-str})]
+                    (swap! created-call-sites assoc result-name (:id call-site))
+                    (:id call-site))))
 
               ;; :fn-name - resolve to fn id (pass as callable)
               (and ref-info (= :fn (second ref-info)))

@@ -6,7 +6,7 @@
    - cached_fn, cached_fn_schema, cached_arg_schema: denormalized graph data
    - cached_merged_arg: precomputed merged argument values
    - cache_fn_dep, cache_fn_schema_dep, cache_arg_schema_dep,
-     cache_fn_result_value_dep: dependency tracking
+     cache_call_site_dep: dependency tracking
 
    Usage:
    (def cache (create-cache datasource))

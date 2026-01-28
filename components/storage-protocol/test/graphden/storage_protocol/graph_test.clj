@@ -196,14 +196,14 @@
         (is (= {} (:call-sites result)))))  ; defaults to empty
 
     (testing "includes call-sites when provided"
-      (let [frv-id (random-uuid)
+      (let [cs-id (random-uuid)
             result (graph/->execution-graph
                      {:fns {fn-id {:id fn-id}}
                       :fn-schemas {fn-schema-id {:id fn-schema-id}}
                       :arg-schemas {}
                       :resolved-args {}
-                      :call-sites {frv-id {:id frv-id :value 42}}})]
-        (is (= {frv-id {:id frv-id :value 42}} (:call-sites result)))))
+                      :call-sites {cs-id {:id cs-id :value 42}}})]
+        (is (= {cs-id {:id cs-id :value 42}} (:call-sites result)))))
 
     (testing "throws when :fns is not a map"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :fns map"

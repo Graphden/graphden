@@ -115,7 +115,7 @@
     ;; We can't easily verify logging, but we ensure no crash at threshold
     (let [fn-id (random-uuid)
           fn-schema-id (random-uuid)
-          frv-id (random-uuid)
+          cs-id (random-uuid)
           _ (exec/register-base-fn! :const-fn (fn [_ _] 42))
           ;; Create mock with call-site to trigger cache storage
           mock-storage (create-mock-storage
@@ -127,7 +127,7 @@
                                                      :returned-type :int}}
                           :arg-schemas {}
                           :resolved-args {}
-                          :call-sites {frv-id {:id frv-id :fn-id fn-id :name "result"}}})
+                          :call-sites {cs-id {:id cs-id :fn-id fn-id :name "result"}}})
           ;; Create context with warning threshold = 2
           ctx (exec/create-context {:storage mock-storage
                                     :cache-warning-threshold 2

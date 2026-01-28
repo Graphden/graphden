@@ -274,18 +274,18 @@ The `call-site` entity enables caching of function results within a single execu
 
 ```clojure
 ;; Create a call-site that points to a function
-(let [frv (sp/create-entity storage :call-site
-                            {:fn-id (:id my-expensive-fn)})]
+(let [call-site (sp/create-entity storage :call-site
+                                  {:fn-id (:id my-expensive-fn)})]
   ;; Multiple arg-values can reference the same call-site
   ;; The function will execute once and the result will be cached
   (sp/create-entity storage :arg-value
                     {:owner-fn-id (:id fn-a)
                      :arg-schema-id (:id arg-schema-x)
-                     :value (:id frv)})
+                     :value (:id call-site)})
   (sp/create-entity storage :arg-value
                     {:owner-fn-id (:id fn-b)
                      :arg-schema-id (:id arg-schema-y)
-                     :value (:id frv)}))
+                     :value (:id call-site)}))
 ```
 
 **When to use:**

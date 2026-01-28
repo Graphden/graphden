@@ -225,7 +225,7 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
          | 1:N
          v
 +------------------------------------------------------------------+
-| fn-result-value (function call site reference)                    |
+| call-site (function call site reference)                    |
 +------------------------------------------------------------------+
 | id: uuid (PK)                                                     |
 | fn-id: ref<fn> - function to execute at this call site           |
@@ -237,7 +237,7 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | SECONDARY: Results are cached within execution (memoization).    |
 |                                                                  |
 | FREE ARGUMENTS: If fn has unbound args, pass them at runtime     |
-| via call-site-args: {[fn-result-value-id arg-schema-id] value}   |
+| via call-site-args: {[call-site-id arg-schema-id] value}   |
 +------------------------------------------------------------------+
 
 +------------------------------------------------------------------+
@@ -246,7 +246,7 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | id: uuid (PK)                                                     |
 | owner-fn-id: ref<fn>                                              |
 | arg-schema-id: ref<arg-schema>                                    |
-| value: union<ref<fn> | ref<fn-result-value> | literal-types...>   |
+| value: union<ref<fn> | ref<call-site> | literal-types...>   |
 | UNIQUE(owner-fn-id, arg-schema-id)                                |
 +------------------------------------------------------------------+
 ```
@@ -302,9 +302,9 @@ Arguments are wrapped in Clojure `delay` objects for lazy evaluation. This nativ
 (wrap-delay-with-context arg-name :fn-ref
   #(execute-internal context uuid-value nil))
 
-;; fn-result-value reference → delay with caching
-(wrap-delay-with-context arg-name :fn-result-value
-  #(execute-fn-result-value context uuid-value))
+;; call-site reference → delay with caching
+(wrap-delay-with-context arg-name :call-site
+  #(execute-call-site context uuid-value))
 ```
 
 ### Argument Resolution Priority
@@ -323,10 +323,10 @@ Arguments are resolved in this order (highest priority first):
 |--------------------|-------------------|----------------|
 | :int, :text, etc. | Literal | `@delay` → literal value |
 | :int, :text, etc. | ref<fn> | `@delay` → executes fn each time forced |
-| :int, :text, etc. | ref<fn-result-value> | `@delay` → executes fn (cached in result-cache) |
+| :int, :text, etc. | ref<call-site> | `@delay` → executes fn (cached in result-cache) |
 | :fn | ref<fn> | `@delay` → fn-id UUID (for HOF) |
 
-### fn-result-value: Call Site Identity
+### call-site: Call Site Identity
 
 **Primary purpose:** Distinguish the same function called at different points in the graph.
 
@@ -334,22 +334,22 @@ Arguments are resolved in this order (highest priority first):
 ;; Problem: How to get time BEFORE and AFTER sleep?
 ;; Both would reference the same fn: current-time
 
-;; Solution: Two fn-result-values pointing to the same fn
-fn-result-value: time-before  → fn: current-time
-fn-result-value: time-after   → fn: current-time
+;; Solution: Two call-sites pointing to the same fn
+call-site: time-before  → fn: current-time
+call-site: time-after   → fn: current-time
 
 fn: my-program
-  t1: ref<fn-result-value:time-before>   ← first call site
-  wait: ref<fn-result-value:sleep-5s>
-  t2: ref<fn-result-value:time-after>    ← second call site (different!)
+  t1: ref<call-site:time-before>   ← first call site
+  wait: ref<call-site:sleep-5s>
+  t2: ref<call-site:time-after>    ← second call site (different!)
 ```
 
 **Secondary purpose:** Results are cached within execution (memoization).
 
 ```
 fn: report
-  sales: ref<fn-result-value:A>     ← A points to calculate-sales
-  summary: ref<fn-result-value:A>   ← Same A, result is cached
+  sales: ref<call-site:A>     ← A points to calculate-sales
+  summary: ref<call-site:A>   ← Same A, result is cached
 
 // calculate-sales executes ONCE, result shared between sales and summary
 ```
@@ -358,10 +358,10 @@ fn: report
 
 ```clojure
 ;; fn-a has free argument arg-schema-a
-;; fn-result-value-a points to fn-a
+;; call-site-a points to fn-a
 
 (execute ctx root-fn-id
-         {[fn-result-value-a-id arg-schema-a-id] 42})
+         {[call-site-a-id arg-schema-a-id] 42})
 ```
 
 **Comparison with direct fn reference:**
@@ -370,7 +370,7 @@ fn: report
 |---------------|----------|
 | `ref<fn>` with type=:fn | HOF: pass function as value, don't execute |
 | `ref<fn>` with other type | Execute function each time arg is forced |
-| `ref<fn-result-value>` | Execute at this call site, cache result, support free args |
+| `ref<call-site>` | Execute at this call site, cache result, support free args |
 
 ### Base Functions and Their Types
 
@@ -423,9 +423,9 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
    start-time        ; Execution start time
    depth             ; Current recursion depth
    call-site-args    ; Runtime args: {arg-schema-id -> value} for root,
-                     ;               {[fn-result-value-id arg-schema-id] -> value} for call sites
-   current-frv-id    ; Current fn-result-value-id (nil for root function)
-   result-cache      ; Atom: {fn-result-value-id -> computed-result}
+                     ;               {[call-site-id arg-schema-id] -> value} for call sites
+   current-frv-id    ; Current call-site-id (nil for root function)
+   result-cache      ; Atom: {call-site-id -> computed-result}
    strict-type-validation?  ; If true (default), throw on unknown types
    max-unknown-types ; Circuit breaker for forward compat mode (default: 10)
    unknown-type-counter     ; Atom: count of unknown types encountered
@@ -438,9 +438,9 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
 1. **`execution-graph` caching** — Graph resolved once at top level, reused for all nested calls
 2. **`base-fns` registry** — Direct access to implementations without global state
 3. **`storage` reference** — Enables `ExecutionGraph` protocol calls if needed
-4. **`result-cache`** — Shared cache for `fn-result-value` computations within execution
+4. **`result-cache`** — Shared cache for `call-site` computations within execution
 5. **`call-site-args`** — Runtime values for free arguments, keyed by arg-schema-id or [frv-id arg-schema-id]
-6. **`current-frv-id`** — Tracks which fn-result-value is being evaluated (for call-site-args lookup)
+6. **`current-frv-id`** — Tracks which call-site is being evaluated (for call-site-args lookup)
 7. **`clock`** — Injectable time source for deterministic timeout testing
 8. **Forward compatibility** — `strict-type-validation?` + circuit breaker for schema migrations
 
@@ -482,7 +482,7 @@ This ensures errors occur at argument evaluation time, not during consumption by
 
 **Key format:**
 - **For root function**: `{arg-schema-id -> value}` — direct arg-schema-id lookup
-- **For nested functions via fn-result-value (call site)**: `{[fn-result-value-id arg-schema-id] -> value}`
+- **For nested functions via call-site (call site)**: `{[call-site-id arg-schema-id] -> value}`
 
 ```clojure
 ;; Example 1: Root function with free argument
@@ -491,22 +491,22 @@ This ensures errors occur at argument evaluation time, not during consumption by
                  :call-site-args {x-schema-id 42}})
 (execute ctx A-id {})
 
-;; Example 2: Nested function via fn-result-value (call site)
-;; fn A uses fn B via fn-result-value (frv-1)
+;; Example 2: Nested function via call-site (call site)
+;; fn A uses fn B via call-site (frv-1)
 ;; fn B has free arg with schema-id y-schema-id
 (create-context {:storage s
                  :call-site-args {[frv-1-id y-schema-id] 100}})
 (execute ctx A-id {})
 
 ;; Example 3: Same function used twice with different values at different call sites
-;; fn A references fn B via two fn-result-values: frv-1 and frv-2
+;; fn A references fn B via two call-sites: frv-1 and frv-2
 ;; B has a free arg with schema-id x-schema-id
 (create-context {:storage s
                  :call-site-args {[frv-1-id x-schema-id] 100   ; x for first call site
                                   [frv-2-id x-schema-id] 200}}) ; x for second call site
 ```
 
-**Important**: Direct fn refs (HOF with type=:fn) cannot receive call-site-args. They are "black boxes" controlled by map/reduce/filter. Only functions referenced via `fn-result-value` (call sites) can have their free args set externally.
+**Important**: Direct fn refs (HOF with type=:fn) cannot receive call-site-args. They are "black boxes" controlled by map/reduce/filter. Only functions referenced via `call-site` (call sites) can have their free args set externally.
 
 ### HOF Single-Argument Model
 
@@ -631,7 +631,7 @@ The `>` suffix determines whether to execute the referenced function:
 | Syntax | Storage Entity | Execution Behavior |
 |--------|---------------|-------------------|
 | `:fn-name` | `ref<fn>` | Pass fn-id (UUID), don't execute |
-| `:fn-name>` | `ref<fn-result-value>` | Execute fn, use result value |
+| `:fn-name>` | `ref<call-site>` | Execute fn, use result value |
 
 **When to use each:**
 
@@ -741,7 +741,7 @@ When executing `:web-server-fn`:
 
 ### Key Insight
 
-The `>` suffix creates a **fn-result-value** entity in storage, which means:
+The `>` suffix creates a **call-site** entity in storage, which means:
 - Result is computed once and cached within execution
 - Multiple references to same `:fn-name>` share the cached result
 - Without `>`, you pass the fn-id for HOF to call multiple times

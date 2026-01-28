@@ -244,7 +244,7 @@
 
   (classify-uuid-refs
     [this uuid-refs]
-    "Classifies UUIDs into fn-refs vs fn-result-value-refs."))
+    "Classifies UUIDs into fn-refs vs call-site-refs."))
 
 
 (defprotocol ExecutionGraphReader
@@ -266,9 +266,9 @@
     [this fn-id]
     "Returns map of resolved arg-values for fn-id.")
 
-  (graph-get-fn-result-value
-    [this frv-id]
-    "Returns fn-result-value record for frv-id."))
+  (graph-get-call-site
+    [this call-site-id]
+    "Returns call-site record for call-site-id."))
 
 
 ;; ============================================================================
@@ -310,8 +310,8 @@
   (graph-get-resolved-args [this fn-id]
     (get (:resolved-args this) fn-id))
 
-  (graph-get-fn-result-value [this frv-id]
-    (get (:fn-result-values this) frv-id)))
+  (graph-get-call-site [this call-site-id]
+    (get (:call-sites this) call-site-id)))
 
 
 ;; ============================================================================
@@ -617,9 +617,9 @@
   graph/get-graph-resolved-args)
 
 
-(def get-graph-fn-result-values
-  "Returns the fn-result-values map from an execution graph."
-  graph/get-graph-fn-result-values)
+(def get-graph-call-sites
+  "Returns the call-sites map from an execution graph."
+  graph/get-graph-call-sites)
 
 
 ;; === Constraint limits re-exports ===

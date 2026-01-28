@@ -49,7 +49,7 @@
                                                   :type :fn
                                                   :required true}}
                      :resolved-args {fn-id {arg-schema-id {:kind :fn-ref :fn-id ref-fn-id}}}
-                     :fn-result-values {}}
+                     :call-sites {}}
               deps {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
           (cache/save-cache! cache fn-id graph deps)
           (let [cached (cache/get-cached-graph cache fn-id)
@@ -95,7 +95,7 @@
                                                   :required false}}
                      ;; No resolved-args for this fn - simulating optional arg not set
                      :resolved-args {}
-                     :fn-result-values {}}
+                     :call-sites {}}
               deps {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
           (cache/save-cache! cache fn-id graph deps)
           (let [cached (cache/get-cached-graph cache fn-id)]
@@ -142,7 +142,7 @@
                                                   :type :jsonb
                                                   :required true}}
                      :resolved-args {fn-id {arg-schema-id complex-value}}
-                     :fn-result-values {}}
+                     :call-sites {}}
               deps {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
           (cache/save-cache! cache fn-id graph deps)
           (let [cached (cache/get-cached-graph cache fn-id)
@@ -197,7 +197,7 @@
                      :resolved-args {fn-id {(:id arg-schema-int) 42
                                             (:id arg-schema-str) "hello"
                                             (:id arg-schema-bool) false}}
-                     :fn-result-values {}}
+                     :call-sites {}}
               deps {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
           (cache/save-cache! cache fn-id graph deps)
           (let [cached (cache/get-cached-graph cache fn-id)]

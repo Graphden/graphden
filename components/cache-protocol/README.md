@@ -23,7 +23,7 @@ Cached graphs have the same structure as `resolve-execution-graph`:
 {:fns {fn-id -> fn-record}
  :fn-schemas {schema-id -> schema-record}
  :arg-schemas {arg-schema-id -> arg-schema-record}
- :fn-result-values {frv-id -> frv-record}
+ :call-sites {cs-id -> cs-record}
  :resolved-args {fn-id -> {arg-schema-id -> resolved-value}}}
 ```
 

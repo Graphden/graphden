@@ -71,7 +71,7 @@
                                               :type :text
                                               :required true}}
                  :resolved-args {fn-id {arg-schema-id "test-value"}}
-                 :fn-result-values {}}
+                 :call-sites {}}
           dependencies {:fn-ids {fn-id 1}
                         :fn-schema-ids {fn-schema-id 1}
                         :arg-schema-ids {arg-schema-id 1}}]
@@ -112,7 +112,7 @@
                                             :returned-type :text}}
                  :arg-schemas {}
                  :resolved-args {}
-                 :fn-result-values {}}
+                 :call-sites {}}
           dependencies {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
       ;; Save and verify
       (cache/save-cache! cache fn-id graph dependencies)
@@ -141,7 +141,7 @@
                                               :returned-type :text}}
                    :arg-schemas {}
                    :resolved-args {}
-                   :fn-result-values {}}
+                   :call-sites {}}
           deps-1 {:fn-ids {shared-dep-fn-id 1}
                   :fn-schema-ids {fn-schema-id 1}
                   :arg-schema-ids {}}
@@ -155,7 +155,7 @@
                                               :returned-type :text}}
                    :arg-schemas {}
                    :resolved-args {}
-                   :fn-result-values {}}
+                   :call-sites {}}
           deps-2 {:fn-ids {shared-dep-fn-id 2}
                   :fn-schema-ids {fn-schema-id 1}
                   :arg-schema-ids {}}]
@@ -187,7 +187,7 @@
                                                :returned-type :text}}
                     :arg-schemas {}
                     :resolved-args {}
-                    :fn-result-values {}}
+                    :call-sites {}}
           graph-v2 {:fns {fn-id {:id fn-id
                                  :name "v2"
                                  :fn-schema-id fn-schema-id}}
@@ -197,7 +197,7 @@
                                                :returned-type :text}}
                     :arg-schemas {}
                     :resolved-args {}
-                    :fn-result-values {}}
+                    :call-sites {}}
           deps {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
       ;; Save v1
       (cache/save-cache! cache fn-id graph-v1 deps)

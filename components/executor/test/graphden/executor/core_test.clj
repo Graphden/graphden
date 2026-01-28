@@ -108,12 +108,12 @@
           _ (setup/create-arg-value-with-binding! storage (:id const-5) (:id const-arg) 5)
           ;; Create add fn-schema
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          ;; Set arg-values to reference const functions via fn-result-value
-          ;; (fn-result-value means: execute the fn and use its result)
+          ;; Set arg-values to reference const functions via call-site
+          ;; (call-site means: execute the fn and use its result)
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a)
-                                                  (setup/create-fn-result-value! storage (:id const-3)))
+                                                  (setup/create-call-site! storage (:id const-3)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b)
-                                                  (setup/create-fn-result-value! storage (:id const-5)))
+                                                  (setup/create-call-site! storage (:id const-5)))
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id fn-rec) {})]
       (is (= 8 result))
@@ -141,11 +141,11 @@
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
-          ;; fn-a -> fn-b -> fn-c -> literal (via fn-result-value to trigger execution)
+          ;; fn-a -> fn-b -> fn-c -> literal (via call-site to trigger execution)
           _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id id-arg)
-                                                  (setup/create-fn-result-value! storage (:id fn-b)))
+                                                  (setup/create-call-site! storage (:id fn-b)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id id-arg)
-                                                  (setup/create-fn-result-value! storage (:id fn-c)))
+                                                  (setup/create-call-site! storage (:id fn-c)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
           ;; Execute with max-depth=1 (should fail at fn-c which runs at depth=2)
           ctx (exec/create-context {:storage storage :max-depth 1})]
@@ -222,9 +222,9 @@
                                  {:name "slow-c"
                                   :fn-schema-id (:id slow-schema)})
           _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id slow-arg)
-                                                  (setup/create-fn-result-value! storage (:id fn-b)))
+                                                  (setup/create-call-site! storage (:id fn-b)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id slow-arg)
-                                                  (setup/create-fn-result-value! storage (:id fn-c)))
+                                                  (setup/create-call-site! storage (:id fn-c)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id slow-arg) 42)
           ;; Create context with 80ms timeout (fn-a sleeps 50ms, fn-b starts, sleeps 50ms = 100ms > 80ms)
           ctx (exec/create-context {:storage storage :timeout-ms 80})]
@@ -359,7 +359,7 @@
 
 
 (deftest fn-not-found-in-graph-test
-  (testing "throws when fn-result-value references non-existent fn during execution"
+  (testing "throws when call-site references non-existent fn during execution"
     (let [storage (setup/create-test-storage)
           ;; Register identity function that forces its arg
           _ (exec/register-base-fn!
@@ -379,14 +379,14 @@
           id-fn (sp/create-entity storage :fn
                                   {:name "my-identity"
                                    :fn-schema-id (:id id-schema)})
-          ;; Create fn-result-value pointing to non-existent fn
+          ;; Create call-site pointing to non-existent fn
           non-existent-fn-id (random-uuid)
-          bad-frv (sp/create-entity storage :fn-result-value
+          bad-frv (sp/create-entity storage :call-site
                                     {:fn-id non-existent-fn-id
                                      :name "bad-frv"})
           _ (setup/create-arg-value-with-binding! storage (:id id-fn) (:id id-arg) (:id bad-frv))
           ctx (exec/create-context {:storage storage})]
-      ;; When we execute, it will try to resolve the fn-result-value which points
+      ;; When we execute, it will try to resolve the call-site which points
       ;; to a non-existent fn - should throw
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found in execution graph"
             (exec/execute ctx (:id id-fn) {})))
@@ -661,7 +661,7 @@
       (sp/close storage))))
 
 
-;; === fn-result-value cache eviction test ===
+;; === call-site cache eviction test ===
 
 (deftest cache-eviction-test
   (testing "evicts oldest entries when cache limit reached"

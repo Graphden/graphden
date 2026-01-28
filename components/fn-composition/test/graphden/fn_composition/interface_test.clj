@@ -135,11 +135,11 @@
   (testing "extracts fn ref from keyword"
     (is (= [:my-fn :fn nil] (#'core/extract-fn-ref :my-fn))))
 
-  (testing "extracts fn-result-value ref from :fn-name> keyword"
-    (is (= [:my-fn :fn-result-value :my-fn] (#'core/extract-fn-ref :my-fn>))))
+  (testing "extracts call-site ref from :fn-name> keyword"
+    (is (= [:my-fn :call-site :my-fn] (#'core/extract-fn-ref :my-fn>))))
 
-  (testing "extracts fn-result-value with custom name"
-    (is (= [:my-fn :fn-result-value :custom] (#'core/extract-fn-ref :my-fn>custom))))
+  (testing "extracts call-site with custom name"
+    (is (= [:my-fn :call-site :custom] (#'core/extract-fn-ref :my-fn>custom))))
 
   (testing "returns nil for literals"
     (is (nil? (#'core/extract-fn-ref 42)))
@@ -147,8 +147,8 @@
     (is (nil? (#'core/extract-fn-ref {:map "value"})))))
 
 
-(deftest fn-result-value-test
-  (testing "creates fn-result-value entities for :fn-name> args"
+(deftest call-site-test
+  (testing "creates call-site entities for :fn-name> args"
     (let [storage (gsm/create-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
@@ -157,7 +157,7 @@
                                        {:assoc-fn {:args {:m :jsonb :k :text :v :any}
                                                    :return-type :jsonb
                                                    :impl (fn [_ _] {})}}])
-          ;; Define fns with fn-result-value ref
+          ;; Define fns with call-site ref
           fn-composition-data [{:name :handler-fn
                                 :parent :const
                                 :args {:x {:status 200}}}
@@ -165,15 +165,15 @@
                                 :parent :assoc-fn
                                 :args {:m {}
                                        :k "handler"
-                                       :v :handler-fn>}}]  ; This should create fn-result-value
+                                       :v :handler-fn>}}]  ; This should create call-site
           result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
-          ;; Verify fn-result-value was created
-          frvs (sp/query-entities storage :fn-result-value {:fn-id handler-fn-id})]
+          ;; Verify call-site was created
+          frvs (sp/query-entities storage :call-site {:fn-id handler-fn-id})]
       (is (= 1 (count frvs)))
       (is (= "handler-fn" (:name (first frvs))))))
 
-  (testing "deduplicates fn-result-values with same name"
+  (testing "deduplicates call-sites with same name"
     (let [storage (gsm/create-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
@@ -197,11 +197,11 @@
                                 :args {:m {} :k "b" :v :handler-fn>}}]  ; Same ref, should reuse
           result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
-          ;; Should have only ONE fn-result-value (deduplicated)
-          frvs (sp/query-entities storage :fn-result-value {:fn-id handler-fn-id})]
+          ;; Should have only ONE call-site (deduplicated)
+          frvs (sp/query-entities storage :call-site {:fn-id handler-fn-id})]
       (is (= 1 (count frvs)))))
 
-  (testing "creates separate fn-result-values with different names"
+  (testing "creates separate call-sites with different names"
     (let [storage (gsm/create-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
@@ -222,8 +222,8 @@
                                 :args {:m {} :k "b" :v :handler-fn>result2}}]
           result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
-          ;; Should have TWO fn-result-values with different names
-          frvs (sp/query-entities storage :fn-result-value {:fn-id handler-fn-id})]
+          ;; Should have TWO call-sites with different names
+          frvs (sp/query-entities storage :call-site {:fn-id handler-fn-id})]
       (is (= 2 (count frvs)))
       (is (= #{"result1" "result2"} (set (map :name frvs)))))))
 
@@ -305,7 +305,7 @@
     (let [fn-def {:name :my-fn
                   :parent :base
                   :args {:a :other-fn   ; fn ref
-                         :b :third-fn>  ; fn-result-value ref
+                         :b :third-fn>  ; call-site ref
                          :c 42}}        ; literal (ignored)
           fn-names #{:other-fn :third-fn}
           deps (#'core/extract-dependencies fn-def fn-names)]
@@ -365,10 +365,10 @@
             (#'core/topological-sort fn-defs))))))
 
 
-;; === fn-result-value edge cases ===
+;; === call-site edge cases ===
 
-(deftest fn-result-value-unresolved-test
-  (testing "throws when fn-result-value references non-existent fn"
+(deftest call-site-unresolved-test
+  (testing "throws when call-site references non-existent fn"
     (let [storage (gsm/create-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:ref :any}

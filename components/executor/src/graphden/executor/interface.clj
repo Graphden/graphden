@@ -79,7 +79,7 @@
 
    ### Cache Behavior
 
-   Result cache stores fn-result-value computations for memoization.
+   Result cache stores call-site computations for memoization.
 
    - **Cache hit**: O(1) lookup, no recomputation
    - **Cache miss**: Execute function, store result
@@ -121,7 +121,7 @@
                    timeout mechanisms (e.g., future with deref timeout).
    - :call-site-args - Map of runtime args for specific call sites (optional):
                        * For root function: {arg-schema-id -> value}
-                       * For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
+                       * For nested fns via call-site: {[call-site-id arg-schema-id] -> value}
 
                        OVERRIDE BEHAVIOR (by design):
                        - Call-site-args can only set args that have NO value stored in DB
@@ -132,7 +132,7 @@
 
                        IMPORTANT: Direct fn refs (HOF, type=:fn) cannot receive call-site-args.
                        HOF functions are 'black boxes' controlled by map/reduce/etc.
-                       Only functions referenced via fn-result-value (call site) can have their
+                       Only functions referenced via call-site can have their
                        free args set via call-site-args.
 
    Example with custom base-fns:
@@ -144,10 +144,10 @@
    (create-context {:storage s
                     :call-site-args {x-schema-id 42}})
 
-   Example with call-site-args for nested function via fn-result-value:
-   ;; fn-result-value frv-1 references function B, which has free arg with schema-id y-schema-id
+   Example with call-site-args for nested function via call-site:
+   ;; call-site cs-1 references function B, which has free arg with schema-id y-schema-id
    (create-context {:storage s
-                    :call-site-args {[frv-1 y-schema-id] 100}})"
+                    :call-site-args {[cs-1 y-schema-id] 100}})"
   [opts]
   (ctx/create-context opts))
 

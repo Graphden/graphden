@@ -27,7 +27,7 @@
   (testing "creates storage with graph-data-schema entities"
     (let [storage (create-test-storage)]
       (try
-        (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :fn-result-value :call-site-arg}
+        (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :call-site :call-site-arg}
                (sp/current-entities storage)))
         (finally
           (sp/close storage)))))

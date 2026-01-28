@@ -52,8 +52,8 @@
     #{})
 
 
-  (find-caches-by-fn-result-value-dep
-    [_ _dep-fn-result-value-id]
+  (find-caches-by-call-site-dep
+    [_ _dep-call-site-id]
     #{}))
 
 
@@ -90,8 +90,8 @@
       (swap! state update-in [:fn-schema-deps schema-id] (fnil conj #{}) fn-id))
     (doseq [[arg-id _] (:arg-schema-ids dependencies)]
       (swap! state update-in [:arg-schema-deps arg-id] (fnil conj #{}) fn-id))
-    (doseq [[frv-id _] (:fn-result-value-ids dependencies)]
-      (swap! state update-in [:fn-result-value-deps frv-id] (fnil conj #{}) fn-id)))
+    (doseq [[cs-id _] (:call-site-ids dependencies)]
+      (swap! state update-in [:call-site-deps cs-id] (fnil conj #{}) fn-id)))
 
 
   (delete-cache!
@@ -117,14 +117,14 @@
     (get-in @state [:arg-schema-deps dep-arg-schema-id] #{}))
 
 
-  (find-caches-by-fn-result-value-dep
-    [_ dep-fn-result-value-id]
-    (get-in @state [:fn-result-value-deps dep-fn-result-value-id] #{})))
+  (find-caches-by-call-site-dep
+    [_ dep-call-site-id]
+    (get-in @state [:call-site-deps dep-call-site-id] #{})))
 
 
 (defn create-mock-cache-with-deps
   []
-  (->MockCacheWithDeps (atom {:graphs {} :deps {} :fn-deps {} :fn-schema-deps {} :arg-schema-deps {} :fn-result-value-deps {}})))
+  (->MockCacheWithDeps (atom {:graphs {} :deps {} :fn-deps {} :fn-schema-deps {} :arg-schema-deps {} :call-site-deps {}})))
 
 
 ;; === Mock Storage ===

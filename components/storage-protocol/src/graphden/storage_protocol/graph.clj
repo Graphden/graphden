@@ -29,7 +29,7 @@
    - :fn-schemas - Map of fn-schema-id -> fn-schema record
    - :arg-schemas - Map of arg-schema-id -> arg-schema record
    - :resolved-args - Map of fn-id -> {arg-schema-id -> arg-value}
-   - :fn-result-values - Map of frv-id -> fn-result-value record
+   - :call-sites - Map of call-site-id -> call-site record
 
    Note: This namespace does NOT define protocols to avoid circular deps.
    The ExecutionGraphReader extension is done in interface.clj."
@@ -182,7 +182,7 @@
 ;; === ExecutionGraphResult record ===
 
 (defrecord ExecutionGraphResult
-  [fns fn-schemas arg-schemas resolved-args fn-result-values arg-schemas-by-fn-schema])
+  [fns fn-schemas arg-schemas resolved-args call-sites arg-schemas-by-fn-schema])
 
 
 (defn- build-arg-schemas-index
@@ -200,8 +200,8 @@
   "Creates an ExecutionGraphResult record from a map.
    Validates that all required keys are present and non-empty.
    Builds arg-schemas-by-fn-schema index for O(1) lookup."
-  [{:keys [fns fn-schemas arg-schemas resolved-args fn-result-values]
-    :or {fn-result-values {}}}]
+  [{:keys [fns fn-schemas arg-schemas resolved-args call-sites]
+    :or {call-sites {}}}]
   (when-not (map? fns)
     (throw (ex-info "ExecutionGraphResult requires :fns map"
                     {:type :invalid-data :received (type fns)})))
@@ -220,7 +220,7 @@
   (when-not (map? resolved-args)
     (throw (ex-info "ExecutionGraphResult requires :resolved-args map"
                     {:type :invalid-data :received (type resolved-args)})))
-  (->ExecutionGraphResult fns fn-schemas arg-schemas resolved-args fn-result-values
+  (->ExecutionGraphResult fns fn-schemas arg-schemas resolved-args call-sites
                           (build-arg-schemas-index arg-schemas)))
 
 
@@ -263,18 +263,18 @@
   (:resolved-args graph))
 
 
-(defn get-graph-fn-result-values
-  "Returns the fn-result-values map from an execution graph.
-   Prefer this over direct :fn-result-values access for forward compatibility."
+(defn get-graph-call-sites
+  "Returns the call-sites map from an execution graph.
+   Prefer this over direct :call-sites access for forward compatibility."
   [graph]
-  (:fn-result-values graph))
+  (:call-sites graph))
 
 
 ;; === Execution Graph Utilities ===
 
 (defn extract-uuid-refs-from-arg-values
   "Extracts UUIDs referenced in arg-values.
-   Returns set of UUIDs that could be fn or fn-result-value references."
+   Returns set of UUIDs that could be fn or call-site references."
   [arg-values-map]
   (->> (vals arg-values-map)
        (map :value)
@@ -302,7 +302,7 @@
    - load-fn-schema-record: (fn [fn-schema-id] -> fn-schema-record)
    - load-arg-schemas-for-fn-schema: (fn [fn-schema-id] -> {arg-schema-id -> record})
    - load-arg-values-for-fn: (fn [fn-id] -> [arg-value-records])
-   - classify-uuid-refs: (fn [uuid-refs] -> {:fn-refs #{} :frvs {}})
+   - classify-uuid-refs: (fn [uuid-refs] -> {:fn-refs #{} :call-sites {}})
    - current-fn-id: UUID of fn to process
    - graph: current accumulated graph state"
   [load-fn-record load-fn-schema-record load-arg-schemas-for-fn-schema
@@ -319,13 +319,13 @@
           arg-values (load-arg-values-for-fn current-fn-id)
           resolved-args (arg-values-to-map arg-values)
           all-refs (extract-uuid-refs-from-arg-values resolved-args)
-          {:keys [fn-refs frvs]} (classify-uuid-refs all-refs)]
+          {:keys [fn-refs call-sites]} (classify-uuid-refs all-refs)]
       {:graph (-> graph
                   (update :fns assoc current-fn-id fn-rec)
                   (update :fn-schemas #(if fn-schema (assoc % fn-schema-id fn-schema) %))
                   (update :arg-schemas merge new-arg-schemas)
                   (update :resolved-args assoc current-fn-id resolved-args)
-                  (update :fn-result-values merge frvs))
+                  (update :call-sites merge call-sites))
        :new-fn-refs fn-refs})
     {:graph graph :new-fn-refs #{}}))
 
@@ -339,7 +339,7 @@
    - load-fn-schema-record: (fn [fn-schema-id] -> fn-schema-record)
    - load-arg-schemas-for-fn-schema: (fn [fn-schema-id] -> {arg-schema-id -> record})
    - load-arg-values-for-fn: (fn [fn-id] -> [arg-value-records])
-   - classify-uuid-refs: (fn [uuid-refs] -> {:fn-refs #{} :frvs {}})
+   - classify-uuid-refs: (fn [uuid-refs] -> {:fn-refs #{} :call-sites {}})
    - fn-id: starting function UUID
 
    Returns ExecutionGraphResult record."
@@ -347,7 +347,7 @@
    load-arg-values-for-fn classify-uuid-refs
    fn-id]
   (let [init-graph {:fns {} :fn-schemas {} :arg-schemas {}
-                    :resolved-args {} :fn-result-values {}}]
+                    :resolved-args {} :call-sites {}}]
     (loop [to-visit #{fn-id}
            visited #{fn-id}
            graph init-graph

@@ -2,13 +2,13 @@
   "ExecutionGraph resolution for memory storage.
 
    Provides functions for:
-   - UUID reference classification (fn vs fn-result-value)
+   - UUID reference classification (fn vs call-site)
    - BFS-based execution graph resolution
 
    Schema (normalized arg-value):
    - arg-value: pure value (arg-schema-id, value) - no owner
    - fn-arg: binding (fn-id, arg-schema-id, arg-value-id)
-   - call-site-arg: binding (fn-result-value-id, arg-schema-id, arg-value-id)
+   - call-site-arg: binding (call-site-id, arg-schema-id, arg-value-id)
 
    To get arg-values for a fn, join fn-arg -> arg-value."
   (:require
@@ -18,27 +18,27 @@
 
 
 (defn- classify-refs
-  "Classifies UUID references as fn refs or fn-result-value refs.
-   Returns {:fn-refs #{...} :frv-refs #{...} :frvs {...}}."
-  [all-refs fns-data fn-result-values-data]
+  "Classifies UUID references as fn refs or call-site refs.
+   Returns {:fn-refs #{...} :call-site-refs #{...} :call-sites {...}}."
+  [all-refs fns-data call-sites-data]
   (reduce (fn [acc ref-id]
             (condp contains? ref-id
               ;; Direct fn reference
               fns-data
               (update acc :fn-refs conj ref-id)
 
-              ;; fn-result-value reference
-              fn-result-values-data
-              (let [frv (get fn-result-values-data ref-id)]
+              ;; call-site reference
+              call-sites-data
+              (let [cs (get call-sites-data ref-id)]
                 (-> acc
-                    (update :frv-refs conj ref-id)
-                    (update :frvs assoc ref-id frv)
-                    ;; Also visit the fn that frv points to
-                    (update :fn-refs conj (:fn-id frv))))
+                    (update :call-site-refs conj ref-id)
+                    (update :call-sites assoc ref-id cs)
+                    ;; Also visit the fn that call-site points to
+                    (update :fn-refs conj (:fn-id cs))))
 
               ;; Unknown UUID - skip
               acc))
-          {:fn-refs #{} :frv-refs #{} :frvs {}}
+          {:fn-refs #{} :call-site-refs #{} :call-sites {}}
           all-refs))
 
 
@@ -55,7 +55,7 @@
    Uses arg-values-by-fn index which is built by joining fn-arg -> arg-value."
   [state indexes current-fn-id graph]
   (let [{:keys [arg-values-by-fn arg-schemas-by-fn-schema
-                fns-data fn-result-values-data]} indexes
+                fns-data call-sites-data]} indexes
         fn-rec (crud/get-record state :fn current-fn-id)]
     (if-not fn-rec
       ;; fn doesn't exist, skip (might be literal value that looks like UUID)
@@ -73,14 +73,14 @@
             resolved-args (arg-values-to-map arg-values)
             ;; Extract and classify UUID refs
             all-refs (sp/extract-uuid-refs-from-arg-values resolved-args)
-            {new-fn-refs :fn-refs new-frvs :frvs}
-            (classify-refs all-refs fns-data fn-result-values-data)]
+            {new-fn-refs :fn-refs new-call-sites :call-sites}
+            (classify-refs all-refs fns-data call-sites-data)]
         {:graph (-> graph
                     (update :fns assoc current-fn-id fn-rec)
                     (update :fn-schemas #(if fn-schema (assoc % fn-schema-id fn-schema) %))
                     (update :arg-schemas merge new-arg-schemas)
                     (update :resolved-args assoc current-fn-id resolved-args)
-                    (update :fn-result-values merge new-frvs))
+                    (update :call-sites merge new-call-sites))
          :new-fn-refs new-fn-refs}))))
 
 
@@ -102,7 +102,7 @@
 
 (defn resolve-execution-graph-impl
   "Resolves execution graph starting from fn-id.
-   Uses BFS to collect all transitively referenced functions and fn-result-values.
+   Uses BFS to collect all transitively referenced functions and call-sites.
    Builds indexes once for O(N+M) performance instead of O(N*M).
    Throws if iteration count exceeds sp/*max-graph-iterations*.
    Optimization: visited check at insertion time, not extraction time.
@@ -117,9 +117,9 @@
         indexes {:arg-values-by-fn (build-arg-values-by-fn-index fn-args-data arg-values-data)
                  :arg-schemas-by-fn-schema (group-by :fn-schema-id (vals (crud/get-entity-data state :arg-schema)))
                  :fns-data (crud/get-entity-data state :fn)
-                 :fn-result-values-data (crud/get-entity-data state :fn-result-value)}
+                 :call-sites-data (crud/get-entity-data state :call-site)}
         init-graph {:fns {} :fn-schemas {} :arg-schemas {}
-                    :resolved-args {} :fn-result-values {}}]
+                    :resolved-args {} :call-sites {}}]
     (loop [to-visit #{fn-id}
            visited #{fn-id}  ; Mark as visited when added to queue
            graph init-graph

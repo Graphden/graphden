@@ -91,7 +91,7 @@
                                                      :returned-type :int}}
                           :arg-schemas {}
                           :resolved-args {}
-                          :fn-result-values {}})
+                          :call-sites {}})
           ;; Create context with very small cache limit
           ctx (exec/create-context {:storage mock-storage
                                     :cache-max-size 5
@@ -117,7 +117,7 @@
           fn-schema-id (random-uuid)
           frv-id (random-uuid)
           _ (exec/register-base-fn! :const-fn (fn [_ _] 42))
-          ;; Create mock with fn-result-value to trigger cache storage
+          ;; Create mock with call-site to trigger cache storage
           mock-storage (create-mock-storage
                          {:fns {fn-id {:id fn-id
                                        :name "const-fn"
@@ -127,7 +127,7 @@
                                                      :returned-type :int}}
                           :arg-schemas {}
                           :resolved-args {}
-                          :fn-result-values {frv-id {:id frv-id :fn-id fn-id :name "result"}}})
+                          :call-sites {frv-id {:id frv-id :fn-id fn-id :name "result"}}})
           ;; Create context with warning threshold = 2
           ctx (exec/create-context {:storage mock-storage
                                     :cache-warning-threshold 2

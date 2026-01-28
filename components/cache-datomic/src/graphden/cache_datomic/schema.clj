@@ -149,16 +149,16 @@
     :db/cardinality :db.cardinality/one
     :db/doc "Reference count"}
 
-   ;; cache-fn-result-value-dep entity
-   {:db/ident (cache-attr :cache-fn-result-value-dep-cache-id)
+   ;; cache-call-site-dep entity
+   {:db/ident (cache-attr :cache-call-site-dep-cache-id)
     :db/valueType :db.type/uuid
     :db/cardinality :db.cardinality/one
     :db/doc "Cache ID"}
-   {:db/ident (cache-attr :cache-fn-result-value-dep-dep-fn-result-value-id)
+   {:db/ident (cache-attr :cache-call-site-dep-dep-call-site-id)
     :db/valueType :db.type/uuid
     :db/cardinality :db.cardinality/one
-    :db/doc "Dependent fn-result-value ID"}
-   {:db/ident (cache-attr :cache-fn-result-value-dep-ref-count)
+    :db/doc "Dependent call-site ID"}
+   {:db/ident (cache-attr :cache-call-site-dep-ref-count)
     :db/valueType :db.type/long
     :db/cardinality :db.cardinality/one
     :db/doc "Reference count"}])

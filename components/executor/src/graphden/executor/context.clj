@@ -21,11 +21,11 @@
    start-time
    depth
    call-site-args   ; Map of runtime args: {arg-schema-id -> value} for root fn,
-   ;; {[fn-result-value-id arg-schema-id] -> value} for nested fns (call sites)
-   current-frv-id   ; Current fn-result-value-id (nil for root function)
-   result-cache     ; Atom: {fn-result-value-id -> computed-value} for caching
+   ;; {[call-site-id arg-schema-id] -> value} for nested fns (call sites)
+   current-call-site-id  ; Current call-site-id (nil for root function)
+   result-cache     ; Atom: {call-site-id -> computed-value} for caching
    ;; LIFECYCLE: result-cache is created in create-context (atom {}), populated
-   ;; during execution by execute-fn-result-value (memoizes fn results), and
+   ;; during execution by execute-call-site (memoizes fn results), and
    ;; becomes eligible for GC when context goes out of scope. Cache is bounded by
    ;; cache-max-size to prevent OOM in unbounded execution graphs.
    strict-type-validation?  ; If true, throw on unknown types; if false, warn and accept
@@ -66,7 +66,7 @@
    Large caches indicate potentially unbounded execution graphs.
    When exceeded, a warning is logged to help diagnose memory issues.
 
-   Why 1000? Typical function graphs have <100 nodes. 1000 unique fn-result-value
+   Why 1000? Typical function graphs have <100 nodes. 1000 unique call-site
    entries indicates either a very deep recursion, infinite loop, or exponential
    branching. This threshold is high enough to avoid false positives in legitimate
    large graphs while catching runaway executions before they exhaust memory."
@@ -76,10 +76,10 @@
 (def default-cache-max-size
   "Default maximum size for result-cache before rejecting new entries.
    Provides hard limit to prevent OOM in unbounded execution graphs.
-   When reached, new fn-result-values will throw an error.
+   When reached, new call-sites will throw an error.
 
    Why 10000? This is 10x the warning threshold. If you've hit 10K unique
-   fn-result-values, the graph is almost certainly unbounded or misconfigured.
+   call-sites, the graph is almost certainly unbounded or misconfigured.
    At ~1KB per cached value average, this limits memory to ~10MB per execution."
   10000)
 
@@ -125,8 +125,8 @@
 
 (def ^:private nested-call-site-arg-key-length
   "Length of call-site-arg key tuple for nested functions.
-   Format: [fn-result-value-id arg-schema-id]
-   - fn-result-value-id: identifies which call site (fn-result-value) references the function
+   Format: [call-site-id arg-schema-id]
+   - call-site-id: identifies which call site references the function
    - arg-schema-id: identifies which argument within that function"
   2)
 
@@ -143,8 +143,8 @@
 
    Valid formats:
    - UUID: for root function arguments (looked up by arg-schema-id directly)
-   - [UUID UUID]: for nested function arguments via fn-result-value (call site)
-     Format is [fn-result-value-id arg-schema-id]"
+   - [UUID UUID]: for nested function arguments via call-site
+     Format is [call-site-id arg-schema-id]"
   [k]
   (or (uuid? k)
       (and (vector? k)
@@ -225,7 +225,7 @@
    - :timeout-ms - Maximum execution time in ms (default 30000)
    - :call-site-args - Map of runtime args for specific call sites (optional):
                        For root function: {arg-schema-id -> value}
-                       For nested fns via fn-result-value: {[fn-result-value-id arg-schema-id] -> value}
+                       For nested fns via call-site: {[call-site-id arg-schema-id] -> value}
                        IMPORTANT: call-site-args can only set args that have NO value in DB.
                        If arg-value exists in DB, call-site-arg is ignored (warning logged).
                        To override DB values, use provided-args in execute call instead.
@@ -299,7 +299,7 @@
   "Clears the result cache in the given context.
    Useful for long-running applications that reuse contexts across multiple executions.
 
-   The result cache stores computed fn-result-values to avoid recomputation within
+   The result cache stores computed call-site results to avoid recomputation within
    a single execution. When reusing a context across multiple independent executions,
    call this between executions to:
    - Free memory from previous execution results

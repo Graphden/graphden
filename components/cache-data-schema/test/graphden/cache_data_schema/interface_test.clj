@@ -16,7 +16,7 @@
         (is (some #{:fn-schema} (ds/entities schema)))
         (is (some #{:arg-schema} (ds/entities schema)))
         (is (some #{:arg-value} (ds/entities schema)))
-        (is (some #{:fn-result-value} (ds/entities schema))))
+        (is (some #{:call-site} (ds/entities schema))))
 
       (testing "includes cache entities"
         (is (some #{:cached-fn} (ds/entities schema)))
@@ -26,7 +26,7 @@
         (is (some #{:cache-fn-dep} (ds/entities schema)))
         (is (some #{:cache-fn-schema-dep} (ds/entities schema)))
         (is (some #{:cache-arg-schema-dep} (ds/entities schema)))
-        (is (some #{:cache-fn-result-value-dep} (ds/entities schema))))
+        (is (some #{:cache-call-site-dep} (ds/entities schema))))
 
       (testing "includes value-kind enum"
         (is (contains? (ds/enums schema) :value-kind))))))
@@ -76,10 +76,10 @@
           (is (= :int (:type (:ref-count fields))))
           (is (= :ref (:type (:dep-arg-schema-id fields))))))
 
-      (testing "cache-fn-result-value-dep"
-        (let [fields (ds/entity-fields schema :cache-fn-result-value-dep)]
+      (testing "cache-call-site-dep"
+        (let [fields (ds/entity-fields schema :cache-call-site-dep)]
           (is (= :int (:type (:ref-count fields))))
-          (is (= :ref (:type (:dep-fn-result-value-id fields)))))))))
+          (is (= :ref (:type (:dep-call-site-id fields)))))))))
 
 
 (deftest cache-entities-constant-test
@@ -91,7 +91,7 @@
              :cache-fn-dep
              :cache-fn-schema-dep
              :cache-arg-schema-dep
-             :cache-fn-result-value-dep}
+             :cache-call-site-dep}
            cds/cache-entities))))
 
 

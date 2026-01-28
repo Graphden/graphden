@@ -40,7 +40,7 @@ Complete graphden stack with PostgreSQL backend. Includes storage, graph schema,
 ## What's Included
 
 1. **PostgreSQL storage** - Production-ready implementation with connection pooling
-2. **Graph schema** - Tables for fn, fn-schema, arg-schema, arg-value, fn-result-value
+2. **Graph schema** - Tables for fn, fn-schema, arg-schema, arg-value, call-site
 3. **Base functions** - 50+ functions registered (same as memory version)
 
 ## When to Use

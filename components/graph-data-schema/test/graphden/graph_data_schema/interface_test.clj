@@ -14,7 +14,7 @@
 
 (deftest entities-test
   (testing "schema contains all expected entities"
-    (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :fn-result-value :call-site-arg}
+    (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :call-site :call-site-arg}
            (set (ds/entities schema))))))
 
 
@@ -49,12 +49,12 @@
   (testing "arg-value has union type for value"
     (let [fields (ds/entity-fields schema :arg-value)]
       (is (= :union (get-in fields [:value :type])))
-      ;; Variants: 2 refs (fn, fn-result-value) + :any + :fn + all literal types = 4 + count(supported-types)
+      ;; Variants: 2 refs (fn, call-site) + :any + :fn + all literal types = 4 + count(supported-types)
       (is (= (+ 4 (count ft/supported-types))
              (count (get-in fields [:value :variants]))))))
 
-  (testing "fn-result-value has expected fields"
-    (let [fields (ds/entity-fields schema :fn-result-value)]
+  (testing "call-site has expected fields"
+    (let [fields (ds/entity-fields schema :call-site)]
       (is (= :ref (get-in fields [:fn-id :type])))
       (is (= :fn (get-in fields [:fn-id :ref-entity])))))
 
@@ -69,8 +69,8 @@
 
   (testing "call-site-arg has expected fields"
     (let [fields (ds/entity-fields schema :call-site-arg)]
-      (is (= :ref (get-in fields [:fn-result-value-id :type])))
-      (is (= :fn-result-value (get-in fields [:fn-result-value-id :ref-entity])))
+      (is (= :ref (get-in fields [:call-site-id :type])))
+      (is (= :call-site (get-in fields [:call-site-id :ref-entity])))
       (is (= :ref (get-in fields [:arg-schema-id :type])))
       (is (= :arg-schema (get-in fields [:arg-schema-id :ref-entity])))
       (is (= :ref (get-in fields [:arg-value-id :type])))
@@ -113,7 +113,7 @@
   (testing "valid call-site-arg binding"
     (is (nil? (ds/validate-entity schema :call-site-arg
                                   {:id (random-uuid)
-                                   :fn-result-value-id (random-uuid)
+                                   :call-site-id (random-uuid)
                                    :arg-schema-id (random-uuid)
                                    :arg-value-id (random-uuid)}))))
 

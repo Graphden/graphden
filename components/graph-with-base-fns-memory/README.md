@@ -33,7 +33,7 @@ Complete graphden stack with in-memory backend. Includes storage, graph schema, 
 ## What's Included
 
 1. **Memory storage** - In-memory implementation
-2. **Graph schema** - fn, fn-schema, arg-schema, arg-value, fn-result-value entities
+2. **Graph schema** - fn, fn-schema, arg-schema, arg-value, call-site entities
 3. **Base functions** - 50+ functions registered:
    - Arithmetic: add, sub, mul, div, mod, inc, dec
    - Comparison: eq, neq, lt, lte, gt, gte

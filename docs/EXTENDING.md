@@ -159,17 +159,17 @@ Functions may have "free" arguments — arguments without defined values in the 
   {:storage storage
    :call-site-args {arg-schema-id 42}})
 
-;; For nested function via fn-result-value (call site)
+;; For nested function via call-site (call site)
 (exec/create-context
   {:storage storage
-   :call-site-args {[fn-result-value-id arg-schema-id] 100}})
+   :call-site-args {[call-site-id arg-schema-id] 100}})
 ```
 
 **Key format:**
 - **Root function**: `{arg-schema-id -> value}` — direct lookup by arg-schema-id
-- **Nested function (call site)**: `{[fn-result-value-id arg-schema-id] -> value}` — lookup by fn-result-value + arg-schema-id
+- **Nested function (call site)**: `{[call-site-id arg-schema-id] -> value}` — lookup by call-site + arg-schema-id
 
-**Note:** Direct fn refs (HOF with type=:fn) cannot receive call-site-args. Only functions referenced via `fn-result-value` (call sites) can have their free args set externally.
+**Note:** Direct fn refs (HOF with type=:fn) cannot receive call-site-args. Only functions referenced via `call-site` (call sites) can have their free args set externally.
 
 ### Error Handling
 
@@ -265,18 +265,18 @@ The default graph schema includes these entities:
 | `fn-schema` | id, name, returned-type | Function type definition |
 | `arg-schema` | id, fn-schema-id, name, type, required | Argument definition |
 | `fn` | id, name, fn-schema-id | Function instance |
-| `fn-result-value` | id, fn-id | Cached computation reference |
+| `call-site` | id, fn-id | Cached computation reference |
 | `arg-value` | id, owner-fn-id, arg-schema-id, value | Argument value |
 
-### fn-result-value Entity
+### call-site Entity
 
-The `fn-result-value` entity enables caching of function results within a single execution:
+The `call-site` entity enables caching of function results within a single execution:
 
 ```clojure
-;; Create a fn-result-value that points to a function
-(let [frv (sp/create-entity storage :fn-result-value
+;; Create a call-site that points to a function
+(let [frv (sp/create-entity storage :call-site
                             {:fn-id (:id my-expensive-fn)})]
-  ;; Multiple arg-values can reference the same fn-result-value
+  ;; Multiple arg-values can reference the same call-site
   ;; The function will execute once and the result will be cached
   (sp/create-entity storage :arg-value
                     {:owner-fn-id (:id fn-a)

@@ -59,7 +59,7 @@
 
 
 (defn make-graph-schema
-  "Creates schema with fn-schema, arg-schema, fn, fn-result-value, arg-value, and fn-arg entities.
+  "Creates schema with fn-schema, arg-schema, fn, call-site, arg-value, and fn-arg entities.
    This is the standard graph schema used by executor and constraint tests.
    Uses normalized schema where arg-value has no owner, and fn-arg binds fn to arg-value."
   []
@@ -83,7 +83,7 @@
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
                                      :type :ref :ref-entity :fn-schema}})
-      (ds/add-entity :fn-result-value #uuid "00000000-0000-0000-0005-000000000001"
+      (ds/add-entity :call-site #uuid "00000000-0000-0000-0005-000000000001"
                      {:fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000002"
                               :type :ref :ref-entity :fn}})
       ;; arg-value: pure value (no owner-fn-id)

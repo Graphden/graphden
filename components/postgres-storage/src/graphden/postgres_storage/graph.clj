@@ -29,20 +29,20 @@
 
 
 (defn- classify-and-load-refs
-  "Classifies UUID references and loads fn-result-values in a single query.
-   Returns {:fn-ids #{...} :frv-ids #{...} :fn-result-values {...}}.
+  "Classifies UUID references and loads call-sites in a single query.
+   Returns {:fn-ids #{...} :call-site-ids #{...} :call-sites {...}}.
 
-   Uses UNION ALL to classify refs and load frv data in one round-trip."
+   Uses UNION ALL to classify refs and load call-site data in one round-trip."
   [ds uuid-candidates]
   (if (empty? uuid-candidates)
-    {:fn-ids #{} :frv-ids #{} :fn-result-values {}}
+    {:fn-ids #{} :call-site-ids #{} :call-sites {}}
     (let [uuids-vec (vec uuid-candidates)
-          ;; Combined query: classify refs AND load frv data in one query
-          ;; Returns rows with entity_type = 'fn' or 'frv'
+          ;; Combined query: classify refs AND load call-site data in one query
+          ;; Returns rows with entity_type = 'fn' or 'cs'
           combined-query
           [(str "SELECT 'fn' as entity_type, id, NULL::uuid as fn_id FROM fn WHERE id = ANY(?)"
                 " UNION ALL "
-                "SELECT 'frv' as entity_type, id, fn_id FROM fn_result_value WHERE id = ANY(?)")
+                "SELECT 'cs' as entity_type, id, fn_id FROM call_site WHERE id = ANY(?)")
            (into-array java.util.UUID uuids-vec)
            (into-array java.util.UUID uuids-vec)]]
       (util/with-sql-error-handling "Database error" :classify-and-load-refs {:candidate-count (count uuid-candidates)}
@@ -51,12 +51,12 @@
                                         (fn [acc row]
                                           (case (:entity_type row)
                                             "fn" (update acc :fn-ids conj (:id row))
-                                            "frv" (-> acc
-                                                      (update :frv-ids conj (:id row))
-                                                      (assoc-in [:fn-result-values (:id row)]
-                                                                {:id (:id row) :fn-id (:fn_id row)}))
+                                            "cs" (-> acc
+                                                     (update :call-site-ids conj (:id row))
+                                                     (assoc-in [:call-sites (:id row)]
+                                                               {:id (:id row) :fn-id (:fn_id row)}))
                                             acc))
-                                        {:fn-ids #{} :frv-ids #{} :fn-result-values {}}
+                                        {:fn-ids #{} :call-site-ids #{} :call-sites {}}
                                         rows))))))
 
 
@@ -115,13 +115,13 @@
 
 (defn resolve-execution-graph
   "Resolves complete execution graph for a function.
-   Uses batched BFS to collect all transitively referenced functions and fn-result-values.
+   Uses batched BFS to collect all transitively referenced functions and call-sites.
    Throws if iteration count exceeds sp/*max-graph-iterations*.
 
    This implementation uses batch queries to minimize database round-trips:
    1. Process pending fn-ids in batches
    2. Load arg-values for each fn directly
-   3. Extract fn-refs and fn-result-value refs, continue until graph is complete
+   3. Extract fn-refs and call-site refs, continue until graph is complete
    4. Final batch load of all fns, fn-schemas, arg-schemas"
   [ds fn-id]
   (let [root-fn (read-entity ds :fn fn-id)]
@@ -129,12 +129,12 @@
       (throw (ex-info "Function not found"
                       {:type :not-found
                        :fn-id fn-id})))
-    ;; Phase 1: Discover all fn-ids and fn-result-values in the graph using batched BFS
+    ;; Phase 1: Discover all fn-ids and call-sites in the graph using batched BFS
     (loop [to-visit #{fn-id}
            visited #{}
-           ;; Accumulate: fn-id -> resolved-args, frv-id -> frv
+           ;; Accumulate: fn-id -> resolved-args, call-site-id -> call-site
            all-resolved-args {}
-           all-fn-result-values {}
+           all-call-sites {}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
@@ -155,7 +155,7 @@
              :fn-schemas fn-schemas
              :arg-schemas arg-schemas
              :resolved-args all-resolved-args
-             :fn-result-values all-fn-result-values}))
+             :call-sites all-call-sites}))
         ;; Process batch of pending fn-ids
         (let [batch (vec to-visit)
               new-visited (into visited batch)
@@ -171,15 +171,15 @@
                                       (set))
               ;; Remove already visited
               new-candidates (set/difference all-potential-refs new-visited)
-              ;; Classify refs AND load fn-result-values in one query
-              {:keys [fn-ids fn-result-values]}
+              ;; Classify refs AND load call-sites in one query
+              {:keys [fn-ids call-sites]}
               (classify-and-load-refs ds new-candidates)
-              ;; Add fn-ids from fn-result-values to visit set
-              frv-fn-ids (set (map :fn-id (vals fn-result-values)))
-              ;; Combine direct fn refs + fn refs from fn-result-values
-              all-new-fn-refs (set/union fn-ids (set/difference frv-fn-ids new-visited))]
+              ;; Add fn-ids from call-sites to visit set
+              cs-fn-ids (set (map :fn-id (vals call-sites)))
+              ;; Combine direct fn refs + fn refs from call-sites
+              all-new-fn-refs (set/union fn-ids (set/difference cs-fn-ids new-visited))]
           (recur all-new-fn-refs
                  new-visited
                  (merge all-resolved-args resolved-args-batch)
-                 (merge all-fn-result-values fn-result-values)
+                 (merge all-call-sites call-sites)
                  (+ iter-count (count batch))))))))

@@ -202,7 +202,7 @@
 
 
 (deftest call-site-args-nested-test
-  (testing "call-site-args provides values for nested function via fn-result-value"
+  (testing "call-site-args provides values for nested function via call-site"
     (let [storage (setup/create-test-storage)
           ;; Register identity function
           _ (exec/register-base-fn!
@@ -226,11 +226,11 @@
           inner-fn (sp/create-entity storage :fn
                                      {:name "inner"
                                       :fn-schema-id (:id id-schema)})
-          ;; Create fn-result-value for inner (call site)
-          inner-frv (sp/create-entity storage :fn-result-value
+          ;; Create call-site for inner (call site)
+          inner-frv (sp/create-entity storage :call-site
                                       {:fn-id (:id inner-fn)
                                        :name "inner-frv"})
-          ;; outer's x -> fn-result-value (which points to inner)
+          ;; outer's x -> call-site (which points to inner)
           _ (setup/create-arg-value-with-binding! storage (:id outer-fn) (:id id-arg) (:id inner-frv))
           ;; inner's x is free - provide via call-site-args using [frv-id arg-schema-id]
           ctx (exec/create-context {:storage storage
@@ -238,7 +238,7 @@
       (is (= 42 (exec/execute ctx (:id outer-fn) nil)))
       (sp/close storage)))
 
-  (testing "call-site-args with different fn-result-values for same function"
+  (testing "call-site-args with different call-sites for same function"
     (let [storage (setup/create-test-storage)
           ;; A function that takes two args and adds them
           _ (exec/register-base-fn!
@@ -277,11 +277,11 @@
           id-fn (sp/create-entity storage :fn
                                   {:name "id-fn"
                                    :fn-schema-id (:id id-schema)})
-          ;; Create TWO fn-result-values for same id-fn (different call sites)
-          frv-a (sp/create-entity storage :fn-result-value
+          ;; Create TWO call-sites for same id-fn (different call sites)
+          frv-a (sp/create-entity storage :call-site
                                   {:fn-id (:id id-fn)
                                    :name "frv-a"})
-          frv-b (sp/create-entity storage :fn-result-value
+          frv-b (sp/create-entity storage :call-site
                                   {:fn-id (:id id-fn)
                                    :name "frv-b"})
           ;; Create add function instance

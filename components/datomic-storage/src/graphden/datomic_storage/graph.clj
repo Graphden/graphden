@@ -35,12 +35,12 @@
 
 
 (defn- classify-and-load-refs
-  "Classifies UUID references and loads fn-result-values in combined queries.
-   Returns {:fn-ids #{...} :frv-ids #{...} :fn-result-values {...}}.
-   Gracefully handles missing fn-result-value attribute."
+  "Classifies UUID references and loads call-sites in combined queries.
+   Returns {:fn-ids #{...} :call-site-ids #{...} :call-sites {...}}.
+   Gracefully handles missing call-site attribute."
   [db uuid-candidates]
   (if (empty? uuid-candidates)
-    {:fn-ids #{} :frv-ids #{} :fn-result-values {}}
+    {:fn-ids #{} :call-site-ids #{} :call-sites {}}
     (let [uuids-vec (vec uuid-candidates)
           ;; Query fn refs
           fn-results (d/q '[:find ?fn-id
@@ -48,26 +48,26 @@
                             :where
                             [?e :fn/id ?fn-id]]
                           db uuids-vec)
-          ;; Query fn-result-values WITH their fn-ids (combined classify + load)
+          ;; Query call-sites WITH their fn-ids (combined classify + load)
           ;; Handle missing attribute gracefully
-          frv-results (try
-                        (d/q '[:find ?frv-id ?fn-id
-                               :in $ [?frv-id ...]
-                               :where
-                               [?e :fn-result-value/id ?frv-id]
-                               [?e :fn-result-value/fn-id ?fn-id]]
-                             db uuids-vec)
-                        (catch clojure.lang.ExceptionInfo e
-                          ;; :db.error/not-an-entity means attribute doesn't exist
-                          (if (= :db.error/not-an-entity (:db/error (ex-data e)))
-                            []
-                            (throw e))))]
+          cs-results (try
+                       (d/q '[:find ?cs-id ?fn-id
+                              :in $ [?cs-id ...]
+                              :where
+                              [?e :call-site/id ?cs-id]
+                              [?e :call-site/fn-id ?fn-id]]
+                            db uuids-vec)
+                       (catch clojure.lang.ExceptionInfo e
+                         ;; :db.error/not-an-entity means attribute doesn't exist
+                         (if (= :db.error/not-an-entity (:db/error (ex-data e)))
+                           []
+                           (throw e))))]
       {:fn-ids (set (map first fn-results))
-       :frv-ids (set (map first frv-results))
-       :fn-result-values (->> frv-results
-                              (map (fn [[frv-id fn-id]]
-                                     [frv-id {:id frv-id :fn-id fn-id}]))
-                              (into {}))})))
+       :call-site-ids (set (map first cs-results))
+       :call-sites (->> cs-results
+                        (map (fn [[cs-id fn-id]]
+                               [cs-id {:id cs-id :fn-id fn-id}]))
+                        (into {}))})))
 
 
 (defn- load-fns-batch
@@ -157,9 +157,9 @@
 
 (defn- load-final-graph-data
   "Phase 2: Batch load all data for the discovered graph.
-   fn-result-values are already loaded during discovery (optimization).
+   call-sites are already loaded during discovery (optimization).
    Returns the complete execution graph map."
-  [db all-resolved-args all-fn-result-values]
+  [db all-resolved-args all-call-sites]
   (let [all-fn-ids (set (keys all-resolved-args))
         fns (load-fns-batch db all-fn-ids)
         fn-schema-ids (->> (vals fns)
@@ -172,12 +172,12 @@
        :fn-schemas fn-schemas
        :arg-schemas arg-schemas
        :resolved-args all-resolved-args
-       :fn-result-values all-fn-result-values})))
+       :call-sites all-call-sites})))
 
 
 (defn- process-discovery-batch
   "Processes a batch of fn-ids during graph discovery.
-   Returns map with :next-to-visit, :new-visited, :resolved-args, :fn-result-values."
+   Returns map with :next-to-visit, :new-visited, :resolved-args, :call-sites."
   [db batch visited]
   (let [new-visited (into visited batch)
         ;; Load and map arg-values for each fn
@@ -191,45 +191,45 @@
                                 (mapcat sp/extract-uuid-refs-from-arg-values)
                                 (set))
         new-candidates (set/difference all-potential-refs new-visited)
-        ;; Classify AND load fn-result-values in one query (optimization)
-        {:keys [fn-ids fn-result-values]} (classify-and-load-refs db new-candidates)
-        frv-fn-ids (set (map :fn-id (vals fn-result-values)))
-        next-to-visit (set/union fn-ids (set/difference frv-fn-ids new-visited))]
+        ;; Classify AND load call-sites in one query (optimization)
+        {:keys [fn-ids call-sites]} (classify-and-load-refs db new-candidates)
+        cs-fn-ids (set (map :fn-id (vals call-sites)))
+        next-to-visit (set/union fn-ids (set/difference cs-fn-ids new-visited))]
     {:next-to-visit next-to-visit
      :new-visited new-visited
      :resolved-args resolved-args-batch
-     :fn-result-values fn-result-values}))
+     :call-sites call-sites}))
 
 
 (defn resolve-execution-graph-impl
   "Resolves complete execution graph for a function.
-   Uses batched BFS to collect all transitively referenced functions and fn-result-values.
+   Uses batched BFS to collect all transitively referenced functions and call-sites.
    Throws if iteration count exceeds sp/*max-graph-iterations*.
 
    This implementation uses batch queries to minimize database round-trips:
    1. Process pending fn-ids in batches
    2. Load arg-values for each fn directly
-   3. Extract fn-refs and fn-result-value refs, continue until graph is complete
+   3. Extract fn-refs and call-site refs, continue until graph is complete
    4. Final batch load of all fns, fn-schemas, arg-schemas
-   Note: fn-result-values are loaded during discovery (optimization)"
+   Note: call-sites are loaded during discovery (optimization)"
   [conn fn-id]
   (let [db (d/db conn)]
     (check-fn-exists! db fn-id)
-    ;; Phase 1: Discover all fn-ids and fn-result-values using batched BFS
+    ;; Phase 1: Discover all fn-ids and call-sites using batched BFS
     (loop [to-visit #{fn-id}
            visited #{}
            all-resolved-args {}
-           all-fn-result-values {}
+           all-call-sites {}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
-        ;; Phase 2: Load final graph data (fn-result-values already loaded)
-        (load-final-graph-data db all-resolved-args all-fn-result-values)
+        ;; Phase 2: Load final graph data (call-sites already loaded)
+        (load-final-graph-data db all-resolved-args all-call-sites)
         ;; Process batch
         (let [batch (vec to-visit)
               result (process-discovery-batch db batch visited)]
           (recur (:next-to-visit result)
                  (:new-visited result)
                  (merge all-resolved-args (:resolved-args result))
-                 (merge all-fn-result-values (:fn-result-values result))
+                 (merge all-call-sites (:call-sites result))
                  (+ iter-count (count batch))))))))

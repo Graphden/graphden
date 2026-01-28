@@ -63,7 +63,7 @@
    | :arg-value      | no-op               | find fn-args, invalidate fns | find fn-args, invalidate|
    | :fn-schema      | no-op               | invalidate all fns using it  | invalidate all dependents|
    | :arg-schema     | no-op               | invalidate all fns using it  | invalidate all dependents|
-   | :fn-result-value| invalidate deps     | invalidate all dependents    | invalidate all dependents|
+   | :call-site| invalidate deps     | invalidate all dependents    | invalidate all dependents|
    | :call-site-arg  | invalidate frv deps | invalidate frv dependents    | invalidate frv deps     |
 
    ### Complex Scenarios
@@ -110,7 +110,7 @@
 
    **Q: Cache returns stale data after update**
    A: Check that entity type has strategy in `invalidation-strategies` map.
-      Only :fn, :arg-value, :fn-schema, :arg-schema, :fn-result-value trigger invalidation.
+      Only :fn, :arg-value, :fn-schema, :arg-schema, :call-site trigger invalidation.
 
    **Q: Performance degradation after large batch update**
    A: Batch updates invalidate caches one-by-one. For bulk migrations,
@@ -132,12 +132,12 @@
    Returns {:fn-ids {fn-id -> count}
             :fn-schema-ids {schema-id -> count}
             :arg-schema-ids {arg-schema-id -> count}
-            :fn-result-value-ids {frv-id -> count}}"
+            :call-site-ids {frv-id -> count}}"
   [graph]
   {:fn-ids (frequencies (keys (:fns graph)))
    :fn-schema-ids (frequencies (keys (:fn-schemas graph)))
    :arg-schema-ids (frequencies (keys (:arg-schemas graph)))
-   :fn-result-value-ids (frequencies (keys (:fn-result-values graph)))})
+   :call-site-ids (frequencies (keys (:call-sites graph)))})
 
 
 (defn- rebuild-cache!
@@ -223,12 +223,12 @@
                           #(cache/find-caches-by-arg-schema-dep % arg-schema-id)))
 
 
-(defn- invalidate-fn-result-value-dependents!
-  "Invalidates all caches that depend on a fn-result-value."
-  [base-storage cache-storage fn-result-value-id]
-  (log/debug "Invalidating fn-result-value dependents" {:fn-result-value-id fn-result-value-id})
+(defn- invalidate-call-site-dependents!
+  "Invalidates all caches that depend on a call-site."
+  [base-storage cache-storage call-site-id]
+  (log/debug "Invalidating call-site dependents" {:call-site-id call-site-id})
   (invalidate-dependents! base-storage cache-storage
-                          #(cache/find-caches-by-fn-result-value-dep % fn-result-value-id)))
+                          #(cache/find-caches-by-call-site-dep % call-site-id)))
 
 
 ;; === Cache invalidation strategy map ===
@@ -323,34 +323,34 @@
     (fn [base-storage cache-storage id _record]
       (invalidate-arg-schema-dependents! base-storage cache-storage id))}
 
-   :fn-result-value
+   :call-site
    {:on-create
     (fn [base-storage cache-storage result]
-      (invalidate-fn-result-value-dependents! base-storage cache-storage (:id result)))
+      (invalidate-call-site-dependents! base-storage cache-storage (:id result)))
 
     :on-update
     (fn [base-storage cache-storage id _data _result _old-record]
-      (invalidate-fn-result-value-dependents! base-storage cache-storage id))
+      (invalidate-call-site-dependents! base-storage cache-storage id))
 
     :on-delete
     (fn [base-storage cache-storage id _record]
-      (invalidate-fn-result-value-dependents! base-storage cache-storage id))}
+      (invalidate-call-site-dependents! base-storage cache-storage id))}
 
-   ;; call-site-arg is the binding from fn-result-value to arg-value
-   ;; When call-site-arg changes, invalidate dependents of the fn-result-value
+   ;; call-site-arg is the binding from call-site to arg-value
+   ;; When call-site-arg changes, invalidate dependents of the call-site
    :call-site-arg
    {:on-create
     (fn [base-storage cache-storage result]
-      (invalidate-fn-result-value-dependents! base-storage cache-storage (:fn-result-value-id result)))
+      (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id result)))
 
     :on-update
     (fn [base-storage cache-storage _id _data result _old-record]
-      (invalidate-fn-result-value-dependents! base-storage cache-storage (:fn-result-value-id result)))
+      (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id result)))
 
     :on-delete
     (fn [base-storage cache-storage _id record]
       (when record
-        (invalidate-fn-result-value-dependents! base-storage cache-storage (:fn-result-value-id record))))}})
+        (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id record))))}})
 
 
 (defn- get-strategy

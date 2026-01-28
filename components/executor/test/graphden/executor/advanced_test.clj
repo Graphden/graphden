@@ -118,11 +118,11 @@
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
-          ;; fn-a -> fn-b -> fn-c -> literal (via fn-result-value to trigger execution)
+          ;; fn-a -> fn-b -> fn-c -> literal (via call-site to trigger execution)
           _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id id-arg)
-                                                  (setup/create-fn-result-value! storage (:id fn-b)))
+                                                  (setup/create-call-site! storage (:id fn-b)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id id-arg)
-                                                  (setup/create-fn-result-value! storage (:id fn-c)))
+                                                  (setup/create-call-site! storage (:id fn-c)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
           ;; max-depth=3 means: fn-a(0) -> fn-b(1) -> fn-c(2) -> literal
           ;; This should work as 2 < 3
@@ -148,9 +148,9 @@
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
           _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id id-arg)
-                                                  (setup/create-fn-result-value! storage (:id fn-b)))
+                                                  (setup/create-call-site! storage (:id fn-b)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id id-arg)
-                                                  (setup/create-fn-result-value! storage (:id fn-c)))
+                                                  (setup/create-call-site! storage (:id fn-c)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
           ;; max-depth=1: fn-a(0) ok, fn-b(1) ok, fn-c(2) fails because depth=2 > max-depth=1
           ctx (exec/create-context {:storage storage :max-depth 1})]

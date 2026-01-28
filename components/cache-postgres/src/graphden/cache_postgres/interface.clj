@@ -272,7 +272,7 @@
                           (execute-one! ds {:delete-from :cache-arg-schema-dep
                                             :where [:= :cache-id fn-id]}))
                         (:next.jdbc/update-count
-                          (execute-one! ds {:delete-from :cache-fn-result-value-dep
+                          (execute-one! ds {:delete-from :cache-call-site-dep
                                             :where [:= :cache-id fn-id]})))
         deleted-merged (:next.jdbc/update-count
                          (execute-one! ds {:delete-from :cached-merged-arg
@@ -345,7 +345,7 @@
                            (save-deps! tx fn-id :cache-fn-dep :dep-fn-id (:fn-ids dependencies))
                            (save-deps! tx fn-id :cache-fn-schema-dep :dep-fn-schema-id (:fn-schema-ids dependencies))
                            (save-deps! tx fn-id :cache-arg-schema-dep :dep-arg-schema-id (:arg-schema-ids dependencies))
-                           (save-deps! tx fn-id :cache-fn-result-value-dep :dep-fn-result-value-id (:fn-result-value-ids dependencies))))
+                           (save-deps! tx fn-id :cache-call-site-dep :dep-call-site-id (:call-site-ids dependencies))))
 
 
   (delete-cache!
@@ -370,9 +370,9 @@
     (find-caches-by-dep datasource :cache-arg-schema-dep :dep-arg-schema-id dep-arg-schema-id))
 
 
-  (find-caches-by-fn-result-value-dep
-    [_ dep-fn-result-value-id]
-    (find-caches-by-dep datasource :cache-fn-result-value-dep :dep-fn-result-value-id dep-fn-result-value-id)))
+  (find-caches-by-call-site-dep
+    [_ dep-call-site-id]
+    (find-caches-by-dep datasource :cache-call-site-dep :dep-call-site-id dep-call-site-id)))
 
 
 (defn create-cache

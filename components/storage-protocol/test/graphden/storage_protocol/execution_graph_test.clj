@@ -110,19 +110,19 @@
     (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-fn-schema))
     (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-arg-schemas))
     (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-resolved-args))
-    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-fn-result-value)))
+    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-call-site)))
 
   (testing "ExecutionGraphResult implements ExecutionGraphReader"
     (let [fn-id (random-uuid)
           fn-schema-id (random-uuid)
           arg-schema-id (random-uuid)
-          frv-id (random-uuid)
+          cs-id (random-uuid)
           graph (storage/->execution-graph
                   {:fns {fn-id {:id fn-id :fn-schema-id fn-schema-id}}
                    :fn-schemas {fn-schema-id {:id fn-schema-id :name "test-fn"}}
                    :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id}}
                    :resolved-args {fn-id {arg-schema-id {:value 42}}}
-                   :fn-result-values {frv-id {:id frv-id :value "result"}}})]
+                   :call-sites {cs-id {:id cs-id :value "result"}}})]
       ;; Test protocol methods
       (is (= {:id fn-id :fn-schema-id fn-schema-id}
              (storage/graph-get-fn graph fn-id)))
@@ -133,8 +133,8 @@
              (storage/graph-get-arg-schemas graph fn-schema-id)))
       (is (= {arg-schema-id {:value 42}}
              (storage/graph-get-resolved-args graph fn-id)))
-      (is (= {:id frv-id :value "result"}
-             (storage/graph-get-fn-result-value graph frv-id)))))
+      (is (= {:id cs-id :value "result"}
+             (storage/graph-get-call-site graph cs-id)))))
 
   (testing "ExecutionGraphReader returns nil/empty for missing keys"
     (let [graph (storage/->execution-graph
@@ -147,4 +147,4 @@
       ;; Returns empty map for missing fn-schema-id (no matching arg-schemas)
       (is (= {} (storage/graph-get-arg-schemas graph (random-uuid))))
       (is (nil? (storage/graph-get-resolved-args graph (random-uuid))))
-      (is (nil? (storage/graph-get-fn-result-value graph (random-uuid)))))))
+      (is (nil? (storage/graph-get-call-site graph (random-uuid)))))))

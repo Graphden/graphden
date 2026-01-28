@@ -15,9 +15,9 @@
   (gsm/create-storage))
 
 
-(defn create-fn-result-value!
-  "Creates a fn-result-value entity pointing to a fn.
-   Returns the fn-result-value id (for use as arg-value :value).
+(defn create-call-site!
+  "Creates a call-site entity pointing to a fn.
+   Returns the call-site id (for use as arg-value :value).
 
    Use this when you want the referenced fn to be EXECUTED and its
    result used as the argument value. If you want to pass the fn
@@ -25,9 +25,9 @@
 
    Optional second arg is the result-name for deduplication (defaults to random UUID string)."
   ([storage fn-id]
-   (create-fn-result-value! storage fn-id (str (random-uuid))))
+   (create-call-site! storage fn-id (str (random-uuid))))
   ([storage fn-id result-name]
-   (:id (sp/create-entity storage :fn-result-value {:fn-id fn-id :name result-name}))))
+   (:id (sp/create-entity storage :call-site {:fn-id fn-id :name result-name}))))
 
 
 (defn create-arg-value-with-binding!

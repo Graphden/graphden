@@ -35,7 +35,7 @@
      {:fns {fn-id -> fn-record}
       :fn-schemas {schema-id -> schema-record}
       :arg-schemas {arg-schema-id -> arg-schema-record}
-      :fn-result-values {frv-id -> frv-record}
+      :call-sites {call-site-id -> call-site-record}
       :merged-args {fn-id -> {arg-schema-id -> resolved-value}}}")
 
   (cache-exists?
@@ -53,7 +53,7 @@
        {:fn-ids {dep-fn-id -> count}
         :fn-schema-ids {schema-id -> count}
         :arg-schema-ids {arg-schema-id -> count}
-        :fn-result-value-ids {frv-id -> count}}
+        :call-site-ids {call-site-id -> count}}
 
      The ref-counts in dependencies allow proper cache invalidation when
      a dependency is used multiple times in the graph.")
@@ -74,9 +74,9 @@
     [this dep-arg-schema-id]
     "Returns set of cache-ids that depend on dep-arg-schema-id.")
 
-  (find-caches-by-fn-result-value-dep
-    [this dep-fn-result-value-id]
-    "Returns set of cache-ids that depend on dep-fn-result-value-id."))
+  (find-caches-by-call-site-dep
+    [this dep-call-site-id]
+    "Returns set of cache-ids that depend on dep-call-site-id."))
 
 
 (defn cached-storage?
@@ -168,10 +168,10 @@
     (throw (ex-info "Dependencies :fn-schema-ids must be a map" {:type :invalid-dependencies :key :fn-schema-ids :value (:fn-schema-ids dependencies)})))
   (when-not (map? (:arg-schema-ids dependencies))
     (throw (ex-info "Dependencies :arg-schema-ids must be a map" {:type :invalid-dependencies :key :arg-schema-ids :value (:arg-schema-ids dependencies)})))
-  ;; fn-result-value-ids is optional for backward compatibility, but if present must be a map
-  (when (and (contains? dependencies :fn-result-value-ids)
-             (not (map? (:fn-result-value-ids dependencies))))
-    (throw (ex-info "Dependencies :fn-result-value-ids must be a map" {:type :invalid-dependencies :key :fn-result-value-ids :value (:fn-result-value-ids dependencies)})))
+  ;; call-site-ids is optional for backward compatibility, but if present must be a map
+  (when (and (contains? dependencies :call-site-ids)
+             (not (map? (:call-site-ids dependencies))))
+    (throw (ex-info "Dependencies :call-site-ids must be a map" {:type :invalid-dependencies :key :call-site-ids :value (:call-site-ids dependencies)})))
   true)
 
 
@@ -196,13 +196,13 @@
    - fn-schemas: map of {fn-schema-id -> schema-record}
    - arg-schemas: map of {arg-schema-id -> arg-schema-record}
    - resolved-args: map of {fn-id -> {arg-schema-id -> value}}
-   - fn-result-values: (optional) map of {frv-id -> frv-record}
+   - call-sites: (optional) map of {call-site-id -> call-site-record}
 
    This is a convenience wrapper around sp/->execution-graph for
    cache implementations."
   ([fns fn-schemas arg-schemas resolved-args]
    (build-cached-graph fns fn-schemas arg-schemas resolved-args {}))
-  ([fns fn-schemas arg-schemas resolved-args fn-result-values]
+  ([fns fn-schemas arg-schemas resolved-args call-sites]
    (when (seq fns)
      ;; Use require/resolve to avoid circular dependency with storage-protocol
      (let [->execution-graph (requiring-resolve 'graphden.storage-protocol.interface/->execution-graph)]
@@ -211,7 +211,7 @@
           :fn-schemas fn-schemas
           :arg-schemas arg-schemas
           :resolved-args resolved-args
-          :fn-result-values fn-result-values})))))
+          :call-sites call-sites})))))
 
 
 ;; ============================================================================

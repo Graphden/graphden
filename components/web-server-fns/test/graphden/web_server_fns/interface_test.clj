@@ -28,7 +28,7 @@
       (is (= :router-fn> (get-in ws-def [:args :handler])))
       (is (= 8080 (get-in ws-def [:args :port])))))
 
-  (testing "router-fn references routes-fn (via fn-result-value)"
+  (testing "router-fn references routes-fn (via call-site)"
     (let [router-def (first (filter #(= :router-fn (:name %)) web-server-fns/fn-defs))]
       (is (= :router (:parent router-def)))
       (is (= :routes-fn> (get-in router-def [:args :routes])))))

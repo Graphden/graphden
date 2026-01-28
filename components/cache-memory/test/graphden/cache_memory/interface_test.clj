@@ -41,7 +41,7 @@
                                               :type :text
                                               :required true}}
                  :resolved-args {fn-id {arg-schema-id "test-value"}}
-                 :fn-result-values {}}
+                 :call-sites {}}
           dependencies {:fn-ids {fn-id 1}
                         :fn-schema-ids {fn-schema-id 1}
                         :arg-schema-ids {arg-schema-id 1}}]
@@ -82,7 +82,7 @@
                                             :returned-type :text}}
                  :arg-schemas {}
                  :resolved-args {}
-                 :fn-result-values {}}
+                 :call-sites {}}
           dependencies {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
       ;; Save and verify
       (cache/save-cache! c fn-id graph dependencies)
@@ -118,7 +118,7 @@
                                                 :type :text
                                                 :required false}}
                    :resolved-args {}
-                   :fn-result-values {}}
+                   :call-sites {}}
           deps-1 {:fn-ids {shared-dep-fn-id 1}
                   :fn-schema-ids {fn-schema-id 1}
                   :arg-schema-ids {arg-schema-id 1}}
@@ -136,7 +136,7 @@
                                                 :type :text
                                                 :required false}}
                    :resolved-args {}
-                   :fn-result-values {}}
+                   :call-sites {}}
           deps-2 {:fn-ids {shared-dep-fn-id 2}
                   :fn-schema-ids {fn-schema-id 1}
                   :arg-schema-ids {arg-schema-id 1}}]
@@ -171,7 +171,7 @@
                                                :returned-type :text}}
                     :arg-schemas {}
                     :resolved-args {}
-                    :fn-result-values {}}
+                    :call-sites {}}
           graph-v2 {:fns {fn-id {:id fn-id
                                  :name "v2"
                                  :fn-schema-id fn-schema-id}}
@@ -181,7 +181,7 @@
                                                :returned-type :text}}
                     :arg-schemas {}
                     :resolved-args {}
-                    :fn-result-values {}}
+                    :call-sites {}}
           deps {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
       ;; Save v1
       (cache/save-cache! c fn-id graph-v1 deps)
@@ -207,7 +207,7 @@
                                             :returned-type :text}}
                  :arg-schemas {}
                  :resolved-args {}
-                 :fn-result-values {}}
+                 :call-sites {}}
           old-deps {:fn-ids {old-dep-fn-id 1}
                     :fn-schema-ids {}
                     :arg-schema-ids {}}
@@ -241,7 +241,7 @@
                                             :returned-type :text}}
                  :arg-schemas {}
                  :resolved-args {}
-                 :fn-result-values {}}
+                 :call-sites {}}
           deps {:fn-ids {dep-fn-id 1}
                 :fn-schema-ids {fn-schema-id 1}
                 :arg-schema-ids {}}]
@@ -291,7 +291,7 @@
                         :fn-schemas {shared-schema-id {:id shared-schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                         :arg-schemas {}
                         :resolved-args {}
-                        :fn-result-values {}})
+                        :call-sites {}})
           deps {:fn-ids {} :fn-schema-ids {shared-schema-id 1} :arg-schema-ids {}}]
 
       ;; Create 3 caches all depending on the same schema
@@ -322,7 +322,7 @@
                    :fn-schemas {schema-id {:id schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                    :arg-schemas {}
                    :resolved-args {}
-                   :fn-result-values {}})
+                   :call-sites {}})
           deps {:fn-ids {} :fn-schema-ids {} :arg-schema-ids {}}]
 
       (cache/save-cache! c fn-id graph deps)
@@ -340,7 +340,7 @@
                         :fn-schemas {schema-id {:id schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                         :arg-schemas {}
                         :resolved-args {}
-                        :fn-result-values {}})
+                        :call-sites {}})
           deps {:fn-ids {} :fn-schema-ids {schema-id 1} :arg-schema-ids {}}
           fn-ids (repeatedly 100 random-uuid)]
 
@@ -379,13 +379,13 @@
                    :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id
                                                 :name "a" :type :int :required true}}
                    :resolved-args {}
-                   :fn-result-values {}}
+                   :call-sites {}}
           graph-2 {:fns {fn-id-2 {:id fn-id-2 :name "fn2" :fn-schema-id fn-schema-id}}
                    :fn-schemas {fn-schema-id {:id fn-schema-id :name "s" :base-fn-name "b" :returned-type :int}}
                    :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id
                                                 :name "a" :type :int :required true}}
                    :resolved-args {}
-                   :fn-result-values {}}
+                   :call-sites {}}
           deps {:fn-ids {dep-fn-id 1}
                 :fn-schema-ids {fn-schema-id 1}
                 :arg-schema-ids {arg-schema-id 1}}]
@@ -425,7 +425,7 @@
                         :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id
                                                      :name "a" :type :int :required true}}
                         :resolved-args {}
-                        :fn-result-values {}})
+                        :call-sites {}})
           old-deps {:fn-ids {old-dep-fn-id 1 shared-dep-fn-id 1}
                     :fn-schema-ids {fn-schema-id 1}
                     :arg-schema-ids {arg-schema-id 1}}
@@ -468,7 +468,7 @@
                                arg-schema-id-2 {:id arg-schema-id-2 :fn-schema-id fn-schema-id
                                                 :name "a2" :type :text :required false}}
                  :resolved-args {}
-                 :fn-result-values {}}
+                 :call-sites {}}
           deps {:fn-ids {dep-fn-id-1 1 dep-fn-id-2 1}
                 :fn-schema-ids {fn-schema-id 1}
                 :arg-schema-ids {arg-schema-id-1 1 arg-schema-id-2 1}}]

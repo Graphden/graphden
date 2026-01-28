@@ -21,8 +21,8 @@
    ## Arg Value Syntax
 
    - `:fn-name` - ref<fn>: pass fn as callable (for HOF, won't execute)
-   - `:fn-name>` - ref<fn-result-value>: execute fn and use result
-   - `:fn-name>result-name` - ref<fn-result-value> with explicit name
+   - `:fn-name>` - ref<call-site>: execute fn and use result
+   - `:fn-name>result-name` - ref<call-site> with explicit name
 
    Example:
    ```clojure
@@ -33,8 +33,8 @@
            :v :hello-handler>}}  ; executes hello-handler, uses result
    ```
 
-   Multiple references to `:fn-name>` create one fn-result-value (same name).
-   Use `:fn-name>name1`, `:fn-name>name2` for different fn-result-values.
+   Multiple references to `:fn-name>` create one call-site (same name).
+   Use `:fn-name>name1`, `:fn-name>name2` for different call-sites.
 
    ## Name Resolution
 
@@ -62,10 +62,10 @@
 ;; === Arg Value Parsing ===
 
 (defn- parse-fn-result-ref
-  "Parses a keyword that might be a fn-result-value reference.
+  "Parses a keyword that might be a call-site reference.
    :fn-name> means execute fn-name, result name defaults to fn-name
    :fn-name>result-name means execute fn-name, result name is result-name
-   Returns [fn-name result-name] or nil if not a fn-result-value ref."
+   Returns [fn-name result-name] or nil if not a call-site ref."
   [kw]
   (when (keyword? kw)
     (let [kw-name (name kw)
@@ -87,12 +87,12 @@
 (defn- extract-fn-ref
   "Extracts the fn name from an arg value.
    Returns [fn-name :fn nil] for keyword refs (pass as callable).
-   Returns [fn-name :fn-result-value result-name] for :fn-name> refs (execute and use result).
+   Returns [fn-name :call-site result-name] for :fn-name> refs (execute and use result).
    Returns nil for literal values."
   [arg-value]
   (when (keyword? arg-value)
     (if-let [[fn-name result-name] (parse-fn-result-ref arg-value)]
-      [fn-name :fn-result-value result-name]
+      [fn-name :call-site result-name]
       [arg-value :fn nil])))
 
 
@@ -298,18 +298,18 @@
    Resolves references to other fns.
 
    For :fn-name> syntax:
-   1. Looks up or creates fn-result-value entity by name
-   2. Uses fn-result-value id as the arg-value (executor will execute it)
+   1. Looks up or creates call-site entity by name
+   2. Uses call-site id as the arg-value (executor will execute it)
 
    With normalized schema:
    - arg-value is a pure value (no owner-fn-id)
    - fn-arg binds fn to arg-value
    - arg-values with same (arg-schema-id, value) are deduplicated
 
-   The created-fn-result-values atom tracks fn-result-values created
+   The created-call-sites atom tracks call-sites created
    in this sync batch, keyed by their name (keyword).
    The created-arg-values atom tracks arg-values created for deduplication."
-  [storage fn-entity fn-def created-fns created-fn-result-values created-arg-values]
+  [storage fn-entity fn-def created-fns created-call-sites created-arg-values]
   (let [{:keys [parent args]} fn-def
         fn-id (:id fn-entity)]
     (doseq [[arg-name arg-value] args]
@@ -318,20 +318,20 @@
             ref-info (extract-fn-ref arg-value)
             resolved-value
             (cond
-              ;; :fn-name> or :fn-name>result-name - get or create fn-result-value
-              (and ref-info (= :fn-result-value (second ref-info)))
+              ;; :fn-name> or :fn-name>result-name - get or create call-site
+              (and ref-info (= :call-site (second ref-info)))
               (let [fn-name (first ref-info)
                     result-name (nth ref-info 2)
                     result-name-str (name result-name)]
-                ;; Check if fn-result-value with this name already exists
-                (if-let [existing-frv-id (get @created-fn-result-values result-name)]
+                ;; Check if call-site with this name already exists
+                (if-let [existing-frv-id (get @created-call-sites result-name)]
                   existing-frv-id
-                  ;; Create new fn-result-value
+                  ;; Create new call-site
                   (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                        frv (sp/create-entity storage :fn-result-value
+                        frv (sp/create-entity storage :call-site
                                               {:fn-id ref-fn-id
                                                :name result-name-str})]
-                    (swap! created-fn-result-values assoc result-name (:id frv))
+                    (swap! created-call-sites assoc result-name (:id frv))
                     (:id frv))))
 
               ;; :fn-name - resolve to fn id (pass as callable)
@@ -365,7 +365,7 @@
    5. Creates all arg-value and fn-arg entities
       - arg-values are deduplicated by (arg-schema-id, value)
       - fn-arg binds fn to arg-value
-      - fn-result-values are deduplicated by name
+      - call-sites are deduplicated by name
 
    Returns map of {fn-name -> fn-id} for created fns.
 
@@ -381,8 +381,8 @@
       (validate-all-defs! fn-defs)
       ;; 2. Topological sort
       (let [sorted-defs (topological-sort fn-defs)
-            ;; Track fn-result-values created during sync for deduplication
-            created-fn-result-values (atom {})
+            ;; Track call-sites created during sync for deduplication
+            created-call-sites (atom {})
             ;; Track arg-values created during sync for deduplication
             created-arg-values (atom {})]
         ;; 3. Warn if order was wrong
@@ -397,5 +397,5 @@
                   new-created (assoc created-fns (:name fn-def) (:id fn-entity))]
               ;; 5. Create arg-values and fn-arg bindings for this fn
               (create-arg-values! storage fn-entity fn-def new-created
-                                  created-fn-result-values created-arg-values)
+                                  created-call-sites created-arg-values)
               (recur (rest remaining) new-created))))))))

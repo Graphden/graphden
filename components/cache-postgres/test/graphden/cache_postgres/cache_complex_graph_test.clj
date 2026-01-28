@@ -52,7 +52,7 @@
                                    (:id arg2) (assoc arg2 :id (:id arg2))
                                    (:id arg3) (assoc arg3 :id (:id arg3))}
                      :resolved-args {}
-                     :fn-result-values {}}
+                     :call-sites {}}
               deps {:fn-ids {}
                     :fn-schema-ids {fn-schema-id 1}
                     :arg-schema-ids {(:id arg1) 1 (:id arg2) 1 (:id arg3) 1}}]

@@ -50,7 +50,7 @@
   #uuid "f7a8b9c0-d1e2-4f3a-4b5c-6d7e8f9a0b1c")
 
 
-(def ^:private cache-fn-result-value-dep-entity-uuid
+(def ^:private cache-call-site-dep-entity-uuid
   #uuid "a8b9c0d1-e2f3-4a4b-5c6d-7e8f9a0b1c2d")
 
 
@@ -173,16 +173,16 @@
   #uuid "63c4d5e6-f7a8-4b9c-0d1e-2f3a4b5c6d7e")
 
 
-;; Field UUIDs for :cache-fn-result-value-dep
-(def ^:private cache-fn-result-value-dep-cache-id-field-uuid
+;; Field UUIDs for :cache-call-site-dep
+(def ^:private cache-call-site-dep-cache-id-field-uuid
   #uuid "71a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c")
 
 
-(def ^:private cache-fn-result-value-dep-fn-result-value-id-field-uuid
+(def ^:private cache-call-site-dep-call-site-id-field-uuid
   #uuid "72b3c4d5-e6f7-4a8b-9c0d-1e2f3a4b5c6d")
 
 
-(def ^:private cache-fn-result-value-dep-ref-count-field-uuid
+(def ^:private cache-call-site-dep-ref-count-field-uuid
   #uuid "73c4d5e6-f7a8-4b9c-0d1e-2f3a4b5c6d7e")
 
 
@@ -278,15 +278,15 @@
                                   :type :int}})
       (ds/add-constraint :cache-arg-schema-dep {:type :unique :fields [:cache-id :dep-arg-schema-id]})
 
-      ;; cache-fn-result-value-dep: tracks which fn-result-values are used in each cache
-      (ds/add-entity :cache-fn-result-value-dep cache-fn-result-value-dep-entity-uuid
-                     {:cache-id {:uuid cache-fn-result-value-dep-cache-id-field-uuid
+      ;; cache-call-site-dep: tracks which call-sites are used in each cache
+      (ds/add-entity :cache-call-site-dep cache-call-site-dep-entity-uuid
+                     {:cache-id {:uuid cache-call-site-dep-cache-id-field-uuid
                                  :type :ref :ref-entity :fn}
-                      :dep-fn-result-value-id {:uuid cache-fn-result-value-dep-fn-result-value-id-field-uuid
-                                               :type :ref :ref-entity :fn-result-value}
-                      :ref-count {:uuid cache-fn-result-value-dep-ref-count-field-uuid
+                      :dep-call-site-id {:uuid cache-call-site-dep-call-site-id-field-uuid
+                                         :type :ref :ref-entity :call-site}
+                      :ref-count {:uuid cache-call-site-dep-ref-count-field-uuid
                                   :type :int}})
-      (ds/add-constraint :cache-fn-result-value-dep {:type :unique :fields [:cache-id :dep-fn-result-value-id]})))
+      (ds/add-constraint :cache-call-site-dep {:type :unique :fields [:cache-id :dep-call-site-id]})))
 
 
 (defn build-schema
@@ -309,4 +309,4 @@
     :cache-fn-dep
     :cache-fn-schema-dep
     :cache-arg-schema-dep
-    :cache-fn-result-value-dep})
+    :cache-call-site-dep})

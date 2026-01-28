@@ -40,9 +40,9 @@ Table fn {
 }
 
 // Represents a cached computation result of a function.
-// Multiple arg-values can reference the same fn-result-value
+// Multiple arg-values can reference the same call-site
 // to reuse the computed value instead of re-executing the function.
-Table fn_result_value {
+Table call_site {
   id uuid [primary key]
   fn_id uuid [not null, ref: > fn.id]
 }
@@ -54,7 +54,7 @@ Table arg_value {
   // value can be:
   // - literal (int, text, bool, etc.)
   // - UUID referencing fn (for HOF - pass function as object)
-  // - UUID referencing fn_result_value (for computed values - execute & cache)
+  // - UUID referencing call_site (for computed values - execute & cache)
   value jsonb
 
   indexes {

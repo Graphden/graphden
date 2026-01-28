@@ -58,7 +58,7 @@
                                                          :type :text
                                                          :required false}}
                             :resolved-args {}
-                            :fn-result-values {}})
+                            :call-sites {}})
               deps {:fn-ids {shared-dep-fn-id 1}
                     :fn-schema-ids {fn-schema-id 1}
                     :arg-schema-ids {arg-schema-id 1}}]
@@ -113,7 +113,7 @@
                                                 :returned-type :text}}
                      :arg-schemas {}
                      :resolved-args {}
-                     :fn-result-values {}}
+                     :call-sites {}}
               old-deps {:fn-ids {old-dep-fn-id 1}
                         :fn-schema-ids {}
                         :arg-schema-ids {}}

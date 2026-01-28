@@ -2,7 +2,7 @@
   "Result value and registry tests for executor.
 
    Covers:
-   - fn-result-value tests
+   - call-site tests
    - Base function registry tests
    - execute-by-name error path tests
    - execute-with-named-args error path tests
@@ -19,10 +19,10 @@
 (use-fixtures :each exec/with-clean-registry)
 
 
-;; === fn-result-value Tests ===
+;; === call-site Tests ===
 
-(deftest fn-result-value-basic-test
-  (testing "fn-result-value is executed and cached"
+(deftest call-site-basic-test
+  (testing "call-site is executed and cached"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)
           ;; Register a function that tracks how many times it's called
@@ -38,8 +38,8 @@
           counter-fn (sp/create-entity storage :fn
                                        {:name "counter-fn"
                                         :fn-schema-id (:id counter-schema)})
-          ;; Create fn-result-value for counter-fn
-          counter-result (sp/create-entity storage :fn-result-value
+          ;; Create call-site for counter-fn
+          counter-result (sp/create-entity storage :call-site
                                            {:fn-id (:id counter-fn)
                                             :name "counter-result"})
           ;; Create add fn-schema that takes two int args
@@ -64,17 +64,17 @@
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
-          ;; Both args reference the SAME fn-result-value
+          ;; Both args reference the SAME call-site
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result))
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result))
           ctx (exec/create-context {:storage storage})]
       ;; Execute add-fn
       (exec/execute ctx (:id add-fn) nil)
       ;; counter should be called only ONCE, even though it's used twice
-      (is (= 1 @call-count) "fn-result-value should be cached and only executed once")
+      (is (= 1 @call-count) "call-site should be cached and only executed once")
       (sp/close storage)))
 
-  (testing "different fn-result-values for same fn are computed separately"
+  (testing "different call-sites for same fn are computed separately"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)
           ;; Register a function that tracks calls and returns incremented count
@@ -90,11 +90,11 @@
           inc-fn (sp/create-entity storage :fn
                                    {:name "inc-fn"
                                     :fn-schema-id (:id inc-schema)})
-          ;; Create TWO different fn-result-values for the same fn
-          result-1 (sp/create-entity storage :fn-result-value
+          ;; Create TWO different call-sites for the same fn
+          result-1 (sp/create-entity storage :call-site
                                      {:fn-id (:id inc-fn)
                                       :name "result-1"})
-          result-2 (sp/create-entity storage :fn-result-value
+          result-2 (sp/create-entity storage :call-site
                                      {:fn-id (:id inc-fn)
                                       :name "result-2"})
           ;; Create add fn that uses result-1 and result-2
@@ -123,13 +123,13 @@
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id result-2))
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id add-fn) nil)]
-      ;; incrementer should be called TWICE (once for each fn-result-value)
-      (is (= 2 @call-count) "Different fn-result-values should each execute separately")
+      ;; incrementer should be called TWICE (once for each call-site)
+      (is (= 2 @call-count) "Different call-sites should each execute separately")
       ;; Result should be 1 + 2 = 3
       (is (= 3 result))
       (sp/close storage)))
 
-  (testing "fn-result-value executes fn, direct fn reference passes fn-id"
+  (testing "call-site executes fn, direct fn reference passes fn-id"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)
           ;; Register a function that tracks calls
@@ -144,11 +144,11 @@
           counter-fn (sp/create-entity storage :fn
                                        {:name "counter-fn"
                                         :fn-schema-id (:id counter-schema)})
-          ;; Create TWO fn-result-values pointing to same fn
-          counter-result-1 (sp/create-entity storage :fn-result-value
+          ;; Create TWO call-sites pointing to same fn
+          counter-result-1 (sp/create-entity storage :call-site
                                              {:fn-id (:id counter-fn)
                                               :name "counter-result-1"})
-          counter-result-2 (sp/create-entity storage :fn-result-value
+          counter-result-2 (sp/create-entity storage :call-site
                                              {:fn-id (:id counter-fn)
                                               :name "counter-result-2"})
           ;; Create add fn
@@ -172,14 +172,14 @@
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
-          ;; a -> fn-result-value-1 (executes counter)
-          ;; b -> fn-result-value-2 (executes counter again - different frv)
+          ;; a -> call-site-1 (executes counter)
+          ;; b -> call-site-2 (executes counter again - different frv)
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result-1))
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result-2))
           ctx (exec/create-context {:storage storage})]
       (exec/execute ctx (:id add-fn) nil)
-      ;; counter should be called TWICE - once for each fn-result-value
-      (is (= 2 @call-count) "Different fn-result-values should each execute the fn")
+      ;; counter should be called TWICE - once for each call-site
+      (is (= 2 @call-count) "Different call-sites should each execute the fn")
       (sp/close storage))))
 
 

@@ -193,17 +193,17 @@
                       :resolved-args {}})]
         (is (graph/execution-graph? result))
         (is (= {fn-id {:id fn-id}} (:fns result)))
-        (is (= {} (:fn-result-values result)))))  ; defaults to empty
+        (is (= {} (:call-sites result)))))  ; defaults to empty
 
-    (testing "includes fn-result-values when provided"
+    (testing "includes call-sites when provided"
       (let [frv-id (random-uuid)
             result (graph/->execution-graph
                      {:fns {fn-id {:id fn-id}}
                       :fn-schemas {fn-schema-id {:id fn-schema-id}}
                       :arg-schemas {}
                       :resolved-args {}
-                      :fn-result-values {frv-id {:id frv-id :value 42}}})]
-        (is (= {frv-id {:id frv-id :value 42}} (:fn-result-values result)))))
+                      :call-sites {frv-id {:id frv-id :value 42}}})]
+        (is (= {frv-id {:id frv-id :value 42}} (:call-sites result)))))
 
     (testing "throws when :fns is not a map"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :fns map"
@@ -326,7 +326,7 @@
             result (graph/process-fn-node
                      load-fn nil nil nil nil fn-id
                      {:fns {} :fn-schemas {} :arg-schemas {}
-                      :resolved-args {} :fn-result-values {}})]
+                      :resolved-args {} :call-sites {}})]
         (is (= {} (:fns (:graph result))))
         (is (= #{} (:new-fn-refs result)))))
 
@@ -339,7 +339,7 @@
             load-arg-values (constantly [])
             classify-refs (constantly {:fn-refs #{} :frvs {}})
             init-graph {:fns {} :fn-schemas {} :arg-schemas {}
-                        :resolved-args {} :fn-result-values {}}
+                        :resolved-args {} :call-sites {}}
             result (graph/process-fn-node
                      load-fn load-fn-schema load-arg-schemas
                      load-arg-values classify-refs

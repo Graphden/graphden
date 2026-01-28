@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 1 | **Correctness first** | No feature justifies bugs. Comprehensive tests required. |
 | 2 | **Minimal entities** | Resist adding new entity types, fields, or edge types. Each addition increases complexity everywhere. |
 | 3 | **Explicit over implicit** | Behavior must be visible in graph structure. No magic, no context-dependent semantics. |
-| 4 | **DRY** | Never define the same thing twice. Use base-functions and fn-result-value for reuse. |
+| 4 | **DRY** | Never define the same thing twice. Use base-functions and call-site for reuse. |
 | 5 | **Expressiveness parity** | Can do everything classical languages can. No "sorry, you can't do that." |
 | 6 | **No unnecessary expressiveness** | Don't add features just because we can. |
 | 7 | **Locality of changes** | Changing one node shouldn't require changes elsewhere. |
@@ -37,12 +37,12 @@ Graphden is a visual functional programming environment where functions and thei
 - `fn-schema` — function signature (name, return type, optional base-fn-name linking to Clojure impl)
 - `arg-schema` — argument definition (belongs to fn-schema)
 - `fn` — function instance (references fn-schema, has bound arg-values)
-- `arg-value` — bound argument value (literal or reference to fn/fn-result-value)
-- `fn-result-value` — reference to a function call site (NOT cached result — see below)
+- `arg-value` — bound argument value (literal or reference to fn/call-site)
+- `call-site` — reference to a function call site (NOT cached result — see below)
 
-## Core Concept: fn-result-value
+## Core Concept: call-site
 
-**fn-result-value is NOT primarily about caching. Its main purpose is structural:**
+**call-site is NOT primarily about caching. Its main purpose is structural:**
 
 It distinguishes between the same function called at different points in the execution graph.
 
@@ -52,31 +52,31 @@ fn: current-time (base function)
 fn: sleep (base function)
 fn: print-two-times (base function with args: t1, t2)
 
-;; These are TWO DIFFERENT fn-result-values pointing to the SAME fn
-fn-result-value: time-before  → fn: current-time
-fn-result-value: time-after   → fn: current-time
+;; These are TWO DIFFERENT call-sites pointing to the SAME fn
+call-site: time-before  → fn: current-time
+call-site: time-after   → fn: current-time
 
 fn: my-program
-  arg: t1 = ref<fn-result-value:time-before>   ;; first call
-  arg: wait = ref<fn-result-value:sleep-5s>
-  arg: t2 = ref<fn-result-value:time-after>    ;; second call (different!)
+  arg: t1 = ref<call-site:time-before>   ;; first call
+  arg: wait = ref<call-site:sleep-5s>
+  arg: t2 = ref<call-site:time-after>    ;; second call (different!)
 ```
 
-Without fn-result-value, we couldn't distinguish "time before sleep" from "time after sleep" — they'd be the same function reference.
+Without call-site, we couldn't distinguish "time before sleep" from "time after sleep" — they'd be the same function reference.
 
 **Free arguments are passed at execution time via call-site-args:**
 ```clojure
 ;; fn-a has free argument arg-schema-a (not bound in DB)
-;; fn-result-value-a references fn-a (this is a "call site")
+;; call-site-a references fn-a (this is a "call site")
 
 ;; At execution time, pass value for the free argument:
 (create-context {:storage s
-                 :call-site-args {[fn-result-value-a-id arg-schema-a-id] 42}})
+                 :call-site-args {[call-site-a-id arg-schema-a-id] 42}})
 
-;; The executor resolves this when it reaches fn-result-value-a
+;; The executor resolves this when it reaches call-site-a
 ```
 
-**Key insight:** No new schema fields needed. The graph structure (fn-result-value pointing to fn) plus runtime call-site-args is sufficient.
+**Key insight:** No new schema fields needed. The graph structure (call-site pointing to fn) plus runtime call-site-args is sufficient.
 
 ## Documentation Map
 

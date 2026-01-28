@@ -163,20 +163,20 @@
       (is (sp/delete-entity wrapped :arg-schema arg-schema-id)))))
 
 
-(deftest fn-result-value-crud-test
-  (testing "fn-result-value CRUD is delegated (no cache action)"
+(deftest call-site-crud-test
+  (testing "call-site CRUD is delegated (no cache action)"
     (let [storage (mocks/create-mock-storage)
           wrapped (cached/wrap-with-cache storage (mocks/create-mock-cache))
           frv-id (random-uuid)
           fn-id (random-uuid)]
 
       ;; Create
-      (let [result (sp/create-entity wrapped :fn-result-value
+      (let [result (sp/create-entity wrapped :call-site
                                      {:id frv-id :fn-id fn-id :value "result" :name "test-frv"})]
         (is (= frv-id (:id result))))
 
       ;; Delete
-      (is (sp/delete-entity wrapped :fn-result-value frv-id)))))
+      (is (sp/delete-entity wrapped :call-site frv-id)))))
 
 
 (deftest fn-update-without-schema-change-test
@@ -225,10 +225,10 @@
     (let [storage (mocks/create-mock-storage)
           wrapped (cached/wrap-with-cache storage (mocks/create-mock-cache))
           frv-id (random-uuid)]
-      ;; Create fn-result-value
-      (sp/create-entity storage :fn-result-value {:id frv-id :fn-id (random-uuid) :value "test" :name "test-frv"})
+      ;; Create call-site
+      (sp/create-entity storage :call-site {:id frv-id :fn-id (random-uuid) :value "test" :name "test-frv"})
       ;; Update - should not throw (default case)
-      (let [result (sp/update-entity wrapped :fn-result-value frv-id {:value "updated"})]
+      (let [result (sp/update-entity wrapped :call-site frv-id {:value "updated"})]
         (is (= "updated" (:value result)))))))
 
 
@@ -243,23 +243,23 @@
       (is (sp/delete-entity wrapped :custom custom-id)))))
 
 
-(deftest create-fn-result-value-test
-  (testing "create-entity for :fn-result-value does not trigger immediate cache action"
+(deftest create-call-site-test
+  (testing "create-entity for :call-site does not trigger immediate cache action"
     (let [storage (mocks/create-mock-storage)
           wrapped (cached/wrap-with-cache storage (mocks/create-mock-cache))
           schema-id (random-uuid)
           fn-id (random-uuid)]
       (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
       (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
-      ;; Create fn-result-value - should not throw and not invalidate cache
-      (let [frv (sp/create-entity wrapped :fn-result-value
+      ;; Create call-site - should not throw and not invalidate cache
+      (let [frv (sp/create-entity wrapped :call-site
                                   {:fn-id fn-id :value "result" :name "test-frv"})]
         (is (some? frv))
         (is (= "result" (:value frv)))))))
 
 
-(deftest delete-fn-result-value-test
-  (testing "delete-entity for :fn-result-value does not trigger cache action"
+(deftest delete-call-site-test
+  (testing "delete-entity for :call-site does not trigger cache action"
     (let [storage (mocks/create-mock-storage)
           wrapped (cached/wrap-with-cache storage (mocks/create-mock-cache))
           schema-id (random-uuid)
@@ -267,9 +267,9 @@
           frv-id (random-uuid)]
       (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
       (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
-      (sp/create-entity storage :fn-result-value {:id frv-id :fn-id fn-id :value "result" :name "test-frv"})
-      ;; Delete fn-result-value - should not throw
-      (is (sp/delete-entity wrapped :fn-result-value frv-id)))))
+      (sp/create-entity storage :call-site {:id frv-id :fn-id fn-id :value "result" :name "test-frv"})
+      ;; Delete call-site - should not throw
+      (is (sp/delete-entity wrapped :call-site frv-id)))))
 
 
 (deftest update-fn-with-fn-schema-id-change-test

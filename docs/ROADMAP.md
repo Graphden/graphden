@@ -41,8 +41,8 @@
 - `fn-schema` with `base-fn-name`
 - `arg-schema` with `required`
 - `fn` (function instance)
-- `fn-result-value` for cached computation results
-- `arg-value` with union types (including refs to fn-result-value)
+- `call-site` for cached computation results
+- `arg-value` with union types (including refs to call-site)
 
 **1.2 GraphConstraints protocol** - All 5 validators
 
@@ -93,7 +93,7 @@
 - `execute-with-named-args` - Execute with named arguments
 - `execute-by-name` - Execute by function name
 - Depth/timeout protection
-- `call-site-args` for runtime free argument values (keyed by arg-schema-id or [fn-result-value-id arg-schema-id])
+- `call-site-args` for runtime free argument values (keyed by arg-schema-id or [call-site-id arg-schema-id])
 
 **3.4 fn-registry component:**
 - `register-base-fns!` - Register implementations
@@ -216,16 +216,16 @@
 
 **Problem**: When executing a function with free arguments via UI, users see technical identifiers (UUIDs). We need human-readable aliases.
 
-**Solution**: New entity `free-arg-alias` linking `fn-result-value` + `arg-schema` to a display name.
+**Solution**: New entity `free-arg-alias` linking `call-site` + `arg-schema` to a display name.
 
 **Schema:**
 ```
 free-arg-alias:
   id: uuid (PK)
-  fn-result-value-id: ref<fn-result-value>
+  call-site-id: ref<call-site>
   arg-schema-id: ref<arg-schema>
   alias: text (human-readable name)
-  UNIQUE(fn-result-value-id, arg-schema-id)
+  UNIQUE(call-site-id, arg-schema-id)
 ```
 
 **Lifecycle:**

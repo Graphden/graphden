@@ -10,13 +10,13 @@
 
    Arguments are wrapped in Clojure `delay` objects for lazy evaluation:
    - Values are only computed when dereferenced with @
-   - Enables memoization of fn-result-values across the execution graph
+   - Enables memoization of call-sites across the execution graph
 
    ## Reference Types
 
    Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
    - ref<fn> → pass fn-id directly (for HOF, handlers, etc. - don't execute)
-   - ref<fn-result-value> → execute fn and use result (with caching)
+   - ref<call-site> → execute fn and use result (with caching)
 
    This means HOF (map, filter, reduce) receive fn-id and create callables themselves.
 
@@ -139,24 +139,24 @@
 
 
 (defn- build-uuid-ref-delay
-  "Builds a delay for a UUID reference (fn or fn-result-value).
+  "Builds a delay for a UUID reference (fn or call-site).
 
    Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
-   - ref<fn-result-value> → execute fn and use result (with caching)
+   - ref<call-site> → execute fn and use result (with caching)
    - ref<fn> → pass fn-id directly (for HOF, handlers, etc.)
 
    Parameters:
    - context: Execution context
    - uuid-value: The UUID reference
    - arg-name: Argument name for error context
-   - fn-result-values: Map of fn-result-values from execution graph
-   - execute-fn-result-value-fn: Function to execute fn-result-values (injected)"
-  [context uuid-value arg-name fn-result-values execute-fn-result-value-fn]
-  (if (contains? fn-result-values uuid-value)
-    ;; ref<fn-result-value>: execute with caching
-    (let [frv-context (assoc context :current-frv-id uuid-value)]
-      (wrap-delay-with-context arg-name :fn-result-value
-                               #(execute-fn-result-value-fn frv-context uuid-value)))
+   - call-sites: Map of call-sites from execution graph
+   - execute-call-site-fn: Function to execute call-sites (injected)"
+  [context uuid-value arg-name call-sites execute-call-site-fn]
+  (if (contains? call-sites uuid-value)
+    ;; ref<call-site>: execute with caching
+    (let [cs-context (assoc context :current-call-site-id uuid-value)]
+      (wrap-delay-with-context arg-name :call-site
+                               #(execute-call-site-fn cs-context uuid-value)))
     ;; ref<fn>: pass fn-id directly (don't execute)
     (delay uuid-value)))
 
@@ -165,27 +165,27 @@
   "Builds a delay for an arg-value with error context.
 
    Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
-   - UUID in fn-result-values map → execute fn and use result (cached)
-   - UUID not in fn-result-values → pass as fn-id (for HOF, handlers, etc.)
+   - UUID in call-sites map → execute fn and use result (cached)
+   - UUID not in call-sites → pass as fn-id (for HOF, handlers, etc.)
    - Non-UUID → literal value
 
    Parameters:
    - context: Execution context
    - arg-value: The argument value record
    - arg-schema: The argument schema
-   - execute-fn-result-value-fn: Injected function to execute fn-result-values
+   - execute-call-site-fn: Injected function to execute call-sites
 
    All delays include error context (arg-name, source) for better diagnostics."
   ^clojure.lang.Delay [context ^clojure.lang.IPersistentMap arg-value
                        ^clojure.lang.IPersistentMap arg-schema
-                       execute-fn-result-value-fn]
+                       execute-call-site-fn]
   (let [value (:value arg-value)
         arg-name (:name arg-schema)]
     (if (uuid? value)
-      ;; UUID: reference to fn or fn-result-value
-      (let [fn-result-values (-> context :execution-graph :fn-result-values)]
-        (build-uuid-ref-delay context value arg-name fn-result-values
-                              execute-fn-result-value-fn))
+      ;; UUID: reference to fn or call-site
+      (let [call-sites (-> context :execution-graph :call-sites)]
+        (build-uuid-ref-delay context value arg-name call-sites
+                              execute-call-site-fn))
       ;; Literal value
       (delay value))))
 
@@ -195,16 +195,16 @@
 (defn get-call-site-arg
   "Gets a runtime argument value from call-site-args.
 
-   For root function (current-frv-id is nil): looks up by arg-schema-id directly
-   For nested fns via fn-result-value (call site): looks up by [fn-result-value-id arg-schema-id]
+   For root function (current-call-site-id is nil): looks up by arg-schema-id directly
+   For nested fns via call-site: looks up by [call-site-id arg-schema-id]
 
    Returns the value or nil if not found."
   [context arg-schema-id]
-  (let [current-frv-id (:current-frv-id context)
+  (let [current-call-site-id (:current-call-site-id context)
         call-site-args (:call-site-args context)]
-    (if current-frv-id
-      ;; Nested fn via fn-result-value (call site): use [frv-id arg-schema-id] as key
-      (get call-site-args [current-frv-id arg-schema-id])
+    (if current-call-site-id
+      ;; Nested fn via call-site: use [call-site-id arg-schema-id] as key
+      (get call-site-args [current-call-site-id arg-schema-id])
       ;; Root function: use arg-schema-id directly
       (get call-site-args arg-schema-id))))
 
@@ -234,26 +234,26 @@
    SECURITY: Does NOT log actual values to prevent sensitive data leakage.
    Only logs type information which is safe for debugging."
   [context arg-value arg-schema arg-schema-id arg-name _call-site-arg-value
-   execute-fn-result-value-fn]
+   execute-call-site-fn]
   (log/warn "Call-site-arg ignored: argument already defined in DB (DB value takes precedence)"
             {:arg-schema-id arg-schema-id
-             :current-frv-id (:current-frv-id context)
+             :current-call-site-id (:current-call-site-id context)
              :arg-name arg-name
              ;; SECURITY: Log types only, not actual values
              :db-value-type (type (:value arg-value))
              :arg-type (:type arg-schema)
              :hint "Use provided-args in execute call or update DB arg-value to override"})
-  (build-delay context arg-value arg-schema execute-fn-result-value-fn))
+  (build-delay context arg-value arg-schema execute-call-site-fn))
 
 
 (defn throw-missing-required-arg!
   "Throws error for required arg with no value."
-  [arg-schema-id arg-name current-frv-id]
+  [arg-schema-id arg-name current-call-site-id]
   (throw (ex-info (str "Required argument '" arg-name "' not provided")
                   {:type :execution-error/missing-required-arg
                    :arg-schema-id arg-schema-id
                    :arg-name arg-name
-                   :current-frv-id current-frv-id})))
+                   :current-call-site-id current-call-site-id})))
 
 
 ;; === Main Argument Resolution ===
@@ -270,7 +270,7 @@
    1. Direct provided value (from HOF callable calls)
    2. Call-site-arg value (only if no DB value exists):
       - For root fn: looked up by arg-schema-id
-      - For nested fn via fn-result-value (call site): looked up by [frv-id arg-schema-id]
+      - For nested fn via call-site: looked up by [call-site-id arg-schema-id]
       - If arg-value also exists in DB -> warning, use DB value (no override)
    3. Stored arg-value from DB
    4. Required arg with no value -> error
@@ -281,10 +281,10 @@
    - context: Execution context
    - fn-data: Function data from graph {:arg-schemas {...} :arg-values {...}}
    - provided-args: Map of {arg-schema-id -> value} provided at call time
-   - execute-fn-result-value-fn: Injected function to execute fn-result-values"
-  [context fn-data provided-args execute-fn-result-value-fn]
+   - execute-call-site-fn: Injected function to execute call-sites"
+  [context fn-data provided-args execute-call-site-fn]
   (let [{:keys [arg-schemas arg-values]} fn-data
-        current-frv-id (:current-frv-id context)
+        current-call-site-id (:current-call-site-id context)
         strict? (:strict-type-validation? context)
         max-unknown-types (:max-unknown-types context)
         unknown-type-counter (:unknown-type-counter context)]
@@ -307,18 +307,18 @@
                      ;; DB value takes precedence
                      (handle-call-site-arg-with-db-value context arg-value arg-schema
                                                          arg-schema-id arg-name call-site-arg-value
-                                                         execute-fn-result-value-fn)
+                                                         execute-call-site-fn)
                      ;; No DB value - use call-site-arg
                      (handle-validated-arg call-site-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :call-site-arg)))
 
             ;; 3. Stored arg-value exists
             arg-value
             (assoc acc arg-name-kw (build-delay context arg-value arg-schema
-                                                execute-fn-result-value-fn))
+                                                execute-call-site-fn))
 
             ;; 4. Required arg with no value -> error
             (:required arg-schema)
-            (throw-missing-required-arg! arg-schema-id arg-name current-frv-id)
+            (throw-missing-required-arg! arg-schema-id arg-name current-call-site-id)
 
             ;; 5. Optional arg with no value -> delay returning nil
             :else

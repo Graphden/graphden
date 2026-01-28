@@ -245,7 +245,7 @@
         (let [pool (:pool storage)
               classify-fn #'graph/classify-and-load-refs
               result (classify-fn pool #{})]
-          (is (= {:fn-ids #{} :frv-ids #{} :fn-result-values {}} result)))
+          (is (= {:fn-ids #{} :call-site-ids #{} :call-sites {}} result)))
         (finally
           (sp/close storage)))))
 

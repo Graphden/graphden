@@ -9,7 +9,7 @@
 (deftest create-storage-test
   (testing "creates storage with graph-data-schema entities"
     (let [storage (gsm/create-storage)]
-      (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :fn-result-value :call-site-arg}
+      (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :call-site :call-site-arg}
              (sp/current-entities storage)))
       (sp/close storage)))
 

@@ -99,16 +99,16 @@ Following SICP, a language has three aspects:
 3. **Means of abstraction** — how to name and reuse compositions
 
 In graphden:
-- **Primitives**: Nodes (fn, fn-schema, arg-schema, arg-value, fn-result-value)
+- **Primitives**: Nodes (fn, fn-schema, arg-schema, arg-value, call-site)
 - **Combination**: Edges (references between nodes)
-- **Abstraction**: Base functions (reusable implementations) and result caching (fn-result-value)
+- **Abstraction**: Base functions (reusable implementations) and result caching (call-site)
 
 **We resist adding new entity types or edge types.** Every addition increases cognitive load and implementation complexity.
 
 #### 2.2 DRY (Don't Repeat Yourself)
 
 Abstractions must minimize the need to define anything twice:
-- fn-result-value enables sharing computed results
+- call-site enables sharing computed results
 - Base functions provide reusable implementations
 - UI can offer "create based on" = copying with ability to change
 
@@ -145,12 +145,12 @@ The system should support (or enable) development tools:
 | `arg-schema` | Argument definition (name, type, required) |
 | `fn` | Function instance (implements schema) |
 | `arg-value` | Bound argument value (literal or reference) |
-| `fn-result-value` | Cached computation reference (memoization within execution) |
+| `call-site` | Cached computation reference (memoization within execution) |
 
 **Why these five?** They are the minimal set needed to express:
 - Function definitions (fn-schema + arg-schema)
 - Function instances with values (fn + arg-value)
-- Result caching / sharing (fn-result-value)
+- Result caching / sharing (call-site)
 
 ### Means of Combination
 
@@ -159,7 +159,7 @@ Two types of references in arg-value:
 | Reference Type | Syntax (in fn-defs) | Behavior |
 |---------------|---------------------|----------|
 | `ref<fn>` | `:fn-name` | Pass fn-id as value (for HOF) |
-| `ref<fn-result-value>` | `:fn-name>` | Execute and use result |
+| `ref<call-site>` | `:fn-name>` | Execute and use result |
 
 **Why two types?** Higher-order functions (map, filter, reduce) need to receive functions as values, not their results. This is the minimum necessary distinction.
 
@@ -169,12 +169,12 @@ Two types of references in arg-value:
 
 ### Means of Abstraction
 
-#### fn-result-value (Named Intermediate Results)
+#### call-site (Named Intermediate Results)
 
 ```
 fn: report
-  sales:   ref<fn-result-value:FRV-1>  ← FRV-1 points to calculate-sales
-  summary: ref<fn-result-value:FRV-1>  ← Same FRV-1, result computed once
+  sales:   ref<call-site:FRV-1>  ← FRV-1 points to calculate-sales
+  summary: ref<call-site:FRV-1>  ← Same FRV-1, result computed once
 ```
 
 This enables:
@@ -190,7 +190,7 @@ This enables:
 
 #### Two Reference Types
 
-We wanted a single edge type, but HOF require passing functions as values. The `>` suffix (fn-result-value) vs plain reference (fn) is the minimum distinction needed.
+We wanted a single edge type, but HOF require passing functions as values. The `>` suffix (call-site) vs plain reference (fn) is the minimum distinction needed.
 
 **Mitigation**: In visual UI, this can be shown as edge color or style, not requiring user to remember syntax.
 
@@ -233,7 +233,7 @@ This section maps each system component to the principles it serves. Use this to
 | `arg-schema` | Minimal entities, Explicit | Arguments are explicit, typed, named |
 | `fn` | DRY, Expressiveness | Inheritance enables reuse without duplication |
 | `arg-value` | Explicit, Locality | Values are explicit; changing one doesn't affect siblings |
-| `fn-result-value` | DRY, Performance | Share computed results; cache expensive operations |
+| `call-site` | DRY, Performance | Share computed results; cache expensive operations |
 
 ### Storage Layer
 
@@ -275,9 +275,9 @@ This section maps each system component to the principles it serves. Use this to
 
 | Decision | Principles Served | Trade-off |
 |----------|-------------------|-----------|
-| Two reference types (`ref<fn>` vs `ref<fn-result-value>`) | Expressiveness (HOF support) | +1 concept, but minimum for HOF |
+| Two reference types (`ref<fn>` vs `ref<call-site>`) | Expressiveness (HOF support) | +1 concept, but minimum for HOF |
 | Union type for arg-value.value | Minimal entities | Single field instead of multiple tables |
-| fn-result-value as separate entity | DRY, Performance | +1 entity, but enables caching and sharing |
+| call-site as separate entity | DRY, Performance | +1 entity, but enables caching and sharing |
 
 ### Bundles
 
@@ -345,7 +345,7 @@ When proposing a change:
 
 **Question**: How does graphden handle this?
 
-**Current answer**: fn-result-value names results, but primarily for caching, not readability. Visual UI may need to support annotations or labels.
+**Current answer**: call-site names results, but primarily for caching, not readability. Visual UI may need to support annotations or labels.
 
 ### Error Messages
 

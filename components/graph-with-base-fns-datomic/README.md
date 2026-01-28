@@ -42,7 +42,7 @@ Complete graphden stack with Datomic backend. Includes storage, graph schema, ex
 ## What's Included
 
 1. **Datomic storage** - Immutable database with full history
-2. **Graph schema** - Datomic attributes for fn, fn-schema, arg-schema, arg-value, fn-result-value
+2. **Graph schema** - Datomic attributes for fn, fn-schema, arg-schema, arg-value, call-site
 3. **Base functions** - 50+ functions registered (same as memory version)
 
 ## When to Use

@@ -208,24 +208,6 @@
       (is (nil? (sp/validate-no-dependency-cycle! wrapped fn-id fn-id))))))
 
 
-(deftest metrics-storage-constraint-helpers-test
-  (testing "CachedStorageWithMetrics delegates constraint helper methods"
-    (let [storage (mocks/create-mock-storage)
-          wrapped (cached/wrap-with-cache-and-metrics storage (mocks/create-mock-cache))
-          schema-id (random-uuid)
-          fn-id (random-uuid)
-          arg-schema-id (random-uuid)]
-      ;; Setup
-      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
-      (sp/create-entity storage :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
-      (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id schema-id
-                                             :name "x" :type :int :required true})
-      ;; Test helpers
-      (is (= schema-id (sp/get-fn-schema-id-for-fn wrapped fn-id)))
-      (is (= schema-id (sp/get-fn-schema-id-for-arg-schema wrapped arg-schema-id)))
-      (is (set? (sp/collect-dependency-chain wrapped fn-id))))))
-
-
 (deftest metrics-storage-lifecycle-test
   (testing "CachedStorageWithMetrics delegates lifecycle methods"
     (let [wrapped (cached/wrap-with-cache-and-metrics (mocks/create-mock-storage) (mocks/create-mock-cache))]

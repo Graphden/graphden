@@ -1,3 +1,9 @@
+// Graphden Graph Data Schema
+// This schema defines the structure for storing function composition graphs.
+// Versioned entities use a two-table pattern: stable id + version table with data.
+// Version tables are append-only: each change adds a new record.
+// Current version = latest record by created_at for a given (entity_id, branch_id).
+
 Enum value_kind {
   null
   bool
@@ -9,55 +15,141 @@ Enum value_kind {
   jsonb
   bytes
   fn
-  ref
   any
-  union
 }
 
+// === Branching ===
+
+Table branch {
+  id uuid [primary key]
+  name text [not null]
+  base_branch_id uuid [ref: > branch.id]
+  created_at timestamptz [not null]
+}
+
+// === Non-versioned (platform-level, postponed) ===
+
+// Function signature definition.
+// base_fn_name links to Clojure implementation (nil for user-defined composite fns).
+// impl_hash is SHA-256 hash of implementation (for base fns only, for version tracking).
+// TODO: versioning postponed (platform updates - separate mechanism)
 Table fn_schema {
   id uuid [primary key]
   name text [not null, unique]
   returned_type value_kind [not null]
+  base_fn_name text
+  impl_hash text
 }
 
+// Argument definition for a function schema.
+// TODO: versioning postponed (tied to fn_schema versioning)
 Table arg_schema {
   id uuid [primary key]
   fn_schema_id uuid [not null, ref: > fn_schema.id]
   name text [not null]
   type value_kind [not null]
-  required bool [not null, default: true]
+  required bool [not null]
 
   indexes {
     (fn_schema_id, name) [unique]
   }
 }
 
-Table fn {
-  id uuid [primary key]
-  name text [not null, unique]
-  fn_schema_id uuid [not null, ref: > fn_schema.id]
-  parent_fn_id uuid [ref: > fn.id]
-}
-
-// Represents a cached computation result of a function.
-// Multiple arg-values can reference the same call-site
-// to reuse the computed value instead of re-executing the function.
-Table call_site {
-  id uuid [primary key]
-  fn_id uuid [not null, ref: > fn.id]
-}
-
+// Pure argument value (no owner). Immutable, deduplicated.
+// value can be:
+// - literal (int, text, bool, etc.)
+// - UUID referencing fn (for HOF - pass function as object)
+// - UUID referencing call_site (for computed values - execute & cache)
+// NOT versioned: changing an argument = pointing fn_arg to a different arg_value.
 Table arg_value {
   id uuid [primary key]
-  owner_fn_id uuid [not null, ref: > fn.id]
   arg_schema_id uuid [not null, ref: > arg_schema.id]
-  // value can be:
-  // - literal (int, text, bool, etc.)
-  // - UUID referencing fn (for HOF - pass function as object)
-  // - UUID referencing call_site (for computed values - execute & cache)
   value jsonb
 
   indexes {
-    (owner_fn_id, arg_schema_id) [unique]
+    (arg_schema_id, value) [unique]
+  }
+}
+
+// === Versioned: fn ===
+
+// Function instance (stable identity).
+// Other entities reference fn.id which never changes.
+Table fn {
+  id uuid [primary key]
+}
+
+// Version of a function. Append-only history.
+// Can change: name, fn_schema_id.
+// Current version: latest by created_at for (fn_id, branch_id).
+Table fn_version {
+  id uuid [primary key]
+  fn_id uuid [not null, ref: > fn.id]
+  branch_id uuid [not null, ref: > branch.id]
+  name text [not null]
+  fn_schema_id uuid [not null, ref: > fn_schema.id]
+  created_at timestamptz [not null]
+
+  indexes {
+    (fn_id, branch_id, created_at) [name: 'idx_fn_version_lookup']
+  }
+}
+
+// === Versioned: fn_arg ===
+
+// Binding from fn to arg_value (stable identity).
+Table fn_arg {
+  id uuid [primary key]
+}
+
+// Version of a fn_arg binding. Append-only history.
+// Can change: arg_value_id.
+// Current version: latest by created_at for (fn_arg_id, branch_id).
+Table fn_arg_version {
+  id uuid [primary key]
+  fn_arg_id uuid [not null, ref: > fn_arg.id]
+  branch_id uuid [not null, ref: > branch.id]
+  fn_id uuid [not null, ref: > fn.id]
+  arg_schema_id uuid [not null, ref: > arg_schema.id]
+  arg_value_id uuid [not null, ref: > arg_value.id]
+  created_at timestamptz [not null]
+
+  indexes {
+    (fn_arg_id, branch_id, created_at) [name: 'idx_fn_arg_version_lookup']
+  }
+}
+
+// === Non-versioned: call_site ===
+
+// Call site reference (function to execute at this point).
+// fn_id is fixed (call_site always calls the same fn).
+// NOT versioned: call_site itself doesn't change.
+Table call_site {
+  id uuid [primary key]
+  name text [not null, unique]
+  fn_id uuid [not null, ref: > fn.id]
+}
+
+// === Versioned: call_site_arg ===
+
+// Binding from call_site to arg_value (stable identity).
+Table call_site_arg {
+  id uuid [primary key]
+}
+
+// Version of a call_site_arg binding. Append-only history.
+// Can change: arg_value_id.
+// Current version: latest by created_at for (call_site_arg_id, branch_id).
+Table call_site_arg_version {
+  id uuid [primary key]
+  call_site_arg_id uuid [not null, ref: > call_site_arg.id]
+  branch_id uuid [not null, ref: > branch.id]
+  call_site_id uuid [not null, ref: > call_site.id]
+  arg_schema_id uuid [not null, ref: > arg_schema.id]
+  arg_value_id uuid [not null, ref: > arg_value.id]
+  created_at timestamptz [not null]
+
+  indexes {
+    (call_site_arg_id, branch_id, created_at) [name: 'idx_call_site_arg_version_lookup']
   }
 }

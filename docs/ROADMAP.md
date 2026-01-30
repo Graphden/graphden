@@ -21,7 +21,7 @@
 | REST API | Planned | Phase 5 |
 | Web UI | Planned | Phase 5 |
 | Type System | Planned | Future work |
-| Versioning | Partial | impl-hash done; full system planned |
+| Versioning | Design done | impl-hash done; branch-based schema designed (see current-schema.dbml) |
 | Permissions | Planned | Future work |
 
 ---
@@ -297,19 +297,54 @@ Execute function: calculate-report
 
 ### Git-like Versioning
 
-**Goal**: Change history, rollback, branches, merge.
+**Goal**: Change history, rollback, branches, merge for function graphs.
 
-**Model:**
-- Each fn/arg-value change is a commit
-- Can rollback to any version
-- Branches for experiments
-- Merge to combine changes
+**Schema**: See [current-schema.dbml](current-schema.dbml) for full schema.
 
-**Implementation:**
-- Either event sourcing (store all changes)
-- Or snapshot + diff
-- Integration with real git for export/import
-- Uses `impl-hash` for detecting base function changes
+**Design decisions:**
+
+| Decision | Choice | Reasoning |
+|----------|--------|-----------|
+| Versioning pattern | Two-table: stable identity (id only) + version table (data + branch_id + created_at) | Clean separation of identity from mutable state |
+| History model | Append-only version records | No data loss; current version = latest by created_at |
+| Unique constraint | Non-unique (entity_id, branch_id) — multiple records per entity per branch | Enables full history without separate history tables |
+| Branch model | Branch table with base_branch_id for inheritance chain | Resolution walks up the chain until version found |
+
+**What is versioned (graph structure changes):**
+
+| Entity | Versioned? | What changes |
+|--------|-----------|--------------|
+| `fn` | Yes (fn + fn_version) | name, fn_schema_id |
+| `fn_arg` | Yes (fn_arg + fn_arg_version) | arg_value_id binding |
+| `call_site_arg` | Yes (call_site_arg + call_site_arg_version) | arg_value_id binding |
+| `fn_schema` / `arg_schema` | No (postponed) | Platform-level, separate mechanism |
+| `arg_value` | No | Immutable, deduplicated; change = point to different arg_value |
+| `call_site` | No | fn_id is fixed; only its arg bindings change |
+
+**Branch operations:**
+
+| Operation | Mechanism |
+|-----------|-----------|
+| Create branch | Insert into `branch` with `base_branch_id` |
+| Edit on branch | Append new version record with branch_id |
+| Read on branch | Walk branch chain upward until version found |
+| Merge B into A | Copy B's version records to A; skip `env_local` records; handle conflicts |
+| Delete branch | Forbid if child branches exist; delete all version records, then branch |
+
+**Branch resolution at execution time:**
+- Executor context carries `branch_id`
+- `resolve-execution-graph` resolves each versioned entity by walking branch chain
+- No branch specified = default branch (base_branch_id = NULL)
+
+**Multi-tenant model:**
+- Each tenant operates on their own branch derived from main
+- Test branches are children of tenant branch
+- Branch context determined by request subdomain (e.g., `feature-1.tenant-a.app.example.com`)
+- Router is version-resolved per-branch, enabling route testing on branches
+
+**Postponed:**
+- fn_schema / arg_schema versioning (platform updates)
+- Personal rename / alias layer
 
 ---
 

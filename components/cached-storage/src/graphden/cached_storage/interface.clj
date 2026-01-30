@@ -14,28 +14,31 @@
 
    ## Cache Invalidation Strategy
 
-   Cache invalidation is data-driven via `invalidation-strategies` map.
-   Each entity type defines handlers for :on-create, :on-update, :on-delete.
+   Cache invalidation is data-driven via a rule registry in
+   `graphden.cached-storage.invalidation`. Rules are matched by entity type
+   and event type (:create, :update, :delete). Default rules are registered
+   at namespace load time. Extensions can register additional rules.
 
-   ### Invalidation Flow (ASCII State Diagram)
+   ### Invalidation Flow
 
    ```
    MUTATION EVENT
         │
         ▼
-   ┌─────────────┐
-   │ Get Strategy │ ◄── invalidation-strategies map
-   │ for Entity   │     {:fn {:on-create ...} ...}
-   └──────┬──────┘
+   ┌──────────────────┐
+   │ Find matching    │ ◄── invalidation rule registry
+   │ rules by entity  │
+   │ type + event     │
+   └──────┬───────────┘
           │
           ▼
-   ┌─────────────────┐    no strategy
-   │ Strategy exists? │───────────────► NO-OP (passthrough)
+   ┌─────────────────┐    no rules
+   │ Rules found?    │───────────────► NO-OP (passthrough)
    └──────┬──────────┘
           │ yes
           ▼
    ┌──────────────────┐
-   │ Execute Strategy │
+   │ Execute rules    │
    │ (invalidate/     │
    │  rebuild caches) │
    └──────┬───────────┘
@@ -109,7 +112,7 @@
    ### Troubleshooting
 
    **Q: Cache returns stale data after update**
-   A: Check that entity type has strategy in `invalidation-strategies` map.
+   A: Check that entity type has rules in the invalidation registry.
       Only :fn, :arg-value, :fn-schema, :arg-schema, :call-site trigger invalidation.
 
    **Q: Performance degradation after large batch update**
@@ -120,265 +123,43 @@
    A: Caches are only rebuilt for fns that exist. If fn was deleted
       during invalidation, its cache is not rebuilt (expected behavior)."
   (:require
-    [clojure.tools.logging :as log]
     [graphden.cache-protocol.interface :as cache]
+    [graphden.cached-storage.invalidation :as inv]
     [graphden.storage-protocol.interface :as sp]))
 
 
-;; === Cache dependency computation ===
-
-(defn- compute-dependencies
-  "Computes dependency counts from an execution graph.
-   Returns {:fn-ids {fn-id -> count}
-            :fn-schema-ids {schema-id -> count}
-            :arg-schema-ids {arg-schema-id -> count}
-            :call-site-ids {call-site-id -> count}}"
-  [graph]
-  {:fn-ids (frequencies (keys (:fns graph)))
-   :fn-schema-ids (frequencies (keys (:fn-schemas graph)))
-   :arg-schema-ids (frequencies (keys (:arg-schemas graph)))
-   :call-site-ids (frequencies (keys (:call-sites graph)))})
-
-
-(defn- rebuild-cache!
-  "Rebuilds cache for a single fn-id using base storage's resolve-execution-graph."
-  [base-storage cache-storage fn-id]
-  (log/debug "Rebuilding cache" {:fn-id fn-id})
-  (let [graph (sp/resolve-execution-graph base-storage fn-id)
-        deps (compute-dependencies graph)]
-    (cache/save-cache! cache-storage fn-id graph deps)
-    (log/debug "Cache rebuilt" {:fn-id fn-id
-                                :fns-count (count (:fns graph))
-                                :fn-schemas-count (count (:fn-schemas graph))})))
-
-
-(defn- batch-delete-caches!
-  "Deletes multiple caches. Returns the set of deleted cache-ids."
-  [cache-storage cache-ids]
-  (doseq [cache-id cache-ids]
-    (cache/delete-cache! cache-storage cache-id))
-  cache-ids)
-
-
-(defn- batch-rebuild-existing-caches!
-  "Rebuilds caches only for fns that still exist in storage.
-   Uses parallel reads to check existence, then sequential rebuilds.
-   Returns the set of cache-ids that were rebuilt."
-  [base-storage cache-storage cache-ids]
-  (when (seq cache-ids)
-    ;; Batch read to check which fns exist
-    (let [existing-fns (sp/read-entities base-storage :fn (vec cache-ids))
-          existing-fn-ids (set (keys existing-fns))]
-      (when (seq existing-fn-ids)
-        (log/debug "Rebuilding caches for existing fns"
-                   {:total (count cache-ids)
-                    :existing (count existing-fn-ids)})
-        (doseq [cache-id existing-fn-ids]
-          (rebuild-cache! base-storage cache-storage cache-id)))
-      existing-fn-ids)))
-
-
-(defn- invalidate-dependents!
-  "Invalidates all caches returned by find-fn and rebuilds them if the fn exists.
-   find-fn should be a function that takes cache-storage and returns a set of cache-ids.
-
-   Optimization: Uses batch read to check existence of all fns at once,
-   then rebuilds only those that exist. This reduces N+1 queries."
-  [base-storage cache-storage find-fn]
-  (let [dependent-cache-ids (find-fn cache-storage)]
-    (when (seq dependent-cache-ids)
-      (log/debug "Invalidating dependent caches" {:count (count dependent-cache-ids)
-                                                  :cache-ids dependent-cache-ids})
-      ;; Phase 1: Delete all caches
-      (batch-delete-caches! cache-storage dependent-cache-ids)
-      ;; Phase 2: Rebuild caches for existing fns
-      (batch-rebuild-existing-caches! base-storage cache-storage dependent-cache-ids))))
-
-
-(defn- invalidate-fn-and-dependents!
-  "Invalidates cache for fn-id and all caches that depend on it."
-  [base-storage cache-storage fn-id]
-  (log/debug "Invalidating fn and dependents" {:fn-id fn-id})
-  ;; Invalidate and rebuild all dependent caches
-  (invalidate-dependents! base-storage cache-storage
-                          #(cache/find-caches-by-fn-dep % fn-id))
-  ;; Rebuild cache for the fn itself if it exists
-  (when (sp/read-entity base-storage :fn fn-id)
-    (rebuild-cache! base-storage cache-storage fn-id)))
-
-
-(defn- invalidate-fn-schema-dependents!
-  "Invalidates all caches that depend on a fn-schema."
-  [base-storage cache-storage fn-schema-id]
-  (log/debug "Invalidating fn-schema dependents" {:fn-schema-id fn-schema-id})
-  (invalidate-dependents! base-storage cache-storage
-                          #(cache/find-caches-by-fn-schema-dep % fn-schema-id)))
-
-
-(defn- invalidate-arg-schema-dependents!
-  "Invalidates all caches that depend on an arg-schema."
-  [base-storage cache-storage arg-schema-id]
-  (log/debug "Invalidating arg-schema dependents" {:arg-schema-id arg-schema-id})
-  (invalidate-dependents! base-storage cache-storage
-                          #(cache/find-caches-by-arg-schema-dep % arg-schema-id)))
-
-
-(defn- invalidate-call-site-dependents!
-  "Invalidates all caches that depend on a call-site."
-  [base-storage cache-storage call-site-id]
-  (log/debug "Invalidating call-site dependents" {:call-site-id call-site-id})
-  (invalidate-dependents! base-storage cache-storage
-                          #(cache/find-caches-by-call-site-dep % call-site-id)))
-
-
-;; === Cache invalidation strategy map ===
-;; Centralized invalidation strategies grouped by entity type.
-;; Each entity can define :on-create, :on-update, :on-delete handlers.
-;;
-;; Benefits over multimethods:
-;; - All strategies for an entity visible in one place
-;; - Easier to see what entities have what invalidation behavior
-;; - Simple to extend for new entities
-;; - Data-driven: can be introspected/tested declaratively
-
-(def ^:private invalidation-strategies
-  "Map of entity-name -> {:on-create fn, :on-update fn, :on-delete fn}.
-
-   Handler signatures:
-   - :on-create (fn [base-storage cache-storage result])
-   - :on-update (fn [base-storage cache-storage id data result old-record])
-   - :on-delete (fn [base-storage cache-storage id record])"
-  {:fn
-   {:on-create
-    (fn [base-storage cache-storage result]
-      (rebuild-cache! base-storage cache-storage (:id result)))
-
-    :on-update
-    (fn [base-storage cache-storage id data _result old-record]
-      ;; Invalidate if fn-schema-id changed (rare but affects execution graph)
-      (when (and (contains? data :fn-schema-id)
-                 (not= (:fn-schema-id old-record) (:fn-schema-id data)))
-        (invalidate-fn-and-dependents! base-storage cache-storage id)))
-
-    :on-delete
-    (fn [base-storage cache-storage id _record]
-      (cache/delete-cache! cache-storage id)
-      (invalidate-fn-and-dependents! base-storage cache-storage id))}
-
-   ;; arg-value is now a pure value (no owner-fn-id)
-   ;; To find affected fns, we query fn-arg bindings that reference this arg-value
-   :arg-value
-   {:on-create
-    (fn [_base-storage _cache-storage _result]
-      ;; arg-value creation alone doesn't affect caches
-      ;; (the fn-arg binding creation will trigger invalidation)
-      nil)
-
-    :on-update
-    (fn [base-storage cache-storage id _data _result _old-record]
-      ;; Find all fn-arg bindings that reference this arg-value and invalidate those fns
-      (let [fn-args (sp/query-entities base-storage :fn-arg {:arg-value-id id})]
-        (doseq [fn-arg fn-args]
-          (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id fn-arg)))))
-
-    :on-delete
-    (fn [base-storage cache-storage id _record]
-      ;; Find all fn-arg bindings that referenced this arg-value
-      ;; Note: fn-arg records should be cascade-deleted first, but we check anyway
-      (let [fn-args (sp/query-entities base-storage :fn-arg {:arg-value-id id})]
-        (doseq [fn-arg fn-args]
-          (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id fn-arg)))))}
-
-   ;; fn-arg is the binding from fn to arg-value
-   ;; When fn-arg changes, invalidate the owning fn
-   :fn-arg
-   {:on-create
-    (fn [base-storage cache-storage result]
-      (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id result)))
-
-    :on-update
-    (fn [base-storage cache-storage _id _data result _old-record]
-      (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id result)))
-
-    :on-delete
-    (fn [base-storage cache-storage _id record]
-      (when record
-        (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id record))))}
-
-   :fn-schema
-   {:on-update
-    (fn [base-storage cache-storage id _data _result _old-record]
-      (invalidate-fn-schema-dependents! base-storage cache-storage id))
-
-    :on-delete
-    (fn [base-storage cache-storage id _record]
-      (invalidate-fn-schema-dependents! base-storage cache-storage id))}
-
-   :arg-schema
-   {:on-update
-    (fn [base-storage cache-storage id _data _result _old-record]
-      (invalidate-arg-schema-dependents! base-storage cache-storage id))
-
-    :on-delete
-    (fn [base-storage cache-storage id _record]
-      (invalidate-arg-schema-dependents! base-storage cache-storage id))}
-
-   :call-site
-   {:on-create
-    (fn [base-storage cache-storage result]
-      (invalidate-call-site-dependents! base-storage cache-storage (:id result)))
-
-    :on-update
-    (fn [base-storage cache-storage id _data _result _old-record]
-      (invalidate-call-site-dependents! base-storage cache-storage id))
-
-    :on-delete
-    (fn [base-storage cache-storage id _record]
-      (invalidate-call-site-dependents! base-storage cache-storage id))}
-
-   ;; call-site-arg is the binding from call-site to arg-value
-   ;; When call-site-arg changes, invalidate dependents of the call-site
-   :call-site-arg
-   {:on-create
-    (fn [base-storage cache-storage result]
-      (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id result)))
-
-    :on-update
-    (fn [base-storage cache-storage _id _data result _old-record]
-      (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id result)))
-
-    :on-delete
-    (fn [base-storage cache-storage _id record]
-      (when record
-        (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id record))))}})
-
-
-(defn- get-strategy
-  "Gets invalidation strategy for entity and operation.
-   Returns nil if no strategy defined (no-op)."
-  [entity-name operation]
-  (get-in invalidation-strategies [entity-name operation]))
-
-
 (defn- invalidate-after-create!
-  "Invokes :on-create strategy for entity if defined."
+  "Invokes :create rules for entity if defined."
   [base-storage cache-storage entity-name result]
-  (when-let [handler (get-strategy entity-name :on-create)]
-    (handler base-storage cache-storage result)))
+  (inv/process-invalidation! entity-name :create
+                             {:base-storage base-storage
+                              :cache-storage cache-storage
+                              :entity-name entity-name
+                              :result result}))
 
 
 (defn- invalidate-after-update!
-  "Invokes :on-update strategy for entity if defined."
+  "Invokes :update rules for entity if defined."
   [base-storage cache-storage entity-name id data result old-record]
-  (when-let [handler (get-strategy entity-name :on-update)]
-    (handler base-storage cache-storage id data result old-record)))
+  (inv/process-invalidation! entity-name :update
+                             {:base-storage base-storage
+                              :cache-storage cache-storage
+                              :entity-name entity-name
+                              :id id
+                              :data data
+                              :result result
+                              :old-record old-record}))
 
 
 (defn- invalidate-after-delete!
-  "Invokes :on-delete strategy for entity if defined."
+  "Invokes :delete rules for entity if defined."
   [base-storage cache-storage entity-name id record]
-  (when-let [handler (get-strategy entity-name :on-delete)]
-    (handler base-storage cache-storage id record)))
+  (inv/process-invalidation! entity-name :delete
+                             {:base-storage base-storage
+                              :cache-storage cache-storage
+                              :entity-name entity-name
+                              :id id
+                              :record record}))
 
 
 ;; === Cached Storage Record ===
@@ -504,23 +285,6 @@
     (sp/validate-no-dependency-cycle! base-storage owner-fn-id value-fn-id))
 
 
-  sp/ConstraintHelpers
-
-  (get-fn-schema-id-for-fn
-    [_ fn-id]
-    (sp/get-fn-schema-id-for-fn base-storage fn-id))
-
-
-  (get-fn-schema-id-for-arg-schema
-    [_ arg-schema-id]
-    (sp/get-fn-schema-id-for-arg-schema base-storage arg-schema-id))
-
-
-  (collect-dependency-chain
-    [_ fn-id]
-    (sp/collect-dependency-chain base-storage fn-id))
-
-
   sp/ExecutionGraph
 
   (resolve-execution-graph
@@ -530,7 +294,7 @@
       cached-graph
       ;; Cache miss: resolve using base storage, then cache
       (let [graph (sp/resolve-execution-graph base-storage fn-id)
-            deps (compute-dependencies graph)]
+            deps (inv/compute-dependencies graph)]
         (cache/save-cache! cache-storage fn-id graph deps)
         graph))))
 
@@ -654,7 +418,7 @@
 
   (create-entity
     [_ entity-name data]
-    (when (get-strategy entity-name :on-create)
+    (when (inv/has-strategy? entity-name :create)
       (inc-invalidations! metrics))
     (sp/create-entity delegate entity-name data))
 
@@ -666,7 +430,7 @@
 
   (update-entity
     [_ entity-name id data]
-    (when (get-strategy entity-name :on-update)
+    (when (inv/has-strategy? entity-name :update)
       (inc-invalidations! metrics))
     (sp/update-entity delegate entity-name id data))
 
@@ -674,7 +438,7 @@
   (delete-entity
     [_ entity-name id]
     (let [result (sp/delete-entity delegate entity-name id)]
-      (when (and result (get-strategy entity-name :on-delete))
+      (when (and result (inv/has-strategy? entity-name :delete))
         (inc-invalidations! metrics))
       result))
 
@@ -689,7 +453,7 @@
   (create-entities
     [_ entity-name data-seq]
     (let [results (sp/create-entities delegate entity-name data-seq)]
-      (when (and (seq results) (get-strategy entity-name :on-create))
+      (when (and (seq results) (inv/has-strategy? entity-name :create))
         (dotimes [_ (count results)]
           (inc-invalidations! metrics)))
       results))
@@ -703,7 +467,7 @@
   (delete-entities
     [_ entity-name ids]
     (let [result (sp/delete-entities delegate entity-name ids)]
-      (when (and (pos? result) (get-strategy entity-name :on-delete))
+      (when (and (pos? result) (inv/has-strategy? entity-name :delete))
         (dotimes [_ result]
           (inc-invalidations! metrics)))
       result))
@@ -721,23 +485,6 @@
     (sp/validate-no-dependency-cycle! delegate owner-fn-id value-fn-id))
 
 
-  sp/ConstraintHelpers
-
-  (get-fn-schema-id-for-fn
-    [_ fn-id]
-    (sp/get-fn-schema-id-for-fn delegate fn-id))
-
-
-  (get-fn-schema-id-for-arg-schema
-    [_ arg-schema-id]
-    (sp/get-fn-schema-id-for-arg-schema delegate arg-schema-id))
-
-
-  (collect-dependency-chain
-    [_ fn-id]
-    (sp/collect-dependency-chain delegate fn-id))
-
-
   sp/ExecutionGraph
 
   (resolve-execution-graph
@@ -752,7 +499,7 @@
         (do
           (inc-misses! metrics)
           (let [graph (sp/resolve-execution-graph base-storage fn-id)
-                deps (compute-dependencies graph)]
+                deps (inv/compute-dependencies graph)]
             (cache/save-cache! cache-storage fn-id graph deps)
             graph))))))
 

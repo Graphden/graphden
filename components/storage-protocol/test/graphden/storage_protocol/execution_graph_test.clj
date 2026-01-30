@@ -89,18 +89,6 @@
     (is (false? (storage/execution-graph? "string")))))
 
 
-;; === GraphDataLoader protocol tests ===
-
-(deftest graph-data-loader-protocol-test
-  (testing "GraphDataLoader protocol is defined"
-    (is (some? storage/GraphDataLoader))
-    (is (contains? (:sigs storage/GraphDataLoader) :load-fn-record))
-    (is (contains? (:sigs storage/GraphDataLoader) :load-fn-schema-record))
-    (is (contains? (:sigs storage/GraphDataLoader) :load-arg-schemas-for-fn-schema))
-    (is (contains? (:sigs storage/GraphDataLoader) :load-arg-values-for-fn))
-    (is (contains? (:sigs storage/GraphDataLoader) :classify-uuid-refs))))
-
-
 ;; === ExecutionGraphReader protocol tests ===
 
 (deftest execution-graph-reader-protocol-test

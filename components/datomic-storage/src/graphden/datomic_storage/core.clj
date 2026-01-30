@@ -11,19 +11,18 @@
    - crud.clj - CRUD and batch operation implementations
    - graph.clj - ExecutionGraph resolution
    - schema.clj - Datomic schema building
-   - constraints.clj - Graph constraint validation
    - util.clj - Common utilities"
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [datomic.client.api :as d]
-    [graphden.datomic-storage.constraints :as constraints]
     [graphden.datomic-storage.crud :as crud]
     [graphden.datomic-storage.graph :as graph]
     [graphden.datomic-storage.introspection :as introspection]
     [graphden.datomic-storage.migration :as migration]
     [graphden.datomic-storage.schema :as schema]
     [graphden.datomic-storage.util :as util]
+    [graphden.storage-protocol.generic-constraints :as gc]
     [graphden.storage-protocol.interface :as sp])
   (:import
     (java.util.concurrent.locks
@@ -256,15 +255,15 @@
   sp/GraphConstraints
 
   (validate-arg-schema-belongs-to-fn!
-    [_this fn-id arg-schema-id]
+    [this fn-id arg-schema-id]
     (sp/with-read-lock rw-lock
-                       #(constraints/validate-arg-schema-belongs-to-fn! conn-atom fn-id arg-schema-id)))
+                       #(gc/validate-arg-schema-belongs-to-fn! this fn-id arg-schema-id)))
 
 
   (validate-no-dependency-cycle!
-    [_this owner-fn-id value-fn-id]
+    [this owner-fn-id value-fn-id]
     (sp/with-read-lock rw-lock
-                       #(constraints/validate-no-dependency-cycle! conn-atom owner-fn-id value-fn-id)))
+                       #(gc/validate-no-dependency-cycle! this owner-fn-id value-fn-id)))
 
 
   sp/ExecutionGraph

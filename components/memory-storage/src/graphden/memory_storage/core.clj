@@ -2,10 +2,10 @@
   "In-memory implementation of Storage protocol."
   (:require
     [clojure.tools.logging :as log]
-    [graphden.memory-storage.constraints :as constraints]
     [graphden.memory-storage.crud :as crud]
     [graphden.memory-storage.graph :as graph]
     [graphden.memory-storage.migration :as migration]
+    [graphden.storage-protocol.generic-constraints :as gc]
     [graphden.storage-protocol.interface :as sp])
   (:import
     (java.util.concurrent.locks
@@ -62,7 +62,7 @@
 ;; === Storage record ===
 
 (defrecord MemoryStorage
-  [state ^ReentrantReadWriteLock rw-lock helpers]
+  [state ^ReentrantReadWriteLock rw-lock]
 
   sp/Storage
 
@@ -205,19 +205,16 @@
 
   sp/GraphConstraints
 
-  ;; Note: helpers is created once at storage creation and reused.
-  ;; It reads current state via the state atom on each call.
-
   (validate-arg-schema-belongs-to-fn!
-    [_this fn-id arg-schema-id]
+    [this fn-id arg-schema-id]
     (sp/with-read-lock rw-lock
-                       #(sp/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)))
+                       #(gc/validate-arg-schema-belongs-to-fn! this fn-id arg-schema-id)))
 
 
   (validate-no-dependency-cycle!
-    [_this owner-fn-id value-fn-id]
+    [this owner-fn-id value-fn-id]
     (sp/with-read-lock rw-lock
-                       #(sp/validate-no-dependency-cycle-impl helpers owner-fn-id value-fn-id)))
+                       #(gc/validate-no-dependency-cycle! this owner-fn-id value-fn-id)))
 
 
   sp/ExecutionGraph
@@ -258,13 +255,11 @@
 
 (defn create-storage
   "Creates a new in-memory storage instance.
-   Thread-safe with ReentrantReadWriteLock for concurrent access.
-   ConstraintHelpers is created once and reused for all constraint validations."
+   Thread-safe with ReentrantReadWriteLock for concurrent access."
   []
   (let [state (atom {:entities {}
                      :enums {}
                      :metadata nil
                      :data {}})]
     (->MemoryStorage state
-                     (ReentrantReadWriteLock.)
-                     (constraints/->MemoryConstraintHelpers state))))
+                     (ReentrantReadWriteLock.))))

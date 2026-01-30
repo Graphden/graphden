@@ -9,10 +9,8 @@
    - introspection.clj - Database introspection
    - ddl.clj - DDL operations (CREATE/ALTER)
    - migration.clj - Schema migration logic
-   - crud.clj - CRUD operations
-   - constraints.clj - Graph constraints validation"
+   - crud.clj - CRUD operations"
   (:require
-    [graphden.postgres-storage.constraints :as constraints]
     [graphden.postgres-storage.crud :as crud]
     [graphden.postgres-storage.graph :as graph]
     [graphden.postgres-storage.introspection :as introspection]
@@ -20,6 +18,7 @@
     [graphden.postgres-storage.migration :as migration]
     [graphden.postgres-storage.pool :as pool]
     [graphden.postgres-storage.util :as util]
+    [graphden.storage-protocol.generic-constraints :as gc]
     [graphden.storage-protocol.interface :as sp])
   (:import
     (java.sql
@@ -245,13 +244,13 @@
   sp/GraphConstraints
 
   (validate-arg-schema-belongs-to-fn!
-    [_this fn-id arg-schema-id]
-    (constraints/validate-arg-schema-belongs-to-fn! pool fn-id arg-schema-id))
+    [this fn-id arg-schema-id]
+    (gc/validate-arg-schema-belongs-to-fn! this fn-id arg-schema-id))
 
 
   (validate-no-dependency-cycle!
-    [_this owner-fn-id value-fn-id]
-    (constraints/validate-no-dependency-cycle! pool owner-fn-id value-fn-id))
+    [this owner-fn-id value-fn-id]
+    (gc/validate-no-dependency-cycle! this owner-fn-id value-fn-id))
 
 
   sp/ExecutionGraph

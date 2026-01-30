@@ -99,26 +99,6 @@
       (is (nil? (sp/validate-no-dependency-cycle! wrapped fn-id fn-id))))))
 
 
-(deftest constraint-helpers-delegation-test
-  (testing "ConstraintHelpers methods are delegated to base storage"
-    (let [storage (mocks/create-mock-storage)
-          wrapped (cached/wrap-with-cache storage (mocks/create-mock-cache))
-          schema-id (random-uuid)
-          fn-id (random-uuid)
-          arg-schema-id (random-uuid)]
-
-      ;; Setup test data in base storage
-      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
-      (sp/create-entity storage :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
-      (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id schema-id
-                                             :name "arg" :type :int :required true})
-
-      ;; Test helper methods
-      (is (= schema-id (sp/get-fn-schema-id-for-fn wrapped fn-id)))
-      (is (= schema-id (sp/get-fn-schema-id-for-arg-schema wrapped arg-schema-id)))
-      (is (set? (sp/collect-dependency-chain wrapped fn-id))))))
-
-
 (deftest introspection-delegation-test
   (testing "StorageIntrospection methods are delegated"
     (let [storage (mocks/create-mock-storage)

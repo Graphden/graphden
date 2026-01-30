@@ -316,6 +316,92 @@ When proposing a change:
 
 ---
 
+## Role Chain and Extensibility
+
+### The Developer Chain
+
+In traditional software, the chain from code to end user is short: a developer writes code, users use the product. But in practice, there are always intermediate layers with varying levels of technical expertise:
+
+| Role | Technical Depth | Domain Knowledge | Examples |
+|------|----------------|-------------------|----------|
+| **Platform developer** | Deep (writes Clojure, base-fn) | Low | Core team |
+| **System integrator** | Medium (composes graphs, configures) | Medium | DevOps, architects |
+| **Domain builder** | Low (uses pre-built blocks) | High | Forum admin creating categories, CMS editor |
+| **End user** | None | Full (their own domain) | Forum user, app consumer |
+
+Even a classic forum has this: developers write the engine, admins create sections and configure rules, users post content. Modern no-code/low-code platforms extend this chain further.
+
+**Graphden should support this entire chain.** Through access levels to functions and graph operations, each role sees only what they need:
+
+- Platform developer: writes base-fn in Clojure, defines fn-schema
+- System integrator: composes base-fn into graphs, configures storage and infrastructure
+- Domain builder: creates domain-specific functions from existing compositions, configures routing
+- End user: invokes functions through UI, provides runtime arguments
+
+The boundaries between roles are enforced by the permission system, not by technical barriers. A domain builder doesn't need to know Clojure — they work with the same graph primitives, just at a higher level.
+
+### Extension Modularity Problem
+
+The core system is simple: base-fn implementations + graph composition (fn, arg-value, call-site) + executor. But production features — versioning, caching, logging, permissions, environment management, secret storage — all require modifications to either storage (new fields, tables, query logic) or executor (new resolution steps, middleware).
+
+Hardwiring these features into the core has problems:
+- Forces all users to use them, even when unnecessary
+- Makes modifications difficult without deep knowledge of internals and Clojure
+- Couples unrelated concerns
+
+### Three Approaches to Extensions
+
+| Approach | Description | When to Use |
+|----------|-------------|-------------|
+| **1. Hardwired** | Extension is part of core storage/executor code | Security-critical, performance-critical, or fundamentally inseparable from core |
+| **2. Component** | Separate module wrapping core with additional behavior | Most production features (versioning, caching, permissions) |
+| **3. Graph-native** | Extension described in the same graph language as user programs | Logging, monitoring, domain-specific middleware |
+
+**Current assessment of planned features:**
+
+| Feature | Recommended Approach | Reasoning |
+|---------|---------------------|-----------|
+| Core executor loop | 1 (hardwired) | Bootstrapping problem — cannot execute graph without executor |
+| Core storage CRUD | 1 (hardwired) | Same — cannot store graph without storage |
+| Versioning | 2 (component) | Storage wrapper: VersionedStorage(BaseStorage) |
+| Caching | 2 (component) | Already implemented as CachedStorage wrapper |
+| Permissions (enforcement) | 2 (component) | Security-critical — must not be bypassable by user graph |
+| Permission policies | 2-3 (data/graph) | Policy rules can be declarative data or graph predicates |
+| Secret storage | 2 (component) | Infrastructure concern, not expressible in pure graph |
+| Environment management | 2 (component) | Branch-level metadata, storage concern |
+| Logging | 3 (graph-native) | `with-logging` base-fn wrapper, user controls placement |
+| Domain middleware | 3 (graph-native) | User-defined request/response processing |
+
+### Storage Modularity Vision
+
+Current storage implementations must satisfy a long protocol interface. The goal is to reduce this to a minimal set of generic operations:
+
+```
+Minimal Storage:
+  put(entity-type, id, data)
+  get(entity-type, id)
+  query(entity-type, predicates)
+  delete(entity-type, id)
+  apply-migration(migration-spec)
+```
+
+Extensions declare their needs through migrations (new fields, indexes, tables) rather than requiring protocol changes. Each storage backend translates migration specs into its own DDL. This allows adding versioning, caching, or permissions without modifying the base storage interface.
+
+```
+BaseStorage (minimal CRUD)
+  └─ VersionedStorage (adds branch resolution, append-only history)
+       └─ CachedStorage (adds read-through cache, invalidation)
+            └─ AuditedStorage (adds operation logging)
+```
+
+### Self-Describing System (Long-term Vision)
+
+The ultimate goal: the system's own infrastructure is described in the same graph language it provides to users. Initialization graphs define storage setup, migrations, executor configuration. Extension graphs add fields, modify behavior. UI is a graph of components (e.g., HTMX + templating).
+
+This is analogous to Lisp's self-hosting capability: the language is expressive enough to describe its own extensions. The practical limit is the bootstrapping boundary — a minimal Clojure core (executor + base CRUD) that cannot itself be a graph, because it's needed to execute graphs.
+
+---
+
 ## Open Questions
 
 ### Debugging and Observability

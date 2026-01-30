@@ -226,21 +226,6 @@
   (validate-no-dependency-cycle! [_ _owner-fn-id _value-fn-id] nil)
 
 
-  sp/ConstraintHelpers
-
-  (get-fn-schema-id-for-fn
-    [_ fn-id]
-    (:fn-schema-id (get-in @state [:fn fn-id])))
-
-
-  (get-fn-schema-id-for-arg-schema
-    [_ arg-schema-id]
-    (:fn-schema-id (get-in @state [:arg-schema arg-schema-id])))
-
-
-  (collect-dependency-chain [_ fn-id] #{fn-id})
-
-
   sp/ExecutionGraph
 
   (resolve-execution-graph

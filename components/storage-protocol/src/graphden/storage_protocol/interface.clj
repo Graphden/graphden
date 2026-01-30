@@ -223,30 +223,6 @@
     "Resolves the complete execution graph for a function."))
 
 
-(defprotocol GraphDataLoader
-  "Protocol for loading graph data during execution graph resolution."
-
-  (load-fn-record
-    [this fn-id]
-    "Loads a single fn record by ID.")
-
-  (load-fn-schema-record
-    [this fn-schema-id]
-    "Loads a single fn-schema record by ID.")
-
-  (load-arg-schemas-for-fn-schema
-    [this fn-schema-id]
-    "Loads all arg-schemas for a fn-schema.")
-
-  (load-arg-values-for-fn
-    [this fn-id]
-    "Loads all arg-values for a single fn.")
-
-  (classify-uuid-refs
-    [this uuid-refs]
-    "Classifies UUIDs into fn-refs vs call-site-refs."))
-
-
 (defprotocol ExecutionGraphReader
   "Protocol for reading data from execution graphs."
 

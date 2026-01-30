@@ -147,31 +147,34 @@
     (rebuild-cache! base-storage cache-storage fn-id)))
 
 
-(defn invalidate-fn-schema-dependents!
-  "Invalidates all caches that depend on a fn-schema."
-  [base-storage cache-storage fn-schema-id]
-  (log/debug "Invalidating fn-schema dependents" {:fn-schema-id fn-schema-id})
-  (invalidate-dependents! base-storage cache-storage
-                          #(cache/find-caches-by-fn-schema-dep % fn-schema-id)))
+(def ^:private dep-type->find-fn
+  "Maps dependency type keyword to CacheStorage lookup function."
+  {:fn-schema cache/find-caches-by-fn-schema-dep
+   :arg-schema cache/find-caches-by-arg-schema-dep
+   :call-site  cache/find-caches-by-call-site-dep})
 
 
-(defn invalidate-arg-schema-dependents!
-  "Invalidates all caches that depend on an arg-schema."
-  [base-storage cache-storage arg-schema-id]
-  (log/debug "Invalidating arg-schema dependents" {:arg-schema-id arg-schema-id})
-  (invalidate-dependents! base-storage cache-storage
-                          #(cache/find-caches-by-arg-schema-dep % arg-schema-id)))
-
-
-(defn invalidate-call-site-dependents!
-  "Invalidates all caches that depend on a call-site."
-  [base-storage cache-storage call-site-id]
-  (log/debug "Invalidating call-site dependents" {:call-site-id call-site-id})
-  (invalidate-dependents! base-storage cache-storage
-                          #(cache/find-caches-by-call-site-dep % call-site-id)))
+(defn invalidate-entity-dependents!
+  "Invalidates all caches that depend on the given entity.
+   dep-type is one of :fn-schema, :arg-schema, :call-site."
+  [base-storage cache-storage dep-type dep-id]
+  (let [find-fn (get dep-type->find-fn dep-type)]
+    (assert find-fn (str "Unknown dep-type: " dep-type))
+    (log/debug "Invalidating dependents" {:dep-type dep-type :dep-id dep-id})
+    (invalidate-dependents! base-storage cache-storage
+                            #(find-fn % dep-id))))
 
 
 ;; === Default rules ===
+
+(defn- register-rules!
+  "Registers the same handler for multiple events on one entity type."
+  [entity-type events handler]
+  (doseq [event events]
+    (register-rule! {:entity-type entity-type
+                     :on-event event
+                     :handler handler})))
+
 
 (defn register-default-rules!
   "Registers the default invalidation rules for all graph entities.
@@ -205,34 +208,18 @@
      :on-event :create
      :handler (fn [_ctx] nil)})
 
-  (register-rule!
-    {:entity-type :arg-value
-     :on-event :update
-     :handler (fn [{:keys [base-storage cache-storage id]}]
-                (let [fn-args (sp/query-entities base-storage :fn-arg {:arg-value-id id})]
-                  (doseq [fn-arg fn-args]
-                    (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id fn-arg)))))})
-
-  (register-rule!
-    {:entity-type :arg-value
-     :on-event :delete
-     :handler (fn [{:keys [base-storage cache-storage id]}]
-                (let [fn-args (sp/query-entities base-storage :fn-arg {:arg-value-id id})]
-                  (doseq [fn-arg fn-args]
-                    (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id fn-arg)))))})
+  (register-rules!
+    :arg-value [:update :delete]
+    (fn [{:keys [base-storage cache-storage id]}]
+      (let [fn-args (sp/query-entities base-storage :fn-arg {:arg-value-id id})]
+        (doseq [fn-arg fn-args]
+          (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id fn-arg))))))
 
   ;; :fn-arg
-  (register-rule!
-    {:entity-type :fn-arg
-     :on-event :create
-     :handler (fn [{:keys [base-storage cache-storage result]}]
-                (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id result)))})
-
-  (register-rule!
-    {:entity-type :fn-arg
-     :on-event :update
-     :handler (fn [{:keys [base-storage cache-storage result]}]
-                (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id result)))})
+  (register-rules!
+    :fn-arg [:create :update]
+    (fn [{:keys [base-storage cache-storage result]}]
+      (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id result))))
 
   (register-rule!
     {:entity-type :fn-arg
@@ -241,70 +228,42 @@
                 (when record
                   (invalidate-fn-and-dependents! base-storage cache-storage (:fn-id record))))})
 
-  ;; :fn-schema
-  (register-rule!
-    {:entity-type :fn-schema
-     :on-event :update
-     :handler (fn [{:keys [base-storage cache-storage id]}]
-                (invalidate-fn-schema-dependents! base-storage cache-storage id))})
+  ;; :fn-schema — update and delete both invalidate dependents
+  (register-rules!
+    :fn-schema [:update :delete]
+    (fn [{:keys [base-storage cache-storage id]}]
+      (invalidate-entity-dependents! base-storage cache-storage :fn-schema id)))
 
-  (register-rule!
-    {:entity-type :fn-schema
-     :on-event :delete
-     :handler (fn [{:keys [base-storage cache-storage id]}]
-                (invalidate-fn-schema-dependents! base-storage cache-storage id))})
+  ;; :arg-schema — update and delete both invalidate dependents
+  (register-rules!
+    :arg-schema [:update :delete]
+    (fn [{:keys [base-storage cache-storage id]}]
+      (invalidate-entity-dependents! base-storage cache-storage :arg-schema id)))
 
-  ;; :arg-schema
-  (register-rule!
-    {:entity-type :arg-schema
-     :on-event :update
-     :handler (fn [{:keys [base-storage cache-storage id]}]
-                (invalidate-arg-schema-dependents! base-storage cache-storage id))})
-
-  (register-rule!
-    {:entity-type :arg-schema
-     :on-event :delete
-     :handler (fn [{:keys [base-storage cache-storage id]}]
-                (invalidate-arg-schema-dependents! base-storage cache-storage id))})
-
-  ;; :call-site
+  ;; :call-site — all events invalidate dependents
   (register-rule!
     {:entity-type :call-site
      :on-event :create
      :handler (fn [{:keys [base-storage cache-storage result]}]
-                (invalidate-call-site-dependents! base-storage cache-storage (:id result)))})
+                (invalidate-entity-dependents! base-storage cache-storage :call-site (:id result)))})
 
-  (register-rule!
-    {:entity-type :call-site
-     :on-event :update
-     :handler (fn [{:keys [base-storage cache-storage id]}]
-                (invalidate-call-site-dependents! base-storage cache-storage id))})
+  (register-rules!
+    :call-site [:update :delete]
+    (fn [{:keys [base-storage cache-storage id]}]
+      (invalidate-entity-dependents! base-storage cache-storage :call-site id)))
 
-  (register-rule!
-    {:entity-type :call-site
-     :on-event :delete
-     :handler (fn [{:keys [base-storage cache-storage id]}]
-                (invalidate-call-site-dependents! base-storage cache-storage id))})
-
-  ;; :call-site-arg
-  (register-rule!
-    {:entity-type :call-site-arg
-     :on-event :create
-     :handler (fn [{:keys [base-storage cache-storage result]}]
-                (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id result)))})
-
-  (register-rule!
-    {:entity-type :call-site-arg
-     :on-event :update
-     :handler (fn [{:keys [base-storage cache-storage result]}]
-                (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id result)))})
+  ;; :call-site-arg — invalidate parent call-site's dependents
+  (register-rules!
+    :call-site-arg [:create :update]
+    (fn [{:keys [base-storage cache-storage result]}]
+      (invalidate-entity-dependents! base-storage cache-storage :call-site (:call-site-id result))))
 
   (register-rule!
     {:entity-type :call-site-arg
      :on-event :delete
      :handler (fn [{:keys [base-storage cache-storage record]}]
                 (when record
-                  (invalidate-call-site-dependents! base-storage cache-storage (:call-site-id record))))}))
+                  (invalidate-entity-dependents! base-storage cache-storage :call-site (:call-site-id record))))}))
 
 
 ;; Register default rules on namespace load (idempotent via defonce)

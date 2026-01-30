@@ -185,6 +185,19 @@
   true)
 
 
+;; === Save-cache validation ===
+
+(defn validate-save-cache-args!
+  "Validates arguments for save-cache! and logs debug message.
+   Called by all cache backend implementations to avoid duplicating
+   the same 4-line validation block."
+  [fn-id graph dependencies]
+  (validate-uuid! fn-id "fn-id")
+  (validate-graph! graph)
+  (validate-dependencies! dependencies)
+  (log/debug "Saving cache for fn-id" fn-id))
+
+
 ;; === Graph building helpers ===
 
 (defn build-cached-graph

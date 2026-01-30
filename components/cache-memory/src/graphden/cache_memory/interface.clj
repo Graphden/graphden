@@ -135,10 +135,7 @@
 
   (save-cache!
     [_ fn-id graph dependencies]
-    (cache/validate-uuid! fn-id "fn-id")
-    (cache/validate-graph! graph)
-    (cache/validate-dependencies! dependencies)
-    (log/debug "Saving cache for fn-id" fn-id)
+    (cache/validate-save-cache-args! fn-id graph dependencies)
     (let [exec-graph (if (sp/execution-graph? graph)
                        graph
                        (sp/->execution-graph graph))]

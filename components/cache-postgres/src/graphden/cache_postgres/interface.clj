@@ -329,10 +329,7 @@
 
   (save-cache!
     [_ fn-id graph dependencies]
-    (cache/validate-uuid! fn-id "fn-id")
-    (cache/validate-graph! graph)
-    (cache/validate-dependencies! dependencies)
-    (log/debug "Saving cache for fn-id" fn-id)
+    (cache/validate-save-cache-args! fn-id graph dependencies)
     (jdbc/with-transaction [tx datasource]
                            ;; Delete existing cache data first (if any)
                            (delete-cache-data! tx fn-id)

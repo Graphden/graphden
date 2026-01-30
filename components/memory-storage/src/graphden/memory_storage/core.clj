@@ -239,14 +239,8 @@
 
   (wrap-error
     [this exception operation context]
-    (let [error-type (sp/classify-error this exception)
-          error-data (merge {:type error-type
-                             :operation operation
-                             :message (ex-message exception)}
-                            context)]
-      (ex-info (str "Memory storage error during " (name operation) ": " (ex-message exception))
-               error-data
-               exception))))
+    (sp/wrap-storage-error (sp/classify-error this exception)
+                           exception "Memory storage error" operation context)))
 
 
 (defn create-storage

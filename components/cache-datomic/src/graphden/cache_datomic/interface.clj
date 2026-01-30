@@ -242,41 +242,28 @@
 
 ;; === Cache deletion ===
 
+(def ^:private cache-id-attrs
+  "All cache-id attributes across entity types.
+   Used to find all entities belonging to a cache for retraction."
+  [:graphden.cache/cached-fn-cache-id
+   :graphden.cache/cached-fn-schema-cache-id
+   :graphden.cache/cached-arg-schema-cache-id
+   :graphden.cache/cached-merged-arg-cache-id
+   :graphden.cache/cache-fn-dep-cache-id
+   :graphden.cache/cache-fn-schema-dep-cache-id
+   :graphden.cache/cache-arg-schema-dep-cache-id
+   :graphden.cache/cache-call-site-dep-cache-id])
+
+
 (defn- find-entities-to-retract
   "Finds all entity IDs for cache data to retract."
   [db cache-id]
-  (let [cached-fns (d/q '[:find ?e :in $ ?cache-id :where
-                          [?e :graphden.cache/cached-fn-cache-id ?cache-id]]
-                        db cache-id)
-        cached-fn-schemas (d/q '[:find ?e :in $ ?cache-id :where
-                                 [?e :graphden.cache/cached-fn-schema-cache-id ?cache-id]]
-                               db cache-id)
-        cached-arg-schemas (d/q '[:find ?e :in $ ?cache-id :where
-                                  [?e :graphden.cache/cached-arg-schema-cache-id ?cache-id]]
-                                db cache-id)
-        cached-merged-args (d/q '[:find ?e :in $ ?cache-id :where
-                                  [?e :graphden.cache/cached-merged-arg-cache-id ?cache-id]]
-                                db cache-id)
-        fn-deps (d/q '[:find ?e :in $ ?cache-id :where
-                       [?e :graphden.cache/cache-fn-dep-cache-id ?cache-id]]
-                     db cache-id)
-        fn-schema-deps (d/q '[:find ?e :in $ ?cache-id :where
-                              [?e :graphden.cache/cache-fn-schema-dep-cache-id ?cache-id]]
-                            db cache-id)
-        arg-schema-deps (d/q '[:find ?e :in $ ?cache-id :where
-                               [?e :graphden.cache/cache-arg-schema-dep-cache-id ?cache-id]]
-                             db cache-id)
-        call-site-deps (d/q '[:find ?e :in $ ?cache-id :where
-                              [?e :graphden.cache/cache-call-site-dep-cache-id ?cache-id]]
-                            db cache-id)]
-    (concat (map first cached-fns)
-            (map first cached-fn-schemas)
-            (map first cached-arg-schemas)
-            (map first cached-merged-args)
-            (map first fn-deps)
-            (map first fn-schema-deps)
-            (map first arg-schema-deps)
-            (map first call-site-deps))))
+  (mapcat (fn [attr]
+            (map first (d/q {:find '[?e]
+                             :in '[$ ?cache-id]
+                             :where [['?e attr '?cache-id]]}
+                            db cache-id)))
+          cache-id-attrs))
 
 
 (defn- delete-cache-data!
@@ -292,54 +279,15 @@
 
 ;; === Dependency lookup ===
 
-(defn- find-caches-by-fn-dep-impl
-  "Returns set of cache-ids that depend on dep-fn-id."
-  [db dep-fn-id]
-  (->> (d/q '[:find ?cache-id
-              :in $ ?dep-fn-id
-              :where
-              [?e :graphden.cache/cache-fn-dep-dep-fn-id ?dep-fn-id]
-              [?e :graphden.cache/cache-fn-dep-cache-id ?cache-id]]
-            db dep-fn-id)
-       (map first)
-       (into #{})))
-
-
-(defn- find-caches-by-fn-schema-dep-impl
-  "Returns set of cache-ids that depend on dep-fn-schema-id."
-  [db dep-fn-schema-id]
-  (->> (d/q '[:find ?cache-id
-              :in $ ?dep-fn-schema-id
-              :where
-              [?e :graphden.cache/cache-fn-schema-dep-dep-fn-schema-id ?dep-fn-schema-id]
-              [?e :graphden.cache/cache-fn-schema-dep-cache-id ?cache-id]]
-            db dep-fn-schema-id)
-       (map first)
-       (into #{})))
-
-
-(defn- find-caches-by-arg-schema-dep-impl
-  "Returns set of cache-ids that depend on dep-arg-schema-id."
-  [db dep-arg-schema-id]
-  (->> (d/q '[:find ?cache-id
-              :in $ ?dep-arg-schema-id
-              :where
-              [?e :graphden.cache/cache-arg-schema-dep-dep-arg-schema-id ?dep-arg-schema-id]
-              [?e :graphden.cache/cache-arg-schema-dep-cache-id ?cache-id]]
-            db dep-arg-schema-id)
-       (map first)
-       (into #{})))
-
-
-(defn- find-caches-by-call-site-dep-impl
-  "Returns set of cache-ids that depend on dep-call-site-id."
-  [db dep-call-site-id]
-  (->> (d/q '[:find ?cache-id
-              :in $ ?dep-call-site-id
-              :where
-              [?e :graphden.cache/cache-call-site-dep-dep-call-site-id ?dep-call-site-id]
-              [?e :graphden.cache/cache-call-site-dep-cache-id ?cache-id]]
-            db dep-call-site-id)
+(defn- find-caches-by-dep
+  "Returns set of cache-ids that depend on a given entity.
+   Generic query using parameterized Datomic attributes."
+  [db dep-attr cache-id-attr dep-id]
+  (->> (d/q {:find '[?cache-id]
+             :in '[$ ?dep-id]
+             :where [['?e dep-attr '?dep-id]
+                     ['?e cache-id-attr '?cache-id]]}
+            db dep-id)
        (map first)
        (into #{})))
 
@@ -368,10 +316,7 @@
 
   (save-cache!
     [_ fn-id graph dependencies]
-    (cache/validate-uuid! fn-id "fn-id")
-    (cache/validate-graph! graph)
-    (cache/validate-dependencies! dependencies)
-    (log/debug "Saving cache for fn-id" fn-id)
+    (cache/validate-save-cache-args! fn-id graph dependencies)
     ;; Delete existing cache data first (if any)
     (delete-cache-data! conn fn-id)
     ;; Build transaction data for all cache entries
@@ -417,22 +362,34 @@
 
   (find-caches-by-fn-dep
     [_ dep-fn-id]
-    (find-caches-by-fn-dep-impl (d/db conn) dep-fn-id))
+    (find-caches-by-dep (d/db conn)
+                        :graphden.cache/cache-fn-dep-dep-fn-id
+                        :graphden.cache/cache-fn-dep-cache-id
+                        dep-fn-id))
 
 
   (find-caches-by-fn-schema-dep
     [_ dep-fn-schema-id]
-    (find-caches-by-fn-schema-dep-impl (d/db conn) dep-fn-schema-id))
+    (find-caches-by-dep (d/db conn)
+                        :graphden.cache/cache-fn-schema-dep-dep-fn-schema-id
+                        :graphden.cache/cache-fn-schema-dep-cache-id
+                        dep-fn-schema-id))
 
 
   (find-caches-by-arg-schema-dep
     [_ dep-arg-schema-id]
-    (find-caches-by-arg-schema-dep-impl (d/db conn) dep-arg-schema-id))
+    (find-caches-by-dep (d/db conn)
+                        :graphden.cache/cache-arg-schema-dep-dep-arg-schema-id
+                        :graphden.cache/cache-arg-schema-dep-cache-id
+                        dep-arg-schema-id))
 
 
   (find-caches-by-call-site-dep
     [_ dep-call-site-id]
-    (find-caches-by-call-site-dep-impl (d/db conn) dep-call-site-id)))
+    (find-caches-by-dep (d/db conn)
+                        :graphden.cache/cache-call-site-dep-dep-call-site-id
+                        :graphden.cache/cache-call-site-dep-cache-id
+                        dep-call-site-id)))
 
 
 (defn create-cache

@@ -7,7 +7,8 @@
    - Error context helpers
    - Sensitive data redaction utilities"
   (:require
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [clojure.tools.logging :as log]))
 
 
 ;; === Storage Error Classification ===
@@ -587,6 +588,39 @@
     (map redact-sensitive-deep data)
 
     :else data))
+
+
+;; ============================================================================
+;; Shared Error Wrapping
+;; ============================================================================
+;;
+;; Generic error wrapping pattern shared by all storage backends.
+;; Backend-specific wrappers classify the error, then delegate here.
+
+(defn wrap-storage-error
+  "Wraps an exception with application context, redacts before logging.
+   Shared by all storage backends (postgres, datomic, memory).
+
+   Parameters:
+   - error-type: Classified error type keyword
+   - exception: The original exception
+   - log-prefix: String prefix for log message (e.g., \"Database error\")
+   - operation: Keyword describing the operation (e.g., :create-entity)
+   - context: Map of additional context (will be redacted for logging)"
+  [error-type exception log-prefix operation context]
+  (let [message (ex-message exception)
+        safe-context (redact-sensitive-deep context)
+        error-data (merge {:type error-type
+                           :operation operation
+                           :message message}
+                          safe-context)]
+    (log/warn log-prefix error-data)
+    (ex-info (str log-prefix " during " (name operation) ": " message)
+             (merge {:type error-type
+                     :operation operation
+                     :message message}
+                    context)
+             exception)))
 
 
 ;; ============================================================================

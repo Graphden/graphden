@@ -5,7 +5,6 @@
    Table-driven error classification for maintainability."
   (:require
     [clojure.string :as str]
-    [clojure.tools.logging :as log]
     [graphden.storage-protocol.interface :as sp]))
 
 
@@ -125,11 +124,9 @@
 (defn wrap-sql-error
   "Wraps a SQLException with application-level context.
    Translates PostgreSQL error codes to meaningful error types.
-   Logs the error with context for debugging.
-   Returns an ex-info with :type, :sql-state, and operation context.
+   Delegates to shared wrap-storage-error with sql-state in context.
 
    SECURITY: Context is redacted before logging to prevent sensitive data leakage.
-   The raw exception is NOT logged to avoid exposing SQL details.
 
    Parameters:
    - e: SQLException to wrap
@@ -138,25 +135,9 @@
    - context: Map of additional context (e.g., {:entity-name :user})"
   [^java.sql.SQLException e log-prefix operation context]
   (let [error-type (classify-sql-error e)
-        sql-state (get-sql-state e)
-        message (java.sql.SQLException/.getMessage e)
-        ;; Redact sensitive data from context before logging
-        safe-context (sp/redact-sensitive-deep context)
-        error-data (merge {:type error-type
-                           :operation operation
-                           :sql-state sql-state
-                           :message message}
-                          safe-context)]
-    ;; Log without raw exception to avoid exposing SQL internals
-    (log/warn log-prefix error-data)
-    (ex-info (str log-prefix " during " (name operation) ": " message)
-             ;; Keep original context in exception for debugging (not logged)
-             (merge {:type error-type
-                     :operation operation
-                     :sql-state sql-state
-                     :message message}
-                    context)
-             e)))
+        sql-state (get-sql-state e)]
+    (sp/wrap-storage-error error-type e log-prefix operation
+                           (assoc context :sql-state sql-state))))
 
 
 ;; === StorageErrorClassifier implementation ===
@@ -177,14 +158,8 @@
     [_this exception operation context]
     (if (instance? java.sql.SQLException exception)
       (wrap-sql-error exception "Database error" operation context)
-      (let [error-data (merge {:type :unknown-sql-error
-                               :operation operation
-                               :message (str exception)}
-                              context)]
-        (log/warn exception "Unknown error" error-data)
-        (ex-info (str "Error during " (name operation) ": " exception)
-                 error-data
-                 exception)))))
+      (sp/wrap-storage-error :unknown-sql-error
+                             exception "Database error" operation context))))
 
 
 (def ^:private error-classifier-singleton

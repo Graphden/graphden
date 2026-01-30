@@ -254,27 +254,11 @@
 
 (defn wrap-datomic-error
   "Wraps a Datomic exception with application context.
-   Returns an ex-info with :type, :operation, and context.
+   Delegates to shared wrap-storage-error.
 
    SECURITY: Context is redacted before logging to prevent sensitive data leakage."
   [e log-prefix operation context]
-  (let [error-type (classify-datomic-error e)
-        message (ex-message e)
-        ;; Redact sensitive data from context before logging
-        safe-context (sp/redact-sensitive-deep context)
-        error-data (merge {:type error-type
-                           :operation operation
-                           :message message}
-                          safe-context)]
-    ;; Log without exposing full exception details
-    (log/warn log-prefix error-data)
-    (ex-info (str log-prefix " during " (name operation) ": " message)
-             ;; Keep original context in exception for debugging
-             (merge {:type error-type
-                     :operation operation
-                     :message message}
-                    context)
-             e)))
+  (sp/wrap-storage-error (classify-datomic-error e) e log-prefix operation context))
 
 
 (defmacro with-datomic-error-handling

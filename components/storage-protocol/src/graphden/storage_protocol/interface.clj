@@ -302,6 +302,12 @@
 (def redact-sensitive-deep errors/redact-sensitive-deep)
 
 
+(def wrap-storage-error
+  "Wraps an exception with application context, redacts before logging.
+   See errors/wrap-storage-error for details."
+  errors/wrap-storage-error)
+
+
 ;; === Unified Validation Error Factory ===
 ;;
 ;; Use these functions for consistent error creation across all validators.

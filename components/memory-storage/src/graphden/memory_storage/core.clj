@@ -3,9 +3,9 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.memory-storage.crud :as crud]
-    [graphden.memory-storage.graph :as graph]
     [graphden.memory-storage.migration :as migration]
     [graphden.storage-protocol.generic-constraints :as gc]
+    [graphden.storage-protocol.generic-graph :as gg]
     [graphden.storage-protocol.interface :as sp])
   (:import
     (java.util.concurrent.locks
@@ -163,8 +163,9 @@
                            (crud/validate-entity-exists! s entity-name)
                            (let [fields (crud/get-entity-fields s entity-name)
                                  all-records (vals (crud/get-entity-data s entity-name))]
-                             ;; Validate where clause fields after we have schema info
+                             ;; Validate where clause fields and types after we have schema info
                              (sp/validate-where-clause-fields! entity-name fields where)
+                             (sp/validate-where-clause-types! entity-name fields where)
                              (if (empty? where)
                                all-records
                                (filter (fn [record]
@@ -220,15 +221,10 @@
   sp/ExecutionGraph
 
   (resolve-execution-graph
-    [_this fn-id]
+    [this fn-id]
     (sp/with-read-lock rw-lock
                        (fn []
-                         (let [s @state]
-                           (when-not (crud/get-record s :fn fn-id)
-                             (throw (ex-info "Function not found"
-                                             {:type :not-found
-                                              :fn-id fn-id})))
-                           (graph/resolve-execution-graph-impl s fn-id)))))
+                         (gg/resolve-execution-graph this fn-id))))
 
 
   sp/StorageErrorClassifier

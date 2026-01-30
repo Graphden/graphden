@@ -155,11 +155,10 @@
   "Queries entities by conditions.
    where must be nil or a map of field->value for equality matching."
   [conn entity-name where]
-  (sp/validate-where-clause! where)
   (let [db (d/db conn)
-        fields (get-entity-fields db entity-name)
-        field-specs (zipmap fields (repeat {:type :any}))  ; Datomic fields for validation
-        _ (sp/validate-where-clause-fields! entity-name field-specs where)
+        field-specs (get-fields-with-specs db entity-name)
+        _ (sp/standard-query-validations! entity-name field-specs where)
+        fields (keys field-specs)
         id-attr (util/entity-attr entity-name :id)
         pattern (into [id-attr] (map #(util/entity-attr entity-name %) fields))
         ;; Build where clauses - must have at least one clause to identify entities of this type

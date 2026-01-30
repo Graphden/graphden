@@ -50,7 +50,9 @@
 
 (defn- classify-uuid-refs
   "Classifies UUIDs into fn-refs vs call-site-refs via StorageCRUD.
-   Returns {:fn-refs #{fn-ids} :call-sites {cs-id -> cs-record}}."
+   Returns {:fn-refs #{fn-ids} :call-sites {cs-id -> cs-record}}.
+   Call-site :fn-id values are also added to :fn-refs so the BFS
+   traverses through call-sites to their target functions."
   [storage uuid-refs]
   (if (empty? uuid-refs)
     {:fn-refs #{} :call-sites {}}
@@ -60,8 +62,10 @@
           remaining (remove fn-ref-ids refs-vec)
           call-site-results (if (empty? remaining)
                               {}
-                              (sp/read-entities storage :call-site (vec remaining)))]
-      {:fn-refs fn-ref-ids
+                              (sp/read-entities storage :call-site (vec remaining)))
+          ;; Also visit the fn that each call-site points to
+          call-site-fn-ids (into #{} (keep :fn-id) (vals call-site-results))]
+      {:fn-refs (into fn-ref-ids call-site-fn-ids)
        :call-sites call-site-results})))
 
 
@@ -74,6 +78,10 @@
    Backends with optimized implementations (batched queries, CTEs, indexes)
    can override this by implementing the ExecutionGraph protocol directly."
   [storage fn-id]
+  (when-not (sp/read-entity storage :fn fn-id)
+    (throw (ex-info "Function not found"
+                    {:type :not-found
+                     :fn-id fn-id})))
   (graph/resolve-execution-graph-bfs
     (partial load-fn-record storage)
     (partial load-fn-schema-record storage)

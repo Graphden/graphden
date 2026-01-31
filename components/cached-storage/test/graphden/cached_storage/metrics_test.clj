@@ -190,6 +190,106 @@
       (is (= 2 (sp/delete-entities wrapped :fn [fn-id-1 fn-id-2]))))))
 
 
+(deftest metrics-delete-entity-tracking-test
+  (testing "tracks invalidations for single fn deletion"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          metrics (cached/create-metrics)
+          wrapped (cached/wrap-with-cache-and-metrics storage cache metrics)
+          schema-id (random-uuid)
+          fn-id (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      (cached/reset-metrics! metrics)
+      ;; Delete fn - should track invalidation
+      (sp/delete-entity wrapped :fn fn-id)
+      (let [m (cached/get-metrics metrics)]
+        (is (= 1 (:invalidations m))))))
+
+  (testing "does not track invalidation for failed deletion (nonexistent entity)"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          metrics (cached/create-metrics)
+          wrapped (cached/wrap-with-cache-and-metrics storage cache metrics)]
+      (sp/delete-entity wrapped :fn (random-uuid))
+      (is (zero? (:invalidations (cached/get-metrics metrics))))))
+
+  (testing "does not track invalidation for entity type without strategy"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          metrics (cached/create-metrics)
+          wrapped (cached/wrap-with-cache-and-metrics storage cache metrics)
+          custom-id (random-uuid)]
+      (sp/create-entity storage :custom {:id custom-id :data "test"})
+      (sp/delete-entity wrapped :custom custom-id)
+      (is (zero? (:invalidations (cached/get-metrics metrics)))))))
+
+
+(deftest metrics-batch-delete-tracking-test
+  (testing "tracks invalidations for batch fn deletion"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          metrics (cached/create-metrics)
+          wrapped (cached/wrap-with-cache-and-metrics storage cache metrics)
+          schema-id (random-uuid)
+          fn-id-1 (random-uuid)
+          fn-id-2 (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id fn-id-1 :name "fn1" :fn-schema-id schema-id})
+      (sp/create-entity wrapped :fn {:id fn-id-2 :name "fn2" :fn-schema-id schema-id})
+      (cached/reset-metrics! metrics)
+      ;; Batch delete - should track 2 invalidations
+      (sp/delete-entities wrapped :fn [fn-id-1 fn-id-2])
+      (let [m (cached/get-metrics metrics)]
+        (is (= 2 (:invalidations m))))))
+
+  (testing "does not track invalidations for batch delete returning zero"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          metrics (cached/create-metrics)
+          wrapped (cached/wrap-with-cache-and-metrics storage cache metrics)]
+      (sp/delete-entities wrapped :fn [(random-uuid)])
+      (is (zero? (:invalidations (cached/get-metrics metrics)))))))
+
+
+(deftest metrics-create-entity-no-strategy-test
+  (testing "does not track invalidation for entity type without create strategy"
+    (let [storage (mocks/create-mock-storage)
+          metrics (cached/create-metrics)
+          wrapped (cached/wrap-with-cache-and-metrics storage (mocks/create-mock-cache) metrics)
+          schema-id (random-uuid)]
+      ;; fn-schema has no :create strategy in default rules
+      (sp/create-entity wrapped :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (is (zero? (:invalidations (cached/get-metrics metrics)))))))
+
+
+(deftest metrics-batch-create-no-strategy-test
+  (testing "does not track invalidations for batch create of entity without create strategy"
+    (let [storage (mocks/create-mock-storage)
+          metrics (cached/create-metrics)
+          wrapped (cached/wrap-with-cache-and-metrics storage (mocks/create-mock-cache) metrics)
+          schema-id (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entities wrapped :arg-schema
+                          [{:fn-schema-id schema-id :name "a" :type :int :required true}
+                           {:fn-schema-id schema-id :name "b" :type :text :required false}])
+      ;; arg-schema has no :create strategy
+      (is (zero? (:invalidations (cached/get-metrics metrics)))))))
+
+
+(deftest unwrap-metrics-wrapper-test
+  (testing "unwrap returns base storage from CachedStorageWithMetrics"
+    (let [storage (mocks/create-mock-storage)
+          wrapped (cached/wrap-with-cache-and-metrics storage (mocks/create-mock-cache))]
+      (is (= storage (cached/unwrap wrapped)))))
+
+  (testing "get-cache returns cache from CachedStorageWithMetrics"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          wrapped (cached/wrap-with-cache-and-metrics storage cache)]
+      (is (= cache (cached/get-cache wrapped))))))
+
+
 (deftest metrics-storage-introspection-test
   (testing "CachedStorageWithMetrics delegates introspection methods"
     (let [wrapped (cached/wrap-with-cache-and-metrics (mocks/create-mock-storage) (mocks/create-mock-cache))]

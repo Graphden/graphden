@@ -138,3 +138,210 @@
       (exec/execute ctx fn-id nil)
       ;; Should complete without error
       (is (>= (count @result-cache) 1)))))
+
+
+(deftest call-site-not-found-in-graph-test
+  (testing "throws when call-site-id is missing from execution graph"
+    (let [fn-id (random-uuid)
+          fn-schema-id (random-uuid)
+          arg-schema-id (random-uuid)
+          missing-cs-id (random-uuid)
+          _ (exec/register-base-fn! :identity-fn (fn [{:keys [x]} _ctx] @x))
+          ;; Create mock with call-site UUID in resolved-args AND in call-sites map
+          ;; to pass build-uuid-ref-delay check, but the call-site record has
+          ;; a fn-id that references a non-existent fn (will trigger error in execute)
+          mock-storage (create-mock-storage
+                         (let [child-fn-id (random-uuid)]
+                           {:fns {fn-id {:id fn-id
+                                         :name "identity-fn"
+                                         :fn-schema-id fn-schema-id}}
+                            :fn-schemas {fn-schema-id {:id fn-schema-id
+                                                       :name "identity-fn"
+                                                       :returned-type :int}}
+                            :arg-schemas {arg-schema-id {:id arg-schema-id
+                                                         :fn-schema-id fn-schema-id
+                                                         :name "x"
+                                                         :type :int
+                                                         :required true}}
+                            ;; resolved-arg value is a call-site UUID (wrapped in arg-value record)
+                            :resolved-args {fn-id {arg-schema-id {:value missing-cs-id}}}
+                            ;; call-site exists but references a fn not in :fns
+                            :call-sites {missing-cs-id {:id missing-cs-id
+                                                        :fn-id child-fn-id
+                                                        :name "result"}}}))
+          ctx (exec/create-context {:storage mock-storage})]
+      ;; Should throw because child-fn-id is not in the execution graph's :fns
+      (is (thrown? clojure.lang.ExceptionInfo
+            (exec/execute ctx fn-id {}))))))
+
+
+;; === Depth Warning Tests ===
+
+(deftest depth-warning-at-threshold-test
+  (testing "executes successfully and triggers depth warning at 80% threshold"
+    ;; With max-depth=10, threshold = 8. We build a chain of 9 call-sites
+    ;; so execution reaches depth 9 (above 8 threshold but below 10 limit).
+    (let [;; Create a chain: fn-0 -> cs-0 -> fn-1 -> cs-1 -> ... -> fn-9 (leaf)
+          num-fns 10
+          fn-ids (vec (repeatedly num-fns random-uuid))
+          schema-id (random-uuid)
+          _ (exec/register-base-fn! :chain-fn (fn [_ _] :leaf))
+          _ (exec/register-base-fn! :chain-step (fn [{:keys [next-val]} _ctx] @next-val))
+          ;; Build graph: fns, schemas, call-sites
+          fns (into {} (map-indexed
+                         (fn [i fid]
+                           [fid {:id fid
+                                 :name (if (= i (dec num-fns)) "chain-fn" "chain-step")
+                                 :fn-schema-id schema-id}])
+                         fn-ids))
+          ;; Leaf fn has no args; step fns have one arg "next-val"
+          leaf-schema-id (random-uuid)
+          step-schema-id schema-id
+          arg-schema-id (random-uuid)
+          fn-schemas {step-schema-id {:id step-schema-id
+                                      :name "chain-step"
+                                      :returned-type :any}
+                      leaf-schema-id {:id leaf-schema-id
+                                      :name "chain-fn"
+                                      :returned-type :any}}
+          ;; Update leaf fn to use leaf-schema
+          fns (assoc-in fns [(last fn-ids) :fn-schema-id] leaf-schema-id)
+          ;; Create call-sites: cs-i points to fn-(i+1)
+          cs-ids (vec (repeatedly (dec num-fns) random-uuid))
+          call-sites (into {} (map-indexed
+                                (fn [i csid]
+                                  [csid {:id csid
+                                         :fn-id (get fn-ids (inc i))
+                                         :name (str "cs-" i)}])
+                                cs-ids))
+          ;; resolved-args: each step fn's next-val = call-site UUID
+          resolved-args (into {}
+                              (map-indexed
+                                (fn [i fid]
+                                  (if (< i (dec num-fns))
+                                    [fid {arg-schema-id {:value (get cs-ids i)}}]
+                                    [fid {}]))
+                                fn-ids))
+          arg-schemas {arg-schema-id {:id arg-schema-id
+                                      :fn-schema-id step-schema-id
+                                      :name "next-val"
+                                      :type :any
+                                      :required true}}
+          mock-storage (create-mock-storage
+                         {:fns fns
+                          :fn-schemas fn-schemas
+                          :arg-schemas arg-schemas
+                          :resolved-args resolved-args
+                          :call-sites call-sites})
+          ctx (exec/create-context {:storage mock-storage
+                                    :max-depth 10})]
+      ;; Execution goes 10 levels deep (depth 1..10), threshold at 8
+      ;; Should succeed (depth 10 = max-depth, not >)
+      (is (= :leaf (exec/execute ctx (first fn-ids) {}))))))
+
+
+(deftest depth-limit-exceeded-test
+  (testing "throws when depth exceeds max-depth"
+    ;; Build a chain of 12 fns with max-depth=10
+    (let [num-fns 12
+          fn-ids (vec (repeatedly num-fns random-uuid))
+          schema-id (random-uuid)
+          leaf-schema-id (random-uuid)
+          arg-schema-id (random-uuid)
+          _ (exec/register-base-fn! :chain-fn (fn [_ _] :leaf))
+          _ (exec/register-base-fn! :chain-step (fn [{:keys [next-val]} _ctx] @next-val))
+          fns (into {} (map-indexed
+                         (fn [i fid]
+                           [fid {:id fid
+                                 :name (if (= i (dec num-fns)) "chain-fn" "chain-step")
+                                 :fn-schema-id (if (= i (dec num-fns)) leaf-schema-id schema-id)}])
+                         fn-ids))
+          fn-schemas {schema-id {:id schema-id :name "chain-step" :returned-type :any}
+                      leaf-schema-id {:id leaf-schema-id :name "chain-fn" :returned-type :any}}
+          cs-ids (vec (repeatedly (dec num-fns) random-uuid))
+          call-sites (into {} (map-indexed
+                                (fn [i csid]
+                                  [csid {:id csid :fn-id (get fn-ids (inc i)) :name (str "cs-" i)}])
+                                cs-ids))
+          resolved-args (into {}
+                              (map-indexed
+                                (fn [i fid]
+                                  (if (< i (dec num-fns))
+                                    [fid {arg-schema-id {:value (get cs-ids i)}}]
+                                    [fid {}]))
+                                fn-ids))
+          arg-schemas {arg-schema-id {:id arg-schema-id
+                                      :fn-schema-id schema-id
+                                      :name "next-val" :type :any :required true}}
+          mock-storage (create-mock-storage
+                         {:fns fns :fn-schemas fn-schemas :arg-schemas arg-schemas
+                          :resolved-args resolved-args :call-sites call-sites})
+          ctx (exec/create-context {:storage mock-storage :max-depth 10})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Maximum recursion depth exceeded"
+            (exec/execute ctx (first fn-ids) {}))))))
+
+
+;; === Timeout Warning Tests ===
+
+(deftest timeout-warning-at-threshold-test
+  (testing "executes with timeout approaching 80% threshold"
+    (let [fn-id (random-uuid)
+          fn-schema-id (random-uuid)
+          call-count (atom 0)
+          ;; Custom clock: returns 0 at start, then 810ms (just past 80% of 1000ms)
+          clock-time (atom 0)
+          _ (exec/register-base-fn! :timed-fn
+                                    (fn [_ _]
+                                      (swap! call-count inc)
+                                      ;; After first call, advance clock past threshold
+                                      (reset! clock-time 810)
+                                      42))
+          mock-storage (create-mock-storage
+                         {:fns {fn-id {:id fn-id :name "timed-fn" :fn-schema-id fn-schema-id}}
+                          :fn-schemas {fn-schema-id {:id fn-schema-id
+                                                     :name "timed-fn"
+                                                     :returned-type :int}}
+                          :arg-schemas {}
+                          :resolved-args {}
+                          :call-sites {}})
+          ctx (exec/create-context {:storage mock-storage
+                                    :timeout-ms 1000
+                                    :clock (fn [] @clock-time)})]
+      ;; Should succeed - we're past warning threshold but not past timeout
+      (is (= 42 (exec/execute ctx fn-id nil)))
+      (is (= 1 @call-count)))))
+
+
+(deftest timeout-exceeded-test
+  (testing "throws when execution timeout is exceeded"
+    (let [fn-id (random-uuid)
+          fn-schema-id (random-uuid)
+          arg-schema-id (random-uuid)
+          cs-id (random-uuid)
+          child-fn-id (random-uuid)
+          _ (exec/register-base-fn! :timeout-fn (fn [{:keys [x]} _ctx] @x))
+          mock-storage (create-mock-storage
+                         {:fns {fn-id {:id fn-id :name "timeout-fn" :fn-schema-id fn-schema-id}
+                                child-fn-id {:id child-fn-id :name "timeout-fn" :fn-schema-id fn-schema-id}}
+                          :fn-schemas {fn-schema-id {:id fn-schema-id
+                                                     :name "timeout-fn"
+                                                     :returned-type :int}}
+                          :arg-schemas {arg-schema-id {:id arg-schema-id
+                                                       :fn-schema-id fn-schema-id
+                                                       :name "x" :type :int :required true}}
+                          :resolved-args {fn-id {arg-schema-id {:value cs-id}}
+                                          child-fn-id {}}
+                          :call-sites {cs-id {:id cs-id :fn-id child-fn-id :name "r"}}})
+          ;; Clock advances past timeout between calls
+          clock-calls (atom 0)
+          ctx (exec/create-context {:storage mock-storage
+                                    :timeout-ms 100
+                                    :clock (fn []
+                                             (let [n (swap! clock-calls inc)]
+                                               ;; First call = 0ms (start-time), then 0ms (first check)
+                                               ;; Then 200ms (second check, past timeout)
+                                               (if (<= n 2) 0 200)))})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Execution timeout exceeded"
+            (exec/execute ctx fn-id {}))))))

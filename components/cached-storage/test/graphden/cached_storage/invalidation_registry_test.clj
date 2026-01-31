@@ -140,3 +140,23 @@
     (is (inv/has-strategy? :call-site :create))
     ;; fn-schema has no :create rule
     (is (not (inv/has-strategy? :fn-schema :create)))))
+
+
+(deftest invalidate-entity-dependents-unknown-dep-type-test
+  (testing "asserts on unknown dep-type"
+    (is (thrown? AssertionError
+          (inv/invalidate-entity-dependents! nil nil :unknown-type (random-uuid))))))
+
+
+(deftest delete-handler-nil-record-test
+  (testing "fn-arg delete with nil record is no-op"
+    (inv/register-default-rules!)
+    (inv/process-invalidation! :fn-arg :delete
+                               {:base-storage nil :cache-storage nil :record nil})
+    (is true "should not throw"))
+
+  (testing "call-site-arg delete with nil record is no-op"
+    (inv/register-default-rules!)
+    (inv/process-invalidation! :call-site-arg :delete
+                               {:base-storage nil :cache-storage nil :record nil})
+    (is true "should not throw")))

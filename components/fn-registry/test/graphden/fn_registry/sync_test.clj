@@ -287,8 +287,36 @@
         (finally
           (sp/close storage)))))
 
+  (testing "sync-fn-schema! triggers update when only impl-hash differs"
+    ;; This tests the fourth branch of the `or` in sync-fn-schema!
+    (let [storage (gsm/create-storage)
+          defs {:impl-hash-test {:args {:x :int}
+                                 :return-type :int
+                                 :impl (fn [_ _] 1)}}]
+      (try
+        (registry/sync-defs-to-storage! storage defs)
+        (let [fn-id (registry/fn-schema-uuid :impl-hash-test)
+              schema-before (sp/read-entity storage :fn-schema fn-id)]
+          (is (some? (:impl-hash schema-before)))
+          ;; Manually corrupt impl-hash in storage (keep name, returned-type, base-fn-name correct)
+          (sp/update-entity storage :fn-schema fn-id
+                            {:name "impl-hash-test"
+                             :returned-type :int
+                             :base-fn-name "impl-hash-test"
+                             :impl-hash "corrupted-hash"})
+          ;; Verify corruption
+          (let [corrupted (sp/read-entity storage :fn-schema fn-id)]
+            (is (= "corrupted-hash" (:impl-hash corrupted))))
+          ;; Re-sync - should update because impl-hash differs
+          (registry/sync-defs-to-storage! storage defs)
+          (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
+            (is (not= "corrupted-hash" (:impl-hash schema-after)))
+            (is (= (:impl-hash schema-before) (:impl-hash schema-after)))))
+        (finally
+          (sp/close storage)))))
+
   (testing "sync-fn-schema! does NOT update when nothing differs"
-    ;; This tests when all three `or` branches are false
+    ;; This tests when all four `or` branches are false
     (let [storage (gsm/create-storage)
           defs {:no-change {:args {:x :int}
                             :return-type :int

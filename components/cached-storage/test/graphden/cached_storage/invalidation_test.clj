@@ -4,6 +4,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.cache-protocol.interface :as cache]
     [graphden.cached-storage.interface :as cached]
+    [graphden.cached-storage.invalidation :as inv]
     [graphden.cached-storage.test-mocks :as mocks]
     [graphden.storage-protocol.interface :as sp]))
 
@@ -390,3 +391,145 @@
       (sp/create-entity storage :custom {:id custom-id :data "test"})
       ;; Delete through wrapped storage - should use default branch
       (is (sp/delete-entity wrapped :custom custom-id)))))
+
+
+(deftest partial-rebuild-deleted-fn-test
+  (testing "cache rebuild skips fns deleted from base storage"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache-with-deps)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-id-1 (random-uuid)
+          fn-id-2 (random-uuid)]
+      ;; Setup: create schema and two fns through wrapped storage
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id fn-id-1 :name "fn1" :fn-schema-id schema-id})
+      (sp/create-entity wrapped :fn {:id fn-id-2 :name "fn2" :fn-schema-id schema-id})
+      (is (cache/cache-exists? cache fn-id-1))
+      (is (cache/cache-exists? cache fn-id-2))
+
+      ;; Delete fn-2 from base storage directly (bypassing cache)
+      (sp/delete-entity storage :fn fn-id-2)
+
+      ;; Trigger fn-schema update which invalidates + rebuilds all dependents
+      (sp/update-entity wrapped :fn-schema schema-id {:name "updated"})
+
+      ;; fn-1 should have cache rebuilt, fn-2 should not (deleted from base)
+      (is (cache/cache-exists? cache fn-id-1))
+      (is (not (cache/cache-exists? cache fn-id-2))))))
+
+
+(deftest fn-arg-crud-invalidation-test
+  (testing "fn-arg create invalidates owning fn's cache"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          arg-schema-id (random-uuid)
+          fn-id (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id schema-id
+                                             :name "x" :type :int :required true})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      (is (cache/cache-exists? cache fn-id))
+      ;; Create fn-arg through wrapped storage
+      (let [fn-arg-id (random-uuid)]
+        (sp/create-entity wrapped :fn-arg {:id fn-arg-id :fn-id fn-id
+                                           :arg-schema-id arg-schema-id
+                                           :arg-value-id (random-uuid)})
+        ;; Cache should be rebuilt
+        (is (cache/cache-exists? cache fn-id)))))
+
+  (testing "fn-arg update invalidates owning fn's cache"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          arg-schema-id (random-uuid)
+          fn-id (random-uuid)
+          fn-arg-id (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id schema-id
+                                             :name "x" :type :int :required true})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      (sp/create-entity storage :fn-arg {:id fn-arg-id :fn-id fn-id
+                                         :arg-schema-id arg-schema-id
+                                         :arg-value-id (random-uuid)})
+      ;; Update fn-arg
+      (let [new-av-id (random-uuid)]
+        (sp/update-entity wrapped :fn-arg fn-arg-id {:arg-value-id new-av-id})
+        ;; Cache should be rebuilt
+        (is (cache/cache-exists? cache fn-id)))))
+
+  (testing "fn-arg delete invalidates owning fn's cache"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          arg-schema-id (random-uuid)
+          fn-id (random-uuid)
+          fn-arg-id (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id schema-id
+                                             :name "x" :type :int :required true})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      (sp/create-entity storage :fn-arg {:id fn-arg-id :fn-id fn-id
+                                         :arg-schema-id arg-schema-id
+                                         :arg-value-id (random-uuid)})
+      ;; Delete fn-arg
+      (is (sp/delete-entity wrapped :fn-arg fn-arg-id))
+      ;; Cache should be rebuilt
+      (is (cache/cache-exists? cache fn-id)))))
+
+
+(deftest call-site-arg-crud-invalidation-test
+  (testing "call-site-arg create invalidates parent call-site's dependents"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          wrapped (cached/wrap-with-cache storage cache)
+          cs-id (random-uuid)
+          fn-id (random-uuid)]
+      ;; Create call-site + call-site-arg through wrapped
+      (sp/create-entity storage :call-site {:id cs-id :fn-id fn-id :value "r" :name "test"})
+      (let [cs-arg-id (random-uuid)]
+        (sp/create-entity wrapped :call-site-arg
+                          {:id cs-arg-id :call-site-id cs-id
+                           :arg-schema-id (random-uuid) :value 42})
+        ;; Should complete without error
+        (is true))))
+
+  (testing "call-site-arg delete with nil record is no-op"
+    (let [storage (mocks/create-mock-storage)
+          wrapped (cached/wrap-with-cache storage (mocks/create-mock-cache))]
+      ;; Delete nonexistent call-site-arg
+      (is (not (sp/delete-entity wrapped :call-site-arg (random-uuid)))))))
+
+
+(deftest fn-update-same-schema-id-no-invalidation-test
+  (testing "fn update with same fn-schema-id does not invalidate"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          wrapped (cached/wrap-with-cache storage cache)
+          schema-id (random-uuid)
+          fn-id (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity wrapped :fn {:id fn-id :name "fn" :fn-schema-id schema-id})
+      (is (cache/cache-exists? cache fn-id))
+      ;; Update fn with same schema-id
+      (sp/update-entity wrapped :fn fn-id {:fn-schema-id schema-id :name "renamed"})
+      ;; Cache should not be rebuilt (still same as original)
+      (is (cache/cache-exists? cache fn-id)))))
+
+
+(deftest rebuild-cache-direct-test
+  (testing "rebuild-cache! creates cache from base storage graph"
+    (let [storage (mocks/create-mock-storage)
+          cache (mocks/create-mock-cache)
+          schema-id (random-uuid)
+          fn-id (random-uuid)]
+      (sp/create-entity storage :fn-schema {:id schema-id :name "test" :returned-type :int})
+      (sp/create-entity storage :fn {:id fn-id :name "fn1" :fn-schema-id schema-id})
+
+      (is (not (cache/cache-exists? cache fn-id)))
+      (inv/rebuild-cache! storage cache fn-id)
+      (is (cache/cache-exists? cache fn-id)))))

@@ -379,3 +379,35 @@
                                                  [{:name :broken
                                                    :parent :base-fn
                                                    :args {:ref :nonexistent>}}]))))))
+
+
+(deftest arg-value-deduplication-test
+  (testing "reuses existing arg-value with same (arg-schema-id, value)"
+    (let [storage (gsm/create-storage)
+          _ (registry/initialize-all! storage
+                                      [{:const-fn {:args {:x :any}
+                                                   :return-type :any
+                                                   :impl (fn [_ _] nil)}}])
+          ;; Two fns with the same parent and same arg value
+          _ (fn-composition/sync-fns-to-storage! storage
+                                                 [{:name :fn-a :parent :const-fn :args {:x 42}}
+                                                  {:name :fn-b :parent :const-fn :args {:x 42}}])
+          ;; Both should reuse the same arg-value
+          arg-values (sp/query-entities storage :arg-value {})
+          values-with-42 (filter #(= 42 (:value %)) arg-values)]
+      ;; Should be exactly 1 arg-value with value 42 (deduplicated)
+      (is (= 1 (count values-with-42))
+          "Same (arg-schema-id, value) should be deduplicated")))
+
+  (testing "creates separate arg-values for different values"
+    (let [storage (gsm/create-storage)
+          _ (registry/initialize-all! storage
+                                      [{:const-fn {:args {:x :any}
+                                                   :return-type :any
+                                                   :impl (fn [_ _] nil)}}])
+          _ (fn-composition/sync-fns-to-storage! storage
+                                                 [{:name :fn-a :parent :const-fn :args {:x 42}}
+                                                  {:name :fn-b :parent :const-fn :args {:x 99}}])
+          arg-values (sp/query-entities storage :arg-value {})]
+      (is (= 2 (count arg-values))
+          "Different values should create separate arg-values"))))

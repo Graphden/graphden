@@ -309,6 +309,10 @@ Execute function: calculate-report
 | History model | Append-only version records | No data loss; current version = latest by created_at |
 | Unique constraint | Non-unique (entity_id, branch_id) — multiple records per entity per branch | Enables full history without separate history tables |
 | Branch model | Branch table with base_branch_id for inheritance chain | Resolution walks up the chain until version found |
+| Merge mechanism | `branch_merge` table (no record duplication) | Single merge record makes source versions visible in target; see current-schema.dbml |
+| Conflict detection | Git-style: entity modified in both branches after fork point | User resolves: take source / take target / custom |
+| Performance strategy | Variant B: full resolve at cache time | Expensive on cache miss, O(1) on hit. Fits existing cached-storage pattern |
+| Modularity | Independent Polylith component (versioned-storage decorator) | Must be composable with/without caching independently |
 
 **What is versioned (graph structure changes):**
 
@@ -327,20 +331,39 @@ Execute function: calculate-report
 |-----------|-----------|
 | Create branch | Insert into `branch` with `base_branch_id` |
 | Edit on branch | Append new version record with branch_id |
-| Read on branch | Walk branch chain upward until version found |
-| Merge B into A | Copy B's version records to A; skip `env_local` records; handle conflicts |
-| Delete branch | Forbid if child branches exist; delete all version records, then branch |
+| Read on branch | Walk branch chain upward; check branch_merge records for merged versions (see resolution algorithm in current-schema.dbml) |
+| Merge B into A | Insert `branch_merge(source=B, source_timestamp=now, target=A, target_timestamp=now)`. No records copied. Detect conflicts: entity modified in both B and A after fork point |
+| Conflict resolution | User chooses: take source version / take target version / create custom version |
+| Delete branch | Forbid if child branches exist; delete all version records and branch_merge records, then branch |
 
 **Branch resolution at execution time:**
 - Executor context carries `branch_id`
-- `resolve-execution-graph` resolves each versioned entity by walking branch chain
+- `resolve-execution-graph` resolves each versioned entity by walking branch chain + branch_merge records
 - No branch specified = default branch (base_branch_id = NULL)
+- Branch is transparent to functions — they don't know which branch they're on
+
+**Performance: Variant B (resolve at cache time):**
+- On cache miss: full version resolution for all entities in execution graph (expensive)
+- On cache hit: O(1) — pre-resolved graph returned directly
+- Fits existing `cached-storage` decorator pattern
+- Cache invalidation: merge operation invalidates affected caches in target branch
+- No materialized views needed initially
 
 **Multi-tenant model:**
 - Each tenant operates on their own branch derived from main
 - Test branches are children of tenant branch
 - Branch context determined by request subdomain (e.g., `feature-1.tenant-a.app.example.com`)
 - Router is version-resolved per-branch, enabling route testing on branches
+
+**Component architecture:**
+- `versioned-storage` — independent Polylith component (storage decorator)
+- `cached-versioned-storage` — optional combining module (cache + versioning)
+- Any combination works: base only, cached only, versioned only, cached+versioned
+- Executor works with any storage through unified `ExecutionGraph` protocol — no executor changes needed
+
+**Open questions (under consideration):**
+- **Tags for arg_schema properties**: env_local, secret, and similar cross-cutting properties need a generic mechanism. Problem: each new boolean field (is_env_local, is_secret) proliferates across schema, storage, and merge logic. Possible direction: tags set on arg_schema, but design not finalized.
+- **User branch execution on shared infrastructure**: How to run different user branches on the same web-server pod. Branch must be resolved at infrastructure level (e.g., subdomain routing), but the exact mechanism for sharing executor instances across branches needs design.
 
 **Postponed:**
 - fn_schema / arg_schema versioning (platform updates)

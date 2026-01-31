@@ -387,12 +387,23 @@ Minimal Storage:
 
 Extensions declare their needs through migrations (new fields, indexes, tables) rather than requiring protocol changes. Each storage backend translates migration specs into its own DDL. This allows adding versioning, caching, or permissions without modifying the base storage interface.
 
+**Independent composability requirement**: Each feature module (caching, versioning, permissions, etc.) must be an independent Polylith component implementing the storage decorator pattern. Any combination of decorators must work correctly:
+
 ```
 BaseStorage (minimal CRUD)
-  └─ VersionedStorage (adds branch resolution, append-only history)
-       └─ CachedStorage (adds read-through cache, invalidation)
-            └─ AuditedStorage (adds operation logging)
+
+Valid compositions (any combination):
+  BaseStorage                                          — no extras
+  CachedStorage(BaseStorage)                           — cache only
+  VersionedStorage(BaseStorage)                        — versioning only
+  CachedVersionedStorage(VersionedStorage(BaseStorage)) — both
+  PermissionStorage(CachedStorage(BaseStorage))        — permissions + cache
+  ... any other combination
 ```
+
+The executor works with any storage through the unified `ExecutionGraph` protocol and does not need to know which decorators are active. Each decorator is transparent to layers above it.
+
+When two features interact (e.g., cache invalidation on branch merge), a dedicated combining module handles the interaction rather than coupling the features directly.
 
 ### Self-Describing System (Long-term Vision)
 

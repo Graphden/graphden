@@ -2,7 +2,20 @@
 // This schema defines the structure for storing function composition graphs.
 // Versioned entities use a two-table pattern: stable id + version table with data.
 // Version tables are append-only: each change adds a new record.
-// Current version = latest record by created_at for a given (entity_id, branch_id).
+//
+// === Version Resolution Algorithm ===
+// To resolve current version of entity E on branch B:
+//   1. Find latest version record for E where branch_id = B (own version).
+//   2. Find all branch_merge records where target_branch_id = B
+//      and target_timestamp > own version's created_at (or all, if no own version).
+//   3. For each such merge, find latest version of E in source_branch
+//      where created_at <= source_timestamp.
+//   4. Among all candidates (own + from merges), pick the one with the
+//      greatest effective timestamp (own created_at, or merge's target_timestamp).
+//   5. If no version found on B, walk up to base_branch_id and repeat.
+//
+// This avoids duplicating version records on merge. A single branch_merge
+// record makes all source branch versions visible in the target branch.
 
 Enum value_kind {
   null
@@ -25,6 +38,24 @@ Table branch {
   name text [not null]
   base_branch_id uuid [ref: > branch.id]
   created_at timestamptz [not null]
+}
+
+// Merge record: makes source branch versions visible in target branch.
+// source_timestamp = snapshot point in source (versions created_at <= this are included).
+// target_timestamp = effective time in target (for ordering among multiple merges).
+// No version records are copied — this single record is sufficient.
+// Conflict detection: entity modified in both source and target after fork point = conflict.
+Table branch_merge {
+  id uuid [primary key]
+  source_branch_id uuid [not null, ref: > branch.id]
+  source_timestamp timestamptz [not null]
+  target_branch_id uuid [not null, ref: > branch.id]
+  target_timestamp timestamptz [not null]
+  created_at timestamptz [not null]
+
+  indexes {
+    (target_branch_id, target_timestamp) [name: 'idx_branch_merge_target_lookup']
+  }
 }
 
 // === Non-versioned (platform-level, postponed) ===

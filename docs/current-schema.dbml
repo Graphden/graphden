@@ -58,31 +58,61 @@ Table branch_merge {
   }
 }
 
-// === Non-versioned (platform-level, postponed) ===
+// === Versioned: fn_schema (platform-level) ===
 
-// Function signature definition.
-// base_fn_name links to Clojure implementation (nil for user-defined composite fns).
-// impl_hash is SHA-256 hash of implementation (for base fns only, for version tracking).
-// TODO: versioning postponed (platform updates - separate mechanism)
+// Function signature (stable identity).
+// Updated via platform migrations (base-fn changes) or user edits (composite fn signatures).
 Table fn_schema {
   id uuid [primary key]
-  name text [not null, unique]
+}
+
+// Version of a function signature. Append-only history.
+// Can change: name, returned_type, base_fn_name, impl_hash.
+// Current version: latest by created_at for (fn_schema_id, branch_id).
+//
+// Platform updates (base-fn migration):
+//   - Compatible changes (new optional arg): update on platform branch, users merge when ready.
+//   - Breaking changes (removed arg, type change): register new base_fn_name,
+//     create new fn_schema. Old fn_schema + old code remain functional.
+//   - Clojure runtime must support old signatures until all users migrate.
+Table fn_schema_version {
+  id uuid [primary key]
+  fn_schema_id uuid [not null, ref: > fn_schema.id]
+  branch_id uuid [not null, ref: > branch.id]
+  name text [not null]
   returned_type value_kind [not null]
   base_fn_name text
   impl_hash text
+  created_at timestamptz [not null]
+
+  indexes {
+    (fn_schema_id, branch_id, created_at) [name: 'idx_fn_schema_version_lookup']
+  }
 }
 
-// Argument definition for a function schema.
-// TODO: versioning postponed (tied to fn_schema versioning)
+// === Versioned: arg_schema (tied to fn_schema) ===
+
+// Argument definition (stable identity).
+// fn_schema_id is stable — arg always belongs to the same fn_schema.
 Table arg_schema {
   id uuid [primary key]
   fn_schema_id uuid [not null, ref: > fn_schema.id]
+}
+
+// Version of an argument definition. Append-only history.
+// Can change: name, type, required.
+// Current version: latest by created_at for (arg_schema_id, branch_id).
+Table arg_schema_version {
+  id uuid [primary key]
+  arg_schema_id uuid [not null, ref: > arg_schema.id]
+  branch_id uuid [not null, ref: > branch.id]
   name text [not null]
   type value_kind [not null]
   required bool [not null]
+  created_at timestamptz [not null]
 
   indexes {
-    (fn_schema_id, name) [unique]
+    (arg_schema_id, branch_id, created_at) [name: 'idx_arg_schema_version_lookup']
   }
 }
 

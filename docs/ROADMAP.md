@@ -21,7 +21,7 @@
 | REST API | Planned | Phase 5 |
 | Web UI | Planned | Phase 5 |
 | Type System | Planned | Future work |
-| Versioning | Design done | impl-hash done; branch-based schema designed (see current-schema.dbml) |
+| Versioning | Design done | All entities versioned (incl. fn_schema/arg_schema); branch_merge; see current-schema.dbml |
 | Permissions | Planned | Future work |
 
 ---
@@ -321,7 +321,8 @@ Execute function: calculate-report
 | `fn` | Yes (fn + fn_version) | name, fn_schema_id |
 | `fn_arg` | Yes (fn_arg + fn_arg_version) | arg_value_id binding |
 | `call_site_arg` | Yes (call_site_arg + call_site_arg_version) | arg_value_id binding |
-| `fn_schema` / `arg_schema` | No (postponed) | Platform-level, separate mechanism |
+| `fn_schema` | Yes (fn_schema + fn_schema_version) | name, returned_type, base_fn_name, impl_hash |
+| `arg_schema` | Yes (arg_schema + arg_schema_version) | name, type, required |
 | `arg_value` | No | Immutable, deduplicated; change = point to different arg_value |
 | `call_site` | No | fn_id is fixed; only its arg bindings change |
 
@@ -352,8 +353,23 @@ Execute function: calculate-report
 **Multi-tenant model:**
 - Each tenant operates on their own branch derived from main
 - Test branches are children of tenant branch
-- Branch context determined by request subdomain (e.g., `feature-1.tenant-a.app.example.com`)
-- Router is version-resolved per-branch, enabling route testing on branches
+
+**Running branches (live deployment):**
+- Most branches are development-only — no running services, no resource consumption
+- User explicitly marks a branch as "live" — platform reacts by provisioning executor
+- Each live branch is a separate deployment (separate service/endpoint)
+- Platform assigns a URL on its own domain: `branch-name.project-id.graphden.io`
+- User optionally configures their DNS (CNAME) to point their domain at the branch service
+- No subdomain parsing or header-based routing needed — each branch has its own endpoint
+- Functions never know about branches — branch is set in executor context before graph execution
+
+**Executor allocation modes:**
+
+| Mode | When | How |
+|------|------|-----|
+| Shared executor | Cheap tier, preview branches | One executor service handles multiple branches. Platform ingress maps hostname → branch_id, passes to executor |
+| Dedicated executor | Production, high load | Separate pod, configured for one branch |
+| Preloaded | Latency-critical | Graph pre-resolved, handler in memory |
 
 **Component architecture:**
 - `versioned-storage` — independent Polylith component (storage decorator)
@@ -363,10 +379,16 @@ Execute function: calculate-report
 
 **Open questions (under consideration):**
 - **Tags for arg_schema properties**: env_local, secret, and similar cross-cutting properties need a generic mechanism. Problem: each new boolean field (is_env_local, is_secret) proliferates across schema, storage, and merge logic. Possible direction: tags set on arg_schema, but design not finalized.
-- **User branch execution on shared infrastructure**: How to run different user branches on the same web-server pod. Branch must be resolved at infrastructure level (e.g., subdomain routing), but the exact mechanism for sharing executor instances across branches needs design.
+
+**Base function update strategy:**
+- Platform migrations update `fn_schema` and `arg_schema` on a platform branch
+- Users' branches don't see the change until they merge
+- Compatible changes (new optional arg): one `base_fn_name`, Clojure code supports both old and new signatures
+- Breaking changes (removed arg, changed type): register new `base_fn_name` (e.g., `map-fn-v2`), old code remains functional
+- Implementation-only changes (bug fix, same signature): all users get the new code automatically (Clojure runtime is shared), `impl_hash` updated on platform branch
+- Clojure runtime must maintain backward compatibility until all users migrate from old `base_fn_name`
 
 **Postponed:**
-- fn_schema / arg_schema versioning (platform updates)
 - Personal rename / alias layer
 
 ---

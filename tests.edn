@@ -7,6 +7,7 @@
     "components/reitit-fns/test"
     "components/web-server-fns/test"
     "components/cache-data-schema/test"
+    "components/graph-protocol/test"
     "components/cache-datomic/test"
     "components/cache-memory/test"
     "components/cache-postgres/test"
@@ -27,5 +28,9 @@
     "components/malli-data-schema/test"
     "components/memory-storage/test"
     "components/postgres-storage/test"
-    "components/storage-protocol/test"]}],
+    "components/storage-protocol/test"
+    "components/versioned-data-schema/test"
+    "components/versioned-storage/test"
+    "components/versioned-graph-storage-memory/test"
+    "components/cached-versioned-storage/test"]}],
  :plugins [:kaocha.plugin/profiling]}

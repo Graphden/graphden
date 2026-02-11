@@ -239,10 +239,18 @@ This section maps each system component to the principles it serves. Use this to
 
 | Component | Principles Served | How |
 |-----------|-------------------|-----|
-| `storage-protocol` | Correctness, Minimal entities | Single interface for all backends; constraints enforced uniformly |
+| `storage-protocol` | Correctness, Minimal entities | Generic CRUD interface for all backends; schema-agnostic |
 | `memory-storage` | Correctness (testing) | Fast tests enable comprehensive coverage |
 | `postgres-storage` | Performance, Correctness | Production-grade ACID transactions |
 | `datomic-storage` | Correctness, Dev tools | Immutable history enables versioning/audit |
+
+### Graph Layer
+
+| Component | Principles Served | How |
+|-----------|-------------------|-----|
+| `graph-protocol` | Correctness, Modularity | Graph-specific protocols: GraphReader, GraphConstraints |
+| `graph-data-schema` | Minimal entities | Core graph entities: fn, fn-schema, arg-schema, arg-value |
+| `graph-storage-*` | Dev simplicity | Pre-configured storage + graph schema bundles |
 
 ### Caching Layer
 
@@ -404,6 +412,96 @@ Valid compositions (any combination):
 The executor works with any storage through the unified `ExecutionGraph` protocol and does not need to know which decorators are active. Each decorator is transparent to layers above it.
 
 When two features interact (e.g., cache invalidation on branch merge), a dedicated combining module handles the interaction rather than coupling the features directly.
+
+### Three-Layer Architecture
+
+The system separates concerns into three distinct layers:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                         EXECUTOR                                 │
+│  - Receives fn-id + call-site-args                              │
+│  - Knows about laziness (delay, thunks)                         │
+│  - Resolves base-fn implementations                             │
+│  - Does NOT know about storage details                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ uses GraphReader protocol
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                       GRAPH LAYER                                │
+│  - Provides execution graph for a fn-id                         │
+│  - Knows about graph entities (fn, fn-schema, arg-value, etc.)  │
+│  - Middleware pattern: composable GraphReader implementations   │
+│    • DirectGraphReader(storage) — direct queries                │
+│    • CachedGraphReader(storage, cache) — DB-level caching       │
+│    • VersionedGraphReader(storage) — branch version resolution  │
+│  - Does NOT know about execution semantics                      │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ uses StorageCRUD protocol
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                      STORAGE LAYER                               │
+│  - Generic CRUD: create/read/update/delete/query                │
+│  - Schema-agnostic (works with any entity types)                │
+│  - Storage decorators modify CRUD behavior:                     │
+│    • VersionedStorage — intercepts CRUD for version resolution  │
+│    • PermissionStorage — enforces access control                │
+│  - Does NOT know about graph semantics                          │
+└─────────────────────────────────────────────────────────────────┘
+                              │
+                              │ uses DataSchema protocol
+                              ▼
+┌─────────────────────────────────────────────────────────────────┐
+│                     DATA SCHEMA LAYER                            │
+│  - Defines entity types, fields, constraints                    │
+│  - Schema extensions are composable:                            │
+│    • graph-data-schema — fn, fn-schema, arg-value, etc.        │
+│    • cache-data-schema — cached-fn, cached-merged-arg          │
+│    • versioned-data-schema — branch, fn-version, etc.          │
+│  - Pure data definitions, no behavior                           │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Key principle**: Each layer depends only on the layer below it. The executor doesn't know if storage is versioned or cached — it only sees `GraphReader`. Storage doesn't know about execution — it only sees CRUD operations.
+
+**Graph-specific protocols in the right place**: The `GraphConstraints` and `ExecutionGraph` protocols belong in the Graph Layer, not Storage Layer:
+
+| Protocol | Layer | Reason |
+|----------|-------|--------|
+| `StorageCRUD` | Storage | Generic CRUD, schema-agnostic |
+| `GraphConstraints` | Graph | Knows about fn→arg-value→fn relationships |
+| `ExecutionGraph` | Graph | Resolves graph structure for execution |
+| `GraphReader` | Graph | Provides graph data to executor |
+
+**GraphReader middleware pattern** enables composition:
+
+```clojure
+;; Direct graph reading (simplest)
+(def reader (direct-graph-reader storage))
+
+;; With DB-level caching
+(def reader (cached-graph-reader storage cache-storage))
+
+;; With versioning (branch resolution)
+(def reader (versioned-graph-reader versioned-storage))
+
+;; With both (cached + versioned)
+(def reader (cached-versioned-graph-reader versioned-storage cache-storage))
+```
+
+The executor creates context with any GraphReader:
+```clojure
+(executor/create-context {:graph-reader reader
+                          :base-fns (registry/get-base-fns)})
+```
+
+This design follows Django's "apps" pattern where each feature is an independent module that can:
+1. Extend the schema (add entities/fields)
+2. Modify CRUD behavior (storage decorators)
+3. Modify graph reading behavior (GraphReader implementations)
+4. Be combined with other features in any order
 
 ### Self-Describing System (Long-term Vision)
 

@@ -1,0 +1,3 @@
+{:paths ["src" "resources"]
+ :deps {graphden/graph-data-schema {:local/root "../graph-data-schema"}
+        graphden/data-schema-protocol {:local/root "../data-schema-protocol"}}}

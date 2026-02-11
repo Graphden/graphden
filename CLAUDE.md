@@ -119,26 +119,36 @@ bb create-component NAME   # Create component and sync paths
 
 Polylith monorepo. Top namespace: `graphden`. Public API through `interface.clj` only.
 
-### Layer Structure
+### Four-Layer Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              graph-with-base-fns-*                          │
-│  (complete stack: storage + schema + executor + base-fns)   │
+│                      EXECUTOR LAYER                          │
+│  executor + base-functions + fn-registry                    │
+│  Uses GraphReader protocol (doesn't know storage details)   │
 ├─────────────────────────────────────────────────────────────┤
-│  executor  │  base-functions  │  fn-registry               │
-├────────────┴─────────────────┬┴────────────────────────────┤
-│         graph-data-schema    │     malli-data-schema       │
-├──────────────────────────────┴─────────────────────────────┤
-│ storage-protocol │ data-schema-protocol │ field-types      │
-├──────────────────┴───────────┬─────────┴──────────────────┤
-│     memory/postgres/datomic-storage                        │
-├────────────────────────────────────────────────────────────┤
-│          cached-storage + cache-*                          │
-└────────────────────────────────────────────────────────────┘
+│                       GRAPH LAYER                            │
+│  graph-protocol: GraphReader, GraphConstraints              │
+│  graph-data-schema: fn, fn-schema, arg-schema, arg-value    │
+│  Middleware: DirectGraphReader, CachedGraphReader,          │
+│              VersionedGraphReader (composable)              │
+├─────────────────────────────────────────────────────────────┤
+│                      STORAGE LAYER                           │
+│  storage-protocol: StorageCRUD (schema-agnostic)            │
+│  Decorators: CachedStorage, VersionedStorage (composable)   │
+│  Backends: memory-storage, postgres-storage, datomic-storage│
+├─────────────────────────────────────────────────────────────┤
+│                    DATA SCHEMA LAYER                         │
+│  data-schema-protocol + malli-data-schema + field-types     │
+│  Schema extensions: cache-data-schema, versioned-data-schema│
+└─────────────────────────────────────────────────────────────┘
 ```
 
-See [README.md](README.md) for component list.
+**Key principle:** Each layer depends only on the layer below it. Executor uses `GraphReader`, doesn't know if storage is versioned/cached. Storage sees only CRUD, doesn't know about graph semantics.
+
+**Bundles:** `graph-storage-*`, `graph-with-base-fns-*` combine layers for convenience.
+
+See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
 ## Quick Reference
 
@@ -179,10 +189,12 @@ See [docs/EXTENDING.md](docs/EXTENDING.md) for details.
 
 ## Graph Constraints
 
-Enforced at write time by `GraphConstraints` protocol:
+Enforced at write time by `GraphConstraints` protocol (part of Graph Layer):
 
 1. **No dependency cycles** — A→B→A forbidden (self-recursion allowed with depth limit)
 2. **Arg-schema belongs to fn-schema** — type safety for argument binding
+
+These are graph-specific constraints, not storage-level. They live in `graph-protocol`, not `storage-protocol`.
 
 See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 

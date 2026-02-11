@@ -1,0 +1,7 @@
+{:paths ["src" "resources"]
+ :deps {graphden/cached-storage {:local/root "../cached-storage"}
+        graphden/cache-protocol {:local/root "../cache-protocol"}
+        graphden/versioned-storage {:local/root "../versioned-storage"}
+        graphden/storage-protocol {:local/root "../storage-protocol"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {}}}}

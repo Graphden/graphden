@@ -75,9 +75,9 @@
           _ (sp/create-entity storage :fn-schema
                               {:id schema-id :name "with-args" :returned-type :int})
           arg1 (sp/create-entity storage :arg-schema
-                                 {:fn-schema-id schema-id :name "x" :type :int})
+                                 {:fn-schema-id schema-id :name "x" :type :int :required true})
           arg2 (sp/create-entity storage :arg-schema
-                                 {:fn-schema-id schema-id :name "y" :type :int})
+                                 {:fn-schema-id schema-id :name "y" :type :int :required true})
           arg-schemas (gp/get-arg-schemas-for-fn-schema reader schema-id)]
       (is (= 2 (count arg-schemas)))
       (is (contains? arg-schemas (:id arg1)))
@@ -101,11 +101,6 @@
 
 
 (deftest re-exports-test
-  (testing "re-exported protocols are available"
-    (is (some? gp/ExecutionGraph))
-    (is (some? gp/ExecutionGraphReader))
-    (is (some? gp/GraphConstraints)))
-
   (testing "re-exported functions work"
     (is (fn? gp/->execution-graph))
     (is (fn? gp/execution-graph?))

@@ -189,33 +189,9 @@
 ;; RE-EXPORTS FROM STORAGE-PROTOCOL
 ;; ============================================================================
 ;;
-;; For backwards compatibility, we re-export graph-related items from
-;; storage-protocol. New code should use graph-protocol directly.
-
-;; Protocols (can be used for extend-type, satisfies?, etc.)
-;; Note: Protocol names use PascalCase per Clojure convention
-(def ^{:splint/disable [:naming/lisp-case]} ExecutionGraph
-  "Re-export: Protocol for retrieving execution graphs.
-   Prefer GraphReader for new code."
-  sp/ExecutionGraph)
-
-
-(def ^{:splint/disable [:naming/lisp-case]} ExecutionGraphReader
-  "Re-export: Protocol for reading data from execution graphs.
-   Used to access data within an ExecutionGraphResult."
-  sp/ExecutionGraphReader)
-
-
-(def ^{:splint/disable [:naming/lisp-case]} GraphConstraints
-  "Re-export: Protocol for graph integrity constraints.
-   Validates no dependency cycles, arg-schema belongs to fn-schema."
-  sp/GraphConstraints)
-
-
-(def ^{:splint/disable [:naming/lisp-case]} ConstraintHelpers
-  "Re-export: Helper protocol for constraint implementations."
-  sp/ConstraintHelpers)
-
+;; Re-export graph-related functions from storage-protocol.
+;; For protocols (ExecutionGraph, GraphConstraints, etc.), import directly
+;; from storage-protocol.interface.
 
 ;; Functions
 (def resolve-execution-graph

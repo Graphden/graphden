@@ -48,7 +48,7 @@
     org.clojure/tools.logging #:mvn{:version "1.3.1"},
     com.datomic/local #:mvn{:version "1.0.291"},
     org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
-    org.postgresql/postgresql #:mvn{:version "42.7.9"},
+    org.postgresql/postgresql #:mvn{:version "42.7.10"},
     com.github.seancorfield/honeysql #:mvn{:version "2.7.1368"},
     metosin/malli #:mvn{:version "0.20.0"},
     com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1093"},
@@ -137,7 +137,11 @@
     "components/versioned-graph-storage-memory/src"
     "components/versioned-graph-storage-memory/test"
     "components/cached-versioned-storage/src"
-    "components/cached-versioned-storage/test"],
+    "components/cached-versioned-storage/test"
+    "components/value-traits-schema/src"
+    "components/value-traits-schema/test"
+    "components/merge-protection/src"
+    "components/merge-protection/test"],
    :extra-deps
    {http-kit/http-kit #:mvn{:version "2.8.1"},
     metosin/reitit #:mvn{:version "0.10.0"},
@@ -146,7 +150,7 @@
     lambdaisland/kaocha #:mvn{:version "1.91.1392"},
     com.datomic/local #:mvn{:version "1.0.291"},
     org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
-    org.postgresql/postgresql #:mvn{:version "42.7.9"},
+    org.postgresql/postgresql #:mvn{:version "42.7.10"},
     com.github.seancorfield/honeysql #:mvn{:version "2.7.1368"},
     metosin/malli #:mvn{:version "0.20.0"},
     com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1093"},
@@ -219,7 +223,11 @@
     "components/versioned-graph-storage-memory/src"
     "components/versioned-graph-storage-memory/test"
     "components/cached-versioned-storage/src"
-    "components/cached-versioned-storage/test"],
+    "components/cached-versioned-storage/test"
+    "components/value-traits-schema/src"
+    "components/value-traits-schema/test"
+    "components/merge-protection/src"
+    "components/merge-protection/test"],
    :extra-deps
    {http-kit/http-kit #:mvn{:version "2.8.1"},
     metosin/reitit #:mvn{:version "0.10.0"},
@@ -227,7 +235,7 @@
     org.clojure/tools.logging #:mvn{:version "1.3.1"},
     com.datomic/local #:mvn{:version "1.0.291"},
     org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
-    org.postgresql/postgresql #:mvn{:version "42.7.9"},
+    org.postgresql/postgresql #:mvn{:version "42.7.10"},
     com.github.seancorfield/honeysql #:mvn{:version "2.7.1368"},
     metosin/malli #:mvn{:version "0.20.0"},
     com.github.seancorfield/next.jdbc #:mvn{:version "1.3.1093"},

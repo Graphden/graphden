@@ -32,5 +32,7 @@
     "components/versioned-data-schema/test"
     "components/versioned-storage/test"
     "components/versioned-graph-storage-memory/test"
-    "components/cached-versioned-storage/test"]}],
+    "components/cached-versioned-storage/test"
+    "components/value-traits-schema/test"
+    "components/merge-protection/test"]}],
  :plugins [:kaocha.plugin/profiling]}

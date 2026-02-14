@@ -1,0 +1,9 @@
+{:paths ["src" "resources"]
+ :deps {graphden/storage-protocol {:local/root "../storage-protocol"}
+        graphden/versioned-storage {:local/root "../versioned-storage"}
+        graphden/value-traits-schema {:local/root "../value-traits-schema"}}
+ :aliases {:test {:extra-paths ["test"]
+                  :extra-deps {graphden/malli-data-schema {:local/root "../malli-data-schema"}
+                               graphden/graph-data-schema {:local/root "../graph-data-schema"}
+                               graphden/versioned-data-schema {:local/root "../versioned-data-schema"}
+                               graphden/memory-storage {:local/root "../memory-storage"}}}}}

@@ -8,6 +8,10 @@
   (:import
     (com.fasterxml.jackson.core
       JsonParseException)
+    (java.sql
+      Timestamp)
+    (java.time
+      Instant)
     (org.postgresql.util
       PGobject)))
 
@@ -47,6 +51,12 @@
     (PGobject/.setValue (util/enum-value->sql v))))
 
 
+(defn- instant->timestamp
+  "Converts java.time.Instant to java.sql.Timestamp for PostgreSQL."
+  [^Instant instant]
+  (Timestamp/from instant))
+
+
 (defn- parse-pgobject
   "Parses PGobject value based on its type.
    Returns nil for null PGobject values."
@@ -67,6 +77,12 @@
   "Columns always treated as JSONB even without field metadata.
    :value - Used in arg_value entity for polymorphic value storage."
   #{:value})
+
+
+(def ^:private fallback-timestamptz-columns
+  "Columns always treated as TIMESTAMPTZ even without field metadata.
+   :created-at - Used in versioned entities (branch, *-version) for timestamps."
+  #{:created-at})
 
 
 ;; === PostgresValueCodec implementation ===
@@ -91,6 +107,11 @@
             (value->enum value (:enum-name field-spec))
             value)
 
+          :timestamptz
+          (if (instance? Instant value)
+            (instant->timestamp value)
+            value)
+
           ;; Other types pass through unchanged
           value))))
 
@@ -109,7 +130,9 @@
       row
       field-specs
       {:key-transform (comp keyword util/kw->snake-case)
-       :fallback-specs (into {} (map (fn [k] [k {:type :jsonb}]) fallback-jsonb-columns))}))
+       :fallback-specs (merge
+                         (into {} (map (fn [k] [k {:type :jsonb}]) fallback-jsonb-columns))
+                         (into {} (map (fn [k] [k {:type :timestamptz}]) fallback-timestamptz-columns)))}))
 
 
   (decode-row
@@ -128,6 +151,19 @@
 
 
 (def ^:private default-codec (delay (create-codec)))
+
+
+(defn encode-value
+  "Encodes a single value using the default codec.
+   Uses fallback specs for known JSONB/TIMESTAMPTZ columns when field-spec is nil."
+  [value field-spec]
+  (let [effective-spec (or field-spec
+                           ;; Apply fallback if needed - check if value looks like it needs special handling
+                           (cond
+                             (map? value) {:type :jsonb}
+                             (instance? Instant value) {:type :timestamptz}
+                             :else nil))]
+    (sp/encode-value @default-codec value effective-spec)))
 
 
 (defn encode-row

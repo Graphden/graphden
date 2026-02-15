@@ -103,8 +103,52 @@
                         {:type keyword}))
 
 
+(defn- keywordize-map-except-headers
+  "Recursively keywordizes all map keys, except keys inside 'headers' maps.
+   HTTP header keys (like 'Content-Type') must remain strings for Ring compatibility.
+   All other keys are converted to keywords."
+  [x inside-headers?]
+  (cond
+    (not (map? x)) x
+
+    inside-headers?
+    ;; Inside headers: keep all keys as strings
+    (into {} (map (fn [[k v]]
+                    [(if (keyword? k) (name k) (str k))
+                     (keywordize-map-except-headers v false)])
+                  x))
+
+    :else
+    ;; Outside headers: keywordize keys, but track when entering headers
+    (into {} (map (fn [[k v]]
+                    (let [k-str (if (keyword? k) (name k) (str k))
+                          is-headers-key (= k-str "headers")]
+                      [(keyword k-str)
+                       (keywordize-map-except-headers v is-headers-key)]))
+                  x))))
+
+
+(defn- keywordize-union-keys
+  "Keywordizes union format keys (:kind, :value, :fn-id).
+   For literal values, keywordizes all map keys except those inside 'headers' maps
+   to preserve HTTP header keys as strings."
+  [parsed]
+  (if (and (map? parsed) (contains? parsed "kind"))
+    (let [kind (keyword (get parsed "kind"))]
+      (case kind
+        :literal {:kind :literal
+                  :value (keywordize-map-except-headers (get parsed "value") false)}
+        :fn-ref {:kind :fn-ref
+                 :fn-id (get parsed "fn-id")}
+        ;; Unknown kind - preserve as-is but keywordize kind
+        (assoc (dissoc parsed "kind") :kind kind)))
+    ;; Not a union format map - return as-is
+    parsed))
+
+
 (defn- parse-value
-  "Parses a cached value from JSON storage format."
+  "Parses a cached value from JSON storage format.
+   Handles union format and Ring response keywordizing."
   [value-json]
   (when value-json
     (let [raw-value (cond
@@ -115,9 +159,11 @@
                       value-json
 
                       :else nil)
+          ;; Parse WITHOUT keywordizing - we'll handle it manually
           parsed (when raw-value
-                   (json/parse-string raw-value true))]
-      (cache/parse-cached-value parsed))))
+                   (json/parse-string raw-value false))]
+      (when parsed
+        (cache/parse-cached-value (keywordize-union-keys parsed))))))
 
 
 (defn- load-cached-merged-args
@@ -158,11 +204,62 @@
 
 ;; === Graph saving helpers ===
 
-(defn- encode-value
-  "Encodes a value for JSON storage."
+(defn- extract-arg-value-content
+  "Extracts the actual value content from an arg-value record.
+   The resolved-args map contains arg-value records with structure:
+   {:id uuid :value actual-value :arg-schema-id uuid}
+   This extracts just the :value field for caching."
+  [arg-value-record]
+  (if (and (map? arg-value-record)
+           (contains? arg-value-record :id)
+           (contains? arg-value-record :value)
+           (contains? arg-value-record :arg-schema-id))
+    (:value arg-value-record)
+    ;; If not a standard record, return as-is (defensive)
+    arg-value-record))
+
+
+(defn- uuid-value?
+  "Returns true if value is a UUID or UUID string."
   [value]
-  (when-let [formatted (cache/format-cached-value value)]
-    (json/generate-string formatted)))
+  (or (uuid? value)
+      (and (string? value)
+           (try
+             (java.util.UUID/fromString value)
+             true
+             (catch IllegalArgumentException _ false)))))
+
+
+(defn- format-value-for-cache
+  "Formats a value for cache storage.
+   - UUIDs (fn/call-site refs) -> {:kind :fn-ref :fn-id uuid}
+   - Other values -> {:kind :literal :value value}"
+  [value]
+  (cond
+    (nil? value)
+    nil
+
+    ;; UUIDs are fn or call-site references
+    (uuid-value? value)
+    {:kind :fn-ref :fn-id (if (uuid? value) value (java.util.UUID/fromString value))}
+
+    ;; Already formatted as fn-ref
+    (and (map? value) (= :fn-ref (:kind value)))
+    value
+
+    ;; Everything else is a literal value
+    :else
+    {:kind :literal :value value}))
+
+
+(defn- encode-value
+  "Encodes a value for JSON storage.
+   Extracts actual value from arg-value records and formats for cache."
+  [arg-value-record]
+  (let [actual-value (extract-arg-value-content arg-value-record)
+        formatted (format-value-for-cache actual-value)]
+    (when formatted
+      (json/generate-string formatted))))
 
 
 (defn- save-cached-fns!

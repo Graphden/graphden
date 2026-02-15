@@ -110,10 +110,12 @@
         where-clause (when (seq where)
                        (into [:and]
                              (map (fn [[k v]]
-                                    (let [col (keyword (util/kw->snake-case k))]
-                                      (if (nil? v)
+                                    (let [col (keyword (util/kw->snake-case k))
+                                          field-spec (get fields k)
+                                          encoded-v (codec/encode-value v field-spec)]
+                                      (if (nil? encoded-v)
                                         [:is col nil]
-                                        [:= col v])))
+                                        [:= col encoded-v])))
                                   where)))
         query (sql/format (cond-> {:select [:*]
                                    :from [table-name]}

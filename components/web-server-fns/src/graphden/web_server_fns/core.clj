@@ -32,7 +32,7 @@
   "Static hello response - returned for all requests to /"
   {:status 200
    :headers {"Content-Type" "text/html; charset=utf-8"}
-   :body "<html><body><h1>Hello from Graphden!!</h1></body></html>"})
+   :body "<html><body><h1>Graphden Executor v2</h1><p>PostgreSQL + Versioning + Cache + Metrics</p></body></html>"})
 
 
 (def health-response

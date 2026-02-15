@@ -291,7 +291,16 @@
     [_ fn-id]
     ;; Fast path: check cache first
     (if-let [cached-graph (cache/get-cached-graph cache-storage fn-id)]
-      cached-graph
+      ;; Cache hit: need to load call-sites since they're not stored in cache
+      ;; The cached graph has resolved-args but no call-sites map
+      ;; We need call-sites so executor can distinguish call-site refs from fn refs
+      (if (empty? (:call-sites cached-graph))
+        (let [call-site-ids (inv/extract-call-site-ids-from-resolved-args (:resolved-args cached-graph))
+              call-sites (if (empty? call-site-ids)
+                           {}
+                           (sp/read-entities base-storage :call-site (vec call-site-ids)))]
+          (assoc cached-graph :call-sites call-sites))
+        cached-graph)
       ;; Cache miss: resolve using base storage, then cache
       (let [graph (sp/resolve-execution-graph base-storage fn-id)
             deps (inv/compute-dependencies graph)]
@@ -495,7 +504,14 @@
       (if-let [cached-graph (cache/get-cached-graph cache-storage fn-id)]
         (do
           (inc-hits! metrics)
-          cached-graph)
+          ;; Cache hit: need to load call-sites since they're not stored in cache
+          (if (empty? (:call-sites cached-graph))
+            (let [call-site-ids (inv/extract-call-site-ids-from-resolved-args (:resolved-args cached-graph))
+                  call-sites (if (empty? call-site-ids)
+                               {}
+                               (sp/read-entities base-storage :call-site (vec call-site-ids)))]
+              (assoc cached-graph :call-sites call-sites))
+            cached-graph))
         (do
           (inc-misses! metrics)
           (let [graph (sp/resolve-execution-graph base-storage fn-id)

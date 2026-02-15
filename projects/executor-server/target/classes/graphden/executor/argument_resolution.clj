@@ -193,11 +193,14 @@
     (and (map? arg-value) (= :fn-ref (:kind arg-value)))
     (:fn-id arg-value)
 
-    ;; Union format with :value OR arg-value record/test format with :value key
-    (or (and (map? arg-value) (= :literal (:kind arg-value)))
-        (and (map? arg-value)
-             (contains? arg-value :value)
-             (not (contains? arg-value :kind))))
+    ;; Union format: {:kind :literal :value <value>}
+    (and (map? arg-value) (= :literal (:kind arg-value)))
+    (:value arg-value)
+
+    ;; arg-value record or test format with :value key (not union format)
+    (and (map? arg-value)
+         (contains? arg-value :value)
+         (not (contains? arg-value :kind)))
     (:value arg-value)
 
     ;; Direct value (already unwrapped)

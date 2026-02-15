@@ -75,6 +75,54 @@
 
 ;; === Cache helpers ===
 
+(defn- try-parse-uuid
+  "Attempts to parse value as UUID.
+   Returns UUID if value is already a UUID or a valid UUID string.
+   Returns nil for non-UUID values."
+  [v]
+  (cond
+    (uuid? v) v
+    (string? v) (try
+                  (java.util.UUID/fromString v)
+                  (catch IllegalArgumentException _ nil))
+    :else nil))
+
+
+(defn- extract-fn-ref-id
+  "Extracts fn-id from a cached value in union format.
+   Returns UUID if value is {:kind :fn-ref :fn-id <uuid>}, nil otherwise.
+   Also handles raw UUIDs and UUID strings for backward compatibility."
+  [value]
+  (cond
+    ;; Union format: {:kind :fn-ref :fn-id uuid}
+    (and (map? value) (= :fn-ref (:kind value)))
+    (try-parse-uuid (:fn-id value))
+
+    ;; Raw UUID or UUID string (backward compat)
+    :else
+    (try-parse-uuid value)))
+
+
+(defn extract-call-site-ids-from-resolved-args
+  "Extracts potential call-site IDs from cached resolved-args.
+   Scans all values and returns UUIDs that might be call-site references.
+
+   Values in resolved-args are in union format:
+   - {:kind :fn-ref :fn-id <uuid>} for function/call-site references
+   - {:kind :literal :value <any>} for literal values
+
+   Note: This cannot distinguish call-site refs from fn refs just from values.
+   The caller should use read-entities on :call-site to verify which are actual call-sites.
+
+   resolved-args format: {fn-id -> {arg-schema-id -> value}}"
+  [resolved-args]
+  (->> resolved-args
+       vals                           ; {arg-schema-id -> value} maps
+       (mapcat vals)                  ; all values
+       (keep extract-fn-ref-id)       ; extract fn-ref UUIDs
+       set))
+
+
 (defn compute-dependencies
   "Computes dependency counts from an execution graph.
    Returns {:fn-ids {fn-id -> count}

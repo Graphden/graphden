@@ -51,8 +51,8 @@
    Ensures proper AGE setup for each operation."
   [datasource f]
   (jdbc/with-transaction [tx datasource]
-    (init-age-connection! tx)
-    (f tx)))
+                         (init-age-connection! tx)
+                         (f tx)))
 
 
 ;; === Cypher Query Helpers ===
@@ -134,8 +134,8 @@
       (try
         ;; Check if graph exists
         (let [result (jdbc/execute-one! conn
-                       [(format "SELECT * FROM ag_catalog.ag_graph WHERE name = '%s'" graph-name)]
-                       {:builder-fn rs/as-unqualified-kebab-maps})]
+                                        [(format "SELECT * FROM ag_catalog.ag_graph WHERE name = '%s'" graph-name)]
+                                        {:builder-fn rs/as-unqualified-kebab-maps})]
           (when-not result
             (jdbc/execute! conn [(format "SELECT create_graph('%s')" graph-name)])
             (log/info "Created AGE graph:" graph-name)))
@@ -271,17 +271,16 @@
   [datasource graph-name entity-name entity]
   (with-age-connection datasource
     (fn [conn]
-      (let [cypher (case entity-name
-                     :fn (build-fn-node-cypher entity)
-                     :fn-schema (build-fn-schema-node-cypher entity)
-                     :arg-schema (build-arg-schema-node-cypher entity)
-                     :arg-value (build-arg-value-node-cypher entity)
-                     :call-site (build-call-site-node-cypher entity)
-                     :fn-arg (build-fn-arg-edge-cypher entity)
-                     :call-site-arg (build-call-site-arg-edge-cypher entity)
-                     nil)]
-        (when cypher
-          (execute-cypher! conn graph-name cypher))))))
+      (when-let [cypher (case entity-name
+                          :fn (build-fn-node-cypher entity)
+                          :fn-schema (build-fn-schema-node-cypher entity)
+                          :arg-schema (build-arg-schema-node-cypher entity)
+                          :arg-value (build-arg-value-node-cypher entity)
+                          :call-site (build-call-site-node-cypher entity)
+                          :fn-arg (build-fn-arg-edge-cypher entity)
+                          :call-site-arg (build-call-site-arg-edge-cypher entity)
+                          nil)]
+        (execute-cypher! conn graph-name cypher)))))
 
 
 (defn delete-entity-from-graph!

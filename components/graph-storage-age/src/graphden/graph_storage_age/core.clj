@@ -5,8 +5,6 @@
    Traditional CRUD operations use SQL tables (like postgres-storage), but
    resolve-execution-graph uses a single optimized Cypher query."
   (:require
-    [clojure.string :as str]
-    [clojure.tools.logging :as log]
     [graphden.graph-storage-age.age :as age]
     [graphden.graph-storage-age.crud :as crud]
     [graphden.graph-storage-age.graph :as graph]
@@ -19,9 +17,9 @@
       ReentrantReadWriteLock)))
 
 
-;; === AGEStorage Record ===
+;; === AgeStorage Record ===
 
-(defrecord AGEStorage
+(defrecord AgeStorage
   [pool graph-name metadata-cache ^ReentrantReadWriteLock rw-lock]
 
   sp/Storage
@@ -184,7 +182,7 @@
    - CRUD operations use PostgreSQL's own transaction isolation"
   [opts]
   (let [graph-name (or (:graph-name opts) "graphden")]
-    (->AGEStorage (pool/create-pool opts)
+    (->AgeStorage (pool/create-pool opts)
                   graph-name
                   (atom nil)
                   (ReentrantReadWriteLock.))))

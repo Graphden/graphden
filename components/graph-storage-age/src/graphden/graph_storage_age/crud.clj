@@ -44,20 +44,20 @@
   "Returns true if exception indicates table not found."
   [^SQLException e]
   (and e
-       (or (str/includes? (.getMessage e) "does not exist")
-           (= "42P01" (.getSQLState e)))))
+       (or (str/includes? (SQLException/.getMessage e) "does not exist")
+           (= "42P01" (SQLException/.getSQLState e)))))
 
 
 (defmacro with-sql-error-handling
   "Wraps body with SQL error handling."
   [msg operation context & body]
   `(try
-     ~@body
+     (do ~@body)
      (catch SQLException e#
        (throw (ex-info ~msg
                        (merge {:type (classify-sql-error e#)
                                :operation ~operation
-                               :sql-state (.getSQLState e#)}
+                               :sql-state (SQLException/.getSQLState e#)}
                               ~context)
                        e#)))))
 
@@ -65,13 +65,13 @@
 (defn classify-sql-error
   "Classifies a SQL exception into error type."
   [^SQLException e]
-  (let [sql-state (.getSQLState e)
-        message (.getMessage e)]
+  (let [sql-state (SQLException/.getSQLState e)
+        message (SQLException/.getMessage e)]
     (cond
       (= "23505" sql-state) :unique-violation
       (= "23503" sql-state) :foreign-key-violation
-      (= "42P01" sql-state) :table-not-found
-      (str/includes? message "does not exist") :table-not-found
+      (or (= "42P01" sql-state)
+          (str/includes? message "does not exist")) :table-not-found
       :else :database-error)))
 
 
@@ -209,8 +209,8 @@
                              :returning [:*]}
                             {:quoted true})]
       (with-sql-error-handling "Database error" :create-entity {:entity-name entity-name :id id}
-                               (-> (jdbc/execute-one! ds query (query-opts))
-                                   codec/row->entity)))))
+        (-> (jdbc/execute-one! ds query (query-opts))
+            codec/row->entity)))))
 
 
 (defn read-entity
@@ -222,8 +222,8 @@
                            :where [:= :id id]}
                           {:quoted true})]
     (with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
-                             (-> (jdbc/execute-one! ds query (query-opts))
-                                 codec/row->entity))))
+      (-> (jdbc/execute-one! ds query (query-opts))
+          codec/row->entity))))
 
 
 (defn update-entity
@@ -246,8 +246,8 @@
                              :returning [:*]}
                             {:quoted true})]
       (with-sql-error-handling "Database error" :update-entity {:entity-name entity-name :id id}
-                               (-> (jdbc/execute-one! ds query (query-opts))
-                                   codec/row->entity)))))
+        (-> (jdbc/execute-one! ds query (query-opts))
+            codec/row->entity)))))
 
 
 (defn delete-entity
@@ -258,8 +258,8 @@
                            :where [:= :id id]}
                           {:quoted true})]
     (with-sql-error-handling "Database error" :delete-entity {:entity-name entity-name :id id}
-                             (pos? (:next.jdbc/update-count
-                                     (jdbc/execute-one! ds query (query-opts)))))))
+      (pos? (:next.jdbc/update-count
+              (jdbc/execute-one! ds query (query-opts)))))))
 
 
 (defn query-entities
@@ -285,8 +285,8 @@
       (when-not where-clause
         (log/debug "Full table scan query" {:entity-name entity-name}))
       (with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where}
-                               (let [rows (jdbc/execute! ds query (query-opts))]
-                                 (map codec/row->entity rows))))))
+        (let [rows (jdbc/execute! ds query (query-opts))]
+          (map codec/row->entity rows))))))
 
 
 ;; === Batch Operations ===
@@ -314,8 +314,8 @@
                                :returning [:*]}
                               {:quoted true})]
         (with-sql-error-handling "Database error" :create-entities {:entity-name entity-name}
-                                 (let [result-rows (jdbc/execute! ds query (query-opts))]
-                                   (map codec/row->entity result-rows)))))))
+          (let [result-rows (jdbc/execute! ds query (query-opts))]
+            (map codec/row->entity result-rows)))))))
 
 
 (defn read-entities
@@ -329,11 +329,11 @@
                              :where [:in :id (vec ids)]}
                             {:quoted true})]
       (with-sql-error-handling "Database error" :read-entities {:entity-name entity-name}
-                               (let [rows (jdbc/execute! ds query (query-opts))]
-                                 (->> rows
-                                      (map codec/row->entity)
-                                      (map (juxt :id identity))
-                                      (into {})))))))
+        (let [rows (jdbc/execute! ds query (query-opts))]
+          (->> rows
+               (map codec/row->entity)
+               (map (juxt :id identity))
+               (into {})))))))
 
 
 (defn delete-entities
@@ -346,5 +346,5 @@
                              :where [:in :id (vec ids)]}
                             {:quoted true})]
       (with-sql-error-handling "Database error" :delete-entities {:entity-name entity-name}
-                               (:next.jdbc/update-count
-                                 (jdbc/execute-one! ds query (query-opts)))))))
+        (:next.jdbc/update-count
+          (jdbc/execute-one! ds query (query-opts)))))))

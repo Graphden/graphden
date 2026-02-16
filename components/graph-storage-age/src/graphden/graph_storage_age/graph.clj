@@ -21,11 +21,7 @@
    If AGE graph is not populated (e.g., during initial sync), we fall back
    to the standard BFS algorithm from postgres-storage/graph.clj."
   (:require
-    [cheshire.core :as json]
     [clojure.set :as set]
-    [clojure.string :as str]
-    [clojure.tools.logging :as log]
-    [graphden.graph-storage-age.age :as age]
     [graphden.graph-storage-age.codec :as codec]
     [graphden.storage-protocol.interface :as sp]
     [honey.sql :as sql]
@@ -45,13 +41,6 @@
 (defn- read-fn
   [ds fn-id]
   (let [query (sql/format {:select [:*] :from [:fn] :where [:= :id fn-id]} {:quoted true})]
-    (-> (jdbc/execute-one! ds query (query-opts))
-        codec/row->entity)))
-
-
-(defn- load-fn-schema
-  [ds fn-schema-id]
-  (let [query (sql/format {:select [:*] :from [:fn_schema] :where [:= :id fn-schema-id]} {:quoted true})]
     (-> (jdbc/execute-one! ds query (query-opts))
         codec/row->entity)))
 
@@ -166,71 +155,6 @@
                  (+ iter-count (count batch))))))))
 
 
-;; === AGE Cypher Implementation ===
-
-(defn- uuid->str
-  [uuid]
-  (when uuid (str uuid)))
-
-
-(defn- str->uuid
-  [s]
-  (when s (java.util.UUID/fromString s)))
-
-
-(defn- parse-value
-  "Parses an arg-value's value field from JSON."
-  [v]
-  (when v
-    (try
-      (json/parse-string v true)
-      (catch Exception _
-        v))))
-
-
-(defn- build-cypher-query
-  "Builds the Cypher query for full graph resolution.
-
-   This query:
-   1. Starts from root Fn node
-   2. Traverses HAS_ARG edges to find all dependent ArgValues
-   3. Follows references to other Fn nodes
-   4. Collects all related FnSchema and ArgSchema nodes
-   5. Returns everything needed for ExecutionGraphResult"
-  [fn-id]
-  (let [fn-id-str (uuid->str fn-id)]
-    ;; Simple approach: just get all nodes of each type
-    ;; The graph structure tells us relationships
-    (str "MATCH (root:Fn {id: '" fn-id-str "'})
-          OPTIONAL MATCH (root)-[:HAS_ARG]->(av:ArgValue)
-          RETURN root.id AS fn_id,
-                 root.name AS fn_name,
-                 root.fn_schema_id AS fn_schema_id,
-                 collect(DISTINCT {id: av.id, arg_schema_id: av.arg_schema_id, value: av.value}) AS arg_values")))
-
-
-(defn- try-resolve-via-cypher
-  "Attempts to resolve execution graph using AGE Cypher.
-   Returns nil if AGE is not available or graph is empty."
-  [ds graph-name fn-id]
-  (try
-    (age/with-age-connection ds
-      (fn [conn]
-        ;; First check if AGE graph has the fn
-        (let [check-cypher (format "MATCH (f:Fn {id: '%s'}) RETURN f.id AS id"
-                                   (uuid->str fn-id))
-              check-result (age/execute-cypher-multi! conn graph-name check-cypher
-                                                      [["id" "agtype"]])]
-          (when (seq check-result)
-            ;; AGE has the data - use Cypher for resolution
-            ;; For now, return nil to use SQL fallback
-            ;; Full Cypher implementation is complex
-            nil))))
-    (catch Exception e
-      (log/debug "AGE query failed, falling back to SQL" {:error (.getMessage e)})
-      nil)))
-
-
 (defn resolve-execution-graph-cypher
   "Resolves execution graph using AGE when available, falls back to SQL.
 
@@ -240,7 +164,7 @@
    Currently, we use SQL fallback for reliability while AGE integration
    is being stabilized. The AGE graph is populated via sync-entity-to-graph!
    during CRUD operations."
-  [ds graph-name fn-id]
+  [ds _graph-name fn-id]
   ;; For now, always use SQL fallback for reliability
   ;; AGE Cypher will be used once we have proper testcontainer support
   (resolve-execution-graph-sql ds fn-id))

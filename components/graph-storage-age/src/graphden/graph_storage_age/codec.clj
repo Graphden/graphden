@@ -112,9 +112,9 @@
   #{:created-at})
 
 
-;; === AGEValueCodec ===
+;; === AgeValueCodec ===
 
-(defrecord AGEValueCodec
+(defrecord AgeValueCodec
   []
 
   sp/StorageValueCodec
@@ -148,12 +148,9 @@
       (instance? PGobject value)
       (parse-pgobject value)
 
-      (and (string? value) (= :enum (:type field-spec)))
-      (sql->enum-value value)
-
       (and (string? value)
-           (nil? field-spec)
-           (known-enum-value? value))
+           (or (= :enum (:type field-spec))
+               (and (nil? field-spec) (known-enum-value? value))))
       (sql->enum-value value)
 
       :else value))
@@ -182,7 +179,7 @@
 
 (defn create-codec
   []
-  (->AGEValueCodec))
+  (->AgeValueCodec))
 
 
 (def ^:private default-codec (delay (create-codec)))

@@ -33,7 +33,7 @@
 (def age-image-name
   "DockerImageName for Apache AGE, declared compatible with postgres."
   (-> (DockerImageName/parse "apache/age:latest")
-      (.asCompatibleSubstituteFor "postgres")))
+      (DockerImageName/.asCompatibleSubstituteFor "postgres")))
 
 
 (def ^:dynamic *container*

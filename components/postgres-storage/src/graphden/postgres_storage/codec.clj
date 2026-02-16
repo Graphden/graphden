@@ -141,14 +141,10 @@
 
       ;; Enum field: PostgreSQL may return enum as plain string
       ;; Convert back to keyword when field-spec indicates enum
-      (and (string? value) (= :enum (:type field-spec)))
-      (util/sql->enum-value value)
-
-      ;; Known enum values: when field-spec is not available,
-      ;; check if string is a known value_kind enum value
+      ;; Also handle known enum values when field-spec is not available
       (and (string? value)
-           (nil? field-spec)
-           (known-enum-value? value))
+           (or (= :enum (:type field-spec))
+               (and (nil? field-spec) (known-enum-value? value))))
       (util/sql->enum-value value)
 
       ;; Other values pass through unchanged

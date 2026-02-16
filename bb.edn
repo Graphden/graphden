@@ -139,7 +139,7 @@
                (System/exit 1))))}
 
   bench
-  {:doc "Run performance benchmarks [--quick] [--memory|--postgres|--datomic]"
+  {:doc "Run performance benchmarks [--quick]"
    :task (clojure (str "-M:bench -m graphden.bench " (str/join " " *command-line-args*)))}
 
   clean
@@ -148,38 +148,4 @@
            (fs/delete-tree "target")
            (fs/delete-tree ".cpcache")
            (fs/delete-tree ".clj-kondo/.cache")
-           (println (str green "✓ Cleaned" reset)))}
-
-  ;; === POLYLITH ===
-
-  info
-  {:doc "Show workspace info"
-   :task (clojure "-M:poly info")}
-
-  deps
-  {:doc "Show component dependencies"
-   :task (clojure "-M:poly deps")}
-
-  sync
-  {:doc "Sync paths to deps.edn and tests.edn"
-   :task (load-file "scripts/sync_paths.clj")}
-
-  create-component
-  {:doc "Create component and sync paths"
-   :task (let [name (first *command-line-args*)]
-           (when-not name
-             (println (str red "Usage: bb create-component <name>" reset))
-             (System/exit 1))
-           (clojure (str "-M:poly create component name:" name))
-           (load-file "scripts/sync_paths.clj")
-           (println (str green "✓ Component '" name "' created and paths synced" reset)))}
-
-  create-base
-  {:doc "Create base and sync paths"
-   :task (let [name (first *command-line-args*)]
-           (when-not name
-             (println (str red "Usage: bb create-base <name>" reset))
-             (System/exit 1))
-           (clojure (str "-M:poly create base name:" name))
-           (load-file "scripts/sync_paths.clj")
-           (println (str green "✓ Base '" name "' created and paths synced" reset)))}}}
+           (println (str green "✓ Cleaned" reset)))}}}

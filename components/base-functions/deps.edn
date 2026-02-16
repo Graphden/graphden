@@ -1,5 +1,0 @@
-{:paths ["src" "resources"]
- :deps {graphden/executor {:local/root "../executor"}
-        graphden/storage-protocol {:local/root "../storage-protocol"}}
- :aliases {:test {:extra-paths ["test"]
-                  :extra-deps {}}}}

@@ -395,7 +395,7 @@ Minimal Storage:
 
 Extensions declare their needs through migrations (new fields, indexes, tables) rather than requiring protocol changes. Each storage backend translates migration specs into its own DDL. This allows adding versioning, caching, or permissions without modifying the base storage interface.
 
-**Independent composability requirement**: Each feature module (caching, versioning, permissions, etc.) must be an independent Polylith component implementing the storage decorator pattern. Any combination of decorators must work correctly:
+**Independent composability requirement**: Each feature module (caching, versioning, permissions, etc.) must be an independent component implementing the storage decorator pattern. Any combination of decorators must work correctly:
 
 ```
 BaseStorage (minimal CRUD)

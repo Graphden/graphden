@@ -1,6 +1,0 @@
-{:paths ["src" "resources"]
- :deps {graphden/data-schema-protocol {:local/root "../data-schema-protocol"}
-        graphden/field-types {:local/root "../field-types"}
-        metosin/malli {:mvn/version "0.20.0"}}
- :aliases {:test {:extra-paths ["test"]
-                  :extra-deps {graphden/malli-data-schema {:local/root "../malli-data-schema"}}}}}

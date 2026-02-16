@@ -107,17 +107,9 @@ clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test
 clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test/execute-test
 ```
 
-### Polylith Commands
-
-```bash
-bb info                    # Show workspace info
-bb deps                    # Show component dependencies
-bb create-component NAME   # Create component and sync paths
-```
-
 ## Architecture Overview
 
-Polylith monorepo. Top namespace: `graphden`. Public API through `interface.clj` only.
+Component-based monorepo. Top namespace: `graphden`. Public API through `interface.clj` only.
 
 ### Three-Layer Architecture
 

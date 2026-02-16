@@ -1,6 +1,0 @@
-{:paths ["src" "resources"]
- :deps {graphden/executor {:local/root "../executor"}
-        graphden/fn-registry {:local/root "../fn-registry"}
-        http-kit/http-kit {:mvn/version "2.8.0"}}
- :aliases {:test {:extra-paths ["test"]
-                  :extra-deps {}}}}

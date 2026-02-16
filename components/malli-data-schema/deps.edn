@@ -1,4 +1,0 @@
-{:paths ["src" "resources"]
- :deps {metosin/malli {:mvn/version "0.20.0"}
-        graphden/data-schema-protocol {:local/root "../data-schema-protocol"}
-        graphden/field-types {:local/root "../field-types"}}}

@@ -1,3 +1,0 @@
-{:paths ["src" "resources"]
- :deps {graphden/versioned-data-schema {:local/root "../versioned-data-schema"}
-        graphden/storage-protocol {:local/root "../storage-protocol"}}}

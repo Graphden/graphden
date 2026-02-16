@@ -1,7 +1,6 @@
 # Graphden
 
 [![Clojure](https://img.shields.io/badge/Clojure-1.12-blue.svg)](https://clojure.org/)
-[![Polylith](https://img.shields.io/badge/architecture-Polylith-purple.svg)](https://polylith.gitbook.io/)
 [![Coverage](https://img.shields.io/badge/coverage-93%25-brightgreen.svg)](#testing)
 [![License](https://img.shields.io/badge/license-AGPL--3.0-blue.svg)](LICENSE)
 
@@ -84,23 +83,20 @@ bb fix       # Auto-fix formatting
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│              graph-with-base-fns-*                          │
-│  (complete stack: storage + schema + executor + base-fns)   │
+│                    EXECUTOR LAYER                           │
+│  executor + base-functions + fn-registry + fn-composition   │
 ├─────────────────────────────────────────────────────────────┤
-│                    graph-storage-*                          │
-│  (memory, postgres, datomic) — storage + graph schema       │
+│                     GRAPH LAYER                             │
+│  graph-data-schema: fn, fn-schema, arg-schema, arg-value    │
+│  graph-storage-age: Apache AGE graph storage                │
 ├─────────────────────────────────────────────────────────────┤
-│  executor  │  base-functions  │  fn-registry               │
-├────────────┴─────────────────┬┴────────────────────────────┤
-│         graph-data-schema    │     malli-data-schema       │
-├──────────────────────────────┴─────────────────────────────┤
-│ storage-protocol │ data-schema-protocol │ field-types      │
-├──────────────────┴───────────┬─────────┴──────────────────┤
-│     memory/postgres/datomic-storage                        │
-├────────────────────────────────────────────────────────────┤
-│          cached-storage + cache-*                          │
-│  (optional caching layer with invalidation)                │
-└────────────────────────────────────────────────────────────┘
+│                    STORAGE LAYER                            │
+│  storage-protocol: StorageCRUD, ExecutionGraph protocols    │
+│  postgres-storage: PostgreSQL backend                       │
+├─────────────────────────────────────────────────────────────┤
+│                  DATA SCHEMA LAYER                          │
+│  data-schema-protocol + malli-data-schema + field-types     │
+└─────────────────────────────────────────────────────────────┘
 ```
 
 ## Components
@@ -109,19 +105,18 @@ bb fix       # Auto-fix formatting
 
 | Component | Description |
 |-----------|-------------|
-| [storage-protocol](components/storage-protocol/) | Storage, CRUD, GraphConstraints, ExecutionGraph protocols |
+| [storage-protocol](components/storage-protocol/) | Storage, CRUD, ExecutionGraph protocols |
 | [data-schema-protocol](components/data-schema-protocol/) | DataSchema protocol for entity definitions |
 | [field-types](components/field-types/) | Supported data types (:int, :text, :bool, :jsonb, etc.) |
 | [malli-data-schema](components/malli-data-schema/) | Malli-based schema builder |
 | [graph-data-schema](components/graph-data-schema/) | Function graph entity schema (fn, fn-schema, arg-schema, arg-value) |
 
-### Storage Backends
+### Storage
 
 | Component | Description |
 |-----------|-------------|
-| [memory-storage](components/memory-storage/) | In-memory storage (tests, development) |
-| [postgres-storage](components/postgres-storage/) | PostgreSQL storage (production) |
-| [datomic-storage](components/datomic-storage/) | Datomic storage (immutable history, audit) |
+| [postgres-storage](components/postgres-storage/) | PostgreSQL storage backend |
+| [graph-storage-age](components/graph-storage-age/) | Apache AGE graph storage (execution graph) |
 
 ### Execution
 
@@ -130,28 +125,22 @@ bb fix       # Auto-fix formatting
 | [executor](components/executor/) | Graph executor with lazy evaluation, depth/timeout protection |
 | [base-functions](components/base-functions/) | 50+ base functions (arithmetic, strings, collections, HOF) |
 | [fn-registry](components/fn-registry/) | Base function registration and synchronization |
+| [fn-composition](components/fn-composition/) | Function composition utilities |
 
-### Caching (Optional)
-
-| Component | Description |
-|-----------|-------------|
-| [cache-protocol](components/cache-protocol/) | CacheStorage protocol for execution graph caching |
-| [cache-memory](components/cache-memory/) | In-memory cache implementation |
-| [cache-postgres](components/cache-postgres/) | PostgreSQL-backed cache |
-| [cache-datomic](components/cache-datomic/) | Datomic-backed cache |
-| [cached-storage](components/cached-storage/) | Decorator wrapping storage with caching + invalidation |
-| [cache-data-schema](components/cache-data-schema/) | Schema for cache storage tables |
-
-### Ready-to-use Bundles
+### Web
 
 | Component | Description |
 |-----------|-------------|
-| [graph-storage-memory](components/graph-storage-memory/) | Memory storage + graph schema |
-| [graph-storage-postgres](components/graph-storage-postgres/) | PostgreSQL storage + graph schema |
-| [graph-storage-datomic](components/graph-storage-datomic/) | Datomic storage + graph schema |
-| [graph-with-base-fns-memory](components/graph-with-base-fns-memory/) | Complete stack with memory backend |
-| [graph-with-base-fns-postgres](components/graph-with-base-fns-postgres/) | Complete stack with PostgreSQL backend |
-| [graph-with-base-fns-datomic](components/graph-with-base-fns-datomic/) | Complete stack with Datomic backend |
+| [http-kit-fns](components/http-kit-fns/) | HTTP server base functions |
+| [reitit-fns](components/reitit-fns/) | Reitit router base functions |
+| [web-server-fns](components/web-server-fns/) | Web server utilities |
+
+### Versioning (Optional)
+
+| Component | Description |
+|-----------|-------------|
+| [versioned-storage](components/versioned-storage/) | Version tracking decorator |
+| [versioned-data-schema](components/versioned-data-schema/) | Versioning schema extensions |
 
 ## Documentation
 
@@ -168,19 +157,18 @@ bb fix       # Auto-fix formatting
 
 ```
 graphden/
-├── components/           # Polylith components (23 total)
-│   ├── storage-protocol/ # Core protocols
-│   ├── *-storage/        # Storage implementations
-│   ├── cache-*/          # Caching layer
-│   ├── graph-data-schema/
-│   ├── executor/
-│   ├── base-functions/
-│   └── graph-with-base-fns-*/  # Complete bundles
-├── docs/
-│   ├── ARCHITECTURE.md   # Technical documentation
-│   ├── ROADMAP.md        # Implementation status
+├── components/           # Component-based modules
+│   ├── storage-protocol/ # Core storage protocols
+│   ├── postgres-storage/ # PostgreSQL backend
+│   ├── graph-storage-age/# Apache AGE graph storage
+│   ├── executor/         # Graph executor
+│   ├── base-functions/   # Base function implementations
 │   └── ...
-├── development/          # Development project
+├── bases/
+│   └── executor-runtime/ # Executor server runtime
+├── projects/
+│   └── executor-server/  # Deployable executor server
+├── docs/                 # Documentation
 ├── bb.edn               # Babashka tasks
 └── deps.edn             # Dependencies
 ```

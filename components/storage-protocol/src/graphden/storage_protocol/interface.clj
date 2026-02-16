@@ -20,7 +20,7 @@
 
    This namespace serves as a unified facade for the storage-protocol component,
    re-exporting functions from internal modules (errors, config, validation, etc.).
-   This is an intentional Polylith pattern that provides:
+   This is an intentional component pattern that provides:
 
    - **Single import point** - Users only need `[graphden.storage-protocol.interface :as sp]`
    - **Stable API** - Internal refactoring doesn't break user code

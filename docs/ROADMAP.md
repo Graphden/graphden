@@ -312,7 +312,7 @@ Execute function: calculate-report
 | Merge mechanism | `branch_merge` table (no record duplication) | Single merge record makes source versions visible in target; see current-schema.dbml |
 | Conflict detection | Git-style: entity modified in both branches after fork point | User resolves: take source / take target / custom |
 | Performance strategy | Variant B: full resolve at cache time | Expensive on cache miss, O(1) on hit. Fits existing cached-storage pattern |
-| Modularity | Independent Polylith component (versioned-storage decorator) | Must be composable with/without caching independently |
+| Modularity | Independent component (versioned-storage decorator) | Must be composable with/without caching independently |
 
 **What is versioned (graph structure changes):**
 
@@ -372,7 +372,7 @@ Execute function: calculate-report
 | Preloaded | Latency-critical | Graph pre-resolved, handler in memory |
 
 **Component architecture:**
-- `versioned-storage` — independent Polylith component (storage decorator)
+- `versioned-storage` — independent component (storage decorator)
 - `cached-versioned-storage` — optional combining module (cache + versioning)
 - Any combination works: base only, cached only, versioned only, cached+versioned
 - Executor works with any storage through unified `ExecutionGraph` protocol — no executor changes needed

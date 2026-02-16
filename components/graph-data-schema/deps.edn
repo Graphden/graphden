@@ -1,3 +1,0 @@
-{:paths ["src" "resources"]
- :deps {graphden/data-schema-protocol {:local/root "../data-schema-protocol"}
-        graphden/field-types {:local/root "../field-types"}}}

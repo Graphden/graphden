@@ -10,26 +10,20 @@
          "../../components/web-server-fns/src"
          ;; Data schemas
          "../../components/graph-data-schema/src"
-         "../../components/cache-data-schema/src"
          "../../components/versioned-data-schema/src"
          "../../components/malli-data-schema/src"
          "../../components/data-schema-protocol/src"
+         "../../components/value-traits-schema/src"
+         "../../components/merge-protection/src"
          ;; Storage protocols
          "../../components/storage-protocol/src"
          "../../components/field-types/src"
-         "../../components/graph-protocol/src"
          ;; PostgreSQL storage
          "../../components/postgres-storage/src"
-         ;; Caching
-         "../../components/cache-protocol/src"
-         "../../components/cache-postgres/src"
-         "../../components/cached-storage/src"
          ;; AGE storage
          "../../components/graph-storage-age/src"
          ;; Versioning
-         "../../components/versioned-storage/src"
-         ;; Combined cache + versioning
-         "../../components/cached-versioned-storage/src"]
+         "../../components/versioned-storage/src"]
  :deps {org.clojure/clojure {:mvn/version "1.12.4"}
         ;; Web server
         http-kit/http-kit {:mvn/version "2.8.0"}

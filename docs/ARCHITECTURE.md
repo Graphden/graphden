@@ -12,10 +12,9 @@
 3. [Recursion and Cycles](#part-3-recursion-and-cycles) - Handling recursive patterns
 4. [Data Schema](#part-4-data-schema) - Entity definitions
 5. [Execution Model](#part-5-execution-model) - Lazy evaluation with thunks
-6. [Execution Graph Caching](#part-6-execution-graph-caching) - O(1) graph resolution
-7. [System Limitations](#part-7-system-limitations) - Known constraints and mitigations
-8. [Distributed Execution](#part-8-distributed-execution-future) - Parallelization and distribution
-9. [Appendices](#appendix-a-component-dependency-graph) - Reference material
+6. [System Limitations](#part-6-system-limitations) - Known constraints and mitigations
+7. [Distributed Execution](#part-7-distributed-execution-future) - Parallelization and distribution
+8. [Appendices](#appendix-a-component-dependency-graph) - Reference material
 
 ---
 
@@ -104,13 +103,12 @@ The implementation uses a **shared validation logic** pattern with pluggable hel
 - Each backend optimizes its helpers (SQL queries, Datomic queries, in-memory traversal)
 - Consistent error messages and behavior
 
-### Implementation in Each Storage
+### Implementation in Storage Backends
 
 | Storage | Implementation | Optimization |
 |---------|----------------|--------------|
-| memory | `memory-storage/core.clj` | In-memory maps, O(1) lookups |
 | postgres | `postgres-storage/constraints.clj` | SQL queries |
-| datomic | `datomic-storage/constraints.clj` | Datomic queries |
+| graph-storage-age | `graph-storage-age/graph.clj` | Cypher queries via Apache AGE |
 
 ---
 
@@ -166,8 +164,7 @@ fn: B
 | Storage | Implementation |
 |---------|----------------|
 | PostgreSQL | Recursive CTE for cycle detection |
-| Datomic | Datalog query traversal |
-| Memory | DFS on write |
+| Apache AGE | Cypher path queries |
 
 ### Mutual Recursion
 
@@ -253,14 +250,14 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 
 ### Constraints and Their Implementation
 
-| # | Constraint | PostgreSQL | Datomic | Memory |
-|---|------------|------------|---------|--------|
-| 1 | fn-schema.name is unique | UNIQUE constraint | :db/unique :db.unique/identity | Set in index |
-| 2 | fn.name is unique | UNIQUE constraint | :db/unique | Set in index |
-| 3 | arg-schema is unique within fn-schema | UNIQUE(fn-schema-id, name) | Composite tuple + unique | Map<[fn-schema-id, name], id> |
-| 4 | arg-value is unique within fn | UNIQUE(owner-fn-id, arg-schema-id) | Composite tuple + unique | Map<[fn-id, arg-schema-id], id> |
-| 5 | arg-value.arg-schema-id matches owner-fn.fn-schema-id | Clojure validation | Clojure validation | Clojure validation |
-| 6 | No cycles in fn graph through arg-value | SQL query | Datalog query | DFS |
+| # | Constraint | PostgreSQL | Apache AGE |
+|---|------------|------------|------------|
+| 1 | fn-schema.name is unique | UNIQUE constraint | UNIQUE constraint |
+| 2 | fn.name is unique | UNIQUE constraint | UNIQUE constraint |
+| 3 | arg-schema is unique within fn-schema | UNIQUE(fn-schema-id, name) | UNIQUE(fn-schema-id, name) |
+| 4 | arg-value is unique within fn | UNIQUE(owner-fn-id, arg-schema-id) | UNIQUE(owner-fn-id, arg-schema-id) |
+| 5 | arg-value.arg-schema-id matches owner-fn.fn-schema-id | Clojure validation | Clojure validation |
+| 6 | No cycles in fn graph through arg-value | Recursive CTE | Cypher path query |
 
 ### Constraint #5 in Detail (Arg-Schema Belongs to Fn)
 
@@ -748,114 +745,7 @@ The `>` suffix creates a **call-site** entity in storage, which means:
 
 ---
 
-## Part 6: Execution Graph Caching
-
-### The Problem
-
-Without caching, every function execution requires:
-1. Resolve the execution graph (recursive queries to load fns, schemas, args)
-2. Resolve all argument values and their references
-3. Classify UUID references
-
-For complex graphs, this means multiple database queries per execution.
-
-### Solution: CacheStorage Protocol
-
-The caching layer provides O(1) access to precomputed execution graphs:
-
-```clojure
-(defprotocol CacheStorage
-  (get-cached-graph [this fn-id])      ; O(1) cache lookup
-  (save-cache! [this fn-id graph deps]) ; Store with dependencies
-  (delete-cache! [this fn-id])          ; Explicit invalidation
-  (find-caches-by-fn-dep [this dep-fn-id])        ; Find affected caches
-  (find-caches-by-fn-schema-dep [this dep-fn-schema-id])
-  (find-caches-by-arg-schema-dep [this dep-arg-schema-id]))
-```
-
-### Architecture
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    CachedStorage                             │
-│  (decorator wrapping base storage + cache)                  │
-├─────────────────────────────────────────────────────────────┤
-│  resolve-execution-graph:                                    │
-│    1. Check cache → return if hit                           │
-│    2. Call base storage → compute graph                     │
-│    3. Save to cache with dependencies                       │
-│    4. Return graph                                          │
-├─────────────────────────────────────────────────────────────┤
-│  CRUD operations:                                            │
-│    1. Delegate to base storage                              │
-│    2. Invalidate affected caches                            │
-└─────────────────────────────────────────────────────────────┘
-         │                              │
-         v                              v
-┌─────────────────┐          ┌─────────────────┐
-│   Base Storage  │          │  Cache Storage  │
-│ (postgres, etc) │          │ (cache-postgres)│
-└─────────────────┘          └─────────────────┘
-```
-
-### Cache Invalidation Strategy
-
-The cache tracks dependencies with ref-counts for proper invalidation:
-
-```clojure
-{:fn-ids {fn-id-1 -> 2, fn-id-2 -> 1}        ; fn referenced 2 times
- :fn-schema-ids {schema-id -> 1}              ; schema referenced 1 time
- :arg-schema-ids {arg-schema-id-1 -> 3}}      ; arg-schema referenced 3 times
-```
-
-**Invalidation triggers:**
-
-| Entity | Operation | Action |
-|--------|-----------|--------|
-| fn | created | Create cache for new fn |
-| fn | updated | Invalidate fn + all dependents |
-| fn | deleted | Delete cache + invalidate dependents |
-| arg-value | created/updated/deleted | Invalidate owner-fn + dependents |
-| fn-schema | updated | Invalidate all caches using this schema |
-| arg-schema | updated | Invalidate all caches using this arg-schema |
-
-### Implementations
-
-| Component | Backend | Use Case |
-|-----------|---------|----------|
-| cache-memory | In-memory maps | Tests, single-process apps |
-| cache-postgres | PostgreSQL tables | Production, multi-process |
-| cache-datomic | Datomic entities | Immutable history, audit |
-
-### Usage
-
-```clojure
-(require '[graphden.postgres-storage.interface :as pg]
-         '[graphden.cache-postgres.interface :as cache-pg]
-         '[graphden.cached-storage.interface :as cached])
-
-;; Create base storage and cache
-(def storage (pg/create-storage config))
-(def cache (cache-pg/create-cache config))
-
-;; Wrap with caching
-(def cached-storage (cached/wrap-with-cache storage cache))
-
-;; Use normally - caching is transparent
-(sp/resolve-execution-graph cached-storage fn-id)  ; O(1) after first call
-```
-
-### Performance Characteristics
-
-| Operation | Without Cache | With Cache (hit) | With Cache (miss) |
-|-----------|--------------|------------------|-------------------|
-| resolve-execution-graph | O(depth) queries | O(1) lookup | O(depth) + O(1) save |
-| create-entity :fn | O(1) | O(1) + cache build | - |
-| update-entity :arg-value | O(1) | O(1) + invalidation cascade | - |
-
----
-
-## Part 7: System Limitations
+## Part 6: System Limitations
 
 ### What CANNOT Be Done Elegantly
 
@@ -872,17 +762,17 @@ The cache tracks dependencies with ref-counts for proper invalidation:
 2. **Races during cycle detection** - if two processes create arg-values simultaneously
    - *Mitigation*: PostgreSQL uses transactions; Datomic is inherently serialized
 3. **Performance on deep graphs** - many DB queries
-   - *Mitigation*: Execution graph caching (implemented)
+   - *Mitigation*: Apache AGE optimized Cypher queries for graph traversal
 
 ### Mitigation Summary
 
-1. Aggressive caching of resolved graphs (implemented)
-2. Transactions for atomicity (implemented)
+1. Apache AGE graph queries for efficient traversal
+2. Transactions for atomicity
 3. Monitoring and alerts for deep/long executions (planned)
 
 ---
 
-## Part 8: Distributed Execution (Future)
+## Part 7: Distributed Execution (Future)
 
 ### Overview
 
@@ -975,42 +865,26 @@ Pure functions (no I/O) can be distributed freely. Functions with side effects n
 
 ---
 
-## Appendix A: Three-Tier Pattern Rationale
+## Appendix A: Storage Backend Architecture
 
-Nine components follow the `*-{memory|postgres|datomic}` naming pattern:
-- `memory-storage`, `postgres-storage`, `datomic-storage`
-- `cache-memory`, `cache-postgres`, `cache-datomic`
-- `graph-storage-memory`, `graph-storage-postgres`, `graph-storage-datomic`
+Two storage backends are available:
 
-**Why not a single shared implementation?**
+- `postgres-storage` — Pure PostgreSQL (SQL queries)
+- `graph-storage-age` — PostgreSQL + Apache AGE (Cypher queries for graph traversal)
 
-Each backend has fundamentally different constraints and optimal implementations:
+**Why AGE for graph operations?**
 
-| Operation | PostgreSQL | Datomic | Memory |
-|-----------|------------|---------|--------|
-| Parent chain traversal | Recursive CTE (single query) | Datalog recursive rule | In-memory loop |
-| Dependency cycle detection | WITH RECURSIVE + array tracking | d/q with accumulator | BFS with visited set |
-| Unique constraint | DB-level UNIQUE constraint | :db.unique/identity | In-memory index check |
-| Transaction isolation | SERIALIZABLE isolation | Datomic ACID transactions | Clojure atoms |
-
-**Trade-offs accepted:**
-
-1. **Code duplication** (~30% similar code across 3 backends) in exchange for:
-   - Optimal performance per backend
-   - Backend-specific error handling
-   - Simpler debugging (no abstraction layers)
-
-2. **Maintenance cost** mitigated by:
-   - Contract tests validating all backends identically (`contract_tests.clj`)
-   - Protocol-first design ensuring consistent interfaces
-   - Shared validation logic in `storage-protocol`
+| Operation | PostgreSQL | Apache AGE |
+|-----------|------------|------------|
+| Dependency chain traversal | Recursive CTE | Single Cypher MATCH path |
+| Cycle detection | WITH RECURSIVE + array | Path pattern matching |
+| Graph visualization | N/A | Native graph model |
 
 **When to add a new backend:**
 
 1. Implement all protocols from `storage-protocol/interface.clj`
-2. Use `backend_template.clj` as starting point
-3. Run contract tests to verify compliance
-4. Add backend-specific optimizations (e.g., recursive CTEs for SQL)
+2. Run tests to verify compliance
+3. Add backend-specific optimizations
 
 ---
 
@@ -1031,58 +905,34 @@ Each backend has fundamentally different constraints and optimal implementations
          │                    │                    │
          └────────────────────┼────────────────────┘
                               │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-         v                    v                    v
-┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│ memory-storage   │ │ postgres-storage │ │ datomic-storage  │
-└────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
-         │                    │                    │
-         │        ┌───────────┴───────────┐        │
-         │        │                       │        │
-         │        v                       │        │
-         │ ┌──────────────────┐           │        │
-         │ │ graph-data-      │           │        │
-         │ │ schema           │           │        │
-         │ └────────┬─────────┘           │        │
-         │          │                     │        │
-         └──────────┼─────────────────────┼────────┘
-                    │                     │
-         ┌──────────┼─────────────────────┼──────────┐
-         │          │                     │          │
-         v          v                     v          v
-┌────────────────────┐ ┌────────────────────┐ ┌────────────────────┐
-│ graph-storage-     │ │ graph-storage-     │ │ graph-storage-     │
-│ memory             │ │ postgres           │ │ datomic            │
-└────────┬───────────┘ └────────┬───────────┘ └────────┬───────────┘
-         │                      │                      │
-         │           ┌──────────┴──────────┐           │
-         │           │                     │           │
-         │           v                     │           │
-         │    ┌──────────────┐             │           │
-         │    │   executor   │<────────────┼───────────┤
-         │    └──────┬───────┘             │           │
-         │           │                     │           │
-         │           v                     │           │
-         │    ┌──────────────┐             │           │
-         │    │ base-        │             │           │
-         │    │ functions    │             │           │
-         │    └──────┬───────┘             │           │
-         │           │                     │           │
-         │           v                     │           │
-         │    ┌──────────────┐             │           │
-         │    │ fn-registry  │             │           │
-         │    └──────┬───────┘             │           │
-         │           │                     │           │
-         └───────────┼─────────────────────┼───────────┘
-                     │                     │
-         ┌───────────┼─────────────────────┼───────────┐
-         │           │                     │           │
-         v           v                     v           v
-┌─────────────────────┐ ┌─────────────────────┐ ┌─────────────────────┐
-│ graph-with-base-    │ │ graph-with-base-    │ │ graph-with-base-    │
-│ fns-memory          │ │ fns-postgres        │ │ fns-datomic         │
-└─────────────────────┘ └─────────────────────┘ └─────────────────────┘
+                    ┌─────────┴─────────┐
+                    │                   │
+                    v                   v
+          ┌──────────────────┐ ┌──────────────────┐
+          │ postgres-storage │ │ graph-data-      │
+          │                  │ │ schema           │
+          └────────┬─────────┘ └────────┬─────────┘
+                   │                    │
+                   └─────────┬──────────┘
+                             │
+                             v
+                   ┌──────────────────┐
+                   │ graph-storage-   │
+                   │ age              │
+                   └────────┬─────────┘
+                            │
+                            v
+                   ┌──────────────────┐
+                   │   executor       │
+                   └────────┬─────────┘
+                            │
+              ┌─────────────┼─────────────┐
+              │             │             │
+              v             v             v
+     ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
+     │ base-        │ │ fn-registry  │ │ versioned-   │
+     │ functions    │ │              │ │ storage      │
+     └──────────────┘ └──────────────┘ └──────────────┘
 ```
 
 ---

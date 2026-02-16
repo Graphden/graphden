@@ -31,7 +31,7 @@ Graphden is a visual functional programming environment where functions and thei
 **Key concepts:**
 - **Code = Graph in DB** — functions, schemas, and argument values stored as entities
 - **Lazy Execution** — delay-based evaluation, only computes what's needed
-- **Three storage backends** — memory (tests), PostgreSQL (production), Datomic (immutable history)
+- **Storage backend** — PostgreSQL with Apache AGE for graph queries
 
 **Core entities** (only 5 — kept minimal by design):
 - `fn-schema` — function signature (name, return type, optional base-fn-name linking to Clojure impl)
@@ -119,34 +119,28 @@ bb create-component NAME   # Create component and sync paths
 
 Polylith monorepo. Top namespace: `graphden`. Public API through `interface.clj` only.
 
-### Four-Layer Architecture
+### Three-Layer Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                      EXECUTOR LAYER                          │
 │  executor + base-functions + fn-registry                    │
-│  Uses GraphReader protocol (doesn't know storage details)   │
-├─────────────────────────────────────────────────────────────┤
-│                       GRAPH LAYER                            │
-│  graph-protocol: GraphReader, GraphConstraints              │
-│  graph-data-schema: fn, fn-schema, arg-schema, arg-value    │
-│  Middleware: DirectGraphReader, CachedGraphReader,          │
-│              VersionedGraphReader (composable)              │
+│  Uses ExecutionGraph protocol (sp/resolve-execution-graph)  │
 ├─────────────────────────────────────────────────────────────┤
 │                      STORAGE LAYER                           │
-│  storage-protocol: StorageCRUD (schema-agnostic)            │
-│  Decorators: CachedStorage, VersionedStorage (composable)   │
-│  Backends: memory-storage, postgres-storage, datomic-storage│
+│  storage-protocol: StorageCRUD, ExecutionGraph, Constraints │
+│  Decorators: VersionedStorage (composable)                  │
+│  Backends: postgres-storage, graph-storage-age              │
 ├─────────────────────────────────────────────────────────────┤
 │                    DATA SCHEMA LAYER                         │
 │  data-schema-protocol + malli-data-schema + field-types     │
-│  Schema extensions: cache-data-schema, versioned-data-schema│
+│  Schema extensions: versioned-data-schema, graph-data-schema│
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Key principle:** Each layer depends only on the layer below it. Executor uses `GraphReader`, doesn't know if storage is versioned/cached. Storage sees only CRUD, doesn't know about graph semantics.
+**Key principle:** Each layer depends only on the layer below it. Executor calls `sp/resolve-execution-graph` which returns `ExecutionGraphResult`. Storage implementations (AGE, Postgres) each implement this protocol optimally.
 
-**Bundles:** `graph-storage-*`, `graph-with-base-fns-*` combine layers for convenience.
+**Bundle:** `graph-storage-age` combines AGE backend with graph schema.
 
 See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
@@ -194,7 +188,7 @@ Enforced at write time by `GraphConstraints` protocol (part of Graph Layer):
 1. **No dependency cycles** — A→B→A forbidden (self-recursion allowed with depth limit)
 2. **Arg-schema belongs to fn-schema** — type safety for argument binding
 
-These are graph-specific constraints, not storage-level. They live in `graph-protocol`, not `storage-protocol`.
+These constraints are implemented in `storage-protocol` and enforced by storage implementations.
 
 See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 

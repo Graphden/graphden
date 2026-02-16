@@ -46,9 +46,8 @@
 ;; System State
 ;; =============================================================================
 
-(defonce ^:private system
-  "Holds the running system state."
-  (atom nil))
+;; Holds the running system state.
+(defonce ^:private system (atom nil))
 
 
 ;; =============================================================================
@@ -97,8 +96,8 @@
   (start! :prod)
 
   ;; Add shutdown hook for graceful shutdown
-  (.addShutdownHook (Runtime/getRuntime)
-                    (Thread. #(stop!)))
+  (Runtime/.addShutdownHook (Runtime/getRuntime)
+                            (Thread. #(stop!)))
 
   ;; Block main thread to keep server running
   (println "Press Ctrl+C to stop...")

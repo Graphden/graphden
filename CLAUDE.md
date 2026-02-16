@@ -98,6 +98,11 @@ bb test         # Run all tests
 bb coverage     # Tests with coverage report (open target/coverage/index.html)
 bb check        # Linters only (clj-kondo, splint, cljstyle in parallel)
 bb fix          # Auto-fix formatting
+
+# Build & Run
+clojure -T:build uber    # Build uberjar (target/executor-server.jar)
+clojure -M:run           # Run server
+docker-compose up        # Run with Apache AGE
 ```
 
 ### Running a Single Test
@@ -220,10 +225,16 @@ src/graphden/
 ├── versioning/         # Storage, merge protection
 │   ├── storage/
 │   └── merge/
-└── web/                # HTTP-kit, reitit, server
-    ├── http-kit/
-    ├── reitit/
-    └── server/
+├── web/                # HTTP-kit, reitit, server
+│   ├── http-kit/
+│   ├── reitit/
+│   └── server/
+├── system/             # Integrant lifecycle management
+│   ├── interface.clj   # start!, stop!, read-config
+│   ├── config.clj      # Aero config loading
+│   └── core.clj        # ig/init-key implementations
+└── executor_runtime/   # Main entry point
+    └── core.clj        # -main, shutdown hooks
 ```
 
 ## CI Workflow

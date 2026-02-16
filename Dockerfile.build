@@ -1,0 +1,40 @@
+# Full build Dockerfile - builds uberjar inside container
+# Use: docker build -f Dockerfile.build -t graphden-executor-server .
+
+FROM clojure:temurin-21-tools-deps-jammy AS builder
+
+WORKDIR /app
+
+# Copy everything
+COPY . .
+
+# Build uberjar
+RUN clojure -T:build uber
+
+# Runtime stage
+FROM eclipse-temurin:21-jre-jammy
+
+RUN apt-get update && apt-get install -y --no-install-recommends curl \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy uberjar from builder
+COPY --from=builder /app/target/executor-server.jar /app/executor-server.jar
+
+# Set default port
+ENV PORT=8080
+ENV DB_POOL_SIZE=10
+
+# Expose port
+EXPOSE 8080
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=3s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:8080/health || exit 1
+
+# Run the application
+CMD ["java", \
+     "-XX:+UseContainerSupport", \
+     "-XX:MaxRAMPercentage=75.0", \
+     "-jar", "/app/executor-server.jar"]

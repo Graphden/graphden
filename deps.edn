@@ -82,4 +82,13 @@
 
   :watson
   {:extra-deps {io.github.clj-holmes/clj-watson {:git/tag "v6.0.1" :git/sha "b520351"}}
-   :main-opts ["-m" "clj-watson.cli" "scan"]}}}
+   :main-opts ["-m" "clj-watson.cli" "scan"]}
+
+  ;; Build uberjar
+  :build
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
+   :ns-default build}
+
+  ;; Run server
+  :run
+  {:main-opts ["-m" "graphden.executor-runtime.core"]}}}

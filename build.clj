@@ -1,4 +1,9 @@
 (ns build
+  "Build script for creating uberjar.
+
+   Usage:
+     clojure -T:build clean
+     clojure -T:build uber"
   (:require
     [clojure.tools.build.api :as b]))
 
@@ -9,7 +14,6 @@
 (def uber-file "target/executor-server.jar")
 
 
-;; Paths relative to project root (projects/executor-server)
 (def basis (b/create-basis {:project "deps.edn"}))
 
 
@@ -21,13 +25,7 @@
 (defn uber
   [_]
   (clean nil)
-  (b/copy-dir {:src-dirs [;; Base runtime
-                          "../../bases/executor-runtime/src"
-                          "../../bases/executor-runtime/resources"
-                          ;; Main source directory (all components migrated here)
-                          "../../src"
-                          ;; Resources (system-*.edn configs)
-                          "../../resources"]
+  (b/copy-dir {:src-dirs ["src" "resources"]
                :target-dir class-dir})
   (b/compile-clj {:basis basis
                   :ns-compile '[graphden.executor-runtime.core]

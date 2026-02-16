@@ -2,12 +2,11 @@
   "Shared test setup for executor tests.
 
    Provides helper functions for creating test storage and setting up
-   common test fixtures using PostgreSQL testcontainers."
+   common test fixtures using AGE testcontainers."
   (:require
     [graphden.executor.interface :as exec]
-    [graphden.graph-storage-postgres.interface :as gsp]
-    [graphden.storage-protocol.interface :as sp]
-    [graphden.storage-protocol.postgres-test-helpers :as th]))
+    [graphden.graph-storage-age.test-setup :as th]
+    [graphden.storage-protocol.interface :as sp]))
 
 
 ;; ============================================================================
@@ -36,12 +35,11 @@
 ;; ============================================================================
 
 (defn create-test-storage
-  "Creates a PostgreSQL storage from the current test container.
-   Cleans the database before creating storage to ensure test isolation.
+  "Creates an AGE storage from the current test container.
+   Cleans the database and initializes schema before creating storage.
    Must be called within a test that has the container fixture active."
   []
-  (th/clean-database-fast! *container*)
-  (gsp/create-storage (th/get-container-config *container*)))
+  (th/create-test-storage *container*))
 
 
 ;; ============================================================================

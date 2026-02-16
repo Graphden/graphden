@@ -103,7 +103,7 @@
    On error, closes the storage and re-throws the exception.
 
    Example:
-     (-> (gsp/create-storage config)
+     (-> (age/create-storage config)
          (registry/initialize-with-base-fns!))"
   [storage]
   (try
@@ -149,14 +149,14 @@
    It wraps any storage creation function with base function initialization.
 
    Arguments:
-   - create-fn: a function that creates a storage instance (e.g., gsp/create-storage)
+   - create-fn: a function that creates a storage instance (e.g., age/create-storage)
    - args: arguments to pass to create-fn
 
    Returns a storage instance with all base functions registered and synced.
 
    Example:
-     (require '[graphden.graph-storage-postgres.interface :as gsp])
-     (create-storage-with-base-fns gsp/create-storage {:jdbc-url \"...\"})"
+     (require '[graphden.graph-storage-age.interface :as age])
+     (create-storage-with-base-fns age/create-storage {:jdbc-url \"...\"})"
   [create-fn & args]
   (-> (apply create-fn args)
       (initialize-with-base-fns!)))

@@ -34,23 +34,19 @@
                           "../../components/web-server-fns/src"
                           ;; Data schema
                           "../../components/graph-data-schema/src"
-                          "../../components/cache-data-schema/src"
                           "../../components/versioned-data-schema/src"
                           "../../components/malli-data-schema/src"
                           "../../components/data-schema-protocol/src"
                           "../../components/field-types/src"
+                          "../../components/value-traits-schema/src"
                           ;; Storage
                           "../../components/storage-protocol/src"
                           "../../components/graph-protocol/src"
                           "../../components/postgres-storage/src"
                           "../../components/graph-storage-age/src"
-                          ;; Caching (for postgres mode)
-                          "../../components/cache-protocol/src"
-                          "../../components/cache-postgres/src"
-                          "../../components/cached-storage/src"
-                          ;; Versioning
+                          ;; Versioning & Merge Protection
                           "../../components/versioned-storage/src"
-                          "../../components/cached-versioned-storage/src"]
+                          "../../components/merge-protection/src"]
                :target-dir class-dir})
   (b/compile-clj {:basis basis
                   :ns-compile '[graphden.executor-runtime.core]

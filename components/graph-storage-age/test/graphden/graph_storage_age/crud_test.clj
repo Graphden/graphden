@@ -20,7 +20,7 @@
 
 (deftest crud-create-entity-test
   (testing "create-entity with provided id"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -33,7 +33,7 @@
           (sp/close storage)))))
 
   (testing "create-entity generates id if not provided"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -47,7 +47,7 @@
 
 (deftest crud-read-entity-test
   (testing "read-entity returns entity by id"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -61,7 +61,7 @@
           (sp/close storage)))))
 
   (testing "read-entity returns nil for non-existent id"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -74,7 +74,7 @@
 
 (deftest crud-update-entity-test
   (testing "update-entity updates existing entity"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -90,7 +90,7 @@
           (sp/close storage)))))
 
   (testing "update-entity throws for non-existent entity"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)]
@@ -105,7 +105,7 @@
 
 (deftest crud-delete-entity-test
   (testing "delete-entity returns true for existing entity"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -119,7 +119,7 @@
           (sp/close storage)))))
 
   (testing "delete-entity returns false for non-existent entity"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -132,7 +132,7 @@
 
 (deftest crud-query-entities-test
   (testing "query-entities with empty where returns all"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -146,7 +146,7 @@
           (sp/close storage)))))
 
   (testing "query-entities with where filters results"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -164,7 +164,7 @@
 
 (deftest batch-create-entities-test
   (testing "create-entities creates multiple entities in single operation"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -182,7 +182,7 @@
           (sp/close storage)))))
 
   (testing "create-entities with empty sequence returns empty"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -195,7 +195,7 @@
 
 (deftest batch-read-entities-test
   (testing "read-entities returns map of found entities"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -212,7 +212,7 @@
           (sp/close storage)))))
 
   (testing "read-entities with empty ids returns empty map"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -225,7 +225,7 @@
 
 (deftest batch-delete-entities-test
   (testing "delete-entities deletes multiple entities and returns count"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -247,7 +247,7 @@
           (sp/close storage)))))
 
   (testing "delete-entities with empty ids returns 0"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}})
           _ (sp/initialize storage schema)
@@ -262,7 +262,7 @@
 
 (deftest crud-required-field-validation-test
   (testing "create-entity throws when required field is missing"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}
                                           :email {:uuid #uuid "00000000-0000-0000-0000-000000000003"
@@ -275,7 +275,7 @@
           (sp/close storage)))))
 
   (testing "create-entity allows nil for nullable field"
-    (let [storage (setup/create-test-storage)
+    (let [storage (setup/create-raw-storage)
           schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
                                                  :type :text}
                                           :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"

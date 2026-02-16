@@ -5,8 +5,65 @@
    the ExecutionGraphResult for function execution."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.data-schema-protocol.interface :as ds]
     [graphden.graph-storage-age.test-setup :as setup]
+    [graphden.malli-data-schema.interface :as mds]
     [graphden.storage-protocol.interface :as sp]))
+
+
+(defn- make-simple-graph-schema
+  "Creates simplified graph schema for execution graph tests.
+   Uses text fields instead of enums for simplicity."
+  []
+  (-> (mds/create-builder)
+      (ds/add-entity :fn-schema #uuid "00000000-0000-0000-0001-000000000001"
+                     {:name {:uuid #uuid "00000000-0000-0000-0001-000000000002"
+                             :type :text}
+                      :returned-type {:uuid #uuid "00000000-0000-0000-0001-000000000003"
+                                      :type :text}})
+      (ds/add-entity :arg-schema #uuid "00000000-0000-0000-0002-000000000001"
+                     {:fn-schema-id {:uuid #uuid "00000000-0000-0000-0002-000000000002"
+                                     :type :ref :ref-entity :fn-schema}
+                      :name {:uuid #uuid "00000000-0000-0000-0002-000000000003"
+                             :type :text}
+                      :type {:uuid #uuid "00000000-0000-0000-0002-000000000004"
+                             :type :text}
+                      :required {:uuid #uuid "00000000-0000-0000-0002-000000000005"
+                                 :type :bool}})
+      (ds/add-entity :fn #uuid "00000000-0000-0000-0003-000000000001"
+                     {:name {:uuid #uuid "00000000-0000-0000-0003-000000000002"
+                             :type :text}
+                      :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
+                                     :type :ref :ref-entity :fn-schema}})
+      (ds/add-entity :call-site #uuid "00000000-0000-0000-0005-000000000001"
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000002"
+                              :type :ref :ref-entity :fn}})
+      (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
+                     {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
+                                      :type :ref :ref-entity :arg-schema}
+                      :value {:uuid #uuid "00000000-0000-0000-0004-000000000004"
+                              :type :jsonb}})
+      (ds/add-entity :fn-arg #uuid "00000000-0000-0000-0006-000000000001"
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0006-000000000002"
+                              :type :ref :ref-entity :fn}
+                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0006-000000000003"
+                                      :type :ref :ref-entity :arg-schema}
+                      :arg-value-id {:uuid #uuid "00000000-0000-0000-0006-000000000004"
+                                     :type :ref :ref-entity :arg-value}})
+      ds/build))
+
+
+(defn- create-arg-value-with-binding!
+  "Creates arg-value and fn-arg binding. Returns the arg-value."
+  [storage fn-id arg-schema-id value]
+  (let [av (sp/create-entity storage :arg-value
+                             {:arg-schema-id arg-schema-id
+                              :value value})]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))
 
 
 (use-fixtures :once (setup/container-fixture))
@@ -15,9 +72,8 @@
 
 (deftest resolve-simple-fn-test
   (testing "resolve-execution-graph for simple fn without dependencies"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)
+    (let [storage (setup/create-raw-storage)
+          _ (sp/initialize storage (make-simple-graph-schema))
           ;; Create fn-schema (no base-fn-name, just a definition)
           fn-schema (sp/create-entity storage :fn-schema
                                       {:name "add-one"
@@ -33,7 +89,7 @@
                                       {:name "add-one-instance"
                                        :fn-schema-id (:id fn-schema)})
           ;; Create arg-value with binding
-          _ (setup/create-arg-value-with-binding! storage (:id fn-entity) (:id arg-schema) 42)
+          _ (create-arg-value-with-binding! storage (:id fn-entity) (:id arg-schema) 42)
           ;; Resolve execution graph
           result (sp/resolve-execution-graph storage (:id fn-entity))]
       (try
@@ -59,9 +115,8 @@
 
 (deftest resolve-fn-with-fn-reference-test
   (testing "resolve-execution-graph follows fn references (UUID in arg-value)"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)
+    (let [storage (setup/create-raw-storage)
+          _ (sp/initialize storage (make-simple-graph-schema))
           ;; Create inner fn-schema and fn
           inner-schema (sp/create-entity storage :fn-schema
                                          {:name "inner"
@@ -83,7 +138,7 @@
                                      {:name "outer-fn"
                                       :fn-schema-id (:id outer-schema)})
           ;; Bind arg to reference inner-fn (just pass the UUID directly)
-          _ (setup/create-arg-value-with-binding!
+          _ (create-arg-value-with-binding!
               storage (:id outer-fn) (:id ref-arg-schema)
               (:id inner-fn))
           ;; Resolve execution graph
@@ -101,9 +156,8 @@
 
 (deftest resolve-fn-with-call-site-reference-test
   (testing "resolve-execution-graph follows call-site references"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)
+    (let [storage (setup/create-raw-storage)
+          _ (sp/initialize storage (make-simple-graph-schema))
           ;; Create target fn
           target-schema (sp/create-entity storage :fn-schema
                                           {:name "target"
@@ -127,7 +181,7 @@
                                       {:name "caller-fn"
                                        :fn-schema-id (:id caller-schema)})
           ;; Bind arg to reference call-site (pass UUID directly)
-          _ (setup/create-arg-value-with-binding!
+          _ (create-arg-value-with-binding!
               storage (:id caller-fn) (:id cs-arg-schema)
               (:id call-site))
           ;; Resolve execution graph
@@ -145,9 +199,8 @@
 
 (deftest resolve-fn-not-found-test
   (testing "resolve-execution-graph throws for non-existent fn"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)]
+    (let [storage (setup/create-raw-storage)
+          _ (sp/initialize storage (make-simple-graph-schema))]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found"
               (sp/resolve-execution-graph storage #uuid "99999999-9999-9999-9999-999999999999")))

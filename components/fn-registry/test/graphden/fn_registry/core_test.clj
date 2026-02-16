@@ -5,9 +5,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.core :as core]
-    [graphden.graph-storage-postgres.interface :as gsp]
-    [graphden.storage-protocol.interface :as sp]
-    [graphden.storage-protocol.postgres-test-helpers :as th])
+    [graphden.graph-storage-age.test-setup :as th]
+    [graphden.storage-protocol.interface :as sp])
   (:import
     (java.util
       UUID)))
@@ -39,8 +38,7 @@
   "Creates a graph storage from the current test container.
    Cleans the database before creating storage to ensure test isolation."
   []
-  (th/clean-database-fast! *container*)
-  (gsp/create-storage (th/get-container-config *container*)))
+  (th/create-test-storage *container*))
 
 
 ;; === register-base-fns! tests ===

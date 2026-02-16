@@ -10,20 +10,26 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
+    [graphden.executor.test-setup :as setup]
     [graphden.fn-composition.interface :as fn-composition]
     [graphden.fn-registry.interface :as registry]
-    [graphden.graph-storage-memory.interface :as gsm]
     [graphden.storage-protocol.interface :as sp]))
 
 
-(use-fixtures :each exec/with-clean-registry)
+;; Use testcontainer for PostgreSQL
+(use-fixtures :once (setup/create-container-fixture))
+
+
+(use-fixtures :each
+  (setup/create-clean-db-fixture)
+  exec/with-clean-registry)
 
 
 ;; === Full Execution Flow Tests ===
 
 (deftest full-execution-with-call-sites-test
   (testing "executes composed functions with call-site references"
-    (let [storage (gsm/create-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         ;; Initialize base functions
         (registry/initialize-all! storage
@@ -56,7 +62,7 @@
           (sp/close storage)))))
 
   (testing "call-sites are cached and reused"
-    (let [storage (gsm/create-storage)
+    (let [storage (setup/create-test-storage)
           call-count (atom 0)]
       (try
         ;; Initialize base functions with a counting function
@@ -95,7 +101,7 @@
 
 (deftest depth-limit-warning-integration-test
   (testing "warns when approaching max depth"
-    (let [storage (gsm/create-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         ;; Initialize recursive-like function
         (registry/initialize-all! storage
@@ -134,7 +140,7 @@
 
 (deftest timeout-integration-test
   (testing "throws when execution timeout exceeded across nested calls"
-    (let [storage (gsm/create-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         ;; Initialize a slow function (100ms per call)
         (registry/initialize-all! storage
@@ -177,7 +183,7 @@
 
 (deftest cache-eviction-integration-test
   (testing "evicts old cache entries when limit reached"
-    (let [storage (gsm/create-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         ;; Initialize functions
         (registry/initialize-all! storage
@@ -211,7 +217,7 @@
 
 (deftest nested-composition-test
   (testing "nested function composition executes correctly"
-    (let [storage (gsm/create-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         ;; Initialize base functions
         (registry/initialize-all! storage

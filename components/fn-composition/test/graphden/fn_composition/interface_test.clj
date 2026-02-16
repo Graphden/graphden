@@ -1,18 +1,40 @@
 (ns graphden.fn-composition.interface-test
   (:require
     [clojure.string :as str]
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging]
+    [graphden.executor.interface :as exec]
     [graphden.fn-composition.core :as core]
     [graphden.fn-composition.interface :as fn-composition]
     [graphden.fn-registry.interface :as registry]
-    [graphden.graph-storage-memory.interface :as gsm]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.graph-storage-postgres.interface :as gsp]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]))
+
+
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+
+
+(use-fixtures :each
+  (th/create-clean-db-fixture #'*container*)
+  exec/with-clean-registry)
+
+
+(defn- create-test-storage
+  "Creates a graph storage from the current test container.
+   Cleans the database before creating storage to ensure test isolation."
+  []
+  (th/clean-database-fast! *container*)
+  (gsp/create-storage (th/get-container-config *container*)))
 
 
 (deftest sync-fns-to-storage!-test
   (testing "syncs fn definitions to storage"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           ;; First sync base-fns so we have fn-schemas
           _ (registry/initialize-all! storage
                                       [{:test-base-fn
@@ -46,7 +68,7 @@
           (is (some? (graphden.storage-protocol.interface/read-entity storage :fn wrapper-fn-id)))))))
 
   (testing "validates definitions"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (testing "throws on missing :name"
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must have :name"
               (fn-composition/sync-fns-to-storage! storage [{:parent :foo}]))))
@@ -62,20 +84,20 @@
                                                     {:name :foo :parent :baz}]))))))
 
   (testing "throws on unresolved parent"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
             (fn-composition/sync-fns-to-storage! storage
                                                  [{:name :foo :parent :nonexistent}])))))
 
   (testing "handles empty definitions"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           result (fn-composition/sync-fns-to-storage! storage [])]
       (is (= {} result)))))
 
 
 (deftest topological-sort-test
   (testing "sorts by dependencies and warns on wrong order"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:base-a {:args {} :return-type :int :impl (fn [_ _] 1)}
                                         :base-b {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])
@@ -99,7 +121,7 @@
 
 (deftest circular-dependency-test
   (testing "throws on circular dependencies"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])
           ;; A -> B -> A
@@ -149,7 +171,7 @@
 
 (deftest call-site-test
   (testing "creates call-site entities for :fn-name> args"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
                                                 :return-type :fn
@@ -174,7 +196,7 @@
       (is (= "handler-fn" (:name (first frvs))))))
 
   (testing "deduplicates call-sites with same name"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
                                                 :return-type :fn
@@ -202,7 +224,7 @@
       (is (= 1 (count frvs)))))
 
   (testing "creates separate call-sites with different names"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
                                                 :return-type :fn
@@ -230,24 +252,24 @@
 
 (deftest validation-edge-cases-test
   (testing "throws on non-keyword name"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword"
             (fn-composition/sync-fns-to-storage! storage [{:name "string-name" :parent :foo}])))))
 
   (testing "throws on non-map args"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:a :int} :return-type :int :impl (fn [_ _] 1)}}])]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"args must be a map"
             (fn-composition/sync-fns-to-storage! storage [{:name :foo :parent :base-fn :args [1 2 3]}])))))
 
   (testing "throws on non-sequential fn-composition"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a vector"
             (fn-composition/sync-fns-to-storage! storage {:not "a vector"})))))
 
   (testing "throws on unresolved fn reference in args"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
@@ -259,7 +281,7 @@
 
 (deftest resolve-fn-id-from-storage-test
   (testing "resolves fn by name from storage when not in created-fns"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:ref :fn}
                                                   :return-type :any
@@ -369,7 +391,7 @@
 
 (deftest call-site-unresolved-test
   (testing "throws when call-site references non-existent fn"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:ref :any}
                                                   :return-type :any
@@ -383,7 +405,7 @@
 
 (deftest arg-value-deduplication-test
   (testing "reuses existing arg-value with same (arg-schema-id, value)"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const-fn {:args {:x :any}
                                                    :return-type :any
@@ -400,7 +422,7 @@
           "Same (arg-schema-id, value) should be deduplicated")))
 
   (testing "creates separate arg-values for different values"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const-fn {:args {:x :any}
                                                    :return-type :any

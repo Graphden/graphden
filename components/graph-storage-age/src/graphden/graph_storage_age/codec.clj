@@ -1,9 +1,9 @@
-(ns graphden.postgres-storage.codec
-  "Value codec for PostgreSQL storage.
+(ns graphden.graph-storage-age.codec
+  "Value codec for AGE storage.
    Handles JSONB, enum, and other type conversions."
   (:require
     [cheshire.core :as json]
-    [graphden.postgres-storage.util :as util]
+    [clojure.string :as str]
     [graphden.storage-protocol.interface :as sp])
   (:import
     (com.fasterxml.jackson.core
@@ -16,18 +16,45 @@
       PGobject)))
 
 
+;; === Naming utilities ===
+
+(defn kw->snake-case
+  "Converts a keyword to snake_case string."
+  [kw]
+  (-> (name kw)
+      (str/replace "-" "_")))
+
+
+(defn snake->kw
+  "Converts a snake_case string to keyword."
+  [s]
+  (-> s
+      (str/replace "_" "-")
+      keyword))
+
+
+(defn enum-value->sql
+  "Converts enum keyword to SQL string."
+  [v]
+  (if (keyword? v)
+    (kw->snake-case v)
+    (str v)))
+
+
+(defn sql->enum-value
+  "Converts SQL string to enum keyword."
+  [s]
+  (when s
+    (snake->kw s)))
+
+
 ;; === Known enum values ===
-;; When field-spec is not available, we need to detect enum values heuristically.
-;; This set contains known value_kind enum values from graph-data-schema.
 
 (def ^:private known-value-kind-values
-  "Known values of the value_kind enum (SQL snake_case form)."
   #{"null" "uuid" "text" "int" "bool" "numeric" "timestamptz" "jsonb" "bytes" "any" "fn"})
 
 
 (defn- known-enum-value?
-  "Returns true if string is a known enum value.
-   Used for heuristic detection when field-spec is not available."
   [s]
   (contains? known-value-kind-values s))
 
@@ -35,7 +62,6 @@
 ;; === Low-level encoding/decoding ===
 
 (defn- value->jsonb
-  "Wraps a value as JSONB PGobject for PostgreSQL."
   [v]
   (doto (PGobject.)
     (PGobject/.setType "jsonb")
@@ -43,8 +69,6 @@
 
 
 (defn- parse-jsonb
-  "Parses JSONB PGobject value to Clojure data.
-   Returns nil for null values."
   [pg-value]
   (when pg-value
     (try
@@ -52,58 +76,45 @@
       (catch JsonParseException e
         (throw (ex-info "Failed to parse JSONB value"
                         {:type :parse-error/jsonb
-                         :raw-value (if (> (count pg-value) 100)
-                                      (str (subs pg-value 0 100) "...")
-                                      pg-value)
                          :cause (Throwable/.getMessage e)}
                         e))))))
 
 
 (defn- value->enum
-  "Converts keyword to PostgreSQL enum PGobject."
   [v enum-name]
   (doto (PGobject.)
-    (PGobject/.setType (util/kw->snake-case enum-name))
-    (PGobject/.setValue (util/enum-value->sql v))))
+    (PGobject/.setType (kw->snake-case enum-name))
+    (PGobject/.setValue (enum-value->sql v))))
 
 
 (defn- instant->timestamp
-  "Converts java.time.Instant to java.sql.Timestamp for PostgreSQL."
   [^Instant instant]
   (Timestamp/from instant))
 
 
 (defn- parse-pgobject
-  "Parses PGobject value based on its type.
-   Returns nil for null PGobject values."
   [v]
   (let [pg-type (PGobject/.getType v)
         pg-value (PGobject/.getValue v)]
     (when pg-value
       (if (= pg-type "jsonb")
         (parse-jsonb pg-value)
-        ;; For enums and other types, convert back to keyword
-        (util/sql->enum-value pg-value)))))
+        (sql->enum-value pg-value)))))
 
 
-;; === Known JSONB columns fallback ===
-;; When field metadata is not available, these columns are treated as JSONB.
+;; === Fallback columns ===
 
 (def ^:private fallback-jsonb-columns
-  "Columns always treated as JSONB even without field metadata.
-   :value - Used in arg_value entity for polymorphic value storage."
   #{:value})
 
 
 (def ^:private fallback-timestamptz-columns
-  "Columns always treated as TIMESTAMPTZ even without field metadata.
-   :created-at - Used in versioned entities (branch, *-version) for timestamps."
   #{:created-at})
 
 
-;; === PostgresValueCodec implementation ===
+;; === AGEValueCodec ===
 
-(defrecord PostgresValueCodec
+(defrecord AGEValueCodec
   []
 
   sp/StorageValueCodec
@@ -128,30 +139,23 @@
             (instant->timestamp value)
             value)
 
-          ;; Other types pass through unchanged
           value))))
 
 
   (decode-value
     [_this value field-spec]
     (cond
-      ;; PGobject (JSONB, custom types)
       (instance? PGobject value)
       (parse-pgobject value)
 
-      ;; Enum field: PostgreSQL may return enum as plain string
-      ;; Convert back to keyword when field-spec indicates enum
       (and (string? value) (= :enum (:type field-spec)))
-      (util/sql->enum-value value)
+      (sql->enum-value value)
 
-      ;; Known enum values: when field-spec is not available,
-      ;; check if string is a known value_kind enum value
       (and (string? value)
            (nil? field-spec)
            (known-enum-value? value))
-      (util/sql->enum-value value)
+      (sql->enum-value value)
 
-      ;; Other values pass through unchanged
       :else value))
 
 
@@ -161,7 +165,7 @@
       (partial sp/encode-value this)
       row
       field-specs
-      {:key-transform (comp keyword util/kw->snake-case)
+      {:key-transform (comp keyword kw->snake-case)
        :fallback-specs (merge
                          (into {} (map (fn [k] [k {:type :jsonb}]) fallback-jsonb-columns))
                          (into {} (map (fn [k] [k {:type :timestamptz}]) fallback-timestamptz-columns)))}))
@@ -173,24 +177,20 @@
       (partial sp/decode-value this)
       row
       field-specs
-      {:key-transform (fn [col-key] (util/snake->kw (name col-key)))})))
+      {:key-transform (fn [col-key] (snake->kw (name col-key)))})))
 
 
 (defn create-codec
-  "Creates a PostgreSQL value codec instance."
   []
-  (->PostgresValueCodec))
+  (->AGEValueCodec))
 
 
 (def ^:private default-codec (delay (create-codec)))
 
 
 (defn encode-value
-  "Encodes a single value using the default codec.
-   Uses fallback specs for known JSONB/TIMESTAMPTZ columns when field-spec is nil."
   [value field-spec]
   (let [effective-spec (or field-spec
-                           ;; Apply fallback if needed - check if value looks like it needs special handling
                            (cond
                              (map? value) {:type :jsonb}
                              (instance? Instant value) {:type :timestamptz}
@@ -199,21 +199,16 @@
 
 
 (defn encode-row
-  "Encodes a row using the default codec."
   [row field-specs]
   (sp/encode-row @default-codec row field-specs))
 
 
 (defn decode-row
-  "Decodes a row using the default codec."
   [row field-specs]
   (sp/decode-row @default-codec row field-specs))
 
 
 (defn row->entity
-  "Converts a JDBC result row to an entity map.
-   Decodes all values using the default codec.
-   Returns nil for nil input."
   ([row]
    (row->entity row nil))
   ([row field-specs]

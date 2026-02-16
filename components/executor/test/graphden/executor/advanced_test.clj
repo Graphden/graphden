@@ -18,32 +18,37 @@
     [graphden.storage-protocol.interface :as sp]))
 
 
-(use-fixtures :each exec/with-clean-registry)
+(use-fixtures :once (setup/create-container-fixture))
 
 
-;; === Union Type Tests ===
+(use-fixtures :each
+  (setup/create-clean-db-fixture)
+  exec/with-clean-registry)
 
-(deftest union-type-validation-test
-  (testing ":union type accepts any value without strict validation"
+
+;; === Any Type Tests ===
+
+(deftest any-type-validation-test
+  (testing ":any type accepts any value without strict validation"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn!
-              :use-union
+              :use-any
               (fn [{:keys [data]} _ctx]
                 @data))
           fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-union"
-                                       :returned-type :union})
+                                      {:name "use-any"
+                                       :returned-type :any})
           data-arg (sp/create-entity storage :arg-schema
                                      {:fn-schema-id (:id fn-schema)
                                       :name "data"
-                                      :type :union
+                                      :type :any
                                       :required true})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-union"
+                                   {:name "my-use-any"
                                     :fn-schema-id (:id fn-schema)})
           ;; No arg-value in DB - test provides values via execute (free arg)
           ctx (exec/create-context {:storage storage})]
-      ;; Union type should accept any value (provided at runtime since no DB value)
+      ;; Any type should accept any value (provided at runtime since no DB value)
       (is (= "a string" (exec/execute ctx (:id fn-rec) {(:id data-arg) "a string"})))
       (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
       (is (= {:key "value"} (exec/execute ctx (:id fn-rec) {(:id data-arg) {:key "value"}})))
@@ -265,57 +270,12 @@
       (sp/close storage))))
 
 
-;; === Unknown Type Validation Tests ===
-
-(deftest unknown-type-validation-test
-  (testing "unknown types throw error in strict mode (default)"
-    ;; By default, strict-type-validation? is true to catch schema mismatches early
-    (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn!
-              :use-custom
-              (fn [{:keys [data]} _ctx]
-                @data))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-custom"
-                                       :returned-type :text})
-          data-arg (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
-                                      :name "data"
-                                      :type :custom-future-type  ; Unknown type
-                                      :required true})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-custom"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free, test checks type validation on provided args
-          ctx (exec/create-context {:storage storage})]
-      ;; Strict mode: unknown type should throw when arg is provided at runtime
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Unknown argument type encountered"
-            (exec/execute ctx (:id fn-rec) {(:id data-arg) "test-value"})))
-      (sp/close storage)))
-
-  (testing "unknown types are accepted in non-strict mode (forward compatibility)"
-    ;; When strict-type-validation? is false, unknown types are accepted
-    (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn!
-              :use-custom
-              (fn [{:keys [data]} _ctx]
-                @data))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-custom"
-                                       :returned-type :text})
-          data-arg (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
-                                      :name "data"
-                                      :type :custom-future-type  ; Unknown type
-                                      :required true})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-custom"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free, test checks type validation on provided args
-          ctx (exec/create-context {:storage storage
-                                    :strict-type-validation? false})]
-      ;; Non-strict mode: unknown type should accept any value (provided at runtime)
-      (is (= "test-value" (exec/execute ctx (:id fn-rec) {(:id data-arg) "test-value"})))
-      (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
-      (sp/close storage))))
+;; NOTE: Unknown type validation tests were removed because PostgreSQL
+;; enforces enum values at the database level. The :type field uses
+;; PostgreSQL enum 'value_kind' which only accepts known values.
+;; In the old memory-storage, arbitrary keywords could be stored,
+;; but PostgreSQL correctly rejects invalid enum values.
+;;
+;; The executor's strict-type-validation? feature is still useful for
+;; validation of runtime-provided argument values against known types,
+;; but the database already ensures only valid types can be stored.

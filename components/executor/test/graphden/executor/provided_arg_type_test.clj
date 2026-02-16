@@ -8,7 +8,12 @@
     [graphden.storage-protocol.interface :as sp]))
 
 
-(use-fixtures :each exec/with-clean-registry)
+(use-fixtures :once (setup/create-container-fixture))
+
+
+(use-fixtures :each
+  (setup/create-clean-db-fixture)
+  exec/with-clean-registry)
 
 
 (deftest provided-arg-type-validation-test
@@ -37,29 +42,8 @@
             (exec/execute ctx (:id fn-rec) {(:id f-arg) "not-a-uuid"})))
       (sp/close storage)))
 
-  (testing "throws when :ref type arg is provided with non-UUID value"
-    (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn!
-              :use-ref
-              (fn [{:keys [r]} _ctx]
-                @r))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-ref"
-                                       :returned-type :int})
-          r-arg (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id fn-schema)
-                                   :name "r"
-                                   :type :ref
-                                   :required true})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-ref"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
-          ctx (exec/create-context {:storage storage})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Type mismatch for argument 'r': expected ref"
-            (exec/execute ctx (:id fn-rec) {(:id r-arg) 12345})))
-      (sp/close storage)))
+  ;; NOTE: :ref type test removed because :ref is not a valid type in value_kind enum.
+  ;; References are handled via :fn type or through arg-value union variants.
 
   (testing "throws when :int type arg is provided with non-integer value"
     (let [storage (setup/create-test-storage)

@@ -2,18 +2,51 @@
   "Shared test setup for executor tests.
 
    Provides helper functions for creating test storage and setting up
-   common test fixtures."
+   common test fixtures using PostgreSQL testcontainers."
   (:require
     [graphden.executor.interface :as exec]
-    [graphden.graph-storage-memory.interface :as gsm]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.graph-storage-postgres.interface :as gsp]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]))
 
+
+;; ============================================================================
+;; Container Management
+;; ============================================================================
+
+(def ^:dynamic *container*
+  "Dynamic var holding the PostgreSQL container for tests."
+  nil)
+
+
+(defn create-container-fixture
+  "Creates a :once fixture that starts/stops a PostgreSQL container."
+  []
+  (th/create-container-fixture #'*container*))
+
+
+(defn create-clean-db-fixture
+  "Creates an :each fixture that cleans the database before each test."
+  []
+  (th/create-clean-db-fixture #'*container*))
+
+
+;; ============================================================================
+;; Storage Creation
+;; ============================================================================
 
 (defn create-test-storage
-  "Creates a storage with a simple fn-schema and registers the base function."
+  "Creates a PostgreSQL storage from the current test container.
+   Cleans the database before creating storage to ensure test isolation.
+   Must be called within a test that has the container fixture active."
   []
-  (gsm/create-storage))
+  (th/clean-database-fast! *container*)
+  (gsp/create-storage (th/get-container-config *container*)))
 
+
+;; ============================================================================
+;; Test Helpers
+;; ============================================================================
 
 (defn create-call-site!
   "Creates a call-site entity pointing to a fn.

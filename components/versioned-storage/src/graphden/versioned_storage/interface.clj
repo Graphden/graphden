@@ -11,7 +11,7 @@
 
    ## Usage
 
-   (def base (-> (mem/create-storage) (sp/initialize-with-cleanup! schema)))
+   (def base (-> (pg/create-storage config) (sp/initialize-with-cleanup! schema)))
    (def storage (vs/wrap-with-versioning base))
 
    ;; CRUD works like normal storage, but is branch-aware
@@ -239,7 +239,7 @@
 
    Example:
    (def schema (vds/build-schema (mds/create-builder)))
-   (def base (-> (mem/create-storage) (sp/initialize-with-cleanup! schema)))
+   (def base (-> (pg/create-storage config) (sp/initialize-with-cleanup! schema)))
    (def storage (wrap-with-versioning base))"
   ([base-storage]
    (wrap-with-versioning base-storage "main"))

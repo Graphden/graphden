@@ -6,4 +6,4 @@
                   :extra-deps {graphden/malli-data-schema {:local/root "../malli-data-schema"}
                                graphden/graph-data-schema {:local/root "../graph-data-schema"}
                                graphden/versioned-data-schema {:local/root "../versioned-data-schema"}
-                               graphden/memory-storage {:local/root "../memory-storage"}}}}}
+                               graphden/postgres-storage {:local/root "../postgres-storage"}}}}}

@@ -2,6 +2,6 @@
  :deps {graphden/storage-protocol {:local/root "../storage-protocol"}
         graphden/field-types {:local/root "../field-types"}}
  :aliases {:test {:extra-paths ["test"]
-                  :extra-deps {graphden/memory-storage {:local/root "../memory-storage"}
+                  :extra-deps {graphden/postgres-storage {:local/root "../postgres-storage"}
                                graphden/graph-data-schema {:local/root "../graph-data-schema"}
                                graphden/malli-data-schema {:local/root "../malli-data-schema"}}}}}

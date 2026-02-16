@@ -1,26 +1,49 @@
 (ns graphden.cached-versioned-storage.interface-test
   (:require
-    [clojure.test :refer [deftest is testing]]
-    [graphden.cache-memory.interface :as cache-mem]
+    [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.cache-data-schema.interface :as cds]
+    [graphden.cache-postgres.interface :as cache-pg]
     [graphden.cache-protocol.interface :as cache]
     [graphden.cached-storage.interface :as cs]
     [graphden.cached-versioned-storage.interface :as cvs]
+    [graphden.data-schema-protocol.interface :as ds]
+    [graphden.graph-data-schema.interface :as gds]
     [graphden.malli-data-schema.interface :as mds]
-    [graphden.memory-storage.interface :as mem]
+    [graphden.postgres-storage.interface :as pg]
     [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]
     [graphden.versioned-data-schema.interface :as vds]
     [graphden.versioned-storage.interface :as vs]))
 
 
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :each (th/create-clean-db-fixture #'*container*))
+
+
 (defn- create-test-stack
-  "Creates a CachedStorage(VersionedStorage(MemoryStorage)) stack for testing."
+  "Creates a CachedStorage(VersionedStorage(PostgresStorage)) stack for testing.
+   Cleans the database before creating storage to ensure test isolation.
+   Uses combined schema: graph + cache + versioned entities."
   []
-  (let [schema (vds/build-schema (mds/create-builder))
-        base (-> (mem/create-storage) (sp/initialize-with-cleanup! schema))
+  (th/clean-database-fast! *container*)
+  (let [config (th/get-container-config *container*)
+        ;; Build schema with all layers: graph + cache + versioned
+        schema (-> (mds/create-builder)
+                   (gds/extend-builder)
+                   (cds/extend-builder)
+                   (vds/extend-builder)
+                   (ds/build))
+        base (-> (pg/create-storage config) (sp/initialize-with-cleanup! schema))
         versioned (vs/wrap-with-versioning base)
-        mem-cache (cache-mem/create-cache)]
-    {:storage (cs/wrap-with-cache versioned mem-cache)
-     :cache mem-cache}))
+        ;; Get datasource from the base storage (stored in :pool field)
+        datasource (:pool base)
+        pg-cache (cache-pg/create-cache datasource)]
+    {:storage (cs/wrap-with-cache versioned pg-cache)
+     :cache pg-cache}))
 
 
 (deftest merge-invalidates-cache-test

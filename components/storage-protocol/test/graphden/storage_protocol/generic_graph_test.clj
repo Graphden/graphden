@@ -1,12 +1,29 @@
 (ns graphden.storage-protocol.generic-graph-test
   "Tests for generic ExecutionGraph resolution via StorageCRUD."
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
-    [graphden.memory-storage.interface :as mem]
+    [graphden.postgres-storage.interface :as pg]
     [graphden.storage-protocol.generic-graph :as gg]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]))
+
+
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :each (th/create-clean-db-fixture #'*container*))
+
+
+(defn- create-test-storage
+  "Creates a PostgreSQL storage from the current test container.
+   Cleans the database before creating storage to ensure test isolation."
+  []
+  (th/clean-database-fast! *container*)
+  (pg/create-storage (th/get-container-config *container*)))
 
 
 (defn- make-graph-schema
@@ -62,7 +79,7 @@
 
 (deftest resolve-simple-fn-test
   (testing "resolves a simple function with no dependencies"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           _ (sp/initialize storage (make-graph-schema))
           fn-schema-id (random-uuid)
           arg-schema-id (random-uuid)
@@ -86,7 +103,7 @@
 
 (deftest resolve-fn-chain-test
   (testing "resolves a chain of dependent functions"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           _ (sp/initialize storage (make-graph-schema))
           fn-schema-id (random-uuid)
           arg-schema-id (random-uuid)
@@ -116,7 +133,7 @@
 
 (deftest resolve-fn-no-args-test
   (testing "resolves function with no arg-values"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           _ (sp/initialize storage (make-graph-schema))
           fn-schema-id (random-uuid)
           _ (sp/create-entity storage :fn-schema
@@ -130,7 +147,7 @@
 
 (deftest resolve-nonexistent-fn-test
   (testing "throws when fn does not exist"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           _ (sp/initialize storage (make-graph-schema))]
       (is (thrown? clojure.lang.ExceptionInfo
             (gg/resolve-execution-graph storage (random-uuid)))))))

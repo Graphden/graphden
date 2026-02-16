@@ -7,7 +7,12 @@
     [graphden.storage-protocol.interface :as sp]))
 
 
-(use-fixtures :each exec/with-clean-registry)
+(use-fixtures :once (setup/create-container-fixture))
+
+
+(use-fixtures :each
+  (setup/create-clean-db-fixture)
+  exec/with-clean-registry)
 
 
 (deftest mutual-reference-graph-test

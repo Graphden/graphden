@@ -6,11 +6,21 @@
     [graphden.base-functions.test-helpers :as h]
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.interface :as registry]
-    [graphden.graph-storage-memory.interface :as gsm]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.graph-storage-postgres.interface :as gsp]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]))
 
 
-(use-fixtures :each exec/with-clean-registry)
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+
+
+(use-fixtures :each
+  (th/create-clean-db-fixture #'*container*)
+  exec/with-clean-registry)
 
 
 ;; === HOF Setup Helpers ===
@@ -19,7 +29,7 @@
   "Creates storage with helper functions for HOF tests.
    Returns fn-ids for use in HOF tests via executor."
   []
-  (let [storage (gsm/create-storage)]
+  (let [storage (gsp/create-storage (th/get-container-config *container*))]
     (h/register-all!)
     ;; Sync base function schemas to storage so HOF can be found
     (registry/sync-defs-to-storage! storage (bf/get-all-defs))

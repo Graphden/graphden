@@ -1,12 +1,29 @@
 (ns graphden.storage-protocol.backend-template-test
   "Tests for backend-template helper functions."
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
-    [graphden.memory-storage.interface :as mem]
+    [graphden.postgres-storage.interface :as pg]
     [graphden.storage-protocol.backend-template :as tpl]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]))
+
+
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :each (th/create-clean-db-fixture #'*container*))
+
+
+(defn- create-test-storage
+  "Creates a PostgreSQL storage from the current test container.
+   Cleans the database before creating storage to ensure test isolation."
+  []
+  (th/clean-database-fast! *container*)
+  (pg/create-storage (th/get-container-config *container*)))
 
 
 ;; === wrap-crud-operation tests ===
@@ -313,8 +330,8 @@
 ;; === run-basic-contract-tests tests ===
 
 (deftest run-basic-contract-tests-test
-  (testing "runs basic tests on memory storage"
-    (let [storage (mem/create-storage)
+  (testing "runs basic tests on storage"
+    (let [storage (create-test-storage)
           schema (-> (mds/create-builder)
                      (ds/add-entity
                        :test-entity

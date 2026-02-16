@@ -1,19 +1,30 @@
 (ns graphden.graph-protocol.interface-test
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.graph-data-schema.interface :as gds]
     [graphden.graph-protocol.interface :as gp]
     [graphden.malli-data-schema.interface :as mds]
-    [graphden.memory-storage.interface :as mem]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.postgres-storage.interface :as pg]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]))
+
+
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :each (th/create-clean-db-fixture #'*container*))
 
 
 (defn- create-test-storage
-  "Creates an initialized in-memory storage for testing."
+  "Creates an initialized PostgreSQL storage for testing.
+   Cleans the database before creating storage to ensure test isolation."
   []
+  (th/clean-database-fast! *container*)
   (let [builder (mds/create-builder)
         schema (gds/build-schema builder)
-        storage (mem/create-storage)]
+        storage (pg/create-storage (th/get-container-config *container*))]
     (sp/initialize-with-cleanup! storage schema)))
 
 

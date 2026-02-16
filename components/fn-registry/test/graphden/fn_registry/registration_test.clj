@@ -5,11 +5,29 @@
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.core :as core]
     [graphden.fn-registry.interface :as registry]
-    [graphden.graph-storage-memory.interface :as gsm]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.graph-storage-postgres.interface :as gsp]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]))
 
 
-(use-fixtures :each exec/with-clean-registry)
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+
+
+(use-fixtures :each
+  (th/create-clean-db-fixture #'*container*)
+  exec/with-clean-registry)
+
+
+(defn- create-test-storage
+  "Creates a graph storage from the current test container.
+   Cleans the database before creating storage to ensure test isolation."
+  []
+  (th/clean-database-fast! *container*)
+  (gsp/create-storage (th/get-container-config *container*)))
 
 
 ;; === Helper Functions ===
@@ -94,7 +112,7 @@
 
 (deftest initialize-with-base-fns-test
   (testing "initializes storage with all base functions"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (try
         (let [result (registry/initialize-with-base-fns! storage)]
           ;; Should return the same storage
@@ -109,7 +127,7 @@
           (sp/close storage)))))
 
   (testing "can execute functions after initialization"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (try
         (registry/initialize-with-base-fns! storage)
         ;; Create a function that uses :add
@@ -136,7 +154,8 @@
 
 (deftest create-storage-with-base-fns-test
   (testing "creates storage and initializes with base fns"
-    (let [storage (registry/create-storage-with-base-fns gsm/create-storage)]
+    (let [storage (registry/create-storage-with-base-fns
+                    #(gsp/create-storage (th/get-container-config *container*)))]
       (try
         ;; Should have storage
         (is (some? storage))
@@ -152,7 +171,7 @@
 
 (deftest initialize-all-test
   (testing "initializes storage with multiple def-sets"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:test-fn1 {:args {:x :int} :return-type :int :impl (fn [_ _] 1)}}
           defs2 {:test-fn2 {:args {:y :text} :return-type :text :impl (fn [_ _] "ok")}}
           defs3 {:test-fn3 {:args {} :return-type :bool :impl (fn [_ _] true)}}]
@@ -172,7 +191,7 @@
           (sp/close storage)))))
 
   (testing "handles empty def-sets sequence"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (try
         (let [result (registry/initialize-all! storage [])]
           (is (= storage result)))
@@ -180,7 +199,7 @@
           (sp/close storage)))))
 
   (testing "handles def-sets with overlap - second sync updates"
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           ;; Both sets define same function
           defs1 {:overlap-fn {:args {:x :int} :return-type :int :impl (fn [_ _] 1)}}
           defs2 {:overlap-fn {:args {:x :int} :return-type :int :impl (fn [_ _] 2)}}]
@@ -211,7 +230,7 @@
   (testing "closes storage on error during sync"
     ;; This tests the catch block in initialize-with-base-fns!
     ;; We need a storage that will fail during sync-defs-to-storage!
-    (let [storage (gsm/create-storage)
+    (let [storage (create-test-storage)
           close-called (atom false)
           ;; Wrap storage to track close and fail on specific operation
           wrapped (reify

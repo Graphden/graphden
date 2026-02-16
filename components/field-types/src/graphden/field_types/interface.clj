@@ -129,7 +129,9 @@
                      (instance? java.time.LocalDateTime %)
                      (instance? java.util.Date %))
    :enum        keyword?
-   :union       (constantly true)})  ; Union accepts any value
+   :union       (constantly true)   ; Union accepts any value
+   :any         (constantly true)   ; Any accepts any value (polymorphic type)
+   :null        (constantly true)}) ; Null/void type
 
 
 (defn valid-type?

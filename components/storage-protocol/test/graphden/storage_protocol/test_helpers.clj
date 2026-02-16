@@ -1,18 +1,20 @@
 (ns graphden.storage-protocol.test-helpers
   "Shared test utilities for storage implementations.
 
-   This namespace provides common helpers used across postgres-storage,
-   datomic-storage, and memory-storage test suites.
+   This namespace provides common helpers used across postgres-storage
+   and other storage test suites using PostgreSQL testcontainers.
 
    Key utilities:
    - make-schema / make-graph-schema: Create test schemas
-   - create-test-storage: Create pre-initialized memory storage
-   - with-test-storage: Macro for test storage lifecycle"
+   - create-test-storage: Create pre-initialized PostgreSQL storage
+   - with-test-storage: Macro for test storage lifecycle
+   - Container management via postgres-test-helpers"
   (:require
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.malli-data-schema.interface :as mds]
-    [graphden.memory-storage.interface :as mem]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.postgres-storage.interface :as pg]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as pth]))
 
 
 (defn make-schema
@@ -109,28 +111,41 @@
 
 
 ;; ============================================================================
+;; Container Management (re-exports from postgres-test-helpers)
+;; ============================================================================
+
+(def create-container-fixture pth/create-container-fixture)
+(def create-clean-db-fixture pth/create-clean-db-fixture)
+(def get-container-config pth/get-container-config)
+
+
+;; Note: with-postgres-container is a macro, use pth/with-postgres-container directly
+
+
+;; ============================================================================
 ;; Test Storage Utilities
 ;; ============================================================================
 
 (defn create-test-storage
-  "Creates an in-memory storage instance for testing.
+  "Creates a PostgreSQL storage instance for testing.
    Optionally initializes with a schema.
 
    Arguments:
+   - container: A running PostgreSQLContainer instance
    - schema: Optional DataSchema to initialize storage with.
              If not provided, creates uninitialized storage.
 
    Returns:
-   A MemoryStorage instance ready for testing.
+   A PostgresStorage instance ready for testing.
 
    Example:
-     (create-test-storage)                    ; uninitialized
-     (create-test-storage (make-schema))      ; with simple schema
-     (create-test-storage (make-graph-schema)); with graph schema"
-  ([]
-   (mem/create-storage))
-  ([schema]
-   (let [storage (mem/create-storage)]
+     (create-test-storage container)                    ; uninitialized
+     (create-test-storage container (make-schema))      ; with simple schema
+     (create-test-storage container (make-graph-schema)); with graph schema"
+  ([container]
+   (pg/create-storage (pth/get-container-config container)))
+  ([container schema]
+   (let [storage (pg/create-storage (pth/get-container-config container))]
      (sp/initialize storage schema)
      storage)))
 
@@ -138,19 +153,20 @@
 (defmacro with-test-storage
   "Executes body with a test storage bound to sym.
    Automatically closes storage when done.
+   Requires a container to be available.
 
    Arguments:
-   - binding: Vector of [sym schema] or [sym] for uninitialized
+   - binding: Vector of [sym container] or [sym container schema]
    - body: Forms to execute with storage available
 
    Example:
-     (with-test-storage [s (make-schema)]
+     (with-test-storage [s *container* (make-schema)]
        (sp/create-entity s :user {:id (random-uuid) :name \"Alice\"})
        (is (= 1 (count (sp/query-entities s :user {})))))"
-  [[sym schema] & body]
+  [[sym container schema] & body]
   `(let [~sym (if ~schema
-                (create-test-storage ~schema)
-                (create-test-storage))]
+                (create-test-storage ~container ~schema)
+                (create-test-storage ~container))]
      (try
        (do ~@body)
        (finally

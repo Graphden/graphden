@@ -1,7 +1,0 @@
-{:paths ["src" "resources"]
- :deps {graphden/datomic-storage {:local/root "../datomic-storage"}
-        graphden/graph-data-schema {:local/root "../graph-data-schema"}
-        graphden/malli-data-schema {:local/root "../malli-data-schema"}
-        graphden/storage-protocol {:local/root "../storage-protocol"}}
- :aliases {:test {:extra-paths ["test"]
-                  :extra-deps {}}}}

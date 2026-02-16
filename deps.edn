@@ -29,14 +29,10 @@
   {:extra-paths
    ["development/bench"
     "components/data-schema-protocol/src"
-    "components/datomic-storage/src"
     "components/field-types/src"
     "components/graph-data-schema/src"
-    "components/graph-storage-datomic/src"
-    "components/graph-storage-memory/src"
     "components/graph-storage-postgres/src"
     "components/malli-data-schema/src"
-    "components/memory-storage/src"
     "components/postgres-storage/src"
     "components/storage-protocol/src"
     "components/executor/src"
@@ -46,7 +42,6 @@
    {criterium/criterium #:mvn{:version "0.4.6"},
     com.zaxxer/HikariCP #:mvn{:version "7.0.2"},
     org.clojure/tools.logging #:mvn{:version "1.3.1"},
-    com.datomic/local #:mvn{:version "1.0.291"},
     org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
     org.postgresql/postgresql #:mvn{:version "42.7.10"},
     com.github.seancorfield/honeysql #:mvn{:version "2.7.1368"},
@@ -86,10 +81,6 @@
     "components/web-server-fns/test"
     "components/cache-data-schema/src"
     "components/cache-data-schema/test"
-    "components/cache-datomic/src"
-    "components/cache-datomic/test"
-    "components/cache-memory/src"
-    "components/cache-memory/test"
     "components/cache-postgres/src"
     "components/cache-postgres/test"
     "components/cache-protocol/src"
@@ -98,8 +89,6 @@
     "components/cached-storage/test"
     "components/data-schema-protocol/src"
     "components/data-schema-protocol/test"
-    "components/datomic-storage/src"
-    "components/datomic-storage/test"
     "components/executor/src"
     "components/executor/test"
     "components/field-types/src"
@@ -110,22 +99,12 @@
     "components/graph-data-schema/test"
     "components/graph-protocol/src"
     "components/graph-protocol/test"
-    "components/graph-storage-datomic/src"
-    "components/graph-storage-datomic/test"
-    "components/graph-storage-memory/src"
-    "components/graph-storage-memory/test"
     "components/graph-storage-postgres/src"
     "components/graph-storage-postgres/test"
-    "components/graph-with-base-fns-datomic/src"
-    "components/graph-with-base-fns-datomic/test"
-    "components/graph-with-base-fns-memory/src"
-    "components/graph-with-base-fns-memory/test"
     "components/graph-with-base-fns-postgres/src"
     "components/graph-with-base-fns-postgres/test"
     "components/malli-data-schema/src"
     "components/malli-data-schema/test"
-    "components/memory-storage/src"
-    "components/memory-storage/test"
     "components/postgres-storage/src"
     "components/postgres-storage/test"
     "components/storage-protocol/src"
@@ -134,21 +113,20 @@
     "components/versioned-data-schema/test"
     "components/versioned-storage/src"
     "components/versioned-storage/test"
-    "components/versioned-graph-storage-memory/src"
-    "components/versioned-graph-storage-memory/test"
     "components/cached-versioned-storage/src"
     "components/cached-versioned-storage/test"
     "components/value-traits-schema/src"
     "components/value-traits-schema/test"
     "components/merge-protection/src"
-    "components/merge-protection/test"],
+    "components/merge-protection/test"
+    "components/graph-storage-age/src"
+    "components/graph-storage-age/test"],
    :extra-deps
    {http-kit/http-kit #:mvn{:version "2.8.1"},
     metosin/reitit #:mvn{:version "0.10.0"},
     com.zaxxer/HikariCP #:mvn{:version "7.0.2"},
     org.clojure/tools.logging #:mvn{:version "1.3.1"},
     lambdaisland/kaocha #:mvn{:version "1.91.1392"},
-    com.datomic/local #:mvn{:version "1.0.291"},
     org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
     org.postgresql/postgresql #:mvn{:version "42.7.10"},
     com.github.seancorfield/honeysql #:mvn{:version "2.7.1368"},
@@ -172,10 +150,6 @@
     "components/web-server-fns/test"
     "components/cache-data-schema/src"
     "components/cache-data-schema/test"
-    "components/cache-datomic/src"
-    "components/cache-datomic/test"
-    "components/cache-memory/src"
-    "components/cache-memory/test"
     "components/cache-postgres/src"
     "components/cache-postgres/test"
     "components/cache-protocol/src"
@@ -184,8 +158,6 @@
     "components/cached-storage/test"
     "components/data-schema-protocol/src"
     "components/data-schema-protocol/test"
-    "components/datomic-storage/src"
-    "components/datomic-storage/test"
     "components/executor/src"
     "components/executor/test"
     "components/field-types/src"
@@ -196,22 +168,12 @@
     "components/graph-data-schema/test"
     "components/graph-protocol/src"
     "components/graph-protocol/test"
-    "components/graph-storage-datomic/src"
-    "components/graph-storage-datomic/test"
-    "components/graph-storage-memory/src"
-    "components/graph-storage-memory/test"
     "components/graph-storage-postgres/src"
     "components/graph-storage-postgres/test"
-    "components/graph-with-base-fns-datomic/src"
-    "components/graph-with-base-fns-datomic/test"
-    "components/graph-with-base-fns-memory/src"
-    "components/graph-with-base-fns-memory/test"
     "components/graph-with-base-fns-postgres/src"
     "components/graph-with-base-fns-postgres/test"
     "components/malli-data-schema/src"
     "components/malli-data-schema/test"
-    "components/memory-storage/src"
-    "components/memory-storage/test"
     "components/postgres-storage/src"
     "components/postgres-storage/test"
     "components/storage-protocol/src"
@@ -220,20 +182,19 @@
     "components/versioned-data-schema/test"
     "components/versioned-storage/src"
     "components/versioned-storage/test"
-    "components/versioned-graph-storage-memory/src"
-    "components/versioned-graph-storage-memory/test"
     "components/cached-versioned-storage/src"
     "components/cached-versioned-storage/test"
     "components/value-traits-schema/src"
     "components/value-traits-schema/test"
     "components/merge-protection/src"
-    "components/merge-protection/test"],
+    "components/merge-protection/test"
+    "components/graph-storage-age/src"
+    "components/graph-storage-age/test"],
    :extra-deps
    {http-kit/http-kit #:mvn{:version "2.8.1"},
     metosin/reitit #:mvn{:version "0.10.0"},
     com.zaxxer/HikariCP #:mvn{:version "7.0.2"},
     org.clojure/tools.logging #:mvn{:version "1.3.1"},
-    com.datomic/local #:mvn{:version "1.0.291"},
     org.testcontainers/testcontainers #:mvn{:version "1.21.4"},
     org.postgresql/postgresql #:mvn{:version "42.7.10"},
     com.github.seancorfield/honeysql #:mvn{:version "2.7.1368"},

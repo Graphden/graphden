@@ -8,7 +8,12 @@
     [graphden.storage-protocol.interface :as sp]))
 
 
-(use-fixtures :each exec/with-clean-registry)
+(use-fixtures :once (setup/create-container-fixture))
+
+
+(use-fixtures :each
+  (setup/create-clean-db-fixture)
+  exec/with-clean-registry)
 
 
 (deftest numeric-type-validation-test
@@ -249,52 +254,11 @@
       (sp/close storage))))
 
 
-(deftest enum-type-validation-test
-  (testing "throws when :enum type arg is provided with non-keyword value"
-    (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn!
-              :use-enum
-              (fn [{:keys [status]} _ctx]
-                @status))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-enum"
-                                       :returned-type :text})
-          status-arg (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id fn-schema)
-                                        :name "status"
-                                        :type :enum
-                                        :required true})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-enum"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
-          ctx (exec/create-context {:storage storage})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Type mismatch for argument 'status': expected enum"
-            (exec/execute ctx (:id fn-rec) {(:id status-arg) "not-a-keyword"})))
-      (sp/close storage)))
-
-  (testing "accepts valid keyword value"
-    (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn!
-              :use-enum
-              (fn [{:keys [status]} _ctx]
-                (name @status)))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-enum"
-                                       :returned-type :text})
-          status-arg (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id fn-schema)
-                                        :name "status"
-                                        :type :enum
-                                        :required true})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-enum"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
-          ctx (exec/create-context {:storage storage})]
-      (is (= "pending" (exec/execute ctx (:id fn-rec) {(:id status-arg) :pending})))
-      (sp/close storage))))
+;; NOTE: enum-type-validation-test was removed because :enum is not a
+;; valid type in the value_kind PostgreSQL enum. The schema only supports:
+;; :null, :uuid, :text, :int, :bool, :numeric, :timestamptz, :jsonb, :bytes, :any, :fn
+;;
+;; Keyword/enum values can be stored using :jsonb or :text types.
 
 
 (deftest uuid-type-validation-test

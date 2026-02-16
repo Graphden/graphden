@@ -38,13 +38,24 @@
 
    The runtime is configured via environment variables:
    - PORT: HTTP server port (default: 8080)
-   - STORAGE_TYPE: 'memory' or 'postgres' (default: memory)
+   - STORAGE_TYPE: 'age' or 'postgres' (default: age)
 
-   For PostgreSQL mode:
-   - JDBC_URL: JDBC connection URL (required for postgres)
-   - DB_USERNAME: database username (required for postgres)
-   - DB_PASSWORD: database password (required for postgres)
+   For AGE/PostgreSQL mode:
+   - JDBC_URL: JDBC connection URL (required)
+   - DB_USERNAME: database username (required)
+   - DB_PASSWORD: database password (required)
    - DB_POOL_SIZE: connection pool size (default: 10)
+
+   ## Storage Stack (AGE mode - recommended)
+
+   When STORAGE_TYPE=age (default), Apache AGE provides graph-optimized storage:
+
+   VersionedStorage
+       └── AGEStorage
+
+   This provides:
+   - O(1) graph resolution via single Cypher query (no cache needed!)
+   - Git-like versioning with branches
 
    ## Storage Stack (PostgreSQL mode)
 
@@ -63,10 +74,12 @@
    ## Running
 
    ```bash
-   # Memory mode (default)
-   clojure -M -m graphden.executor-runtime.core
+   # AGE mode (default, recommended)
+   JDBC_URL=jdbc:postgresql://localhost:5432/graphden \\
+     DB_USERNAME=graphden DB_PASSWORD=graphden \\
+     clojure -M -m graphden.executor-runtime.core
 
-   # PostgreSQL mode
+   # PostgreSQL mode (with cache layer)
    STORAGE_TYPE=postgres JDBC_URL=jdbc:postgresql://localhost:5432/graphden \\
      DB_USERNAME=graphden DB_PASSWORD=graphden \\
      clojure -M -m graphden.executor-runtime.core
@@ -83,7 +96,7 @@
     [graphden.fn-composition.interface :as fn-composition]
     [graphden.fn-registry.interface :as registry]
     [graphden.graph-data-schema.interface :as gds]
-    [graphden.graph-storage-memory.interface :as gsm]
+    [graphden.graph-storage-age.interface :as age]
     [graphden.http-kit-fns.interface :as http-kit-fns]
     [graphden.malli-data-schema.interface :as mds]
     [graphden.postgres-storage.interface :as pg]
@@ -98,7 +111,7 @@
 
 (def default-config
   {:port 8080
-   :storage-type :memory
+   :storage-type :age
    :db-pool-size 10})
 
 
@@ -106,8 +119,8 @@
   "Gets configuration from environment variables or returns defaults."
   []
   {:port (Integer/parseInt (or (System/getenv "PORT") "8080"))
-   :storage-type (keyword (or (System/getenv "STORAGE_TYPE") "memory"))
-   ;; PostgreSQL settings
+   :storage-type (keyword (or (System/getenv "STORAGE_TYPE") "age"))
+   ;; PostgreSQL/AGE settings
    :jdbc-url (System/getenv "JDBC_URL")
    :db-username (System/getenv "DB_USERNAME")
    :db-password (System/getenv "DB_PASSWORD")
@@ -164,19 +177,58 @@
      :pg-storage pg-storage}))
 
 
+(defn- create-age-storage
+  "Creates Apache AGE storage with versioning support.
+
+   AGE storage uses a single Cypher query for graph resolution,
+   eliminating the need for caching layer.
+
+   Stack architecture:
+   VersionedStorage
+       └── AGEStorage"
+  [config]
+  (let [{:keys [jdbc-url db-username db-password db-pool-size]} config
+        _ (when-not jdbc-url
+            (throw (ex-info "JDBC_URL is required for AGE storage"
+                            {:type :configuration-error})))
+        _ (log/info "Connecting to Apache AGE..." jdbc-url)
+        ;; Build schema (no cache needed for AGE)
+        schema (-> (mds/create-builder)
+                   (gds/extend-builder)
+                   (vds/extend-builder)
+                   (ds/build))
+        ;; Create and initialize AGE storage
+        age-config {:jdbc-url jdbc-url
+                    :username db-username
+                    :password db-password
+                    :pool-size db-pool-size}
+        age-storage (-> (age/create-storage age-config)
+                        (sp/initialize-with-cleanup! schema))
+        _ (log/info "AGE storage initialized")
+        ;; Wrap with versioning (creates 'main' branch)
+        versioned (vs/wrap-with-versioning age-storage)
+        _ (log/info "Versioning enabled, branch:" (vs/current-branch-id versioned))]
+    (log/info "AGE storage stack initialized: AGE + Versioning (no cache needed)")
+    {:storage versioned
+     :metrics nil
+     :pg-storage age-storage}))
+
+
 (defn create-storage
   "Creates storage based on configuration.
 
    Returns a map with:
    - :storage - the storage instance to use
    - :metrics - cache metrics (only for postgres mode)
-   - :pg-storage - underlying PostgreSQL storage (only for postgres mode)"
+   - :pg-storage - underlying PostgreSQL storage (for cleanup)
+
+   Supported storage types:
+   - :postgres - PostgreSQL with caching layer
+   - :age - Apache AGE (graph-optimized, no cache needed)"
   [config]
   (case (:storage-type config)
-    :memory {:storage (gsm/create-storage)
-             :metrics nil
-             :pg-storage nil}
     :postgres (create-postgres-storage config)
+    :age (create-age-storage config)
     (throw (ex-info "Unsupported storage type" {:type (:storage-type config)}))))
 
 

@@ -1,19 +1,30 @@
 (ns graphden.versioned-storage.interface-test
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.malli-data-schema.interface :as mds]
-    [graphden.memory-storage.interface :as mem]
+    [graphden.postgres-storage.interface :as pg]
     [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]
     [graphden.versioned-data-schema.interface :as vds]
     [graphden.versioned-storage.interface :as vs]
     [graphden.versioned-storage.resolution :as res]))
 
 
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :each (th/create-clean-db-fixture #'*container*))
+
+
 (defn- create-test-storage
-  "Creates a versioned storage initialized with versioned schema on main branch."
+  "Creates a versioned storage initialized with versioned schema on main branch.
+   Cleans the database before creating storage to ensure test isolation."
   []
+  (th/clean-database-fast! *container*)
   (let [schema (vds/build-schema (mds/create-builder))
-        base (-> (mem/create-storage)
+        base (-> (pg/create-storage (th/get-container-config *container*))
                  (sp/initialize-with-cleanup! schema))]
     (vs/wrap-with-versioning base)))
 
@@ -32,8 +43,9 @@
 
 (deftest wrap-idempotent-test
   (testing "wrapping twice reuses existing main branch"
+    (th/clean-database-fast! *container*)
     (let [schema (vds/build-schema (mds/create-builder))
-          base (-> (mem/create-storage)
+          base (-> (pg/create-storage (th/get-container-config *container*))
                    (sp/initialize-with-cleanup! schema))
           s1 (vs/wrap-with-versioning base)
           s2 (vs/wrap-with-versioning base)]

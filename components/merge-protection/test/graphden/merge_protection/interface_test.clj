@@ -1,26 +1,37 @@
 (ns graphden.merge-protection.interface-test
   (:require
-    [clojure.test :refer [deftest is testing]]
+    [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.data-schema-protocol.interface :as ds]
     [graphden.graph-data-schema.interface :as gds]
     [graphden.malli-data-schema.interface :as mds]
-    [graphden.memory-storage.interface :as mem]
     [graphden.merge-protection.interface :as mp]
+    [graphden.postgres-storage.interface :as pg]
     [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]
     [graphden.value-traits-schema.interface :as vts]
     [graphden.versioned-data-schema.interface :as vds]
     [graphden.versioned-storage.interface :as vs]))
 
 
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :each (th/create-clean-db-fixture #'*container*))
+
+
 (defn- create-test-storage
-  "Creates a versioned storage with both versioned-data-schema and value-traits-schema."
+  "Creates a versioned storage with both versioned-data-schema and value-traits-schema.
+   Cleans the database before creating storage to ensure test isolation."
   []
+  (th/clean-database-fast! *container*)
   (let [schema (-> (mds/create-builder)
                    (gds/extend-builder)
                    (vds/extend-builder)
                    (vts/extend-builder)
                    (ds/build))
-        base (-> (mem/create-storage)
+        base (-> (pg/create-storage (th/get-container-config *container*))
                  (sp/initialize-with-cleanup! schema))]
     (vts/seed-traits! base)
     (vs/wrap-with-versioning base)))

@@ -5,16 +5,34 @@
     [graphden.base-functions.interface :as bf]
     [graphden.base-functions.test-helpers :as h]
     [graphden.executor.interface :as exec]
-    [graphden.graph-storage-memory.interface :as gsm]
-    [graphden.storage-protocol.interface :as sp]))
+    [graphden.graph-storage-postgres.interface :as gsp]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th]))
 
 
-(use-fixtures :each exec/with-clean-registry)
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
+
+
+(use-fixtures :each
+  (th/create-clean-db-fixture #'*container*)
+  exec/with-clean-registry)
+
+
+(defn- create-test-storage
+  "Creates a graph storage from the current test container.
+   Cleans the database before creating storage to ensure test isolation."
+  []
+  (th/clean-database-fast! *container*)
+  (gsp/create-storage (th/get-container-config *container*)))
 
 
 (deftest sync-to-storage-test
   (testing "sync-storage! creates fn-schemas and arg-schemas"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (try
         ;; First sync - should create all
         (let [result (h/sync-storage! storage)]
@@ -43,7 +61,7 @@
           (sp/close storage)))))
 
   (testing "sync-storage! is idempotent"
-    (let [storage (gsm/create-storage)]
+    (let [storage (create-test-storage)]
       (try
         ;; First sync
         (h/sync-storage! storage)

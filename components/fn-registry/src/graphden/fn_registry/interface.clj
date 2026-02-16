@@ -103,7 +103,7 @@
    On error, closes the storage and re-throws the exception.
 
    Example:
-     (-> (gsm/create-storage)
+     (-> (gsp/create-storage config)
          (registry/initialize-with-base-fns!))"
   [storage]
   (try

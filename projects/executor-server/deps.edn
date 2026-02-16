@@ -8,9 +8,6 @@
          "../../components/http-kit-fns/src"
          "../../components/reitit-fns/src"
          "../../components/web-server-fns/src"
-         ;; Memory storage (for STORAGE_TYPE=memory)
-         "../../components/graph-storage-memory/src"
-         "../../components/memory-storage/src"
          ;; Data schemas
          "../../components/graph-data-schema/src"
          "../../components/cache-data-schema/src"
@@ -27,6 +24,8 @@
          "../../components/cache-protocol/src"
          "../../components/cache-postgres/src"
          "../../components/cached-storage/src"
+         ;; AGE storage
+         "../../components/graph-storage-age/src"
          ;; Versioning
          "../../components/versioned-storage/src"
          ;; Combined cache + versioning

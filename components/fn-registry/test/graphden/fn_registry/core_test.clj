@@ -5,11 +5,19 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.fn-registry.core :as core]
-    [graphden.memory-storage.interface :as mem]
-    [graphden.storage-protocol.interface :as sp])
+    [graphden.graph-storage-postgres.interface :as gsp]
+    [graphden.storage-protocol.interface :as sp]
+    [graphden.storage-protocol.postgres-test-helpers :as th])
   (:import
     (java.util
       UUID)))
+
+
+;; Container for PostgreSQL tests
+(def ^:dynamic *container* nil)
+
+
+(use-fixtures :once (th/create-container-fixture #'*container*))
 
 
 ;; Fixture to clean executor registry between tests
@@ -22,7 +30,17 @@
       (exec/clear-base-fns!))))
 
 
-(use-fixtures :each clean-executor-registry-fixture)
+(use-fixtures :each
+  (th/create-clean-db-fixture #'*container*)
+  clean-executor-registry-fixture)
+
+
+(defn- create-test-storage
+  "Creates a graph storage from the current test container.
+   Cleans the database before creating storage to ensure test isolation."
+  []
+  (th/clean-database-fast! *container*)
+  (gsp/create-storage (th/get-container-config *container*)))
 
 
 ;; === register-base-fns! tests ===
@@ -180,7 +198,7 @@
 
 (deftest sync-defs-to-storage!-test
   (testing "creates fn-schema and arg-schemas in storage"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:add {:args {:a :int :b :int}
                       :return-type :int
                       :impl (fn [_ _] nil)}}
@@ -201,7 +219,7 @@
         (is (= :int (:type arg-a))))))
 
   (testing "is idempotent - second sync updates instead of creates"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:add {:args {:a :int} :return-type :int :impl (fn [_ _] nil)}}
           result1 (core/sync-defs-to-storage! storage defs)
           result2 (core/sync-defs-to-storage! storage defs)]
@@ -210,7 +228,7 @@
       (is (= 1 (get-in result2 [:fn-schemas :updated])))))
 
   (testing "handles optional arguments"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:greet {:args {:name :text
                                :greeting {:type :text :required false}}
                         :return-type :text
@@ -221,7 +239,7 @@
       (is (false? (:required greeting-arg)))))
 
   (testing "validates before syncing - no partial sync on error"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:valid {:args {:a :int} :return-type :int :impl (fn [_ _] nil)}
                 :invalid {:args {:a :int}}}]  ; missing return-type
       (is (thrown? clojure.lang.ExceptionInfo
@@ -230,7 +248,7 @@
       (is (nil? (sp/read-entity storage :fn-schema (core/fn-schema-uuid :valid))))))
 
   (testing "updates fn-schema when return-type changes"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {:a :int} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:compute {:args {:a :int} :return-type :numeric :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs1)
@@ -241,7 +259,7 @@
         (is (= :numeric (:returned-type after))))))
 
   (testing "updates arg-schema when type changes"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:compute {:args {:x :text} :return-type :int :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs1)
@@ -252,7 +270,7 @@
         (is (= :text (:type after))))))
 
   (testing "updates arg-schema when required changes"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:compute {:args {:x {:type :int :required false}} :return-type :int :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs1)
@@ -298,7 +316,7 @@
     ;; Note: name is derived from fn-name, so this path is hit when fn-name differs
     ;; but since UUIDs are deterministic by name, changing name = different entity
     ;; So we test update by keeping same UUID but different return-type
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {:a :int} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:compute {:args {:a :int} :return-type :text :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs1)
@@ -307,7 +325,7 @@
         (is (= 1 (get-in result [:fn-schemas :updated]))))))
 
   (testing "updates when ONLY returned-type differs"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:compute {:args {} :return-type :numeric :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs1)
@@ -315,7 +333,7 @@
         (is (= 1 (get-in result [:fn-schemas :updated]))))))
 
   (testing "updates when ONLY base-fn-name differs"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {} :return-type :int :impl (fn [_ _] nil)}}
           ;; Can't easily change base-fn-name since it's derived from fn-name
           ;; This branch is rarely hit in practice
@@ -328,7 +346,7 @@
   (testing "no update when all fields identical"
     ;; When existing fn-schema has same name, returned-type, and base-fn-name
     ;; the update still happens but no actual change
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:compute {:args {} :return-type :int :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs)
       (let [result (core/sync-defs-to-storage! storage defs)]
@@ -352,7 +370,7 @@
     (is true "name-differs branch is structurally unreachable"))
 
   (testing "updates when ONLY type differs"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:compute {:args {:x :text} :return-type :int :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs1)
@@ -364,7 +382,7 @@
         (is (= 1 (get-in result [:arg-schemas :updated]))))))
 
   (testing "updates when ONLY required differs"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:compute {:args {:x {:type :int :required false}} :return-type :int :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs1)
@@ -376,7 +394,7 @@
         (is (= 1 (get-in result [:arg-schemas :updated]))))))
 
   (testing "no update when all arg-schema fields identical"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:compute {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs)
       (let [result (core/sync-defs-to-storage! storage defs)]
@@ -384,7 +402,7 @@
         (is (= 1 (get-in result [:arg-schemas :updated]))))))
 
   (testing "creates new arg-schema when arg is added"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:compute {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:compute {:args {:x :int :y :text} :return-type :int :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs1)
@@ -562,21 +580,21 @@
 
 (deftest sync-fn-schema-edge-cases-test
   (testing "creates fn-schema with base-fn-name field"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:my-func {:args {} :return-type :text :impl (fn [_ _] nil)}}]
       (core/sync-defs-to-storage! storage defs)
       (let [fn-schema (sp/read-entity storage :fn-schema (core/fn-schema-uuid :my-func))]
         (is (= "my-func" (:base-fn-name fn-schema))))))
 
   (testing "handles function with no arguments"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:constant {:args {} :return-type :int :impl (fn [_ _] 42)}}
           result (core/sync-defs-to-storage! storage defs)]
       (is (= 1 (get-in result [:fn-schemas :created])))
       (is (zero? (get-in result [:arg-schemas :created])))))
 
   (testing "handles function with many arguments"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:multi-arg {:args {:a :int :b :int :c :int :d :int :e :int}
                             :return-type :int
                             :impl (fn [_ _] nil)}}
@@ -589,7 +607,7 @@
 
 (deftest sync-defs-batch-size-limit-test
   (testing "throws when defs exceed max-sync-batch-size"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           ;; Create 501 function definitions (max is 500)
           large-defs (into {}
                            (for [i (range 501)]
@@ -600,7 +618,7 @@
             (core/sync-defs-to-storage! storage large-defs)))))
 
   (testing "error data contains batch size info"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           large-defs (into {}
                            (for [i (range 501)]
                              [(keyword (str "fn-" i))
@@ -615,7 +633,7 @@
           (is (= :sync-defs-to-storage (:operation (ex-data e))))))))
 
   (testing "accepts exactly max-sync-batch-size (500) definitions"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           max-defs (into {}
                          (for [i (range 500)]
                            [(keyword (str "fn-" i))
@@ -628,7 +646,7 @@
 
 (deftest sync-multiple-functions-test
   (testing "syncs multiple functions in one call"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:add {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}
                 :sub {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}
                 :mul {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}}
@@ -637,7 +655,7 @@
       (is (= 6 (get-in result [:arg-schemas :created])))))
 
   (testing "partial update - some functions new, some existing"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:add {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}}
           defs2 {:add {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}
                  :sub {:args {:a :int :b :int} :return-type :int :impl (fn [_ _] nil)}}]
@@ -756,7 +774,7 @@
 
 (deftest impl-hash-storage-test
   (testing "sync-defs-to-storage! saves impl-hash to fn-schema"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:add-fn {:args {:a :int :b :int}
                          :return-type :int
                          :impl (fn [_ _] nil)
@@ -768,7 +786,7 @@
         (is (re-matches #"[0-9a-f]{64}" (:impl-hash fn-schema))))))
 
   (testing "impl-hash changes when impl-source changes"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:change-fn {:args {:a :int :b :int}
                              :return-type :int
                              :impl (fn [_ _] nil)
@@ -784,7 +802,7 @@
           (is (not= hash1 hash2))))))
 
   (testing "impl-hash remains same when impl-source unchanged"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs {:stable-fn {:args {:x :int}
                             :return-type :int
                             :impl (fn [_ _] nil)
@@ -796,7 +814,7 @@
           (is (= hash1 hash2))))))
 
   (testing "updates fn-schema when only impl-hash changes"
-    (let [storage (mem/create-storage)
+    (let [storage (create-test-storage)
           defs1 {:impl-change {:args {:a :int}
                                :return-type :int
                                :impl (fn [_ _] nil)

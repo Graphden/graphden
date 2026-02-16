@@ -134,8 +134,9 @@
   [x]
   (or (keyword? x)
       (and (string? x)
-           (not (empty? x))
+           (seq x)
            (Character/isLetter (first x)))))
+
 
 (defn- hiccup-element?
   "Returns true if x is a single hiccup element (vector or list starting with keyword/string tag)."
@@ -143,16 +144,6 @@
   (and (or (vector? x) (seq? x) (list? x))
        (seq x)
        (element-name? (first x))))
-
-(defn- normalize-element
-  "Converts a hiccup element to vector form with keyword tag.
-   Handles JSON round-trip where keywords become strings."
-  [el]
-  (let [as-vec (if (vector? el) el (vec el))
-        tag (first as-vec)]
-    (if (string? tag)
-      (assoc as-vec 0 (keyword tag))
-      as-vec)))
 
 
 (defn- normalize-attrs
@@ -166,6 +157,7 @@
 
 
 (declare normalize-hiccup)
+
 
 (defn- normalize-hiccup-element
   "Normalizes a single hiccup element recursively.
@@ -216,6 +208,7 @@
     :else
     value))
 
+
 (defn- flatten-head
   "Flattens nested head content into a flat vector of hiccup elements.
    Handles cases like [[elem1 elem2] elem3] -> [elem1 elem2 elem3].
@@ -240,6 +233,7 @@
                      :else []))
                  head))
     :else []))
+
 
 (defn normalize-head
   "Normalizes head content to always be a flat vector of hiccup elements.
@@ -278,6 +272,7 @@
                   [:title title]]
                  head-elements)]
           [(into [:body normalized-body] scripts-elements)])))
+
 
 (defbase with-htmx
   "Adds HTMX script tag to head content.

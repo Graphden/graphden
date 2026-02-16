@@ -38,7 +38,7 @@
           :is-base-fn (boolean base-fn-name)}})
 
 
-(defn- fn-to-node
+(defn- fn->node
   "Converts fn entity to Cytoscape node."
   [{:keys [id fn-schema-id] entity-name :name}]
   {:data {:id (str id)
@@ -188,7 +188,7 @@
         entities
 
         fn-schema-nodes (mapv fn-schema-to-node fn-schemas)
-        fn-nodes (mapv fn-to-node fns)
+        fn-nodes (mapv fn->node fns)
         arg-schema-nodes (mapv arg-schema-to-node arg-schemas)
         arg-value-nodes (mapv arg-value-to-node arg-values)
         call-site-nodes (mapv call-site-to-node call-sites)

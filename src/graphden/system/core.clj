@@ -23,11 +23,11 @@
     [graphden.storage.age.interface :as age]
     [graphden.storage.protocol.interface :as sp]
     [graphden.versioning.storage.interface :as vs]
-    [graphden.web.crud.interface :as crud-fns]
-    [graphden.web.graph.interface :as graph-fns]
-    [graphden.web.html.interface :as html-fns]
-    [graphden.web.http-kit.interface :as http-kit-fns]
-    [graphden.web.reitit.interface :as reitit-fns]
+    [graphden.web.crud.core :as crud-fns]
+    [graphden.web.graph.core :as graph-fns]
+    [graphden.web.html.core :as html-fns]
+    [graphden.web.http-kit.core :as http-kit-fns]
+    [graphden.web.reitit.core :as reitit-fns]
     [integrant.core :as ig]))
 
 

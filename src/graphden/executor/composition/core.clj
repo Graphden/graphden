@@ -78,6 +78,7 @@
     (and (not (re-find #"\s" s))
          (re-matches #"[a-zA-Z_\-][a-zA-Z0-9_\-]*" s))))
 
+
 (defn- parse-fn-result-ref
   "Parses a keyword or string that might be a call-site reference.
    :fn-name> or \"fn-name>\" means execute fn-name, result name defaults to fn-name
@@ -424,9 +425,9 @@
   (if-let [ref-info (extract-fn-ref arg-value)]
     ;; Top-level fn reference
     (let [[fn-name ref-type result-name] ref-info]
-      (cond
+      (condp = ref-type
         ;; :fn-name> - get or create call-site
-        (= :call-site ref-type)
+        :call-site
         (let [result-name-str (name result-name)]
           (if-let [existing-cs-id (get @created-call-sites result-name)]
             existing-cs-id
@@ -438,10 +439,11 @@
               (:id call-site))))
 
         ;; :fn-name - resolve to fn id
-        (= :fn ref-type)
+        :fn
         (resolve-fn-id storage created-fns fn-name)
 
-        :else arg-value))
+        ;; default
+        arg-value))
     ;; Not a top-level ref, recursively resolve nested structures
     (resolve-refs-recursively arg-value storage created-fns created-call-sites)))
 

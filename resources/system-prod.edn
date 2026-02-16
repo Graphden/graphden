@@ -31,4 +31,4 @@
   :port #long #or [#env PORT "8080"]}
 
  ;; Fn definitions are loaded from the graph editor module
- :app/fn-defs #var graphden.web.editor.interface/fn-defs}
+ :app/fn-defs #var graphden.web.editor.core/fn-defs}

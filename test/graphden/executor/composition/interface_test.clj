@@ -452,8 +452,8 @@
 
   (testing "collects refs from deeply nested structure"
     (let [refs (#'core/collect-refs-recursively
-                 {:routes [["/" {:handler :home>}]
-                           ["/api" {:handler :api>}]]})]
+                {:routes [["/" {:handler :home>}]
+                          ["/api" {:handler :api>}]]})]
       (is (= #{[:home :call-site :home]
                [:api :call-site :api]}
              (set refs)))))
@@ -486,8 +486,8 @@
           created-call-sites (atom {})
           ;; Resolve refs in nested structure
           resolved (#'core/resolve-refs-recursively
-                     {:routes [["/" {:handler :home-handler>}]]}
-                     storage created-fns created-call-sites)]
+                    {:routes [["/" {:handler :home-handler>}]]}
+                    storage created-fns created-call-sites)]
       ;; Check that call-site was created
       (is (= 1 (count @created-call-sites)))
       (is (contains? @created-call-sites :home-handler))
@@ -512,9 +512,9 @@
           created-fns {:home home-id :api api-id}
           created-call-sites (atom {})
           resolved (#'core/resolve-refs-recursively
-                     {:routes [["/" {:handler :home>}]
-                               ["/api" {:handler :api>}]]}
-                     storage created-fns created-call-sites)]
+                    {:routes [["/" {:handler :home>}]
+                              ["/api" {:handler :api>}]]}
+                    storage created-fns created-call-sites)]
       ;; Both call-sites created
       (is (= 2 (count @created-call-sites)))
       (is (uuid? (get-in resolved [:routes 0 1 :handler])))
@@ -529,8 +529,8 @@
           created-fns {}
           created-call-sites (atom {})
           resolved (#'core/resolve-refs-recursively
-                     {:a 42 :b "string" :c [1 2 3] :d {:nested true}}
-                     storage created-fns created-call-sites)]
+                    {:a 42 :b "string" :c [1 2 3] :d {:nested true}}
+                    storage created-fns created-call-sites)]
       (is (= {:a 42 :b "string" :c [1 2 3] :d {:nested true}} resolved)))))
 
 
@@ -546,16 +546,16 @@
                                                  :impl (fn [_ _] (fn [_] nil))}}])
           ;; Define handlers first, then router with nested refs
           result (fn-composition/sync-fns-to-storage! storage
-                   [{:name :home-handler
-                     :parent :handler-fn
-                     :args {:body "home"}}
-                    {:name :api-handler
-                     :parent :handler-fn
-                     :args {:body "api"}}
-                    {:name :app-router
-                     :parent :router
-                     :args {:routes [["/" {:get {:handler :home-handler>}}]
-                                     ["/api" {:get {:handler :api-handler>}}]]}}])]
+                                                      [{:name :home-handler
+                                                        :parent :handler-fn
+                                                        :args {:body "home"}}
+                                                       {:name :api-handler
+                                                        :parent :handler-fn
+                                                        :args {:body "api"}}
+                                                       {:name :app-router
+                                                        :parent :router
+                                                        :args {:routes [["/" {:get {:handler :home-handler>}}]
+                                                                        ["/api" {:get {:handler :api-handler>}}]]}}])]
       ;; All fns created
       (is (= #{:home-handler :api-handler :app-router} (set (keys result))))
       ;; Check call-sites were created for handlers
@@ -575,12 +575,12 @@
                                                    :return-type :any
                                                    :impl (fn [_ _] nil)}}])
           result (fn-composition/sync-fns-to-storage! storage
-                   [{:name :inner-fn
-                     :parent :const-fn
-                     :args {:x "inner"}}
-                    {:name :outer-fn
-                     :parent :const-fn
-                     :args {:x {:level1 {:level2 {:level3 :inner-fn>}}}}}])]
+                                                      [{:name :inner-fn
+                                                        :parent :const-fn
+                                                        :args {:x "inner"}}
+                                                       {:name :outer-fn
+                                                        :parent :const-fn
+                                                        :args {:x {:level1 {:level2 {:level3 :inner-fn>}}}}}])]
       ;; Check fn created
       (is (uuid? (:outer-fn result)))
       ;; Check call-site created for inner-fn

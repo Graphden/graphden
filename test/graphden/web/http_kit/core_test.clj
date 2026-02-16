@@ -1,19 +1,19 @@
-(ns graphden.web.http-kit.interface-test
+(ns graphden.web.http-kit.core-test
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.web.http-kit.interface :as http-kit-fns]
+    [graphden.web.http-kit.core :as http-kit-fns]
     [org.httpkit.client :as http-client]))
 
 
-(deftest get-all-defs-test
+(deftest all-defs-test
   (testing "returns http-kit function definitions"
-    (let [defs (http-kit-fns/get-all-defs)]
+    (let [defs http-kit-fns/all-defs]
       (is (map? defs))
       (is (contains? defs :http-server))
       (is (contains? defs :http-stop))))
 
   (testing "http-server has correct metadata"
-    (let [http-server-def (get (http-kit-fns/get-all-defs) :http-server)]
+    (let [http-server-def (get http-kit-fns/all-defs :http-server)]
       (is (map? http-server-def))
       (is (contains? (:args http-server-def) :handler))
       (is (contains? (:args http-server-def) :port))
@@ -23,7 +23,7 @@
       (is (fn? (:impl http-server-def)))))
 
   (testing "http-stop has correct metadata"
-    (let [http-stop-def (get (http-kit-fns/get-all-defs) :http-stop)]
+    (let [http-stop-def (get http-kit-fns/all-defs :http-stop)]
       (is (map? http-stop-def))
       (is (contains? (:args http-stop-def) :server))
       (is (= :any (:server (:args http-stop-def))))
@@ -48,7 +48,7 @@
                     {:status 200
                      :headers {"Content-Type" "text/plain"}
                      :body "Hello Test"})
-          http-server-def (get (http-kit-fns/get-all-defs) :http-server)
+          http-server-def (get http-kit-fns/all-defs :http-server)
           server (call-impl http-server-def {:handler handler :port test-port})]
       (try
         ;; Server should be a function (http-kit returns a stop-fn)
@@ -71,7 +71,7 @@
                     {:status 201
                      :headers {"X-Custom" "header"}
                      :body "Created"})
-          http-server-def (get (http-kit-fns/get-all-defs) :http-server)
+          http-server-def (get http-kit-fns/all-defs :http-server)
           server (call-impl http-server-def {:handler handler :port test-port})]
       (try
         ;; Make POST request
@@ -90,7 +90,7 @@
   (testing "http-server provides default response values"
     (let [test-port 18082
           handler (fn [_req] {})  ; Empty response
-          http-server-def (get (http-kit-fns/get-all-defs) :http-server)
+          http-server-def (get http-kit-fns/all-defs :http-server)
           server (call-impl http-server-def {:handler handler :port test-port})]
       (try
         (let [response @(http-client/get (str "http://localhost:" test-port "/empty")
@@ -108,8 +108,8 @@
   (testing "http-stop stops a running server"
     (let [test-port 18083
           handler (fn [_req] {:status 200 :body "Running"})
-          http-server-def (get (http-kit-fns/get-all-defs) :http-server)
-          http-stop-def (get (http-kit-fns/get-all-defs) :http-stop)
+          http-server-def (get http-kit-fns/all-defs :http-server)
+          http-stop-def (get http-kit-fns/all-defs :http-stop)
           server (call-impl http-server-def {:handler handler :port test-port})]
 
       ;; Server should respond before stop
@@ -129,6 +129,6 @@
         (is (some? (:error response))))))
 
   (testing "http-stop handles nil server gracefully"
-    (let [http-stop-def (get (http-kit-fns/get-all-defs) :http-stop)
+    (let [http-stop-def (get http-kit-fns/all-defs :http-stop)
           result (call-impl http-stop-def {:server nil})]
       (is (nil? result)))))

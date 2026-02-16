@@ -1,7 +1,7 @@
-(ns graphden.web.reitit.interface-test
+(ns graphden.web.reitit.core-test
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.web.reitit.interface :as reitit-fns]))
+    [graphden.web.reitit.core :as reitit-fns]))
 
 
 (deftest all-defs-test

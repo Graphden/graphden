@@ -174,15 +174,14 @@
   {:args {}
    :return-type :jsonb
    :impl (fn [_args ctx]
-           (let [storage (:storage ctx)]
-             (if storage
-               {:fn-schemas (vec (sp/query-entities storage :fn-schema {}))
-                :fns (vec (sp/query-entities storage :fn {}))
-                :arg-schemas (vec (sp/query-entities storage :arg-schema {}))
-                :arg-values (vec (sp/query-entities storage :arg-value {}))
-                :call-sites (vec (sp/query-entities storage :call-site {}))}
-               (throw (ex-info "Storage not available in context"
-                               {:type :execution-error/missing-storage})))))})
+           (if-let [storage (:storage ctx)]
+             {:fn-schemas (vec (sp/query-entities storage :fn-schema {}))
+              :fns (vec (sp/query-entities storage :fn {}))
+              :arg-schemas (vec (sp/query-entities storage :arg-schema {}))
+              :arg-values (vec (sp/query-entities storage :arg-value {}))
+              :call-sites (vec (sp/query-entities storage :call-site {}))}
+             (throw (ex-info "Storage not available in context"
+                             {:type :execution-error/missing-storage}))))})
 
 
 ;; =============================================================================
@@ -262,9 +261,8 @@
    :return-type :jsonb}
   (let [body (:body request)
         content-type (get-in request [:headers "content-type"] "")]
-    (if (and body (str/includes? content-type "application/json"))
-      (json/parse-string body true)
-      nil)))
+    (when (and body (str/includes? content-type "application/json"))
+      (json/parse-string body true))))
 
 
 (defbase str-to-uuid

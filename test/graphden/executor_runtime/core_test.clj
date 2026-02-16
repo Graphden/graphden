@@ -8,6 +8,7 @@
    - Profile handling (:dev, :test, :prod)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor-runtime.core :as rt]
     [graphden.schema.protocol.interface :as ds]
     [graphden.storage.age.test-setup :as age-setup]
     [graphden.storage.protocol.interface :as sp]
@@ -177,3 +178,86 @@
       ;; Starting should fail because AGE can't connect
       (is (thrown? Exception
             (ig/init config [:db/schema :db/age]))))))
+
+
+;; =============================================================================
+;; Executor Runtime Lifecycle Tests
+;; =============================================================================
+
+(deftest executor-runtime-start-stop-test
+  (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+        original-read-config sys/read-config]
+    ;; Override config to use test container
+    (with-redefs [sys/read-config (fn [profile]
+                                    (-> (original-read-config profile)
+                                        (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+      (testing "start! returns running system"
+        (let [system (rt/start! :test)]
+          (try
+            (is (map? system))
+            (is (some? (:db/schema system)))
+            (is (some? (:db/age system)))
+            (is (some? (:db/versioned system)))
+            (finally
+              (rt/stop!)))))
+
+      (testing "stop! with no running system does nothing"
+        ;; stop! should not throw when nothing is running
+        (is (nil? (rt/stop!)))))))
+
+
+(deftest executor-runtime-restart-test
+  (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+        original-read-config sys/read-config]
+    (with-redefs [sys/read-config (fn [profile]
+                                    (-> (original-read-config profile)
+                                        (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+      (testing "restart! stops and starts system"
+        (let [system1 (rt/start! :test)]
+          (try
+            (is (some? system1))
+            (let [system2 (rt/restart! :test)]
+              (is (some? system2))
+              (is (not= system1 system2)))
+            (finally
+              (rt/stop!))))))))
+
+
+;; =============================================================================
+;; System Interface suspend/resume Tests
+;; =============================================================================
+
+(deftest suspend-resume-test
+  (testing "suspend! works with schema-only system"
+    (let [system (ig/init (sys/read-config :test) [:db/schema])]
+      (try
+        (is (some? (:db/schema system)))
+        ;; Suspend should work without error
+        (sys/suspend! system)
+        (finally
+          (ig/halt! system)))))
+
+  (testing "suspend! with multiple components"
+    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+          config (-> (sys/read-config :test)
+                     (assoc-in [:db/age :jdbc-url] jdbc-url))
+          system (ig/init config [:db/schema :db/age :db/versioned])]
+      (try
+        (is (some? (:db/versioned system)))
+        (sys/suspend! system)
+        (finally
+          (ig/halt! system))))))
+
+
+;; =============================================================================
+;; Start with partial components Test
+;; =============================================================================
+
+(deftest start-with-component-keys-test
+  (testing "start! with component-keys starts only specified components"
+    (let [system (sys/start! :test [:db/schema])]
+      (try
+        (is (some? (:db/schema system)))
+        (is (nil? (:db/age system)))
+        (finally
+          (sys/stop! system))))))

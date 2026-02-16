@@ -274,12 +274,11 @@
 
       ;; UUID not in current graph - check storage to see if it's a call-site
       parsed-uuid
-      (let [cs (sp/read-entity storage :call-site parsed-uuid)]
-        (if cs
-          ;; It's a call-site - execute it
-          (execute-external-call-site context parsed-uuid execute-call-site-fn)
-          ;; Not a call-site - it's a fn-id, keep as-is
-          parsed-uuid))
+      (if-let [_cs (sp/read-entity storage :call-site parsed-uuid)]
+        ;; It's a call-site - execute it
+        (execute-external-call-site context parsed-uuid execute-call-site-fn)
+        ;; Not a call-site - it's a fn-id, keep as-is
+        parsed-uuid)
 
       ;; Map: recursively resolve values (not keys)
       (map? value)
@@ -338,7 +337,7 @@
                               execute-call-site-fn))
       ;; Literal or complex value - resolve nested call-sites
       (wrap-delay-with-context arg-name :db-value
-        #(resolve-nested-call-sites raw-value context execute-call-site-fn)))))
+                               #(resolve-nested-call-sites raw-value context execute-call-site-fn)))))
 
 
 ;; === Call Site Argument Resolution ===

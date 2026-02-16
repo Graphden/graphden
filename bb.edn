@@ -6,7 +6,7 @@
              [clojure.string :as str])
 
   :init (do
-          (def all-paths "components bases development")
+          (def all-paths "src test")
           (def green "\u001b[32m")
           (def red "\u001b[31m")
           (def cyan "\u001b[36m")
@@ -59,7 +59,7 @@
 
   coverage
   {:doc "Run tests with coverage report"
-   :task (clojure "-M:dev:test:cloverage --src-ns-path components --test-ns-path components --ns-regex \"graphden\\..*\" --ns-exclude-regex \".*-test\" --ns-exclude-regex \".*contract-tests\" --ns-exclude-regex \".*test-helpers\" --ns-exclude-regex \".*test-mocks\"")}
+   :task (clojure "-M:dev:test:cloverage --src-ns-path src --test-ns-path test --ns-regex \"graphden\\..*\" --ns-exclude-regex \".*-test\" --ns-exclude-regex \".*contract-tests\" --ns-exclude-regex \".*test-helpers\" --ns-exclude-regex \".*test-mocks\"")}
 
   ;; === FULL CHECK ===
 

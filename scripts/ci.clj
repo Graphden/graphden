@@ -57,15 +57,15 @@
   []
   (let [;; Build commands
         kondo-cmd (if (native-cmd? "clj-kondo")
-                    ["clj-kondo" "--lint" "components" "bases" "development"]
-                    ["clojure" "-M:kondo" "--lint" "components" "bases" "development"])
+                    ["clj-kondo" "--lint" "src" "test"]
+                    ["clojure" "-M:kondo" "--lint" "src" "test"])
         cljstyle-cmd (if (native-cmd? "cljstyle")
-                       ["cljstyle" "check" "components" "bases" "development"]
-                       ["clojure" "-M:cljstyle" "check" "components" "bases" "development"])
-        splint-cmd ["clojure" "-M:splint" "components" "bases" "development"]
+                       ["cljstyle" "check" "src" "test"]
+                       ["clojure" "-M:cljstyle" "check" "src" "test"])
+        splint-cmd ["clojure" "-M:splint" "src" "test"]
         test-cmd ["clojure" "-M:dev:test:cloverage"
-                  "--src-ns-path" "components"
-                  "--test-ns-path" "components"
+                  "--src-ns-path" "src"
+                  "--test-ns-path" "test"
                   "--ns-regex" "graphden\\..*"
                   "--ns-exclude-regex" ".*-test"
                   "--ns-exclude-regex" ".*contract-tests"

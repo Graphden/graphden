@@ -1,23 +1,5 @@
 #kaocha/v1
 {:tests
- [{:id :unit,
-   :test-paths
-   ["components/base-functions/test"
-    "components/http-kit-fns/test"
-    "components/reitit-fns/test"
-    "components/web-server-fns/test"
-    "components/data-schema-protocol/test"
-    "components/executor/test"
-    "components/field-types/test"
-    "components/fn-registry/test"
-    "components/fn-composition/test"
-    "components/graph-data-schema/test"
-    "components/malli-data-schema/test"
-    "components/postgres-storage/test"
-    "components/storage-protocol/test"
-    "components/versioned-data-schema/test"
-    "components/versioned-storage/test"
-    "components/value-traits-schema/test"
-    "components/merge-protection/test"
-    "components/graph-storage-age/test"]}],
+ [{:id :unit
+   :test-paths ["test"]}]
  :plugins [:kaocha.plugin/profiling]}

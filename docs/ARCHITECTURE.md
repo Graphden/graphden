@@ -65,7 +65,7 @@ arg-value:
 
 ### Protocol Definition
 
-**File:** `components/storage-protocol/src/graphden/storage_protocol/interface.clj`
+**File:** `src/graphden/storage/protocol/interface.clj`
 
 ```clojure
 (defprotocol GraphConstraints
@@ -107,8 +107,8 @@ The implementation uses a **shared validation logic** pattern with pluggable hel
 
 | Storage | Implementation | Optimization |
 |---------|----------------|--------------|
-| postgres | `postgres-storage/constraints.clj` | SQL queries |
-| graph-storage-age | `graph-storage-age/graph.clj` | Cypher queries via Apache AGE |
+| postgres | `storage/postgres/constraints.clj` | SQL queries |
+| graph-storage-age | `storage/age/graph.clj` | Cypher queries via Apache AGE |
 
 ---
 
@@ -281,7 +281,7 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 
 ### Laziness via Clojure Delays
 
-**File:** `components/executor/src/graphden/executor/argument_resolution.clj`
+**File:** `src/graphden/executor/argument_resolution.clj`
 
 Arguments are wrapped in Clojure `delay` objects for lazy evaluation. This native approach:
 - Leverages Clojure's built-in memoization (delays compute once, cache result)
@@ -408,7 +408,7 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
 
 ### Execution Context
 
-**File:** `components/executor/src/graphden/executor/context.clj`
+**File:** `src/graphden/executor/context.clj`
 
 ```clojure
 (defrecord ExecutionContext
@@ -453,7 +453,7 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
 
 ### Lazy Sequence Protection
 
-**File:** `components/executor/src/graphden/executor/argument_resolution.clj`
+**File:** `src/graphden/executor/argument_resolution.clj`
 
 Lazy sequences are a potential DoS vector — an attacker could pass `(range)` (infinite sequence) as an argument. The executor protects against this:
 
@@ -587,7 +587,7 @@ Graphden separates function definitions into two layers:
 **Layer 1: Base Functions** — Clojure implementations
 
 ```clojure
-;; In base-functions, http-kit-fns, reitit-fns components
+;; In executor/base-fns, web/http-kit, web/reitit modules
 (defbase const
   "Returns a constant function that ignores input and returns x."
   {:args {:x :any}
@@ -603,7 +603,7 @@ Graphden separates function definitions into two layers:
 **Layer 2: Fn Entities (fn-defs)** — Pure data compositions
 
 ```clojure
-;; In web-server/core.clj - no Clojure code, only data
+;; In web/server/core.clj - no Clojure code, only data
 [{:name :hello-handler-fn
   :parent :const
   :args {:x {:status 200 :body "Hello"}}}
@@ -857,8 +857,8 @@ Pure functions (no I/O) can be distributed freely. Functions with side effects n
 
 ### Relevant Existing Components
 
-| Component | Role in Distribution |
-|-----------|---------------------|
+| Module | Role in Distribution |
+|--------|---------------------|
 | `executor` | Base execution, will need parallel/distributed modes |
 | `resolve-execution-graph` | Graph analysis for dependency detection |
 | `storage` | Shared state, potential intermediate result store |
@@ -888,19 +888,18 @@ Two storage backends are available:
 
 ---
 
-## Appendix B: Component Dependency Graph
+## Appendix B: Module Dependency Graph
 
 ```
                     ┌─────────────────────┐
-                    │   field-types       │
+                    │   schema/fields     │
                     └──────────┬──────────┘
                                │
            ┌───────────────────┼───────────────────┐
            │                   │                   │
            v                   v                   v
 ┌──────────────────┐ ┌──────────────────┐ ┌──────────────────┐
-│ data-schema-     │ │ storage-protocol │ │ malli-data-      │
-│ protocol         │ │                  │ │ schema           │
+│ schema/protocol  │ │ storage/protocol │ │ schema/malli     │
 └────────┬─────────┘ └────────┬─────────┘ └────────┬─────────┘
          │                    │                    │
          └────────────────────┼────────────────────┘
@@ -909,16 +908,14 @@ Two storage backends are available:
                     │                   │
                     v                   v
           ┌──────────────────┐ ┌──────────────────┐
-          │ postgres-storage │ │ graph-data-      │
-          │                  │ │ schema           │
+          │ storage/postgres │ │ schema/graph     │
           └────────┬─────────┘ └────────┬─────────┘
                    │                    │
                    └─────────┬──────────┘
                              │
                              v
                    ┌──────────────────┐
-                   │ graph-storage-   │
-                   │ age              │
+                   │ storage/age      │
                    └────────┬─────────┘
                             │
                             v
@@ -930,8 +927,8 @@ Two storage backends are available:
               │             │             │
               v             v             v
      ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-     │ base-        │ │ fn-registry  │ │ versioned-   │
-     │ functions    │ │              │ │ storage      │
+     │ executor/    │ │ executor/    │ │ versioning/  │
+     │ base-fns     │ │ registry     │ │ storage      │
      └──────────────┘ └──────────────┘ └──────────────┘
 ```
 

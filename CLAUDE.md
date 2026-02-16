@@ -22,7 +22,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Does it violate any other principle?
 - Is there a simpler way?
 
-See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full rationale and component-to-principle mapping.
+See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full rationale and module mapping.
 
 ## Project Overview
 
@@ -82,7 +82,7 @@ Without call-site, we couldn't distinguish "time before sleep" from "time after 
 
 | Document | Purpose | When to read |
 |----------|---------|--------------|
-| [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles, rationale, component mapping | Before making architectural decisions |
+| [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles, rationale, module mapping | Before making architectural decisions |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical details, execution model, examples | When implementing features |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |
@@ -109,7 +109,7 @@ clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test/execute
 
 ## Architecture Overview
 
-Component-based monorepo. Top namespace: `graphden`. Public API through `interface.clj` only.
+Classical Clojure monorepo. Top namespace: `graphden`. Public API through `interface.clj` only.
 
 ### Three-Layer Architecture
 
@@ -131,8 +131,6 @@ Component-based monorepo. Top namespace: `graphden`. Public API through `interfa
 ```
 
 **Key principle:** Each layer depends only on the layer below it. Executor calls `sp/resolve-execution-graph` which returns `ExecutionGraphResult`. Storage implementations (AGE, Postgres) each implement this protocol optimally.
-
-**Bundle:** `graph-storage-age` combines AGE backend with graph schema.
 
 See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
@@ -194,9 +192,38 @@ See [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) for detailed specifications.
 ## File Locations
 
 ```
-components/<name>/src/graphden/<name_snake>/interface.clj  # Public API
-components/<name>/test/graphden/<name_snake>/              # Tests
-docs/                                                       # Documentation
+src/graphden/<module>/interface.clj    # Public API
+test/graphden/<module>/                # Tests
+docs/                                  # Documentation
+```
+
+### Namespace Structure
+
+```
+src/graphden/
+├── executor/           # Executor, base-fns, registry, composition
+│   ├── interface.clj
+│   ├── base-fns/
+│   ├── registry/
+│   └── composition/
+├── schema/             # Protocol, malli, graph, versioned, traits, fields
+│   ├── protocol/
+│   ├── malli/
+│   ├── graph/
+│   ├── versioned/
+│   ├── traits/
+│   └── fields/
+├── storage/            # Protocol, postgres, AGE
+│   ├── protocol/
+│   ├── postgres/
+│   └── age/
+├── versioning/         # Storage, merge protection
+│   ├── storage/
+│   └── merge/
+└── web/                # HTTP-kit, reitit, server
+    ├── http-kit/
+    ├── reitit/
+    └── server/
 ```
 
 ## CI Workflow

@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: graphden
       POSTGRES_PASSWORD: graphden
     volumes:
-      - age_data:/var/lib/postgresql/data
+      - age_data:/var/lib/postgresql
     # ports:
     #   - "5432:5432"  # Uncomment for external access
     healthcheck:

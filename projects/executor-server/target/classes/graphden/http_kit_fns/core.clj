@@ -59,7 +59,15 @@
   {:args {:handler :any  ; Changed from :fn - handler is already a Clojure fn, not fn-id
           :port :int}
    :return-type :any}
-  (let [ring-handler (fn [request]
+  (let [stringify-keys (fn [m]
+                         ;; http-kit requires string keys in headers map
+                         ;; JSONB parsing may convert them to keywords
+                         (when m
+                           (into {}
+                                 (map (fn [[k v]]
+                                        [(if (keyword? k) (name k) (str k)) v])
+                                      m))))
+        ring-handler (fn [request]
                        ;; Convert request to jsonb-compatible format
                        (let [req-map {:method (name (:request-method request))
                                       :uri (:uri request)
@@ -70,8 +78,9 @@
                              ;; Call the Clojure handler function directly
                              response (handler req-map)]
                          ;; Ensure response has required keys
+                         ;; Stringify header keys (JSONB may return keywords)
                          {:status (or (:status response) 200)
-                          :headers (or (:headers response) {})
+                          :headers (stringify-keys (or (:headers response) {}))
                           :body (or (:body response) "")}))]
     (http-kit/run-server ring-handler {:port port})))
 

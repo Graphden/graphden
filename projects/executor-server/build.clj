@@ -21,21 +21,36 @@
 (defn uber
   [_]
   (clean nil)
-  (b/copy-dir {:src-dirs ["../../bases/executor-runtime/src"
+  (b/copy-dir {:src-dirs [;; Base runtime
+                          "../../bases/executor-runtime/src"
                           "../../bases/executor-runtime/resources"
+                          ;; Core components
                           "../../components/base-functions/src"
                           "../../components/executor/src"
+                          "../../components/fn-composition/src"
                           "../../components/fn-registry/src"
                           "../../components/http-kit-fns/src"
                           "../../components/reitit-fns/src"
-                          "../../components/web-server/src"
-                          "../../components/graph-storage-memory/src"
+                          "../../components/web-server-fns/src"
+                          ;; Data schema
                           "../../components/graph-data-schema/src"
+                          "../../components/cache-data-schema/src"
+                          "../../components/versioned-data-schema/src"
                           "../../components/malli-data-schema/src"
-                          "../../components/memory-storage/src"
                           "../../components/data-schema-protocol/src"
+                          "../../components/field-types/src"
+                          ;; Storage
                           "../../components/storage-protocol/src"
-                          "../../components/field-types/src"]
+                          "../../components/graph-protocol/src"
+                          "../../components/postgres-storage/src"
+                          "../../components/graph-storage-age/src"
+                          ;; Caching (for postgres mode)
+                          "../../components/cache-protocol/src"
+                          "../../components/cache-postgres/src"
+                          "../../components/cached-storage/src"
+                          ;; Versioning
+                          "../../components/versioned-storage/src"
+                          "../../components/cached-versioned-storage/src"]
                :target-dir class-dir})
   (b/compile-clj {:basis basis
                   :ns-compile '[graphden.executor-runtime.core]

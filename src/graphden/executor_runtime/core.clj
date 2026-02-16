@@ -100,5 +100,5 @@
                             (Thread. #(stop!)))
 
   ;; Block main thread to keep server running
-  (println "Press Ctrl+C to stop...")
+  (log/info "Server running. Press Ctrl+C to stop.")
   @(promise))

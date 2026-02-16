@@ -13,7 +13,8 @@
     (let [router-def (get reitit-fns/all-defs :router)]
       (is (map? router-def))
       (is (contains? (:args router-def) :routes))
-      (is (= :jsonb (:routes (:args router-def))))
+      ;; :any because routes contain Clojure handler fns (not serializable)
+      (is (= :any (:routes (:args router-def))))
       (is (= :fn (:return-type router-def)))
       (is (fn? (:impl router-def))))))
 

@@ -167,6 +167,84 @@ Two types of references in arg-value:
 - Inferring from arg-schema type — possible but makes behavior implicit
 - Single reference type with explicit "execute" node — more entities
 
+### Base Functions Philosophy
+
+**Base functions are minimal primitives that wrap Clojure/Java capabilities.**
+
+They should be:
+- **Atomic** — a single operation that cannot be expressed as composition of other base-fns
+- **Generic** — no hardcoded business logic, values, or domain specifics
+- **Small** — typically 1-10 lines of implementation code
+- **Library wrappers** — thin layers over Clojure core, Java interop, or external libraries
+
+**Examples of GOOD base functions:**
+
+| Name | Purpose | Why it's a base-fn |
+|------|---------|-------------------|
+| `add` | `(apply + nums)` | Wraps Clojure `+` |
+| `http-server` | Start http-kit server | Wraps http-kit library |
+| `render-hiccup` | Convert hiccup to HTML | Wraps hiccup library |
+| `router` | Create Ring router | Wraps reitit library |
+| `query-entities` | Query storage | Access to storage protocol |
+| `env` | Get environment variable | Access to system |
+
+**Examples of BAD base functions (anti-patterns):**
+
+| Name | Problem | What it should be |
+|------|---------|-------------------|
+| `graph-editor-server` | 250+ lines, hardcoded routes, HTML, CSS, JS | Multiple fn-defs composing `router`, `http-server`, `render-hiccup` |
+| `user-login-handler` | Hardcoded auth logic | fn-def composing `query-entities`, `if`, `json-response` |
+| `dashboard-page` | Hardcoded page structure | fn-def composing `html-page`, `with-htmx`, etc. |
+
+**Rule of thumb:** If a base function contains:
+- Hardcoded strings (except library defaults)
+- Hardcoded HTML/CSS/JS
+- Hardcoded routes
+- Hardcoded business logic
+- More than ~20 lines of code
+
+...it should be a **fn-def** (graph composition), not a base-fn.
+
+**The graph editor UI should be built entirely as fn-defs:**
+```clojure
+;; CORRECT: fn-defs composing base functions
+{:name :editor-styles
+ :parent :const
+ :args {:x "* { box-sizing: border-box; ... }"}}
+
+{:name :editor-page-body
+ :parent :const
+ :args {:x [:div {:class "layout"} ...]}}
+
+{:name :editor-page
+ :parent :html-page
+ :args {:title "Graph Editor"
+        :head :editor-head>
+        :body :editor-page-body>
+        :scripts :editor-scripts>}}
+
+{:name :editor-handler
+ :parent :html-handler
+ :args {:body :editor-page>}}
+
+{:name :editor-router
+ :parent :router
+ :args {:routes [["/" {"get" {"handler" :editor-handler}}]
+                 ["/health" {"get" {"handler" :health-handler}}]
+                 ["/api/entities/all" {"get" {"handler" :all-entities-handler}}]]}}
+
+{:name :graph-editor-server
+ :parent :http-server
+ :args {:handler :editor-router>
+        :port 8080}}
+```
+
+This approach:
+- Makes UI structure visible in the graph
+- Allows modification without Clojure knowledge
+- Follows DRY (shared components can be reused)
+- Enables visual editing of the UI structure
+
 ### Means of Abstraction
 
 #### call-site (Named Intermediate Results)

@@ -16,8 +16,10 @@
   ;; Web
   http-kit/http-kit {:mvn/version "2.8.1"}
   metosin/reitit {:mvn/version "0.10.0"}
+  ;; HTML templating
+  hiccup/hiccup {:mvn/version "2.0.0-RC4"}
   ;; System lifecycle
-  integrant/integrant {:mvn/version "0.11.0"}
+  integrant/integrant {:mvn/version "1.0.1"}
   aero/aero {:mvn/version "1.1.6"}}
 
  :aliases
@@ -33,7 +35,7 @@
    :extra-deps
    {org.testcontainers/testcontainers {:mvn/version "1.21.4"}
     org.testcontainers/postgresql {:mvn/version "1.21.4"}
-    integrant/repl {:mvn/version "0.4.0"}}}
+    integrant/repl {:mvn/version "0.5.0"}}}
 
   :bench
   {:extra-paths ["development/bench"]
@@ -68,9 +70,9 @@
   {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}
    :main-opts ["-m" "noahtheduke.splint"]}
 
-  :eastwood
-  {:extra-deps {jonase/eastwood {:mvn/version "1.4.3"}}
-   :main-opts ["-m" "eastwood.lint"]}
+  ;; NOTE: Eastwood removed - incompatible with Clojure 1.12 qualified methods (Class/.method)
+  ;; See: https://github.com/jonase/eastwood/issues/457
+  ;; Re-add when tools.analyzer supports Clojure 1.12
 
   ;; Utilities
   :outdated
@@ -86,7 +88,7 @@
 
   ;; Build uberjar
   :build
-  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
+  {:deps {io.github.clojure/tools.build {:mvn/version "0.10.12"}}
    :ns-default build}
 
   ;; Run server

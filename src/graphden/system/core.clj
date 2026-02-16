@@ -23,6 +23,9 @@
     [graphden.storage.age.interface :as age]
     [graphden.storage.protocol.interface :as sp]
     [graphden.versioning.storage.interface :as vs]
+    [graphden.web.crud.interface :as crud-fns]
+    [graphden.web.graph.interface :as graph-fns]
+    [graphden.web.html.interface :as html-fns]
     [graphden.web.http-kit.interface :as http-kit-fns]
     [graphden.web.reitit.interface :as reitit-fns]
     [integrant.core :as ig]))
@@ -85,7 +88,10 @@
   (registry/initialize-all! storage
                             [(bf/get-all-defs)
                              http-kit-fns/all-defs
-                             reitit-fns/all-defs])
+                             reitit-fns/all-defs
+                             html-fns/all-defs
+                             graph-fns/all-defs
+                             crud-fns/all-defs])
   (log/info "Base functions registered")
   :registered)
 

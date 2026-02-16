@@ -40,7 +40,8 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.types :as types]
-    [graphden.storage.protocol.config :as config]))
+    [graphden.storage.protocol.config :as config]
+    [graphden.storage.protocol.interface :as sp]))
 
 
 ;; === Delay Building Infrastructure ===
@@ -205,13 +206,113 @@
     arg-value))
 
 
+(defn- execute-external-call-site
+  "Executes a call-site that's not in the current execution graph.
+
+   When nested JSONB values contain call-site UUIDs, these call-sites
+   aren't included in the parent's execution graph. This function:
+   1. Reads the call-site from storage to get its fn-id
+   2. Fetches a fresh execution graph for that fn
+   3. Executes the fn and returns the result
+
+   Uses the result-cache from context for memoization."
+  [context call-site-id execute-call-site-fn]
+  (let [result-cache (:result-cache context)
+        cached (get @result-cache call-site-id)]
+    (if (some? cached)
+      ;; Cache hit
+      cached
+      ;; Cache miss - fetch and execute
+      (let [storage (:storage context)
+            cs (sp/read-entity storage :call-site call-site-id)]
+        (when-not cs
+          (throw (ex-info "call-site not found in storage"
+                          {:type :execution-error/call-site-not-found
+                           :call-site-id call-site-id})))
+        (let [fn-id (:fn-id cs)
+              ;; Fetch fresh execution graph for this fn
+              cs-execution-graph (sp/resolve-execution-graph storage fn-id)
+              ;; Create new context with this graph and the call-site added
+              cs-context (-> context
+                             (assoc :execution-graph
+                                    (update cs-execution-graph :call-sites
+                                            assoc call-site-id cs))
+                             (assoc :current-call-site-id call-site-id))
+              ;; Execute using the injected execute-call-site-fn
+              result (execute-call-site-fn cs-context call-site-id)]
+          ;; Cache the result
+          (swap! result-cache assoc call-site-id result)
+          result)))))
+
+
+(defn- resolve-nested-call-sites
+  "Recursively walks a value and resolves any call-site UUIDs.
+
+   For nested structures (maps, vectors), UUIDs that are call-sites are
+   executed and replaced with their results. This allows fn-defs to embed
+   call-site references anywhere in their args (e.g., handlers in route maps).
+
+   When a UUID is found that's not in the current execution graph, we check
+   storage to see if it's a call-site. If so, we fetch its execution graph
+   and execute it.
+
+   Parameters:
+   - value: The value to resolve (may contain nested call-site UUIDs)
+   - context: Execution context with call-sites map and storage
+   - execute-call-site-fn: Function to execute call-sites
+
+   Returns the value with all call-site UUIDs replaced by their results."
+  [value context execute-call-site-fn]
+  (let [call-sites (-> context :execution-graph :call-sites)
+        storage (:storage context)
+        parsed-uuid (try-parse-uuid value)]
+    (cond
+      ;; UUID that's a call-site in current graph - execute and return result
+      (and parsed-uuid (contains? call-sites parsed-uuid))
+      (let [cs-context (assoc context :current-call-site-id parsed-uuid)]
+        (execute-call-site-fn cs-context parsed-uuid))
+
+      ;; UUID not in current graph - check storage to see if it's a call-site
+      parsed-uuid
+      (let [cs (sp/read-entity storage :call-site parsed-uuid)]
+        (if cs
+          ;; It's a call-site - execute it
+          (execute-external-call-site context parsed-uuid execute-call-site-fn)
+          ;; Not a call-site - it's a fn-id, keep as-is
+          parsed-uuid))
+
+      ;; Map: recursively resolve values (not keys)
+      (map? value)
+      (persistent!
+        (reduce-kv
+          (fn [m k v]
+            (assoc! m k (resolve-nested-call-sites v context execute-call-site-fn)))
+          (transient {})
+          value))
+
+      ;; Vector: recursively resolve elements
+      (vector? value)
+      (mapv #(resolve-nested-call-sites % context execute-call-site-fn) value)
+
+      ;; List/seq: recursively resolve elements (return as vector for JSONB compat)
+      (sequential? value)
+      (vec (map #(resolve-nested-call-sites % context execute-call-site-fn) value))
+
+      ;; Other values: return as-is
+      :else value)))
+
+
 (defn build-delay
   "Builds a delay for an arg-value with error context.
 
    Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
    - UUID in call-sites map → execute fn and use result (cached)
    - UUID not in call-sites → pass as fn-id (for HOF, handlers, etc.)
-   - Non-UUID → literal value
+   - Non-UUID → literal value (with nested call-site UUIDs resolved)
+
+   For complex values (maps, vectors), nested call-site UUIDs are recursively
+   resolved. This allows fn-defs to embed call-site references anywhere
+   (e.g., handlers in route definitions).
 
    Parameters:
    - context: Execution context
@@ -235,8 +336,9 @@
       (let [call-sites (-> context :execution-graph :call-sites)]
         (build-uuid-ref-delay context parsed-uuid arg-name call-sites
                               execute-call-site-fn))
-      ;; Literal value
-      (delay raw-value))))
+      ;; Literal or complex value - resolve nested call-sites
+      (wrap-delay-with-context arg-name :db-value
+        #(resolve-nested-call-sites raw-value context execute-call-site-fn)))))
 
 
 ;; === Call Site Argument Resolution ===

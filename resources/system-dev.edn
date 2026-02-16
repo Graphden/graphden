@@ -4,7 +4,7 @@
 {:db/schema {}
 
  :db/age
- {:jdbc-url "jdbc:postgresql://localhost:5432/graphden_dev"
+ {:jdbc-url "jdbc:postgresql://localhost:5434/graphden"
   :username "graphden"
   :password "graphden"
   :pool-size 5
@@ -18,16 +18,16 @@
 
  :exec/fn-entities
  {:storage #ig/ref :db/versioned
-  :fn-defs #ig/refset :app/fn-defs}
+  :fn-defs #ig/ref :app/fn-defs}
 
  :exec/context
  {:storage #ig/ref :db/versioned
   :max-depth 1000
-  :timeout-ms 30000}
+  :timeout-ms 120000}
 
  :http/server
  {:context #ig/ref :exec/context
   :startup-fn-name :web-server-fn
   :port 8080}
 
- :app/fn-defs #var graphden.web.server.interface/fn-defs}
+ :app/fn-defs #var graphden.web.editor.interface/fn-defs}

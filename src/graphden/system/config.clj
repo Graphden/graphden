@@ -6,10 +6,30 @@
     [integrant.core :as ig]))
 
 
+;; Register Integrant reader tags for Aero
+(defmethod aero/reader 'ig/ref
+  [_ _ value]
+  (ig/ref value))
+
+
+(defmethod aero/reader 'ig/refset
+  [_ _ value]
+  (ig/refset value))
+
+
+;; Register #var reader tag - resolves to the var's value
+(defmethod aero/reader 'var
+  [_ _ value]
+  (let [ns-sym (symbol (namespace value))
+        var-sym (symbol (name value))]
+    (require ns-sym)
+    (deref (ns-resolve ns-sym var-sym))))
+
+
 (defn read-config
   "Reads system configuration for the given profile.
    Profile can be :dev, :test, or :prod.
-   Returns a prepared Integrant configuration map."
+   Returns an Integrant configuration map."
   [profile]
   (let [filename (str "system-" (name profile) ".edn")
         resource (io/resource filename)]
@@ -17,6 +37,4 @@
       (throw (ex-info (str "Config file not found: " filename)
                       {:profile profile
                        :filename filename})))
-    (-> resource
-        (aero/read-config {:profile profile})
-        (ig/prep))))
+    (aero/read-config resource {:profile profile})))

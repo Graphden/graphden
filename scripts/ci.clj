@@ -74,8 +74,8 @@
         outdated-cmd ["clojure" "-M:outdated"]
         security-cmd ["clojure" "-M:watson" "-p" "deps.edn"]
 
-        ;; Define checks (eastwood disabled - issues with Clojure 1.12 method syntax)
-        ;; security disabled - requires NVD API key, run manually with bb security
+        ;; Define checks
+        ;; NOTE: security check disabled - requires NVD API key, run manually with bb security
         checks [{:name "clj-kondo" :cmd kondo-cmd}
                 {:name "splint" :cmd splint-cmd}
                 {:name "cljstyle" :cmd cljstyle-cmd}

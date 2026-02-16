@@ -9,6 +9,7 @@
    - Strings: str, subs, str-len, str-upper, str-lower, str-trim, str-split, str-join
    - Collections: first, rest, cons, conj, get, assoc, dissoc, count, empty?, etc.
    - HOF: map, filter, reduce, some, every?, find-first, group-by, sort-by, apply
+   - System: jvm-info, current-time-ms, health-status
 
    All functions are defined using the defbase macro which handles
    automatic argument dereferencing. Arguments are passed as delays
@@ -35,7 +36,8 @@
     [graphden.executor.base-fns.collections :as collections]
     [graphden.executor.base-fns.hof :as hof]
     [graphden.executor.base-fns.logic :as logic]
-    [graphden.executor.base-fns.strings :as strings]))
+    [graphden.executor.base-fns.strings :as strings]
+    [graphden.executor.base-fns.system :as system]))
 
 
 ;; Re-export individual def maps for consumers who want subsets
@@ -46,6 +48,7 @@
 (def string-defs strings/string-defs)
 (def collection-defs collections/collection-defs)
 (def hof-defs hof/hof-defs)
+(def system-defs system/system-defs)
 
 
 ;; All definitions merged
@@ -57,4 +60,5 @@
          conditional-defs
          string-defs
          collection-defs
-         hof-defs))
+         hof-defs
+         system-defs))

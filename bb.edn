@@ -45,11 +45,8 @@
   {:doc "Check formatting [path]"
    :task (clojure (str "-M:cljstyle check " (or (first *command-line-args*) all-paths)))}
 
-  eastwood
-  {:doc "Run Eastwood static analysis (NOTE: Eastwood 1.4.3 has issues with Clojure 1.12 method syntax)"
-   :task (do
-           (println "Warning: Eastwood may fail on Clojure 1.12+ method syntax (Type/.method)")
-           (clojure "-M:dev:eastwood"))}
+  ;; NOTE: Eastwood removed - incompatible with Clojure 1.12 qualified methods (Class/.method)
+  ;; See: https://github.com/jonase/eastwood/issues/457
 
   ;; === TESTS ===
 

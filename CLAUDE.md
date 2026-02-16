@@ -167,6 +167,39 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
 For complete examples, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) Part 5.5.
 
+### Base Function Philosophy (CRITICAL)
+
+**Base functions MUST be minimal primitives wrapping Clojure/Java/library capabilities.**
+
+✅ **GOOD base-fns** (atomic, generic, small):
+- `add`, `sub`, `mul` — wrap Clojure arithmetic
+- `http-server` — wrap http-kit `run-server`
+- `render-hiccup` — wrap hiccup2 `html`
+- `router` — wrap reitit router creation
+- `query-entities` — wrap storage protocol
+- `env` — get environment variable
+
+❌ **BAD base-fns** (anti-patterns to avoid):
+- Hardcoded HTML/CSS/JS content
+- Hardcoded routes or handlers
+- Hardcoded business logic
+- More than ~20 lines of code
+- Anything that could be composed from other base-fns
+
+**Rule:** If it contains hardcoded strings (except library defaults), HTML, routes, or logic — it should be a **fn-def**, not a base-fn.
+
+**Example: Graph Editor should be fn-defs:**
+```clojure
+;; CORRECT approach
+{:name :editor-styles, :parent :const, :args {:x "CSS here..."}}
+{:name :editor-body, :parent :const, :args {:x [:div ...]}}
+{:name :editor-page, :parent :html-page, :args {:title "Editor" :body :editor-body>}}
+{:name :editor-router, :parent :router, :args {:routes [...]}}
+{:name :web-server, :parent :http-server, :args {:handler :editor-router> :port 8080}}
+```
+
+See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) "Base Functions Philosophy" for full details.
+
 ### Base Function impl-hash
 
 Each base function has an `impl-hash` stored in `fn-schema` for version tracking:

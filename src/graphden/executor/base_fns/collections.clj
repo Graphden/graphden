@@ -35,6 +35,14 @@
   (conj coll x))
 
 
+(defbase conj-any-fn
+  "Conj that can work with non-JSON-serializable values like functions.
+   Use when building structures that contain function objects."
+  {:args {:coll :any, :x :any}
+   :return-type :any}
+  (conj coll x))
+
+
 (defbase get-fn
   {:args {:coll :jsonb, :k :any, :default :any}
    :return-type :any}
@@ -45,6 +53,14 @@
   {:args {:m :jsonb, :k :any, :v :any}
    :return-type :jsonb}
   (assoc m k v))
+
+
+(defbase assoc-any-fn
+  "Assoc that can work with non-JSON-serializable values like functions.
+   Use when building structures that contain function objects."
+  {:args {:m :any, :k :any, :v :any}
+   :return-type :any}
+  (assoc (or m {}) k v))
 
 
 (defbase dissoc-fn
@@ -174,8 +190,10 @@
    :rest rest-fn
    :cons cons-fn
    :conj conj-fn
+   :conj-any conj-any-fn
    :get get-fn
    :assoc assoc-fn
+   :assoc-any assoc-any-fn
    :dissoc dissoc-fn
    :count count-fn
    :empty? empty?-fn

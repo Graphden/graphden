@@ -20,18 +20,26 @@
 
    ## Arg Value Syntax
 
+   At the TOP LEVEL of args, both syntaxes work:
    - `:fn-name` - ref<fn>: pass fn as callable (for HOF, won't execute)
    - `:fn-name>` - ref<call-site>: execute fn and use result
    - `:fn-name>result-name` - ref<call-site> with explicit name
 
-   Example:
+   In NESTED structures (maps, vectors inside arg values), only the
+   `:fn-name>` syntax works. Plain keywords are kept as-is because
+   we can't distinguish `:some-fn` (intended fn ref) from `:status` (data).
+
+   Example with nested references:
    ```clojure
-   {:name :hello-handler-map
-    :parent :assoc
-    :args {:m {}
-           :k \"handler\"
-           :v :hello-handler>}}  ; executes hello-handler, uses result
+   {:name :my-router
+    :parent :router
+    :args {:routes [[\"GET\" \"/\" {:handler :home-handler>}]
+                    [\"GET\" \"/api\" {:handler :api-handler>}]]}}
    ```
+
+   The `:home-handler>` and `:api-handler>` will be resolved recursively,
+   creating call-sites and replacing references with call-site-ids.
+   Other keywords like `:handler` (map key) are kept as-is.
 
    Multiple references to `:fn-name>` create one call-site (same name).
    Use `:fn-name>name1`, `:fn-name>name2` for different call-sites.
@@ -61,27 +69,41 @@
 
 ;; === Arg Value Parsing ===
 
+(defn- valid-identifier?
+  "Returns true if s looks like a valid Clojure keyword name.
+   Valid identifiers don't contain whitespace, newlines, or other special chars."
+  [s]
+  (when (and (string? s) (seq s))
+    ;; Simple check: no whitespace, must start with letter/underscore/dash
+    (and (not (re-find #"\s" s))
+         (re-matches #"[a-zA-Z_\-][a-zA-Z0-9_\-]*" s))))
+
 (defn- parse-fn-result-ref
-  "Parses a keyword that might be a call-site reference.
-   :fn-name> means execute fn-name, result name defaults to fn-name
+  "Parses a keyword or string that might be a call-site reference.
+   :fn-name> or \"fn-name>\" means execute fn-name, result name defaults to fn-name
    :fn-name>result-name means execute fn-name, result name is result-name
-   Returns [fn-name result-name] or nil if not a call-site ref."
-  [kw]
-  (when (keyword? kw)
-    (let [kw-name (name kw)
-          kw-ns (namespace kw)]
-      (when (str/includes? kw-name ">")
-        (let [parts (str/split kw-name #">" 2)
-              fn-name (first parts)
-              result-name (second parts)]
-          (when (seq fn-name)
-            ;; Reconstruct keyword with namespace if present
-            (let [fn-kw (if kw-ns (keyword kw-ns fn-name) (keyword fn-name))
-                  ;; If result-name is empty (just ":fn>"), use fn-name as default
-                  result-kw (if (or (nil? result-name) (str/blank? result-name))
-                              fn-kw
-                              (if kw-ns (keyword kw-ns result-name) (keyword result-name)))]
-              [fn-kw result-kw])))))))
+   Returns [fn-name result-name] or nil if not a call-site ref.
+
+   Also handles strings (for JSONB round-trip where keywords become strings)."
+  [value]
+  (let [[kw-name kw-ns]
+        (cond
+          (keyword? value) [(name value) (namespace value)]
+          (string? value) [value nil]
+          :else [nil nil])]
+    (when (and kw-name (str/includes? kw-name ">"))
+      (let [parts (str/split kw-name #">" 2)
+            fn-name (first parts)
+            result-name (second parts)]
+        ;; Only match if fn-name looks like a valid identifier
+        (when (and (seq fn-name) (valid-identifier? fn-name))
+          ;; Reconstruct keyword with namespace if present
+          (let [fn-kw (if kw-ns (keyword kw-ns fn-name) (keyword fn-name))
+                ;; If result-name is empty (just ":fn>"), use fn-name as default
+                result-kw (if (or (nil? result-name) (str/blank? result-name))
+                            fn-kw
+                            (if kw-ns (keyword kw-ns result-name) (keyword result-name)))]
+            [fn-kw result-kw]))))))
 
 
 (defn- extract-fn-ref
@@ -141,17 +163,113 @@
   (registry/arg-schema-uuid parent-name arg-name))
 
 
+;; === Recursive Reference Handling ===
+
+(defn- collect-refs-recursively
+  "Recursively walks a data structure and collects all fn references.
+   Only collects :fn-name> syntax (call-site refs) in nested structures.
+   Plain keywords are not collected (not treated as fn refs).
+
+   Returns a sequence of [fn-name ref-type result-name] tuples."
+  [value]
+  (cond
+    ;; Check if it's a call-site reference keyword or string (contains >)
+    ;; Handles strings for JSONB round-trip where keywords become strings
+    (or (keyword? value) (string? value))
+    (when-let [[fn-name result-name] (parse-fn-result-ref value)]
+      [[fn-name :call-site result-name]])
+
+    ;; Recursively walk maps - only walk values, not keys
+    (map? value)
+    (mapcat collect-refs-recursively (vals value))
+
+    ;; Recursively walk vectors/lists/seqs
+    (or (vector? value) (sequential? value))
+    (mapcat collect-refs-recursively value)
+
+    ;; Other values - no refs
+    :else
+    nil))
+
+
+(defn- resolve-refs-recursively
+  "Recursively walks a data structure and resolves fn references.
+   Only resolves :fn-name> or \"fn-name>\" syntax (call-site refs) in nested structures.
+   Plain keywords are kept as-is (not treated as fn refs).
+
+   This is intentional: in nested structures like routes, we can't distinguish
+   between a keyword meant to be a fn ref (:some-fn) and a data keyword (:status).
+   So we only support explicit call-site syntax (:fn-name>) in nested structures.
+
+   Also handles strings (for JSONB round-trip where keywords become strings).
+
+   Arguments:
+   - value: the value to resolve
+   - storage: storage for lookups
+   - created-fns: map of {fn-name -> fn-id} for fns created in this batch
+   - created-call-sites: atom tracking call-sites created for deduplication"
+  [value storage created-fns created-call-sites]
+  (cond
+    ;; Check if it's a call-site reference keyword or string (contains >)
+    (or (keyword? value) (string? value))
+    (if-let [[fn-name result-name] (parse-fn-result-ref value)]
+      ;; :fn-name> or "fn-name>" - get or create call-site
+      (let [result-name-str (name result-name)]
+        (if-let [existing-cs-id (get @created-call-sites result-name)]
+          existing-cs-id
+          (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
+                call-site (sp/create-entity storage :call-site
+                                            {:fn-id ref-fn-id
+                                             :name result-name-str})]
+            (swap! created-call-sites assoc result-name (:id call-site))
+            (:id call-site))))
+      ;; Plain keyword/string without > - keep as is (not a call-site ref)
+      value)
+
+    ;; Recursively resolve maps - only resolve values, not keys
+    (map? value)
+    (into {}
+          (map (fn [[k v]]
+                 ;; Keys are never resolved - they're just data keys
+                 [k (resolve-refs-recursively v storage created-fns created-call-sites)])
+               value))
+
+    ;; Recursively resolve vectors
+    (vector? value)
+    (mapv #(resolve-refs-recursively % storage created-fns created-call-sites) value)
+
+    ;; Recursively resolve lists/seqs (convert to vector for JSON compatibility)
+    (sequential? value)
+    (vec (map #(resolve-refs-recursively % storage created-fns created-call-sites) value))
+
+    ;; Other values - return as is
+    :else
+    value))
+
+
 ;; === Dependency Analysis ===
+
+(defn- collect-deps-from-value
+  "Collects fn dependencies from a single arg value.
+   At the top level, supports both :fn-name and :fn-name> syntax.
+   In nested structures, only :fn-name> syntax is supported."
+  [value]
+  (if-let [ref-info (extract-fn-ref value)]
+    ;; Top-level: both :fn-name and :fn-name> work
+    #{(first ref-info)}
+    ;; Not a top-level ref, check nested structures with recursive collection
+    (set (map first (collect-refs-recursively value)))))
+
 
 (defn- extract-dependencies
   "Extracts fn names that this fn-def depends on (from args).
-   Handles both :fn-name and :fn-name> syntax.
+   At top-level args, handles both :fn-name and :fn-name> syntax.
+   In nested structures, only :fn-name> syntax is supported.
    Returns set of keywords."
   [fn-def fn-names-in-set]
-  (let [arg-values (vals (:args fn-def {}))]
-    (->> arg-values
-         (keep extract-fn-ref)
-         (map first)
+  (let [args (:args fn-def {})]
+    (->> (vals args)
+         (mapcat collect-deps-from-value)
          (filter fn-names-in-set)
          set)))
 
@@ -293,13 +411,47 @@
             (:id av)))))))
 
 
+(defn- resolve-arg-value
+  "Resolves an arg value, handling both top-level and nested references.
+
+   At top-level (the arg value itself):
+   - :fn-name -> resolve to fn-id (for HOF)
+   - :fn-name> -> create call-site and resolve to call-site-id
+
+   In nested structures:
+   - Only :fn-name> syntax is supported (plain keywords are kept as-is)"
+  [arg-value storage created-fns created-call-sites]
+  (if-let [ref-info (extract-fn-ref arg-value)]
+    ;; Top-level fn reference
+    (let [[fn-name ref-type result-name] ref-info]
+      (cond
+        ;; :fn-name> - get or create call-site
+        (= :call-site ref-type)
+        (let [result-name-str (name result-name)]
+          (if-let [existing-cs-id (get @created-call-sites result-name)]
+            existing-cs-id
+            (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
+                  call-site (sp/create-entity storage :call-site
+                                              {:fn-id ref-fn-id
+                                               :name result-name-str})]
+              (swap! created-call-sites assoc result-name (:id call-site))
+              (:id call-site))))
+
+        ;; :fn-name - resolve to fn id
+        (= :fn ref-type)
+        (resolve-fn-id storage created-fns fn-name)
+
+        :else arg-value))
+    ;; Not a top-level ref, recursively resolve nested structures
+    (resolve-refs-recursively arg-value storage created-fns created-call-sites)))
+
+
 (defn- create-arg-values!
   "Creates arg-value entities and fn-arg bindings for a fn.
    Resolves references to other fns.
 
-   For :fn-name> syntax:
-   1. Looks up or creates call-site entity by name
-   2. Uses call-site id as the arg-value (executor will execute it)
+   At top-level args, both :fn-name and :fn-name> syntax work.
+   In nested structures, only :fn-name> syntax is supported.
 
    With normalized schema:
    - arg-value is a pure value (no owner-fn-id)
@@ -314,33 +466,8 @@
         fn-id (:id fn-entity)]
     (doseq [[arg-name arg-value] args]
       (let [arg-schema-id (resolve-arg-schema-id parent arg-name)
-            ;; Parse the arg value
-            ref-info (extract-fn-ref arg-value)
-            resolved-value
-            (cond
-              ;; :fn-name> or :fn-name>result-name - get or create call-site
-              (and ref-info (= :call-site (second ref-info)))
-              (let [fn-name (first ref-info)
-                    result-name (nth ref-info 2)
-                    result-name-str (name result-name)]
-                ;; Check if call-site with this name already exists
-                (if-let [existing-cs-id (get @created-call-sites result-name)]
-                  existing-cs-id
-                  ;; Create new call-site
-                  (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                        call-site (sp/create-entity storage :call-site
-                                                    {:fn-id ref-fn-id
-                                                     :name result-name-str})]
-                    (swap! created-call-sites assoc result-name (:id call-site))
-                    (:id call-site))))
-
-              ;; :fn-name - resolve to fn id (pass as callable)
-              (and ref-info (= :fn (second ref-info)))
-              (resolve-fn-id storage created-fns (first ref-info))
-
-              ;; literal value
-              :else
-              arg-value)
+            ;; Resolve the arg value (handles top-level and nested refs)
+            resolved-value (resolve-arg-value arg-value storage created-fns created-call-sites)
             ;; Get or create arg-value (deduplicated)
             arg-value-id (get-or-create-arg-value! storage arg-schema-id resolved-value created-arg-values)]
         ;; Create fn-arg binding (fn -> arg-value)

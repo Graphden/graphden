@@ -431,3 +431,159 @@
           arg-values (sp/query-entities storage :arg-value {})]
       (is (= 2 (count arg-values))
           "Different values should create separate arg-values"))))
+
+
+;; === Recursive Reference Resolution Tests ===
+
+(deftest collect-refs-recursively-test
+  (testing "collects call-site refs from flat map"
+    ;; Only :fn-a> (with >) is collected, plain :fn-b is NOT collected
+    (let [refs (#'core/collect-refs-recursively {:a :fn-a> :b :fn-b :c 42})]
+      (is (= #{[:fn-a :call-site :fn-a]} (set refs)))))
+
+  (testing "collects refs from nested map"
+    (let [refs (#'core/collect-refs-recursively {:outer {:inner :nested-fn>}})]
+      (is (= #{[:nested-fn :call-site :nested-fn]} (set refs)))))
+
+  (testing "collects call-site refs from vector"
+    ;; Only :fn-b> (with >) is collected, plain :fn-a is NOT collected
+    (let [refs (#'core/collect-refs-recursively [:fn-a :fn-b> "literal"])]
+      (is (= #{[:fn-b :call-site :fn-b]} (set refs)))))
+
+  (testing "collects refs from deeply nested structure"
+    (let [refs (#'core/collect-refs-recursively
+                 {:routes [["/" {:handler :home>}]
+                           ["/api" {:handler :api>}]]})]
+      (is (= #{[:home :call-site :home]
+               [:api :call-site :api]}
+             (set refs)))))
+
+  (testing "returns empty for literals"
+    (is (empty? (#'core/collect-refs-recursively 42)))
+    (is (empty? (#'core/collect-refs-recursively "string")))
+    (is (empty? (#'core/collect-refs-recursively nil))))
+
+  (testing "returns empty for plain keywords without >"
+    ;; Plain keywords are not treated as fn refs in recursive collection
+    (is (empty? (#'core/collect-refs-recursively :some-keyword)))
+    (is (empty? (#'core/collect-refs-recursively {:status 200})))))
+
+
+(deftest resolve-refs-recursively-test
+  (testing "resolves refs in nested map"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:handler-fn {:args {:x :any}
+                                                     :return-type :fn
+                                                     :impl (fn [_ _] (fn [_] nil))}}])
+          ;; Create a fn to reference
+          _ (fn-composition/sync-fns-to-storage! storage
+                                                 [{:name :home-handler
+                                                   :parent :handler-fn
+                                                   :args {:x "home"}}])
+          created-fns {:home-handler (-> (sp/query-entities storage :fn {:name "home-handler"})
+                                         first :id)}
+          created-call-sites (atom {})
+          ;; Resolve refs in nested structure
+          resolved (#'core/resolve-refs-recursively
+                     {:routes [["/" {:handler :home-handler>}]]}
+                     storage created-fns created-call-sites)]
+      ;; Check that call-site was created
+      (is (= 1 (count @created-call-sites)))
+      (is (contains? @created-call-sites :home-handler))
+      ;; Check that the structure has UUID instead of keyword
+      (is (uuid? (get-in resolved [:routes 0 1 :handler])))))
+
+  (testing "resolves multiple refs in same structure"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:handler-fn {:args {:x :any}
+                                                     :return-type :fn
+                                                     :impl (fn [_ _] (fn [_] nil))}}])
+          _ (fn-composition/sync-fns-to-storage! storage
+                                                 [{:name :home
+                                                   :parent :handler-fn
+                                                   :args {:x "home"}}
+                                                  {:name :api
+                                                   :parent :handler-fn
+                                                   :args {:x "api"}}])
+          home-id (-> (sp/query-entities storage :fn {:name "home"}) first :id)
+          api-id (-> (sp/query-entities storage :fn {:name "api"}) first :id)
+          created-fns {:home home-id :api api-id}
+          created-call-sites (atom {})
+          resolved (#'core/resolve-refs-recursively
+                     {:routes [["/" {:handler :home>}]
+                               ["/api" {:handler :api>}]]}
+                     storage created-fns created-call-sites)]
+      ;; Both call-sites created
+      (is (= 2 (count @created-call-sites)))
+      (is (uuid? (get-in resolved [:routes 0 1 :handler])))
+      (is (uuid? (get-in resolved [:routes 1 1 :handler])))))
+
+  (testing "preserves non-ref values"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:handler-fn {:args {:x :any}
+                                                     :return-type :fn
+                                                     :impl (fn [_ _] (fn [_] nil))}}])
+          created-fns {}
+          created-call-sites (atom {})
+          resolved (#'core/resolve-refs-recursively
+                     {:a 42 :b "string" :c [1 2 3] :d {:nested true}}
+                     storage created-fns created-call-sites)]
+      (is (= {:a 42 :b "string" :c [1 2 3] :d {:nested true}} resolved)))))
+
+
+(deftest nested-routes-integration-test
+  (testing "sync fn-defs with nested route references"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:handler-fn {:args {:body :any}
+                                                     :return-type :fn
+                                                     :impl (fn [_ _] (fn [_] nil))}}
+                                       {:router {:args {:routes :any}
+                                                 :return-type :fn
+                                                 :impl (fn [_ _] (fn [_] nil))}}])
+          ;; Define handlers first, then router with nested refs
+          result (fn-composition/sync-fns-to-storage! storage
+                   [{:name :home-handler
+                     :parent :handler-fn
+                     :args {:body "home"}}
+                    {:name :api-handler
+                     :parent :handler-fn
+                     :args {:body "api"}}
+                    {:name :app-router
+                     :parent :router
+                     :args {:routes [["/" {:get {:handler :home-handler>}}]
+                                     ["/api" {:get {:handler :api-handler>}}]]}}])]
+      ;; All fns created
+      (is (= #{:home-handler :api-handler :app-router} (set (keys result))))
+      ;; Check call-sites were created for handlers
+      (let [home-id (:home-handler result)
+            api-id (:api-handler result)
+            home-call-sites (sp/query-entities storage :call-site {:fn-id home-id})
+            api-call-sites (sp/query-entities storage :call-site {:fn-id api-id})]
+        (is (= 1 (count home-call-sites)))
+        (is (= 1 (count api-call-sites)))
+        (is (= "home-handler" (:name (first home-call-sites))))
+        (is (= "api-handler" (:name (first api-call-sites)))))))
+
+  (testing "handles deeply nested references"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:const-fn {:args {:x :any}
+                                                   :return-type :any
+                                                   :impl (fn [_ _] nil)}}])
+          result (fn-composition/sync-fns-to-storage! storage
+                   [{:name :inner-fn
+                     :parent :const-fn
+                     :args {:x "inner"}}
+                    {:name :outer-fn
+                     :parent :const-fn
+                     :args {:x {:level1 {:level2 {:level3 :inner-fn>}}}}}])]
+      ;; Check fn created
+      (is (uuid? (:outer-fn result)))
+      ;; Check call-site created for inner-fn
+      (let [inner-id (:inner-fn result)
+            call-sites (sp/query-entities storage :call-site {:fn-id inner-id})]
+        (is (= 1 (count call-sites)))))))

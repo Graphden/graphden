@@ -42,7 +42,7 @@
    1. Matches request URI and method
    2. Calls the handler with request (+ path-params)
    3. Returns 404 if no match"
-  {:args {:routes :jsonb}
+  {:args {:routes :any}
    :return-type :fn}
   (let [;; Convert string keys to keywords (fn-defs uses strings for literal keys)
         normalized-routes (keywordize-map-keys routes)

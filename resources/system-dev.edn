@@ -1,0 +1,33 @@
+;; Development system configuration
+;; Uses local PostgreSQL with sensible defaults
+
+{:db/schema {}
+
+ :db/age
+ {:jdbc-url "jdbc:postgresql://localhost:5432/graphden_dev"
+  :username "graphden"
+  :password "graphden"
+  :pool-size 5
+  :schema #ig/ref :db/schema}
+
+ :db/versioned
+ {:base-storage #ig/ref :db/age}
+
+ :exec/base-fns
+ {:storage #ig/ref :db/versioned}
+
+ :exec/fn-entities
+ {:storage #ig/ref :db/versioned
+  :fn-defs #ig/refset :app/fn-defs}
+
+ :exec/context
+ {:storage #ig/ref :db/versioned
+  :max-depth 1000
+  :timeout-ms 30000}
+
+ :http/server
+ {:context #ig/ref :exec/context
+  :startup-fn-name :web-server-fn
+  :port 8080}
+
+ :app/fn-defs #var graphden.web.server.interface/fn-defs}

@@ -15,7 +15,10 @@
   cheshire/cheshire {:mvn/version "6.1.0"}
   ;; Web
   http-kit/http-kit {:mvn/version "2.8.1"}
-  metosin/reitit {:mvn/version "0.10.0"}}
+  metosin/reitit {:mvn/version "0.10.0"}
+  ;; System lifecycle
+  integrant/integrant {:mvn/version "0.11.0"}
+  aero/aero {:mvn/version "1.1.6"}}
 
  :aliases
  {:test
@@ -29,7 +32,8 @@
   {:extra-paths ["test" "development/src"]
    :extra-deps
    {org.testcontainers/testcontainers {:mvn/version "1.21.4"}
-    org.testcontainers/postgresql {:mvn/version "1.21.4"}}}
+    org.testcontainers/postgresql {:mvn/version "1.21.4"}
+    integrant/repl {:mvn/version "0.4.0"}}}
 
   :bench
   {:extra-paths ["development/bench"]

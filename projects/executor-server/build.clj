@@ -25,7 +25,9 @@
                           "../../bases/executor-runtime/src"
                           "../../bases/executor-runtime/resources"
                           ;; Main source directory (all components migrated here)
-                          "../../src"]
+                          "../../src"
+                          ;; Resources (system-*.edn configs)
+                          "../../resources"]
                :target-dir class-dir})
   (b/compile-clj {:basis basis
                   :ns-compile '[graphden.executor-runtime.core]

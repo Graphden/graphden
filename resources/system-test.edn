@@ -1,0 +1,22 @@
+;; Test system configuration
+;; Minimal config - jdbc-url is injected from testcontainer at runtime
+
+{:db/schema {}
+
+ :db/age
+ {:jdbc-url nil  ; Will be overridden by test fixture
+  :username "test"
+  :password "test"
+  :pool-size 2
+  :schema #ig/ref :db/schema}
+
+ :db/versioned
+ {:base-storage #ig/ref :db/age}
+
+ :exec/base-fns
+ {:storage #ig/ref :db/versioned}
+
+ :exec/context
+ {:storage #ig/ref :db/versioned
+  :max-depth 100
+  :timeout-ms 5000}}

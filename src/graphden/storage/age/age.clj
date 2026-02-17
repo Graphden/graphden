@@ -57,6 +57,25 @@
 
 ;; === Cypher Query Helpers ===
 
+(def ^:private valid-graph-name-pattern
+  "Pattern for valid AGE graph names: alphanumeric and underscore only."
+  #"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+(defn- validate-graph-name!
+  "Validates graph-name to prevent injection attacks.
+   Graph names must be alphanumeric with underscores only."
+  [graph-name]
+  (when-not (and (string? graph-name)
+                 (<= (count graph-name) 63)  ; PostgreSQL identifier limit
+                 (re-matches valid-graph-name-pattern graph-name))
+    (throw (ex-info "Invalid graph name"
+                    {:type :security-error/invalid-identifier
+                     :graph-name graph-name
+                     :pattern (str valid-graph-name-pattern)})))
+  graph-name)
+
+
 (defn- escape-cypher-string
   "Escapes a string for use in Cypher queries."
   [s]
@@ -64,12 +83,35 @@
     (-> (str s)
         (str/replace "\\" "\\\\")
         (str/replace "'" "\\'")
-        (str/replace "\"" "\\\""))))
+        (str/replace "\""  "\\\""))))
+
+
+(def ^:private valid-col-name-pattern
+  "Pattern for valid column names in Cypher query results."
+  #"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+(def ^:private valid-col-type-pattern
+  "Pattern for valid AGE column types."
+  #"^[a-zA-Z_][a-zA-Z0-9_]*$")
+
+
+(defn- validate-col-spec!
+  "Validates column specification to prevent injection."
+  [[col-name col-type]]
+  (when-not (and (re-matches valid-col-name-pattern col-name)
+                 (re-matches valid-col-type-pattern col-type))
+    (throw (ex-info "Invalid column specification"
+                    {:type :security-error/invalid-identifier
+                     :col-name col-name
+                     :col-type col-type})))
+  [col-name col-type])
 
 
 (defn- cypher-query
   "Wraps a Cypher query in AGE SQL syntax."
   [graph-name cypher]
+  (validate-graph-name! graph-name)
   (format "SELECT * FROM cypher('%s', $$ %s $$) AS (result agtype)"
           graph-name cypher))
 
@@ -78,6 +120,8 @@
   "Wraps a Cypher query that returns multiple columns.
    cols is a vector of [col-name col-type] pairs."
   [graph-name cypher cols]
+  (validate-graph-name! graph-name)
+  (doseq [col cols] (validate-col-spec! col))
   (let [col-defs (str/join ", " (map (fn [[n t]] (str n " " t)) cols))]
     (format "SELECT * FROM cypher('%s', $$ %s $$) AS (%s)"
             graph-name cypher col-defs)))
@@ -127,12 +171,14 @@
 ;; === Graph Initialization ===
 
 (defn ensure-graph!
-  "Ensures the AGE graph exists. Creates it if not present."
+  "Ensures the AGE graph exists. Creates it if not present.
+   Validates graph-name to prevent injection attacks."
   [datasource graph-name]
+  (validate-graph-name! graph-name)
   (with-age-connection datasource
     (fn [conn]
       (try
-        ;; Check if graph exists
+        ;; Check if graph exists - graph-name is validated above
         (let [result (jdbc/execute-one! conn
                                         [(format "SELECT * FROM ag_catalog.ag_graph WHERE name = '%s'" graph-name)]
                                         {:builder-fn rs/as-unqualified-kebab-maps})]

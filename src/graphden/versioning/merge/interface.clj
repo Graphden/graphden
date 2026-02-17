@@ -18,7 +18,7 @@
    2. Before merging, call detect-protected-transfers to find violations
    3. Either block merge or exclude protected values from transfer"
   (:require
-    [clojure.set]
+    [clojure.set :as set]
     [graphden.schema.traits.interface :as vts]
     [graphden.storage.protocol.interface :as sp]
     [graphden.versioning.storage.interface :as vs]))
@@ -88,7 +88,7 @@
         transfers (when (seq protected-ids)
                     (let [transferred-ids (find-transferred-arg-value-ids
                                             base-storage source-branch-id target-branch-id)
-                          violations (clojure.set/intersection protected-ids transferred-ids)]
+                          violations (set/intersection protected-ids transferred-ids)]
 
                       ;; Find which versions reference these protected values
                       (when (seq violations)

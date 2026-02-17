@@ -1,12 +1,15 @@
 ;; Test system configuration
 ;; Minimal config - jdbc-url is injected from testcontainer at runtime
+;;
+;; NOTE: Test credentials are overridden by test fixtures.
+;; These defaults are only used if fixtures don't provide values.
 
 {:db/schema {}
 
  :db/age
  {:jdbc-url nil  ; Will be overridden by test fixture
-  :username "test"
-  :password "test"
+  :username #or [#env GRAPHDEN_TEST_DB_USER "test"]
+  :password #or [#env GRAPHDEN_TEST_DB_PASSWORD "test"]
   :pool-size 2
   :schema #ig/ref :db/schema}
 

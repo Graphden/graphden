@@ -2,8 +2,29 @@
   "Tests for error context and storage error helpers."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]
-    [graphden.storage.protocol.test-mocks :refer [->MockConstraintHelpers]]))
+    [graphden.storage.protocol.interface :as storage]))
+
+
+;; === Mock for constraint helpers ===
+
+(defrecord MockConstraintHelpers
+  [fn-schema-map arg-schema-fn-schema-map dependency-chain-map]
+
+  storage/ConstraintHelpers
+
+  (get-fn-schema-id-for-fn
+    [_ fn-id]
+    (get fn-schema-map fn-id))
+
+
+  (get-fn-schema-id-for-arg-schema
+    [_ arg-schema-id]
+    (get arg-schema-fn-schema-map arg-schema-id))
+
+
+  (collect-dependency-chain
+    [_ fn-id]
+    (get dependency-chain-map fn-id #{})))
 
 
 ;; === Error helpers tests ===

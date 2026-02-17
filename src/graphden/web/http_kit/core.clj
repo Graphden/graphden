@@ -25,6 +25,20 @@
     [org.httpkit.server :as http-kit]))
 
 
+;; === Security Headers ===
+
+(def ^:private security-headers
+  "Standard security headers added to all responses.
+   - X-Content-Type-Options: Prevents MIME type sniffing
+   - X-Frame-Options: Prevents clickjacking via iframes
+   - X-XSS-Protection: Enables browser XSS filter
+   - Referrer-Policy: Controls referrer information"
+  {"X-Content-Type-Options" "nosniff"
+   "X-Frame-Options" "DENY"
+   "X-XSS-Protection" "1; mode=block"
+   "Referrer-Policy" "strict-origin-when-cross-origin"})
+
+
 ;; === Server Management ===
 
 (defbase http-server
@@ -80,7 +94,8 @@
                          ;; Ensure response has required keys
                          ;; Stringify header keys (JSONB may return keywords)
                          {:status (or (:status response) 200)
-                          :headers (stringify-keys (or (:headers response) {}))
+                          :headers (merge security-headers
+                                          (stringify-keys (or (:headers response) {})))
                           :body (or (:body response) "")}))]
     (http-kit/run-server ring-handler {:port port})))
 

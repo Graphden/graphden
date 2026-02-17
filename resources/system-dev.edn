@@ -1,12 +1,15 @@
 ;; Development system configuration
 ;; Uses local PostgreSQL with sensible defaults
+;;
+;; NOTE: Credentials use environment variables with dev defaults.
+;; For production, always set proper environment variables.
 
 {:db/schema {}
 
  :db/age
- {:jdbc-url "jdbc:postgresql://localhost:5434/graphden"
-  :username "graphden"
-  :password "graphden"
+ {:jdbc-url #or [#env GRAPHDEN_JDBC_URL "jdbc:postgresql://localhost:5434/graphden"]
+  :username #or [#env GRAPHDEN_DB_USER "graphden"]
+  :password #or [#env GRAPHDEN_DB_PASSWORD "graphden"]
   :pool-size 5
   :schema #ig/ref :db/schema}
 

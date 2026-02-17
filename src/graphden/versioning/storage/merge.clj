@@ -9,7 +9,7 @@
    the source and target branches after the fork point (branch creation time or
    last merge between the two)."
   (:require
-    [clojure.set]
+    [clojure.set :as set]
     [graphden.storage.protocol.interface :as sp]
     [graphden.versioning.storage.resolution :as res])
   (:import
@@ -126,7 +126,7 @@
      (when (seq conflicts)
        (let [resolved-keys (set (keys (or conflict-resolutions {})))
              conflict-keys (set (map (juxt :entity-name :entity-id) conflicts))
-             unresolved (clojure.set/difference conflict-keys resolved-keys)]
+             unresolved (set/difference conflict-keys resolved-keys)]
          (when (seq unresolved)
            (throw (ex-info "Unresolved merge conflicts"
                            {:type :merge-conflict

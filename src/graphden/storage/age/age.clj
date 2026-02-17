@@ -77,13 +77,17 @@
 
 
 (defn- escape-cypher-string
-  "Escapes a string for use in Cypher queries."
+  "Escapes a string for use in Cypher queries.
+   Handles backslash, quotes, and control characters."
   [s]
   (when s
     (-> (str s)
         (str/replace "\\" "\\\\")
         (str/replace "'" "\\'")
-        (str/replace "\""  "\\\""))))
+        (str/replace "\"" "\\\"")
+        (str/replace "\n" "\\n")
+        (str/replace "\r" "\\r")
+        (str/replace "\t" "\\t"))))
 
 
 (def ^:private valid-col-name-pattern
@@ -241,7 +245,7 @@
            RETURN n"
           (uuid->str (:id entity))
           (escape-cypher-string (:name entity))
-          (name (:returned-type entity))
+          (escape-cypher-string (name (:returned-type entity)))
           (if (:base-fn-name entity)
             (format "'%s'" (escape-cypher-string (:base-fn-name entity)))
             "null")
@@ -262,7 +266,7 @@
           (uuid->str (:id entity))
           (uuid->str (:fn-schema-id entity))
           (escape-cypher-string (:name entity))
-          (name (:type entity))
+          (escape-cypher-string (name (:type entity)))
           (if (:required entity) "true" "false")))
 
 

@@ -287,3 +287,25 @@
           (is (nil? (:bio user))))
         (finally
           (sp/close storage))))))
+
+
+;; === Query with nil filter values ===
+
+(deftest crud-query-with-nil-filter-test
+  (testing "query-entities with nil filter value uses IS NULL"
+    (let [storage (setup/create-raw-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                :type :text :nullable? true}})]
+      (sp/initialize storage schema)
+      (try
+        (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111"
+                                         :name "Alice" :bio nil})
+        (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222"
+                                         :name "Bob" :bio "Developer"})
+        (let [result (sp/query-entities storage :user {:bio nil})]
+          (is (= 1 (count result)))
+          (is (= "Alice" (:name (first result)))))
+        (finally
+          (sp/close storage))))))

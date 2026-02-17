@@ -421,3 +421,12 @@
         (rt/start! :test)
         (let [result (rt/stop!)]
           (is (nil? result)))))))
+
+
+;; =============================================================================
+;; -main Function Tests
+;; =============================================================================
+
+;; Note: -main uses Java interop (Runtime/addShutdownHook) and blocks forever
+;; with @(promise). These are intentionally not unit tested.
+;; The components it uses (start!, stop!) are tested above.

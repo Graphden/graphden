@@ -860,3 +860,102 @@
   (testing "list-all-graph-entities-impl throws without storage"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Storage not available"
           (call-impl-with-ctx crud/list-all-graph-entities-impl {} {})))))
+
+
+;; =============================================================================
+;; Additional coverage tests for uncovered branches
+;; =============================================================================
+
+(deftest entity-details-handler-unknown-type-details-test
+  (testing "entity-details-handler with arg-schema type renders correctly"
+    ;; This tests render-arg-schema-details through the handler
+    (let [storage (create-mock-storage)
+          schema-id (random-uuid)
+          arg-schema-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn-schema [{:id schema-id :name :test-schema}]
+                   :arg-schema [{:id arg-schema-id
+                                 :name :test-arg
+                                 :type nil  ; nil type edge case
+                                 :required false
+                                 :fn-schema-id schema-id}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "arg-schema" :id (str arg-schema-id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "test-arg")))))
+
+
+(deftest entity-details-handler-fn-schema-with-base-fn-test
+  (testing "fn-schema details shows base-fn-name when present"
+    (let [storage (create-mock-storage)
+          id (random-uuid)
+          _ (swap! (:data storage) assoc :fn-schema
+                   [{:id id :name :base-fn-test :returned-type :int :base-fn-name :identity}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "fn-schema" :id (str id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "identity"))
+      (is (str/includes? (:body response) "Yes")))))
+
+
+(deftest entity-details-handler-fn-schema-without-base-fn-test
+  (testing "fn-schema details shows No for non-base function"
+    (let [storage (create-mock-storage)
+          id (random-uuid)
+          _ (swap! (:data storage) assoc :fn-schema
+                   [{:id id :name :normal-fn :returned-type nil :base-fn-name nil}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "fn-schema" :id (str id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "No")))))
+
+
+(deftest create-entity-api-handler-entity-data-nil-test
+  (testing "create-entity-api-handler returns 400 when entity-data parsing fails"
+    (let [storage (create-mock-storage)
+          ctx {:storage storage}
+          handler-fn ((:impl crud/create-entity-api-handler-impl) {} ctx)
+          ;; Send fn type but with form data that doesn't have fn-schema-id (will fail to parse)
+          response (handler-fn {:path-params {:type "fn-schema"}
+                                :body "name=test"})]
+      ;; fn-schema is not handled in the case statement, so entity-data will be nil
+      (is (= 400 (:status response)))
+      (is (str/includes? (:body response) "Failed to create entity")))))
+
+
+(deftest create-entity-api-handler-fn-with-invalid-schema-id-test
+  (testing "create-entity-api-handler returns 500 for invalid UUID in fn-schema-id"
+    (let [storage (create-mock-storage)
+          ctx {:storage storage}
+          handler-fn ((:impl crud/create-entity-api-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "fn"}
+                                :body "name=test&fn-schema-id=invalid-uuid"})]
+      ;; UUID parsing will fail
+      (is (= 500 (:status response)))
+      (is (str/includes? (:body response) "Error")))))
+
+
+(deftest entity-form-handler-edit-fn-schema-test
+  (testing "entity-form-handler returns not-yet-implemented for fn-schema edit"
+    (let [storage (create-mock-storage)
+          id (random-uuid)
+          _ (swap! (:data storage) assoc :fn-schema
+                   [{:id id :name :existing-schema :returned-type :int}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-form-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "fn-schema" :id (str id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "not yet implemented")))))
+
+
+(deftest entity-form-handler-arg-schema-test
+  (testing "entity-form-handler returns not-yet-implemented for arg-schema type"
+    (let [storage (create-mock-storage)
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-form-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "arg-schema"}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "not yet implemented")))))

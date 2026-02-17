@@ -24,9 +24,9 @@
    Base function implementations (arithmetic, strings, etc.) are in the
    base-functions component which uses this infrastructure."
   (:require
-    [graphden.executor.base-fns.interface :as bf]
     [graphden.executor.registry.core :as core]
     [graphden.executor.registry.macros :as macros]
+    [graphden.library.interface :as bf]
     [graphden.storage.protocol.interface :as sp]))
 
 

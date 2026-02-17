@@ -11,10 +11,15 @@
    :http/server      → [:exec/context, :exec/fn-entities]"
   (:require
     [clojure.tools.logging :as log]
-    [graphden.executor.base-fns.interface :as bf]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
+    [graphden.library.interface :as bf]
+    [graphden.library.base-fns.web.crud :as crud-fns]
+    [graphden.library.base-fns.web.graph :as graph-fns]
+    [graphden.library.base-fns.web.html :as html-fns]
+    [graphden.library.base-fns.web.http-kit :as http-kit-fns]
+    [graphden.library.base-fns.web.reitit :as reitit-fns]
     [graphden.schema.graph.interface :as gds]
     [graphden.schema.malli.interface :as mds]
     [graphden.schema.protocol.interface :as ds]
@@ -23,11 +28,6 @@
     [graphden.storage.age.interface :as age]
     [graphden.storage.protocol.interface :as sp]
     [graphden.versioning.storage.interface :as vs]
-    [graphden.web.crud.core :as crud-fns]
-    [graphden.web.graph.core :as graph-fns]
-    [graphden.web.html.core :as html-fns]
-    [graphden.web.http-kit.core :as http-kit-fns]
-    [graphden.web.reitit.core :as reitit-fns]
     [integrant.core :as ig]))
 
 

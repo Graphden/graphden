@@ -33,4 +33,4 @@
   :startup-fn-name :web-server-fn
   :port 8080}
 
- :app/fn-defs #var graphden.web.editor.core/fn-defs}
+ :app/fn-defs #var graphden.library.fn-defs.web.editor/fn-defs}

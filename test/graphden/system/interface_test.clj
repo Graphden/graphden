@@ -24,7 +24,7 @@
   (testing "read-config throws for invalid profile"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Config file not found"
-                          (sys/read-config :nonexistent)))))
+          (sys/read-config :nonexistent)))))
 
 
 ;; =============================================================================

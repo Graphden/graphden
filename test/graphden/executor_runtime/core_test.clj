@@ -261,3 +261,93 @@
         (is (nil? (:db/age system)))
         (finally
           (sys/stop! system))))))
+
+
+;; =============================================================================
+;; Additional init-key Tests
+;; =============================================================================
+
+(deftest exec-base-fns-init-test
+  (testing ":exec/base-fns returns :registered"
+    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+          config (-> (sys/read-config :test)
+                     (assoc-in [:db/age :jdbc-url] jdbc-url))
+          system (ig/init config [:db/schema :db/age :db/versioned :exec/base-fns])]
+      (try
+        (is (= :registered (:exec/base-fns system)))
+        (finally
+          (ig/halt! system))))))
+
+
+(deftest exec-context-init-test
+  (testing ":exec/context creates context map with correct keys"
+    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+          config (-> (sys/read-config :test)
+                     (assoc-in [:db/age :jdbc-url] jdbc-url))
+          system (ig/init config [:db/schema :db/age :db/versioned :exec/context])]
+      (try
+        (let [ctx (:exec/context system)]
+          (is (map? ctx))
+          (is (contains? ctx :storage))
+          (is (contains? ctx :max-depth))
+          (is (contains? ctx :timeout-ms))
+          (is (= 100 (:max-depth ctx)))
+          (is (= 5000 (:timeout-ms ctx))))
+        (finally
+          (ig/halt! system))))))
+
+
+(deftest exec-context-defaults-test
+  (testing ":exec/context uses defaults when max-depth and timeout-ms are nil"
+    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+          config (-> (sys/read-config :test)
+                     (assoc-in [:db/age :jdbc-url] jdbc-url)
+                     (assoc-in [:exec/context :max-depth] nil)
+                     (assoc-in [:exec/context :timeout-ms] nil))
+          system (ig/init config [:db/schema :db/age :db/versioned :exec/context])]
+      (try
+        (let [ctx (:exec/context system)]
+          (is (= 1000 (:max-depth ctx)))
+          (is (= 30000 (:timeout-ms ctx))))
+        (finally
+          (ig/halt! system))))))
+
+
+;; =============================================================================
+;; Resume Tests
+;; =============================================================================
+
+(deftest resume-system-test
+  (testing "resume! restarts system after suspend"
+    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+          original-read-config sys/read-config]
+      (with-redefs [sys/read-config (fn [profile]
+                                      (-> (original-read-config profile)
+                                          (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+        (let [system (sys/start! :test [:db/schema :db/age :db/versioned])]
+          (try
+            (is (some? (:db/schema system)))
+            (sys/suspend! system)
+            (let [resumed (sys/resume! system :test)]
+              (try
+                (is (some? (:db/schema resumed)))
+                (finally
+                  (sys/stop! resumed))))
+            (finally
+              ;; Ensure cleanup happens
+              (try (sys/stop! system) (catch Exception _)))))))))
+
+
+;; =============================================================================
+;; App Fn Defs Test
+;; =============================================================================
+
+(deftest app-fn-defs-init-test
+  (testing ":app/fn-defs returns fn-defs passthrough"
+    (let [fn-defs {:my-fn {:name :my-fn :parent :identity :args {}}}
+          config {:app/fn-defs fn-defs}
+          system (ig/init config [:app/fn-defs])]
+      (try
+        (is (= fn-defs (:app/fn-defs system)))
+        (finally
+          (ig/halt! system))))))

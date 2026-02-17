@@ -739,3 +739,253 @@
 
       ;; Parent still has original
       (is (= "main-fn" (:name (sp/read-entity storage :fn (:id fn-main))))))))
+
+
+(deftest delete-nonexistent-branch-throws-test
+  (testing "delete nonexistent branch throws :not-found"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Branch not found"
+            (vs/delete-branch! storage (random-uuid)))))))
+
+
+;; === wrap-with-versioning Edge Cases ===
+
+(deftest wrap-with-nonexistent-branch-throws-test
+  (testing "wrap-with-versioning with non-existent branch throws"
+    (th/clean-database-fast! *container*)
+    (let [schema (vds/build-schema (mds/create-builder))
+          base (-> (pg/create-storage (th/get-container-config *container*))
+                   (sp/initialize-with-cleanup! schema))]
+      ;; Create main branch first
+      (vs/wrap-with-versioning base)
+      ;; Then try to wrap with non-existent branch
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Branch not found"
+            (vs/wrap-with-versioning base "nonexistent-branch"))))))
+
+
+(deftest wrap-with-existing-branch-test
+  (testing "wrap-with-versioning with existing branch name works"
+    (th/clean-database-fast! *container*)
+    (let [schema (vds/build-schema (mds/create-builder))
+          base (-> (pg/create-storage (th/get-container-config *container*))
+                   (sp/initialize-with-cleanup! schema))
+          main-storage (vs/wrap-with-versioning base)
+          feature-branch (vs/create-branch! main-storage "feature")]
+      ;; Wrap with existing feature branch
+      (is (vs/versioned-storage? (vs/wrap-with-versioning base "feature")))
+      (is (= (:id feature-branch)
+             (vs/current-branch-id (vs/wrap-with-versioning base "feature")))))))
+
+
+;; === Update Entity Not Found ===
+
+(deftest update-nonexistent-entity-throws-test
+  (testing "update versioned entity that doesn't exist throws :not-found"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Entity not found"
+            (sp/update-entity storage :fn (random-uuid) {:name "new-name"}))))))
+
+
+;; === Batch Delete Operations ===
+
+(deftest batch-delete-versioned-test
+  (testing "delete-entities works for versioned entities"
+    (let [storage (create-test-storage)
+          fs (sp/create-entity storage :fn-schema
+                               {:name "schema" :returned-type :int})
+          f1 (sp/create-entity storage :fn {:name "fn1" :fn-schema-id (:id fs)})
+          f2 (sp/create-entity storage :fn {:name "fn2" :fn-schema-id (:id fs)})
+          f3 (sp/create-entity storage :fn {:name "fn3" :fn-schema-id (:id fs)})]
+      ;; Delete two of them
+      (let [deleted-count (sp/delete-entities storage :fn [(:id f1) (:id f2)])]
+        (is (= 2 deleted-count)))
+      ;; Verify they're gone
+      (is (nil? (sp/read-entity storage :fn (:id f1))))
+      (is (nil? (sp/read-entity storage :fn (:id f2))))
+      ;; Third still exists
+      (is (some? (sp/read-entity storage :fn (:id f3)))))))
+
+
+(deftest batch-delete-non-versioned-test
+  (testing "delete-entities works for non-versioned entities"
+    (let [storage (create-test-storage)
+          fs (sp/create-entity storage :fn-schema
+                               {:name "schema" :returned-type :int})
+          as (sp/create-entity storage :arg-schema
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+          av1 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 1})
+          av2 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 2})
+          av3 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 3})]
+      ;; Delete two arg-values (non-versioned)
+      (let [deleted-count (sp/delete-entities storage :arg-value [(:id av1) (:id av2)])]
+        (is (= 2 deleted-count)))
+      ;; Verify
+      (is (nil? (sp/read-entity storage :arg-value (:id av1))))
+      (is (nil? (sp/read-entity storage :arg-value (:id av2))))
+      (is (some? (sp/read-entity storage :arg-value (:id av3)))))))
+
+
+;; === Create Branch with Base Branch ID ===
+
+(deftest create-branch-with-base-branch-id-test
+  (testing "create-branch! with explicit base-branch-id forks from specified branch"
+    (let [storage (create-test-storage)
+          fs (sp/create-entity storage :fn-schema
+                               {:name "schema" :returned-type :int})
+          ;; Create entity on main
+          fn-main (sp/create-entity storage :fn
+                                    {:name "main-fn" :fn-schema-id (:id fs)})
+          ;; Create feature branch from main
+          feature-branch (vs/create-branch! storage "feature")
+          feature (vs/switch-branch storage (:id feature-branch))
+          ;; Create entity only on feature
+          fn-feature (sp/create-entity feature :fn
+                                       {:name "feature-fn" :fn-schema-id (:id fs)})
+          ;; Create hotfix branch from main (not from feature)
+          hotfix-branch (vs/create-branch! feature "hotfix"
+                                           {:base-branch-id (vs/current-branch-id storage)})
+          hotfix (vs/switch-branch storage (:id hotfix-branch))]
+      ;; Hotfix should see main's entity
+      (is (some? (sp/read-entity hotfix :fn (:id fn-main))))
+      ;; Hotfix should NOT see feature's entity (forked from main)
+      (is (nil? (sp/read-entity hotfix :fn (:id fn-feature)))))))
+
+
+;; === Storage Introspection Delegation ===
+
+(deftest storage-introspection-delegation-test
+  (testing "VersionedStorage delegates introspection methods to base storage"
+    (let [storage (create-test-storage)]
+      (testing "current-entities returns expected entities"
+        (let [entities (sp/current-entities storage)]
+          (is (set? entities))
+          (is (contains? entities :fn))
+          (is (contains? entities :fn-schema))
+          (is (contains? entities :arg-schema))))
+
+      (testing "current-fields returns field metadata"
+        (let [fields (sp/current-fields storage :fn)]
+          (is (map? fields))
+          (is (some? fields))))
+
+      (testing "current-enums returns enums"
+        (let [enums (sp/current-enums storage)]
+          (is (or (nil? enums) (set? enums) (sequential? enums)))))
+
+      (testing "schema-metadata returns metadata map"
+        (let [metadata (sp/schema-metadata storage)]
+          (is (map? metadata)))))))
+
+
+;; === Storage Lifecycle Delegation ===
+
+(deftest storage-lifecycle-delegation-test
+  (testing "VersionedStorage delegates close to base storage"
+    (th/clean-database-fast! *container*)
+    (let [schema (vds/build-schema (mds/create-builder))
+          base (-> (pg/create-storage (th/get-container-config *container*))
+                   (sp/initialize-with-cleanup! schema))
+          storage (vs/wrap-with-versioning base)]
+      ;; Close should not throw
+      (is (nil? (sp/close storage))))))
+
+
+;; === GraphConstraints Delegation ===
+
+(deftest graph-constraints-validation-test
+  (testing "validate-arg-schema-belongs-to-fn! throws for mismatched"
+    (let [storage (create-test-storage)
+          fs1 (sp/create-entity storage :fn-schema
+                                {:name "schema1" :returned-type :int})
+          fs2 (sp/create-entity storage :fn-schema
+                                {:name "schema2" :returned-type :text})
+          as1 (sp/create-entity storage :arg-schema
+                                {:fn-schema-id (:id fs1) :name "x" :type :int :required true})
+          fn2 (sp/create-entity storage :fn
+                                {:name "fn2" :fn-schema-id (:id fs2)})]
+      ;; arg-schema belongs to fs1, but fn2 uses fs2 - mismatch!
+      (is (thrown? clojure.lang.ExceptionInfo
+            (sp/validate-arg-schema-belongs-to-fn! storage (:id fn2) (:id as1))))))
+
+  (testing "validate-arg-schema-belongs-to-fn! succeeds for matching"
+    (let [storage (create-test-storage)
+          fs (sp/create-entity storage :fn-schema
+                               {:name "schema" :returned-type :int})
+          as (sp/create-entity storage :arg-schema
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-fn" :fn-schema-id (:id fs)})]
+      ;; Should not throw - arg-schema belongs to same fn-schema as fn
+      (is (nil? (sp/validate-arg-schema-belongs-to-fn! storage (:id fn-rec) (:id as)))))))
+
+
+(deftest no-dependency-cycle-validation-test
+  (testing "validate-no-dependency-cycle! allows non-cyclic dependencies"
+    (let [storage (create-test-storage)
+          fs (sp/create-entity storage :fn-schema
+                               {:name "schema" :returned-type :int})
+          fn-a (sp/create-entity storage :fn
+                                 {:name "fn-a" :fn-schema-id (:id fs)})
+          fn-b (sp/create-entity storage :fn
+                                 {:name "fn-b" :fn-schema-id (:id fs)})]
+      ;; fn-a depends on fn-b should be allowed
+      (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b)))))))
+
+
+;; === Read Entities Edge Cases ===
+
+(deftest read-entities-missing-ids-test
+  (testing "read-entities returns only found records for versioned entities"
+    (let [storage (create-test-storage)
+          fs (sp/create-entity storage :fn-schema
+                               {:name "schema" :returned-type :int})
+          f1 (sp/create-entity storage :fn {:name "fn1" :fn-schema-id (:id fs)})
+          missing-id (random-uuid)
+          results (sp/read-entities storage :fn [(:id f1) missing-id])]
+      ;; Should only return the existing record
+      (is (= 1 (count results)))
+      (is (some? (get results (:id f1))))
+      (is (nil? (get results missing-id))))))
+
+
+;; === call-site-arg CRUD Test ===
+
+(deftest call-site-arg-crud-test
+  (testing "call-site-arg is versioned and works correctly"
+    (let [storage (create-test-storage)
+          fs (sp/create-entity storage :fn-schema
+                               {:name "schema" :returned-type :int})
+          as (sp/create-entity storage :arg-schema
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-fn" :fn-schema-id (:id fs)})
+          cs (sp/create-entity storage :call-site
+                               {:fn-id (:id fn-rec) :name "cs1"})
+          av (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 42})
+          csa (sp/create-entity storage :call-site-arg
+                                {:call-site-id (:id cs)
+                                 :arg-schema-id (:id as)
+                                 :arg-value-id (:id av)})]
+      (is (some? (:id csa)))
+      (is (= (:id cs) (:call-site-id csa)))
+      (is (= (:id as) (:arg-schema-id csa)))
+      (is (= (:id av) (:arg-value-id csa)))
+
+      (testing "read returns same data"
+        (let [read-csa (sp/read-entity storage :call-site-arg (:id csa))]
+          (is (some? read-csa))
+          (is (= (:id csa) (:id read-csa))))))))
+
+
+;; === Delete Entities Returns Correct Count ===
+
+(deftest delete-entities-partial-count-test
+  (testing "delete-entities returns count of actually deleted entities"
+    (let [storage (create-test-storage)
+          fs (sp/create-entity storage :fn-schema
+                               {:name "schema" :returned-type :int})
+          f1 (sp/create-entity storage :fn {:name "fn1" :fn-schema-id (:id fs)})
+          missing-id (random-uuid)]
+      ;; Try to delete one existing and one non-existing
+      ;; Only one should be counted as deleted
+      (is (= 1 (sp/delete-entities storage :fn [(:id f1) missing-id]))))))

@@ -124,7 +124,9 @@
                         startup-attempts 3}}]
    (fn [f]
      (let [container (doto (PostgreSQLContainer. ^String image)
-                       (PostgreSQLContainer/.withStartupAttempts startup-attempts))]
+                       (PostgreSQLContainer/.withStartupAttempts startup-attempts)
+                       ;; Increase max_connections for parallel test execution
+                       (PostgreSQLContainer/.withCommand "postgres -c max_connections=500"))]
        (PostgreSQLContainer/.start container)
        (when-not (PostgreSQLContainer/.isRunning container)
          (throw (ex-info "Failed to start PostgreSQL test container"
@@ -179,7 +181,9 @@
   [[sym & [opts]] & body]
   `(let [opts# (merge {:image default-postgres-image :startup-attempts 3} ~opts)
          container# (doto (PostgreSQLContainer. ^String (:image opts#))
-                      (PostgreSQLContainer/.withStartupAttempts (:startup-attempts opts#)))]
+                      (PostgreSQLContainer/.withStartupAttempts (:startup-attempts opts#))
+                      ;; Increase max_connections for parallel test execution
+                      (PostgreSQLContainer/.withCommand "postgres -c max_connections=500"))]
      (PostgreSQLContainer/.start container#)
      (when-not (PostgreSQLContainer/.isRunning container#)
        (throw (ex-info "Failed to start PostgreSQL test container"

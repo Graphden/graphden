@@ -78,7 +78,9 @@
   []
   (fn [f]
     (let [container (doto (PostgreSQLContainer. age-image-name)
-                      (PostgreSQLContainer/.withStartupAttempts 3))]
+                      (PostgreSQLContainer/.withStartupAttempts 3)
+                      ;; Increase max_connections for parallel test execution
+                      (PostgreSQLContainer/.withCommand "postgres -c max_connections=500"))]
       (PostgreSQLContainer/.start container)
       (when-not (PostgreSQLContainer/.isRunning container)
         (throw (ex-info "Failed to start AGE test container"
@@ -96,7 +98,9 @@
   [container-var]
   (fn [f]
     (let [container (doto (PostgreSQLContainer. age-image-name)
-                      (PostgreSQLContainer/.withStartupAttempts 3))]
+                      (PostgreSQLContainer/.withStartupAttempts 3)
+                      ;; Increase max_connections for parallel test execution
+                      (PostgreSQLContainer/.withCommand "postgres -c max_connections=500"))]
       (PostgreSQLContainer/.start container)
       (when-not (PostgreSQLContainer/.isRunning container)
         (throw (ex-info "Failed to start AGE test container"

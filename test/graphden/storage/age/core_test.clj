@@ -160,3 +160,126 @@
           (is (= :user (:entity (ex-data wrapped)))))
         (finally
           (sp/close storage))))))
+
+
+;; =============================================================================
+;; StorageCRUD tests (through AgeStorage - tests graph sync)
+;; =============================================================================
+
+(deftest crud-operations-test
+  (testing "create-entity for graph entity syncs to AGE"
+    (let [storage (setup/create-test-storage)
+          fn-schema-id (java.util.UUID/randomUUID)]
+      (try
+        (let [schema (sp/create-entity storage :fn-schema
+                                       {:id fn-schema-id :name "crud-test-schema" :returned-type :int})]
+          (is (some? schema))
+          (is (= "crud-test-schema" (:name schema))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "read-entity returns created entity"
+    (let [storage (setup/create-test-storage)
+          fn-schema-id (java.util.UUID/randomUUID)]
+      (try
+        (sp/create-entity storage :fn-schema
+                          {:id fn-schema-id :name "read-test-schema" :returned-type :int})
+        (let [result (sp/read-entity storage :fn-schema fn-schema-id)]
+          (is (some? result))
+          (is (= fn-schema-id (:id result))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entity updates graph entity"
+    (let [storage (setup/create-test-storage)
+          fn-schema-id (java.util.UUID/randomUUID)]
+      (try
+        (sp/create-entity storage :fn-schema
+                          {:id fn-schema-id :name "update-test-schema" :returned-type :int})
+        (let [updated (sp/update-entity storage :fn-schema fn-schema-id {:name "updated-schema"})]
+          (is (some? updated))
+          (is (= "updated-schema" (:name updated))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "delete-entity removes graph entity"
+    (let [storage (setup/create-test-storage)
+          fn-schema-id (java.util.UUID/randomUUID)]
+      (try
+        (sp/create-entity storage :fn-schema
+                          {:id fn-schema-id :name "delete-test-schema" :returned-type :int})
+        (is (some? (sp/read-entity storage :fn-schema fn-schema-id)))
+        (sp/delete-entity storage :fn-schema fn-schema-id)
+        (is (nil? (sp/read-entity storage :fn-schema fn-schema-id)))
+        (finally
+          (sp/close storage)))))
+
+  (testing "query-entities returns matching entities"
+    (let [storage (setup/create-test-storage)
+          fn-schema-id (java.util.UUID/randomUUID)]
+      (try
+        (sp/create-entity storage :fn-schema
+                          {:id fn-schema-id :name "query-test-schema" :returned-type :int})
+        (let [results (sp/query-entities storage :fn-schema {:name "query-test-schema"})]
+          (is (seq results))
+          (is (= "query-test-schema" (:name (first results)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; =============================================================================
+;; StorageBatchCRUD tests
+;; =============================================================================
+
+(deftest batch-crud-operations-test
+  (testing "create-entities creates multiple graph entities"
+    (let [storage (setup/create-test-storage)
+          fn-schema-id (java.util.UUID/randomUUID)]
+      (try
+        (sp/create-entity storage :fn-schema
+                          {:id fn-schema-id :name "batch-schema" :returned-type :int})
+        (let [fns [{:id (java.util.UUID/randomUUID)
+                    :name "batch-fn-1"
+                    :fn-schema-id fn-schema-id}
+                   {:id (java.util.UUID/randomUUID)
+                    :name "batch-fn-2"
+                    :fn-schema-id fn-schema-id}]
+              results (sp/create-entities storage :fn fns)]
+          (is (= 2 (count results)))
+          (is (every? :id results)))
+        (finally
+          (sp/close storage)))))
+
+  (testing "read-entities reads multiple entities by IDs"
+    (let [storage (setup/create-test-storage)
+          fn-schema-id (java.util.UUID/randomUUID)
+          fn1-id (java.util.UUID/randomUUID)
+          fn2-id (java.util.UUID/randomUUID)]
+      (try
+        (sp/create-entity storage :fn-schema
+                          {:id fn-schema-id :name "read-batch-schema" :returned-type :int})
+        (sp/create-entities storage :fn
+                            [{:id fn1-id :name "read-batch-fn-1" :fn-schema-id fn-schema-id}
+                             {:id fn2-id :name "read-batch-fn-2" :fn-schema-id fn-schema-id}])
+        ;; read-entities returns map {id -> entity}
+        (let [results (sp/read-entities storage :fn [fn1-id fn2-id])]
+          (is (= 2 (count results)))
+          (is (= #{fn1-id fn2-id} (set (keys results)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "delete-entities deletes multiple graph entities"
+    (let [storage (setup/create-test-storage)
+          fn-schema-id (java.util.UUID/randomUUID)
+          fn1-id (java.util.UUID/randomUUID)
+          fn2-id (java.util.UUID/randomUUID)]
+      (try
+        (sp/create-entity storage :fn-schema
+                          {:id fn-schema-id :name "delete-batch-schema" :returned-type :int})
+        (sp/create-entities storage :fn
+                            [{:id fn1-id :name "delete-batch-fn-1" :fn-schema-id fn-schema-id}
+                             {:id fn2-id :name "delete-batch-fn-2" :fn-schema-id fn-schema-id}])
+        (sp/delete-entities storage :fn [fn1-id fn2-id])
+        (is (empty? (sp/read-entities storage :fn [fn1-id fn2-id])))
+        (finally
+          (sp/close storage))))))

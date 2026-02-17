@@ -351,3 +351,73 @@
         (is (= fn-defs (:app/fn-defs system)))
         (finally
           (ig/halt! system))))))
+
+
+;; =============================================================================
+;; Runtime 0-arity and Default Profile Tests
+;; =============================================================================
+
+(deftest start-default-profile-test
+  (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+        original-read-config sys/read-config
+        profile-used (atom nil)]
+    ;; Override to track which profile is used and inject test container URL
+    (with-redefs [sys/read-config (fn [profile]
+                                    (reset! profile-used profile)
+                                    (-> (original-read-config :test)
+                                        (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+      (testing "start! with no args uses :prod profile"
+        (let [system (rt/start!)]
+          (try
+            (is (= :prod @profile-used))
+            (is (some? system))
+            (finally
+              (rt/stop!))))))))
+
+
+(deftest restart-default-profile-test
+  (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+        original-read-config sys/read-config
+        profiles-used (atom [])]
+    ;; Override to track which profiles are used
+    (with-redefs [sys/read-config (fn [profile]
+                                    (swap! profiles-used conj profile)
+                                    (-> (original-read-config :test)
+                                        (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+      (testing "restart! with no args uses :prod profile"
+        ;; First start with :test
+        (rt/start! :test)
+        (try
+          (reset! profiles-used [])
+          ;; Restart with default (should use :prod)
+          (let [system (rt/restart!)]
+            (is (= [:prod] @profiles-used))
+            (is (some? system)))
+          (finally
+            (rt/stop!)))))))
+
+
+;; =============================================================================
+;; -main Function Tests
+;; =============================================================================
+
+;; Note: -main is difficult to fully test because it:
+;; 1. Uses Java interop (Runtime/addShutdownHook) which can't be easily mocked
+;; 2. Blocks forever with @(promise)
+;; Instead we test the components it uses (start!, stop!) are working correctly
+
+
+;; =============================================================================
+;; Edge Cases
+;; =============================================================================
+
+(deftest stop-returns-nil-test
+  (testing "stop! returns nil when system is stopped"
+    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+          original-read-config sys/read-config]
+      (with-redefs [sys/read-config (fn [profile]
+                                      (-> (original-read-config profile)
+                                          (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+        (rt/start! :test)
+        (let [result (rt/stop!)]
+          (is (nil? result)))))))

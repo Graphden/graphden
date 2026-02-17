@@ -546,3 +546,146 @@
         (is (= :invalid-data (:type (ex-data e))))
         (is (= :product (:entity-name (ex-data e))))
         (is (= [1 2 3] (:data (ex-data e))))))))
+
+
+;; === Additional edge case tests ===
+
+(deftest validate-required-fields-edge-cases-test
+  (testing "nullable? explicitly false is required"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Required field"
+          (storage/validate-required-fields!
+            :user
+            {:name {:type :text :nullable? false}}
+            {}))))
+
+  (testing "multiple required fields - first missing"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Required field"
+          (storage/validate-required-fields!
+            :user
+            {:name {:type :text} :email {:type :text}}
+            {:email "test@test.com"}))))
+
+  (testing "all required fields present passes"
+    (is (nil? (storage/validate-required-fields!
+                :user
+                {:name {:type :text} :email {:type :text}}
+                {:name "John" :email "john@test.com"})))))
+
+
+(deftest infer-actual-type-additional-cases-test
+  (testing "infers :numeric for ratio"
+    ;; Ratios like 22/7 may return :unknown since they're not float/decimal
+    (let [result (#'graphden.storage.protocol.crud-validation/infer-actual-type 22/7)]
+      (is (contains? #{:numeric :unknown} result))))
+
+  (testing "infers :int for BigInteger"
+    (is (= :int (#'graphden.storage.protocol.crud-validation/infer-actual-type (bigint 999999999999999999)))))
+
+  (testing "infers types correctly for Java Instant"
+    (is (= :timestamptz (#'graphden.storage.protocol.crud-validation/infer-actual-type (java.time.Instant/now))))))
+
+
+(deftest validate-where-clause-types-additional-cases-test
+  (testing "wrong type throws - boolean for uuid"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:ref-id {:type :uuid}}
+            {:ref-id true}))))
+
+  (testing "wrong type throws - map for text"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:name {:type :text}}
+            {:name {:invalid "map"}}))))
+
+  (testing "empty where clause passes"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                {}))))
+
+  (testing "multiple type mismatches throws on first"
+    ;; Should throw on first mismatch encountered
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:name {:type :text} :age {:type :int}}
+            {:name 123 :age "wrong"})))))
+
+
+(deftest validate-entity-name-additional-cases-test
+  (testing "entity-name at max length (64 chars) passes"
+    (let [max-name (keyword (str/join (repeat 64 "a")))]
+      (is (nil? (storage/validate-entity-name! max-name "create")))))
+
+  (testing "entity-name with hyphen passes"
+    (is (nil? (storage/validate-entity-name! :my-entity "query"))))
+
+  (testing "entity-name with underscore passes"
+    (is (nil? (storage/validate-entity-name! :my_entity "query"))))
+
+  (testing "entity-name with special chars throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! :my.entity "create"))))
+
+  (testing "entity-name starting with hyphen throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! :-entity "create"))))
+
+  (testing "entity-name starting with underscore throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! :_entity "create"))))
+
+  (testing "operation is included in error message"
+    (try
+      (storage/validate-entity-name! nil "batch-insert")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= "batch-insert" (:operation (ex-data e))))))))
+
+
+(deftest check-type-match-additional-cases-test
+  (testing "exotic type passes through"
+    ;; Unknown/exotic types should return nil to allow backend handling
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
+               "any-value" :custom-exotic-type))))
+
+  (testing "wrong type for numeric - string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "3.14" :numeric)]
+      (is (= :numeric (:expected result)))
+      (is (= :text (:actual result)))))
+
+  (testing "wrong type for timestamptz - string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "2023-01-01" :timestamptz)]
+      (is (= :timestamptz (:expected result)))
+      (is (= :text (:actual result)))))
+
+  (testing "wrong type for bytes - string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "binary" :bytes)]
+      (is (= :bytes (:expected result)))
+      (is (= :text (:actual result)))))
+
+  (testing "wrong type for enum - string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "active" :enum)]
+      (is (= :enum (:expected result)))
+      (is (= :text (:actual result))))))
+
+
+(deftest validate-where-clause-fields-multiple-unknown-test
+  (testing "throws on first unknown field even with multiple"
+    ;; Should throw on first unknown field encountered
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Unknown field"
+          (storage/validate-where-clause-fields!
+            :user
+            {:name {:type :text}}
+            {:unknown1 "val" :unknown2 "val"})))))

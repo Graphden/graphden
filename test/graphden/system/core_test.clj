@@ -1,0 +1,77 @@
+(ns graphden.system.core-test
+  "Tests for Integrant init-key implementations in system.core.
+
+   Covers:
+   - :http/server halt-key!, suspend-key!, resume-key
+   - Basic lifecycle testing with mocks"
+  (:require
+    [clojure.test :refer [deftest is testing]]
+    [graphden.executor.interface :as exec]
+    [integrant.core :as ig]))
+
+
+;; =============================================================================
+;; :http/server Tests (using mock)
+;; =============================================================================
+
+(defn- mock-execute-by-name
+  "Creates a mock server stop function."
+  [_context _fn-name _args]
+  ;; Return a function that simulates http-kit server stop
+  (let [stopped? (atom false)]
+    (fn []
+      (reset! stopped? true))))
+
+
+(deftest http-server-halt-test
+  (testing "halt-key! calls server stop function"
+    (let [stopped? (atom false)
+          mock-server (fn []
+                        (reset! stopped? true))]
+      ;; Simulate halt behavior
+      (ig/halt-key! :http/server mock-server)
+      (is @stopped? "Server stop function should be called")))
+
+  (testing "halt-key! handles nil server gracefully"
+    ;; Should not throw
+    (is (nil? (ig/halt-key! :http/server nil)))))
+
+
+(deftest http-server-suspend-test
+  (testing "suspend-key! calls server stop function"
+    (let [stopped? (atom false)
+          mock-server (fn []
+                        (reset! stopped? true))]
+      ;; Simulate suspend behavior
+      (ig/suspend-key! :http/server mock-server)
+      (is @stopped? "Server stop function should be called")))
+
+  (testing "suspend-key! handles nil server gracefully"
+    ;; Should not throw
+    (is (nil? (ig/suspend-key! :http/server nil)))))
+
+
+(deftest http-server-resume-with-mock-test
+  (testing "resume-key calls init-key with same config"
+    (with-redefs [exec/execute-by-name mock-execute-by-name]
+      (let [mock-context {:storage :mock :registry :mock}
+            opts {:context mock-context :startup-fn-name :test-server :port 8888}
+            config {:http/server opts}
+            ;; Simulate a previous server
+            old-server (fn [] nil)
+            ;; Resume should create new server (calls init-key internally)
+            new-server (ig/resume-key :http/server opts config old-server)]
+        (is (fn? new-server) "Resume should return a server function")))))
+
+
+(deftest http-server-init-with-mock-test
+  (testing "init-key returns a server stop function"
+    (with-redefs [exec/execute-by-name mock-execute-by-name]
+      (let [mock-context {:storage :mock :registry :mock}
+            opts {:context mock-context :startup-fn-name :test-server :port 9999}
+            ;; Init should return a function (the stop function)
+            result (ig/init-key :http/server opts)]
+        (is (fn? result) "init-key should return a function")
+        ;; Calling the stop function should not throw
+        (when (fn? result)
+          (result))))))

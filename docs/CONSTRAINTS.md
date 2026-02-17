@@ -94,9 +94,8 @@ The `storage-protocol` component provides shared validation functions that work 
 
 | Storage | Location | Notes |
 |---------|----------|-------|
-| memory | `memory-storage/core.clj` | Direct atom access |
-| postgres | `postgres-storage/constraints.clj` | SQL queries |
-| datomic | `datomic-storage/constraints.clj` | Datalog queries |
+| postgres | `storage/postgres/constraints.clj` | SQL queries |
+| age | `storage/age/age.clj` | Graph queries via Cypher |
 
 ### Performance Considerations
 
@@ -104,11 +103,6 @@ The `storage-protocol` component provides shared validation functions that work 
 - Uses iterative DFS with visited set
 - Worst case O(V + E) where V = functions, E = references
 - Early termination on cycle detection
-
-**Caching:**
-- Postgres: Metadata cached with lock-protected invalidation
-- Datomic: Connection cached, queries use indices
-- Memory: Direct access, no caching needed
 
 ## Testing
 

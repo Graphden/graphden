@@ -61,60 +61,10 @@ Error types follow the pattern `:category/specific-error` where:
 - `:min-timeout-ms` - Minimum allowed (1000ms)
 **Solution:** Provide a positive integer timeout of at least 1000ms.
 
-### `:config-error/invalid-db-name`
-**Component:** datomic-storage
-**Description:** Database name is invalid (empty, too long, or contains invalid characters).
-**Ex-data keys:**
-- `:db-name` - The invalid database name
-**Solution:** Use a non-empty database name with only alphanumeric characters and hyphens, max 64 chars.
-
-### `:config-error/invalid-client-config`
-**Component:** datomic-storage
-**Description:** Datomic client configuration is invalid.
-**Solution:** Provide a valid client configuration map.
-
-### `:config-error/missing-server-type`
-**Component:** datomic-storage
-**Description:** Server type is required in Datomic client configuration.
-**Solution:** Provide `:server-type` (`:dev-local` or `:cloud`).
-
-### `:config-error/invalid-server-type`
-**Component:** datomic-storage
-**Description:** Server type is not supported.
-**Ex-data keys:**
-- `:server-type` - The invalid server type
-- `:supported` - List of supported types
-**Solution:** Use `:dev-local` or `:cloud` as server type.
-
-### `:config-error/missing-system`
-**Component:** datomic-storage
-**Description:** System name is required for dev-local server type.
-**Solution:** Provide `:system` in the client configuration.
-
-### `:config-error/missing-storage-dir`
-**Component:** datomic-storage
-**Description:** Storage directory is required for dev-local server type.
-**Solution:** Provide `:storage-dir` in the client configuration.
-
-### `:config-error/missing-endpoint`
-**Component:** datomic-storage
-**Description:** Endpoint is required for cloud server type.
-**Solution:** Provide `:endpoint` in the client configuration.
-
-### `:config-error/missing-access-key`
-**Component:** datomic-storage
-**Description:** Access key is required for cloud server type.
-**Solution:** Provide `:access-key` in the client configuration.
-
-### `:config-error/missing-secret`
-**Component:** datomic-storage
-**Description:** Secret is required for cloud server type.
-**Solution:** Provide `:secret` in the client configuration.
-
 ## Constraint Violations
 
 ### `:constraint-violation/unique`
-**Components:** memory-storage, datomic-storage
+**Component:** storage-protocol
 **Description:** Attempted to insert a record with a duplicate unique key.
 **Ex-data keys:**
 - `:entity` - Entity name (e.g., `:fn`, `:fn-schema`)
@@ -239,15 +189,6 @@ Error types follow the pattern `:category/specific-error` where:
 **Ex-data keys:**
 - `:field` - Field name
 - `:value` - Raw value that failed to parse
-
-## Metadata Errors
-
-### `:metadata-error/rollback-failed`
-**Component:** datomic-storage
-**Description:** Metadata save failed and rollback also failed. Database may be inconsistent.
-**Ex-data keys:**
-- `:original-error` - The original error message
-- `:rollback-error` - The rollback error message
 
 ## Error Handling Example
 

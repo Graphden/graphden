@@ -627,10 +627,17 @@
 
 
 ;; === Query timeout re-exports ===
-;; Note: We create our own dynamic var here for interface consistency.
-;; config/*query-timeout-ms* is the canonical source, but this var allows
-;; users to read sp/*query-timeout-ms* directly. The with-query-timeout
-;; wrapper below ensures both vars are bound together.
+;; === Dynamic Configuration Vars ===
+;;
+;; ARCHITECTURE NOTE: Dynamic vars are re-exported from config.clj to provide
+;; a unified API through this interface. Each var here shadows its canonical
+;; definition in config.clj. The wrapper functions (with-query-timeout,
+;; with-regex-limits) bind BOTH sets of vars to ensure consistent behavior
+;; regardless of which namespace the consuming code imports.
+;;
+;; Canonical source: graphden.storage.protocol.config
+;; This interface: re-exports for sp/* convenience
+
 (def ^:dynamic *query-timeout-ms*
   "Timeout for storage queries in milliseconds. Can be rebound per-thread.
    Default is 30000 ms (30 seconds). Use with-query-timeout for safe rebinding."

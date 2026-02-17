@@ -318,9 +318,8 @@ This section maps each system component to the principles it serves. Use this to
 | Component | Principles Served | How |
 |-----------|-------------------|-----|
 | `storage-protocol` | Correctness, Minimal entities | Generic CRUD interface for all backends; schema-agnostic |
-| `memory-storage` | Correctness (testing) | Fast tests enable comprehensive coverage |
 | `postgres-storage` | Performance, Correctness | Production-grade ACID transactions |
-| `datomic-storage` | Correctness, Dev tools | Immutable history enables versioning/audit |
+| `graph-storage-age` | Correctness, Performance | Graph queries via Apache AGE Cypher |
 
 ### Graph Layer
 
@@ -329,17 +328,6 @@ This section maps each system component to the principles it serves. Use this to
 | `graph-protocol` | Correctness, Modularity | Graph-specific protocols: GraphReader, GraphConstraints |
 | `graph-data-schema` | Minimal entities | Core graph entities: fn, fn-schema, arg-schema, arg-value |
 | `graph-storage-*` | Dev simplicity | Pre-configured storage + graph schema bundles |
-
-### Caching Layer
-
-| Component | Principles Served | How |
-|-----------|-------------------|-----|
-| `cache-protocol` | Performance | O(1) graph resolution instead of O(depth) |
-| `cache-memory` | Performance (dev) | Zero-latency cache for development |
-| `cache-postgres` | Performance (prod) | Persistent cache survives restarts |
-| `cache-datomic` | Performance + Dev tools | Cache with history for debugging |
-| `cached-storage` | Performance, Correctness | Transparent caching; auto-invalidation prevents stale data |
-| `cache-data-schema` | Minimal entities | Extends graph-data-schema without new concepts |
 
 ### Execution Layer
 
@@ -499,7 +487,7 @@ The system separates concerns into three distinct layers:
 ┌─────────────────────────────────────────────────────────────────┐
 │                         EXECUTOR                                 │
 │  - Receives fn-id + call-site-args                              │
-│  - Knows about laziness (delay, thunks)                         │
+│  - Knows about laziness (Clojure delays)                        │
 │  - Resolves base-fn implementations                             │
 │  - Does NOT know about storage details                          │
 └─────────────────────────────────────────────────────────────────┘

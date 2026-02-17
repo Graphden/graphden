@@ -9,19 +9,20 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| GraphConstraints Protocol | Done | All 5 validators |
+| GraphConstraints Protocol | Done | All validators implemented |
 | StorageCRUD Protocol | Done | + Batch operations |
-| Executor with Thunks | Done | + Graph caching |
-| Base Functions | Partial | 50+ functions done; I/O pending |
-| Memory Storage | Done | Full protocol support |
+| Executor with Delays | Done | Lazy evaluation via Clojure delays |
+| Base Functions | Partial | 50+ functions done; I/O server done |
 | PostgreSQL Storage | Done | Full protocol support |
-| Datomic Storage | Done | Full protocol support |
-| Execution Graph Caching | Done | O(1) resolution, auto-invalidation |
+| Apache AGE Storage | Done | Graph queries via Cypher |
 | Base Function impl-hash | Done | SHA-256 hash for version tracking |
+| Integrant System | Done | Component lifecycle management |
+| Logging | Done | Structured logging with MDC |
+| Web Server | Done | HTTP-kit + Reitit router |
+| Versioning | Done | VersionedStorage decorator |
 | REST API | Planned | Phase 5 |
 | Web UI | Planned | Phase 5 |
 | Type System | Planned | Future work |
-| Versioning | Design done | All entities versioned (incl. fn_schema/arg_schema); branch_merge; see current-schema.dbml |
 | Permissions | Planned | Future work |
 
 ---
@@ -49,7 +50,7 @@
 
 **1.3 Contract tests** - Comprehensive test coverage
 
-**1.4 Storage implementations** - All 3 backends
+**1.4 Storage implementations** - PostgreSQL + Apache AGE
 
 ---
 
@@ -83,11 +84,11 @@
   (resolve-execution-graph [this root-fn-id]))
 ```
 
-**3.2 Thunk types:**
-- LiteralThunk - literal values
-- FnRefThunk - direct function references (execute each time)
-- FnResultValueThunk - cached computation references (execute once)
-- LazyFnThunk - HOF function references (pass as value)
+**3.2 Lazy Evaluation:**
+Arguments are wrapped in Clojure `delay` objects:
+- Literal values → immediate delay
+- fn references → delay that executes function
+- call-site references → delay with result caching within execution
 
 **3.3 Executor:**
 - `execute` - Main entry point
@@ -100,36 +101,6 @@
 - `register-base-fns!` - Register implementations
 - `sync-defs-to-storage!` - Sync schemas to storage
 - Deterministic UUID generation for idempotent operations
-
----
-
-## Phase 3.5: Execution Graph Caching [DONE]
-
-**Goal**: O(1) graph resolution instead of O(depth) recursive queries.
-
-**3.5.1 CacheStorage protocol:**
-```clojure
-(defprotocol CacheStorage
-  (get-cached-graph [this fn-id])
-  (save-cache! [this fn-id graph dependencies])
-  (delete-cache! [this fn-id])
-  (find-caches-by-fn-dep [this dep-fn-id])
-  (find-caches-by-fn-schema-dep [this dep-fn-schema-id])
-  (find-caches-by-arg-schema-dep [this dep-arg-schema-id]))
-```
-
-**3.5.2 Components:**
-- `cache-protocol` - Protocol definition and utilities
-- `cache-data-schema` - Schema for cache storage
-- `cache-memory` - In-memory implementation
-- `cache-postgres` - PostgreSQL implementation
-- `cache-datomic` - Datomic implementation
-- `cached-storage` - Decorator with automatic invalidation
-
-**3.5.3 Features:**
-- Dependency tracking with ref-counts
-- Automatic invalidation on entity changes
-- Extensible via multimethods
 
 ---
 

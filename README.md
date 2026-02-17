@@ -13,7 +13,7 @@ Graphden is an experimental platform where:
 - **Code = Graph in DB** — functions and their compositions are stored as structured data
 - **Visual Editing** — graphical interface instead of text
 - **Lazy Execution** — only computes what's needed
-- **Execution Graph Caching** — O(1) graph resolution instead of O(depth) recursive queries
+- **Integrant System** — component lifecycle management with hot reload
 
 **Goals**:
 1. Test the hypothesis that graph-based visual programming can be simpler and more readable than text code for high-level logic
@@ -135,6 +135,14 @@ bb fix       # Auto-fix formatting
 | `web/reitit/` | Reitit router base functions |
 | `web/server/` | Web server utilities |
 
+### System & Runtime
+
+| Module | Description |
+|--------|-------------|
+| `system/` | Integrant lifecycle management, Aero config loading |
+| `executor_runtime/` | Main entry point (-main), shutdown hooks |
+| `logging/` | Structured logging with MDC context |
+
 ### Versioning (Optional)
 
 | Module | Description |
@@ -152,6 +160,8 @@ bb fix       # Auto-fix formatting
 | [CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications |
 | [ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference |
 | [EXTENDING.md](docs/EXTENDING.md) | Guide for adding new storage backends |
+| [CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config and Aero tags |
+| [DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment setup |
 
 ## Project Structure
 
@@ -159,16 +169,16 @@ bb fix       # Auto-fix formatting
 graphden/
 ├── src/graphden/            # Source code
 │   ├── executor/            # Executor, base-fns, registry, composition
+│   ├── executor_runtime/    # Main entry point (-main, shutdown hooks)
+│   ├── logging/             # Structured logging with MDC
 │   ├── schema/              # Protocol, malli, graph, versioned, traits
 │   ├── storage/             # Protocol, postgres, AGE
+│   ├── system/              # Integrant lifecycle management
 │   ├── versioning/          # Storage, merge protection
-│   └── web/                 # HTTP-kit, reitit, server
+│   └── web/                 # HTTP-kit, reitit, server, editor, CRUD
 ├── test/graphden/           # Tests (mirrors src structure)
-├── bases/
-│   └── executor-runtime/    # Executor server runtime
-├── projects/
-│   └── executor-server/     # Deployable executor server
 ├── docs/                    # Documentation
+├── resources/               # Config files (config.edn, logback.xml)
 ├── bb.edn                   # Babashka tasks
 └── deps.edn                 # Dependencies
 ```

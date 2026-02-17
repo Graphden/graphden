@@ -43,9 +43,9 @@
   core/all-defs)
 
 
-;; For backwards compatibility
 (defn get-all-defs
   "Returns all base function definitions.
-   Deprecated: use `all-defs` directly."
+   Convenience function for consumers who prefer calling a function
+   over accessing the `all-defs` var directly."
   []
   all-defs)

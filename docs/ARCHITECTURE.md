@@ -11,7 +11,7 @@
 2. [Constraints Protocol](#part-2-constraints-protocol-graphconstraints) - Graph integrity
 3. [Recursion and Cycles](#part-3-recursion-and-cycles) - Handling recursive patterns
 4. [Data Schema](#part-4-data-schema) - Entity definitions
-5. [Execution Model](#part-5-execution-model) - Lazy evaluation with thunks
+5. [Execution Model](#part-5-execution-model) - Lazy evaluation with delays
 6. [System Limitations](#part-6-system-limitations) - Known constraints and mitigations
 7. [Distributed Execution](#part-7-distributed-execution-future) - Parallelization and distribution
 8. [Appendices](#appendix-a-component-dependency-graph) - Reference material

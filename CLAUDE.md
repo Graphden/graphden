@@ -88,6 +88,8 @@ Without call-site, we couldn't distinguish "time before sleep" from "time after 
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |
 | [docs/EXTENDING.md](docs/EXTENDING.md) | Adding new storage backends | When implementing new backend |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Implementation status, future plans | For project planning |
+| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
 
 ## Common Commands
 
@@ -241,7 +243,7 @@ docs/                                  # Documentation
 src/graphden/
 ├── executor/           # Executor, base-fns, registry, composition
 │   ├── interface.clj
-│   ├── base-fns/
+│   ├── base_fns/
 │   ├── registry/
 │   └── composition/
 ├── schema/             # Protocol, malli, graph, versioned, traits, fields
@@ -255,13 +257,19 @@ src/graphden/
 │   ├── protocol/
 │   ├── postgres/
 │   └── age/
-├── versioning/         # Storage, merge protection
+├── versioning/         # Storage decorator, merge protection
 │   ├── storage/
 │   └── merge/
-├── web/                # HTTP-kit, reitit, server
-│   ├── http-kit/
-│   ├── reitit/
-│   └── server/
+├── web/                # HTTP-kit, reitit, server, editor UI
+│   ├── http_kit/       # HTTP server base functions
+│   ├── reitit/         # Router base functions
+│   ├── server/         # Server fn-defs
+│   ├── editor/         # Graph editor UI
+│   ├── graph/          # Graph API handlers
+│   ├── crud/           # CRUD API handlers
+│   └── html/           # HTML rendering utilities
+├── logging/            # Structured logging with MDC
+│   └── interface.clj
 ├── system/             # Integrant lifecycle management
 │   ├── interface.clj   # start!, stop!, read-config
 │   ├── config.clj      # Aero config loading

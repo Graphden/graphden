@@ -14,9 +14,8 @@ Base functions are the primitives that execute actual computations. They are reg
 ;; Simple function that adds two numbers
 (exec/register-base-fn!
   :add
-  (fn [{:keys [a b]} ctx]
-    (+ (exec/force-value a ctx)
-       (exec/force-value b ctx))))
+  (fn [{:keys [a b]} _ctx]
+    (+ @a @b)))  ; @ dereferences the delay to get actual value
 ```
 
 ### Step 2: Create fn-schema in Storage
@@ -75,24 +74,23 @@ Base functions are the primitives that execute actual computations. They are reg
 | `:fn` | UUID | Lazy function reference (not executed) |
 | `:ref` | UUID | Function reference (executed on force) |
 
-### Working with Thunks
+### Working with Lazy Arguments (Delays)
 
-Arguments are passed as thunks (lazy values). Use `force-value` to get the actual value:
+Arguments are passed as Clojure delays (lazy values). Use `@` to dereference and get the actual value:
 
 ```clojure
 (exec/register-base-fn!
   :conditional-add
   (fn [{:keys [condition a b]} ctx]
-    ;; force-value evaluates the thunk
-    (if (exec/force-value condition ctx)
-      (+ (exec/force-value a ctx)
-         (exec/force-value b ctx))
+    ;; @ (deref) evaluates the delay
+    (if @condition
+      (+ @a @b)
       0)))
 ```
 
 ### Higher-Order Functions
 
-For `:fn` type arguments, `force-value` returns the fn-id (UUID) without executing.
+For `:fn` type arguments, `@` returns the fn-id (UUID) without executing.
 
 **Single-Argument Model**: Functions passed to HOF must have exactly **one required argument** (any name). This eliminates naming convention problems — users don't need to know that `map` expects `:item` or `reduce` expects `:acc`.
 
@@ -102,9 +100,9 @@ Use `make-single-arg-callable` to create a callable that automatically finds the
 (exec/register-base-fn!
   :my-map
   (fn [{:keys [f coll]} ctx]
-    ;; f is a :fn type - forcing returns fn-id (UUID)
-    (let [fn-id (exec/force-value f ctx)
-          items (exec/force-value coll ctx)
+    ;; f is a :fn type - @ returns fn-id (UUID)
+    (let [fn-id @f
+          items @coll
           ;; Create callable that passes value to the single required arg
           callable (exec/make-single-arg-callable ctx fn-id)]
       (mapv callable items))))
@@ -116,9 +114,9 @@ For `reduce`-like operations, the function receives a vector `[acc item]` as its
 (exec/register-base-fn!
   :my-reduce
   (fn [{:keys [f init coll]} ctx]
-    (let [fn-id (exec/force-value f ctx)
-          initial (exec/force-value init ctx)
-          items (exec/force-value coll ctx)
+    (let [fn-id @f
+          initial @init
+          items @coll
           callable (exec/make-single-arg-callable ctx fn-id)]
       ;; Pass [acc item] as single value
       (reduce (fn [acc item] (callable [acc item])) initial items))))
@@ -130,8 +128,8 @@ For `reduce`-like operations, the function receives a vector `[acc item]` as its
 (exec/register-base-fn!
   :apply-twice
   (fn [{:keys [f x]} ctx]
-    (let [fn-id (exec/force-value f ctx)
-          x-val (exec/force-value x ctx)
+    (let [fn-id @f
+          x-val @x
           callable (exec/make-single-arg-callable ctx fn-id)
           result1 (callable x-val)
           result2 (callable result1)]

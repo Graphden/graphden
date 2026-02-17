@@ -445,20 +445,37 @@
     :parent :delete-entity-api-handler
     :args {}}
 
-   ;; Health check - calls health-status base function and wraps in JSON
+   ;; Health check - composed from primitives
+   ;; Chain: health-status -> to-json-string -> ring-response -> make-handler
    {:name :health-data
     :parent :health-status
     :args {}}
 
-   {:name :health-handler-fn
-    :parent :json-handler
+   {:name :health-json-body
+    :parent :to-json-string
     :args {:data :health-data>}}
 
-   ;; Favicon - SVG graph icon
+   {:name :health-response
+    :parent :ring-response
+    :args {:status 200
+           :headers {"Content-Type" "application/json"}
+           :body :health-json-body>}}
+
+   {:name :health-handler-fn
+    :parent :make-handler
+    :args {:response :health-response>}}
+
+   ;; Favicon - SVG graph icon, composed from primitives
+   {:name :favicon-response
+    :parent :ring-response
+    :args {:status 200
+           :headers {"Content-Type" "image/svg+xml"
+                     "Cache-Control" "public, max-age=86400"}
+           :body "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#4A90D9\" rx=\"6\"/><circle cx=\"10\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"22\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"16\" cy=\"22\" r=\"4\" fill=\"white\"/><line x1=\"10\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/><line x1=\"22\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/></svg>"}}
+
    {:name :favicon-handler-fn
-    :parent :static-handler
-    :args {:content "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#4A90D9\" rx=\"6\"/><circle cx=\"10\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"22\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"16\" cy=\"22\" r=\"4\" fill=\"white\"/><line x1=\"10\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/><line x1=\"22\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/></svg>"
-           :content-type "image/svg+xml"}}
+    :parent :make-handler
+    :args {:response :favicon-response>}}
 
    ;; Router with all routes
    {:name :editor-router

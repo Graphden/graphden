@@ -20,71 +20,59 @@
 
 
 ;; =============================================================================
-;; Ring Response Helpers
+;; Ring Response Primitives
 ;; =============================================================================
 
-(defbase json-response
-  "Wraps data in a JSON Ring response map.
+(defbase ring-response
+  "Creates a Ring response map from components.
+
+   Arguments:
+   - status: HTTP status code (integer)
+   - headers: Map of header name to value
+   - body: Response body (string)
+
+   Returns:
+   {:status <status> :headers <headers> :body <body>}"
+  {:args {:status :int
+          :headers :jsonb
+          :body :text}
+   :return-type :jsonb}
+  {:status status
+   :headers headers
+   :body body})
+
+
+(defbase make-handler
+  "Creates a Ring handler function from a response map.
+
+   Arguments:
+   - response: A Ring response map {:status :headers :body}
+
+   Returns:
+   A function (fn [request] response) that ignores request and returns response.
+
+   Note: The response is captured at handler creation time (via let binding),
+   not at request time. This ensures the response delay is dereferenced
+   during startup, avoiding stale execution context issues."
+  {:args {:response :jsonb}
+   :return-type :fn}
+  ;; Capture response value NOW (at make-handler execution time)
+  ;; Using let binding forces deref before the fn closure is created
+  (let [r response]
+    (fn [_request] r)))
+
+
+(defbase to-json-string
+  "Serializes data to JSON string.
 
    Arguments:
    - data: Any JSON-serializable value
 
    Returns:
-   {:status 200
-    :headers {\"Content-Type\" \"application/json\"}
-    :body <json-encoded-data>}"
+   JSON string representation."
   {:args {:data :any}
-   :return-type :jsonb}
-  {:status 200
-   :headers {"Content-Type" "application/json"}
-   :body (json/generate-string data)})
-
-
-(defbase json-handler
-  "Creates a Ring handler that returns JSON response from data.
-
-   Arguments:
-   - data: Any JSON-serializable value to return
-
-   Returns:
-   A Ring handler function that ignores the request and returns
-   the data as a JSON response.
-
-   Usage in fn-defs:
-   {:name :health-handler-fn
-    :parent :json-handler
-    :args {:data :health-status>}}  ; execute health-status and wrap result"
-  {:args {:data :any}
-   :return-type :fn}
-  (let [response {:status 200
-                  :headers {"Content-Type" "application/json"}
-                  :body (json/generate-string data)}]
-    (fn [_request] response)))
-
-
-(defbase static-handler
-  "Creates a Ring handler that returns static content with specified content-type.
-
-   Arguments:
-   - content: String content to return
-   - content-type: MIME type string (e.g. \"image/svg+xml\", \"text/plain\")
-
-   Returns:
-   A Ring handler function that returns the content with proper headers.
-
-   Usage in fn-defs:
-   {:name :favicon-handler
-    :parent :static-handler
-    :args {:content \"<svg>...</svg>\"
-           :content-type \"image/svg+xml\"}}"
-  {:args {:content :text
-          :content-type :text}
-   :return-type :fn}
-  (let [response {:status 200
-                  :headers {"Content-Type" content-type
-                            "Cache-Control" "public, max-age=86400"}
-                  :body content}]
-    (fn [_request] response)))
+   :return-type :text}
+  (json/generate-string data))
 
 
 ;; =============================================================================
@@ -146,9 +134,9 @@
 
 (def system-defs
   "System base function definitions."
-  {:json-response json-response
-   :json-handler json-handler
-   :static-handler static-handler
+  {:ring-response ring-response
+   :make-handler make-handler
+   :to-json-string to-json-string
    :jvm-info jvm-info
    :current-time-ms current-time-ms
    :health-status health-status})

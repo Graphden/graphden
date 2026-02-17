@@ -445,10 +445,27 @@
     :parent :delete-entity-api-handler
     :args {}}
 
+   ;; Health check - calls health-status base function and wraps in JSON
+   {:name :health-data
+    :parent :health-status
+    :args {}}
+
+   {:name :health-handler-fn
+    :parent :json-handler
+    :args {:data :health-data>}}
+
+   ;; Favicon - SVG graph icon
+   {:name :favicon-handler-fn
+    :parent :static-handler
+    :args {:content "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#4A90D9\" rx=\"6\"/><circle cx=\"10\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"22\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"16\" cy=\"22\" r=\"4\" fill=\"white\"/><line x1=\"10\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/><line x1=\"22\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/></svg>"
+           :content-type "image/svg+xml"}}
+
    ;; Router with all routes
    {:name :editor-router
     :parent :router
-    :args {:routes [["/" {"get" {"handler" :editor-handler>}}]
+    :args {:routes [["/health" {"get" {"handler" :health-handler-fn>}}]
+                    ["/favicon.ico" {"get" {"handler" :favicon-handler-fn>}}]
+                    ["/" {"get" {"handler" :editor-handler>}}]
                     ["/api/graph/entities" {"get" {"handler" :api-entities-handler>}}]
                     ["/partials/entity-details/:type/:id" {"get" {"handler" :entity-details-handler-fn>}}]
                     ["/partials/entity-form/:type" {"get" {"handler" :entity-form-handler-fn>}}]

@@ -62,6 +62,31 @@
     (fn [_request] response)))
 
 
+(defbase static-handler
+  "Creates a Ring handler that returns static content with specified content-type.
+
+   Arguments:
+   - content: String content to return
+   - content-type: MIME type string (e.g. \"image/svg+xml\", \"text/plain\")
+
+   Returns:
+   A Ring handler function that returns the content with proper headers.
+
+   Usage in fn-defs:
+   {:name :favicon-handler
+    :parent :static-handler
+    :args {:content \"<svg>...</svg>\"
+           :content-type \"image/svg+xml\"}}"
+  {:args {:content :text
+          :content-type :text}
+   :return-type :fn}
+  (let [response {:status 200
+                  :headers {"Content-Type" content-type
+                            "Cache-Control" "public, max-age=86400"}
+                  :body content}]
+    (fn [_request] response)))
+
+
 ;; =============================================================================
 ;; System Information Functions
 ;; =============================================================================
@@ -123,6 +148,7 @@
   "System base function definitions."
   {:json-response json-response
    :json-handler json-handler
+   :static-handler static-handler
    :jvm-info jvm-info
    :current-time-ms current-time-ms
    :health-status health-status})

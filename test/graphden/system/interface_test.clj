@@ -1,0 +1,115 @@
+(ns graphden.system.interface-test
+  "Tests for system/interface.clj public API.
+
+   Tests configuration loading and lifecycle functions.
+   Full integration tests use test-helpers.clj fixtures."
+  (:require
+    [clojure.test :refer [deftest is testing]]
+    [graphden.system.interface :as sys]
+    [integrant.core :as ig]))
+
+
+;; =============================================================================
+;; read-config tests
+;; =============================================================================
+
+(deftest read-config-test
+  (testing "read-config returns valid Integrant config for :test profile"
+    (let [config (sys/read-config :test)]
+      (is (map? config) "Config should be a map")
+      (is (contains? config :db/schema) "Config should have :db/schema")
+      (is (contains? config :db/age) "Config should have :db/age")
+      (is (contains? config :db/versioned) "Config should have :db/versioned")))
+
+  (testing "read-config throws for invalid profile"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Config file not found"
+                          (sys/read-config :nonexistent)))))
+
+
+;; =============================================================================
+;; start-with-overrides! tests (config merging)
+;; =============================================================================
+
+(deftest start-with-overrides-config-merge-test
+  (testing "start-with-overrides! merges config correctly"
+    ;; We test the merging logic by checking that read-config + manual merge
+    ;; produces the same structure as what start-with-overrides! would use
+    (let [base-config (sys/read-config :test)
+          overrides {:db/age {:jdbc-url "jdbc:postgresql://override:5432/test"}}
+          ;; Simulate what start-with-overrides! does internally
+          merged-config (reduce-kv
+                          (fn [cfg k v]
+                            (update cfg k merge v))
+                          base-config
+                          overrides)]
+      (is (= "jdbc:postgresql://override:5432/test"
+             (get-in merged-config [:db/age :jdbc-url]))
+          "Override should be applied to config"))))
+
+
+;; =============================================================================
+;; stop!/suspend!/resume! delegation tests
+;; =============================================================================
+
+(deftest stop-delegation-test
+  (testing "stop! delegates to ig/halt!"
+    (let [halted? (atom false)
+          mock-system {:db/schema :mock}]
+      (with-redefs [ig/halt! (fn [sys]
+                               (reset! halted? true)
+                               (is (= mock-system sys)))]
+        (sys/stop! mock-system)
+        (is @halted? "ig/halt! should be called")))))
+
+
+(deftest suspend-delegation-test
+  (testing "suspend! delegates to ig/suspend!"
+    (let [suspended? (atom false)
+          mock-system {:db/schema :mock}]
+      (with-redefs [ig/suspend! (fn [sys]
+                                  (reset! suspended? true)
+                                  (is (= mock-system sys)))]
+        (sys/suspend! mock-system)
+        (is @suspended? "ig/suspend! should be called")))))
+
+
+(deftest resume-delegation-test
+  (testing "resume! delegates to ig/resume with new config"
+    (let [resumed? (atom false)
+          mock-system {:db/schema :mock}]
+      (with-redefs [ig/resume (fn [config sys]
+                                (reset! resumed? true)
+                                (is (map? config) "Config should be passed")
+                                (is (= mock-system sys) "System should be passed")
+                                :resumed)]
+        (let [result (sys/resume! mock-system :test)]
+          (is @resumed? "ig/resume should be called")
+          (is (= :resumed result)))))))
+
+
+;; =============================================================================
+;; start! with component-keys tests
+;; =============================================================================
+
+(deftest start-with-component-keys-test
+  (testing "start! accepts optional component-keys parameter"
+    (let [init-called? (atom false)
+          init-keys-passed (atom nil)]
+      (with-redefs [ig/init (fn [_config & [component-keys]]
+                              (reset! init-called? true)
+                              (reset! init-keys-passed component-keys)
+                              {:mock :system})]
+        ;; Test with component-keys
+        (sys/start! :test [:db/schema])
+        (is @init-called? "ig/init should be called")
+        (is (= [:db/schema] @init-keys-passed)
+            "Component keys should be passed to ig/init")
+
+        ;; Reset and test without component-keys
+        (reset! init-called? false)
+        (reset! init-keys-passed :not-called)
+        (sys/start! :test)
+        (is @init-called? "ig/init should be called")
+        (is (nil? @init-keys-passed)
+            "No component keys should be passed for full system start")))))

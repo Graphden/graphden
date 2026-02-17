@@ -375,16 +375,20 @@
 
 ;; === Storage Sync ===
 
-(defn- create-fn-entity!
-  "Creates a single fn entity in storage.
-   Returns the created entity."
+(defn- get-or-create-fn-entity!
+  "Gets existing fn with same name or creates new one.
+   Returns the fn entity."
   [storage fn-def]
   (let [fn-name (:name fn-def)
-        parent (:parent fn-def)
-        fn-schema-id (resolve-fn-schema-id storage parent)]
-    (sp/create-entity storage :fn
-                      {:name (clojure.core/name fn-name)
-                       :fn-schema-id fn-schema-id})))
+        fn-name-str (clojure.core/name fn-name)
+        existing (sp/query-entities storage :fn {:name fn-name-str})]
+    (if (seq existing)
+      (first existing)
+      (let [parent (:parent fn-def)
+            fn-schema-id (resolve-fn-schema-id storage parent)]
+        (sp/create-entity storage :fn
+                          {:name fn-name-str
+                           :fn-schema-id fn-schema-id})))))
 
 
 (defn- get-or-create-arg-value!
@@ -431,12 +435,18 @@
         (let [result-name-str (name result-name)]
           (if-let [existing-cs-id (get @created-call-sites result-name)]
             existing-cs-id
-            (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                  call-site (sp/create-entity storage :call-site
-                                              {:fn-id ref-fn-id
-                                               :name result-name-str})]
-              (swap! created-call-sites assoc result-name (:id call-site))
-              (:id call-site))))
+            ;; Check storage for existing call-site with same name
+            (let [existing-in-db (sp/query-entities storage :call-site {:name result-name-str})]
+              (if (seq existing-in-db)
+                (let [cs-id (:id (first existing-in-db))]
+                  (swap! created-call-sites assoc result-name cs-id)
+                  cs-id)
+                (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
+                      call-site (sp/create-entity storage :call-site
+                                                  {:fn-id ref-fn-id
+                                                   :name result-name-str})]
+                  (swap! created-call-sites assoc result-name (:id call-site))
+                  (:id call-site))))))
 
         ;; :fn-name - resolve to fn id
         :fn
@@ -446,6 +456,22 @@
         arg-value))
     ;; Not a top-level ref, recursively resolve nested structures
     (resolve-refs-recursively arg-value storage created-fns created-call-sites)))
+
+
+(defn- get-or-create-fn-arg!
+  "Gets existing fn-arg binding or creates new one.
+   The unique constraint is on (fn-id, arg-schema-id).
+   Returns the fn-arg entity."
+  [storage fn-id arg-schema-id arg-value-id]
+  (let [existing (sp/query-entities storage :fn-arg
+                                    {:fn-id fn-id
+                                     :arg-schema-id arg-schema-id})]
+    (if (seq existing)
+      (first existing)
+      (sp/create-entity storage :fn-arg
+                        {:fn-id fn-id
+                         :arg-schema-id arg-schema-id
+                         :arg-value-id arg-value-id}))))
 
 
 (defn- create-arg-values!
@@ -472,11 +498,8 @@
             resolved-value (resolve-arg-value arg-value storage created-fns created-call-sites)
             ;; Get or create arg-value (deduplicated)
             arg-value-id (get-or-create-arg-value! storage arg-schema-id resolved-value created-arg-values)]
-        ;; Create fn-arg binding (fn -> arg-value)
-        (sp/create-entity storage :fn-arg
-                          {:fn-id fn-id
-                           :arg-schema-id arg-schema-id
-                           :arg-value-id arg-value-id})))))
+        ;; Get or create fn-arg binding (fn -> arg-value)
+        (get-or-create-fn-arg! storage fn-id arg-schema-id arg-value-id)))))
 
 
 (defn sync-fns-to-storage!
@@ -522,7 +545,7 @@
           (if (empty? remaining)
             created-fns
             (let [fn-def (first remaining)
-                  fn-entity (create-fn-entity! storage fn-def)
+                  fn-entity (get-or-create-fn-entity! storage fn-def)
                   new-created (assoc created-fns (:name fn-def) (:id fn-entity))]
               ;; 5. Create arg-values and fn-arg bindings for this fn
               (create-arg-values! storage fn-entity fn-def new-created

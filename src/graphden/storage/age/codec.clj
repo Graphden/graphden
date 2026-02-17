@@ -3,7 +3,6 @@
    Handles JSONB, enum, and other type conversions."
   (:require
     [cheshire.core :as json]
-    [clojure.string :as str]
     [graphden.storage.protocol.interface :as sp])
   (:import
     (com.fasterxml.jackson.core
@@ -16,28 +15,11 @@
       PGobject)))
 
 
-;; === Naming utilities ===
-
-(defn kw->snake-case
-  "Converts a keyword to snake_case string."
-  [kw]
-  (-> (name kw)
-      (str/replace "-" "_")))
-
-
-(defn snake->kw
-  "Converts a snake_case string to keyword."
-  [s]
-  (-> s
-      (str/replace "_" "-")
-      keyword))
-
-
 (defn enum-value->sql
   "Converts enum keyword to SQL string."
   [v]
   (if (keyword? v)
-    (kw->snake-case v)
+    (sp/kw->snake-case v)
     (str v)))
 
 
@@ -45,7 +27,7 @@
   "Converts SQL string to enum keyword."
   [s]
   (when s
-    (snake->kw s)))
+    (sp/snake->kw s)))
 
 
 ;; === Known enum values ===
@@ -83,7 +65,7 @@
 (defn- value->enum
   [v enum-name]
   (doto (PGobject.)
-    (PGobject/.setType (kw->snake-case enum-name))
+    (PGobject/.setType (sp/kw->snake-case enum-name))
     (PGobject/.setValue (enum-value->sql v))))
 
 
@@ -162,7 +144,7 @@
       (partial sp/encode-value this)
       row
       field-specs
-      {:key-transform (comp keyword kw->snake-case)
+      {:key-transform (comp keyword sp/kw->snake-case)
        :fallback-specs (merge
                          (into {} (map (fn [k] [k {:type :jsonb}]) fallback-jsonb-columns))
                          (into {} (map (fn [k] [k {:type :timestamptz}]) fallback-timestamptz-columns)))}))
@@ -174,7 +156,7 @@
       (partial sp/decode-value this)
       row
       field-specs
-      {:key-transform (fn [col-key] (snake->kw (name col-key)))})))
+      {:key-transform (fn [col-key] (sp/snake->kw (name col-key)))})))
 
 
 (defn create-codec

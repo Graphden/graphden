@@ -18,21 +18,6 @@
 
 ;; === SQL Utilities ===
 
-(defn kw->snake-case
-  "Converts a keyword to snake_case string."
-  [kw]
-  (-> (name kw)
-      (str/replace "-" "_")))
-
-
-(defn snake->kw
-  "Converts a snake_case string to keyword."
-  [s]
-  (-> s
-      (str/replace "_" "-")
-      keyword))
-
-
 (defn- query-opts
   "Default query options."
   []
@@ -103,7 +88,7 @@
                 AND table_type = 'BASE TABLE'
                 AND table_name NOT LIKE '\\_%' ESCAPE '\\'"]
         rows (jdbc/execute! ds query (query-opts))]
-    (set (map (comp snake->kw :table-name) rows))))
+    (set (map (comp sp/snake->kw :table-name) rows))))
 
 
 (defn current-enums
@@ -113,7 +98,7 @@
                 WHERE typtype = 'e'
                 AND typnamespace = (SELECT oid FROM pg_namespace WHERE nspname = 'public')"]
         rows (jdbc/execute! ds query (query-opts))]
-    (set (map (comp snake->kw :typname) rows))))
+    (set (map (comp sp/snake->kw :typname) rows))))
 
 
 (defn current-enum-values
@@ -122,7 +107,7 @@
   (let [query ["SELECT enumlabel FROM pg_enum
                 JOIN pg_type ON pg_enum.enumtypid = pg_type.oid
                 WHERE typname = ?"
-               (kw->snake-case enum-name)]
+               (sp/kw->snake-case enum-name)]
         rows (jdbc/execute! ds query (query-opts))]
     (when (seq rows)
       (set (map (comp keyword :enumlabel) rows)))))
@@ -197,7 +182,7 @@
   [ds entity-name data metadata-cache rw-lock]
   (let [fields (get-entity-fields ds metadata-cache rw-lock entity-name)]
     (sp/standard-crud-validations! entity-name data fields)
-    (let [table-name (keyword (kw->snake-case entity-name))
+    (let [table-name (keyword (sp/kw->snake-case entity-name))
           id (or (:id data) (random-uuid))
           record (assoc data :id id)
           row (entity->row record fields)
@@ -216,7 +201,7 @@
 (defn read-entity
   "Reads an entity by id."
   [ds entity-name id]
-  (let [table-name (keyword (kw->snake-case entity-name))
+  (let [table-name (keyword (sp/kw->snake-case entity-name))
         query (sql/format {:select [:*]
                            :from [table-name]
                            :where [:= :id id]}
@@ -236,7 +221,7 @@
                       {:type :not-found
                        :entity entity-name
                        :id id})))
-    (let [table-name (keyword (kw->snake-case entity-name))
+    (let [table-name (keyword (sp/kw->snake-case entity-name))
           updated (merge existing data {:id id})
           _ (when fields (sp/validate-required-fields! entity-name fields updated))
           row (entity->row (dissoc updated :id) fields)
@@ -253,7 +238,7 @@
 (defn delete-entity
   "Deletes an entity by id."
   [ds entity-name id]
-  (let [table-name (keyword (kw->snake-case entity-name))
+  (let [table-name (keyword (sp/kw->snake-case entity-name))
         query (sql/format {:delete-from table-name
                            :where [:= :id id]}
                           {:quoted true})]
@@ -267,11 +252,11 @@
   [ds entity-name where metadata-cache rw-lock]
   (let [fields (get-entity-fields ds metadata-cache rw-lock entity-name)]
     (sp/standard-query-validations! entity-name fields where)
-    (let [table-name (keyword (kw->snake-case entity-name))
+    (let [table-name (keyword (sp/kw->snake-case entity-name))
           where-clause (when (seq where)
                          (into [:and]
                                (map (fn [[k v]]
-                                      (let [col (keyword (kw->snake-case k))
+                                      (let [col (keyword (sp/kw->snake-case k))
                                             field-spec (get fields k)
                                             encoded-v (codec/encode-value v field-spec)]
                                         (if (nil? encoded-v)
@@ -299,7 +284,7 @@
     (let [fields (get-entity-fields ds metadata-cache rw-lock entity-name)]
       (sp/validate-batch-size! (count data-seq) :create-entities {:entity-name entity-name})
       (sp/validate-no-duplicate-ids! entity-name data-seq)
-      (let [table-name (keyword (kw->snake-case entity-name))
+      (let [table-name (keyword (sp/kw->snake-case entity-name))
             records (vec (map (fn [data]
                                 (when fields (sp/validate-required-fields! entity-name fields data))
                                 (let [id (or (:id data) (random-uuid))]
@@ -323,7 +308,7 @@
   [ds entity-name ids]
   (if (empty? ids)
     {}
-    (let [table-name (keyword (kw->snake-case entity-name))
+    (let [table-name (keyword (sp/kw->snake-case entity-name))
           query (sql/format {:select [:*]
                              :from [table-name]
                              :where [:in :id (vec ids)]}
@@ -341,7 +326,7 @@
   [ds entity-name ids]
   (if (empty? ids)
     0
-    (let [table-name (keyword (kw->snake-case entity-name))
+    (let [table-name (keyword (sp/kw->snake-case entity-name))
           query (sql/format {:delete-from table-name
                              :where [:in :id (vec ids)]}
                             {:quoted true})]

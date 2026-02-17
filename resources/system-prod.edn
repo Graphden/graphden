@@ -18,7 +18,7 @@
 
  :exec/fn-entities
  {:storage #ig/ref :db/versioned
-  :fn-defs #ig/refset :app/fn-defs}
+  :fn-defs #ig/ref :app/fn-defs}
 
  :exec/context
  {:storage #ig/ref :db/versioned

@@ -11,18 +11,18 @@
 
    ;; Define fns as data
    (def my-fns
-     [{:name :router-handler-fn
+     [{:name :router-handler
        :parent :default-router-handler}
 
-      {:name :web-server-fn
+      {:name :web-server
        :parent :http-server
-       :args {:handler :router-handler-fn
+       :args {:handler :router-handler
               :port 8080}}])
 
    ;; Sync to storage (after base-fns are synced)
    (fn-composition/sync-fns-to-storage! storage my-fns)
-   ;; => {:router-handler-fn #uuid \"...\"
-   ;;     :web-server-fn #uuid \"...\"}
+   ;; => {:router-handler #uuid \"...\"
+   ;;     :web-server #uuid \"...\"}
    ```
 
    ## Definition Format

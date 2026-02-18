@@ -9,12 +9,12 @@
    Fn definitions are a vector of maps (order matters for validation):
 
    ```clojure
-   [{:name :router-handler-fn
+   [{:name :router-handler
      :parent :default-router-handler}  ; parent is base-fn
 
-    {:name :web-server-fn
+    {:name :web-server
      :parent :http-server              ; parent is base-fn
-     :args {:handler :router-handler-fn  ; ref to fn by name
+     :args {:handler :router-handler  ; ref to fn by name
             :port 8080}}]              ; literal value
    ```
 

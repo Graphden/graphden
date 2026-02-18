@@ -12,7 +12,7 @@
     (is (= 20 (count web-server-fns/fn-defs)))
     (let [names (set (map :name web-server-fns/fn-defs))]
       ;; Core fns
-      (is (contains? names :web-server-fn))
+      (is (contains? names :web-server))
       (is (contains? names :router-fn))
       (is (contains? names :routes-fn))
       ;; Handlers
@@ -25,7 +25,7 @@
       (is (contains? names :metrics-route-fn))))
 
   (testing "web-server-fn has correct parent and args"
-    (let [ws-def (first (filter #(= :web-server-fn (:name %)) web-server-fns/fn-defs))]
+    (let [ws-def (first (filter #(= :web-server (:name %)) web-server-fns/fn-defs))]
       (is (= :http-server (:parent ws-def)))
       ;; handler uses :router-fn> (execute router and use result as handler)
       (is (= :router-fn> (get-in ws-def [:args :handler])))
@@ -54,4 +54,4 @@
 
 (deftest startup-fn-name-test
   (testing "startup fn name is web-server-fn"
-    (is (= :web-server-fn web-server-fns/startup-fn-name))))
+    (is (= :web-server web-server-fns/startup-fn-name))))

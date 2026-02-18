@@ -676,19 +676,19 @@
     :args {}}
 
    ;; HTMX partial handlers
-   {:name :entity-details-handler-fn
+   {:name :entity-details-handler
     :parent :entity-details-handler
     :args {}}
 
-   {:name :entity-form-handler-fn
+   {:name :entity-form-handler
     :parent :entity-form-handler
     :args {}}
 
-   {:name :create-entity-handler-fn
+   {:name :create-entity-handler
     :parent :create-entity-api-handler
     :args {}}
 
-   {:name :delete-entity-handler-fn
+   {:name :delete-entity-handler
     :parent :delete-entity-api-handler
     :args {}}
 
@@ -708,7 +708,7 @@
            :headers {"Content-Type" "application/json"}
            :body :health-json-body>}}
 
-   {:name :health-handler-fn
+   {:name :health-handler
     :parent :make-handler
     :args {:response :health-response>}}
 
@@ -720,25 +720,25 @@
                      "Cache-Control" "public, max-age=86400"}
            :body "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#4A90D9\" rx=\"6\"/><circle cx=\"10\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"22\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"16\" cy=\"22\" r=\"4\" fill=\"white\"/><line x1=\"10\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/><line x1=\"22\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/></svg>"}}
 
-   {:name :favicon-handler-fn
+   {:name :favicon-handler
     :parent :make-handler
     :args {:response :favicon-response>}}
 
    ;; Router with all routes
    {:name :editor-router
     :parent :router
-    :args {:routes [["/health" {"get" {"handler" :health-handler-fn>}}]
-                    ["/favicon.ico" {"get" {"handler" :favicon-handler-fn>}}]
+    :args {:routes [["/health" {"get" {"handler" :health-handler>}}]
+                    ["/favicon.ico" {"get" {"handler" :favicon-handler>}}]
                     ["/" {"get" {"handler" :editor-handler>}}]
                     ["/api/graph/entities" {"get" {"handler" :api-entities-handler>}}]
-                    ["/partials/entity-details/:type/:id" {"get" {"handler" :entity-details-handler-fn>}}]
-                    ["/partials/entity-form/:type" {"get" {"handler" :entity-form-handler-fn>}}]
-                    ["/partials/entity-form/:type/:id" {"get" {"handler" :entity-form-handler-fn>}}]
-                    ["/api/entities/:type" {"post" {"handler" :create-entity-handler-fn>}}]
-                    ["/api/entities/:type/:id" {"delete" {"handler" :delete-entity-handler-fn>}}]]}}
+                    ["/partials/entity-details/:type/:id" {"get" {"handler" :entity-details-handler>}}]
+                    ["/partials/entity-form/:type" {"get" {"handler" :entity-form-handler>}}]
+                    ["/partials/entity-form/:type/:id" {"get" {"handler" :entity-form-handler>}}]
+                    ["/api/entities/:type" {"post" {"handler" :create-entity-handler>}}]
+                    ["/api/entities/:type/:id" {"delete" {"handler" :delete-entity-handler>}}]]}}
 
    ;; HTTP server with router
-   {:name :web-server-fn
+   {:name :web-server
     :parent :http-server
     :args {:handler :editor-router>
            :port 8080}}])
@@ -746,4 +746,4 @@
 
 (def startup-fn-name
   "Name of the function to execute at startup."
-  :web-server-fn)
+  :web-server)

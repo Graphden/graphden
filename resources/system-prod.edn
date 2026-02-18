@@ -27,7 +27,7 @@
 
  :http/server
  {:context #ig/ref :exec/context
-  :startup-fn-name :web-server-fn
+  :startup-fn-name :web-server
   :port #long #or [#env PORT "8080"]}
 
  ;; Fn definitions are loaded from the graph editor module

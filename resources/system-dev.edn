@@ -30,7 +30,7 @@
 
  :http/server
  {:context #ig/ref :exec/context
-  :startup-fn-name :web-server-fn
+  :startup-fn-name :web-server
   :port 8080}
 
  :app/fn-defs #var graphden.library.fn-defs.web.editor/fn-defs}

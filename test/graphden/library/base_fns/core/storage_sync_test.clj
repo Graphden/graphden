@@ -2,9 +2,9 @@
   "Tests for syncing base functions to storage."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.library.interface :as bf]
-    [graphden.library.base-fns.core.test-helpers :as h]
     [graphden.executor.interface :as exec]
+    [graphden.library.base-fns.core.test-helpers :as h]
+    [graphden.library.interface :as bf]
     [graphden.storage.age.test-setup :as th]
     [graphden.storage.protocol.interface :as sp]))
 

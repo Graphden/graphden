@@ -218,12 +218,18 @@
       (let [result-name-str (name result-name)]
         (if-let [existing-cs-id (get @created-call-sites result-name)]
           existing-cs-id
-          (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                call-site (sp/create-entity storage :call-site
-                                            {:fn-id ref-fn-id
-                                             :name result-name-str})]
-            (swap! created-call-sites assoc result-name (:id call-site))
-            (:id call-site))))
+          ;; Check storage for existing call-site with same name
+          (let [existing-in-db (sp/query-entities storage :call-site {:name result-name-str})]
+            (if (seq existing-in-db)
+              (let [cs-id (:id (first existing-in-db))]
+                (swap! created-call-sites assoc result-name cs-id)
+                cs-id)
+              (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
+                    call-site (sp/create-entity storage :call-site
+                                                {:fn-id ref-fn-id
+                                                 :name result-name-str})]
+                (swap! created-call-sites assoc result-name (:id call-site))
+                (:id call-site))))))
       ;; Plain keyword/string without > - keep as is (not a call-site ref)
       value)
 

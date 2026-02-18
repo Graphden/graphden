@@ -2,11 +2,11 @@
   "Tests for higher-order function base functions."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.library.interface :as bf]
-    [graphden.library.base-fns.core.test-helpers :as h]
-    [graphden.executor.interface :as exec]
     [graphden.executor.composition.interface :as fn-composition]
+    [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
+    [graphden.library.base-fns.core.test-helpers :as h]
+    [graphden.library.interface :as bf]
     [graphden.storage.age.test-setup :as th]
     [graphden.storage.protocol.interface :as sp]))
 

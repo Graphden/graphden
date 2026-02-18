@@ -95,7 +95,7 @@
                           (odd? x))
           result (filter tracking-pred [1 2 3 4 5])]
       (is (zero? @call-count) "lazy sequence should not compute until realized")
-      (first result)
+      (is (= 1 (first result)) "first odd number should be 1")
       (is (pos? @call-count)))))
 
 
@@ -120,11 +120,11 @@
     (is (= [] (vec (map inc [])))))
 
   (testing "filter on empty collection"
-    (is (= [] (vec (filter odd? [])))))
+    (is (= [] (filterv odd? []))))
 
   (testing "transduce on empty collection"
     (let [xf (map inc)]
-      (is (= 0 (transduce xf + 0 []))))))
+      (is (zero? (transduce xf + 0 []))))))
 
 
 (deftest transducer-composition-order-test

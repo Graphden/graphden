@@ -2,9 +2,9 @@
   "Tests for arithmetic base functions."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
+    [graphden.executor.interface :as exec]
     [graphden.library.base-fns.core.arithmetic :as arithmetic]
-    [graphden.library.base-fns.core.test-helpers :as h]
-    [graphden.executor.interface :as exec]))
+    [graphden.library.base-fns.core.test-helpers :as h]))
 
 
 (use-fixtures :each exec/with-clean-registry)

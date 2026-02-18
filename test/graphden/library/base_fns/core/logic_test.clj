@@ -2,8 +2,8 @@
   "Tests for logic base functions."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.library.base-fns.core.test-helpers :as h]
-    [graphden.executor.interface :as exec]))
+    [graphden.executor.interface :as exec]
+    [graphden.library.base-fns.core.test-helpers :as h]))
 
 
 (use-fixtures :each exec/with-clean-registry)

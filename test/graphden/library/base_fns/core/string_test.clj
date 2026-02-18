@@ -3,8 +3,8 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.library.base-fns.core.test-helpers :as h]
     [graphden.executor.interface :as exec]
+    [graphden.library.base-fns.core.test-helpers :as h]
     [graphden.storage.protocol.interface :as sp]))
 
 

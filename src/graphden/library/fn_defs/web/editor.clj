@@ -33,85 +33,112 @@
 ;; =============================================================================
 
 (def editor-styles
-  "CSS styles for the graph editor."
+  "CSS styles for the graph editor - monochrome design."
   "
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  body { font-family: system-ui, -apple-system, sans-serif; background: #f5f5f5; }
+  body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #fff; color: #000; }
 
   .layout { display: flex; height: 100vh; }
-  .sidebar { width: 300px; background: white; border-right: 1px solid #ddd; overflow-y: auto; }
-  .main { flex: 1; display: flex; flex-direction: column; }
+  .sidebar { width: 280px; background: #fafafa; border-right: 2px solid #000; overflow-y: auto; }
+  .main { flex: 1; display: flex; flex-direction: column; background: #fff; }
 
-  .header { padding: 16px; background: white; border-bottom: 1px solid #ddd; }
-  .header h1 { font-size: 20px; color: #333; }
+  .header { padding: 12px 16px; background: #000; color: #fff; }
+  .header h1 { font-size: 16px; font-weight: 500; letter-spacing: 1px; }
 
-  .toolbar { padding: 8px 16px; background: #fafafa; border-bottom: 1px solid #ddd; display: flex; gap: 8px; }
-  .toolbar button { padding: 6px 12px; border: 1px solid #ddd; background: white; border-radius: 4px; cursor: pointer; }
-  .toolbar button:hover { background: #f0f0f0; }
-  .toolbar button.primary { background: #4A90D9; color: white; border-color: #4A90D9; }
-  .toolbar button.primary:hover { background: #3A80C9; }
+  .toolbar { padding: 8px 16px; border-bottom: 1px solid #ccc; display: flex; gap: 8px; align-items: center; }
+  .toolbar button { padding: 6px 14px; border: 1px solid #000; background: #fff; cursor: pointer;
+    font-family: inherit; font-size: 12px; transition: all 0.1s; }
+  .toolbar button:hover { background: #000; color: #fff; }
+  .toolbar .separator { width: 1px; height: 20px; background: #ccc; margin: 0 8px; }
+  .toolbar label { font-size: 12px; color: #666; }
+  .toolbar input[type=range] { width: 80px; }
+  .toolbar .depth-value { font-size: 12px; min-width: 20px; }
 
-  .graph-container { flex: 1; position: relative; }
+  .graph-container { flex: 1; position: relative; background: #fff; }
   #cy { width: 100%; height: 100%; }
 
   .panel { padding: 16px; }
-  .panel h2 { font-size: 14px; color: #666; margin-bottom: 12px; text-transform: uppercase; }
+  .panel h2 { font-size: 11px; color: #666; margin-bottom: 12px; text-transform: uppercase;
+    letter-spacing: 2px; border-bottom: 1px solid #ddd; padding-bottom: 8px; }
 
   .entity-list { list-style: none; }
-  .entity-item { padding: 8px 12px; border-bottom: 1px solid #eee; cursor: pointer; }
-  .entity-item:hover { background: #f5f5f5; }
-  .entity-item .name { font-weight: 500; }
-  .entity-item .type { font-size: 12px; color: #888; }
+  .entity-item { padding: 10px 12px; border-bottom: 1px solid #eee; cursor: pointer;
+    transition: background 0.1s; }
+  .entity-item:hover { background: #f0f0f0; }
+  .entity-item.selected { background: #000; color: #fff; }
+  .entity-item .name { font-weight: 500; font-size: 13px; }
+  .entity-item .meta { font-size: 11px; color: #888; margin-top: 2px; }
+  .entity-item.selected .meta { color: #aaa; }
 
   .form-group { margin-bottom: 12px; }
-  .form-group label { display: block; font-size: 12px; color: #666; margin-bottom: 4px; }
+  .form-group label { display: block; font-size: 11px; color: #666; margin-bottom: 4px;
+    text-transform: uppercase; letter-spacing: 1px; }
   .form-group input, .form-group select, .form-group textarea {
-    width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px; font-size: 14px;
+    width: 100%; padding: 8px; border: 1px solid #000; font-family: inherit; font-size: 13px;
   }
   .form-group input:focus, .form-group select:focus, .form-group textarea:focus {
-    outline: none; border-color: #4A90D9;
+    outline: none; box-shadow: 0 0 0 2px rgba(0,0,0,0.1);
   }
 
-  .btn { padding: 8px 16px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
-  .btn-primary { background: #4A90D9; color: white; }
-  .btn-primary:hover { background: #3A80C9; }
-  .btn-danger { background: #D9534F; color: white; }
-  .btn-danger:hover { background: #C9433F; }
-  .btn-secondary { background: #eee; color: #333; }
-  .btn-secondary:hover { background: #ddd; }
+  .btn { padding: 8px 16px; border: 1px solid #000; cursor: pointer; font-family: inherit;
+    font-size: 12px; transition: all 0.1s; }
+  .btn-primary { background: #000; color: #fff; }
+  .btn-primary:hover { background: #333; }
+  .btn-danger { background: #fff; color: #000; border-style: dashed; }
+  .btn-danger:hover { background: #f5f5f5; }
+  .btn-secondary { background: #fff; color: #000; }
+  .btn-secondary:hover { background: #f0f0f0; }
 
-  .details-panel { position: absolute; top: 16px; right: 16px; width: 320px; background: white;
-    border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.15); max-height: calc(100% - 32px); overflow-y: auto; }
+  .details-panel { position: absolute; top: 16px; right: 16px; width: 320px; background: #fff;
+    border: 2px solid #000; max-height: calc(100% - 32px); overflow-y: auto; }
   .details-panel.hidden { display: none; }
-  .details-panel .panel-header { padding: 12px 16px; border-bottom: 1px solid #eee; display: flex;
-    justify-content: space-between; align-items: center; }
-  .details-panel .panel-header h3 { font-size: 16px; }
-  .details-panel .close-btn { background: none; border: none; font-size: 20px; cursor: pointer; color: #888; }
+  .details-panel .panel-header { padding: 12px 16px; border-bottom: 2px solid #000; display: flex;
+    justify-content: space-between; align-items: center; background: #000; color: #fff; }
+  .details-panel .panel-header h3 { font-size: 13px; font-weight: 500; }
+  .details-panel .close-btn { background: none; border: none; font-size: 18px; cursor: pointer;
+    color: #fff; line-height: 1; }
   .details-panel .panel-body { padding: 16px; }
 
-  .field-row { display: flex; margin-bottom: 8px; }
-  .field-label { width: 100px; font-size: 12px; color: #888; }
-  .field-value { flex: 1; font-size: 14px; word-break: break-all; }
+  .field-row { display: flex; margin-bottom: 8px; padding-bottom: 8px; border-bottom: 1px dotted #ddd; }
+  .field-label { width: 90px; font-size: 10px; color: #888; text-transform: uppercase; letter-spacing: 1px; }
+  .field-value { flex: 1; font-size: 13px; word-break: break-all; }
 
-  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; }
-  .badge-fn-schema { background: #E3F2FD; color: #1976D2; }
-  .badge-fn { background: #E8F5E9; color: #388E3C; }
-  .badge-arg-schema { background: #FFF3E0; color: #F57C00; }
-  .badge-arg-value { background: #EEEEEE; color: #616161; }
-  .badge-call-site { background: #F3E5F5; color: #7B1FA2; }
+  .badge { display: inline-block; padding: 2px 8px; font-size: 10px; font-weight: 500;
+    border: 1px solid #000; text-transform: uppercase; letter-spacing: 1px; }
+  .badge-fn { background: #000; color: #fff; }
+  .badge-base { background: #fff; color: #000; border-style: dashed; }
 
-  .loading { text-align: center; padding: 40px; color: #888; }
-  .error { background: #FFEBEE; color: #C62828; padding: 12px; border-radius: 4px; margin: 16px; }
+  .loading { text-align: center; padding: 40px; color: #888; font-size: 12px; }
+  .error { background: #fff; color: #000; padding: 12px; border: 2px dashed #000; margin: 16px;
+    font-size: 12px; }
 
-  .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.5);
+  .modal-overlay { position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.7);
     display: flex; align-items: center; justify-content: center; z-index: 1000; }
   .modal-overlay.hidden { display: none; }
-  .modal { background: white; border-radius: 8px; width: 480px; max-width: 90%; max-height: 90%;
+  .modal { background: #fff; border: 2px solid #000; width: 400px; max-width: 90%; max-height: 90%;
     overflow-y: auto; }
-  .modal-header { padding: 16px; border-bottom: 1px solid #eee; display: flex;
-    justify-content: space-between; align-items: center; }
+  .modal-header { padding: 12px 16px; border-bottom: 2px solid #000; display: flex;
+    justify-content: space-between; align-items: center; background: #000; color: #fff; }
+  .modal-header h3 { font-size: 13px; }
+  .modal-header .close-btn { background: none; border: none; font-size: 18px; cursor: pointer;
+    color: #fff; }
   .modal-body { padding: 16px; }
-  .modal-footer { padding: 16px; border-top: 1px solid #eee; display: flex; justify-content: flex-end; gap: 8px; }
+  .modal-footer { padding: 16px; border-top: 1px solid #ddd; display: flex; justify-content: flex-end; gap: 8px; }
+
+  /* Schema info panel - shown on hover/click */
+  .schema-info { font-size: 11px; color: #666; margin-top: 4px; padding-left: 12px;
+    border-left: 2px solid #ddd; }
+  .schema-info .arg { margin: 4px 0; }
+  .schema-info .arg-name { font-weight: 500; }
+  .schema-info .arg-type { color: #888; }
+  .schema-info .arg-unset { opacity: 0.5; font-style: italic; }
+  .schema-info .arg-set { font-weight: 500; }
+
+  /* Arg value indicator */
+  .arg-indicator { display: inline-block; width: 8px; height: 8px; border: 1px solid #000;
+    margin-right: 4px; }
+  .arg-indicator.set { background: #000; }
+  .arg-indicator.unset { background: #fff; }
   ")
 
 
@@ -120,98 +147,187 @@
 ;; =============================================================================
 
 (def editor-script
-  "JavaScript for graph editor functionality."
+  "JavaScript for graph editor functionality - fn-centric visualization."
   "
   let cy = null;
   let selectedNode = null;
+  let graphData = null;
+  let maxDepth = 3;
 
-  // Update sidebar entity list
-  function updateEntityList(data) {
-    const list = document.getElementById('entity-list');
-    list.innerHTML = '';
+  // Build lookup maps for fast access
+  function buildLookups(data) {
+    const fnSchemaMap = new Map();
+    const argSchemaMap = new Map();
+    const fnMap = new Map();
+    const fnArgMap = new Map();  // fn_id -> [{arg_schema_id, arg_value}]
+    const callSiteMap = new Map();
 
-    const entityTypes = [
-      { key: 'fn_schemas', type: 'fn-schema', badge: 'badge-fn-schema' },
-      { key: 'fns', type: 'fn', badge: 'badge-fn' },
-      { key: 'arg_schemas', type: 'arg-schema', badge: 'badge-arg-schema' },
-      { key: 'arg_values', type: 'arg-value', badge: 'badge-arg-value' },
-      { key: 'call_sites', type: 'call-site', badge: 'badge-call-site' }
-    ];
+    (data.fn_schemas || []).forEach(fs => fnSchemaMap.set(fs.id, fs));
+    (data.arg_schemas || []).forEach(as => argSchemaMap.set(as.id, as));
+    (data.fns || []).forEach(f => fnMap.set(f.id, f));
+    (data.call_sites || []).forEach(cs => callSiteMap.set(cs.id, cs));
 
-    entityTypes.forEach(({ key, type, badge }) => {
-      (data[key] || []).forEach(entity => {
-        const li = document.createElement('li');
-        li.className = 'entity-item';
-        li.innerHTML = '<div class=\"name\">' + (entity.name || entity.id.substring(0,8)) + '</div>' +
-                       '<div class=\"type\"><span class=\"badge ' + badge + '\">' + type + '</span></div>';
-        li.onclick = () => {
-          const node = cy.getElementById(entity.id);
-          if (node.length) {
-            cy.center(node);
-            node.select();
-            showNodeDetails({ ...entity, entityType: type });
-          }
-        };
-        list.appendChild(li);
+    // Build fn_arg map from arg_values: owner_fn_id -> list of arg_values
+    (data.arg_values || []).forEach(av => {
+      const fnId = av.owner_fn_id;
+      if (!fnId) return;
+      if (!fnArgMap.has(fnId)) fnArgMap.set(fnId, []);
+      fnArgMap.get(fnId).push({
+        arg_schema_id: av.arg_schema_id,
+        arg_value: av
       });
     });
 
+    return { fnSchemaMap, argSchemaMap, fnMap, fnArgMap, callSiteMap };
+  }
+
+  // Update sidebar - show only fn entities
+  function updateEntityList(data) {
+    const list = document.getElementById('entity-list');
+    list.innerHTML = '';
+    const lookups = buildLookups(data);
+
+    (data.fns || []).forEach(fn => {
+      const schema = lookups.fnSchemaMap.get(fn.fn_schema_id);
+      const isBase = schema && schema.base_fn_name;
+      const returnType = schema ? schema.returned_type : '?';
+
+      const li = document.createElement('li');
+      li.className = 'entity-item';
+      li.dataset.fnId = fn.id;
+      li.innerHTML =
+        '<div class=\"name\">' + fn.name + '</div>' +
+        '<div class=\"meta\">' +
+          (isBase ? '<span class=\"badge badge-base\">base</span> ' : '') +
+          '<span style=\"opacity:0.6\">-> ' + returnType + '</span>' +
+        '</div>';
+
+      li.onclick = () => selectFn(fn.id);
+      list.appendChild(li);
+    });
+
     if (list.children.length === 0) {
-      list.innerHTML = '<li class=\"loading\">No entities found</li>';
+      list.innerHTML = '<li class=\"loading\">No functions found</li>';
     }
   }
 
-  // Initialize Cytoscape
+  // Select a function and center graph on it
+  function selectFn(fnId) {
+    document.querySelectorAll('.entity-item').forEach(el => el.classList.remove('selected'));
+    const item = document.querySelector('[data-fn-id=\"' + fnId + '\"]');
+    if (item) item.classList.add('selected');
+
+    const node = cy.getElementById(fnId);
+    if (node.length) {
+      cy.center(node);
+      node.select();
+      showFnDetails(fnId);
+    }
+  }
+
+  // Initialize Cytoscape with fn-centric graph
   async function initGraph() {
     const response = await fetch('/api/graph/entities');
-    const data = await response.json();
+    graphData = await response.json();
 
-    updateEntityList(data);
-    const elements = convertToElements(data);
+    updateEntityList(graphData);
+    renderGraph();
+  }
+
+  function renderGraph() {
+    const elements = convertToFnCentricElements(graphData, maxDepth);
+
+    if (cy) {
+      cy.destroy();
+    }
 
     cy = cytoscape({
       container: document.getElementById('cy'),
       elements: elements,
       style: [
-        { selector: 'node', style: {
-          'label': 'data(label)', 'text-valign': 'center', 'text-halign': 'center',
-          'font-size': '11px', 'width': 60, 'height': 60
+        // fn nodes - circles, monochrome
+        { selector: 'node[type=\"fn\"]', style: {
+          'label': 'data(label)',
+          'text-valign': 'center',
+          'text-halign': 'center',
+          'font-size': '11px',
+          'font-family': 'SF Mono, Monaco, monospace',
+          'width': 70,
+          'height': 70,
+          'shape': 'ellipse',
+          'background-color': '#fff',
+          'border-width': 2,
+          'border-color': '#000',
+          'color': '#000'
         }},
-        { selector: 'node[type=\"fn-schema\"]', style: {
-          'background-color': '#4A90D9', 'shape': 'rectangle', 'width': 80, 'height': 40
+        // Base fn - dashed border
+        { selector: 'node[type=\"fn\"][isBase]', style: {
+          'border-style': 'dashed',
+          'border-width': 2
         }},
-        { selector: 'node[type=\"fn\"]', style: { 'background-color': '#5CB85C', 'shape': 'ellipse' }},
-        { selector: 'node[type=\"arg-schema\"]', style: {
-          'background-color': '#F0AD4E', 'shape': 'diamond', 'width': 50, 'height': 50
-        }},
-        { selector: 'node[type=\"arg-value\"]', style: {
-          'background-color': '#999999', 'shape': 'round-rectangle', 'width': 70, 'height': 35
-        }},
-        { selector: 'node[type=\"arg-value\"][isRef]', style: { 'background-color': '#D9534F' }},
+        // call-site indicator - small square attached to fn
         { selector: 'node[type=\"call-site\"]', style: {
-          'background-color': '#9B59B6', 'shape': 'hexagon'
+          'label': '',
+          'width': 12,
+          'height': 12,
+          'shape': 'rectangle',
+          'background-color': '#000',
+          'border-width': 0
         }},
+        // Edges - argument connections
         { selector: 'edge', style: {
-          'width': 2, 'line-color': '#CCCCCC', 'target-arrow-color': '#CCCCCC',
-          'target-arrow-shape': 'triangle', 'curve-style': 'bezier'
+          'width': 1,
+          'line-color': '#666',
+          'target-arrow-color': '#666',
+          'target-arrow-shape': 'triangle',
+          'curve-style': 'bezier',
+          'font-size': '10px',
+          'font-family': 'SF Mono, Monaco, monospace',
+          'text-rotation': 'autorotate',
+          'text-margin-y': -8
         }},
-        { selector: 'edge[type=\"has-schema\"]', style: {
-          'line-color': '#4A90D9', 'target-arrow-color': '#4A90D9', 'line-style': 'dashed'
+        // Argument edges - show arg name as label
+        { selector: 'edge[type=\"arg\"]', style: {
+          'label': 'data(argName)',
+          'line-color': '#999',
+          'target-arrow-color': '#999',
+          'line-style': 'solid'
         }},
-        { selector: 'edge[type=\"references\"]', style: {
-          'line-color': '#D9534F', 'target-arrow-color': '#D9534F'
+        // Unset argument edges - dashed
+        { selector: 'edge[type=\"arg-unset\"]', style: {
+          'label': 'data(argName)',
+          'line-color': '#ccc',
+          'target-arrow-color': '#ccc',
+          'line-style': 'dashed'
         }},
-        { selector: 'edge[type=\"calls\"]', style: {
-          'line-color': '#9B59B6', 'target-arrow-color': '#9B59B6'
+        // call-site edges
+        { selector: 'edge[type=\"call-site\"]', style: {
+          'line-color': '#000',
+          'target-arrow-color': '#000',
+          'width': 2
         }},
-        { selector: ':selected', style: { 'border-width': 3, 'border-color': '#000' }}
+        // Selected
+        { selector: ':selected', style: {
+          'border-width': 4,
+          'border-color': '#000'
+        }}
       ],
-      layout: { name: 'dagre', rankDir: 'TB', nodeSep: 50, edgeSep: 10, rankSep: 100 }
+      layout: {
+        name: 'dagre',
+        rankDir: 'LR',  // Left to right: output <- inputs
+        nodeSep: 60,
+        edgeSep: 20,
+        rankSep: 120
+      },
+      userZoomingEnabled: true,
+      userPanningEnabled: true,
+      minZoom: 0.2,
+      maxZoom: 3
     });
 
-    cy.on('tap', 'node', function(evt) {
+    cy.on('tap', 'node[type=\"fn\"]', function(evt) {
       const data = evt.target.data();
-      showNodeDetails(data);
+      showFnDetails(data.id);
     });
 
     cy.on('tap', function(evt) {
@@ -220,86 +336,116 @@
       }
     });
 
-    cy.fit();
+    cy.fit(50);
   }
 
-  function convertToElements(data) {
+  // Convert data to fn-centric elements
+  // Only shows fn nodes connected by argument edges
+  function convertToFnCentricElements(data, depth) {
     const nodes = [];
     const edges = [];
+    const addedFns = new Set();
+    const lookups = buildLookups(data);
 
-    // Add fn-schemas
-    (data.fn_schemas || []).forEach(fs => {
+    // Add all fns as nodes
+    (data.fns || []).forEach(fn => {
+      const schema = lookups.fnSchemaMap.get(fn.fn_schema_id);
+      const isBase = schema && schema.base_fn_name;
+      const returnType = schema ? schema.returned_type : '?';
+
       nodes.push({
-        data: { id: fs.id, label: fs.name, type: 'fn-schema', entityType: 'fn-schema', ...fs }
+        data: {
+          id: fn.id,
+          label: fn.name,
+          type: 'fn',
+          isBase: isBase,
+          returnType: returnType,
+          schemaId: fn.fn_schema_id,
+          entityType: 'fn'
+        }
       });
+      addedFns.add(fn.id);
     });
 
-    // Add fns
-    (data.fns || []).forEach(f => {
-      nodes.push({
-        data: { id: f.id, label: f.name, type: 'fn', entityType: 'fn', ...f }
-      });
-      if (f.fn_schema_id) {
-        edges.push({
-          data: { id: 'e-fs-' + f.id, source: f.id, target: f.fn_schema_id, type: 'has-schema' }
-        });
-      }
-    });
-
-    // Add arg-schemas
-    (data.arg_schemas || []).forEach(as => {
-      nodes.push({
-        data: { id: as.id, label: as.name, type: 'arg-schema', entityType: 'arg-schema', ...as }
-      });
-      if (as.fn_schema_id) {
-        edges.push({
-          data: { id: 'e-as-' + as.id, source: as.fn_schema_id, target: as.id, type: 'has-arg' }
-        });
-      }
-    });
-
-    // Add arg-values
+    // Add edges based on arg_values -> references
     (data.arg_values || []).forEach(av => {
-      const isRef = av.value && typeof av.value === 'object' && (av.value.fn_id || av.value.call_site_id);
-      let label = isRef ? 'ref' : String(av.value).substring(0, 15);
-      nodes.push({
-        data: { id: av.id, label: label, type: 'arg-value', entityType: 'arg-value', isRef: isRef, ...av }
-      });
-      if (av.owner_fn_id) {
-        edges.push({
-          data: { id: 'e-av-o-' + av.id, source: av.owner_fn_id, target: av.id, type: 'has-value' }
-        });
-      }
-      if (isRef) {
-        const targetId = av.value.fn_id || av.value.call_site_id;
-        edges.push({
-          data: { id: 'e-av-r-' + av.id, source: av.id, target: targetId, type: 'references' }
-        });
+      if (!av.owner_fn_id) return;
+      const argSchema = lookups.argSchemaMap.get(av.arg_schema_id);
+      const argName = argSchema ? argSchema.name : '?';
+
+      if (av.value && typeof av.value === 'object') {
+        // Reference to another fn or call-site
+        let targetFnId = null;
+        let isCallSite = false;
+
+        if (av.value.fn_id) {
+          targetFnId = av.value.fn_id;
+        } else if (av.value.call_site_id) {
+          const cs = lookups.callSiteMap.get(av.value.call_site_id);
+          if (cs) {
+            targetFnId = cs.fn_id;
+            isCallSite = true;
+          }
+        }
+
+        if (targetFnId && addedFns.has(targetFnId)) {
+          edges.push({
+            data: {
+              id: 'e-' + av.id,
+              source: av.owner_fn_id,
+              target: targetFnId,
+              type: isCallSite ? 'call-site' : 'arg',
+              argName: argName
+            }
+          });
+        }
       }
     });
 
-    // Add call-sites
-    (data.call_sites || []).forEach(cs => {
-      nodes.push({
-        data: { id: cs.id, label: cs.name || 'unnamed', type: 'call-site', entityType: 'call-site', ...cs }
+    // Show unset args as edges to placeholder
+    (data.fns || []).forEach(fn => {
+      const schema = lookups.fnSchemaMap.get(fn.fn_schema_id);
+      if (!schema) return;
+
+      const schemaArgs = (data.arg_schemas || []).filter(as => as.fn_schema_id === fn.fn_schema_id);
+      const boundArgs = lookups.fnArgMap.get(fn.id) || [];
+      const boundArgSchemaIds = new Set(boundArgs.map(ba => ba.arg_schema_id));
+
+      schemaArgs.forEach(as => {
+        if (!boundArgSchemaIds.has(as.id) && as.required) {
+          // Create a placeholder node for unset required arg
+          const placeholderId = 'unset-' + fn.id + '-' + as.id;
+          nodes.push({
+            data: {
+              id: placeholderId,
+              label: '?',
+              type: 'fn',
+              isBase: false,
+              isPlaceholder: true
+            }
+          });
+          edges.push({
+            data: {
+              id: 'e-unset-' + fn.id + '-' + as.id,
+              source: fn.id,
+              target: placeholderId,
+              type: 'arg-unset',
+              argName: as.name
+            }
+          });
+        }
       });
-      if (cs.fn_id) {
-        edges.push({
-          data: { id: 'e-cs-' + cs.id, source: cs.id, target: cs.fn_id, type: 'calls' }
-        });
-      }
     });
 
     return { nodes, edges };
   }
 
-  function showNodeDetails(data) {
-    selectedNode = data;
+  // Show function details in panel
+  function showFnDetails(fnId) {
+    selectedNode = fnId;
     const panel = document.getElementById('details-panel');
     panel.classList.remove('hidden');
-
-    // Load details via HTMX
-    htmx.ajax('GET', '/partials/entity-details/' + data.entityType + '/' + data.id, '#details-content');
+    htmx.ajax('GET', '/partials/entity-details/fn/' + fnId, '#details-content');
   }
 
   function hideNodeDetails() {
@@ -318,20 +464,19 @@
 
   async function refreshGraph() {
     const response = await fetch('/api/graph/entities');
-    const data = await response.json();
-
-    updateEntityList(data);
-    const elements = convertToElements(data);
-
-    cy.elements().remove();
-    cy.add(elements.nodes);
-    cy.add(elements.edges);
-    cy.layout({ name: 'dagre', rankDir: 'TB', nodeSep: 50, edgeSep: 10, rankSep: 100 }).run();
-    cy.fit();
+    graphData = await response.json();
+    updateEntityList(graphData);
+    renderGraph();
   }
 
   function fitGraph() {
-    if (cy) cy.fit();
+    if (cy) cy.fit(50);
+  }
+
+  function setDepth(value) {
+    maxDepth = parseInt(value);
+    document.getElementById('depth-value').textContent = maxDepth;
+    renderGraph();
   }
 
   // Initialize on load
@@ -354,16 +499,21 @@
    ;; Sidebar
    [:div {:class "sidebar"}
     [:div {:class "panel"}
-     [:h2 "Entities"]
+     [:h2 "Functions"]
      [:ul {:class "entity-list" :id "entity-list"}
       [:li {:class "loading"} "Loading..."]]]]
    ;; Main area
    [:div {:class "main"}
     [:div {:class "header"}
-     [:h1 "Graph Editor"]]
+     [:h1 "GRAPHDEN"]]
     [:div {:class "toolbar"}
-     [:button {:onclick "showCreateModal('fn-schema')"} "New fn-schema"]
-     [:button {:onclick "showCreateModal('fn')"} "New fn"]
+     [:button {:onclick "showCreateModal('fn')"} "+ fn"]
+     [:div {:class "separator"}]
+     [:label "Depth:"]
+     [:input {:type "range" :min "1" :max "10" :value "3" :id "depth-slider"
+              :onchange "setDepth(this.value)"}]
+     [:span {:class "depth-value" :id "depth-value"} "3"]
+     [:div {:class "separator"}]
      [:button {:onclick "refreshGraph()"} "Refresh"]
      [:button {:onclick "fitGraph()"} "Fit"]]
     [:div {:class "graph-container"}
@@ -418,10 +568,14 @@
                      [:script editor-script]]}}
 
    ;; Handler returns Ring response with HTML
-   ;; html-handler returns :fn type, so it's a Ring handler
-   {:name :editor-handler
-    :parent :html-handler
+   ;; Two-step composition: html-response creates response, make-handler wraps as handler
+   {:name :editor-response
+    :parent :html-response
     :args {:body :editor-page>}}
+
+   {:name :editor-handler
+    :parent :make-handler
+    :args {:response :editor-response>}}
 
    ;; API handler for graph entities (JSON)
    {:name :api-entities-handler

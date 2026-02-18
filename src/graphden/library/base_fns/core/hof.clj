@@ -161,7 +161,9 @@
   ;; We wrap to support both arities, passing [acc item] as single vector
   (transduce xf
              (fn
-               ([acc] acc) ;; completion step - just return accumulator
+               ([acc] acc)
+               ;; completion step - just return accumulator
+
                ([acc item] (rf [acc item])))
              init coll))
 

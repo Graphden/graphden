@@ -2,8 +2,8 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as sp]
-    [graphden.library.base-fns.web.crud :as crud]))
+    [graphden.library.base-fns.web.crud :as crud]
+    [graphden.storage.protocol.interface :as sp]))
 
 
 ;; =============================================================================

@@ -275,16 +275,17 @@
       container: document.getElementById('cy'),
       elements: elements,
       style: [
-        // fn nodes - simple circles
+        // fn nodes - rounded rectangles (adapt to label width)
         { selector: 'node[type=\"fn\"]', style: {
           'label': 'data(label)',
           'text-valign': 'center',
           'text-halign': 'center',
           'font-size': '11px',
           'font-family': 'SF Mono, Monaco, monospace',
-          'width': 70,
-          'height': 70,
-          'shape': 'ellipse',
+          'width': 'label',
+          'height': 28,
+          'padding': '12px',
+          'shape': 'round-rectangle',
           'background-color': '#fff',
           'border-width': 2,
           'border-color': '#000',
@@ -294,12 +295,9 @@
         { selector: 'node[isRoot]', style: {
           'border-width': 4
         }},
-        // Placeholder for unset arg - smaller, gray
+        // Placeholder for unset arg - dashed border (black/white only)
         { selector: 'node[isPlaceholder]', style: {
-          'width': 50,
-          'height': 50,
-          'border-color': '#999',
-          'color': '#999'
+          'border-style': 'dashed'
         }},
         // Literal arg values - rectangles (different shape = different type)
         { selector: 'node[type=\"arg\"]', style: {
@@ -331,9 +329,9 @@
           'text-background-opacity': 1,
           'text-background-padding': '2px'
         }},
-        // Unset arg edges - gray
+        // Unset arg edges - dashed (black/white only)
         { selector: 'edge[type=\"arg-unset\"]', style: {
-          'line-color': '#999'
+          'line-style': 'dashed'
         }}
       ],
       layout: {

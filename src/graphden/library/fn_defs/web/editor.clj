@@ -317,12 +317,10 @@
           'border-color': '#000',
           'color': '#000'
         }},
-        // Edges - simple arrows
+        // Edges - simple lines
         { selector: 'edge', style: {
           'width': 2,
           'line-color': '#000',
-          'target-arrow-color': '#000',
-          'target-arrow-shape': 'triangle',
           'curve-style': 'bezier',
           'label': 'data(argName)',
           'font-size': '10px',
@@ -335,12 +333,7 @@
         }},
         // Unset arg edges - gray
         { selector: 'edge[type=\"arg-unset\"]', style: {
-          'line-color': '#999',
-          'target-arrow-color': '#999'
-        }},
-        // Literal arg edges - no arrow (connects to rectangle)
-        { selector: 'edge[type=\"arg-literal\"]', style: {
-          'target-arrow-shape': 'none'
+          'line-color': '#999'
         }}
       ],
       layout: {

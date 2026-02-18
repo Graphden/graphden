@@ -275,16 +275,17 @@
       container: document.getElementById('cy'),
       elements: elements,
       style: [
-        // fn nodes - rounded rectangles (adapt to label width)
+        // fn nodes - rounded rectangles (adapt to label width, multi-line support)
         { selector: 'node[type=\"fn\"]', style: {
           'label': 'data(label)',
           'text-valign': 'center',
           'text-halign': 'center',
+          'text-wrap': 'wrap',
           'font-size': '11px',
           'font-family': 'SF Mono, Monaco, monospace',
           'width': 'label',
-          'height': 28,
-          'padding': '12px',
+          'height': 'label',
+          'padding': '10px',
           'shape': 'round-rectangle',
           'background-color': '#fff',
           'border-width': 2,
@@ -418,15 +419,25 @@
       if (!fn) return;
 
       const schema = lookups.fnSchemaMap.get(fn['fn-schema-id']);
-      const isBase = schema && schema['base-fn-name'];
+      const baseFnName = schema ? schema['base-fn-name'] : null;
+      const isBase = !!baseFnName;
       const returnType = schema ? schema['returned-type'] : '?';
+
+      // Build label: fn name, separator line, base-fn name (if different)
+      let label = fn.name;
+      if (baseFnName && baseFnName !== fn.name) {
+        const maxLen = Math.max(fn.name.length, baseFnName.length);
+        const separator = '─'.repeat(maxLen);
+        label = fn.name + '\\n' + separator + '\\n' + baseFnName;
+      }
 
       nodes.push({
         data: {
           id: fn.id,
-          label: fn.name,
+          label: label,
           type: 'fn',
           isBase: isBase,
+          baseFnName: baseFnName,
           isRoot: isRoot,
           returnType: returnType,
           schemaId: fn['fn-schema-id']
@@ -704,13 +715,13 @@
     :parent :make-handler
     :args {:response :health-response>}}
 
-   ;; Favicon - SVG graph icon, composed from primitives
+   ;; Favicon - SVG graph icon, monochrome style matching UI
    {:name :favicon-response
     :parent :ring-response
     :args {:status 200
            :headers {"Content-Type" "image/svg+xml"
                      "Cache-Control" "public, max-age=86400"}
-           :body "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#4A90D9\" rx=\"6\"/><circle cx=\"10\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"22\" cy=\"10\" r=\"4\" fill=\"white\"/><circle cx=\"16\" cy=\"22\" r=\"4\" fill=\"white\"/><line x1=\"10\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/><line x1=\"22\" y1=\"14\" x2=\"16\" y2=\"18\" stroke=\"white\" stroke-width=\"2\"/></svg>"}}
+           :body "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#fff\" rx=\"4\"/><rect x=\"1\" y=\"1\" width=\"30\" height=\"30\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" rx=\"4\"/><rect x=\"3\" y=\"12\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"4\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"20\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"14\" x2=\"19\" y2=\"8\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"18\" x2=\"19\" y2=\"24\" stroke=\"#000\" stroke-width=\"1.5\"/></svg>"}}
 
    {:name :favicon-handler
     :parent :make-handler

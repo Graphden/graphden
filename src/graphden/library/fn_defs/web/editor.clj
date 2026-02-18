@@ -499,7 +499,7 @@
               nodes.push({
                 data: {
                   id: argNodeId,
-                  label: argName + ': ' + displayValue,
+                  label: displayValue,
                   type: 'arg',
                   argSchemaId: as.id,
                   rawValue: value
@@ -511,17 +511,18 @@
                   source: fnId,
                   target: argNodeId,
                   type: 'arg-literal',
-                  argName: ''
+                  argName: argName
                 }
               });
             }
           } else {
             // Arg is unset (free argument)
             const placeholderId = 'unset-' + fnId + '-' + as.id;
+            const argType = as.type || 'any';
             nodes.push({
               data: {
                 id: placeholderId,
-                label: argName + ': ?',
+                label: argType,
                 type: 'fn',
                 isBase: false,
                 isPlaceholder: true
@@ -533,7 +534,7 @@
                 source: fnId,
                 target: placeholderId,
                 type: 'arg-unset',
-                argName: ''
+                argName: argName
               }
             });
           }

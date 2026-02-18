@@ -169,6 +169,40 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
 For complete examples, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) Part 5.5.
 
+### Transducers and Lazy Sequences
+
+HOFs like `map`, `filter` support two modes via optional `coll` argument:
+- **With coll**: `(map f coll)` — returns lazy sequence of results
+- **Without coll**: `(map f)` — returns transducer
+
+**Key functions for composition:**
+- `comp` — composes functions/transducers
+- `transduce` — applies transducer with reducing function in single pass
+- `call` — invokes function with argument
+
+**Example pipeline:**
+```clojure
+;; Efficient single-pass transformation
+(transduce (comp (filter pred) (map transform)) + 0 coll)
+```
+
+### fn vs Runtime Function (CRITICAL)
+
+**Understand the two levels of "function" in graphden:**
+
+| Level | What it is | Where it lives | Examples |
+|-------|------------|----------------|----------|
+| **fn (graph)** | Composition description | Database | fn-schema, arg bindings |
+| **Runtime fn** | Actual Clojure object | Executor memory | transducers, composed fns |
+
+**Key insight:** The graph in DB is just a *description* of how functions compose. Actual Clojure functions (like transducers, composed functions) exist only at runtime in executor memory.
+
+**No special-casing:** The executor must remain generic. Never add special handling for specific function names (anti-pattern). All functions execute uniformly through the same code path.
+
+**Multi-arity for behavior:** Use optional arguments to control behavior (e.g., `coll` in `map`/`filter`). Clojure's multi-arity functions handle this idiomatically.
+
+**Runtime objects can't be stored:** Functions returned by `comp`, transducers, etc. are Clojure objects — they exist only during execution. The graph stores *how to create them*, not the objects themselves.
+
 ### Base Function Philosophy (CRITICAL)
 
 **Base functions MUST be minimal primitives wrapping Clojure/Java/library capabilities.**
@@ -241,9 +275,15 @@ docs/                                  # Documentation
 
 ```
 src/graphden/
-├── executor/           # Executor, base-fns, registry, composition
-│   ├── interface.clj
+├── library/            # Base function definitions (separated from executor)
+│   ├── interface.clj   # Public API (get-all-defs)
 │   ├── base_fns/
+│   │   ├── core/       # Core primitives (arithmetic, logic, HOF, etc.)
+│   │   └── web/        # Web-related base-fns (http, reitit, html)
+│   └── fn_defs/
+│       └── web/        # Web fn compositions (editor, etc.)
+├── executor/           # Executor, registry, composition
+│   ├── interface.clj
 │   ├── registry/
 │   └── composition/
 ├── schema/             # Protocol, malli, graph, versioned, traits, fields

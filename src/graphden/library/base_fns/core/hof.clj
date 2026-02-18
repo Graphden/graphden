@@ -2,7 +2,19 @@
   "Higher-order base functions.
 
    Functions: map, filter, reduce, some, every?, find-first, group-by,
-              sort-by, apply, identity, constantly
+              sort-by, apply, identity, constantly, comp, transduce, call
+
+   ## Transducer Support
+
+   HOFs like map, filter support two modes via Clojure's multi-arity pattern:
+   - With coll: `(map f coll)` returns transformed collection
+   - Without coll: `(map f)` returns transducer
+
+   This enables efficient composition:
+   ```clojure
+   ;; Composed transducer - single pass over data
+   (transduce (comp (filter pred) (map f)) conj [] coll)
+   ```
 
    Note: :fn type args are automatically wrapped as callables by defbase.
    User functions must have exactly 1 required argument (any name).
@@ -12,15 +24,27 @@
 
 
 (defbase map-fn
-  {:args {:f :fn, :coll :jsonb}
-   :return-type :jsonb}
-  (mapv f coll))
+  "Applies f to each element of coll.
+   With coll: returns lazy sequence of results.
+   Without coll: returns transducer."
+  {:args {:f :fn
+          :coll {:type :jsonb :required false}}
+   :return-type :any}
+  (if coll
+    (map f coll)
+    (map f)))
 
 
 (defbase filter-fn
-  {:args {:pred :fn, :coll :jsonb}
-   :return-type :jsonb}
-  (filterv pred coll))
+  "Returns elements of coll for which pred returns truthy.
+   With coll: returns lazy sequence of matching elements.
+   Without coll: returns transducer."
+  {:args {:pred :fn
+          :coll {:type :jsonb :required false}}
+   :return-type :any}
+  (if coll
+    (filter pred coll)
+    (filter pred)))
 
 
 (defbase reduce-fn
@@ -102,6 +126,51 @@
   (fn [_] x))
 
 
+;; === Transducer Support ===
+
+(defbase comp-fn
+  "Composes functions/transducers from left to right.
+   Takes a vector of functions/transducers and returns their composition.
+
+   When used with transducers, note that comp applies right-to-left,
+   but for transducers this means data flows left-to-right:
+   (comp (filter odd?) (map inc)) - filters first, then maps.
+
+   Example:
+   (comp [(filter odd?) (map inc)]) -> composed transducer"
+  {:args {:fns :jsonb}
+   :return-type :any}
+  (apply comp fns))
+
+
+(defbase transduce-fn
+  "Reduces coll using transducer xf, reducing function rf, and initial value init.
+   Transforms and reduces in a single pass - more efficient than separate steps.
+
+   Example:
+   (transduce (comp (filter odd?) (map inc)) + 0 [1 2 3 4 5])
+   -> 12  ; (+ 0 2 4 6) - filters [1 3 5], maps to [2 4 6], sums"
+  {:args {:xf :any
+          :rf :fn
+          :init :any
+          :coll :jsonb}
+   :return-type :any}
+  (transduce xf rf init coll))
+
+
+(defbase call-fn
+  "Calls function f with argument arg.
+   Useful for applying a composed function or transducer result to data.
+
+   Example:
+   (call inc 5) -> 6
+   (call (comp inc inc) 5) -> 7"
+  {:args {:f :fn
+          :arg :any}
+   :return-type :any}
+  (f arg))
+
+
 ;; === Exports ===
 
 (def hof-defs
@@ -116,4 +185,7 @@
    :apply apply-fn
    :identity identity-fn
    :constantly constantly-fn
-   :const const-fn})
+   :const const-fn
+   :comp comp-fn
+   :transduce transduce-fn
+   :call call-fn})

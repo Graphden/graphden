@@ -2,7 +2,7 @@
   "Higher-order base functions.
 
    Functions: map, filter, reduce, some, every?, find-first, group-by,
-              sort-by, apply, identity, constantly, comp, transduce, call
+              sort-by, apply, identity, constantly, comp, transduce
 
    ## Transducer Support
 
@@ -147,6 +147,8 @@
   "Reduces coll using transducer xf, reducing function rf, and initial value init.
    Transforms and reduces in a single pass - more efficient than separate steps.
 
+   The rf function receives [acc item] as a single argument (same as reduce).
+
    Example:
    (transduce (comp (filter odd?) (map inc)) + 0 [1 2 3 4 5])
    -> 12  ; (+ 0 2 4 6) - filters [1 3 5], maps to [2 4 6], sums"
@@ -155,20 +157,13 @@
           :init :any
           :coll :jsonb}
    :return-type :any}
-  (transduce xf rf init coll))
-
-
-(defbase call-fn
-  "Calls function f with argument arg.
-   Useful for applying a composed function or transducer result to data.
-
-   Example:
-   (call inc 5) -> 6
-   (call (comp inc inc) 5) -> 7"
-  {:args {:f :fn
-          :arg :any}
-   :return-type :any}
-  (f arg))
+  ;; transduce calls rf with 1 arg (completion) and 2 args (reduce step)
+  ;; We wrap to support both arities, passing [acc item] as single vector
+  (transduce xf
+             (fn
+               ([acc] acc) ;; completion step - just return accumulator
+               ([acc item] (rf [acc item])))
+             init coll))
 
 
 ;; === Exports ===
@@ -187,5 +182,4 @@
    :constantly constantly-fn
    :const const-fn
    :comp comp-fn
-   :transduce transduce-fn
-   :call call-fn})
+   :transduce transduce-fn})

@@ -5,6 +5,7 @@
     [graphden.library.interface :as bf]
     [graphden.library.base-fns.core.test-helpers :as h]
     [graphden.executor.interface :as exec]
+    [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.registry.interface :as registry]
     [graphden.storage.age.test-setup :as th]
     [graphden.storage.protocol.interface :as sp]))
@@ -331,3 +332,199 @@
   (testing "constantly returns value"
     (is (= 42 (h/call-base-fn :constantly {:x 42})))
     (is (= "always" (h/call-base-fn :constantly {:x "always"})))))
+
+
+;; === Transducer Integration Tests ===
+;; Tests that comp + transduce work correctly with call-site references
+
+(deftest transducer-comp-transduce-integration-test
+  (testing "comp + transduce pipeline works with call-site references"
+    (let [storage (th/create-test-storage *container*)]
+      (try
+        ;; Register base functions
+        (h/register-all!)
+        (registry/sync-defs-to-storage! storage (bf/get-all-defs))
+
+        ;; Setup: create helper predicate and transform functions
+        ;; gt2: x -> x > 2
+        (let [gt2-schema (sp/create-entity storage :fn-schema
+                                           {:name "gt2"
+                                            :returned-type :bool})
+              _ (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id gt2-schema)
+                                   :name "x"
+                                   :type :int
+                                   :required true})
+              gt2-fn (sp/create-entity storage :fn
+                                       {:name "my-gt2"
+                                        :fn-schema-id (:id gt2-schema)})
+
+              ;; double: x -> x * 2
+              double-schema (sp/create-entity storage :fn-schema
+                                              {:name "double"
+                                               :returned-type :int})
+              _ (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id double-schema)
+                                   :name "x"
+                                   :type :int
+                                   :required true})
+              double-fn (sp/create-entity storage :fn
+                                          {:name "my-double"
+                                           :fn-schema-id (:id double-schema)})
+
+              ;; add-reducer: [acc item] -> acc + item
+              add-schema (sp/create-entity storage :fn-schema
+                                           {:name "add-reducer"
+                                            :returned-type :int})
+              _ (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id add-schema)
+                                   :name "pair"
+                                   :type :jsonb
+                                   :required true})
+              add-fn (sp/create-entity storage :fn
+                                       {:name "my-add-reducer"
+                                        :fn-schema-id (:id add-schema)})]
+
+          ;; Register implementations
+          (exec/register-base-fn! :gt2
+                                  (fn [{:keys [x]} _ctx]
+                                    (> @x 2)))
+
+          (exec/register-base-fn! :double
+                                  (fn [{:keys [x]} _ctx]
+                                    (* 2 @x)))
+
+          (exec/register-base-fn! :add-reducer
+                                  (fn [{:keys [pair]} _ctx]
+                                    (let [[acc item] @pair]
+                                      (+ acc item))))
+
+          ;; Create transducer-returning functions and compose them
+          ;; The key here is using fn-composition which creates call-sites
+          (fn-composition/sync-fns-to-storage! storage
+                                               [;; filter-xf: (filter gt2) - returns transducer
+                                                {:name :filter-xf
+                                                 :parent :filter
+                                                 :args {:pred (:id gt2-fn)}}
+
+                                                ;; map-xf: (map double) - returns transducer
+                                                {:name :map-xf
+                                                 :parent :map
+                                                 :args {:f (:id double-fn)}}
+
+                                                ;; composed-xf: (comp filter-xf map-xf)
+                                                ;; Uses call-site references - executed and results composed
+                                                {:name :composed-xf
+                                                 :parent :comp
+                                                 :args {:fns [:filter-xf> :map-xf>]}}
+
+                                                ;; final-result: (transduce composed-xf add-reducer 0 [1 2 3 4 5])
+                                                {:name :final-result
+                                                 :parent :transduce
+                                                 :args {:xf :composed-xf>
+                                                        :rf (:id add-fn)
+                                                        :init 0
+                                                        :coll [1 2 3 4 5]}}])
+
+          (let [final-fn (first (sp/query-entities storage :fn {:name "final-result"}))
+                ctx (exec/create-context {:storage storage})
+                result (exec/execute ctx (:id final-fn) nil)]
+            ;; [1 2 3 4 5] -> filter >2 -> [3 4 5] -> map *2 -> [6 8 10] -> sum -> 24
+            (is (= 24 result))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "transducers are lazily composed (single pass)"
+    (let [storage (th/create-test-storage *container*)
+          filter-count (atom 0)
+          map-count (atom 0)]
+      (try
+        ;; Register base functions
+        (h/register-all!)
+        (registry/sync-defs-to-storage! storage (bf/get-all-defs))
+
+        ;; Create counting predicate and transform
+        (let [counting-pred-schema (sp/create-entity storage :fn-schema
+                                                     {:name "counting-pred"
+                                                      :returned-type :bool})
+              _ (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id counting-pred-schema)
+                                   :name "x"
+                                   :type :int
+                                   :required true})
+              counting-pred-fn (sp/create-entity storage :fn
+                                                 {:name "my-counting-pred"
+                                                  :fn-schema-id (:id counting-pred-schema)})
+
+              counting-map-schema (sp/create-entity storage :fn-schema
+                                                    {:name "counting-map"
+                                                     :returned-type :int})
+              _ (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id counting-map-schema)
+                                   :name "x"
+                                   :type :int
+                                   :required true})
+              counting-map-fn (sp/create-entity storage :fn
+                                                {:name "my-counting-map"
+                                                 :fn-schema-id (:id counting-map-schema)})
+
+              add-schema (sp/create-entity storage :fn-schema
+                                           {:name "add-reducer2"
+                                            :returned-type :int})
+              _ (sp/create-entity storage :arg-schema
+                                  {:fn-schema-id (:id add-schema)
+                                   :name "pair"
+                                   :type :jsonb
+                                   :required true})
+              add-fn (sp/create-entity storage :fn
+                                       {:name "my-add-reducer2"
+                                        :fn-schema-id (:id add-schema)})]
+
+          ;; Register implementations with counting
+          (exec/register-base-fn! :counting-pred
+                                  (fn [{:keys [x]} _ctx]
+                                    (swap! filter-count inc)
+                                    (odd? @x)))
+
+          (exec/register-base-fn! :counting-map
+                                  (fn [{:keys [x]} _ctx]
+                                    (swap! map-count inc)
+                                    (* 2 @x)))
+
+          (exec/register-base-fn! :add-reducer2
+                                  (fn [{:keys [pair]} _ctx]
+                                    (let [[acc item] @pair]
+                                      (+ acc item))))
+
+          ;; Create transducer pipeline
+          (fn-composition/sync-fns-to-storage! storage
+                                               [{:name :counting-filter-xf
+                                                 :parent :filter
+                                                 :args {:pred (:id counting-pred-fn)}}
+
+                                                {:name :counting-map-xf
+                                                 :parent :map
+                                                 :args {:f (:id counting-map-fn)}}
+
+                                                {:name :counting-composed-xf
+                                                 :parent :comp
+                                                 :args {:fns [:counting-filter-xf> :counting-map-xf>]}}
+
+                                                {:name :counting-result
+                                                 :parent :transduce
+                                                 :args {:xf :counting-composed-xf>
+                                                        :rf (:id add-fn)
+                                                        :init 0
+                                                        :coll [1 2 3 4 5 6 7 8 9 10]}}])
+
+          (let [final-fn (first (sp/query-entities storage :fn {:name "counting-result"}))
+                ctx (exec/create-context {:storage storage})
+                result (exec/execute ctx (:id final-fn) nil)]
+            ;; [1..10] -> filter odd [1 3 5 7 9] -> map *2 [2 6 10 14 18] -> sum = 50
+            (is (= 50 result))
+            ;; Filter should see all 10 elements
+            (is (= 10 @filter-count))
+            ;; Map should only see the 5 odd elements
+            (is (= 5 @map-count))))
+        (finally
+          (sp/close storage))))))

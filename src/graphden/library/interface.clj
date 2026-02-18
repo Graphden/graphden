@@ -9,7 +9,7 @@
    - Strings: str, subs, str-len, str-upper, str-lower, str-trim, str-split, str-join
    - Collections: first, rest, cons, conj, get, assoc, dissoc, count, empty?, etc.
    - HOF: map, filter, reduce, some, every?, find-first, group-by, sort-by, apply
-   - Transducers: comp, transduce, call (map/filter without coll return transducers)
+   - Transducers: comp, transduce (map/filter without coll return transducers)
 
    Registration and storage sync should be done by consuming components
    using fn-registry.

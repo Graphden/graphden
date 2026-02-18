@@ -51,7 +51,14 @@
   .toolbar button:hover { background: #000; color: #fff; }
   .toolbar .separator { width: 1px; height: 20px; background: #ccc; margin: 0 8px; }
   .toolbar label { font-size: 12px; color: #666; }
-  .toolbar input[type=range] { width: 80px; }
+  .toolbar input[type=range] { width: 80px; -webkit-appearance: none; appearance: none; height: 4px;
+    background: #ccc; border-radius: 0; cursor: pointer; }
+  .toolbar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+    width: 14px; height: 14px; background: #000; border: none; cursor: pointer; }
+  .toolbar input[type=range]::-moz-range-thumb { width: 14px; height: 14px; background: #000;
+    border: none; border-radius: 0; cursor: pointer; }
+  .toolbar input[type=range]::-webkit-slider-runnable-track { background: #ccc; height: 4px; }
+  .toolbar input[type=range]::-moz-range-track { background: #ccc; height: 4px; }
   .toolbar .depth-value { font-size: 12px; min-width: 20px; }
 
   .graph-container { flex: 1; position: relative; background: #fff; }
@@ -150,9 +157,10 @@
   "JavaScript for graph editor functionality - fn-centric visualization."
   "
   let cy = null;
-  let selectedNode = null;
+  let selectedFnId = null;
   let graphData = null;
   let maxDepth = 3;
+  let lookups = null;
 
   // Build lookup maps for fast access
   function buildLookups(data) {
@@ -185,7 +193,6 @@
   function updateEntityList(data) {
     const list = document.getElementById('entity-list');
     list.innerHTML = '';
-    const lookups = buildLookups(data);
 
     (data.fns || []).forEach(fn => {
       const schema = lookups.fnSchemaMap.get(fn.fn_schema_id);
@@ -194,6 +201,7 @@
 
       const li = document.createElement('li');
       li.className = 'entity-item';
+      if (fn.id === selectedFnId) li.className += ' selected';
       li.dataset.fnId = fn.id;
       li.innerHTML =
         '<div class=\"name\">' + fn.name + '</div>' +
@@ -211,31 +219,29 @@
     }
   }
 
-  // Select a function and center graph on it
+  // Select a function and show its dependency tree
   function selectFn(fnId) {
+    selectedFnId = fnId;
     document.querySelectorAll('.entity-item').forEach(el => el.classList.remove('selected'));
     const item = document.querySelector('[data-fn-id=\"' + fnId + '\"]');
     if (item) item.classList.add('selected');
 
-    const node = cy.getElementById(fnId);
-    if (node.length) {
-      cy.center(node);
-      node.select();
-      showFnDetails(fnId);
-    }
+    renderGraph();
+    showFnDetails(fnId);
   }
 
   // Initialize Cytoscape with fn-centric graph
   async function initGraph() {
     const response = await fetch('/api/graph/entities');
     graphData = await response.json();
+    lookups = buildLookups(graphData);
 
     updateEntityList(graphData);
     renderGraph();
   }
 
   function renderGraph() {
-    const elements = convertToFnCentricElements(graphData, maxDepth);
+    const elements = convertToFnCentricElements(graphData, maxDepth, selectedFnId);
 
     if (cy) {
       cy.destroy();
@@ -260,19 +266,22 @@
           'border-color': '#000',
           'color': '#000'
         }},
+        // Selected root fn - filled
+        { selector: 'node[isRoot]', style: {
+          'background-color': '#000',
+          'color': '#fff'
+        }},
         // Base fn - dashed border
         { selector: 'node[type=\"fn\"][isBase]', style: {
           'border-style': 'dashed',
           'border-width': 2
         }},
-        // call-site indicator - small square attached to fn
-        { selector: 'node[type=\"call-site\"]', style: {
-          'label': '',
-          'width': 12,
-          'height': 12,
-          'shape': 'rectangle',
-          'background-color': '#000',
-          'border-width': 0
+        // Placeholder node for unset arg
+        { selector: 'node[isPlaceholder]', style: {
+          'width': 40,
+          'height': 40,
+          'border-style': 'dashed',
+          'border-color': '#999'
         }},
         // Edges - argument connections
         { selector: 'edge', style: {
@@ -302,6 +311,7 @@
         }},
         // call-site edges
         { selector: 'edge[type=\"call-site\"]', style: {
+          'label': 'data(argName)',
           'line-color': '#000',
           'target-arrow-color': '#000',
           'width': 2
@@ -314,7 +324,7 @@
       ],
       layout: {
         name: 'dagre',
-        rankDir: 'LR',  // Left to right: output <- inputs
+        rankDir: 'LR',  // Left to right: root fn on left, deps on right
         nodeSep: 60,
         edgeSep: 20,
         rankSep: 120
@@ -327,7 +337,9 @@
 
     cy.on('tap', 'node[type=\"fn\"]', function(evt) {
       const data = evt.target.data();
-      showFnDetails(data.id);
+      if (!data.isPlaceholder) {
+        selectFn(data.id);
+      }
     });
 
     cy.on('tap', function(evt) {
@@ -339,16 +351,60 @@
     cy.fit(50);
   }
 
-  // Convert data to fn-centric elements
-  // Only shows fn nodes connected by argument edges
-  function convertToFnCentricElements(data, depth) {
+  // Get fn dependencies (fns referenced in arg_values) for a given fn
+  function getFnDependencies(fnId) {
+    const deps = [];
+    const argValues = lookups.fnArgMap.get(fnId) || [];
+
+    argValues.forEach(av => {
+      const value = av.arg_value.value;
+      if (value && typeof value === 'object') {
+        let targetFnId = null;
+        let isCallSite = false;
+
+        if (value.fn_id) {
+          targetFnId = value.fn_id;
+        } else if (value.call_site_id) {
+          const cs = lookups.callSiteMap.get(value.call_site_id);
+          if (cs) {
+            targetFnId = cs.fn_id;
+            isCallSite = true;
+          }
+        }
+
+        if (targetFnId) {
+          deps.push({
+            fnId: targetFnId,
+            argSchemaId: av.arg_schema_id,
+            argValueId: av.arg_value.id,
+            isCallSite: isCallSite
+          });
+        }
+      }
+    });
+
+    return deps;
+  }
+
+  // Convert data to fn-centric elements - only selected fn and its dependency tree
+  function convertToFnCentricElements(data, depth, rootFnId) {
     const nodes = [];
     const edges = [];
     const addedFns = new Set();
-    const lookups = buildLookups(data);
 
-    // Add all fns as nodes
-    (data.fns || []).forEach(fn => {
+    if (!rootFnId || !lookups.fnMap.has(rootFnId)) {
+      // No fn selected - show hint
+      return { nodes: [], edges: [] };
+    }
+
+    // Recursively collect fn and its dependencies to specified depth
+    function collectFn(fnId, currentDepth, isRoot) {
+      if (addedFns.has(fnId) || currentDepth > depth) return;
+      addedFns.add(fnId);
+
+      const fn = lookups.fnMap.get(fnId);
+      if (!fn) return;
+
       const schema = lookups.fnSchemaMap.get(fn.fn_schema_id);
       const isBase = schema && schema.base_fn_name;
       const returnType = schema ? schema.returned_type : '?';
@@ -359,97 +415,78 @@
           label: fn.name,
           type: 'fn',
           isBase: isBase,
+          isRoot: isRoot,
           returnType: returnType,
-          schemaId: fn.fn_schema_id,
-          entityType: 'fn'
+          schemaId: fn.fn_schema_id
         }
       });
-      addedFns.add(fn.id);
-    });
 
-    // Add edges based on arg_values -> references
-    (data.arg_values || []).forEach(av => {
-      if (!av.owner_fn_id) return;
-      const argSchema = lookups.argSchemaMap.get(av.arg_schema_id);
-      const argName = argSchema ? argSchema.name : '?';
+      // Get dependencies and add edges
+      const deps = getFnDependencies(fnId);
+      deps.forEach(dep => {
+        const argSchema = lookups.argSchemaMap.get(dep.argSchemaId);
+        const argName = argSchema ? argSchema.name : '?';
 
-      if (av.value && typeof av.value === 'object') {
-        // Reference to another fn or call-site
-        let targetFnId = null;
-        let isCallSite = false;
-
-        if (av.value.fn_id) {
-          targetFnId = av.value.fn_id;
-        } else if (av.value.call_site_id) {
-          const cs = lookups.callSiteMap.get(av.value.call_site_id);
-          if (cs) {
-            targetFnId = cs.fn_id;
-            isCallSite = true;
+        edges.push({
+          data: {
+            id: 'e-' + dep.argValueId,
+            source: fnId,
+            target: dep.fnId,
+            type: dep.isCallSite ? 'call-site' : 'arg',
+            argName: argName
           }
-        }
+        });
 
-        if (targetFnId && addedFns.has(targetFnId)) {
-          edges.push({
-            data: {
-              id: 'e-' + av.id,
-              source: av.owner_fn_id,
-              target: targetFnId,
-              type: isCallSite ? 'call-site' : 'arg',
-              argName: argName
-            }
-          });
-        }
-      }
-    });
-
-    // Show unset args as edges to placeholder
-    (data.fns || []).forEach(fn => {
-      const schema = lookups.fnSchemaMap.get(fn.fn_schema_id);
-      if (!schema) return;
-
-      const schemaArgs = (data.arg_schemas || []).filter(as => as.fn_schema_id === fn.fn_schema_id);
-      const boundArgs = lookups.fnArgMap.get(fn.id) || [];
-      const boundArgSchemaIds = new Set(boundArgs.map(ba => ba.arg_schema_id));
-
-      schemaArgs.forEach(as => {
-        if (!boundArgSchemaIds.has(as.id) && as.required) {
-          // Create a placeholder node for unset required arg
-          const placeholderId = 'unset-' + fn.id + '-' + as.id;
-          nodes.push({
-            data: {
-              id: placeholderId,
-              label: '?',
-              type: 'fn',
-              isBase: false,
-              isPlaceholder: true
-            }
-          });
-          edges.push({
-            data: {
-              id: 'e-unset-' + fn.id + '-' + as.id,
-              source: fn.id,
-              target: placeholderId,
-              type: 'arg-unset',
-              argName: as.name
-            }
-          });
+        // Recurse into dependency
+        if (currentDepth < depth) {
+          collectFn(dep.fnId, currentDepth + 1, false);
         }
       });
-    });
 
+      // Show unset required args as placeholder nodes
+      if (schema) {
+        const schemaArgs = (data.arg_schemas || []).filter(as => as.fn_schema_id === fn.fn_schema_id);
+        const boundArgs = lookups.fnArgMap.get(fnId) || [];
+        const boundArgSchemaIds = new Set(boundArgs.map(ba => ba.arg_schema_id));
+
+        schemaArgs.forEach(as => {
+          if (!boundArgSchemaIds.has(as.id) && as.required) {
+            const placeholderId = 'unset-' + fnId + '-' + as.id;
+            nodes.push({
+              data: {
+                id: placeholderId,
+                label: '?',
+                type: 'fn',
+                isBase: false,
+                isPlaceholder: true
+              }
+            });
+            edges.push({
+              data: {
+                id: 'e-unset-' + fnId + '-' + as.id,
+                source: fnId,
+                target: placeholderId,
+                type: 'arg-unset',
+                argName: as.name
+              }
+            });
+          }
+        });
+      }
+    }
+
+    collectFn(rootFnId, 1, true);
     return { nodes, edges };
   }
 
   // Show function details in panel
   function showFnDetails(fnId) {
-    selectedNode = fnId;
     const panel = document.getElementById('details-panel');
     panel.classList.remove('hidden');
     htmx.ajax('GET', '/partials/entity-details/fn/' + fnId, '#details-content');
   }
 
   function hideNodeDetails() {
-    selectedNode = null;
     document.getElementById('details-panel').classList.add('hidden');
   }
 
@@ -465,6 +502,7 @@
   async function refreshGraph() {
     const response = await fetch('/api/graph/entities');
     graphData = await response.json();
+    lookups = buildLookups(graphData);
     updateEntityList(graphData);
     renderGraph();
   }

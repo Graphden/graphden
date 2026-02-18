@@ -139,6 +139,40 @@
   {:doc "Run performance benchmarks [--quick]"
    :task (clojure (str "-M:bench -m graphden.bench " (str/join " " *command-line-args*)))}
 
+  ;; === DOCKER DEPLOYMENT ===
+
+  deploy
+  {:doc "Build and deploy to docker (clean rebuild)"
+   :task (do
+           (println "1. Cleaning target...")
+           (fs/delete-tree "target")
+           (fs/create-dirs "target")
+
+           (println "2. Building uberjar...")
+           (p/shell "clojure -T:build uber")
+
+           (println "3. Truncating database...")
+           (p/shell {:continue true}
+                    "docker exec graphden-age psql -U graphden -d graphden -c \"TRUNCATE TABLE fn_version, fn_arg_version, arg_value, call_site_arg_version, call_site_arg, call_site, fn_arg, fn, fn_schema, arg_schema CASCADE;\"")
+
+           (println "4. Rebuilding docker image...")
+           (p/shell "docker-compose build --no-cache executor")
+
+           (println "5. Restarting container...")
+           (p/shell "docker-compose up -d executor")
+
+           (println "6. Waiting for server...")
+           (loop [attempts 0]
+             (Thread/sleep 2000)
+             (let [result (p/shell {:continue true :out :string :err :string}
+                                   "docker exec graphden-executor curl -sf http://localhost:8080/health")]
+               (if (= 0 (:exit result))
+                 (println (str green "✓ Server ready at http://localhost:9002/" reset))
+                 (if (< attempts 30)
+                   (do (print ".") (flush) (recur (inc attempts)))
+                   (do (println (str red "✗ Server failed to start" reset))
+                       (System/exit 1)))))))}
+
   clean
   {:doc "Clean generated files"
    :task (do

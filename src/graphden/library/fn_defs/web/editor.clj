@@ -50,19 +50,6 @@
     font-family: inherit; font-size: 12px; transition: all 0.1s; }
   .toolbar button:hover { background: #000; color: #fff; }
   .toolbar .separator { width: 1px; height: 20px; background: #ccc; margin: 0 8px; }
-  .toolbar label { font-size: 12px; color: #666; }
-  .toolbar input[type=range] { width: 80px; -webkit-appearance: none; appearance: none; height: 4px;
-    background: #ccc; border-radius: 0; cursor: pointer; }
-  .toolbar input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
-    width: 14px; height: 14px; background: #000; border: none; cursor: pointer; }
-  .toolbar input[type=range]::-moz-range-thumb { width: 14px; height: 14px; background: #000;
-    border: none; border-radius: 0; cursor: pointer; }
-  .toolbar input[type=range]::-webkit-slider-runnable-track { background: #ccc; height: 4px; }
-  .toolbar input[type=range]::-moz-range-track { background: #ccc; height: 4px; }
-  .toolbar .depth-value { font-size: 12px; min-width: 20px; text-align: center; }
-  .toolbar .depth-btn { width: 24px; height: 24px; padding: 0; font-size: 14px; font-weight: bold;
-    display: inline-flex; align-items: center; justify-content: center; }
-  .toolbar .depth-control { display: flex; align-items: center; gap: 4px; }
 
   .graph-container { flex: 1; position: relative; background: #fff; }
   #cy { width: 100%; height: 100%; }
@@ -170,15 +157,16 @@
   let cy = null;
   let selectedFnId = null;
   let graphData = null;
-  let maxDepth = 3;
+  let maxDepth = 100; // Show all levels
   let lookups = null;
 
   // Build lookup maps for fast access
+  // Note: API returns kebab-case keys (fn-schema-id), so we use bracket notation
   function buildLookups(data) {
     const fnSchemaMap = new Map();
     const argSchemaMap = new Map();
     const fnMap = new Map();
-    const fnArgMap = new Map();  // fn_id -> [{arg_schema_id, arg_value}]
+    const fnArgMap = new Map();  // fn_id -> [{argSchemaId, argValue}]
     const callSiteMap = new Map();
 
     (data.fn_schemas || []).forEach(fs => fnSchemaMap.set(fs.id, fs));
@@ -186,14 +174,21 @@
     (data.fns || []).forEach(f => fnMap.set(f.id, f));
     (data.call_sites || []).forEach(cs => callSiteMap.set(cs.id, cs));
 
-    // Build fn_arg map from arg_values: owner_fn_id -> list of arg_values
-    (data.arg_values || []).forEach(av => {
-      const fnId = av.owner_fn_id;
-      if (!fnId) return;
+    // Build arg_value lookup map: arg-value-id -> arg-value
+    const argValueMap = new Map();
+    (data.arg_values || []).forEach(av => argValueMap.set(av.id, av));
+
+    // Build fn_arg map from fn_args: fn-id -> [{argSchemaId, argValue}]
+    (data.fn_args || []).forEach(fa => {
+      const fnId = fa['fn-id'];
+      const argValueId = fa['arg-value-id'];
+      const argSchemaId = fa['arg-schema-id'];
+      const argValue = argValueMap.get(argValueId);
+      if (!fnId || !argValue) return;
       if (!fnArgMap.has(fnId)) fnArgMap.set(fnId, []);
       fnArgMap.get(fnId).push({
-        arg_schema_id: av.arg_schema_id,
-        arg_value: av
+        argSchemaId: argSchemaId,
+        argValue: argValue
       });
     });
 
@@ -206,17 +201,11 @@
     list.innerHTML = '';
 
     (data.fns || []).forEach(fn => {
-      const schema = lookups.fnSchemaMap.get(fn.fn_schema_id);
-      const isBase = schema && schema.base_fn_name;
-
       const li = document.createElement('li');
       li.className = 'entity-item';
       if (fn.id === selectedFnId) li.className += ' selected';
       li.dataset.fnId = fn.id;
-      li.innerHTML =
-        '<div class=\"name\">' + fn.name + '</div>' +
-        (isBase ? '<div class=\"meta\"><span class=\"badge badge-base\">base</span></div>' : '');
-
+      li.innerHTML = '<div class=\"name\">' + fn.name + '</div>';
       li.onclick = () => selectFn(fn.id);
       list.appendChild(li);
     });
@@ -240,7 +229,6 @@
     }
 
     renderGraph();
-    showFnDetails(fnId);
   }
 
   // Select fn by name (for URL hash navigation)
@@ -287,7 +275,7 @@
       container: document.getElementById('cy'),
       elements: elements,
       style: [
-        // fn nodes - circles, monochrome
+        // fn nodes - simple circles
         { selector: 'node[type=\"fn\"]', style: {
           'label': 'data(label)',
           'text-valign': 'center',
@@ -302,100 +290,57 @@
           'border-color': '#000',
           'color': '#000'
         }},
-        // Selected root fn - filled
+        // Selected root fn - thicker border only
         { selector: 'node[isRoot]', style: {
-          'background-color': '#000',
-          'color': '#fff'
+          'border-width': 4
         }},
-        // Base fn - dashed border
-        { selector: 'node[type=\"fn\"][isBase]', style: {
-          'border-style': 'dashed',
-          'border-width': 2
-        }},
-        // Placeholder node for unset arg
+        // Placeholder for unset arg - smaller, gray
         { selector: 'node[isPlaceholder]', style: {
-          'width': 40,
-          'height': 40,
-          'border-style': 'dashed',
-          'border-color': '#999'
+          'width': 50,
+          'height': 50,
+          'border-color': '#999',
+          'color': '#999'
         }},
-        // Arg value nodes - small rectangles
+        // Literal arg values - rectangles (different shape = different type)
         { selector: 'node[type=\"arg\"]', style: {
           'label': 'data(label)',
           'text-valign': 'center',
           'text-halign': 'center',
-          'font-size': '9px',
-          'font-family': 'SF Mono, Monaco, monospace',
-          'width': 'label',
-          'height': 24,
-          'padding': '6px',
-          'shape': 'round-rectangle',
-          'background-color': '#f5f5f5',
-          'border-width': 1,
-          'border-color': '#999',
-          'color': '#333'
-        }},
-        // Arg label for edge
-        { selector: 'node[type=\"arg-label\"]', style: {
-          'label': 'data(label)',
-          'text-valign': 'center',
-          'text-halign': 'center',
           'font-size': '10px',
           'font-family': 'SF Mono, Monaco, monospace',
           'width': 'label',
-          'height': 20,
-          'padding': '4px',
-          'shape': 'round-rectangle',
+          'height': 28,
+          'padding': '8px',
+          'shape': 'rectangle',
           'background-color': '#fff',
-          'border-width': 1,
-          'border-color': '#ccc',
-          'color': '#666'
+          'border-width': 2,
+          'border-color': '#000',
+          'color': '#000'
         }},
-        // Edges - argument connections
+        // Edges - simple arrows
         { selector: 'edge', style: {
-          'width': 1,
-          'line-color': '#666',
-          'target-arrow-color': '#666',
+          'width': 2,
+          'line-color': '#000',
+          'target-arrow-color': '#000',
           'target-arrow-shape': 'triangle',
           'curve-style': 'bezier',
+          'label': 'data(argName)',
           'font-size': '10px',
           'font-family': 'SF Mono, Monaco, monospace',
           'text-rotation': 'autorotate',
-          'text-margin-y': -8
+          'text-margin-y': -10,
+          'text-background-color': '#fff',
+          'text-background-opacity': 1,
+          'text-background-padding': '2px'
         }},
-        // Argument edges - show arg name as label
-        { selector: 'edge[type=\"arg\"]', style: {
-          'label': 'data(argName)',
-          'line-color': '#999',
-          'target-arrow-color': '#999',
-          'line-style': 'solid'
-        }},
-        // Unset argument edges - dashed
+        // Unset arg edges - gray
         { selector: 'edge[type=\"arg-unset\"]', style: {
-          'label': 'data(argName)',
-          'line-color': '#ccc',
-          'target-arrow-color': '#ccc',
-          'line-style': 'dashed'
-        }},
-        // Literal arg edges - thin dotted
-        { selector: 'edge[type=\"arg-literal\"]', style: {
           'line-color': '#999',
-          'target-arrow-color': '#999',
-          'target-arrow-shape': 'none',
-          'line-style': 'dotted',
-          'width': 1
+          'target-arrow-color': '#999'
         }},
-        // call-site edges
-        { selector: 'edge[type=\"call-site\"]', style: {
-          'label': 'data(argName)',
-          'line-color': '#000',
-          'target-arrow-color': '#000',
-          'width': 2
-        }},
-        // Selected
-        { selector: ':selected', style: {
-          'border-width': 4,
-          'border-color': '#000'
+        // Literal arg edges - no arrow (connects to rectangle)
+        { selector: 'edge[type=\"arg-literal\"]', style: {
+          'target-arrow-shape': 'none'
         }}
       ],
       layout: {
@@ -481,9 +426,9 @@
       const fn = lookups.fnMap.get(fnId);
       if (!fn) return;
 
-      const schema = lookups.fnSchemaMap.get(fn.fn_schema_id);
-      const isBase = schema && schema.base_fn_name;
-      const returnType = schema ? schema.returned_type : '?';
+      const schema = lookups.fnSchemaMap.get(fn['fn-schema-id']);
+      const isBase = schema && schema['base-fn-name'];
+      const returnType = schema ? schema['returned-type'] : '?';
 
       nodes.push({
         data: {
@@ -493,16 +438,28 @@
           isBase: isBase,
           isRoot: isRoot,
           returnType: returnType,
-          schemaId: fn.fn_schema_id
+          schemaId: fn['fn-schema-id']
         }
       });
 
       // Get all schema args for this fn and show them
+      // For wrapper fns (those with base-fn-name different from name), look up parent's args
       if (schema) {
-        const schemaArgs = (data.arg_schemas || []).filter(as => as.fn_schema_id === fn.fn_schema_id);
+        let argSchemaSourceId = schema.id;
+        const isWrapper = schema['base-fn-name'] && schema.name !== schema['base-fn-name'];
+        if (isWrapper) {
+          // Find the parent base function's schema by name
+          const parentSchema = Array.from(lookups.fnSchemaMap.values()).find(
+            s => s.name === schema['base-fn-name']
+          );
+          if (parentSchema) {
+            argSchemaSourceId = parentSchema.id;
+          }
+        }
+        const schemaArgs = (data.arg_schemas || []).filter(as => as['fn-schema-id'] === argSchemaSourceId);
         const boundArgs = lookups.fnArgMap.get(fnId) || [];
         const boundBySchemaId = new Map();
-        boundArgs.forEach(ba => boundBySchemaId.set(ba.arg_schema_id, ba.arg_value));
+        boundArgs.forEach(ba => boundBySchemaId.set(ba.argSchemaId, ba.argValue));
 
         schemaArgs.forEach(as => {
           const argValue = boundBySchemaId.get(as.id);
@@ -515,12 +472,12 @@
             let isCallSite = false;
 
             if (value && typeof value === 'object') {
-              if (value.fn_id) {
-                targetFnId = value.fn_id;
-              } else if (value.call_site_id) {
-                const cs = lookups.callSiteMap.get(value.call_site_id);
+              if (value['fn-id']) {
+                targetFnId = value['fn-id'];
+              } else if (value['call-site-id']) {
+                const cs = lookups.callSiteMap.get(value['call-site-id']);
                 if (cs) {
-                  targetFnId = cs.fn_id;
+                  targetFnId = cs['fn-id'];
                   isCallSite = true;
                 }
               }
@@ -629,18 +586,6 @@
     if (cy) cy.fit(50);
   }
 
-  function setDepth(value) {
-    maxDepth = parseInt(value);
-    document.getElementById('depth-value').textContent = maxDepth;
-    document.getElementById('depth-slider').value = maxDepth;
-    renderGraph();
-  }
-
-  function adjustDepth(delta) {
-    const newValue = Math.max(1, Math.min(10, maxDepth + delta));
-    setDepth(newValue);
-  }
-
   // Initialize on load
   document.addEventListener('DOMContentLoaded', initGraph);
 
@@ -669,26 +614,9 @@
     [:div {:class "header"}
      [:h1 "GRAPHDEN"]]
     [:div {:class "toolbar"}
-     [:button {:onclick "showCreateModal('fn')"} "+ fn"]
-     [:div {:class "separator"}]
-     [:label "Depth:"]
-     [:div {:class "depth-control"}
-      [:button {:class "depth-btn" :onclick "adjustDepth(-1)"} "-"]
-      [:input {:type "range" :min "1" :max "10" :value "3" :id "depth-slider"
-               :oninput "setDepth(this.value)"}]
-      [:button {:class "depth-btn" :onclick "adjustDepth(1)"} "+"]]
-     [:span {:class "depth-value" :id "depth-value"} "3"]
-     [:div {:class "separator"}]
-     [:button {:onclick "refreshGraph()"} "Refresh"]
-     [:button {:onclick "fitGraph()"} "Fit"]]
+     [:button {:onclick "showCreateModal('fn')"} "+ fn"]]
     [:div {:class "graph-container"}
-     [:div {:id "cy"}]
-     ;; Details panel
-     [:div {:class "details-panel hidden" :id "details-panel"}
-      [:div {:class "panel-header"}
-       [:h3 "Details"]
-       [:button {:class "close-btn" :onclick "hideNodeDetails()"} "×"]]
-      [:div {:class "panel-body" :id "details-content"}]]]]
+     [:div {:id "cy"}]]]
    ;; Modal
    [:div {:class "modal-overlay hidden" :id "modal-overlay"}
     [:div {:class "modal"}

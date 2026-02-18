@@ -303,6 +303,7 @@
                                  :fns (vec (sp/query-entities storage :fn {}))
                                  :arg_schemas (vec (sp/query-entities storage :arg-schema {}))
                                  :arg_values (vec (sp/query-entities storage :arg-value {}))
+                                 :fn_args (vec (sp/query-entities storage :fn-arg {}))
                                  :call_sites (vec (sp/query-entities storage :call-site {}))}]
                      {:status 200
                       :headers {"Content-Type" "application/json"}

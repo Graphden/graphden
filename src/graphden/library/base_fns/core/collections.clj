@@ -199,6 +199,24 @@
   (vec (distinct coll)))
 
 
+(defbase pair-fn
+  "Creates a 2-element vector (tuple) from two values.
+   Works with non-JSON-serializable values like functions.
+
+   Example: (pair \"/health\" handler) => [\"/health\" handler]"
+  {:args {:a :any, :b :any}
+   :return-type :any}
+  [a b])
+
+
+(defbase triple-fn
+  "Creates a 3-element vector from three values.
+   Works with non-JSON-serializable values like functions."
+  {:args {:a :any, :b :any, :c :any}
+   :return-type :any}
+  [a b c])
+
+
 ;; === Exports ===
 
 (def collection-defs
@@ -227,4 +245,6 @@
    :sort sort-fn
    :concat concat-fn
    :flatten flatten-fn
-   :distinct distinct-fn})
+   :distinct distinct-fn
+   :pair pair-fn
+   :triple triple-fn})

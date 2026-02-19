@@ -83,14 +83,14 @@
 
    ;; === Health Route (Dynamic JSON) ===
    ;; Uses json-handler to create handler from health-status result
-   {:name :health-handler
+   {:name :health-handler-fn
     :parent :json-handler
     :args {:data :health-status>}}
 
    ;; {:handler <fn>} - execute health-handler-fn to get Clojure fn
    {:name :health-handler-map-fn
     :parent :assoc
-    :args {:m {}, :k "handler", :v :health-handler>}}
+    :args {:m {}, :k "handler", :v :health-handler-fn>}}
 
    ;; {:get {:handler <fn>}}
    {:name :health-method-map-fn

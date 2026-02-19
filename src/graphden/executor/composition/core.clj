@@ -164,108 +164,19 @@
   (registry/arg-schema-uuid parent-name arg-name))
 
 
-;; === Recursive Reference Handling ===
-
-(defn- collect-refs-recursively
-  "Recursively walks a data structure and collects all fn references.
-   Only collects :fn-name> syntax (call-site refs) in nested structures.
-   Plain keywords are not collected (not treated as fn refs).
-
-   Returns a sequence of [fn-name ref-type result-name] tuples."
-  [value]
-  (cond
-    ;; Check if it's a call-site reference keyword or string (contains >)
-    ;; Handles strings for JSONB round-trip where keywords become strings
-    (or (keyword? value) (string? value))
-    (when-let [[fn-name result-name] (parse-fn-result-ref value)]
-      [[fn-name :call-site result-name]])
-
-    ;; Recursively walk maps - only walk values, not keys
-    (map? value)
-    (mapcat collect-refs-recursively (vals value))
-
-    ;; Recursively walk vectors/lists/seqs
-    (or (vector? value) (sequential? value))
-    (mapcat collect-refs-recursively value)
-
-    ;; Other values - no refs
-    :else
-    nil))
-
-
-(defn- resolve-refs-recursively
-  "Recursively walks a data structure and resolves fn references.
-   Only resolves :fn-name> or \"fn-name>\" syntax (call-site refs) in nested structures.
-   Plain keywords are kept as-is (not treated as fn refs).
-
-   This is intentional: in nested structures like routes, we can't distinguish
-   between a keyword meant to be a fn ref (:some-fn) and a data keyword (:status).
-   So we only support explicit call-site syntax (:fn-name>) in nested structures.
-
-   Also handles strings (for JSONB round-trip where keywords become strings).
-
-   Arguments:
-   - value: the value to resolve
-   - storage: storage for lookups
-   - created-fns: map of {fn-name -> fn-id} for fns created in this batch
-   - created-call-sites: atom tracking call-sites created for deduplication"
-  [value storage created-fns created-call-sites]
-  (cond
-    ;; Check if it's a call-site reference keyword or string (contains >)
-    (or (keyword? value) (string? value))
-    (if-let [[fn-name result-name] (parse-fn-result-ref value)]
-      ;; :fn-name> or "fn-name>" - get or create call-site
-      (let [result-name-str (name result-name)]
-        (if-let [existing-cs-id (get @created-call-sites result-name)]
-          existing-cs-id
-          ;; Check storage for existing call-site with same name
-          (let [existing-in-db (sp/query-entities storage :call-site {:name result-name-str})]
-            (if (seq existing-in-db)
-              (let [cs-id (:id (first existing-in-db))]
-                (swap! created-call-sites assoc result-name cs-id)
-                cs-id)
-              (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                    call-site (sp/create-entity storage :call-site
-                                                {:fn-id ref-fn-id
-                                                 :name result-name-str})]
-                (swap! created-call-sites assoc result-name (:id call-site))
-                (:id call-site))))))
-      ;; Plain keyword/string without > - keep as is (not a call-site ref)
-      value)
-
-    ;; Recursively resolve maps - only resolve values, not keys
-    (map? value)
-    (into {}
-          (map (fn [[k v]]
-                 ;; Keys are never resolved - they're just data keys
-                 [k (resolve-refs-recursively v storage created-fns created-call-sites)])
-               value))
-
-    ;; Recursively resolve vectors
-    (vector? value)
-    (mapv #(resolve-refs-recursively % storage created-fns created-call-sites) value)
-
-    ;; Recursively resolve lists/seqs (convert to vector for JSON compatibility)
-    (sequential? value)
-    (vec (map #(resolve-refs-recursively % storage created-fns created-call-sites) value))
-
-    ;; Other values - return as is
-    :else
-    value))
-
-
 ;; === Dependency Analysis ===
 
 (defn- collect-deps-from-value
   "Collects fn dependencies from a single arg value.
-   At the top level, supports both :fn-name and :fn-name> syntax.
-   In nested structures, only :fn-name> syntax is supported."
+   Only handles top-level refs (:fn-name and :fn-name> syntax).
+   Nested structures with refs are NOT supported - use explicit
+   graph functions (pair, assoc-any, conj-any) to build them."
   [value]
   (if-let [ref-info (extract-fn-ref value)]
     ;; Top-level: both :fn-name and :fn-name> work
     #{(first ref-info)}
-    ;; Not a top-level ref, check nested structures with recursive collection
-    (set (map first (collect-refs-recursively value)))))
+    ;; Not a top-level ref - no nested collection (nested not supported)
+    #{}))
 
 
 (defn- extract-dependencies
@@ -423,14 +334,15 @@
 
 
 (defn- resolve-arg-value
-  "Resolves an arg value, handling both top-level and nested references.
+  "Resolves an arg value, handling top-level references only.
 
    At top-level (the arg value itself):
    - :fn-name -> resolve to fn-id (for HOF)
    - :fn-name> -> create call-site and resolve to call-site-id
 
-   In nested structures:
-   - Only :fn-name> syntax is supported (plain keywords are kept as-is)"
+   NOTE: Nested structures with fn/call-site references are NOT resolved.
+   Use explicit graph functions (pair, assoc-any, conj-any) to build
+   structures containing fn/call-site references."
   [arg-value storage created-fns created-call-sites]
   (if-let [ref-info (extract-fn-ref arg-value)]
     ;; Top-level fn reference
@@ -460,8 +372,8 @@
 
         ;; default
         arg-value))
-    ;; Not a top-level ref, recursively resolve nested structures
-    (resolve-refs-recursively arg-value storage created-fns created-call-sites)))
+    ;; Not a top-level ref - return literal value as-is (no nested resolution)
+    arg-value))
 
 
 (defn- get-or-create-fn-arg!
@@ -482,10 +394,12 @@
 
 (defn- create-arg-values!
   "Creates arg-value entities and fn-arg bindings for a fn.
-   Resolves references to other fns.
+   Resolves top-level references to other fns.
 
    At top-level args, both :fn-name and :fn-name> syntax work.
-   In nested structures, only :fn-name> syntax is supported.
+   NOTE: Nested structures with fn/call-site references are NOT resolved.
+   Use explicit graph functions (pair, assoc-any, conj-any) to build
+   structures containing fn/call-site references.
 
    With normalized schema:
    - arg-value is a pure value (no owner-fn-id)

@@ -412,11 +412,16 @@
                                                  :parent :map
                                                  :args {:f (:id double-fn)}}
 
-                                                ;; composed-xf: (comp filter-xf map-xf)
-                                                ;; Uses call-site references - executed and results composed
-                                                {:name :composed-xf
-                                                 :parent :comp
-                                                 :args {:fns [:filter-xf> :map-xf>]}}
+                                               ;; Build pair of transducers explicitly
+                                               {:name :xf-pair
+                                                :parent :pair
+                                                :args {:a :filter-xf> :b :map-xf>}}
+
+                                               ;; composed-xf: (comp filter-xf map-xf)
+                                               ;; Uses pair to pass functions as vector
+                                               {:name :composed-xf
+                                                :parent :comp
+                                                :args {:fns :xf-pair>}}
 
                                                 ;; final-result: (transduce composed-xf add-reducer 0 [1 2 3 4 5])
                                                 {:name :final-result
@@ -506,9 +511,14 @@
                                                  :parent :map
                                                  :args {:f (:id counting-map-fn)}}
 
+                                                ;; Build pair of transducers explicitly
+                                                {:name :counting-xf-pair
+                                                 :parent :pair
+                                                 :args {:a :counting-filter-xf> :b :counting-map-xf>}}
+
                                                 {:name :counting-composed-xf
                                                  :parent :comp
-                                                 :args {:fns [:counting-filter-xf> :counting-map-xf>]}}
+                                                 :args {:fns :counting-xf-pair>}}
 
                                                 {:name :counting-result
                                                  :parent :transduce

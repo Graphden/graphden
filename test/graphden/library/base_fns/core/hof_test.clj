@@ -412,16 +412,16 @@
                                                  :parent :map
                                                  :args {:f (:id double-fn)}}
 
-                                               ;; Build pair of transducers explicitly
-                                               {:name :xf-pair
-                                                :parent :pair
-                                                :args {:a :filter-xf> :b :map-xf>}}
+                                                ;; Build pair of transducers explicitly
+                                                {:name :xf-pair
+                                                 :parent :pair
+                                                 :args {:a :filter-xf> :b :map-xf>}}
 
-                                               ;; composed-xf: (comp filter-xf map-xf)
-                                               ;; Uses pair to pass functions as vector
-                                               {:name :composed-xf
-                                                :parent :comp
-                                                :args {:fns :xf-pair>}}
+                                                ;; composed-xf: (comp filter-xf map-xf)
+                                                ;; Uses pair to pass functions as vector
+                                                {:name :composed-xf
+                                                 :parent :comp
+                                                 :args {:fns :xf-pair>}}
 
                                                 ;; final-result: (transduce composed-xf add-reducer 0 [1 2 3 4 5])
                                                 {:name :final-result

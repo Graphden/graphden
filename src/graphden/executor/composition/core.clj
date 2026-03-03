@@ -377,15 +377,20 @@
 
 
 (defn- get-or-create-fn-arg!
-  "Gets existing fn-arg binding or creates new one.
+  "Gets existing fn-arg binding or creates/updates one.
    The unique constraint is on (fn-id, arg-schema-id).
+   If existing fn-arg has different arg-value-id, updates it.
    Returns the fn-arg entity."
   [storage fn-id arg-schema-id arg-value-id]
   (let [existing (sp/query-entities storage :fn-arg
                                     {:fn-id fn-id
                                      :arg-schema-id arg-schema-id})]
     (if (seq existing)
-      (first existing)
+      (let [existing-fn-arg (first existing)]
+        (if (= (:arg-value-id existing-fn-arg) arg-value-id)
+          existing-fn-arg
+          (sp/update-entity storage :fn-arg (:id existing-fn-arg)
+                            {:arg-value-id arg-value-id})))
       (sp/create-entity storage :fn-arg
                         {:fn-id fn-id
                          :arg-schema-id arg-schema-id

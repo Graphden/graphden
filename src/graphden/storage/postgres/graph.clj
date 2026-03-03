@@ -97,18 +97,18 @@
   (let [query-map (build-graph-discovery-query root-fn-id sp/*max-graph-iterations*)
         query (sql/format query-map)]
     (util/with-sql-error-handling "Database error" :discover-graph-cte {:fn-id root-fn-id}
-      (let [rows (jdbc/execute! ds query (util/query-opts))]
-        (reduce
-          (fn [acc row]
-            (case (:entity_type row)
-              "fn" (update acc :fn-ids conj (:id row))
-              "fu" (-> acc
-                       (update :fn-usage-ids conj (:id row))
-                       (assoc-in [:fn-usages (:id row)]
-                                 {:id (:id row) :fn-id (:fn_id row)}))
-              acc))
-          {:fn-ids #{} :fn-usage-ids #{} :fn-usages {}}
-          rows)))))
+                                  (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                    (reduce
+                                      (fn [acc row]
+                                        (case (:entity_type row)
+                                          "fn" (update acc :fn-ids conj (:id row))
+                                          "fu" (-> acc
+                                                   (update :fn-usage-ids conj (:id row))
+                                                   (assoc-in [:fn-usages (:id row)]
+                                                             {:id (:id row) :fn-id (:fn_id row)}))
+                                          acc))
+                                      {:fn-ids #{} :fn-usage-ids #{} :fn-usages {}}
+                                      rows)))))
 
 
 (defn- load-entities-batch
@@ -122,11 +122,11 @@
                              :where [:in key-column (vec values)]}
                             {:quoted true})]
       (util/with-sql-error-handling "Database error" :load-entities-batch {:table table :count (count values)}
-        (let [rows (jdbc/execute! ds query (util/query-opts))]
-          (->> rows
-               (map codec/row->entity)
-               (map (juxt :id identity))
-               (into {})))))))
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                      (->> rows
+                                           (map codec/row->entity)
+                                           (map (juxt :id identity))
+                                           (into {})))))))
 
 
 (defn- load-fns-batch
@@ -159,18 +159,18 @@
                              :join [[:arg_value :av] [:= :av.id :fa.arg_value_id]]
                              :where [:in :fa.fn_id fn-ids-vec]})]
       (util/with-sql-error-handling "Database error" :load-arg-values-batch {:fn-count (count fn-ids)}
-        (let [rows (jdbc/execute! ds query (util/query-opts))]
-          (->> rows
-               (group-by :fn_id)
-               (reduce-kv
-                 (fn [acc fn-id rows-for-fn]
-                   (assoc acc fn-id
-                          (->> rows-for-fn
-                               (map (fn [row]
-                                      (codec/row->entity (dissoc row :fn_id))))
-                               (map (juxt :arg-schema-id identity))
-                               (into {}))))
-                 (zipmap fn-ids-vec (repeat {})))))))))
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                      (->> rows
+                                           (group-by :fn_id)
+                                           (reduce-kv
+                                             (fn [acc fn-id rows-for-fn]
+                                               (assoc acc fn-id
+                                                      (->> rows-for-fn
+                                                           (map (fn [row]
+                                                                  (codec/row->entity (dissoc row :fn_id))))
+                                                           (map (juxt :arg-schema-id identity))
+                                                           (into {}))))
+                                             (zipmap fn-ids-vec (repeat {})))))))))
 
 
 (defn resolve-execution-graph

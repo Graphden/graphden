@@ -1,15 +1,15 @@
 services:
-  # Apache AGE - PostgreSQL with graph database extension
-  # Provides O(1) graph resolution via Cypher queries
-  age:
-    image: apache/age:latest
-    container_name: graphden-age
+  # PostgreSQL database
+  # Uses plain PostgreSQL with recursive CTE for graph resolution
+  postgres:
+    image: postgres:16-alpine
+    container_name: graphden-postgres
     environment:
       POSTGRES_DB: graphden
       POSTGRES_USER: graphden
       POSTGRES_PASSWORD: graphden
     volumes:
-      - age_data:/var/lib/postgresql
+      - postgres_data:/var/lib/postgresql/data
     # ports:
     #   - "5432:5432"  # Uncomment for external access
     healthcheck:
@@ -17,18 +17,18 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-      start_period: 15s
+      start_period: 10s
 
   executor:
     build: .
     container_name: graphden-executor
     depends_on:
-      age:
+      postgres:
         condition: service_healthy
     environment:
       PORT: 8080
-      STORAGE_TYPE: age
-      JDBC_URL: jdbc:postgresql://age:5432/graphden
+      STORAGE_TYPE: postgres
+      JDBC_URL: jdbc:postgresql://postgres:5432/graphden
       DB_USERNAME: graphden
       DB_PASSWORD: graphden
       DB_POOL_SIZE: 10
@@ -37,5 +37,5 @@ services:
     restart: unless-stopped
 
 volumes:
-  age_data:
-    name: graphden-age-data
+  postgres_data:
+    name: graphden-postgres-data

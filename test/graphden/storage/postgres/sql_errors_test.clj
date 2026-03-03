@@ -238,13 +238,14 @@
 
 
 (deftest batch-operations-empty-sequences-test
-  (testing "classify-and-load-refs returns empty for empty candidates"
+  (testing "discover-graph-cte throws not-found for non-existent fn"
     (let [storage (setup/create-test-storage)]
       (try
         (sp/initialize storage (setup/make-graph-schema))
         (let [pool (:pool storage)
-              classify-fn #'graph/classify-and-load-refs
-              result (classify-fn pool #{})]
+              discover-fn #'graph/discover-graph-cte
+              result (discover-fn pool (random-uuid))]
+          ;; Non-existent fn returns empty set
           (is (= {:fn-ids #{} :fn-usage-ids #{} :fn-usages {}} result)))
         (finally
           (sp/close storage)))))
@@ -329,17 +330,17 @@
 
 
 (deftest sql-error-graph-operations-mock-test
-  (testing "classify-and-load-refs throws wrapped error on SQLException"
-    (let [classify-fn #'graph/classify-and-load-refs
+  (testing "discover-graph-cte throws wrapped error on SQLException"
+    (let [discover-fn #'graph/discover-graph-cte
           not-null-ex (SQLException. "not null violation" "23502")]
       (with-redefs [jdbc/execute! (fn [_ds _query & _opts]
                                     (throw not-null-ex))]
         (try
-          (classify-fn nil #{(random-uuid)})
+          (discover-fn nil (random-uuid))
           (is false "Should have thrown")
           (catch clojure.lang.ExceptionInfo e
             (is (= :not-null-violation (:type (ex-data e))))
-            (is (= :classify-and-load-refs (:operation (ex-data e)))))))))
+            (is (= :discover-graph-cte (:operation (ex-data e)))))))))
 
   (testing "load-entities-batch throws wrapped error on SQLException"
     (let [load-fn #'graph/load-entities-batch

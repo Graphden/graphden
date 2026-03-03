@@ -26,6 +26,7 @@
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.age.core :as age]
+    [graphden.storage.postgres.core :as postgres]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
@@ -62,6 +63,27 @@
 
 (defmethod ig/halt-key! :db/age [_ storage]
   (log/info "Closing AGE storage...")
+  (sp/close storage))
+
+
+;; =============================================================================
+;; PostgreSQL Storage (plain, no AGE extension)
+;; =============================================================================
+
+(defmethod ig/init-key :db/postgres [_ {:keys [jdbc-url username password pool-size schema]}]
+  (log/info "Connecting to PostgreSQL:" jdbc-url)
+  (let [storage (-> (postgres/create-storage {:jdbc-url jdbc-url
+                                               :username username
+                                               :password password
+                                               :pool-size pool-size})
+                    (sp/initialize-with-cleanup! schema))]
+    (vts/seed-traits! storage)
+    (log/info "PostgreSQL storage initialized")
+    storage))
+
+
+(defmethod ig/halt-key! :db/postgres [_ storage]
+  (log/info "Closing PostgreSQL storage...")
   (sp/close storage))
 
 

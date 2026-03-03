@@ -61,8 +61,8 @@
           fn-ref-ids (set (keys fn-results))
           remaining (remove fn-ref-ids refs-vec)
           fn-usage-results (if (empty? remaining)
-                              {}
-                              (sp/read-entities storage :fn-usage (vec remaining)))
+                             {}
+                             (sp/read-entities storage :fn-usage (vec remaining)))
           ;; Also visit the fn that each fn-usage points to
           fn-usage-fn-ids (into #{} (keep :fn-id) (vals fn-usage-results))]
       {:fn-refs (into fn-ref-ids fn-usage-fn-ids)

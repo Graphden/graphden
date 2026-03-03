@@ -98,8 +98,8 @@
 
   (testing "converts fn-usage entities"
     (let [entities {:fn-usages [{:id #uuid "00000000-0000-0000-0000-000000000006"
-                                  :name :my-fn-usage
-                                  :fn-id #uuid "00000000-0000-0000-0000-000000000002"}]}
+                                 :name :my-fn-usage
+                                 :fn-id #uuid "00000000-0000-0000-0000-000000000002"}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})]
       (is (= 1 (count (:nodes result))))
       (let [node (first (:nodes result))]

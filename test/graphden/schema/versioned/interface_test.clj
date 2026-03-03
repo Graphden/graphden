@@ -113,8 +113,6 @@
       (is (= :timestamptz (:type (:created-at fields)))))))
 
 
-
-
 (deftest versioned-entities-constant-test
   (testing "versioned-entities contains all versioning entity names"
     (is (= #{:branch

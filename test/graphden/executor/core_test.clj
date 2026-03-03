@@ -453,8 +453,8 @@
           ;; Create fn-usage pointing to non-existent fn
           non-existent-fn-id (random-uuid)
           bad-fn-usage (sp/create-entity storage :fn-usage
-                                          {:fn-id non-existent-fn-id
-                                           :name "bad-fn-usage"})
+                                         {:fn-id non-existent-fn-id
+                                          :name "bad-fn-usage"})
           _ (setup/create-arg-value-with-binding! storage (:id id-fn) (:id id-arg) (:id bad-fn-usage))
           ctx (exec/create-context {:storage storage})]
       ;; When we execute, it will try to resolve the fn-usage which points
@@ -477,8 +477,8 @@
     (let [storage (setup/create-test-storage)
           ;; Create 1001 fn-usage-args (max is 1000)
           large-fn-usage-args (into {}
-                                     (for [i (range 1001)]
-                                       [(random-uuid) i]))]
+                                    (for [i (range 1001)]
+                                      [(random-uuid) i]))]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"fn-usage-args count exceeds maximum"

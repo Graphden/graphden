@@ -277,5 +277,3 @@
           ;; Merge should succeed - protected value stays on main
           merge-rec (mp/safe-merge-branch! storage (:id branch))]
       (is (some? merge-rec)))))
-
-

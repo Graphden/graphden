@@ -361,8 +361,8 @@
                   fu-id)
                 (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
                       fn-usage (sp/create-entity storage :fn-usage
-                                                  {:fn-id ref-fn-id
-                                                   :name result-name-str})]
+                                                 {:fn-id ref-fn-id
+                                                  :name result-name-str})]
                   (swap! created-fn-usages assoc result-name (:id fn-usage))
                   (:id fn-usage))))))
 

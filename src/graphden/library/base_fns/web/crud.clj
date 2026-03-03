@@ -641,8 +641,8 @@
                                          "fn" {:name (keyword (:name form-data))
                                                :fn-schema-id (java.util.UUID/fromString (:fn-schema-id form-data))}
                                          "fn-usage" (cond-> {:fn-id (java.util.UUID/fromString (:fn-id form-data))}
-                                                       (not (str/blank? (:name form-data)))
-                                                       (assoc :name (keyword (:name form-data))))
+                                                      (not (str/blank? (:name form-data)))
+                                                      (assoc :name (keyword (:name form-data))))
                                          "arg-value" {:owner-fn-id (java.util.UUID/fromString (:owner-fn-id form-data))
                                                       :arg-schema-id (java.util.UUID/fromString (:arg-schema-id form-data))
                                                       :value (json/parse-string (:value form-data) true)}

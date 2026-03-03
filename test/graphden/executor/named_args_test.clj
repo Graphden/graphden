@@ -239,8 +239,8 @@
                                       :fn-schema-id (:id id-schema)})
           ;; Create fn-usage for inner (call site)
           inner-fn-usage (sp/create-entity storage :fn-usage
-                                            {:fn-id (:id inner-fn)
-                                             :name "inner-fn-usage"})
+                                           {:fn-id (:id inner-fn)
+                                            :name "inner-fn-usage"})
           ;; outer's x -> fn-usage (which points to inner)
           _ (setup/create-arg-value-with-binding! storage (:id outer-fn) (:id id-arg) (:id inner-fn-usage))
           ;; inner's x is free - provide via fn-usage-args using [fn-usage-id arg-schema-id]
@@ -290,11 +290,11 @@
                                    :fn-schema-id (:id id-schema)})
           ;; Create TWO fn-usages for same id-fn (different call sites)
           fn-usage-a (sp/create-entity storage :fn-usage
-                                        {:fn-id (:id id-fn)
-                                         :name "fn-usage-a"})
+                                       {:fn-id (:id id-fn)
+                                        :name "fn-usage-a"})
           fn-usage-b (sp/create-entity storage :fn-usage
-                                        {:fn-id (:id id-fn)
-                                         :name "fn-usage-b"})
+                                       {:fn-id (:id id-fn)
+                                        :name "fn-usage-b"})
           ;; Create add function instance
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
@@ -306,7 +306,7 @@
           ;; fn-usage-a's x = 10, fn-usage-b's x = 32
           ctx (exec/create-context {:storage storage
                                     :fn-usage-args {[(:id fn-usage-a) (:id id-arg)] 10
-                                                     [(:id fn-usage-b) (:id id-arg)] 32}})]
+                                                    [(:id fn-usage-b) (:id id-arg)] 32}})]
       (is (= 42 (exec/execute ctx (:id add-fn) nil)))
       (sp/close storage)))
 

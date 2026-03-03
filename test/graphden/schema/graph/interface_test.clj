@@ -65,9 +65,7 @@
       (is (= :ref (get-in fields [:arg-schema-id :type])))
       (is (= :arg-schema (get-in fields [:arg-schema-id :ref-entity])))
       (is (= :ref (get-in fields [:arg-value-id :type])))
-      (is (= :arg-value (get-in fields [:arg-value-id :ref-entity])))))
-
-)
+      (is (= :arg-value (get-in fields [:arg-value-id :ref-entity]))))))
 
 
 (deftest validation-test

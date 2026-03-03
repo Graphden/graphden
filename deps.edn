@@ -50,7 +50,7 @@
 
   :nrepl
   {:extra-deps
-   {nrepl/nrepl {:mvn/version "1.5.2"}
+   {nrepl/nrepl {:mvn/version "1.6.0"}
     cider/cider-nrepl {:mvn/version "0.58.0"}
     refactor-nrepl/refactor-nrepl {:mvn/version "3.11.0"}}
    :main-opts
@@ -67,7 +67,7 @@
    :main-opts ["-m" "cljstyle.main"]}
 
   :splint
-  {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.22.0"}}
+  {:extra-deps {io.github.noahtheduke/splint {:mvn/version "1.23.1"}}
    :main-opts ["-m" "noahtheduke.splint"]}
 
   ;; NOTE: Eastwood removed - incompatible with Clojure 1.12 qualified methods (Class/.method)

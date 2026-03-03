@@ -179,8 +179,8 @@
                                        :fn-schema-id (:id target-schema)})
           ;; Create fn-usage pointing to target
           fn-usage (sp/create-entity storage :fn-usage
-                                      {:fn-id (:id target-fn)
-                                       :name "target-usage"})
+                                     {:fn-id (:id target-fn)
+                                      :name "target-usage"})
           ;; Create caller fn
           caller-schema (sp/create-entity storage :fn-schema
                                           {:name "caller"

@@ -255,8 +255,8 @@
       (try
         (let [ds (get-pool storage)
               fn-usage {:id #uuid "77777777-7777-7777-7777-777777777777"
-                         :fn-id #uuid "33333333-3333-3333-3333-333333333333"
-                         :name :my-fn-usage}]
+                        :fn-id #uuid "33333333-3333-3333-3333-333333333333"
+                        :name :my-fn-usage}]
           (age/ensure-graph! ds "fn_usage_test")
           (age/sync-entity-to-graph! ds "fn_usage_test" :fn-usage fn-usage)
           (age/with-age-connection ds
@@ -292,8 +292,6 @@
                                        (is (= 1 (count results)))))))
         (finally
           (sp/close storage))))))
-
-
 
 
 (deftest sync-unknown-entity-returns-nil-test

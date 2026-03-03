@@ -947,8 +947,6 @@
       (is (nil? (get results missing-id))))))
 
 
-
-
 ;; === Delete Entities Returns Correct Count ===
 
 (deftest delete-entities-partial-count-test

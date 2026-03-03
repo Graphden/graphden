@@ -167,8 +167,8 @@
                             :resolved-args {fn-id {arg-schema-id {:value missing-cs-id}}}
                             ;; fn-usage exists but references a fn not in :fns
                             :fn-usages {missing-cs-id {:id missing-cs-id
-                                                        :fn-id child-fn-id
-                                                        :name "result"}}}))
+                                                       :fn-id child-fn-id
+                                                       :name "result"}}}))
           ctx (exec/create-context {:storage mock-storage})]
       ;; Should throw because child-fn-id is not in the execution graph's :fns
       (is (thrown? clojure.lang.ExceptionInfo
@@ -209,11 +209,11 @@
           ;; Create fn-usages: cs-i points to fn-(i+1)
           cs-ids (vec (repeatedly (dec num-fns) random-uuid))
           fn-usages (into {} (map-indexed
-                                (fn [i csid]
-                                  [csid {:id csid
-                                         :fn-id (get fn-ids (inc i))
-                                         :name (str "cs-" i)}])
-                                cs-ids))
+                               (fn [i csid]
+                                 [csid {:id csid
+                                        :fn-id (get fn-ids (inc i))
+                                        :name (str "cs-" i)}])
+                               cs-ids))
           ;; resolved-args: each step fn's next-val = fn-usage UUID
           resolved-args (into {}
                               (map-indexed
@@ -260,9 +260,9 @@
                       leaf-schema-id {:id leaf-schema-id :name "chain-fn" :returned-type :any}}
           cs-ids (vec (repeatedly (dec num-fns) random-uuid))
           fn-usages (into {} (map-indexed
-                                (fn [i csid]
-                                  [csid {:id csid :fn-id (get fn-ids (inc i)) :name (str "cs-" i)}])
-                                cs-ids))
+                               (fn [i csid]
+                                 [csid {:id csid :fn-id (get fn-ids (inc i)) :name (str "cs-" i)}])
+                               cs-ids))
           resolved-args (into {}
                               (map-indexed
                                 (fn [i fid]

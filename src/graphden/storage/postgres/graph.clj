@@ -17,6 +17,7 @@
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.graph :as spg]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]))
 
@@ -25,16 +26,11 @@
 ;; PostgreSQL-specific HoneySQL helpers
 ;; =============================================================================
 
-(def ^:private uuid-regex
-  "Regex pattern for UUID validation in PostgreSQL."
-  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
-
-
 (defn- uuid-from-jsonb
   "Extracts UUID from JSONB if it matches UUID regex, else NULL.
    Pattern: CASE WHEN (col#>>'{}') ~ 'uuid-regex' THEN (col#>>'{}')::uuid ELSE NULL END"
   [col]
-  [:raw (str "CASE WHEN (" (name col) "#>>'{}') ~ '" uuid-regex
+  [:raw (str "CASE WHEN (" (name col) "#>>'{}') ~ '" spg/uuid-regex-pattern
              "' THEN (" (name col) "#>>'{}')::uuid ELSE NULL END")])
 
 

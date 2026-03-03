@@ -60,6 +60,15 @@
   10)
 
 
+;; === UUID constants for SQL/Cypher queries ===
+
+(def uuid-regex-pattern
+  "PostgreSQL regex pattern for UUID validation.
+   Used in recursive CTEs to extract UUID references from JSONB values.
+   Format: 8-4-4-4-12 hexadecimal characters."
+  "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
 (def ^:dynamic *max-graph-iterations*
   "Maximum number of iterations when resolving execution graph.
    Prevents infinite loops in case of data inconsistencies.

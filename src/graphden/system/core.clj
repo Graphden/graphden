@@ -46,45 +46,45 @@
 
 
 ;; =============================================================================
-;; AGE Storage
+;; Storage (unified initialization)
 ;; =============================================================================
 
-(defmethod ig/init-key :db/age [_ {:keys [jdbc-url username password pool-size schema]}]
-  (log/info "Connecting to Apache AGE:" jdbc-url)
-  (let [storage (-> (age/create-storage {:jdbc-url jdbc-url
-                                         :username username
-                                         :password password
-                                         :pool-size pool-size})
+(defn- init-storage!
+  "Unified storage initialization.
+   Creates storage using create-fn, initializes with schema, seeds traits."
+  [storage-name create-fn {:keys [jdbc-url username password pool-size schema]}]
+  (log/info (str "Connecting to " storage-name ":") jdbc-url)
+  (let [storage (-> (create-fn {:jdbc-url jdbc-url
+                                :username username
+                                :password password
+                                :pool-size pool-size})
                     (sp/initialize-with-cleanup! schema))]
     (vts/seed-traits! storage)
-    (log/info "AGE storage initialized")
+    (log/info (str storage-name " initialized"))
     storage))
+
+
+(defn- halt-storage!
+  "Unified storage shutdown."
+  [storage-name storage]
+  (log/info (str "Closing " storage-name "..."))
+  (sp/close storage))
+
+
+(defmethod ig/init-key :db/age [_ opts]
+  (init-storage! "Apache AGE" age/create-storage opts))
 
 
 (defmethod ig/halt-key! :db/age [_ storage]
-  (log/info "Closing AGE storage...")
-  (sp/close storage))
+  (halt-storage! "AGE storage" storage))
 
 
-;; =============================================================================
-;; PostgreSQL Storage (plain, no AGE extension)
-;; =============================================================================
-
-(defmethod ig/init-key :db/postgres [_ {:keys [jdbc-url username password pool-size schema]}]
-  (log/info "Connecting to PostgreSQL:" jdbc-url)
-  (let [storage (-> (postgres/create-storage {:jdbc-url jdbc-url
-                                               :username username
-                                               :password password
-                                               :pool-size pool-size})
-                    (sp/initialize-with-cleanup! schema))]
-    (vts/seed-traits! storage)
-    (log/info "PostgreSQL storage initialized")
-    storage))
+(defmethod ig/init-key :db/postgres [_ opts]
+  (init-storage! "PostgreSQL" postgres/create-storage opts))
 
 
 (defmethod ig/halt-key! :db/postgres [_ storage]
-  (log/info "Closing PostgreSQL storage...")
-  (sp/close storage))
+  (halt-storage! "PostgreSQL storage" storage))
 
 
 ;; =============================================================================

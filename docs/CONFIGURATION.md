@@ -87,7 +87,7 @@ Reference another component:
 Resolve a Clojure var at config load time:
 
 ```clojure
-:fn-defs #var graphden.web.server.interface/fn-defs
+:fn-defs #var graphden.library.fn-defs.web.server/fn-defs
 ```
 
 ## Component Configuration

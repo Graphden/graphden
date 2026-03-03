@@ -7,7 +7,7 @@
    - fn: actual function instances (with optional owner-fn-id for local scoping)
    - arg-value: argument values (literals or references) - pure values, no owner
    - fn-arg: binding from fn to arg-value
-   - fn-usage: usage of a function at a computation point (formerly call-site)"
+   - fn-usage: usage of a function at a computation point"
   (:require
     [graphden.schema.fields.interface :as ft]
     [graphden.schema.protocol.interface :as ds]))
@@ -75,7 +75,7 @@
   #uuid "f1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c")
 
 
-;; fn-usage (formerly call-site) - same UUID enables rename migration
+;; fn-usage - same UUID enables rename migration
 (def ^:private fn-usage-entity-uuid
   #uuid "d4f8a2b1-7c3e-4d9f-a5b6-8e1c2f3d4a5b")
 
@@ -157,7 +157,7 @@
   #uuid "a3b4c5d6-e7f8-9a0b-1c2d-3e4f5a6b7c8d")
 
 
-;; Field UUIDs for :fn-usage entity (formerly call-site)
+;; Field UUIDs for :fn-usage entity
 ;; Keeping same UUIDs enables field rename migration
 (def ^:private fn-usage-fn-id-field-uuid
   #uuid "e5a9b3c2-8d4f-5e0a-b6c7-9f2d3e4a5b6c")
@@ -251,7 +251,7 @@
       (ds/add-constraint :fn {:type :unique :fields [:owner-fn-id :name]})
 
       ;; arg_value: pure argument values (no owner)
-      ;; value is a union: ref to fn (HOF), ref to call-site (computed), or literal
+      ;; value is a union: ref to fn (HOF), ref to fn-usage (computed), or literal
       ;; Deduplication: same (arg-schema-id, value) → reuse existing arg-value
       (ds/add-entity :arg-value arg-value-entity-uuid
                      {:arg-schema-id {:uuid arg-value-arg-schema-id-field-uuid
@@ -271,10 +271,9 @@
                                      :type :ref :ref-entity :arg-value}})
       (ds/add-constraint :fn-arg {:type :unique :fields [:fn-id :arg-schema-id]})
 
-      ;; fn_usage: usage of a function at a computation point (formerly call-site)
+      ;; fn_usage: usage of a function at a computation point
       ;; Multiple arg-values can reference the same fn-usage to reuse computed value
       ;; owner-fn-id: NULL = global usage, set = local usage (scoped to owner fn)
-      ;; Same UUID as old call-site enables rename migration
       (ds/add-entity :fn-usage fn-usage-entity-uuid
                      {:fn-id {:uuid fn-usage-fn-id-field-uuid
                               :type :ref :ref-entity :fn}

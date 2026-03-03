@@ -473,59 +473,16 @@
                             #"storage must implement ExecutionGraph protocol"
             (exec/create-context {:storage invalid-storage})))))
 
-  (testing "throws when fn-usage-args exceed max count"
-    (let [storage (setup/create-test-storage)
-          ;; Create 1001 fn-usage-args (max is 1000)
-          large-fn-usage-args (into {}
-                                    (for [i (range 1001)]
-                                      [(random-uuid) i]))]
-      (try
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"fn-usage-args count exceeds maximum"
-              (exec/create-context {:storage storage :fn-usage-args large-fn-usage-args})))
-        (finally
-          (sp/close storage)))))
-
-  (testing "throws when fn-usage-args keys have invalid format"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"fn-usage-args keys must be UUID or"
-              (exec/create-context {:storage storage
-                                    :fn-usage-args {"string-key" 42}})))
-        (finally
-          (sp/close storage)))))
-
   (testing "throws with multiple validation errors combined"
     (let [invalid-storage {:fake "storage"}]
-      ;; Missing storage + fn-usage-args not a map
       (try
         (exec/create-context {:storage invalid-storage
-                              :fn-usage-args "not-a-map"
                               :max-depth -1
                               :timeout-ms 10})
         (is false "should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (let [errors (:validation-errors (ex-data e))]
-            (is (> (count errors) 1) "should have multiple errors"))))))
-
-  (testing "accepts fn-usage-args with valid UUID keys"
-    (let [storage (setup/create-test-storage)
-          fn-usage-args {(random-uuid) 42}]
-      (try
-        (let [ctx (exec/create-context {:storage storage :fn-usage-args fn-usage-args})]
-          (is (some? ctx)))
-        (finally
-          (sp/close storage)))))
-
-  (testing "accepts fn-usage-args with valid [UUID UUID] vector keys"
-    (let [storage (setup/create-test-storage)
-          fn-usage-args {[(random-uuid) (random-uuid)] 42}]
-      (try
-        (let [ctx (exec/create-context {:storage storage :fn-usage-args fn-usage-args})]
-          (is (some? ctx)))
-        (finally
-          (sp/close storage))))))
+            (is (> (count errors) 1) "should have multiple errors")))))))
 
 
 (deftest clear-result-cache-test

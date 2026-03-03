@@ -153,7 +153,7 @@
 
            (println "3. Truncating database...")
            (p/shell {:continue true}
-                    "docker exec graphden-age psql -U graphden -d graphden -c \"TRUNCATE TABLE fn_version, fn_arg_version, arg_value, call_site_arg_version, call_site_arg, call_site, fn_arg, fn, fn_schema, arg_schema CASCADE;\"")
+                    "docker exec graphden-age psql -U graphden -d graphden -c \"TRUNCATE TABLE fn_version, fn_arg_version, arg_value, fn_usage, fn_arg, fn, fn_schema, arg_schema CASCADE;\"")
 
            (println "4. Rebuilding docker image...")
            (p/shell "docker-compose build --no-cache executor")

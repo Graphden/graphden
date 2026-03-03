@@ -274,7 +274,7 @@
 
 (defn extract-uuid-refs-from-arg-values
   "Extracts UUIDs referenced in arg-values.
-   Returns set of UUIDs that could be fn or call-site references."
+   Returns set of UUIDs that could be fn or fn-usage references."
   [arg-values-map]
   (->> (vals arg-values-map)
        (map :value)

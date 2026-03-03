@@ -95,7 +95,7 @@ Arguments are wrapped in Clojure `delay` objects:
 - `execute-with-named-args` - Execute with named arguments
 - `execute-by-name` - Execute by function name
 - Depth/timeout protection
-- `fn-usage-args` for runtime free argument values (keyed by arg-schema-id or [fn-usage-id arg-schema-id])
+- Local fn with owner-fn-id for scoped argument binding
 
 **3.4 fn-registry component:**
 - `register-base-fns!` - Register implementations
@@ -289,13 +289,12 @@ Execute function: calculate-report
 
 | Entity | Versioned? | What changes |
 |--------|-----------|--------------|
-| `fn` | Yes (fn + fn_version) | name, fn_schema_id |
+| `fn` | Yes (fn + fn_version) | name, fn_schema_id, owner_fn_id |
 | `fn_arg` | Yes (fn_arg + fn_arg_version) | arg_value_id binding |
-| `call_site_arg` | Yes (call_site_arg + call_site_arg_version) | arg_value_id binding |
 | `fn_schema` | Yes (fn_schema + fn_schema_version) | name, returned_type, base_fn_name, impl_hash |
 | `arg_schema` | Yes (arg_schema + arg_schema_version) | name, type, required |
 | `arg_value` | No | Immutable, deduplicated; change = point to different arg_value |
-| `call_site` | No | fn_id is fixed; only its arg bindings change |
+| `fn_usage` | No | fn_id is fixed; only its arg bindings change |
 
 **Branch operations:**
 

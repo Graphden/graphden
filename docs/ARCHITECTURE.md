@@ -234,8 +234,8 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 |                                                                  |
 | SECONDARY: Results are cached within execution (memoization).    |
 |                                                                  |
-| FREE ARGUMENTS: If fn has unbound args, pass them at runtime     |
-| via fn-usage-args: {[fn-usage-id arg-schema-id] value}           |
+| LOCAL ARGUMENTS: Use fn with owner-fn-id to set arguments        |
+| locally within the owning function's scope.                      |
 +------------------------------------------------------------------+
 
 +------------------------------------------------------------------+
@@ -309,11 +309,10 @@ Arguments are wrapped in Clojure `delay` objects for lazy evaluation. This nativ
 
 Arguments are resolved in this order (highest priority first):
 
-1. **provided-args** — Explicitly passed at execute time (from HOF callables)
-2. **fn-usage-args** — Runtime args from context for specific call sites
-3. **arg-values** — Stored values from database (resolved-args in graph)
-4. Required arg with no value → error
-5. Optional arg with no value → delay returning nil
+1. **arg-values** — Stored values from database (always takes precedence)
+2. **provided-args** — Explicitly passed at execute time (from HOF callables, only for free args)
+3. Required arg with no value → error
+4. Optional arg with no value → delay returning nil
 
 ### Argument Types and Their Handling
 
@@ -420,8 +419,6 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
    timeout-ms        ; Maximum execution time (default: 30000ms)
    start-time        ; Execution start time
    depth             ; Current recursion depth
-   fn-usage-args    ; Runtime args: {arg-schema-id -> value} for root,
-                     ;               {[fn-usage-id arg-schema-id] -> value} for call sites
    current-fn-usage-id  ; Current fn-usage-id (nil for root function)
    result-cache      ; Atom: {fn-usage-id -> computed-result}
    strict-type-validation?  ; If true (default), throw on unknown types
@@ -437,10 +434,9 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
 2. **`base-fns` registry** — Direct access to implementations without global state
 3. **`storage` reference** — Enables `ExecutionGraph` protocol calls if needed
 4. **`result-cache`** — Shared cache for `fn-usage` computations within execution
-5. **`fn-usage-args`** — Runtime values for free arguments, keyed by arg-schema-id or [fn-usage-id arg-schema-id]
-6. **`current-fn-usage-id`** — Tracks which fn-usage is being evaluated (for fn-usage-args lookup)
-7. **`clock`** — Injectable time source for deterministic timeout testing
-8. **Forward compatibility** — `strict-type-validation?` + circuit breaker for schema migrations
+5. **`current-fn-usage-id`** — Tracks which fn-usage is being evaluated
+6. **`clock`** — Injectable time source for deterministic timeout testing
+7. **Forward compatibility** — `strict-type-validation?` + circuit breaker for schema migrations
 
 ### Limit Checking
 
@@ -472,39 +468,44 @@ Lazy sequences are a potential DoS vector — an attacker could pass `(range)` (
 
 This ensures errors occur at argument evaluation time, not during consumption by base functions.
 
-### Addressing Free Arguments (fn-usage-args)
+### Local Argument Binding
 
-**Problem**: A function may have "free" arguments — arguments without defined values in the database. These must be provided at runtime.
+**Problem**: How to provide different argument values for the same function at different call sites?
 
-**Solution**: Use `fn-usage-args` in the execution context with fixed-length keys.
-
-**Key format:**
-- **For root function**: `{arg-schema-id -> value}` — direct arg-schema-id lookup
-- **For nested functions via fn-usage (call site)**: `{[fn-usage-id arg-schema-id] -> value}`
+**Solution**: Create a local fn with `owner-fn-id` pointing to the parent function. This fn inherits the same fn-schema but can have different arg-values.
 
 ```clojure
-;; Example 1: Root function with free argument
-;; fn A has free arg with schema-id x-schema-id
-(create-context {:storage s
-                 :fn-usage-args {x-schema-id 42}})
-(execute ctx A-id {})
+;; Example: Using add-fn twice with different arguments in a parent function
 
-;; Example 2: Nested function via fn-usage (call site)
-;; fn A uses fn B via fn-usage (cs-1)
-;; fn B has free arg with schema-id y-schema-id
-(create-context {:storage s
-                 :fn-usage-args {[cs-1-id y-schema-id] 100}})
-(execute ctx A-id {})
+;; 1. Base add function (no owner)
+fn: add-fn
+  fn-schema-id: add-schema
+  ;; No arg-values - this is the "template"
 
-;; Example 3: Same function used twice with different values at different call sites
-;; fn A references fn B via two fn-usages: cs-1 and cs-2
-;; B has a free arg with schema-id x-schema-id
-(create-context {:storage s
-                 :fn-usage-args {[cs-1-id x-schema-id] 100   ; x for first call site
-                                  [cs-2-id x-schema-id] 200}}) ; x for second call site
+;; 2. Local fn for first usage (owned by parent)
+fn: add-10-20
+  fn-schema-id: add-schema
+  owner-fn-id: parent-fn-id  ;; Local to parent
+  arg-values: {a: 10, b: 20}
+
+;; 3. Local fn for second usage (owned by same parent)
+fn: add-30-40
+  fn-schema-id: add-schema
+  owner-fn-id: parent-fn-id  ;; Local to parent
+  arg-values: {a: 30, b: 40}
+
+;; 4. Parent function uses both via fn-usage
+fn-usage: first-sum  → fn: add-10-20
+fn-usage: second-sum → fn: add-30-40
+
+fn: parent-fn
+  arg-values: {
+    x: ref<fn-usage:first-sum>   ;; Result: 30
+    y: ref<fn-usage:second-sum>  ;; Result: 70
+  }
 ```
 
-**Important**: Direct fn refs (HOF with type=:fn) cannot receive fn-usage-args. They are "black boxes" controlled by map/reduce/filter. Only functions referenced via `fn-usage` (call sites) can have their free args set externally.
+**Key insight**: All argument binding happens in the database via arg-values. No runtime argument injection is needed. The graph structure (fn with owner-fn-id + arg-values) is sufficient for all use cases.
 
 ### HOF Single-Argument Model
 

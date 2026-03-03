@@ -783,11 +783,6 @@
 
 
 ;; Execution limits
-(def max-call-site-args-count
-  "Maximum number of call-site arguments. Default: 100."
-  config/max-call-site-args-count)
-
-
 (def warning-threshold-ratio
   "Ratio of limit at which to log warnings. Default: 0.8."
   config/warning-threshold-ratio)

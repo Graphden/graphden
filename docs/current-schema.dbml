@@ -191,26 +191,3 @@ Table fn_usage {
   fn_id uuid [not null, ref: > fn.id]
 }
 
-// === Versioned: fn_usage_arg ===
-
-// Binding from fn_usage to arg_value (stable identity).
-Table fn_usage_arg {
-  id uuid [primary key]
-}
-
-// Version of a fn_usage_arg binding. Append-only history.
-// Can change: arg_value_id.
-// Current version: latest by created_at for (fn_usage_arg_id, branch_id).
-Table fn_usage_arg_version {
-  id uuid [primary key]
-  fn_usage_arg_id uuid [not null, ref: > fn_usage_arg.id]
-  branch_id uuid [not null, ref: > branch.id]
-  fn_usage_id uuid [not null, ref: > fn_usage.id]
-  arg_schema_id uuid [not null, ref: > arg_schema.id]
-  arg_value_id uuid [not null, ref: > arg_value.id]
-  created_at timestamptz [not null]
-
-  indexes {
-    (fn_usage_arg_id, branch_id, created_at) [name: 'idx_fn_usage_arg_version_lookup']
-  }
-}

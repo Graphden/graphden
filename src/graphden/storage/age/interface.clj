@@ -27,14 +27,14 @@
    - (:ArgSchema {id, fn_schema_id, name, type, required})
    - (:Fn {id, name, fn_schema_id})
    - (:ArgValue {id, arg_schema_id, value_type, value})
-   - (:CallSite {id, fn_id, name})
+   - (:FnUsage {id, fn_id, name, owner_fn_id})
 
    Edges:
    - (:Fn)-[:HAS_SCHEMA]->(:FnSchema)
    - (:Fn)-[:HAS_ARG {arg_schema_id}]->(:ArgValue)
    - (:Fn)-[:DEPENDS_ON]->(:Fn) - transitive dependency
-   - (:CallSite)-[:CALLS]->(:Fn)
-   - (:CallSite)-[:HAS_ARG {arg_schema_id}]->(:ArgValue)
+   - (:FnUsage)-[:CALLS]->(:Fn)
+   - (:FnUsage)-[:HAS_ARG {arg_schema_id}]->(:ArgValue)
 
    ## Usage
 

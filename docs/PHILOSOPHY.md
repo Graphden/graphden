@@ -486,7 +486,7 @@ The system separates concerns into three distinct layers:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         EXECUTOR                                 │
-│  - Receives fn-id + fn-usage-args                              │
+│  - Receives fn-id, executes function graph                     │
 │  - Knows about laziness (Clojure delays)                        │
 │  - Resolves base-fn implementations                             │
 │  - Does NOT know about storage details                          │

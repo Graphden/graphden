@@ -569,12 +569,6 @@
 
 ;; === Execution Limits ===
 
-(def ^:const max-call-site-args-count
-  "Maximum number of call-site arguments in a request.
-   Prevents excessive memory usage from large call-site-args maps."
-  100)
-
-
 (def ^:const warning-threshold-ratio
   "Ratio of limit at which to log warnings.
    0.8 means warn at 80% of limit."

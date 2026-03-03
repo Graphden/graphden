@@ -303,7 +303,6 @@
           (uuid->str (:arg-schema-id entity))))
 
 
-;; call-site-arg entity has been removed from schema
 ;; Free arguments at fn-usage now handled by creating local fn with owner-fn-id
 ;; Keeping this as a comment for historical reference
 

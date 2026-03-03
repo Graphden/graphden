@@ -256,7 +256,7 @@
   "Extends a builder (that already has graph-data-schema entities) with versioning entities.
    Returns the builder for further extension or finalization.
 
-   Expects :fn, :fn-schema, :arg-schema, :fn-arg, :call-site-arg entities to be defined.
+   Expects :fn, :fn-schema, :arg-schema, :fn-arg, :fn-usage entities to be defined.
    Can be chained with cache-data-schema/extend-builder in any order."
   [builder]
   (-> builder

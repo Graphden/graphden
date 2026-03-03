@@ -65,19 +65,25 @@ fn: my-program
 
 Without fn-usage, we couldn't distinguish "time before sleep" from "time after sleep" — they'd be the same function reference.
 
-**Free arguments are passed at execution time via fn-usage-args:**
+**Local argument binding via fn with owner-fn-id:**
 ```clojure
-;; fn-a has free argument arg-schema-a (not bound in DB)
-;; fn-usage-a references fn-a (this is a "function usage")
+;; To provide different argument values at different call sites,
+;; create a local fn with owner-fn-id:
 
-;; At execution time, pass value for the free argument:
-(create-context {:storage s
-                 :fn-usage-args {[fn-usage-a-id arg-schema-a-id] 42}})
+;; Local fn owned by parent function
+(sp/create-entity storage :fn
+  {:name "local-add"
+   :fn-schema-id add-schema-id
+   :owner-fn-id parent-fn-id})  ;; Makes this fn local to parent
 
-;; The executor resolves this when it reaches fn-usage-a
+;; Bind arguments for the local fn
+(sp/create-entity storage :fn-arg
+  {:fn-id local-fn-id
+   :arg-schema-id a-schema-id
+   :arg-value-id (create-literal-value 42)})
 ```
 
-**Key insight:** No new schema fields needed. The graph structure (fn-usage pointing to fn) plus runtime fn-usage-args is sufficient.
+**Key insight:** All argument binding happens in the database via fn-arg entities. No runtime argument injection needed.
 
 ## Documentation Map
 

@@ -4,7 +4,7 @@
    Covers:
    - execute-with-named-args tests
    - execute-by-name tests
-   - Call-site-args tests"
+   - Fn-usage-args tests"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -172,144 +172,9 @@
       (sp/close storage))))
 
 
-;; === Call-Site-Args Tests ===
+;; === HOF Tests ===
 
-(deftest fn-usage-args-basic-test
-  (testing "fn-usage-args provides values for free arguments (root function)"
-    (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          ;; Only provide :a, leave :b as free arg
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
-          ;; Use fn-usage-args to provide :b by arg-schema-id (root function format)
-          ctx (exec/create-context {:storage storage
-                                    :fn-usage-args {(:id arg-b) 20}})]
-      (is (= 30 (exec/execute ctx (:id fn-rec) nil)))
-      (sp/close storage)))
-
-  (testing "fn-usage-args ignores override of DB-defined args with warning"
-    (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          ;; Both args defined in DB
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 20)
-          ;; Try to override :a via fn-usage-args - should be ignored
-          ctx (exec/create-context {:storage storage
-                                    :fn-usage-args {(:id arg-a) 100}})]
-      ;; Should use DB value (10) not fn-usage-arg (100)
-      (is (= 30 (exec/execute ctx (:id fn-rec) nil)))
-      (sp/close storage)))
-
-  (testing "fn-usage-args throws error for missing required arg"
-    (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)
-          ;; Only provide :a, leave :b as free required arg
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
-          ;; Don't provide :b via fn-usage-args
-          ctx (exec/create-context {:storage storage})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Required argument 'b' not provided"
-            (exec/execute ctx (:id fn-rec) nil)))
-      (sp/close storage))))
-
-
-(deftest fn-usage-args-nested-test
-  (testing "fn-usage-args provides values for nested function via fn-usage"
-    (let [storage (setup/create-test-storage)
-          ;; Register identity function
-          _ (exec/register-base-fn!
-              :identity
-              (fn [{:keys [x]} _ctx]
-                @x))
-          ;; Create identity fn-schema
-          id-schema (sp/create-entity storage :fn-schema
-                                      {:name "identity"
-                                       :returned-type :int})
-          id-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id id-schema)
-                                    :name "x"
-                                    :type :int
-                                    :required true :first-class false})
-          ;; Create outer fn that wraps identity
-          outer-fn (sp/create-entity storage :fn
-                                     {:name "outer"
-                                      :fn-schema-id (:id id-schema)})
-          ;; Create inner fn with free arg
-          inner-fn (sp/create-entity storage :fn
-                                     {:name "inner"
-                                      :fn-schema-id (:id id-schema)})
-          ;; Create fn-usage for inner (call site)
-          inner-fn-usage (sp/create-entity storage :fn-usage
-                                           {:fn-id (:id inner-fn)
-                                            :name "inner-fn-usage"})
-          ;; outer's x -> fn-usage (which points to inner)
-          _ (setup/create-arg-value-with-binding! storage (:id outer-fn) (:id id-arg) (:id inner-fn-usage))
-          ;; inner's x is free - provide via fn-usage-args using [fn-usage-id arg-schema-id]
-          ctx (exec/create-context {:storage storage
-                                    :fn-usage-args {[(:id inner-fn-usage) (:id id-arg)] 42}})]
-      (is (= 42 (exec/execute ctx (:id outer-fn) nil)))
-      (sp/close storage)))
-
-  (testing "fn-usage-args with different fn-usages for same function"
-    (let [storage (setup/create-test-storage)
-          ;; A function that takes two args and adds them
-          _ (exec/register-base-fn!
-              :add
-              (fn [{:keys [a b]} _ctx]
-                (+ @a @b)))
-          ;; identity fn for passthrough
-          _ (exec/register-base-fn!
-              :identity
-              (fn [{:keys [x]} _ctx]
-                @x))
-          ;; Create add fn-schema
-          add-schema (sp/create-entity storage :fn-schema
-                                       {:name "add"
-                                        :returned-type :int})
-          add-arg-a (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id add-schema)
-                                       :name "a"
-                                       :type :int
-                                       :required true :first-class false})
-          add-arg-b (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id add-schema)
-                                       :name "b"
-                                       :type :int
-                                       :required true :first-class false})
-          ;; Create identity fn-schema
-          id-schema (sp/create-entity storage :fn-schema
-                                      {:name "identity"
-                                       :returned-type :int})
-          id-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id id-schema)
-                                    :name "x"
-                                    :type :int
-                                    :required true :first-class false})
-          ;; Create the identity function instance
-          id-fn (sp/create-entity storage :fn
-                                  {:name "id-fn"
-                                   :fn-schema-id (:id id-schema)})
-          ;; Create TWO fn-usages for same id-fn (different call sites)
-          fn-usage-a (sp/create-entity storage :fn-usage
-                                       {:fn-id (:id id-fn)
-                                        :name "fn-usage-a"})
-          fn-usage-b (sp/create-entity storage :fn-usage
-                                       {:fn-id (:id id-fn)
-                                        :name "fn-usage-b"})
-          ;; Create add function instance
-          add-fn (sp/create-entity storage :fn
-                                   {:name "add-fn"
-                                    :fn-schema-id (:id add-schema)})
-          ;; add-fn's a -> fn-usage-a, b -> fn-usage-b
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id fn-usage-a))
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id fn-usage-b))
-          ;; Provide different values for id-fn's x via different call sites
-          ;; fn-usage-a's x = 10, fn-usage-b's x = 32
-          ctx (exec/create-context {:storage storage
-                                    :fn-usage-args {[(:id fn-usage-a) (:id id-arg)] 10
-                                                    [(:id fn-usage-b) (:id id-arg)] 32}})]
-      (is (= 42 (exec/execute ctx (:id add-fn) nil)))
-      (sp/close storage)))
-
+(deftest hof-single-arg-model-test
   (testing "HOF functions work with single-arg model"
     ;; This test verifies HOF with the new single-arg model:
     ;; - HOF receives fn-id (not callable)
@@ -371,31 +236,4 @@
       (is (= [1 2 3] (exec/execute ctx (:id map-fn) nil)))
       ;; Verify all items were recorded
       (is (= [1 2 3] @call-args))
-      (sp/close storage))))
-
-
-(deftest fn-usage-args-context-validation-test
-  (testing "throws when fn-usage-args is not a map"
-    (let [storage (setup/create-test-storage)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"fn-usage-args must be a map"
-            (exec/create-context {:storage storage
-                                  :fn-usage-args "not a map"})))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"fn-usage-args must be a map"
-            (exec/create-context {:storage storage
-                                  :fn-usage-args [[:a] 10]})))
-      (sp/close storage)))
-
-  (testing "accepts empty fn-usage-args map"
-    (let [storage (setup/create-test-storage)
-          ctx (exec/create-context {:storage storage
-                                    :fn-usage-args {}})]
-      (is (some? ctx))
-      (sp/close storage)))
-
-  (testing "accepts nil fn-usage-args (defaults to empty)"
-    (let [storage (setup/create-test-storage)
-          ctx (exec/create-context {:storage storage})]
-      (is (some? ctx))
       (sp/close storage))))

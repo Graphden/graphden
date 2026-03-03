@@ -3,14 +3,14 @@
 
    This module handles:
    - Building delays for lazy argument evaluation
-   - Resolving argument values from various sources (provided, call-site-args runtime API, DB)
+   - Resolving argument values from various sources (provided args from HOF, DB)
    - Type validation for provided arguments
 
    ## Why Delays?
 
    Arguments are wrapped in Clojure `delay` objects for lazy evaluation:
    - Values are only computed when dereferenced with @
-   - Enables memoization of call-sites across the execution graph
+   - Enables memoization of fn-usages across the execution graph
 
    ## Reference Types
 
@@ -22,9 +22,8 @@
 
    ## Argument Resolution Priority
 
-   1. `provided-args` - Explicitly passed at execute time (highest priority)
-   2. `call-site-args` - Runtime args from context for specific call sites
-   3. `arg-values` - Stored values from database (resolved-args in graph)
+   1. `arg-values` - Stored values from database (always takes precedence)
+   2. `provided-args` - Values passed at call time by HOF (only for args without DB value)
 
    ## Error Handling
 
@@ -244,32 +243,11 @@
                                #(identity raw-value)))))
 
 
-;; === Call Site Argument Resolution ===
-
-(defn get-call-site-arg
-  "Gets a runtime argument value from call-site-args (runtime API).
-
-   For root function (current-fn-usage-id is nil): looks up by arg-schema-id directly
-   For nested fns via fn-usage: looks up by [fn-usage-id arg-schema-id]
-
-   Returns the value or nil if not found.
-
-   NOTE: call-site-args is the runtime API name (stays as-is), not the entity name."
-  [context arg-schema-id]
-  (let [current-fn-usage-id (:current-fn-usage-id context)
-        call-site-args (:call-site-args context)]
-    (if current-fn-usage-id
-      ;; Nested fn via fn-usage: use [fn-usage-id arg-schema-id] as key
-      (get call-site-args [current-fn-usage-id arg-schema-id])
-      ;; Root function: use arg-schema-id directly
-      (get call-site-args arg-schema-id))))
-
-
 ;; === Argument Validation Helpers ===
 
 (defn handle-validated-arg
   "Validates and wraps a user-provided argument value in a delay.
-   Used for both direct provided args (from HOF) and call-site-args.
+   Used for provided args (from HOF callable calls).
    The source parameter identifies the origin for debugging."
   [value arg-schema strict? max-unknown-types arg-name unknown-type-counter source]
   (types/validate-provided-arg-type! value arg-schema strict? max-unknown-types unknown-type-counter)
@@ -277,7 +255,7 @@
 
 
 (defn handle-runtime-arg-with-db-value
-  "Handles case when runtime arg (provided-arg or call-site-arg) exists but DB value takes precedence.
+  "Handles case when runtime arg (provided-arg from HOF) exists but DB value takes precedence.
 
    Design Decision: DB values always win over runtime args.
    This prevents accidental override of validated stored data.
@@ -323,13 +301,10 @@
    ## Argument Resolution Priority
 
    1. Stored arg-value from DB (ALWAYS takes precedence, cannot be overridden)
-      - If provided-arg or call-site-arg also exists -> warning logged, DB value used
+      - If provided-arg also exists -> warning logged, DB value used
    2. Provided value (from HOF callable calls) - only if no DB value
-   3. Call-site-arg value (runtime API) - only if no DB value and no provided-arg:
-      - For root fn: looked up by arg-schema-id
-      - For nested fn via fn-usage: looked up by [fn-usage-id arg-schema-id]
-   4. Required arg with no value -> error
-   5. Optional arg with no value -> delay returning nil
+   3. Required arg with no value -> error
+   4. Optional arg with no value -> delay returning nil
 
    ## Parameters
 
@@ -348,20 +323,15 @@
         (let [arg-name (:name arg-schema)
               arg-name-kw (keyword arg-name)
               provided-value (get provided-args arg-schema-id)
-              call-site-arg-value (get-call-site-arg context arg-schema-id)
               arg-value (get arg-values arg-schema-id)]
           (cond
             ;; 1. Stored arg-value exists - DB always takes precedence
-            ;;    Runtime args (provided-args, call-site-args) are ignored with warning
+            ;;    Runtime args (provided-args) are ignored with warning
             arg-value
             (do
               (when (some? provided-value)
                 (handle-runtime-arg-with-db-value context arg-value arg-schema
                                                   arg-schema-id arg-name :provided-arg
-                                                  execute-fn-usage-fn))
-              (when (some? call-site-arg-value)
-                (handle-runtime-arg-with-db-value context arg-value arg-schema
-                                                  arg-schema-id arg-name :call-site-arg
                                                   execute-fn-usage-fn))
               (assoc acc arg-name-kw (build-delay context arg-value arg-schema
                                                   execute-fn-usage-fn)))
@@ -370,15 +340,11 @@
             (some? provided-value)
             (assoc acc arg-name-kw (handle-validated-arg provided-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :provided-arg))
 
-            ;; 3. No DB value, no provided-arg - use call-site-arg if available
-            (some? call-site-arg-value)
-            (assoc acc arg-name-kw (handle-validated-arg call-site-arg-value arg-schema strict? max-unknown-types arg-name unknown-type-counter :call-site-arg))
-
-            ;; 4. Required arg with no value -> error
+            ;; 3. Required arg with no value -> error
             (:required arg-schema)
             (throw-missing-required-arg! arg-schema-id arg-name current-fn-usage-id)
 
-            ;; 5. Optional arg with no value -> delay returning nil
+            ;; 4. Optional arg with no value -> delay returning nil
             :else
             (assoc acc arg-name-kw (delay nil)))))
       {}

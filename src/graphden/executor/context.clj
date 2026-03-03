@@ -20,8 +20,6 @@
    timeout-ms
    start-time
    depth
-   call-site-args   ; Map of runtime args (API name, not entity): {arg-schema-id -> value} for root fn,
-   ;; {[fn-usage-id arg-schema-id] -> value} for nested fns (via fn-usage)
    current-fn-usage-id  ; Current fn-usage-id (nil for root function)
    result-cache     ; Atom: {fn-usage-id -> computed-value} for caching
    ;; LIFECYCLE: result-cache is created in create-context (atom {}), populated
@@ -113,24 +111,6 @@
   100)
 
 
-(def max-call-site-args-count
-  "Maximum number of call-site-args (runtime API) allowed.
-   Prevents potential memory exhaustion from large call-site-args maps.
-
-   Why 1000? Typical execution graphs have <100 arguments. 1000 unique call-site-args
-   indicates either a very deep graph or potential abuse. This limit prevents
-   DoS attacks via oversized call-site-args while accommodating legitimate large graphs."
-  1000)
-
-
-(def ^:private nested-call-site-arg-key-length
-  "Length of call-site-arg key tuple for nested functions.
-   Format: [fn-usage-id arg-schema-id]
-   - fn-usage-id: identifies which fn-usage references the function
-   - arg-schema-id: identifies which argument within that function"
-  2)
-
-
 (def warning-threshold-ratio
   "Ratio of limit at which to log warning. 0.8 = warn at 80% of limit."
   0.8)
@@ -138,25 +118,11 @@
 
 ;; === Context Validation ===
 
-(defn- valid-call-site-arg-key?
-  "Returns true if key is a valid call-site-arg key format.
-
-   Valid formats:
-   - UUID: for root function arguments (looked up by arg-schema-id directly)
-   - [UUID UUID]: for nested function arguments via fn-usage
-     Format is [fn-usage-id arg-schema-id]"
-  [k]
-  (or (uuid? k)
-      (and (vector? k)
-           (= nested-call-site-arg-key-length (count k))
-           (every? uuid? k))))
-
-
 (defn- validate-context-options!
   "Validates context creation options. Throws on invalid options.
    Collects ALL validation errors and reports them together for better UX,
    so users can fix multiple issues in one iteration instead of one at a time."
-  [storage timeout-ms max-depth fn-usage-args]
+  [storage timeout-ms max-depth]
   (let [errors (cond-> []
                  ;; Required: storage
                  (not storage)
@@ -182,28 +148,7 @@
                  (and max-depth (pos-int? max-depth) (> max-depth max-depth-limit))
                  (conj {:error (str "max-depth exceeds maximum allowed value of " max-depth-limit)
                         :max-depth max-depth
-                        :max-allowed max-depth-limit})
-
-                 ;; Optional fn-usage-args type validation
-                 (and (some? fn-usage-args) (not (map? fn-usage-args)))
-                 (conj {:error "fn-usage-args must be a map"
-                        :fn-usage-args-type (type fn-usage-args)})
-
-                 ;; fn-usage-args count validation
-                 (and (map? fn-usage-args) (> (count fn-usage-args) max-call-site-args-count))
-                 (conj {:error (str "fn-usage-args count exceeds maximum allowed value of " max-call-site-args-count)
-                        :fn-usage-args-count (count fn-usage-args)
-                        :max-allowed max-call-site-args-count}))
-        ;; Validate fn-usage-args keys format (collect all invalid keys)
-        invalid-keys (when (map? fn-usage-args)
-                       (into []
-                             (comp (map first)
-                                   (filter (complement valid-call-site-arg-key?)))
-                             fn-usage-args))
-        errors (if (seq invalid-keys)
-                 (conj errors {:error "fn-usage-args keys must be UUID or [UUID UUID] vector"
-                               :invalid-keys invalid-keys})
-                 errors)]
+                        :max-allowed max-depth-limit}))]
     (when (seq errors)
       (throw (ex-info (if (= 1 (count errors))
                         (:error (first errors))
@@ -223,12 +168,6 @@
    - :base-fns - Map of fn-name -> fn for base function lookup (optional, uses default registry if not provided)
    - :max-depth - Maximum recursion depth (default 1000)
    - :timeout-ms - Maximum execution time in ms (default 30000)
-   - :fn-usage-args - Map of runtime args for specific fn-usages (optional):
-                       For root function: {arg-schema-id -> value}
-                       For nested fns via fn-usage: {[fn-usage-id arg-schema-id] -> value}
-                       IMPORTANT: fn-usage-args can only set args that have NO value in DB.
-                       If arg-value exists in DB, fn-usage-arg is ignored (warning logged).
-                       To change an arg value, update the arg-value in the database.
    - :strict-type-validation? - If true (default), throw on unknown types.
                                 If false, warn and accept (forward compatibility mode).
    - :max-unknown-types - Maximum unknown types allowed in forward compat mode (default 10).
@@ -268,22 +207,20 @@
    Validates:
    - storage is required
    - timeout-ms must be at least 50ms (allows for fast test cases)
-   - max-depth must be positive and <= 100000
-   - fn-usage-args must be a map if provided"
-  [{:keys [storage base-fns max-depth timeout-ms fn-usage-args strict-type-validation?
+   - max-depth must be positive and <= 100000"
+  [{:keys [storage base-fns max-depth timeout-ms strict-type-validation?
            max-unknown-types clock cache-warning-threshold cache-max-size]
     :or {max-depth sp/default-max-depth
          timeout-ms default-timeout-ms
-         fn-usage-args {}
          strict-type-validation? true
          max-unknown-types sp/default-max-unknown-types
          cache-warning-threshold default-cache-warning-threshold
          cache-max-size default-cache-max-size}}]
-  (validate-context-options! storage timeout-ms max-depth fn-usage-args)
+  (validate-context-options! storage timeout-ms max-depth)
   (let [fns (or base-fns (registry/get-default-registry))
         clock-fn (or clock #(System/currentTimeMillis))]
     (->ExecutionContext storage nil fns max-depth timeout-ms (clock-fn) 0
-                        (or fn-usage-args {}) nil (atom {}) strict-type-validation?
+                        nil (atom {}) strict-type-validation?
                         max-unknown-types (atom 0) clock-fn
                         cache-warning-threshold cache-max-size)))
 

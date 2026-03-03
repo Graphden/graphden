@@ -147,27 +147,25 @@ For `reduce`-like operations, the function receives a vector `[acc item]` as its
    :timeout-ms 30000})  ; Execution timeout in ms (default: 30000)
 ```
 
-### Runtime Free Arguments (fn-usage-args)
+### Local Argument Binding
 
-Functions may have "free" arguments — arguments without defined values in the database. These must be provided at runtime via `fn-usage-args`:
+To provide different argument values for the same function at different call sites, create a local fn with `owner-fn-id`:
 
 ```clojure
-;; For root function with free arg
-(exec/create-context
-  {:storage storage
-   :fn-usage-args {arg-schema-id 42}})
+;; Local fn owned by parent function
+(sp/create-entity storage :fn
+  {:name "local-add"
+   :fn-schema-id add-schema-id
+   :owner-fn-id parent-fn-id})  ;; Makes this fn local to parent
 
-;; For nested function via fn-usage (call site)
-(exec/create-context
-  {:storage storage
-   :fn-usage-args {[fn-usage-id arg-schema-id] 100}})
+;; Bind arguments for the local fn
+(sp/create-entity storage :fn-arg
+  {:fn-id local-fn-id
+   :arg-schema-id a-schema-id
+   :arg-value-id (create-literal-value 42)})
 ```
 
-**Key format:**
-- **Root function**: `{arg-schema-id -> value}` — direct lookup by arg-schema-id
-- **Nested function (call site)**: `{[fn-usage-id arg-schema-id] -> value}` — lookup by fn-usage + arg-schema-id
-
-**Note:** Direct fn refs (HOF with type=:fn) cannot receive fn-usage-args. Only functions referenced via `fn-usage` (call sites) can have their free args set externally.
+**Key insight:** All argument binding happens in the database via fn-arg entities. No runtime argument injection is needed.
 
 ### Error Handling
 

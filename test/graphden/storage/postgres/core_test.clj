@@ -6,7 +6,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.postgres.core :as core]
     [graphden.storage.postgres.util :as util]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.storage.protocol.core :as sp])
   (:import
     (java.sql
       SQLException)))

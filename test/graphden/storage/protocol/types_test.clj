@@ -6,8 +6,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.interface :as ds]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.schema.protocol.protocol :as ds]
+    [graphden.storage.protocol.core :as storage]))
 
 
 (deftest types-equivalent?-test

@@ -1,4 +1,4 @@
-(ns graphden.schema.traits.interface
+(ns graphden.schema.traits.schema
   "Value traits schema definition.
 
    Extends graph-data-schema with entities for assigning traits to arg-values:
@@ -12,7 +12,7 @@
 
    Addons can define their own traits and assign them to values."
   (:require
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 ;; === Stable UUIDs for value traits schema elements ===
@@ -84,8 +84,8 @@
   "Seeds the standard traits into storage. Idempotent.
    Call this after initializing storage with the schema."
   [storage]
-  (let [sp (requiring-resolve 'graphden.storage.protocol.interface/create-entity)
-        read-entity (requiring-resolve 'graphden.storage.protocol.interface/read-entity)]
+  (let [sp (requiring-resolve 'graphden.storage.protocol.core/create-entity)
+        read-entity (requiring-resolve 'graphden.storage.protocol.core/read-entity)]
     ;; Only seed if not exists
     (when-not (@read-entity storage :trait merge-protected-trait-uuid)
       (@sp storage :trait

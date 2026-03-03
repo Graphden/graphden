@@ -1,4 +1,4 @@
-(ns graphden.storage.protocol.interface
+(ns graphden.storage.protocol.core
   "Protocol for storage implementations.
 
    Storage brings itself into sync with a DataSchema through the
@@ -22,7 +22,7 @@
    re-exporting functions from internal modules (errors, config, validation, etc.).
    This is an intentional component pattern that provides:
 
-   - **Single import point** - Users only need `[graphden.storage.protocol.interface :as sp]`
+   - **Single import point** - Users only need `[graphden.storage.protocol.core :as sp]`
    - **Stable API** - Internal refactoring doesn't break user code
    - **Discoverability** - All public functions visible in one place
 

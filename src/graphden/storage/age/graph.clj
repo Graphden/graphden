@@ -23,7 +23,7 @@
   (:require
     [clojure.set :as set]
     [graphden.storage.age.codec :as codec]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs]))

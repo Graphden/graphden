@@ -4,7 +4,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.malli.test-helpers :refer [example-schema uuid]]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 (deftest validate-entity-test

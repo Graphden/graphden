@@ -1,4 +1,4 @@
-(ns graphden.schema.fields.interface
+(ns graphden.schema.fields.types
   "Centralized definition of supported field types.
    This is the single source of truth for type information across all backends.")
 

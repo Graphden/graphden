@@ -6,7 +6,7 @@
   (:require
     [graphden.executor.interface :as exec]
     [graphden.storage.age.test-setup :as th]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; ============================================================================

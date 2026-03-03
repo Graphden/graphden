@@ -9,7 +9,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 (use-fixtures :once (setup/create-container-fixture))

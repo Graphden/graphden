@@ -1,4 +1,4 @@
-(ns graphden.versioning.storage.interface
+(ns graphden.versioning.storage.core
   "Storage decorator that adds Git-like versioning with branch support.
 
    Wraps any storage implementation with branch-aware CRUD:
@@ -30,9 +30,9 @@
    It is independently usable: VersionedStorage(BaseStorage) works without any cache.
    CachedStorage(VersionedStorage(BaseStorage)) works via simple stacking."
   (:require
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
     [graphden.storage.protocol.generic-graph :as gg]
-    [graphden.storage.protocol.interface :as sp]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.resolution :as res])
   (:import

@@ -34,8 +34,8 @@
    - :post-process!         (fn [ctx] -> nil)
      Called after processing, before save-metadata (e.g., datomic transact + validate)."
   (:require
-    [graphden.schema.protocol.interface :as ds]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.schema.protocol.protocol :as ds]
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Migration context ===

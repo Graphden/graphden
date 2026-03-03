@@ -20,7 +20,7 @@
   (:require
     [clojure.string :as str]
     [graphden.storage.postgres.errors :as errors]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [next.jdbc.result-set :as rs]))
 
 

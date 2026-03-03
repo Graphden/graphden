@@ -18,8 +18,8 @@
     [graphden.storage.postgres.migration :as migration]
     [graphden.storage.postgres.pool :as pool]
     [graphden.storage.postgres.util :as util]
-    [graphden.storage.protocol.generic-constraints :as gc]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.generic-constraints :as gc])
   (:import
     (java.sql
       SQLException)

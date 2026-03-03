@@ -13,7 +13,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
     [graphden.executor.test-setup :as setup]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; Use testcontainer for PostgreSQL

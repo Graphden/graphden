@@ -7,7 +7,7 @@
    - Entity name format
    - Where clause structure and types"
   (:require
-    [graphden.schema.fields.interface :as ft]))
+    [graphden.schema.fields.types :as ft]))
 
 
 (defn validate-required-fields!

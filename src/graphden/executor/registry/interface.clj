@@ -27,7 +27,7 @@
     [graphden.executor.registry.core :as core]
     [graphden.executor.registry.macros :as macros]
     [graphden.library.base-fns.core :as bf]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Function Registration ===

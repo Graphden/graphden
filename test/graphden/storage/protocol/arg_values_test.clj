@@ -2,7 +2,7 @@
   "Tests for arg-value UUID extraction helpers."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === extract-uuid-refs-from-arg-values tests ===

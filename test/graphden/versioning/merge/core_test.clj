@@ -1,16 +1,16 @@
-(ns graphden.versioning.merge.interface-test
+(ns graphden.versioning.merge.core-test
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.schema.graph.interface :as gds]
+    [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.interface :as ds]
-    [graphden.schema.traits.interface :as vts]
-    [graphden.schema.versioned.interface :as vds]
+    [graphden.schema.protocol.protocol :as ds]
+    [graphden.schema.traits.schema :as vts]
+    [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
-    [graphden.versioning.merge.interface :as mp]
-    [graphden.versioning.storage.interface :as vs]))
+    [graphden.versioning.merge.core :as mp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 ;; Container for PostgreSQL tests

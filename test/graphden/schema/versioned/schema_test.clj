@@ -1,9 +1,9 @@
-(ns graphden.schema.versioned.interface-test
+(ns graphden.schema.versioned.schema-test
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.malli.core :as malli]
-    [graphden.schema.protocol.interface :as ds]
-    [graphden.schema.versioned.interface :as vds]))
+    [graphden.schema.protocol.protocol :as ds]
+    [graphden.schema.versioned.schema :as vds]))
 
 
 (deftest build-schema-test
@@ -150,7 +150,7 @@
 
 (deftest chainable-with-other-extensions-test
   (testing "extend-builder can be chained after graph-data-schema extend-builder"
-    (let [gds-ns (requiring-resolve 'graphden.schema.graph.interface/extend-builder)
+    (let [gds-ns (requiring-resolve 'graphden.schema.graph.schema/extend-builder)
           builder (-> (malli/create-builder)
                       (gds-ns)
                       (vds/extend-builder))]

@@ -10,8 +10,8 @@
     [graphden.storage.age.graph :as graph]
     [graphden.storage.age.migration :as migration]
     [graphden.storage.age.pool :as pool]
-    [graphden.storage.protocol.generic-constraints :as gc]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.generic-constraints :as gc])
   (:import
     (java.util.concurrent.locks
       ReentrantReadWriteLock)))

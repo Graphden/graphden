@@ -3,7 +3,7 @@
    CREATE/ALTER for tables, columns, enums, indexes, and constraints."
   (:require
     [clojure.string :as str]
-    [graphden.schema.protocol.interface :as ds]
+    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.util :as util]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]))

@@ -4,13 +4,13 @@
    Uses generic-migration pipeline with postgres-specific callbacks."
   (:require
     [clojure.tools.logging :as log]
-    [graphden.schema.protocol.interface :as ds]
+    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.ddl :as ddl]
     [graphden.storage.postgres.introspection :as introspection]
     [graphden.storage.postgres.metadata :as metadata]
     [graphden.storage.postgres.util :as util]
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-migration :as gm]
-    [graphden.storage.protocol.interface :as sp]
     [next.jdbc :as jdbc]))
 
 

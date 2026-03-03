@@ -3,7 +3,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.library.base-fns.web.crud :as crud]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; =============================================================================

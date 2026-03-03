@@ -14,7 +14,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.registry.core :as core]
     [graphden.storage.age.test-setup :as setup]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; =============================================================================

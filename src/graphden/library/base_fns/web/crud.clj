@@ -26,7 +26,7 @@
     [cheshire.core :as json]
     [clojure.string :as str]
     [graphden.executor.registry.macros :refer [defbase]]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [hiccup2.core]))
 
 

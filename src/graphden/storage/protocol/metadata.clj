@@ -7,33 +7,33 @@
    - Type compatibility and change detection"
   (:require
     [clojure.set :as set]
-    [graphden.schema.fields.interface :as ft]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.fields.types :as ft]
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 ;; === Type compatibility ===
 
 (def type-mappings
   "Complete type mapping reference for all storage backends.
-   See graphden.schema.fields.interface/type-mappings for details."
+   See graphden.schema.fields.types/type-mappings for details."
   ft/type-mappings)
 
 
 (def type-widening
   "Map of type→set of types it can safely widen to.
-   See graphden.schema.fields.interface/type-widening for details."
+   See graphden.schema.fields.types/type-widening for details."
   ft/type-widening)
 
 
 (def type-equivalents
   "Types that are equivalent (stored the same way in storage).
-   See graphden.schema.fields.interface/type-equivalents for details."
+   See graphden.schema.fields.types/type-equivalents for details."
   ft/type-equivalents)
 
 
 (defn types-equivalent?
   "Returns true if two types are equivalent (stored the same way).
-   Delegates to graphden.schema.fields.interface/types-equivalent?."
+   Delegates to graphden.schema.fields.types/types-equivalent?."
   [t1 t2]
   (ft/types-equivalent? t1 t2))
 

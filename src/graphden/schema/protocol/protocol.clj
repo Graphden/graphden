@@ -1,4 +1,4 @@
-(ns graphden.schema.protocol.interface
+(ns graphden.schema.protocol.protocol
   "Protocol for data schema definition.
 
    Data schema describes entities that can be stored in various storage backends

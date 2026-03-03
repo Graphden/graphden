@@ -1,4 +1,4 @@
-(ns graphden.schema.versioned.interface
+(ns graphden.schema.versioned.schema
   "Versioned data schema definition.
 
    Extends graph-data-schema with entities for Git-like versioning:
@@ -17,8 +17,8 @@
 
    See docs/current-schema.dbml for the full versioning design and resolution algorithm."
   (:require
-    [graphden.schema.graph.interface :as gds]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.graph.schema :as gds]
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 ;; === Stable UUIDs for versioned schema elements ===

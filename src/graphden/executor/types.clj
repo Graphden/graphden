@@ -8,8 +8,8 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.context :as ctx]
-    [graphden.schema.fields.interface :as ft]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.schema.fields.types :as ft]
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Value Truncation ===

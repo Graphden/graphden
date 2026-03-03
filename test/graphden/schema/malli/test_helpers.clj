@@ -2,7 +2,7 @@
   "Test helpers and example schema for malli-data-schema tests."
   (:require
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 ;; Helper to generate UUIDs for tests

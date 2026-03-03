@@ -7,7 +7,7 @@
    - with-test-context: Macro for context lifecycle management"
   (:require
     [graphden.executor.context :as ctx]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Mock Storage ===

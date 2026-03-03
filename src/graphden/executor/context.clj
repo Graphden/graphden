@@ -7,7 +7,7 @@
    - Execution limits and constants"
   (:require
     [graphden.executor.registry :as registry]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === ExecutionContext Record ===

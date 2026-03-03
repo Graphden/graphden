@@ -5,7 +5,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.malli.test-helpers :refer [uuid]]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 (deftest enum-validation-test

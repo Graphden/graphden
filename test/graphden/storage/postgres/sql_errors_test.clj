@@ -11,13 +11,13 @@
    - DDL error tests"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.schema.protocol.interface :as ds]
+    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.crud :as crud]
     [graphden.storage.postgres.ddl :as ddl]
     [graphden.storage.postgres.graph :as graph]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.postgres.util :as util]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.test-helpers :as th]
     [next.jdbc :as jdbc])
   (:import

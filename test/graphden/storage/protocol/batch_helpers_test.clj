@@ -2,7 +2,7 @@
   "Tests for batch processing helpers."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 (deftest wrap-batch-error-test

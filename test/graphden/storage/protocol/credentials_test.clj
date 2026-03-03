@@ -3,7 +3,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === validate-credentials! tests ===

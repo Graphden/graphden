@@ -4,7 +4,7 @@
     [graphden.schema.malli.schema :as schema]
     [graphden.schema.malli.types :as types]
     [graphden.schema.malli.validators :as v]
-    [graphden.schema.protocol.interface :as ds]
+    [graphden.schema.protocol.protocol :as ds]
     [malli.core :as m]
     [malli.error :as me]))
 

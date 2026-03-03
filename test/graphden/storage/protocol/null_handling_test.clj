@@ -2,7 +2,7 @@
   "Tests for NULL handling contract."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === NULL Handling Contract Tests ===

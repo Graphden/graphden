@@ -5,7 +5,7 @@
     [clojure.set :as set]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.util :as util]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]))
 

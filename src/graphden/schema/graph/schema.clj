@@ -1,4 +1,4 @@
-(ns graphden.schema.graph.interface
+(ns graphden.schema.graph.schema
   "Graph data schema definition.
 
    Defines the schema for a function composition graph:
@@ -9,8 +9,8 @@
    - fn-arg: binding from fn to arg-value
    - fn-usage: usage of a function at a computation point"
   (:require
-    [graphden.schema.fields.interface :as ft]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.fields.types :as ft]
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 ;; === Stable UUIDs for schema elements ===

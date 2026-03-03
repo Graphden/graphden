@@ -1,4 +1,4 @@
-(ns graphden.versioning.merge.interface
+(ns graphden.versioning.merge.core
   "Merge protection for arg-values with the merge-protected trait.
 
    When merging branches, arg-values marked with the 'merge-protected' trait
@@ -19,9 +19,9 @@
    3. Either block merge or exclude protected values from transfer"
   (:require
     [clojure.set :as set]
-    [graphden.schema.traits.interface :as vts]
-    [graphden.storage.protocol.interface :as sp]
-    [graphden.versioning.storage.interface :as vs]))
+    [graphden.schema.traits.schema :as vts]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]))
 
 
 (defn- get-merge-protected-arg-value-ids

@@ -8,7 +8,7 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.storage.protocol.core :as sp])
   (:import
     (com.zaxxer.hikari
       HikariConfig

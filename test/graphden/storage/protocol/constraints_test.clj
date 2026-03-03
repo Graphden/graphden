@@ -3,7 +3,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.constraints :as constraints]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === Mock ConstraintHelpers for testing shared implementations ===

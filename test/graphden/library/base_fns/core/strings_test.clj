@@ -3,7 +3,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.library.base-fns.core.strings :as strings]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === str-fn tests ===

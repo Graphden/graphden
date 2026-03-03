@@ -1,10 +1,10 @@
-(ns graphden.schema.graph.interface-test
+(ns graphden.schema.graph.schema-test
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.schema.fields.interface :as ft]
-    [graphden.schema.graph.interface :as graph]
+    [graphden.schema.fields.types :as ft]
+    [graphden.schema.graph.schema :as graph]
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 (def schema

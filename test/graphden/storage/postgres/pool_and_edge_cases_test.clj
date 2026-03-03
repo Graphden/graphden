@@ -3,13 +3,13 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.interface :as ds]
+    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.postgres.introspection :as introspection]
     [graphden.storage.postgres.metadata :as metadata]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.postgres.util :as util]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.test-helpers :as th]
     [next.jdbc :as jdbc])
   (:import

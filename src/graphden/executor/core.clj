@@ -27,7 +27,7 @@
     [clojure.tools.logging :as log]
     [graphden.executor.argument-resolution :as arg-res]
     [graphden.executor.context :as ctx]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; Forward declaration: execute-internal is defined later but referenced by

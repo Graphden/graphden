@@ -2,7 +2,7 @@
   "Tests for type helper functions and query validations."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === Additional Helper Function Tests ===

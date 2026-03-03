@@ -9,9 +9,9 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor-runtime.core :as rt]
-    [graphden.schema.protocol.interface :as ds]
+    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.age.test-setup :as age-setup]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [graphden.system.interface :as sys]
     [integrant.core :as ig]))
 

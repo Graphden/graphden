@@ -58,8 +58,8 @@
     [clojure.string :as str]
     [clojure.walk :as walk]
     [graphden.executor.interface :as exec]
-    [graphden.schema.fields.interface :as ft]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.schema.fields.types :as ft]
+    [graphden.storage.protocol.core :as sp])
   (:import
     (java.nio.charset
       StandardCharsets)

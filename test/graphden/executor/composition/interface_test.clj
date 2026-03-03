@@ -8,7 +8,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
     [graphden.storage.age.test-setup :as th]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; Container for PostgreSQL tests
@@ -62,8 +62,8 @@
       (testing "creates fn entities in storage"
         (let [my-fn-id (:my-fn result)
               wrapper-fn-id (:wrapper-fn result)]
-          (is (some? (graphden.storage.protocol.interface/read-entity storage :fn my-fn-id)))
-          (is (some? (graphden.storage.protocol.interface/read-entity storage :fn wrapper-fn-id)))))))
+          (is (some? (graphden.storage.protocol.core/read-entity storage :fn my-fn-id)))
+          (is (some? (graphden.storage.protocol.core/read-entity storage :fn wrapper-fn-id)))))))
 
   (testing "validates definitions"
     (let [storage (create-test-storage)]

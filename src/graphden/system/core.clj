@@ -20,14 +20,14 @@
     [graphden.library.base-fns.web.html :as html-fns]
     [graphden.library.base-fns.web.http-kit :as http-kit-fns]
     [graphden.library.base-fns.web.reitit :as reitit-fns]
-    [graphden.schema.graph.interface :as gds]
+    [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.interface :as ds]
-    [graphden.schema.traits.interface :as vts]
-    [graphden.schema.versioned.interface :as vds]
+    [graphden.schema.protocol.protocol :as ds]
+    [graphden.schema.traits.schema :as vts]
+    [graphden.schema.versioned.schema :as vds]
     [graphden.storage.age.core :as age]
-    [graphden.storage.protocol.interface :as sp]
-    [graphden.versioning.storage.interface :as vs]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs]
     [integrant.core :as ig]))
 
 

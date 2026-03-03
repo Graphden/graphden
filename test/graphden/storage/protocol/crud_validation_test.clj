@@ -3,8 +3,8 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.crud-validation]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]
+    [graphden.storage.protocol.crud-validation]))
 
 
 ;; === Storage Implementation Helpers tests ===

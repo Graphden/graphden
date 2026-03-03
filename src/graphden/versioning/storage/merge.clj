@@ -10,7 +10,7 @@
    last merge between the two)."
   (:require
     [clojure.set :as set]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.resolution :as res])
   (:import
     (java.time

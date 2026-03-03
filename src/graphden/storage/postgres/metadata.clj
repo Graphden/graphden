@@ -4,7 +4,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.tools.logging :as log]
-    [graphden.schema.protocol.interface :as ds]
+    [graphden.schema.protocol.protocol :as ds]
     [graphden.storage.postgres.util :as util]
     [honey.sql :as sql]
     [next.jdbc :as jdbc])

@@ -4,7 +4,7 @@
   (:require
     [cheshire.core :as json]
     [graphden.storage.postgres.util :as util]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.storage.protocol.core :as sp])
   (:import
     (com.fasterxml.jackson.core
       JsonParseException)

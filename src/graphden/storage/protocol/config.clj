@@ -61,7 +61,7 @@
    ```"
   (:require
     [clojure.string :as str]
-    [graphden.schema.fields.interface :as ft]
+    [graphden.schema.fields.types :as ft]
     [malli.core :as m]
     [malli.error :as me]))
 

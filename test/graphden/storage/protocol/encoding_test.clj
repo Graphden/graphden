@@ -2,7 +2,7 @@
   "Tests for encoding helpers and constants."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === needs-special-encoding? tests ===

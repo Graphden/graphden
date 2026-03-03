@@ -16,7 +16,7 @@
    ```"
   (:require
     [graphden.storage.protocol.constraints :as constraints]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 (defrecord GenericConstraintHelpers

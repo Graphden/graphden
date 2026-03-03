@@ -40,7 +40,7 @@
    ```clojure
    (ns my-project.redis-storage.core
      (:require
-       [graphden.storage.protocol.interface :as sp]
+       [graphden.storage.protocol.core :as sp]
        [graphden.storage.protocol.backend-template :as tpl]))
 
    (defrecord RedisStorage [conn schema-atom rw-lock]
@@ -62,7 +62,7 @@
     [clojure.set :as set]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.storage.protocol.core :as sp])
   (:import
     (java.util.concurrent.locks
       ReentrantReadWriteLock)))

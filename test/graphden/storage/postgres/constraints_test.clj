@@ -9,7 +9,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.protocol.contract-tests :as contract]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 (use-fixtures :once (setup/container-fixture))

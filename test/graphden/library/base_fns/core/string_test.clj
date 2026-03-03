@@ -5,7 +5,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.library.base-fns.core.test-helpers :as h]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 (use-fixtures :each exec/with-clean-registry)

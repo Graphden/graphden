@@ -2,10 +2,10 @@
   "Basic schema structure tests for malli-data-schema."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.schema.fields.interface :as ft]
+    [graphden.schema.fields.types :as ft]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.malli.test-helpers :refer [example-schema]]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 (deftest entities-test

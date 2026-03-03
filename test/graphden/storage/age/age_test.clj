@@ -11,7 +11,7 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.age.age :as age]
     [graphden.storage.age.test-setup :as setup]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 (defn- get-pool

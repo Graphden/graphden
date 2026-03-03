@@ -17,10 +17,10 @@
            (sp/close storage)))))
    ```"
   (:require
-    [graphden.schema.graph.interface :as gds]
+    [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.age.core :as age]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [next.jdbc :as jdbc])
   (:import
     (org.testcontainers.containers

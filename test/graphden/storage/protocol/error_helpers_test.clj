@@ -2,7 +2,7 @@
   "Tests for error context and storage error helpers."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === Mock for constraint helpers ===

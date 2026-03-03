@@ -6,7 +6,7 @@
     [graphden.executor.registry.core :as core]
     [graphden.executor.registry.interface :as registry]
     [graphden.storage.age.test-setup :as th]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; Container for PostgreSQL tests

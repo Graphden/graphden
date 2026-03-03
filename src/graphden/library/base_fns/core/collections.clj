@@ -8,7 +8,7 @@
     [clojure.math :as math]
     [graphden.executor.registry.macros :refer [defbase]]
     [graphden.library.base-fns.core.validation :as v]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 (defbase first-fn

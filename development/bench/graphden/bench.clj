@@ -8,10 +8,10 @@
      --quick    Run quick benchmarks (fewer samples)"
   (:require
     [criterium.core :as crit]
-    [graphden.schema.graph.interface :as gds]
+    [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.age.core :as age]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.storage.protocol.core :as sp])
   (:import
     (org.testcontainers.containers
       PostgreSQLContainer)

@@ -8,7 +8,7 @@
     [graphden.library.base-fns.core :as bf]
     [graphden.library.base-fns.core.test-helpers :as h]
     [graphden.storage.age.test-setup :as th]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; Container for PostgreSQL tests

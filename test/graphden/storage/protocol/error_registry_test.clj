@@ -2,7 +2,7 @@
   "Tests for error registry extensibility."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === Error Registry Extensibility Tests ===

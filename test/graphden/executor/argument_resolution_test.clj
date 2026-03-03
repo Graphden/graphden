@@ -4,7 +4,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.argument-resolution :as arg-res]
     [graphden.storage.protocol.config :as config]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 (deftest realize-lazy-seq-bounded-test

@@ -1,7 +1,7 @@
 (ns graphden.schema.malli.validators
   "Validation functions for malli-data-schema."
   (:require
-    [graphden.schema.fields.interface :as ft]
+    [graphden.schema.fields.types :as ft]
     [graphden.schema.malli.types :as types]))
 
 

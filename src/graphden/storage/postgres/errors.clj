@@ -5,7 +5,7 @@
    Table-driven error classification for maintainability."
   (:require
     [clojure.string :as str]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Error Classification Tables ===

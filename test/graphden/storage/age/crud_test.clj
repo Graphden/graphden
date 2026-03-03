@@ -8,7 +8,7 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.age.test-setup :as setup]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.test-helpers :as th]))
 
 

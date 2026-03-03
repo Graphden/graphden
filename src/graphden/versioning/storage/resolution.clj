@@ -8,7 +8,7 @@
    4. Pick candidate with greatest effective timestamp
    5. If nothing found, recurse to parent branch (base-branch-id)"
   (:require
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Entity Configuration ===

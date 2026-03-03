@@ -1,7 +1,7 @@
 (ns graphden.schema.malli.types
   "Type definitions and mappings for malli-data-schema."
   (:require
-    [graphden.schema.fields.interface :as ft]))
+    [graphden.schema.fields.types :as ft]))
 
 
 (def ^:private jsonb-schema

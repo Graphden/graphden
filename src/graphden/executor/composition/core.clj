@@ -64,7 +64,7 @@
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.registry.interface :as registry]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Arg Value Parsing ===

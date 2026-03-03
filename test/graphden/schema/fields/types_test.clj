@@ -1,8 +1,8 @@
-(ns graphden.schema.fields.interface-test
+(ns graphden.schema.fields.types-test
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.schema.fields.interface :as ft]))
+    [graphden.schema.fields.types :as ft]))
 
 
 (deftest types-test

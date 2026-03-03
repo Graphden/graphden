@@ -2,7 +2,7 @@
   "Tests for ExecutionGraphResult validation and reader."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === ExecutionGraphResult validation tests ===

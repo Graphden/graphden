@@ -7,7 +7,7 @@
     [clojure.tools.logging :as log]
     [graphden.storage.age.codec :as codec]
     [graphden.storage.postgres.metadata :as metadata]
-    [graphden.storage.protocol.interface :as sp]
+    [graphden.storage.protocol.core :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]
     [next.jdbc.result-set :as rs])

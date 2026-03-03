@@ -13,8 +13,8 @@
    (gg/resolve-execution-graph storage fn-id)
    ```"
   (:require
-    [graphden.storage.protocol.graph :as graph]
-    [graphden.storage.protocol.interface :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.graph :as graph]))
 
 
 (defn- load-fn-record

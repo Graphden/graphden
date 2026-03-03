@@ -1,10 +1,10 @@
-(ns graphden.schema.protocol.interface-test
+(ns graphden.schema.protocol.protocol-test
   "Contract tests for DataSchema and DataSchemaBuilder protocols.
    Uses malli-data-schema as reference implementation."
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.malli.core :as mds]
-    [graphden.schema.protocol.interface :as ds]))
+    [graphden.schema.protocol.protocol :as ds]))
 
 
 ;; Helper to generate UUIDs for tests

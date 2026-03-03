@@ -2,7 +2,7 @@
   "Tests for redaction and sensitive field handling."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.storage.protocol.interface :as storage]))
+    [graphden.storage.protocol.core :as storage]))
 
 
 ;; === redact-sensitive tests ===

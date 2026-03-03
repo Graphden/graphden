@@ -4,7 +4,7 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.postgres.util :as util]
-    [graphden.storage.protocol.interface :as sp])
+    [graphden.storage.protocol.core :as sp])
   (:import
     (java.sql
       SQLException)))

@@ -31,7 +31,7 @@ Graphden is a visual functional programming environment where functions and thei
 **Key concepts:**
 - **Code = Graph in DB** — functions, schemas, and argument values stored as entities
 - **Lazy Execution** — delay-based evaluation, only computes what's needed
-- **Storage backend** — PostgreSQL with Apache AGE for graph queries
+- **Storage backend** — PostgreSQL with recursive CTE for graph traversal
 
 **Core entities** (only 6 — kept minimal by design):
 - `fn-schema` — function signature (name, return type, optional base-fn-name linking to Clojure impl)
@@ -111,7 +111,7 @@ bb fix          # Auto-fix formatting
 # Build & Run
 clojure -T:build uber    # Build uberjar (target/executor-server.jar)
 clojure -M:run           # Run server
-docker-compose up        # Run with Apache AGE
+docker-compose up        # Run with PostgreSQL
 ```
 
 ### Running a Single Test
@@ -136,7 +136,7 @@ Classical Clojure monorepo. Top namespace: `graphden`. Public API through `inter
 │                      STORAGE LAYER                           │
 │  storage-protocol: StorageCRUD, ExecutionGraph, Constraints │
 │  Decorators: VersionedStorage (composable)                  │
-│  Backends: postgres-storage, graph-storage-age              │
+│  Backends: postgres-storage                                 │
 ├─────────────────────────────────────────────────────────────┤
 │                    DATA SCHEMA LAYER                         │
 │  data-schema-protocol + malli-data-schema + field-types     │
@@ -144,7 +144,7 @@ Classical Clojure monorepo. Top namespace: `graphden`. Public API through `inter
 └─────────────────────────────────────────────────────────────┘
 ```
 
-**Key principle:** Each layer depends only on the layer below it. Executor calls `sp/resolve-execution-graph` which returns `ExecutionGraphResult`. Storage implementations (AGE, Postgres) each implement this protocol optimally.
+**Key principle:** Each layer depends only on the layer below it. Executor calls `sp/resolve-execution-graph` which returns `ExecutionGraphResult`. Storage implementations implement this protocol using recursive CTEs for optimal graph traversal.
 
 See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
@@ -300,10 +300,9 @@ src/graphden/
 │   ├── versioned/
 │   ├── traits/
 │   └── fields/
-├── storage/            # Protocol, postgres, AGE
+├── storage/            # Protocol, postgres
 │   ├── protocol/
-│   ├── postgres/
-│   └── age/
+│   └── postgres/
 ├── versioning/         # Storage decorator, merge protection
 │   ├── storage/
 │   └── merge/

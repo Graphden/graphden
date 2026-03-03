@@ -10,19 +10,11 @@
     [criterium.core :as crit]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
-    [graphden.storage.age.core :as age]
+    [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp])
   (:import
     (org.testcontainers.containers
-      PostgreSQLContainer)
-    (org.testcontainers.utility
-      DockerImageName)))
-
-
-;; Apache AGE Docker image
-(def age-image-name
-  (-> (DockerImageName/parse "apache/age:latest")
-      (DockerImageName/.asCompatibleSubstituteFor "postgres")))
+      PostgreSQLContainer)))
 
 
 ;; === Test schema ===
@@ -35,35 +27,35 @@
 
 ;; === Benchmark runners ===
 
-(defn bench-age-storage
-  "Benchmark Apache AGE storage operations."
+(defn bench-postgres-storage
+  "Benchmark PostgreSQL storage operations."
   [quick?]
-  (println "\n=== Apache AGE Storage Benchmarks ===\n")
-  (println "Starting AGE container...")
+  (println "\n=== PostgreSQL Storage Benchmarks ===\n")
+  (println "Starting PostgreSQL container...")
 
-  (let [container (doto (PostgreSQLContainer. age-image-name)
-                    (PostgreSQLContainer/.withStartupAttempts 3))]
+  (let [container (doto (PostgreSQLContainer. "postgres:16-alpine")
+                    (.withStartupAttempts 3))]
     (try
-      (PostgreSQLContainer/.start container)
-      (let [opts {:jdbc-url (PostgreSQLContainer/.getJdbcUrl container)
-                  :username (PostgreSQLContainer/.getUsername container)
-                  :password (PostgreSQLContainer/.getPassword container)
+      (.start container)
+      (let [opts {:jdbc-url (.getJdbcUrl container)
+                  :username (.getUsername container)
+                  :password (.getPassword container)
                   :pool-size 5}
             schema (create-test-schema)]
 
         (println "-- create-storage + initialize --")
         (if quick?
           (crit/quick-bench
-            (let [storage (age/create-storage opts)]
+            (let [storage (pg/create-storage opts)]
               (sp/initialize storage schema)
               (sp/close storage)))
           (crit/bench
-            (let [storage (age/create-storage opts)]
+            (let [storage (pg/create-storage opts)]
               (sp/initialize storage schema)
               (sp/close storage))))
 
         (println "\n-- current-entities (after init) --")
-        (let [storage (age/create-storage opts)]
+        (let [storage (pg/create-storage opts)]
           (try
             (sp/initialize storage schema)
             (if quick?
@@ -73,7 +65,7 @@
               (sp/close storage))))
 
         (println "\n-- current-fields --")
-        (let [storage (age/create-storage opts)]
+        (let [storage (pg/create-storage opts)]
           (try
             (sp/initialize storage schema)
             (if quick?
@@ -83,7 +75,7 @@
               (sp/close storage))))
 
         (println "\n-- create-entity :fn-schema --")
-        (let [storage (age/create-storage opts)]
+        (let [storage (pg/create-storage opts)]
           (try
             (sp/initialize storage schema)
             (if quick?
@@ -99,7 +91,7 @@
               (sp/close storage))))
 
         (println "\n-- resolve-execution-graph (simple fn) --")
-        (let [storage (age/create-storage opts)]
+        (let [storage (pg/create-storage opts)]
           (try
             (sp/initialize storage schema)
             (let [fn-schema (sp/create-entity storage :fn-schema
@@ -114,7 +106,7 @@
             (finally
               (sp/close storage)))))
       (finally
-        (PostgreSQLContainer/.stop container)))))
+        (.stop container)))))
 
 
 ;; === Main ===
@@ -134,9 +126,9 @@
     (println "      Graphden Performance Benchmarks")
     (println "========================================")
     (println (str "Mode: " (if quick? "quick" "full")))
-    (println "Storage: Apache AGE")
+    (println "Storage: PostgreSQL")
 
-    (bench-age-storage quick?)
+    (bench-postgres-storage quick?)
 
     (println "\n========================================")
     (println "           Benchmarks Complete")

@@ -6,7 +6,7 @@
 
 {:db/schema {}
 
- :db/age
+ :db/postgres
  {:jdbc-url #or [#env GRAPHDEN_JDBC_URL "jdbc:postgresql://localhost:5434/graphden"]
   :username #or [#env GRAPHDEN_DB_USER "graphden"]
   :password #or [#env GRAPHDEN_DB_PASSWORD "graphden"]
@@ -14,7 +14,7 @@
   :schema #ig/ref :db/schema}
 
  :db/versioned
- {:base-storage #ig/ref :db/age}
+ {:base-storage #ig/ref :db/postgres}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned}

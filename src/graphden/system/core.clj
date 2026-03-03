@@ -3,8 +3,8 @@
 
    Component dependency graph:
    :db/schema        → (pure function, no deps)
-   :db/age           → [:db/schema]
-   :db/versioned     → [:db/age]
+   :db/postgres      → [:db/schema]
+   :db/versioned     → [:db/postgres]
    :exec/base-fns    → [:db/versioned]
    :exec/fn-entities → [:db/versioned, :exec/base-fns]
    :exec/context     → [:db/versioned]
@@ -25,7 +25,6 @@
     [graphden.schema.protocol.protocol :as ds]
     [graphden.schema.traits.schema :as vts]
     [graphden.schema.versioned.schema :as vds]
-    [graphden.storage.age.core :as age]
     [graphden.storage.postgres.core :as postgres]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]
@@ -69,14 +68,6 @@
   [storage-name storage]
   (log/info (str "Closing " storage-name "..."))
   (sp/close storage))
-
-
-(defmethod ig/init-key :db/age [_ opts]
-  (init-storage! "Apache AGE" age/create-storage opts))
-
-
-(defmethod ig/halt-key! :db/age [_ storage]
-  (halt-storage! "AGE storage" storage))
 
 
 (defmethod ig/init-key :db/postgres [_ opts]

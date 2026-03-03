@@ -7,29 +7,47 @@
     [graphden.executor.registry.interface :as registry]
     [graphden.library.base-fns.core :as bf]
     [graphden.library.base-fns.core.test-helpers :as h]
-    [graphden.storage.age.test-setup :as th]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.schema.graph.schema :as gds]
+    [graphden.schema.malli.core :as mds]
+    [graphden.storage.postgres.core :as pg]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.postgres-test-helpers :as pth]))
 
 
 ;; Container for PostgreSQL tests
 (def ^:dynamic *container* nil)
 
 
-(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :once (pth/create-container-fixture #'*container*))
 
 
 (use-fixtures :each
-  (th/create-clean-db-fixture #'*container*)
+  (pth/create-clean-db-fixture #'*container*)
   exec/with-clean-registry)
 
 
 ;; === HOF Setup Helpers ===
 
+(defn- create-base-storage
+  "Creates a PostgreSQL storage with schema initialized (no extra functions).
+   For tests that need to set up their own functions."
+  []
+  (pth/clean-database-fast! *container*)
+  (let [storage (pg/create-storage (pth/get-container-config *container*))
+        schema (gds/build-schema (mds/create-builder))]
+    (sp/initialize storage schema)
+    storage))
+
+
 (defn- setup-hof-storage
   "Creates storage with helper functions for HOF tests.
    Returns fn-ids for use in HOF tests via executor."
   []
-  (let [storage (th/create-test-storage *container*)]
+  (let [storage (do (pth/clean-database-fast! *container*)
+                    (let [s (pg/create-storage (pth/get-container-config *container*))
+                          schema (gds/build-schema (mds/create-builder))]
+                      (sp/initialize s schema)
+                      s))]
     (h/register-all!)
     ;; Sync base function schemas to storage so HOF can be found
     (registry/sync-defs-to-storage! storage bf/all-defs)
@@ -339,7 +357,7 @@
 
 (deftest transducer-comp-transduce-integration-test
   (testing "comp + transduce pipeline works with fn-usage references"
-    (let [storage (th/create-test-storage *container*)]
+    (let [storage (create-base-storage)]
       (try
         ;; Register base functions
         (h/register-all!)
@@ -440,7 +458,7 @@
           (sp/close storage)))))
 
   (testing "transducers are lazily composed (single pass)"
-    (let [storage (th/create-test-storage *container*)
+    (let [storage (create-base-storage)
           filter-count (atom 0)
           map-count (atom 0)]
       (try

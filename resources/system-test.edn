@@ -6,7 +6,7 @@
 
 {:db/schema {}
 
- :db/age
+ :db/postgres
  {:jdbc-url nil  ; Will be overridden by test fixture
   :username #or [#env GRAPHDEN_TEST_DB_USER "test"]
   :password #or [#env GRAPHDEN_TEST_DB_PASSWORD "test"]
@@ -14,7 +14,7 @@
   :schema #ig/ref :db/schema}
 
  :db/versioned
- {:base-storage #ig/ref :db/age}
+ {:base-storage #ig/ref :db/postgres}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned}

@@ -18,7 +18,7 @@
     (let [config (sys/read-config :test)]
       (is (map? config) "Config should be a map")
       (is (contains? config :db/schema) "Config should have :db/schema")
-      (is (contains? config :db/age) "Config should have :db/age")
+      (is (contains? config :db/postgres) "Config should have :db/postgres")
       (is (contains? config :db/versioned) "Config should have :db/versioned")))
 
   (testing "read-config throws for invalid profile"
@@ -36,7 +36,7 @@
     ;; We test the merging logic by checking that read-config + manual merge
     ;; produces the same structure as what start-with-overrides! would use
     (let [base-config (sys/read-config :test)
-          overrides {:db/age {:jdbc-url "jdbc:postgresql://override:5432/test"}}
+          overrides {:db/postgres {:jdbc-url "jdbc:postgresql://override:5432/test"}}
           ;; Simulate what start-with-overrides! does internally
           merged-config (reduce-kv
                           (fn [cfg k v]
@@ -44,7 +44,7 @@
                           base-config
                           overrides)]
       (is (= "jdbc:postgresql://override:5432/test"
-             (get-in merged-config [:db/age :jdbc-url]))
+             (get-in merged-config [:db/postgres :jdbc-url]))
           "Override should be applied to config"))))
 
 

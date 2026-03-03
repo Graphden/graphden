@@ -10,8 +10,8 @@
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor-runtime.core :as rt]
     [graphden.schema.protocol.protocol :as ds]
-    [graphden.storage.age.test-setup :as age-setup]
     [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.interface :as sys]
     [integrant.core :as ig]))
 
@@ -20,7 +20,9 @@
 ;; Fixtures
 ;; =============================================================================
 
-(use-fixtures :once (age-setup/container-fixture))
+(def ^:dynamic *container* nil)
+
+(use-fixtures :once (pth/create-container-fixture #'*container*))
 
 
 ;; =============================================================================
@@ -32,7 +34,7 @@
     (let [config (sys/read-config :test)]
       (is (map? config))
       (is (contains? config :db/schema))
-      (is (contains? config :db/age))
+      (is (contains? config :db/postgres))
       (is (contains? config :db/versioned))
       (is (contains? config :exec/base-fns))
       (is (contains? config :exec/context))))
@@ -41,7 +43,7 @@
     (let [config (sys/read-config :dev)]
       (is (map? config))
       (is (contains? config :db/schema))
-      (is (contains? config :db/age))))
+      (is (contains? config :db/postgres))))
 
   (testing "read-config returns valid config for :prod profile"
     (let [config (sys/read-config :prod)]
@@ -52,20 +54,20 @@
 
 
 (deftest config-dependencies-test
-  (testing ":db/age depends on :db/schema"
+  (testing ":db/postgres depends on :db/schema"
     (let [config (sys/read-config :test)
-          age-config (:db/age config)
+          age-config (:db/postgres config)
           schema-ref (:schema age-config)]
       ;; ig/ref creates IntegrantRef record
       (is (some? schema-ref))
       (is (= :db/schema (:key schema-ref)))))
 
-  (testing ":db/versioned depends on :db/age"
+  (testing ":db/versioned depends on :db/postgres"
     (let [config (sys/read-config :test)
           versioned-config (:db/versioned config)
           base-ref (:base-storage versioned-config)]
       (is (some? base-ref))
-      (is (= :db/age (:key base-ref)))))
+      (is (= :db/postgres (:key base-ref)))))
 
   (testing ":exec/context depends on :db/versioned"
     (let [config (sys/read-config :test)
@@ -81,25 +83,25 @@
 
 (deftest partial-system-start-test
   (testing "Can start only schema component"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
           system (ig/init config [:db/schema])]
       (try
         (is (some? (:db/schema system)))
-        (is (nil? (:db/age system)))
+        (is (nil? (:db/postgres system)))
         (is (nil? (:db/versioned system)))
         (finally
           (ig/halt! system)))))
 
   (testing "Can start schema + age + versioned components"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))
-          system (ig/init config [:db/schema :db/age :db/versioned])]
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+          system (ig/init config [:db/schema :db/postgres :db/versioned])]
       (try
         (is (some? (:db/schema system)))
-        (is (some? (:db/age system)))
+        (is (some? (:db/postgres system)))
         (is (some? (:db/versioned system)))
         (is (nil? (:exec/context system)))
         (finally
@@ -108,14 +110,14 @@
 
 (deftest full-system-lifecycle-test
   (testing "Full system starts and stops correctly"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
           system (ig/init config)]
       (try
         ;; Verify all components are initialized
         (is (some? (:db/schema system)) "Schema should be initialized")
-        (is (some? (:db/age system)) "AGE storage should be initialized")
+        (is (some? (:db/postgres system)) "PostgreSQL storage should be initialized")
         (is (some? (:db/versioned system)) "Versioned storage should be initialized")
         (is (some? (:exec/base-fns system)) "Base functions should be registered")
         (is (some? (:exec/context system)) "Executor context should be created")
@@ -126,12 +128,12 @@
 
 (deftest start-with-overrides-test
   (testing "start-with-overrides! merges config correctly"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           system (sys/start-with-overrides! :test
-                                            {:db/age {:jdbc-url jdbc-url}})]
+                                            {:db/postgres {:jdbc-url jdbc-url}})]
       (try
         (is (some? (:db/schema system)))
-        (is (some? (:db/age system)))
+        (is (some? (:db/postgres system)))
         (is (some? (:db/versioned system)))
         (finally
           (sys/stop! system))))))
@@ -139,16 +141,16 @@
 
 (deftest system-component-values-test
   (testing "Initialized components have correct types"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
           system (ig/init config)]
       (try
         ;; Schema is a DataSchema
         (is (satisfies? ds/DataSchema (:db/schema system)))
 
         ;; Storage satisfies StorageCRUD
-        (is (satisfies? sp/StorageCRUD (:db/age system)))
+        (is (satisfies? sp/StorageCRUD (:db/postgres system)))
 
         ;; Versioned storage also satisfies StorageCRUD
         (is (satisfies? sp/StorageCRUD (:db/versioned system)))
@@ -174,10 +176,10 @@
 (deftest missing-jdbc-url-test
   (testing "System fails to start without JDBC URL"
     (let [config (sys/read-config :test)]
-      ;; :db/age has jdbc-url = nil in test config
+      ;; :db/postgres has jdbc-url = nil in test config
       ;; Starting should fail because AGE can't connect
       (is (thrown? Exception
-            (ig/init config [:db/schema :db/age]))))))
+            (ig/init config [:db/schema :db/postgres]))))))
 
 
 ;; =============================================================================
@@ -185,18 +187,18 @@
 ;; =============================================================================
 
 (deftest executor-runtime-start-stop-test
-  (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+  (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
         original-read-config sys/read-config]
     ;; Override config to use test container
     (with-redefs [sys/read-config (fn [profile]
                                     (-> (original-read-config profile)
-                                        (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+                                        (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
       (testing "start! returns running system"
         (let [system (rt/start! :test)]
           (try
             (is (map? system))
             (is (some? (:db/schema system)))
-            (is (some? (:db/age system)))
+            (is (some? (:db/postgres system)))
             (is (some? (:db/versioned system)))
             (finally
               (rt/stop!)))))
@@ -207,11 +209,11 @@
 
 
 (deftest executor-runtime-restart-test
-  (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+  (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
         original-read-config sys/read-config]
     (with-redefs [sys/read-config (fn [profile]
                                     (-> (original-read-config profile)
-                                        (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+                                        (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
       (testing "restart! stops and starts system"
         (let [system1 (rt/start! :test)]
           (try
@@ -238,10 +240,10 @@
           (ig/halt! system)))))
 
   (testing "suspend! with multiple components"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))
-          system (ig/init config [:db/schema :db/age :db/versioned])]
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+          system (ig/init config [:db/schema :db/postgres :db/versioned])]
       (try
         (is (some? (:db/versioned system)))
         (sys/suspend! system)
@@ -258,7 +260,7 @@
     (let [system (sys/start! :test [:db/schema])]
       (try
         (is (some? (:db/schema system)))
-        (is (nil? (:db/age system)))
+        (is (nil? (:db/postgres system)))
         (finally
           (sys/stop! system))))))
 
@@ -269,10 +271,10 @@
 
 (deftest exec-base-fns-init-test
   (testing ":exec/base-fns returns :registered"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))
-          system (ig/init config [:db/schema :db/age :db/versioned :exec/base-fns])]
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+          system (ig/init config [:db/schema :db/postgres :db/versioned :exec/base-fns])]
       (try
         (is (= :registered (:exec/base-fns system)))
         (finally
@@ -281,10 +283,10 @@
 
 (deftest exec-context-init-test
   (testing ":exec/context creates context map with correct keys"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))
-          system (ig/init config [:db/schema :db/age :db/versioned :exec/context])]
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))
+          system (ig/init config [:db/schema :db/postgres :db/versioned :exec/context])]
       (try
         (let [ctx (:exec/context system)]
           (is (map? ctx))
@@ -299,12 +301,12 @@
 
 (deftest exec-context-defaults-test
   (testing ":exec/context uses defaults when max-depth and timeout-ms are nil"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url)
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url)
                      (assoc-in [:exec/context :max-depth] nil)
                      (assoc-in [:exec/context :timeout-ms] nil))
-          system (ig/init config [:db/schema :db/age :db/versioned :exec/context])]
+          system (ig/init config [:db/schema :db/postgres :db/versioned :exec/context])]
       (try
         (let [ctx (:exec/context system)]
           (is (= 1000 (:max-depth ctx)))
@@ -319,12 +321,12 @@
 
 (deftest resume-system-test
   (testing "resume! restarts system after suspend"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           original-read-config sys/read-config]
       (with-redefs [sys/read-config (fn [profile]
                                       (-> (original-read-config profile)
-                                          (assoc-in [:db/age :jdbc-url] jdbc-url)))]
-        (let [system (sys/start! :test [:db/schema :db/age :db/versioned])]
+                                          (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
+        (let [system (sys/start! :test [:db/schema :db/postgres :db/versioned])]
           (try
             (is (some? (:db/schema system)))
             (sys/suspend! system)
@@ -358,14 +360,14 @@
 ;; =============================================================================
 
 (deftest start-default-profile-test
-  (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+  (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
         original-read-config sys/read-config
         profile-used (atom nil)]
     ;; Override to track which profile is used and inject test container URL
     (with-redefs [sys/read-config (fn [profile]
                                     (reset! profile-used profile)
                                     (-> (original-read-config :test)
-                                        (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+                                        (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
       (testing "start! with no args uses :prod profile"
         (let [system (rt/start!)]
           (try
@@ -376,14 +378,14 @@
 
 
 (deftest restart-default-profile-test
-  (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+  (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
         original-read-config sys/read-config
         profiles-used (atom [])]
     ;; Override to track which profiles are used
     (with-redefs [sys/read-config (fn [profile]
                                     (swap! profiles-used conj profile)
                                     (-> (original-read-config :test)
-                                        (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+                                        (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
       (testing "restart! with no args uses :prod profile"
         ;; First start with :test
         (rt/start! :test)
@@ -413,11 +415,11 @@
 
 (deftest stop-returns-nil-test
   (testing "stop! returns nil when system is stopped"
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           original-read-config sys/read-config]
       (with-redefs [sys/read-config (fn [profile]
                                       (-> (original-read-config profile)
-                                          (assoc-in [:db/age :jdbc-url] jdbc-url)))]
+                                          (assoc-in [:db/postgres :jdbc-url] jdbc-url)))]
         (rt/start! :test)
         (let [result (rt/stop!)]
           (is (nil? result)))))))

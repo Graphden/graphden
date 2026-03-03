@@ -5,27 +5,34 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as core]
     [graphden.executor.registry.interface :as registry]
-    [graphden.storage.age.test-setup :as th]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.schema.graph.schema :as gds]
+    [graphden.schema.malli.core :as mds]
+    [graphden.storage.postgres.core :as pg]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.postgres-test-helpers :as pth]))
 
 
 ;; Container for PostgreSQL tests
 (def ^:dynamic *container* nil)
 
 
-(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :once (pth/create-container-fixture #'*container*))
 
 
 (use-fixtures :each
-  (th/create-clean-db-fixture #'*container*)
+  (pth/create-clean-db-fixture #'*container*)
   exec/with-clean-registry)
 
 
 (defn- create-test-storage
-  "Creates a graph storage from the current test container.
-   Cleans the database before creating storage to ensure test isolation."
+  "Creates a PostgreSQL storage from the current test container.
+   Cleans the database and initializes schema before creating storage."
   []
-  (th/create-test-storage *container*))
+  (pth/clean-database-fast! *container*)
+  (let [storage (pg/create-storage (pth/get-container-config *container*))
+        schema (gds/build-schema (mds/create-builder))]
+    (sp/initialize storage schema)
+    storage))
 
 
 ;; === Helper Functions ===
@@ -153,7 +160,7 @@
 (deftest create-storage-with-base-fns-test
   (testing "creates storage and initializes with base fns"
     (let [storage (registry/create-storage-with-base-fns
-                    #(th/create-test-storage *container*))]
+                    #(create-test-storage))]
       (try
         ;; Should have storage
         (is (some? storage))

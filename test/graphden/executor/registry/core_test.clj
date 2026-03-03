@@ -13,16 +13,32 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.registry.core :as core]
-    [graphden.storage.age.test-setup :as setup]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.schema.graph.schema :as gds]
+    [graphden.schema.malli.core :as mds]
+    [graphden.storage.postgres.core :as pg]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.postgres-test-helpers :as pth]))
 
 
 ;; =============================================================================
 ;; Test Fixtures
 ;; =============================================================================
 
-(use-fixtures :once (setup/container-fixture))
-(use-fixtures :each (setup/clean-db-fixture))
+(def ^:dynamic *container* nil)
+
+(use-fixtures :once (pth/create-container-fixture #'*container*))
+(use-fixtures :each (pth/create-clean-db-fixture #'*container*))
+
+
+(defn- create-test-storage
+  "Creates a PostgreSQL storage from the current test container.
+   Initializes with graph schema."
+  []
+  (pth/clean-database-fast! *container*)
+  (let [storage (pg/create-storage (pth/get-container-config *container*))
+        schema (gds/build-schema (mds/create-builder))]
+    (sp/initialize storage schema)
+    storage))
 
 
 ;; =============================================================================
@@ -307,7 +323,7 @@
 
 (deftest sync-defs-to-storage-test
   (testing "sync-defs-to-storage! creates fn-schema and arg-schema"
-    (let [storage (setup/create-test-storage)
+    (let [storage (create-test-storage)
           defs {:sync-test-fn {:args {:x :int :y :text}
                                :return-type :int}}]
       (try
@@ -325,7 +341,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! is idempotent (updates on second run)"
-    (let [storage (setup/create-test-storage)
+    (let [storage (create-test-storage)
           defs {:idempotent-fn {:args {:a :bool}
                                 :return-type :bool}}]
       (try
@@ -340,7 +356,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! stores impl-hash"
-    (let [storage (setup/create-test-storage)
+    (let [storage (create-test-storage)
           defs {:hash-fn {:args {:x :int}
                           :return-type :int
                           :impl-source '[(* x 2)]}}]
@@ -354,7 +370,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! validates before syncing"
-    (let [storage (setup/create-test-storage)
+    (let [storage (create-test-storage)
           defs {:bad-fn {:args {:x :invalid}
                          :return-type :int}}]
       (try
@@ -364,7 +380,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! rejects too large batch"
-    (let [storage (setup/create-test-storage)
+    (let [storage (create-test-storage)
           ;; Create 501 definitions (exceeds max of 500)
           defs (into {} (for [i (range 501)]
                           [(keyword (str "fn-" i))
@@ -378,7 +394,7 @@
 
 (deftest sync-defs-with-optional-args-test
   (testing "sync-defs-to-storage! handles optional args"
-    (let [storage (setup/create-test-storage)
+    (let [storage (create-test-storage)
           defs {:optional-fn {:args {:required-arg :int
                                      :optional-arg {:type :text :required false}}
                               :return-type :int}}]

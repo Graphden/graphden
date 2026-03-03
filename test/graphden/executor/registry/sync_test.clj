@@ -5,34 +5,23 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as core]
     [graphden.executor.registry.interface :as registry]
-    [graphden.storage.age.test-setup :as th]
+    [graphden.executor.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]))
 
 
-;; Container for PostgreSQL tests
-(def ^:dynamic *container* nil)
-
-
-(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :once (setup/create-container-fixture))
 
 
 (use-fixtures :each
-  (th/create-clean-db-fixture #'*container*)
+  (setup/create-clean-db-fixture)
   exec/with-clean-registry)
-
-
-(defn- create-test-storage
-  "Creates a graph storage from the current test container.
-   Cleans the database before creating storage to ensure test isolation."
-  []
-  (th/create-test-storage *container*))
 
 
 ;; === Storage Sync Tests ===
 
 (deftest sync-defs-to-storage-test
   (testing "sync-defs-to-storage! creates fn-schemas and arg-schemas"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:my-add {:args {:a :numeric :b :numeric}
                          :return-type :numeric
                          :impl (fn [{:keys [a b]} _ctx] (+ a b))}
@@ -63,7 +52,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! is idempotent"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:idempotent-fn {:args {:x :any}
                                 :return-type :any
                                 :impl (fn [{:keys [x]} _ctx] x)}}]
@@ -83,7 +72,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! validates arg-spec - missing :type in map"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           invalid-defs {:bad-fn {:args {:x {:required false}} ; missing :type
                                  :return-type :any
                                  :impl (fn [_ _] nil)}}]
@@ -94,7 +83,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! validates arg-spec - invalid type"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           invalid-defs {:bad-fn {:args {:x "not-a-keyword"} ; invalid
                                  :return-type :any
                                  :impl (fn [_ _] nil)}}]
@@ -105,7 +94,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! validates arg-spec - nil"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           invalid-defs {:bad-fn {:args {:x nil}
                                  :return-type :any
                                  :impl (fn [_ _] nil)}}]
@@ -116,7 +105,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! validates arg-spec - number"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           invalid-defs {:bad-fn {:args {:x 123}
                                  :return-type :any
                                  :impl (fn [_ _] nil)}}]
@@ -127,7 +116,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! handles update when data actually changed"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs-v1 {:changing-fn {:args {:x :int}
                                  :return-type :int
                                  :impl (fn [{:keys [x]} _ctx] x)}}
@@ -151,7 +140,7 @@
           (sp/close storage)))))
 
   (testing "sync-defs-to-storage! handles optional args"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:opt-fn {:args {:required :int
                                 :optional {:type :text :required false}}
                          :return-type :any
@@ -168,7 +157,7 @@
           (sp/close storage)))))
 
   (testing "sync-fn-schema! updates only when return-type changes"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs-v1 {:ret-change {:args {:x :int}
                                 :return-type :int
                                 :impl (fn [_ _] 1)}}
@@ -186,7 +175,7 @@
           (sp/close storage)))))
 
   (testing "sync-arg-schemas! updates when required changes"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs-v1 {:req-change {:args {:x {:type :int :required true}}
                                 :return-type :int
                                 :impl (fn [_ _] 1)}}
@@ -206,7 +195,7 @@
           (sp/close storage)))))
 
   (testing "sync-arg-schemas! updates when type changes"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs-v1 {:type-change {:args {:x :int}
                                  :return-type :any
                                  :impl (fn [_ _] 1)}}
@@ -233,7 +222,7 @@
   (testing "sync-fn-schema! triggers update when only base-fn-name differs"
     ;; This tests the third branch of the `or` in sync-fn-schema!
     ;; We manually modify base-fn-name in storage, then sync to trigger update
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:base-fn-test {:args {:x :int}
                                :return-type :int
                                :impl (fn [_ _] 1)}}]
@@ -260,7 +249,7 @@
 
   (testing "sync-fn-schema! triggers update when only name differs"
     ;; This tests the first branch of the `or` in sync-fn-schema!
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:name-test {:args {:x :int}
                             :return-type :int
                             :impl (fn [_ _] 1)}}]
@@ -281,7 +270,7 @@
 
   (testing "sync-fn-schema! triggers update when only returned-type differs"
     ;; This tests the second branch of the `or` in sync-fn-schema!
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:ret-test {:args {:x :int}
                            :return-type :numeric
                            :impl (fn [_ _] 1)}}]
@@ -305,7 +294,7 @@
 
   (testing "sync-fn-schema! triggers update when only impl-hash differs"
     ;; This tests the fourth branch of the `or` in sync-fn-schema!
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:impl-hash-test {:args {:x :int}
                                  :return-type :int
                                  :impl (fn [_ _] 1)}}]
@@ -333,7 +322,7 @@
 
   (testing "sync-fn-schema! does NOT update when nothing differs"
     ;; This tests when all four `or` branches are false
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:no-change {:args {:x :int}
                             :return-type :int
                             :impl (fn [_ _] 1)}}]
@@ -352,7 +341,7 @@
 (deftest sync-arg-schema-or-branches-test
   (testing "sync-arg-schemas! triggers update when only fn-schema-id differs"
     ;; This tests the first branch of the `or` in sync-arg-schemas!
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:arg-fn-test {:args {:x :int}
                               :return-type :int
                               :impl (fn [_ _] 1)}}
@@ -379,7 +368,7 @@
 
   (testing "sync-arg-schemas! triggers update when only name differs"
     ;; This tests the second branch of the `or` in sync-arg-schemas!
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:arg-name-test {:args {:myarg :int}
                                 :return-type :int
                                 :impl (fn [_ _] 1)}}]
@@ -402,7 +391,7 @@
 
   (testing "sync-arg-schemas! triggers update when only type differs"
     ;; This tests the third branch of the `or` in sync-arg-schemas!
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:arg-type-test {:args {:z :numeric}
                                 :return-type :int
                                 :impl (fn [_ _] 1)}}]
@@ -428,7 +417,7 @@
 
   (testing "sync-arg-schemas! triggers update when only required differs"
     ;; This tests the fourth branch of the `or` in sync-arg-schemas!
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:arg-req-test {:args {:w {:type :int :required false}}
                                :return-type :int
                                :impl (fn [_ _] 1)}}]
@@ -454,7 +443,7 @@
 
   (testing "sync-arg-schemas! does NOT update when nothing differs"
     ;; This tests when all four `or` branches are false
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           defs {:arg-nochange {:args {:p :int}
                                :return-type :int
                                :impl (fn [_ _] 1)}}]
@@ -473,7 +462,7 @@
 
 (deftest sync-defs-to-storage-core-test
   (testing "creates new fn-schema and arg-schema entries"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       ;; create-test-storage returns storage already initialized with graph schema
       (try
         (let [defs {:test-fn {:args {:x :int :y :int}
@@ -487,7 +476,7 @@
           (sp/close storage)))))
 
   (testing "updates existing fn-schema when re-syncing"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         ;; First sync
         (core/sync-defs-to-storage! storage {:test-fn {:args {:x :int} :return-type :int}})
@@ -501,7 +490,7 @@
           (sp/close storage)))))
 
   (testing "sync is idempotent with deterministic UUIDs"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         (let [defs {:add {:args {:a :int :b :int} :return-type :int}}
               fn-id-before (core/fn-schema-uuid :add)]
@@ -514,7 +503,7 @@
           (sp/close storage)))))
 
   (testing "handles empty defs map"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         (let [result (core/sync-defs-to-storage! storage {})]
           (is (= {:fn-schemas {:created 0 :updated 0}
@@ -524,7 +513,7 @@
           (sp/close storage)))))
 
   (testing "handles optional args correctly"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         (let [defs {:opt-fn {:args {:x :int
                                     :y {:type :int :required false}}
@@ -539,7 +528,7 @@
           (sp/close storage)))))
 
   (testing "fails fast on invalid definition"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         ;; Should throw before any storage operations
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Unknown return type"
@@ -552,7 +541,7 @@
 
 (deftest sync-fn-schema-update-test
   (testing "updates fn-schema when returned-type changes"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         ;; First sync with :int return type
         (core/sync-defs-to-storage! storage {:my-fn {:args {} :return-type :int}})
@@ -567,7 +556,7 @@
           (sp/close storage)))))
 
   (testing "does not update fn-schema when nothing changed"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         (core/sync-defs-to-storage! storage {:my-fn {:args {:x :int} :return-type :int}})
         ;; Same sync again - should report as update but no actual change
@@ -581,7 +570,7 @@
 
 (deftest sync-arg-schemas-update-test
   (testing "updates arg-schema when type changes"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         (core/sync-defs-to-storage! storage {:my-fn {:args {:x :int} :return-type :int}})
         (let [arg-id (core/arg-schema-uuid :my-fn :x)
@@ -595,7 +584,7 @@
           (sp/close storage)))))
 
   (testing "updates arg-schema when required changes"
-    (let [storage (create-test-storage)]
+    (let [storage (setup/create-test-storage)]
       (try
         (core/sync-defs-to-storage! storage {:my-fn {:args {:x :int} :return-type :int}})
         (let [arg-id (core/arg-schema-uuid :my-fn :x)
@@ -613,7 +602,7 @@
 
 (deftest sync-defs-batch-limit-test
   (testing "throws when batch exceeds max-sync-batch-size"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           ;; Create 501 function definitions (max is 500)
           large-defs (into {}
                            (for [i (range 501)]
@@ -627,7 +616,7 @@
           (sp/close storage)))))
 
   (testing "exception contains batch size info"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           large-defs (into {}
                            (for [i (range 502)]
                              [(keyword (str "fn-" i))
@@ -644,7 +633,7 @@
           (sp/close storage)))))
 
   (testing "accepts batch at exactly max size"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           ;; Create exactly 500 function definitions (max allowed)
           max-defs (into {}
                          (for [i (range 500)]
@@ -661,7 +650,7 @@
 
 (deftest parse-arg-spec-required-validation-test
   (testing "throws when :required is not a boolean"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           invalid-defs {:bad-fn {:args {:x {:type :int :required "yes"}}
                                  :return-type :int}}]
       (try
@@ -672,7 +661,7 @@
           (sp/close storage)))))
 
   (testing "exception contains arg-spec info"
-    (let [storage (create-test-storage)
+    (let [storage (setup/create-test-storage)
           invalid-defs {:bad-fn {:args {:x {:type :int :required 1}}
                                  :return-type :int}}]
       (try

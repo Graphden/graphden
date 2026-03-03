@@ -207,6 +207,36 @@
   )
 
 
+;; === str-to-keyword-fn tests ===
+
+(deftest str-to-keyword-fn-test
+  (testing "converts string to keyword"
+    (is (= :hello ((:impl strings/str-to-keyword-fn) {:s (delay "hello")} nil)))
+    (is (= :foo-bar ((:impl strings/str-to-keyword-fn) {:s (delay "foo-bar")} nil))))
+
+  (testing "handles empty string"
+    (is (= (keyword "") ((:impl strings/str-to-keyword-fn) {:s (delay "")} nil))))
+
+  (testing "handles namespaced keywords"
+    ;; Note: keyword function creates simple keyword from string
+    (is (= :ns/name ((:impl strings/str-to-keyword-fn) {:s (delay "ns/name")} nil)))))
+
+
+;; === keyword-to-str-fn tests ===
+
+(deftest keyword-to-str-fn-test
+  (testing "converts keyword to string"
+    (is (= "hello" ((:impl strings/keyword-to-str-fn) {:k (delay :hello)} nil)))
+    (is (= "foo-bar" ((:impl strings/keyword-to-str-fn) {:k (delay :foo-bar)} nil))))
+
+  (testing "handles non-keyword input by converting to string"
+    (is (= "123" ((:impl strings/keyword-to-str-fn) {:k (delay 123)} nil)))
+    (is (= "hello" ((:impl strings/keyword-to-str-fn) {:k (delay "hello")} nil))))
+
+  (testing "handles namespaced keywords (returns name only)"
+    (is (= "name" ((:impl strings/keyword-to-str-fn) {:k (delay :ns/name)} nil)))))
+
+
 ;; === string-defs map tests ===
 
 (deftest string-defs-test
@@ -218,7 +248,9 @@
     (is (contains? strings/string-defs :str-lower))
     (is (contains? strings/string-defs :str-trim))
     (is (contains? strings/string-defs :str-split))
-    (is (contains? strings/string-defs :str-join)))
+    (is (contains? strings/string-defs :str-join))
+    (is (contains? strings/string-defs :str-to-keyword))
+    (is (contains? strings/string-defs :keyword-to-str)))
 
   (testing "all defs have required keys"
     (doseq [[fn-name def-map] strings/string-defs]

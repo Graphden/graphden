@@ -44,45 +44,54 @@
   "Builds HoneySQL map for recursive CTE graph discovery.
 
    Structure:
-   1. fn_graph: recursively find all fn-ids (direct references)
-   2. fu_refs: find fn_usage references and their target fn-ids
-   3. fu_fn_ids: fn-ids from fn_usages not already in fn_graph
-   4. combined: union all discovered fn-ids and fn-usages"
+   1. fn_graph: recursively find all fn-ids (direct AND indirect via fn_usage)
+   2. fu_refs: find all fn_usage references from discovered fns
+
+   The key insight is that the recursive CTE must follow BOTH:
+   - Direct fn references: arg_value.value -> fn.id
+   - Indirect fn references: arg_value.value -> fn_usage.id -> fn_usage.fn_id
+
+   PostgreSQL only allows ONE recursive term, so we combine both cases using
+   LEFT JOINs and COALESCE to pick the matching fn_id."
   [root-fn-id max-depth]
   {:with-recursive
-   [;; Base case + recursive case for fn references
+   [;; Base case + single recursive case handling both direct and indirect refs
     [:fn_graph
      {:union
-      [{:select [:id [[:inline 0] :depth]]
+      [;; Base case: root function
+       {:select [:id [[:inline 0] :depth]]
         :from [:fn]
         :where [:= :id root-fn-id]}
-       {:select-distinct [:f.id [[:+ :g.depth [:inline 1]] :depth]]
+       ;; Recursive case: handles BOTH direct fn refs AND indirect via fn_usage
+       ;; Uses LEFT JOINs to try both paths, COALESCE picks whichever matched
+       {:select-distinct
+        [[[:raw "COALESCE(f_direct.id, f_via_fu.id)"]]
+         [[:+ :g.depth [:inline 1]] :depth]]
         :from [[:fn_graph :g]]
         :join [[:fn_arg :fa] [:= :fa.fn_id :g.id]
-               [:arg_value :av] [:= :av.id :fa.arg_value_id]
-               [:fn :f] [:= :f.id (uuid-from-jsonb :av.value)]]
-        :where [:< :g.depth max-depth]}]}]
+               [:arg_value :av] [:= :av.id :fa.arg_value_id]]
+        :left-join [;; Direct path: arg_value.value = fn.id
+                    [:fn :f_direct] [:= :f_direct.id (uuid-from-jsonb :av.value)]
+                    ;; Indirect path: arg_value.value = fn_usage.id -> fn_usage.fn_id
+                    [:fn_usage :fu] [:= :fu.id (uuid-from-jsonb :av.value)]
+                    [:fn :f_via_fu] [:= :f_via_fu.id :fu.fn_id]]
+        :where [:and
+                [:< :g.depth max-depth]
+                ;; At least one path must match
+                [:or [:is-not :f_direct.id nil] [:is-not :f_via_fu.id nil]]]}]}]
 
-    ;; fn_usage references
+    ;; All fn_usage references from any fn in fn_graph
     [:fu_refs
      {:select-distinct [[:fu.id :fu_id] :fu.fn_id]
       :from [[:fn_graph :g]]
       :join [[:fn_arg :fa] [:= :fa.fn_id :g.id]
              [:arg_value :av] [:= :av.id :fa.arg_value_id]
-             [:fn_usage :fu] [:= :fu.id (uuid-from-jsonb :av.value)]]}]
-
-    ;; fn-ids from fn_usages not in fn_graph
-    [:fu_fn_ids
-     {:select-distinct [[:fn_id :id]]
-      :from [:fu_refs]
-      :where [:not-in :fn_id {:select [:id] :from [:fn_graph]}]}]]
+             [:fn_usage :fu] [:= :fu.id (uuid-from-jsonb :av.value)]]}]]
 
    ;; Final select: union all results
    :union-all
    [{:select [[[:inline "fn"] :entity_type] :id [[:cast nil :uuid] :fn_id]]
      :from [:fn_graph]}
-    {:select [[[:inline "fn"] :entity_type] :id [[:cast nil :uuid] :fn_id]]
-     :from [:fu_fn_ids]}
     {:select [[[:inline "fu"] :entity_type] [:fu_id :id] :fn_id]
      :from [:fu_refs]}]})
 

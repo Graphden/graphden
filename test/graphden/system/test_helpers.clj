@@ -8,14 +8,14 @@
 
    Usage:
      (use-fixtures :once
-       (create-container-fixture)
+       (pth/create-container-fixture #'*container*)
        (create-system-fixture))
 
      (deftest my-test
        (let [storage (storage)]
          ...))"
   (:require
-    [graphden.storage.age.test-setup :as age-setup]
+    [graphden.storage.protocol.postgres-test-helpers :as pth]
     [graphden.system.interface :as sys]
     [integrant.core :as ig]))
 
@@ -29,23 +29,28 @@
   nil)
 
 
+(def ^:dynamic *container*
+  "Dynamic var holding the test container."
+  nil)
+
+
 ;; =============================================================================
 ;; Fixtures
 ;; =============================================================================
 
 (defn create-system-fixture
   "Creates a fixture that starts system with testcontainer config.
-   Requires *container* to be bound (from age-setup/create-container-fixture).
+   Requires *container* to be bound (from pth/create-container-fixture).
 
    Usage:
      (use-fixtures :once
-       (age-setup/create-container-fixture)
+       (pth/create-container-fixture #'*container*)
        (create-system-fixture))"
   []
   (fn [f]
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))]
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))]
       (binding [*system* (ig/init config)]
         (try
           (f)
@@ -59,13 +64,13 @@
 
    Usage:
      (use-fixtures :once
-       (age-setup/create-container-fixture)
-       (create-partial-system-fixture [:db/schema :db/age :db/versioned]))"
+       (pth/create-container-fixture #'*container*)
+       (create-partial-system-fixture [:db/schema :db/postgres :db/versioned]))"
   [component-keys]
   (fn [f]
-    (let [jdbc-url (:jdbc-url (age-setup/get-container-config age-setup/*container*))
+    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
-                     (assoc-in [:db/age :jdbc-url] jdbc-url))]
+                     (assoc-in [:db/postgres :jdbc-url] jdbc-url))]
       (binding [*system* (ig/init config component-keys)]
         (try
           (f)
@@ -83,10 +88,10 @@
   (:db/versioned *system*))
 
 
-(defn age-storage
-  "Returns the raw AGE storage from test system."
+(defn postgres-storage
+  "Returns the raw PostgreSQL storage from test system."
   []
-  (:db/age *system*))
+  (:db/postgres *system*))
 
 
 (defn context

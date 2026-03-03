@@ -2,11 +2,14 @@
   "Shared test setup for executor tests.
 
    Provides helper functions for creating test storage and setting up
-   common test fixtures using AGE testcontainers."
+   common test fixtures using PostgreSQL testcontainers."
   (:require
     [graphden.executor.interface :as exec]
-    [graphden.storage.age.test-setup :as th]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.schema.graph.schema :as gds]
+    [graphden.schema.malli.core :as mds]
+    [graphden.storage.postgres.core :as pg]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.postgres-test-helpers :as pth]))
 
 
 ;; ============================================================================
@@ -21,13 +24,13 @@
 (defn create-container-fixture
   "Creates a :once fixture that starts/stops a PostgreSQL container."
   []
-  (th/create-container-fixture #'*container*))
+  (pth/create-container-fixture #'*container*))
 
 
 (defn create-clean-db-fixture
   "Creates an :each fixture that cleans the database before each test."
   []
-  (th/create-clean-db-fixture #'*container*))
+  (pth/create-clean-db-fixture #'*container*))
 
 
 ;; ============================================================================
@@ -35,11 +38,15 @@
 ;; ============================================================================
 
 (defn create-test-storage
-  "Creates an AGE storage from the current test container.
+  "Creates a PostgreSQL storage from the current test container.
    Cleans the database and initializes schema before creating storage.
    Must be called within a test that has the container fixture active."
   []
-  (th/create-test-storage *container*))
+  (pth/clean-database-fast! *container*)
+  (let [storage (pg/create-storage (pth/get-container-config *container*))
+        schema (gds/build-schema (mds/create-builder))]
+    (sp/initialize storage schema)
+    storage))
 
 
 ;; ============================================================================

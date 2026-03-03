@@ -7,27 +7,34 @@
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
-    [graphden.storage.age.test-setup :as th]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.schema.graph.schema :as gds]
+    [graphden.schema.malli.core :as mds]
+    [graphden.storage.postgres.core :as pg]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.postgres-test-helpers :as pth]))
 
 
 ;; Container for PostgreSQL tests
 (def ^:dynamic *container* nil)
 
 
-(use-fixtures :once (th/create-container-fixture #'*container*))
+(use-fixtures :once (pth/create-container-fixture #'*container*))
 
 
 (use-fixtures :each
-  (th/create-clean-db-fixture #'*container*)
+  (pth/create-clean-db-fixture #'*container*)
   exec/with-clean-registry)
 
 
 (defn- create-test-storage
-  "Creates a graph storage from the current test container.
-   Cleans the database before creating storage to ensure test isolation."
+  "Creates a PostgreSQL storage from the current test container.
+   Cleans the database and initializes schema before creating storage."
   []
-  (th/create-test-storage *container*))
+  (pth/clean-database-fast! *container*)
+  (let [storage (pg/create-storage (pth/get-container-config *container*))
+        schema (gds/build-schema (mds/create-builder))]
+    (sp/initialize storage schema)
+    storage))
 
 
 (deftest sync-fns-to-storage!-test
@@ -410,7 +417,7 @@
                                                    :impl (fn [_ _] nil)}}])
           ;; First sync with value 42
           result1 (fn-composition/sync-fns-to-storage! storage
-                                                        [{:name :my-fn :parent :const-fn :args {:x 42}}])
+                                                       [{:name :my-fn :parent :const-fn :args {:x 42}}])
           fn-id (:my-fn result1)
           fn-args-before (sp/query-entities storage :fn-arg {:fn-id fn-id})
           arg-value-id-before (:arg-value-id (first fn-args-before))
@@ -420,7 +427,7 @@
 
       ;; Re-sync with changed value 99
       (fn-composition/sync-fns-to-storage! storage
-                                            [{:name :my-fn :parent :const-fn :args {:x 99}}])
+                                           [{:name :my-fn :parent :const-fn :args {:x 99}}])
       ;; fn-arg should now point to different arg-value
       (let [fn-args-after (sp/query-entities storage :fn-arg {:fn-id fn-id})
             arg-value-id-after (:arg-value-id (first fn-args-after))
@@ -440,14 +447,14 @@
                                                    :return-type :any
                                                    :impl (fn [_ _] nil)}}])
           _ (fn-composition/sync-fns-to-storage! storage
-                                                  [{:name :my-fn :parent :const-fn :args {:x 42}}])
+                                                 [{:name :my-fn :parent :const-fn :args {:x 42}}])
           fn-id (first (map :id (sp/query-entities storage :fn {:name "my-fn"})))
           fn-args-before (sp/query-entities storage :fn-arg {:fn-id fn-id})
           fn-arg-id-before (:id (first fn-args-before))
           arg-value-id-before (:arg-value-id (first fn-args-before))]
       ;; Re-sync with same value
       (fn-composition/sync-fns-to-storage! storage
-                                            [{:name :my-fn :parent :const-fn :args {:x 42}}])
+                                           [{:name :my-fn :parent :const-fn :args {:x 42}}])
       (let [fn-args-after (sp/query-entities storage :fn-arg {:fn-id fn-id})]
         ;; fn-arg should be the same entity pointing to the same arg-value
         (is (= fn-arg-id-before (:id (first fn-args-after))))

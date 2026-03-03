@@ -14,11 +14,12 @@
 
    ## Reference Types
 
-   Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
-   - ref<fn> → pass fn-id directly (for HOF, handlers, etc. - don't execute)
-   - ref<fn-usage> → execute fn and use result (with caching)
+   Resolution is based on arg-schema.first-class flag:
+   - first-class=true → get fn-id from fn-usage, pass directly (for HOF)
+   - first-class=false → execute fn-usage and use result (with caching)
 
-   This means HOF (map, filter, reduce) receive fn-id and create callables themselves.
+   All function references are stored as fn-usage UUIDs in arg-value.value.
+   The first-class flag determines whether to pass fn-id or execute.
 
    ## Argument Resolution Priority
 
@@ -138,25 +139,30 @@
 
 
 (defn- build-uuid-ref-delay
-  "Builds a delay for a UUID reference (fn or fn-usage).
+  "Builds a delay for a UUID reference to fn-usage.
 
-   Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
-   - ref<fn-usage> → execute fn and use result (with caching)
-   - ref<fn> → pass fn-id directly (for HOF, handlers, etc.)
+   Resolution is based on arg-schema.first-class flag:
+   - first-class=true → get fn-id from fn-usage, pass directly (for HOF)
+   - first-class=false → execute fn-usage and use result (with caching)
 
    Parameters:
    - context: Execution context
-   - uuid-value: The UUID reference
+   - uuid-value: The UUID reference (must be fn-usage-id)
    - arg-name: Argument name for error context
    - fn-usages: Map of fn-usages from execution graph
+   - first-class?: Whether this arg should receive fn-id directly (HOF)
    - execute-fn-usage-fn: Function to execute fn-usages (injected)"
-  [context uuid-value arg-name fn-usages execute-fn-usage-fn]
-  (if (contains? fn-usages uuid-value)
-    ;; ref<fn-usage>: execute with caching
-    (let [fu-context (assoc context :current-fn-usage-id uuid-value)]
-      (wrap-delay-with-context arg-name :fn-usage
-                               #(execute-fn-usage-fn fu-context uuid-value)))
-    ;; ref<fn>: pass fn-id directly (don't execute)
+  [context uuid-value arg-name fn-usages first-class? execute-fn-usage-fn]
+  (if-let [fn-usage (get fn-usages uuid-value)]
+    (if first-class?
+      ;; first-class=true: pass fn-id directly (for HOF, handlers, etc.)
+      (delay (:fn-id fn-usage))
+      ;; first-class=false: execute fn-usage with caching
+      (let [fu-context (assoc context :current-fn-usage-id uuid-value)]
+        (wrap-delay-with-context arg-name :fn-usage
+                                 #(execute-fn-usage-fn fu-context uuid-value))))
+    ;; UUID not in fn-usages - this shouldn't happen with proper validation
+    ;; but handle gracefully by passing as-is
     (delay uuid-value)))
 
 
@@ -207,19 +213,19 @@
 (defn build-delay
   "Builds a delay for an arg-value with error context.
 
-   Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
-   - UUID in fn-usages map → execute fn and use result (cached)
-   - UUID not in fn-usages → pass as fn-id (for HOF, handlers, etc.)
+   Resolution is based on arg-schema.first-class flag:
+   - first-class=true: get fn-id from fn-usage, pass directly (for HOF)
+   - first-class=false: execute fn-usage and use result (cached)
    - Non-UUID → literal value (returned as-is)
 
-   NOTE: Nested structures with fn/fn-usage references are NOT resolved.
+   NOTE: Nested structures with fn-usage references are NOT resolved.
    Use explicit graph functions (pair, assoc-any, conj-any) to build
-   structures containing fn/fn-usage references.
+   structures containing fn-usage references.
 
    Parameters:
    - context: Execution context
    - arg-value: The argument value record OR direct value (from cache)
-   - arg-schema: The argument schema
+   - arg-schema: The argument schema (includes first-class flag)
    - execute-fn-usage-fn: Injected function to execute fn-usages
 
    All delays include error context (arg-name, source) for better diagnostics.
@@ -230,14 +236,15 @@
   ^clojure.lang.Delay [context arg-value arg-schema execute-fn-usage-fn]
   (let [raw-value (extract-arg-value arg-value)
         arg-name (:name arg-schema)
+        first-class? (:first-class arg-schema)
         ;; Try to parse as UUID - handles both native UUIDs and UUID strings
         ;; from PostgreSQL JSONB storage
         parsed-uuid (try-parse-uuid raw-value)]
     (if parsed-uuid
-      ;; UUID: reference to fn or fn-usage
+      ;; UUID: reference to fn-usage
       (let [fn-usages (-> context :execution-graph :fn-usages)]
         (build-uuid-ref-delay context parsed-uuid arg-name fn-usages
-                              execute-fn-usage-fn))
+                              first-class? execute-fn-usage-fn))
       ;; Literal or complex value - return as-is (no nested resolution)
       (wrap-delay-with-context arg-name :db-value
                                #(identity raw-value)))))

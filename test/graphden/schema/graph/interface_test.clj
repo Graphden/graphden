@@ -49,8 +49,8 @@
   (testing "arg-value has union type for value"
     (let [fields (ds/entity-fields schema :arg-value)]
       (is (= :union (get-in fields [:value :type])))
-      ;; Variants: 2 refs (fn, fn-usage) + :any + :fn + all literal types = 4 + count(supported-types)
-      (is (= (+ 4 (count ft/supported-types))
+      ;; Variants: 1 ref (fn-usage) + :any + :fn + all literal types = 3 + count(supported-types)
+      (is (= (+ 3 (count ft/supported-types))
              (count (get-in fields [:value :variants]))))))
 
   (testing "fn-usage has expected fields"

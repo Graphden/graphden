@@ -186,15 +186,18 @@
 (defn value-variants
   "Generates union variants for arg-value.
    Variants:
-   - ref to fn: for HOF (passing function as first-class value)
-   - ref to fn-usage: for computed values (execute fn, cache result)
+   - ref to fn-usage: for function references (both HOF and computed)
    - :any/:fn types
    - literal types
 
+   Function references always go through fn-usage. The arg-schema.first-class
+   field determines how the executor handles it:
+   - first-class=true: pass fn-id from fn-usage (for HOF)
+   - first-class=false: execute fn-usage and use result
+
    Public for reuse by cache-data-schema."
   []
-  (into [{:type :ref :ref-entity :fn}
-         {:type :ref :ref-entity :fn-usage}
+  (into [{:type :ref :ref-entity :fn-usage}
          {:type :any}
          {:type :fn}]
         (map (fn [t] {:type t}) ft/supported-types)))

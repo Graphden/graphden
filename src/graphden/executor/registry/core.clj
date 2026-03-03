@@ -396,10 +396,13 @@
 
 
 (defn- sync-arg-schemas!
-  "Syncs arg-schemas for a function to storage."
+  "Syncs arg-schemas for a function to storage.
+   Sets first-class=true for :fn type args (HOF), false for others."
   [storage fn-name fn-schema-id args]
   (doseq [[arg-name arg-spec] args]
     (let [{:keys [arg-type required]} (parse-arg-spec arg-name arg-spec)
+          ;; :fn type args are first-class (HOF - pass fn-id, don't execute)
+          first-class? (= :fn arg-type)
           id (arg-schema-uuid fn-name arg-name)
           existing (sp/read-entity storage :arg-schema id)]
       (if existing
@@ -408,12 +411,12 @@
                         :name (name arg-name)
                         :type arg-type
                         :required required
-                        :first-class false}]
+                        :first-class first-class?}]
           (when (or (not= (:fn-schema-id existing) fn-schema-id)
                     (not= (:name existing) (:name new-data))
                     (not= (:type existing) (:type new-data))
                     (not= (:required existing) required)
-                    (not= (:first-class existing) false))
+                    (not= (:first-class existing) first-class?))
             (sp/update-entity storage :arg-schema id new-data)))
         ;; Create new
         (sp/create-entity storage :arg-schema
@@ -422,7 +425,7 @@
                            :name (name arg-name)
                            :type arg-type
                            :required required
-                           :first-class false})))))
+                           :first-class first-class?})))))
 
 
 (defn validate-all-defs!

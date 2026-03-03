@@ -401,6 +401,60 @@
                                                    :args {:ref :nonexistent>}}]))))))
 
 
+(deftest fn-arg-update-on-value-change-test
+  (testing "updates fn-arg when arg-value changes on re-sync"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:const-fn {:args {:x :any}
+                                                   :return-type :any
+                                                   :impl (fn [_ _] nil)}}])
+          ;; First sync with value 42
+          result1 (fn-composition/sync-fns-to-storage! storage
+                                                        [{:name :my-fn :parent :const-fn :args {:x 42}}])
+          fn-id (:my-fn result1)
+          fn-args-before (sp/query-entities storage :fn-arg {:fn-id fn-id})
+          arg-value-id-before (:arg-value-id (first fn-args-before))
+          ;; Verify initial value
+          arg-value-before (sp/read-entity storage :arg-value arg-value-id-before)]
+      (is (= 42 (:value arg-value-before)))
+
+      ;; Re-sync with changed value 99
+      (fn-composition/sync-fns-to-storage! storage
+                                            [{:name :my-fn :parent :const-fn :args {:x 99}}])
+      ;; fn-arg should now point to different arg-value
+      (let [fn-args-after (sp/query-entities storage :fn-arg {:fn-id fn-id})
+            arg-value-id-after (:arg-value-id (first fn-args-after))
+            arg-value-after (sp/read-entity storage :arg-value arg-value-id-after)]
+        ;; Should still have exactly one fn-arg
+        (is (= 1 (count fn-args-after)))
+        ;; But it should point to a different arg-value
+        (is (not= arg-value-id-before arg-value-id-after)
+            "fn-arg should point to new arg-value after re-sync")
+        ;; And the new arg-value should have value 99
+        (is (= 99 (:value arg-value-after))))))
+
+  (testing "does not update fn-arg when arg-value is same"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:const-fn {:args {:x :any}
+                                                   :return-type :any
+                                                   :impl (fn [_ _] nil)}}])
+          _ (fn-composition/sync-fns-to-storage! storage
+                                                  [{:name :my-fn :parent :const-fn :args {:x 42}}])
+          fn-id (first (map :id (sp/query-entities storage :fn {:name "my-fn"})))
+          fn-args-before (sp/query-entities storage :fn-arg {:fn-id fn-id})
+          fn-arg-id-before (:id (first fn-args-before))
+          arg-value-id-before (:arg-value-id (first fn-args-before))]
+      ;; Re-sync with same value
+      (fn-composition/sync-fns-to-storage! storage
+                                            [{:name :my-fn :parent :const-fn :args {:x 42}}])
+      (let [fn-args-after (sp/query-entities storage :fn-arg {:fn-id fn-id})]
+        ;; fn-arg should be the same entity pointing to the same arg-value
+        (is (= fn-arg-id-before (:id (first fn-args-after))))
+        (is (= arg-value-id-before (:arg-value-id (first fn-args-after)))
+            "fn-arg should still point to same arg-value")))))
+
+
 (deftest arg-value-deduplication-test
   (testing "reuses existing arg-value with same (arg-schema-id, value)"
     (let [storage (create-test-storage)

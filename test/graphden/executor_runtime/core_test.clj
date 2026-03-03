@@ -47,7 +47,7 @@
     (let [config (sys/read-config :prod)]
       (is (map? config))
       (is (contains? config :db/schema))
-      (is (contains? config :db/age))
+      (is (contains? config :db/postgres))
       (is (contains? config :http/server)))))
 
 

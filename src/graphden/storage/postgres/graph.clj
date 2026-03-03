@@ -21,16 +21,74 @@
     [next.jdbc :as jdbc]))
 
 
-;; === Recursive CTE for graph traversal ===
-;;
-;; This implementation uses a single recursive CTE to discover all fn-ids
-;; in the dependency graph, then batch-loads all related data.
-;;
-;; Complexity: O(1) round-trips (3-4 queries total) instead of O(depth)
+;; =============================================================================
+;; PostgreSQL-specific HoneySQL helpers
+;; =============================================================================
 
 (def ^:private uuid-regex
   "Regex pattern for UUID validation in PostgreSQL."
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+(defn- uuid-from-jsonb
+  "Extracts UUID from JSONB if it matches UUID regex, else NULL.
+   Pattern: CASE WHEN (col#>>'{}') ~ 'uuid-regex' THEN (col#>>'{}')::uuid ELSE NULL END"
+  [col]
+  [:raw (str "CASE WHEN (" (name col) "#>>'{}') ~ '" uuid-regex
+             "' THEN (" (name col) "#>>'{}')::uuid ELSE NULL END")])
+
+
+;; =============================================================================
+;; Recursive CTE for graph traversal
+;; =============================================================================
+;;
+;; Complexity: O(1) round-trips (4-5 queries total) instead of O(depth)
+
+(defn- build-graph-discovery-query
+  "Builds HoneySQL map for recursive CTE graph discovery.
+
+   Structure:
+   1. fn_graph: recursively find all fn-ids (direct references)
+   2. fu_refs: find fn_usage references and their target fn-ids
+   3. fu_fn_ids: fn-ids from fn_usages not already in fn_graph
+   4. combined: union all discovered fn-ids and fn-usages"
+  [root-fn-id max-depth]
+  {:with-recursive
+   [;; Base case + recursive case for fn references
+    [:fn_graph
+     {:union
+      [{:select [:id [[:inline 0] :depth]]
+        :from [:fn]
+        :where [:= :id root-fn-id]}
+       {:select-distinct [:f.id [[:+ :g.depth [:inline 1]] :depth]]
+        :from [[:fn_graph :g]]
+        :join [[:fn_arg :fa] [:= :fa.fn_id :g.id]
+               [:arg_value :av] [:= :av.id :fa.arg_value_id]
+               [:fn :f] [:= :f.id (uuid-from-jsonb :av.value)]]
+        :where [:< :g.depth max-depth]}]}]
+
+    ;; fn_usage references
+    [:fu_refs
+     {:select-distinct [[:fu.id :fu_id] :fu.fn_id]
+      :from [[:fn_graph :g]]
+      :join [[:fn_arg :fa] [:= :fa.fn_id :g.id]
+             [:arg_value :av] [:= :av.id :fa.arg_value_id]
+             [:fn_usage :fu] [:= :fu.id (uuid-from-jsonb :av.value)]]}]
+
+    ;; fn-ids from fn_usages not in fn_graph
+    [:fu_fn_ids
+     {:select-distinct [[:fn_id :id]]
+      :from [:fu_refs]
+      :where [:not-in :fn_id {:select [:id] :from [:fn_graph]}]}]]
+
+   ;; Final select: union all results
+   :union-all
+   [{:select [[[:inline "fn"] :entity_type] :id [[:cast nil :uuid] :fn_id]]
+     :from [:fn_graph]}
+    {:select [[[:inline "fn"] :entity_type] :id [[:cast nil :uuid] :fn_id]]
+     :from [:fu_fn_ids]}
+    {:select [[[:inline "fu"] :entity_type] [:fu_id :id] :fn_id]
+     :from [:fu_refs]}]})
 
 
 (defn- discover-graph-cte
@@ -40,52 +98,8 @@
    This is a SINGLE database query that traverses the entire graph.
    The CTE recursively follows UUID references in arg_value.value fields."
   [ds root-fn-id]
-  (let [;; Recursive CTE query that discovers all fn-ids and fn-usage refs
-        ;;
-        ;; Structure:
-        ;; 1. fn_graph: recursively find all fn-ids (direct references)
-        ;; 2. fu_refs: find fn_usage references and their target fn-ids
-        ;; 3. combined: union all discovered fn-ids
-        ;; Note: av.value is JSONB, so we extract text using #>>'{}'
-        ;; This handles JSON strings like "uuid" → uuid
-        query [(str
-                 "WITH RECURSIVE fn_graph AS ("
-                 ;; Base case: root function
-                 "  SELECT id, 0 as depth FROM fn WHERE id = ? "
-                 "  UNION "
-                 ;; Recursive case: functions referenced in arg_values
-                 "  SELECT DISTINCT f.id, g.depth + 1 "
-                 "  FROM fn_graph g "
-                 "  JOIN fn_arg fa ON fa.fn_id = g.id "
-                 "  JOIN arg_value av ON av.id = fa.arg_value_id "
-                 "  JOIN fn f ON f.id = CASE "
-                 "    WHEN (av.value#>>'{}') ~ '" uuid-regex "' THEN (av.value#>>'{}')::uuid "
-                 "    ELSE NULL END "
-                 "  WHERE g.depth < ? "  ;; depth limit for safety
-                 "), "
-                 ;; Find fn_usage references (indirect fn references)
-                 "fu_refs AS ("
-                 "  SELECT DISTINCT fu.id as fu_id, fu.fn_id "
-                 "  FROM fn_graph g "
-                 "  JOIN fn_arg fa ON fa.fn_id = g.id "
-                 "  JOIN arg_value av ON av.id = fa.arg_value_id "
-                 "  JOIN fn_usage fu ON fu.id = CASE "
-                 "    WHEN (av.value#>>'{}') ~ '" uuid-regex "' THEN (av.value#>>'{}')::uuid "
-                 "    ELSE NULL END "
-                 "), "
-                 ;; Get all fn-ids from fn_usages that aren't already in fn_graph
-                 "fu_fn_ids AS ("
-                 "  SELECT DISTINCT fn_id as id FROM fu_refs "
-                 "  WHERE fn_id NOT IN (SELECT id FROM fn_graph) "
-                 ") "
-                 ;; Return all data
-                 "SELECT 'fn' as entity_type, id, NULL::uuid as fn_id FROM fn_graph "
-                 "UNION ALL "
-                 "SELECT 'fn' as entity_type, id, NULL::uuid as fn_id FROM fu_fn_ids "
-                 "UNION ALL "
-                 "SELECT 'fu' as entity_type, fu_id as id, fn_id FROM fu_refs")
-               root-fn-id
-               sp/*max-graph-iterations*]]
+  (let [query-map (build-graph-discovery-query root-fn-id sp/*max-graph-iterations*)
+        query (sql/format query-map)]
     (util/with-sql-error-handling "Database error" :discover-graph-cte {:fn-id root-fn-id}
       (let [rows (jdbc/execute! ds query (util/query-opts))]
         (reduce
@@ -144,11 +158,10 @@
   (if (empty? fn-ids)
     {}
     (let [fn-ids-vec (vec fn-ids)
-          query [(str "SELECT fa.fn_id, av.* "
-                      "FROM fn_arg fa "
-                      "JOIN arg_value av ON av.id = fa.arg_value_id "
-                      "WHERE fa.fn_id = ANY(?)")
-                 (into-array java.util.UUID fn-ids-vec)]]
+          query (sql/format {:select [:fa.fn_id :av.*]
+                             :from [[:fn_arg :fa]]
+                             :join [[:arg_value :av] [:= :av.id :fa.arg_value_id]]
+                             :where [:in :fa.fn_id fn-ids-vec]})]
       (util/with-sql-error-handling "Database error" :load-arg-values-batch {:fn-count (count fn-ids)}
         (let [rows (jdbc/execute! ds query (util/query-opts))]
           (->> rows

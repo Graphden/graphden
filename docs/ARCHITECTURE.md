@@ -1,6 +1,6 @@
 # Graphden: Visual Functional Programming System
 
-> **Last updated:** 2026-01-18
+> **Last updated:** 2026-03-03
 >
 > This document describes the technical architecture of graphden.
 > For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
@@ -22,39 +22,47 @@
 
 ### Simple Graph Model
 
-Each function (`fn`) directly defines its arguments through `arg-value` entities:
+Each function (`fn`) has argument bindings via `fn-arg` entities pointing to `arg-value` entities:
 
 ```
 fn: create-user
   fn-schema: http-request
-  arg-values: {
-    url: "https://api.example.com",
-    method: "POST",
-    headers: {...},
-    body: {...}
-  }
+  fn-args: [
+    {arg: url, value: "https://api.example.com"},
+    {arg: method, value: "POST"},
+    {arg: headers, value: {...}},
+    {arg: body, value: {...}}
+  ]
 ```
 
-**Schema:**
+**Schema (normalized):**
 
 ```
 fn:
   id: uuid (PK)
-  name: text (UNIQUE)
+  name: text
   fn-schema-id: ref<fn-schema>
+  owner-fn-id: ref<fn> (nullable) - for local scoping
+  UNIQUE(owner-fn-id, name)
 
 arg-value:
   id: uuid (PK)
-  owner-fn-id: ref<fn>
   arg-schema-id: ref<arg-schema>
-  value: union<ref<fn> | literal-types...>
-  UNIQUE(owner-fn-id, arg-schema-id)
+  value: union<ref<fn> | ref<fn-usage> | literal-types...>
+  UNIQUE(arg-schema-id, value) - deduplication
+
+fn-arg:
+  id: uuid (PK)
+  fn-id: ref<fn>
+  arg-schema-id: ref<arg-schema>
+  arg-value-id: ref<arg-value>
+  UNIQUE(fn-id, arg-schema-id)
 ```
 
 **Benefits:**
-- Each fn is self-contained
-- Simple constraint: one arg-schema-id per fn = simple `UNIQUE(owner-fn-id, arg-schema-id)`
-- No recursive checks needed
+- arg-value is pure (no owner) - enables deduplication
+- fn-arg is the binding between fn and arg-value
+- Local scoping via fn.owner-fn-id
 - UI can offer "create based on" = copying with ability to change
 
 **Constraints are extracted into an explicit protocol** - each storage MUST implement them.
@@ -120,10 +128,10 @@ The implementation uses a **shared validation logic** pattern with pluggable hel
 
 ```
 fn: factorial
-  arg-values: {
-    n: <input argument>,
-    recursive-call: ref<factorial>  // Reference to itself
-  }
+  fn-args: [
+    {arg: n, value: <input argument>},
+    {arg: recursive-call, value: ref<factorial>}  // Reference to itself
+  ]
 ```
 
 **With lazy execution this works**, if there's a base case:
@@ -208,6 +216,7 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | name: text                                                        |
 | type: enum<value-kind>                                            |
 | required: bool (default true)                                     |
+| first-class: bool (default true) - visible in UI                 |
 | UNIQUE(fn-schema-id, name)                                        |
 +------------------------------------------------------------------+
 
@@ -215,37 +224,48 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | fn (function instance)                                            |
 +------------------------------------------------------------------+
 | id: uuid (PK)                                                     |
-| name: text (UNIQUE)                                               |
+| name: text                                                        |
 | fn-schema-id: ref<fn-schema>                                      |
+| owner-fn-id: ref<fn> (nullable) - for local scoping              |
+| UNIQUE(owner-fn-id, name)                                         |
 +------------------------------------------------------------------+
          |
-         | 1:N
+         | 1:N (via fn-arg)
          v
++------------------------------------------------------------------+
+| fn-arg (argument binding)                                         |
++------------------------------------------------------------------+
+| id: uuid (PK)                                                     |
+| fn-id: ref<fn>                                                    |
+| arg-schema-id: ref<arg-schema>                                    |
+| arg-value-id: ref<arg-value>                                      |
+| UNIQUE(fn-id, arg-schema-id)                                      |
++------------------------------------------------------------------+
+         |
+         | N:1
+         v
++------------------------------------------------------------------+
+| arg-value (argument value - pure, no owner)                       |
++------------------------------------------------------------------+
+| id: uuid (PK)                                                     |
+| arg-schema-id: ref<arg-schema>                                    |
+| value: union<ref<fn> | ref<fn-usage> | literal-types...>         |
+| UNIQUE(arg-schema-id, value) - enables deduplication              |
++------------------------------------------------------------------+
+
 +------------------------------------------------------------------+
 | fn-usage (function usage reference)                               |
 +------------------------------------------------------------------+
 | id: uuid (PK)                                                     |
 | fn-id: ref<fn> - function to execute at this usage               |
-| name: text (UNIQUE) - identifier for this fn-usage               |
+| name: text - identifier for this fn-usage                        |
 | owner-fn-id: ref<fn> (nullable) - owning fn for local scoping    |
+| UNIQUE(owner-fn-id, name)                                         |
 +------------------------------------------------------------------+
 | PRIMARY PURPOSE: Distinguish same function at different usage    |
 | points. Example: current-time before sleep vs after sleep.       |
 |                                                                  |
 | SECONDARY: Results are cached within execution (memoization).    |
-|                                                                  |
-| LOCAL ARGUMENTS: Use fn with owner-fn-id to set arguments        |
-| locally within the owning function's scope.                      |
-+------------------------------------------------------------------+
-
-+------------------------------------------------------------------+
-| arg-value (argument value)                                        |
-+------------------------------------------------------------------+
-| id: uuid (PK)                                                     |
-| owner-fn-id: ref<fn>                                              |
-| arg-schema-id: ref<arg-schema>                                    |
-| value: union<ref<fn> | ref<fn-usage> | literal-types...>    |
-| UNIQUE(owner-fn-id, arg-schema-id)                                |
 +------------------------------------------------------------------+
 ```
 
@@ -254,25 +274,26 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 | # | Constraint | PostgreSQL | Apache AGE |
 |---|------------|------------|------------|
 | 1 | fn-schema.name is unique | UNIQUE constraint | UNIQUE constraint |
-| 2 | fn.name is unique | UNIQUE constraint | UNIQUE constraint |
+| 2 | fn.name is unique within scope | UNIQUE(owner-fn-id, name) | UNIQUE(owner-fn-id, name) |
 | 3 | arg-schema is unique within fn-schema | UNIQUE(fn-schema-id, name) | UNIQUE(fn-schema-id, name) |
-| 4 | arg-value is unique within fn | UNIQUE(owner-fn-id, arg-schema-id) | UNIQUE(owner-fn-id, arg-schema-id) |
-| 5 | arg-value.arg-schema-id matches owner-fn.fn-schema-id | Clojure validation | Clojure validation |
-| 6 | No cycles in fn graph through arg-value | Recursive CTE | Cypher path query |
+| 4 | arg-value deduplication | UNIQUE(arg-schema-id, value) | UNIQUE(arg-schema-id, value) |
+| 5 | fn-arg is unique per fn | UNIQUE(fn-id, arg-schema-id) | UNIQUE(fn-id, arg-schema-id) |
+| 6 | fn-arg.arg-schema-id matches fn.fn-schema-id | Clojure validation | Clojure validation |
+| 7 | No cycles in fn graph through fn-arg | Recursive CTE | Cypher path query |
 
-### Constraint #5 in Detail (Arg-Schema Belongs to Fn)
+### Constraint #6 in Detail (Arg-Schema Belongs to Fn)
 
-**Problem**: arg-value references arg-schema, which belongs to fn-schema. owner-fn also references fn-schema. They must match.
+**Problem**: fn-arg binds arg-value to fn. The arg-schema-id must belong to the fn's fn-schema.
 
 **Implementation**: All storage backends use shared Clojure validation via `validate-arg-schema-belongs-to-fn!`.
 
-### Constraint #6 in Detail (No Dependency Cycles)
+### Constraint #7 in Detail (No Dependency Cycles)
 
-**When creating arg-value with value = ref<fn>:**
+**When creating fn-arg with arg-value.value = ref<fn>:**
 
-1. Get target-fn-id from value
-2. Recursively collect all fn that target-fn references through arg-values
-3. If owner-fn-id is in this set -> REJECT (cycle)
+1. Get target-fn-id from arg-value.value
+2. Recursively collect all fns that target-fn references through fn-arg → arg-value
+3. If fn-id (the fn being bound) is in this set -> REJECT (cycle)
 
 **Implementation**: `validate-no-dependency-cycle!` with backend-specific optimizations.
 
@@ -309,7 +330,7 @@ Arguments are wrapped in Clojure `delay` objects for lazy evaluation. This nativ
 
 Arguments are resolved in this order (highest priority first):
 
-1. **arg-values** — Stored values from database (always takes precedence)
+1. **fn-arg bindings** — Stored bindings from database (fn-arg → arg-value, always takes precedence)
 2. **provided-args** — Explicitly passed at execute time (from HOF callables, only for free args)
 3. Required arg with no value → error
 4. Optional arg with no value → delay returning nil
@@ -472,40 +493,48 @@ This ensures errors occur at argument evaluation time, not during consumption by
 
 **Problem**: How to provide different argument values for the same function at different call sites?
 
-**Solution**: Create a local fn with `owner-fn-id` pointing to the parent function. This fn inherits the same fn-schema but can have different arg-values.
+**Solution**: Create a local fn with `owner-fn-id` pointing to the parent function. This fn inherits the same fn-schema but can have different fn-arg bindings.
 
-```clojure
+```
 ;; Example: Using add-fn twice with different arguments in a parent function
 
-;; 1. Base add function (no owner)
+;; 1. Base add function (no owner, no bindings)
 fn: add-fn
   fn-schema-id: add-schema
-  ;; No arg-values - this is the "template"
+  ;; No fn-arg bindings - this is the "template"
 
 ;; 2. Local fn for first usage (owned by parent)
 fn: add-10-20
   fn-schema-id: add-schema
   owner-fn-id: parent-fn-id  ;; Local to parent
-  arg-values: {a: 10, b: 20}
+
+;; fn-arg bindings for add-10-20:
+fn-arg: {fn-id: add-10-20, arg-schema-id: a, arg-value-id: val-10}
+fn-arg: {fn-id: add-10-20, arg-schema-id: b, arg-value-id: val-20}
+
+;; arg-values (pure, reusable):
+arg-value: val-10 {arg-schema-id: a, value: 10}
+arg-value: val-20 {arg-schema-id: b, value: 20}
 
 ;; 3. Local fn for second usage (owned by same parent)
 fn: add-30-40
   fn-schema-id: add-schema
   owner-fn-id: parent-fn-id  ;; Local to parent
-  arg-values: {a: 30, b: 40}
+
+;; fn-arg bindings for add-30-40:
+fn-arg: {fn-id: add-30-40, arg-schema-id: a, arg-value-id: val-30}
+fn-arg: {fn-id: add-30-40, arg-schema-id: b, arg-value-id: val-40}
 
 ;; 4. Parent function uses both via fn-usage
 fn-usage: first-sum  → fn: add-10-20
 fn-usage: second-sum → fn: add-30-40
 
 fn: parent-fn
-  arg-values: {
-    x: ref<fn-usage:first-sum>   ;; Result: 30
-    y: ref<fn-usage:second-sum>  ;; Result: 70
-  }
+  fn-arg: {arg-schema-id: x, arg-value-id: ref<fn-usage:first-sum>}   ;; Result: 30
+  fn-arg: {arg-schema-id: y, arg-value-id: ref<fn-usage:second-sum>}  ;; Result: 70
 ```
 
-**Key insight**: All argument binding happens in the database via arg-values. No runtime argument injection is needed. The graph structure (fn with owner-fn-id + arg-values) is sufficient for all use cases.
+**Key insight**: All argument binding happens in the database via fn-arg (binding) + arg-value (pure values). No runtime argument injection is needed. The graph structure (fn with owner-fn-id + fn-arg bindings) is sufficient for all use cases.
 
 ### HOF Single-Argument Model
 
@@ -761,7 +790,7 @@ The `>` suffix creates a **fn-usage** entity in storage, which means:
 ### What Can Break
 
 1. **Infinite recursion** - protection via depth/timeout, but error at runtime
-2. **Races during cycle detection** - if two processes create arg-values simultaneously
+2. **Races during cycle detection** - if two processes create fn-arg bindings simultaneously
    - *Mitigation*: PostgreSQL uses transactions; Datomic is inherently serialized
 3. **Performance on deep graphs** - many DB queries
    - *Mitigation*: Apache AGE optimized Cypher queries for graph traversal

@@ -100,8 +100,9 @@ Table arg_schema {
 }
 
 // Version of an argument definition. Append-only history.
-// Can change: name, type, required.
+// Can change: name, type, required, first_class.
 // Current version: latest by created_at for (arg_schema_id, branch_id).
+// first_class: true = pass fn as value (HOF), false = execute and use result.
 Table arg_schema_version {
   id uuid [primary key]
   arg_schema_id uuid [not null, ref: > arg_schema.id]
@@ -109,6 +110,7 @@ Table arg_schema_version {
   name text [not null]
   type value_kind [not null]
   required bool [not null]
+  first_class bool [not null]
   created_at timestamptz [not null]
 
   indexes {
@@ -141,14 +143,16 @@ Table fn {
 }
 
 // Version of a function. Append-only history.
-// Can change: name, fn_schema_id.
+// Can change: name, fn_schema_id, owner_fn_id.
 // Current version: latest by created_at for (fn_id, branch_id).
+// owner_fn_id: if set, fn is local (scoped to owner). NULL = global fn.
 Table fn_version {
   id uuid [primary key]
   fn_id uuid [not null, ref: > fn.id]
   branch_id uuid [not null, ref: > branch.id]
   name text [not null]
   fn_schema_id uuid [not null, ref: > fn_schema.id]
+  owner_fn_id uuid [ref: > fn.id]
   created_at timestamptz [not null]
 
   indexes {
@@ -184,10 +188,16 @@ Table fn_arg_version {
 
 // Call site reference (function to execute at this point).
 // fn_id is fixed (fn_usage always calls the same fn).
+// owner_fn_id: if set, fn_usage is local (scoped to owner). NULL = global.
 // NOT versioned: fn_usage itself doesn't change.
 Table fn_usage {
   id uuid [primary key]
-  name text [not null, unique]
+  name text [not null]
   fn_id uuid [not null, ref: > fn.id]
+  owner_fn_id uuid [ref: > fn.id]
+
+  indexes {
+    (owner_fn_id, name) [unique, name: 'idx_fn_usage_unique_name']
+  }
 }
 

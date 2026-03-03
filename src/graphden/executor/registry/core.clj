@@ -407,11 +407,13 @@
         (let [new-data {:fn-schema-id fn-schema-id
                         :name (name arg-name)
                         :type arg-type
-                        :required required}]
+                        :required required
+                        :first-class false}]
           (when (or (not= (:fn-schema-id existing) fn-schema-id)
                     (not= (:name existing) (:name new-data))
                     (not= (:type existing) (:type new-data))
-                    (not= (:required existing) required))
+                    (not= (:required existing) required)
+                    (not= (:first-class existing) false))
             (sp/update-entity storage :arg-schema id new-data)))
         ;; Create new
         (sp/create-entity storage :arg-schema
@@ -419,7 +421,8 @@
                            :fn-schema-id fn-schema-id
                            :name (name arg-name)
                            :type arg-type
-                           :required required})))))
+                           :required required
+                           :first-class false})))))
 
 
 (defn validate-all-defs!

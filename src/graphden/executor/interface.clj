@@ -79,7 +79,7 @@
 
    ### Cache Behavior
 
-   Result cache stores call-site computations for memoization.
+   Result cache stores fn-usage computations for memoization.
 
    - **Cache hit**: O(1) lookup, no recomputation
    - **Cache miss**: Execute function, store result
@@ -119,12 +119,12 @@
                    fully even if it exceeds the timeout. For hard timeouts on
                    individual operations, base functions should use their own
                    timeout mechanisms (e.g., future with deref timeout).
-   - :call-site-args - Map of runtime args for specific call sites (optional):
+   - :call-site-args - Map of runtime args for specific fn-usages (optional):
                        * For root function: {arg-schema-id -> value}
-                       * For nested fns via call-site: {[call-site-id arg-schema-id] -> value}
+                       * For nested fns via fn-usage: {[fn-usage-id arg-schema-id] -> value}
 
                        OVERRIDE BEHAVIOR (by design):
-                       - Call-site-args can only set args that have NO value stored in DB
+                       - call-site-args can only set args that have NO value stored in DB
                        - If an arg-value exists in DB, call-site-arg is IGNORED (warning logged)
                        - This prevents accidental override of validated stored data
                        - To override a stored arg: use `provided-args` in `execute` call,
@@ -132,8 +132,10 @@
 
                        IMPORTANT: Direct fn refs (HOF, type=:fn) cannot receive call-site-args.
                        HOF functions are 'black boxes' controlled by map/reduce/etc.
-                       Only functions referenced via call-site can have their
+                       Only functions referenced via fn-usage can have their
                        free args set via call-site-args.
+
+                       NOTE: call-site-args is the runtime API name (not related to entity).
 
    Example with custom base-fns:
    (create-context {:storage s
@@ -144,10 +146,10 @@
    (create-context {:storage s
                     :call-site-args {x-schema-id 42}})
 
-   Example with call-site-args for nested function via call-site:
-   ;; call-site cs-1 references function B, which has free arg with schema-id y-schema-id
+   Example with call-site-args for nested function via fn-usage:
+   ;; fn-usage fu-1 references function B, which has free arg with schema-id y-schema-id
    (create-context {:storage s
-                    :call-site-args {[cs-1 y-schema-id] 100}})"
+                    :call-site-args {[fu-1 y-schema-id] 100}})"
   [opts]
   (ctx/create-context opts))
 

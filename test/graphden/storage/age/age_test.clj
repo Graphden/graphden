@@ -34,9 +34,8 @@
     (is (true? (age/graph-entity? :fn-schema)))
     (is (true? (age/graph-entity? :arg-schema)))
     (is (true? (age/graph-entity? :arg-value)))
-    (is (true? (age/graph-entity? :call-site)))
-    (is (true? (age/graph-entity? :fn-arg)))
-    (is (true? (age/graph-entity? :call-site-arg))))
+    (is (true? (age/graph-entity? :fn-usage)))
+    (is (true? (age/graph-entity? :fn-arg))))
 
   (testing "returns false for non-graph entities"
     (is (false? (age/graph-entity? :user)))
@@ -250,20 +249,20 @@
           (sp/close storage))))))
 
 
-(deftest sync-call-site-to-graph!-test
-  (testing "syncs call-site entity to graph"
+(deftest sync-fn-usage-to-graph!-test
+  (testing "syncs fn-usage entity to graph"
     (let [storage (setup/create-test-storage)]
       (try
         (let [ds (get-pool storage)
-              call-site {:id #uuid "77777777-7777-7777-7777-777777777777"
+              fn-usage {:id #uuid "77777777-7777-7777-7777-777777777777"
                          :fn-id #uuid "33333333-3333-3333-3333-333333333333"
-                         :name :my-call-site}]
-          (age/ensure-graph! ds "call_site_test")
-          (age/sync-entity-to-graph! ds "call_site_test" :call-site call-site)
+                         :name :my-fn-usage}]
+          (age/ensure-graph! ds "fn_usage_test")
+          (age/sync-entity-to-graph! ds "fn_usage_test" :fn-usage fn-usage)
           (age/with-age-connection ds
                                    (fn [conn]
-                                     (let [results (age/execute-cypher! conn "call_site_test"
-                                                                        "MATCH (n:CallSite {id: '77777777-7777-7777-7777-777777777777'}) RETURN n")]
+                                     (let [results (age/execute-cypher! conn "fn_usage_test"
+                                                                        "MATCH (n:FnUsage {id: '77777777-7777-7777-7777-777777777777'}) RETURN n")]
                                        (is (= 1 (count results)))))))
         (finally
           (sp/close storage))))))
@@ -295,30 +294,6 @@
           (sp/close storage))))))
 
 
-(deftest sync-call-site-arg-edge-to-graph!-test
-  (testing "syncs call-site-arg edge to graph"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (let [ds (get-pool storage)
-              cs-id #uuid "77777777-7777-7777-7777-777777777777"
-              av-id #uuid "55555555-5555-5555-5555-555555555555"
-              as-id #uuid "44444444-4444-4444-4444-444444444444"]
-          (age/ensure-graph! ds "cs_arg_test")
-          ;; First create the nodes
-          (age/sync-entity-to-graph! ds "cs_arg_test" :call-site
-                                     {:id cs-id :fn-id #uuid "33333333-3333-3333-3333-333333333333" :name :cs})
-          (age/sync-entity-to-graph! ds "cs_arg_test" :arg-value
-                                     {:id av-id :arg-schema-id as-id :value 42})
-          ;; Then create the edge
-          (age/sync-entity-to-graph! ds "cs_arg_test" :call-site-arg
-                                     {:call-site-id cs-id :arg-value-id av-id :arg-schema-id as-id})
-          (age/with-age-connection ds
-                                   (fn [conn]
-                                     (let [results (age/execute-cypher! conn "cs_arg_test"
-                                                                        "MATCH (cs:CallSite)-[r:HAS_ARG]->(av:ArgValue) RETURN r")]
-                                       (is (= 1 (count results)))))))
-        (finally
-          (sp/close storage))))))
 
 
 (deftest sync-unknown-entity-returns-nil-test

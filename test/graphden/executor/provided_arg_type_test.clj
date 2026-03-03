@@ -30,7 +30,7 @@
                                   {:fn-schema-id (:id fn-schema)
                                    :name "f"
                                    :type :fn
-                                   :required true})
+                                   :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-apply"
                                     :fn-schema-id (:id fn-schema)})
@@ -69,7 +69,7 @@
                                      {:fn-schema-id (:id fn-schema)
                                       :name "flag"
                                       :type :bool
-                                      :required true})
+                                      :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-bool"
                                     :fn-schema-id (:id fn-schema)})
@@ -93,7 +93,7 @@
                                     {:fn-schema-id (:id fn-schema)
                                      :name "msg"
                                      :type :text
-                                     :required true})
+                                     :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-text"
                                     :fn-schema-id (:id fn-schema)})
@@ -128,7 +128,7 @@
                                   {:fn-schema-id (:id fn-schema)
                                    :name "n"
                                    :type :numeric
-                                   :required true})
+                                   :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-numeric"
                                     :fn-schema-id (:id fn-schema)})

@@ -39,7 +39,7 @@
    - It exists only on source branch (not on target)
    - It will become visible on target after merge via the branch-merge record
 
-   Checks fn-arg-version and call-site-arg-version tables."
+   Checks fn-arg-version table."
   [base-storage source-branch-id target-branch-id]
   (let [;; Get all fn-arg-versions on source branch
         source-fn-arg-versions (sp/query-entities base-storage :fn-arg-version
@@ -53,20 +53,9 @@
         transferred-fn-arg-versions (remove #(contains? target-fn-arg-ids (:fn-arg-id %))
                                             source-fn-arg-versions)
 
-        ;; Same for call-site-arg-versions
-        source-csa-versions (sp/query-entities base-storage :call-site-arg-version
-                                               {:branch-id source-branch-id})
-        target-csa-versions (sp/query-entities base-storage :call-site-arg-version
-                                               {:branch-id target-branch-id})
-        target-csa-ids (set (map :call-site-arg-id target-csa-versions))
-
-        transferred-csa-versions (remove #(contains? target-csa-ids (:call-site-arg-id %))
-                                         source-csa-versions)
-
         ;; Collect all arg-value-ids from transferred versions
-        fn-arg-value-ids (keep :arg-value-id transferred-fn-arg-versions)
-        csa-value-ids (keep :arg-value-id transferred-csa-versions)]
-    (set (concat fn-arg-value-ids csa-value-ids))))
+        fn-arg-value-ids (keep :arg-value-id transferred-fn-arg-versions)]
+    (set fn-arg-value-ids)))
 
 
 (defn detect-protected-transfers
@@ -74,7 +63,7 @@
 
    Returns a map:
    {:protected-transfers [{:arg-value-id uuid
-                           :entity-type :fn-arg | :call-site-arg
+                           :entity-type :fn-arg
                            :version <version record>}]
     :blocked? boolean}
 
@@ -95,9 +84,6 @@
                         (let [source-fn-arg-versions
                               (sp/query-entities base-storage :fn-arg-version
                                                  {:branch-id source-branch-id})
-                              source-csa-versions
-                              (sp/query-entities base-storage :call-site-arg-version
-                                                 {:branch-id source-branch-id})
 
                               fn-arg-transfers
                               (for [v source-fn-arg-versions
@@ -105,16 +91,8 @@
                                 {:arg-value-id (:arg-value-id v)
                                  :entity-type :fn-arg
                                  :entity-id (:fn-arg-id v)
-                                 :version v})
-
-                              csa-transfers
-                              (for [v source-csa-versions
-                                    :when (contains? violations (:arg-value-id v))]
-                                {:arg-value-id (:arg-value-id v)
-                                 :entity-type :call-site-arg
-                                 :entity-id (:call-site-arg-id v)
                                  :version v})]
-                          (vec (concat fn-arg-transfers csa-transfers))))))]
+                          (vec fn-arg-transfers)))))]
 
     {:protected-transfers (or transfers [])
      :blocked? (boolean (seq transfers))}))

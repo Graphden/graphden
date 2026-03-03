@@ -36,9 +36,9 @@
             :version-id-field :fn-arg-id
             :version-data-fields #{:fn-id :arg-schema-id :arg-value-id}}
 
-   :call-site-arg {:version-entity :call-site-arg-version
-                   :version-id-field :call-site-arg-id
-                   :version-data-fields #{:call-site-id :arg-schema-id :arg-value-id}}})
+   ;; call-site-arg entity has been removed from schema
+   ;; Free arguments at fn-usage now handled by creating local fn with owner-fn-id
+   })
 
 
 (defn versioned-entity?

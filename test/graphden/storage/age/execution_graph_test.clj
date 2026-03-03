@@ -29,15 +29,25 @@
                       :type {:uuid #uuid "00000000-0000-0000-0002-000000000004"
                              :type :text}
                       :required {:uuid #uuid "00000000-0000-0000-0002-000000000005"
-                                 :type :bool}})
+                                 :type :bool}
+                      :first-class {:uuid #uuid "00000000-0000-0000-0002-000000000006"
+                                    :type :bool}})
       (ds/add-entity :fn #uuid "00000000-0000-0000-0003-000000000001"
                      {:name {:uuid #uuid "00000000-0000-0000-0003-000000000002"
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
-                                     :type :ref :ref-entity :fn-schema}})
-      (ds/add-entity :call-site #uuid "00000000-0000-0000-0005-000000000001"
+                                     :type :ref :ref-entity :fn-schema}
+                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0003-000000000004"
+                                    :type :ref :ref-entity :fn
+                                    :nullable? true}})
+      (ds/add-entity :fn-usage #uuid "00000000-0000-0000-0005-000000000001"
                      {:fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000002"
-                              :type :ref :ref-entity :fn}})
+                              :type :ref :ref-entity :fn}
+                      :name {:uuid #uuid "00000000-0000-0000-0005-000000000003"
+                             :type :text}
+                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000004"
+                                    :type :ref :ref-entity :fn
+                                    :nullable? true}})
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
                      {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
                                       :type :ref :ref-entity :arg-schema}
@@ -83,7 +93,8 @@
                                        {:fn-schema-id (:id fn-schema)
                                         :name "x"
                                         :type "int"
-                                        :required true})
+                                        :required true
+                                        :first-class false})
           ;; Create fn instance
           fn-entity (sp/create-entity storage :fn
                                       {:name "add-one-instance"
@@ -132,7 +143,8 @@
                                            {:fn-schema-id (:id outer-schema)
                                             :name "inner-ref"
                                             :type "ref"
-                                            :required true})
+                                            :required true
+                                            :first-class false})
           ;; Create outer fn
           outer-fn (sp/create-entity storage :fn
                                      {:name "outer-fn"
@@ -154,8 +166,8 @@
           (sp/close storage))))))
 
 
-(deftest resolve-fn-with-call-site-reference-test
-  (testing "resolve-execution-graph follows call-site references"
+(deftest resolve-fn-with-fn-usage-reference-test
+  (testing "resolve-execution-graph follows fn-usage references"
     (let [storage (setup/create-raw-storage)
           _ (sp/initialize storage (make-simple-graph-schema))
           ;; Create target fn
@@ -165,9 +177,10 @@
           target-fn (sp/create-entity storage :fn
                                       {:name "target-fn"
                                        :fn-schema-id (:id target-schema)})
-          ;; Create call-site pointing to target
-          call-site (sp/create-entity storage :call-site
-                                      {:fn-id (:id target-fn)})
+          ;; Create fn-usage pointing to target
+          fn-usage (sp/create-entity storage :fn-usage
+                                      {:fn-id (:id target-fn)
+                                       :name "target-usage"})
           ;; Create caller fn
           caller-schema (sp/create-entity storage :fn-schema
                                           {:name "caller"
@@ -176,14 +189,15 @@
                                           {:fn-schema-id (:id caller-schema)
                                            :name "cs-ref"
                                            :type "ref"
-                                           :required true})
+                                           :required true
+                                           :first-class false})
           caller-fn (sp/create-entity storage :fn
                                       {:name "caller-fn"
                                        :fn-schema-id (:id caller-schema)})
-          ;; Bind arg to reference call-site (pass UUID directly)
+          ;; Bind arg to reference fn-usage (pass UUID directly)
           _ (create-arg-value-with-binding!
               storage (:id caller-fn) (:id cs-arg-schema)
-              (:id call-site))
+              (:id fn-usage))
           ;; Resolve execution graph
           result (sp/resolve-execution-graph storage (:id caller-fn))]
       (try
@@ -191,8 +205,8 @@
         (is (= 2 (count (:fns result))))
         (is (contains? (:fns result) (:id caller-fn)))
         (is (contains? (:fns result) (:id target-fn)))
-        ;; Should have call-sites
-        (is (contains? (:call-sites result) (:id call-site)))
+        ;; Should have fn-usages
+        (is (contains? (:fn-usages result) (:id fn-usage)))
         (finally
           (sp/close storage))))))
 

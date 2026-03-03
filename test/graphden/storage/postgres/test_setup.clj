@@ -59,7 +59,7 @@
 
 
 (defn make-graph-schema
-  "Creates schema with fn-schema, arg-schema, fn, call-site, arg-value, and fn-arg entities.
+  "Creates schema with fn-schema, arg-schema, fn, fn-usage, arg-value, and fn-arg entities.
    This is the standard graph schema used by executor and constraint tests.
    Uses normalized schema where arg-value has no owner, and fn-arg binds fn to arg-value."
   []
@@ -77,15 +77,25 @@
                       :type {:uuid #uuid "00000000-0000-0000-0002-000000000004"
                              :type :text}
                       :required {:uuid #uuid "00000000-0000-0000-0002-000000000005"
-                                 :type :bool}})
+                                 :type :bool}
+                      :first-class {:uuid #uuid "00000000-0000-0000-0002-000000000006"
+                                    :type :bool}})
       (ds/add-entity :fn #uuid "00000000-0000-0000-0003-000000000001"
                      {:name {:uuid #uuid "00000000-0000-0000-0003-000000000002"
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
-                                     :type :ref :ref-entity :fn-schema}})
-      (ds/add-entity :call-site #uuid "00000000-0000-0000-0005-000000000001"
+                                     :type :ref :ref-entity :fn-schema}
+                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0003-000000000004"
+                                    :type :ref :ref-entity :fn
+                                    :nullable? true}})
+      (ds/add-entity :fn-usage #uuid "00000000-0000-0000-0005-000000000001"
                      {:fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000002"
-                              :type :ref :ref-entity :fn}})
+                              :type :ref :ref-entity :fn}
+                      :name {:uuid #uuid "00000000-0000-0000-0005-000000000003"
+                             :type :text}
+                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000004"
+                                    :type :ref :ref-entity :fn
+                                    :nullable? true}})
       ;; arg-value: pure value (no owner-fn-id)
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
                      {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"

@@ -1,5 +1,5 @@
-(ns graphden.web.server.core
-  "Web server component - defines fn entities for HTTP server setup.
+(ns graphden.library.fn-defs.web.server
+  "Web server fn-defs - minimal API server setup.
 
    This component defines fn entities (NOT base-fns) that compose
    base functions from other components to create a working web server.
@@ -8,7 +8,7 @@
 
    Routes are built compositionally using base-fns:
    - const: creates Ring handler functions from response maps
-   - json-handler: creates Ring handler that returns JSON response
+   - to-json-string + ring-response + make-handler: composable JSON handler
    - assoc: builds route data structures {:handler fn}
    - vector: combines path + route-data into route tuples
 
@@ -44,14 +44,25 @@
 
 ;; === Fn Definitions ===
 
+;; JSON content type header for reuse
+(def json-headers
+  "Headers for JSON responses."
+  {"Content-Type" "application/json"})
+
+
 (def fn-defs
   "Fn definitions for creating web server.
 
    Routes are built compositionally using conj to build vectors:
-   1. const/json-handler creates Ring handler fn
+   1. const/make-handler creates Ring handler fn
    2. assoc builds {:handler fn} and {:get {...}} maps
    3. conj builds route tuple: [] -> [\"/\"] -> [\"/\" {...}]
    4. conj collects routes: [] -> [[route1]] -> [[route1] [route2]]
+
+   JSON handlers are built compositionally:
+   - to-json-string: converts data to JSON string
+   - ring-response: creates {:status :headers :body} map
+   - make-handler: creates (fn [_request] response)
 
    Arg value syntax:
    - :fn-name = pass fn as callable (don't execute)
@@ -82,12 +93,22 @@
     :args {:coll :hello-route-path-fn>, :x :hello-method-map-fn>}}
 
    ;; === Health Route (Dynamic JSON) ===
-   ;; Uses json-handler to create handler from health-status result
-   {:name :health-handler-fn
-    :parent :json-handler
+   ;; Compositional JSON handler: to-json-string -> ring-response -> make-handler
+   {:name :health-json-body-fn
+    :parent :to-json-string
     :args {:data :health-status>}}
 
-   ;; {:handler <fn>} - execute health-handler-fn to get Clojure fn
+   {:name :health-response-fn
+    :parent :ring-response
+    :args {:status 200
+           :headers json-headers
+           :body :health-json-body-fn>}}
+
+   {:name :health-handler-fn
+    :parent :make-handler
+    :args {:response :health-response-fn>}}
+
+   ;; {:handler <fn>}
    {:name :health-handler-map-fn
     :parent :assoc
     :args {:m {}, :k "handler", :v :health-handler-fn>}}
@@ -107,10 +128,20 @@
     :args {:coll :health-route-path-fn>, :x :health-method-map-fn>}}
 
    ;; === Metrics Route (JVM Info) ===
-   ;; Uses json-handler to create handler from jvm-info result
-   {:name :metrics-handler-fn
-    :parent :json-handler
+   ;; Compositional JSON handler: to-json-string -> ring-response -> make-handler
+   {:name :metrics-json-body-fn
+    :parent :to-json-string
     :args {:data :jvm-info>}}
+
+   {:name :metrics-response-fn
+    :parent :ring-response
+    :args {:status 200
+           :headers json-headers
+           :body :metrics-json-body-fn>}}
+
+   {:name :metrics-handler-fn
+    :parent :make-handler
+    :args {:response :metrics-response-fn>}}
 
    ;; {:handler <fn>}
    {:name :metrics-handler-map-fn

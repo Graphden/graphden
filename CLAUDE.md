@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 1 | **Correctness first** | No feature justifies bugs. Comprehensive tests required. |
 | 2 | **Minimal entities** | Resist adding new entity types, fields, or edge types. Each addition increases complexity everywhere. |
 | 3 | **Explicit over implicit** | Behavior must be visible in graph structure. No magic, no context-dependent semantics. |
-| 4 | **DRY** | Never define the same thing twice. Use base-functions and call-site for reuse. |
+| 4 | **DRY** | Never define the same thing twice. Use base-functions and fn-usage for reuse. |
 | 5 | **Expressiveness parity** | Can do everything classical languages can. No "sorry, you can't do that." |
 | 6 | **No unnecessary expressiveness** | Don't add features just because we can. |
 | 7 | **Locality of changes** | Changing one node shouldn't require changes elsewhere. |
@@ -33,16 +33,17 @@ Graphden is a visual functional programming environment where functions and thei
 - **Lazy Execution** — delay-based evaluation, only computes what's needed
 - **Storage backend** — PostgreSQL with Apache AGE for graph queries
 
-**Core entities** (only 5 — kept minimal by design):
+**Core entities** (only 6 — kept minimal by design):
 - `fn-schema` — function signature (name, return type, optional base-fn-name linking to Clojure impl)
-- `arg-schema` — argument definition (belongs to fn-schema)
-- `fn` — function instance (references fn-schema, has bound arg-values)
-- `arg-value` — bound argument value (literal or reference to fn/call-site)
-- `call-site` — reference to a function call site (NOT cached result — see below)
+- `arg-schema` — argument definition (belongs to fn-schema, includes first-class flag for HOF support)
+- `fn` — function instance (references fn-schema, optional owner-fn-id for local scoping)
+- `arg-value` — bound argument value (literal or reference to fn/fn-usage)
+- `fn-usage` — function usage reference (distinguishes multiple uses of same function)
+- `fn-arg` — binding that connects fn to arg-schema and arg-value
 
-## Core Concept: call-site
+## Core Concept: fn-usage
 
-**call-site is NOT primarily about caching. Its main purpose is structural:**
+**fn-usage is NOT primarily about caching. Its main purpose is structural:**
 
 It distinguishes between the same function called at different points in the execution graph.
 
@@ -52,31 +53,31 @@ fn: current-time (base function)
 fn: sleep (base function)
 fn: print-two-times (base function with args: t1, t2)
 
-;; These are TWO DIFFERENT call-sites pointing to the SAME fn
-call-site: time-before  → fn: current-time
-call-site: time-after   → fn: current-time
+;; These are TWO DIFFERENT fn-usages pointing to the SAME fn
+fn-usage: time-before  → fn: current-time
+fn-usage: time-after   → fn: current-time
 
 fn: my-program
-  arg: t1 = ref<call-site:time-before>   ;; first call
-  arg: wait = ref<call-site:sleep-5s>
-  arg: t2 = ref<call-site:time-after>    ;; second call (different!)
+  arg: t1 = ref<fn-usage:time-before>   ;; first call
+  arg: wait = ref<fn-usage:sleep-5s>
+  arg: t2 = ref<fn-usage:time-after>    ;; second call (different!)
 ```
 
-Without call-site, we couldn't distinguish "time before sleep" from "time after sleep" — they'd be the same function reference.
+Without fn-usage, we couldn't distinguish "time before sleep" from "time after sleep" — they'd be the same function reference.
 
-**Free arguments are passed at execution time via call-site-args:**
+**Free arguments are passed at execution time via fn-usage-args:**
 ```clojure
 ;; fn-a has free argument arg-schema-a (not bound in DB)
-;; call-site-a references fn-a (this is a "call site")
+;; fn-usage-a references fn-a (this is a "function usage")
 
 ;; At execution time, pass value for the free argument:
 (create-context {:storage s
-                 :call-site-args {[call-site-a-id arg-schema-a-id] 42}})
+                 :fn-usage-args {[fn-usage-a-id arg-schema-a-id] 42}})
 
-;; The executor resolves this when it reaches call-site-a
+;; The executor resolves this when it reaches fn-usage-a
 ```
 
-**Key insight:** No new schema fields needed. The graph structure (call-site pointing to fn) plus runtime call-site-args is sufficient.
+**Key insight:** No new schema fields needed. The graph structure (fn-usage pointing to fn) plus runtime fn-usage-args is sufficient.
 
 ## Documentation Map
 

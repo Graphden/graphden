@@ -2,7 +2,7 @@
   "Result value and registry tests for executor.
 
    Covers:
-   - call-site tests
+   - fn-usage tests
    - Base function registry tests
    - execute-by-name error path tests
    - execute-with-named-args error path tests
@@ -24,10 +24,10 @@
   exec/with-clean-registry)
 
 
-;; === call-site Tests ===
+;; === fn-usage Tests ===
 
-(deftest call-site-basic-test
-  (testing "call-site is executed and cached"
+(deftest fn-usage-basic-test
+  (testing "fn-usage is executed and cached"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)
           ;; Register a function that tracks how many times it's called
@@ -43,8 +43,8 @@
           counter-fn (sp/create-entity storage :fn
                                        {:name "counter-fn"
                                         :fn-schema-id (:id counter-schema)})
-          ;; Create call-site for counter-fn
-          counter-result (sp/create-entity storage :call-site
+          ;; Create fn-usage for counter-fn
+          counter-result (sp/create-entity storage :fn-usage
                                            {:fn-id (:id counter-fn)
                                             :name "counter-result"})
           ;; Create add fn-schema that takes two int args
@@ -59,27 +59,27 @@
                                       {:fn-schema-id (:id add-schema)
                                        :name "a"
                                        :type :int
-                                       :required true})
+                                       :required true :first-class false})
           add-arg-b (sp/create-entity storage :arg-schema
                                       {:fn-schema-id (:id add-schema)
                                        :name "b"
                                        :type :int
-                                       :required true})
+                                       :required true :first-class false})
           ;; Create add fn that uses counter-result for BOTH args
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
-          ;; Both args reference the SAME call-site
+          ;; Both args reference the SAME fn-usage
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result))
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result))
           ctx (exec/create-context {:storage storage})]
       ;; Execute add-fn
       (exec/execute ctx (:id add-fn) nil)
       ;; counter should be called only ONCE, even though it's used twice
-      (is (= 1 @call-count) "call-site should be cached and only executed once")
+      (is (= 1 @call-count) "fn-usage should be cached and only executed once")
       (sp/close storage)))
 
-  (testing "different call-sites for same fn are computed separately"
+  (testing "different fn-usages for same fn are computed separately"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)
           ;; Register a function that tracks calls and returns incremented count
@@ -95,11 +95,11 @@
           inc-fn (sp/create-entity storage :fn
                                    {:name "inc-fn"
                                     :fn-schema-id (:id inc-schema)})
-          ;; Create TWO different call-sites for the same fn
-          result-1 (sp/create-entity storage :call-site
+          ;; Create TWO different fn-usages for the same fn
+          result-1 (sp/create-entity storage :fn-usage
                                      {:fn-id (:id inc-fn)
                                       :name "result-1"})
-          result-2 (sp/create-entity storage :call-site
+          result-2 (sp/create-entity storage :fn-usage
                                      {:fn-id (:id inc-fn)
                                       :name "result-2"})
           ;; Create add fn that uses result-1 and result-2
@@ -114,12 +114,12 @@
                                       {:fn-schema-id (:id add-schema)
                                        :name "a"
                                        :type :int
-                                       :required true})
+                                       :required true :first-class false})
           add-arg-b (sp/create-entity storage :arg-schema
                                       {:fn-schema-id (:id add-schema)
                                        :name "b"
                                        :type :int
-                                       :required true})
+                                       :required true :first-class false})
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
@@ -128,13 +128,13 @@
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id result-2))
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id add-fn) nil)]
-      ;; incrementer should be called TWICE (once for each call-site)
-      (is (= 2 @call-count) "Different call-sites should each execute separately")
+      ;; incrementer should be called TWICE (once for each fn-usage)
+      (is (= 2 @call-count) "Different fn-usages should each execute separately")
       ;; Result should be 1 + 2 = 3
       (is (= 3 result))
       (sp/close storage)))
 
-  (testing "call-site executes fn, direct fn reference passes fn-id"
+  (testing "fn-usage executes fn, direct fn reference passes fn-id"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)
           ;; Register a function that tracks calls
@@ -149,11 +149,11 @@
           counter-fn (sp/create-entity storage :fn
                                        {:name "counter-fn"
                                         :fn-schema-id (:id counter-schema)})
-          ;; Create TWO call-sites pointing to same fn
-          counter-result-1 (sp/create-entity storage :call-site
+          ;; Create TWO fn-usages pointing to same fn
+          counter-result-1 (sp/create-entity storage :fn-usage
                                              {:fn-id (:id counter-fn)
                                               :name "counter-result-1"})
-          counter-result-2 (sp/create-entity storage :call-site
+          counter-result-2 (sp/create-entity storage :fn-usage
                                              {:fn-id (:id counter-fn)
                                               :name "counter-result-2"})
           ;; Create add fn
@@ -168,23 +168,23 @@
                                       {:fn-schema-id (:id add-schema)
                                        :name "a"
                                        :type :int
-                                       :required true})
+                                       :required true :first-class false})
           add-arg-b (sp/create-entity storage :arg-schema
                                       {:fn-schema-id (:id add-schema)
                                        :name "b"
                                        :type :int
-                                       :required true})
+                                       :required true :first-class false})
           add-fn (sp/create-entity storage :fn
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
-          ;; a -> call-site-1 (executes counter)
-          ;; b -> call-site-2 (executes counter again - different call-site)
+          ;; a -> fn-usage-1 (executes counter)
+          ;; b -> fn-usage-2 (executes counter again - different fn-usage)
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result-1))
           _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result-2))
           ctx (exec/create-context {:storage storage})]
       (exec/execute ctx (:id add-fn) nil)
-      ;; counter should be called TWICE - once for each call-site
-      (is (= 2 @call-count) "Different call-sites should each execute the fn")
+      ;; counter should be called TWICE - once for each fn-usage
+      (is (= 2 @call-count) "Different fn-usages should each execute the fn")
       (sp/close storage))))
 
 
@@ -273,12 +273,12 @@
                               {:fn-schema-id (:id schema)
                                :name "a"
                                :type :int
-                               :required true})
+                               :required true :first-class false})
           _ (sp/create-entity storage :arg-schema
                               {:fn-schema-id (:id schema)
                                :name "b"
                                :type :int
-                               :required true})
+                               :required true :first-class false})
           the-fn (sp/create-entity storage :fn
                                    {:name "my-add-named"
                                     :fn-schema-id (:id schema)})
@@ -295,7 +295,7 @@
                               {:fn-schema-id (:id schema)
                                :name "x"
                                :type :int
-                               :required true})
+                               :required true :first-class false})
           the-fn (sp/create-entity storage :fn
                                    {:name "my-single-arg"
                                     :fn-schema-id (:id schema)})
@@ -337,7 +337,7 @@
                                        {:fn-schema-id (:id schema)
                                         :name "x"
                                         :type :int
-                                        :required true})
+                                        :required true :first-class false})
           the-fn (sp/create-entity storage :fn
                                    {:name "my-identity"
                                     :fn-schema-id (:id schema)})
@@ -359,12 +359,12 @@
                               {:fn-schema-id (:id schema)
                                :name "a"
                                :type :int
-                               :required true})
+                               :required true :first-class false})
           _ (sp/create-entity storage :arg-schema
                               {:fn-schema-id (:id schema)
                                :name "b"
                                :type :int
-                               :required true})
+                               :required true :first-class false})
           the-fn (sp/create-entity storage :fn
                                    {:name "my-multi"
                                     :fn-schema-id (:id schema)})
@@ -385,7 +385,7 @@
                               {:fn-schema-id (:id schema)
                                :name "x"
                                :type :int
-                               :required false})  ; optional, not required
+                               :required false :first-class false})  ; optional, not required
           the-fn (sp/create-entity storage :fn
                                    {:name "my-optional"
                                     :fn-schema-id (:id schema)})

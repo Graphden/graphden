@@ -38,7 +38,7 @@
   "Lists entities of a given type with optional filtering.
 
    Arguments:
-   - entity-type: Keyword for entity type (:fn, :fn-schema, :arg-schema, :arg-value, :call-site)
+   - entity-type: Keyword for entity type (:fn, :fn-schema, :arg-schema, :arg-value, :fn-usage)
    - where: Optional where clause map for filtering
 
    Returns:
@@ -164,10 +164,10 @@
 ;; =============================================================================
 
 (def list-all-graph-entities-impl
-  "Lists all graph entities (fn-schemas, fns, arg-schemas, arg-values, call-sites).
+  "Lists all graph entities (fn-schemas, fns, arg-schemas, arg-values, fn-usages).
 
    Returns:
-   Map with keys :fn-schemas, :fns, :arg-schemas, :arg-values, :call-sites,
+   Map with keys :fn-schemas, :fns, :arg-schemas, :arg-values, :fn-usages,
    each containing a vector of entities.
 
    Requires :storage in execution context."
@@ -179,7 +179,7 @@
               :fns (vec (sp/query-entities storage :fn {}))
               :arg-schemas (vec (sp/query-entities storage :arg-schema {}))
               :arg-values (vec (sp/query-entities storage :arg-value {}))
-              :call-sites (vec (sp/query-entities storage :call-site {}))}
+              :fn-usages (vec (sp/query-entities storage :fn-usage {}))}
              (throw (ex-info "Storage not available in context"
                              {:type :execution-error/missing-storage}))))})
 
@@ -304,7 +304,7 @@
                                  :arg_schemas (vec (sp/query-entities storage :arg-schema {}))
                                  :arg_values (vec (sp/query-entities storage :arg-value {}))
                                  :fn_args (vec (sp/query-entities storage :fn-arg {}))
-                                 :call_sites (vec (sp/query-entities storage :call-site {}))}]
+                                 :fn_usages (vec (sp/query-entities storage :fn-usage {}))}]
                      {:status 200
                       :headers {"Content-Type" "application/json"}
                       :body (json/generate-string result)})
@@ -332,7 +332,7 @@
     "fn-schema" :fn-schema
     "arg-schema" :arg-schema
     "arg-value" :arg-value
-    "call-site" :call-site
+    "fn-usage" :fn-usage
     nil))
 
 
@@ -386,12 +386,12 @@
   "Renders arg-value entity details."
   [entity]
   (let [value (:value entity)
-        is-ref (and (map? value) (or (:fn-id value) (:call-site-id value)))
+        is-ref (and (map? value) (or (:fn-id value) (:fn-usage-id value)))
         display-value (cond
                         (and (map? value) (:fn-id value))
                         [:span "ref<fn:" [:code (str (:fn-id value))] ">"]
-                        (and (map? value) (:call-site-id value))
-                        [:span "ref<call-site:" [:code (str (:call-site-id value))] ">"]
+                        (and (map? value) (:fn-usage-id value))
+                        [:span "ref<fn-usage:" [:code (str (:fn-usage-id value))] ">"]
                         :else
                         [:code (pr-str value)])]
     [:div
@@ -404,13 +404,14 @@
      (render-field-row "Arg Schema ID" (:arg-schema-id entity))]))
 
 
-(defn- render-call-site-details
-  "Renders call-site entity details."
+(defn- render-fn-usage-details
+  "Renders fn-usage entity details."
   [entity]
   [:div
    (render-field-row "ID" (:id entity))
    (render-field-row "Name" (when (:name entity) (name (:name entity))))
-   (render-field-row "Fn ID" (:fn-id entity))])
+   (render-field-row "Fn ID" (:fn-id entity))
+   (render-field-row "Owner Fn ID" (:owner-fn-id entity))])
 
 
 (defn- render-entity-details
@@ -421,7 +422,7 @@
     "fn" (render-fn-details entity)
     "arg-schema" (render-arg-schema-details entity)
     "arg-value" (render-arg-value-details entity)
-    "call-site" (render-call-site-details entity)
+    "fn-usage" (render-fn-usage-details entity)
     [:p "Unknown entity type"]))
 
 
@@ -507,14 +508,14 @@
       [:button {:type "submit" :class "btn btn-primary"} (if editing? "Save" "Create")]]]))
 
 
-(defn- render-call-site-form
-  "Renders form for call-site entity."
+(defn- render-fn-usage-form
+  "Renders form for fn-usage entity."
   [entity fns]
   (let [editing? (some? entity)
         fn-options (mapv (fn [f] [(:id f) (name (:name f))]) fns)]
     [:form {:hx-post (if editing?
-                       (str "/api/entities/call-site/" (:id entity))
-                       "/api/entities/call-site")
+                       (str "/api/entities/fn-usage/" (:id entity))
+                       "/api/entities/fn-usage")
             :hx-target "#modal-content"
             :hx-swap "innerHTML"
             :_ "on htmx:afterRequest if event.detail.successful trigger entityCreated on body then call hideModal()"}
@@ -594,7 +595,7 @@
                            arg-schemas (vec (sp/query-entities storage :arg-schema {}))
                            form-html (case entity-type-str
                                        "fn" (render-fn-form entity fn-schemas)
-                                       "call-site" (render-call-site-form entity fns)
+                                       "fn-usage" (render-fn-usage-form entity fns)
                                        "arg-value" (render-arg-value-form entity fns arg-schemas)
                                        [:p "Forms for " entity-type-str " not yet implemented"])]
                        {:status 200
@@ -639,7 +640,7 @@
                      (let [entity-data (case entity-type-str
                                          "fn" {:name (keyword (:name form-data))
                                                :fn-schema-id (java.util.UUID/fromString (:fn-schema-id form-data))}
-                                         "call-site" (cond-> {:fn-id (java.util.UUID/fromString (:fn-id form-data))}
+                                         "fn-usage" (cond-> {:fn-id (java.util.UUID/fromString (:fn-id form-data))}
                                                        (not (str/blank? (:name form-data)))
                                                        (assoc :name (keyword (:name form-data))))
                                          "arg-value" {:owner-fn-id (java.util.UUID/fromString (:owner-fn-id form-data))

@@ -7,9 +7,10 @@
 (deftest fn-defs-test
   (testing "fn-defs contains all expected definitions"
     (is (vector? web-server-fns/fn-defs))
-    ;; 20 fns: handlers, route maps, route tuples, routes collection, router, server
-    ;; hello (5) + health (5) + metrics (5) + routes collection (3) + router + server = 20
-    (is (= 20 (count web-server-fns/fn-defs)))
+    ;; 24 fns: handlers, route maps, route tuples, routes collection, router, server
+    ;; hello (5) + health (7: json-body, response, handler, handler-map, method-map, route-path, route)
+    ;; + metrics (7) + routes collection (3) + router + server = 24
+    (is (= 24 (count web-server-fns/fn-defs)))
     (let [names (set (map :name web-server-fns/fn-defs))]
       ;; Core fns
       (is (contains? names :web-server))
@@ -31,7 +32,7 @@
       (is (= :router-fn> (get-in ws-def [:args :handler])))
       (is (= 8080 (get-in ws-def [:args :port])))))
 
-  (testing "router-fn references routes-fn (via call-site)"
+  (testing "router-fn references routes-fn (via fn-usage)"
     (let [router-def (first (filter #(= :router-fn (:name %)) web-server-fns/fn-defs))]
       (is (= :router (:parent router-def)))
       (is (= :routes-fn> (get-in router-def [:args :routes])))))
@@ -41,15 +42,24 @@
       (is (= :const (:parent hello-def)))
       (is (= 200 (get-in hello-def [:args :x :status])))))
 
-  (testing "health/metrics handlers use json-handler base-fn"
+  (testing "health/metrics handlers use compositional pattern"
     (let [health-def (first (filter #(= :health-handler-fn (:name %)) web-server-fns/fn-defs))
           metrics-def (first (filter #(= :metrics-handler-fn (:name %)) web-server-fns/fn-defs))]
-      ;; json-handler wraps data from another fn
-      (is (= :json-handler (:parent health-def)))
-      (is (= :json-handler (:parent metrics-def)))
-      ;; health-status> and jvm-info> are the data sources
-      (is (= :health-status> (get-in health-def [:args :data])))
-      (is (= :jvm-info> (get-in metrics-def [:args :data]))))))
+      ;; Handlers use make-handler base-fn (compositional pattern)
+      (is (= :make-handler (:parent health-def)))
+      (is (= :make-handler (:parent metrics-def)))
+      ;; response arg references the response-fn (which wraps json body)
+      (is (= :health-response-fn> (get-in health-def [:args :response])))
+      (is (= :metrics-response-fn> (get-in metrics-def [:args :response])))))
+
+  (testing "json body fns use to-json-string with data sources"
+    (let [health-json (first (filter #(= :health-json-body-fn (:name %)) web-server-fns/fn-defs))
+          metrics-json (first (filter #(= :metrics-json-body-fn (:name %)) web-server-fns/fn-defs))]
+      (is (= :to-json-string (:parent health-json)))
+      (is (= :to-json-string (:parent metrics-json)))
+      ;; Data sources
+      (is (= :health-status> (get-in health-json [:args :data])))
+      (is (= :jvm-info> (get-in metrics-json [:args :data]))))))
 
 
 (deftest startup-fn-name-test

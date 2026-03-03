@@ -147,27 +147,27 @@ For `reduce`-like operations, the function receives a vector `[acc item]` as its
    :timeout-ms 30000})  ; Execution timeout in ms (default: 30000)
 ```
 
-### Runtime Free Arguments (call-site-args)
+### Runtime Free Arguments (fn-usage-args)
 
-Functions may have "free" arguments — arguments without defined values in the database. These must be provided at runtime via `call-site-args`:
+Functions may have "free" arguments — arguments without defined values in the database. These must be provided at runtime via `fn-usage-args`:
 
 ```clojure
 ;; For root function with free arg
 (exec/create-context
   {:storage storage
-   :call-site-args {arg-schema-id 42}})
+   :fn-usage-args {arg-schema-id 42}})
 
-;; For nested function via call-site (call site)
+;; For nested function via fn-usage (call site)
 (exec/create-context
   {:storage storage
-   :call-site-args {[call-site-id arg-schema-id] 100}})
+   :fn-usage-args {[fn-usage-id arg-schema-id] 100}})
 ```
 
 **Key format:**
 - **Root function**: `{arg-schema-id -> value}` — direct lookup by arg-schema-id
-- **Nested function (call site)**: `{[call-site-id arg-schema-id] -> value}` — lookup by call-site + arg-schema-id
+- **Nested function (call site)**: `{[fn-usage-id arg-schema-id] -> value}` — lookup by fn-usage + arg-schema-id
 
-**Note:** Direct fn refs (HOF with type=:fn) cannot receive call-site-args. Only functions referenced via `call-site` (call sites) can have their free args set externally.
+**Note:** Direct fn refs (HOF with type=:fn) cannot receive fn-usage-args. Only functions referenced via `fn-usage` (call sites) can have their free args set externally.
 
 ### Error Handling
 
@@ -263,27 +263,27 @@ The default graph schema includes these entities:
 | `fn-schema` | id, name, returned-type | Function type definition |
 | `arg-schema` | id, fn-schema-id, name, type, required | Argument definition |
 | `fn` | id, name, fn-schema-id | Function instance |
-| `call-site` | id, fn-id | Cached computation reference |
+| `fn-usage` | id, fn-id | Cached computation reference |
 | `arg-value` | id, owner-fn-id, arg-schema-id, value | Argument value |
 
-### call-site Entity
+### fn-usage Entity
 
-The `call-site` entity enables caching of function results within a single execution:
+The `fn-usage` entity enables caching of function results within a single execution:
 
 ```clojure
-;; Create a call-site that points to a function
-(let [call-site (sp/create-entity storage :call-site
+;; Create a fn-usage that points to a function
+(let [fn-usage (sp/create-entity storage :fn-usage
                                   {:fn-id (:id my-expensive-fn)})]
-  ;; Multiple arg-values can reference the same call-site
+  ;; Multiple arg-values can reference the same fn-usage
   ;; The function will execute once and the result will be cached
   (sp/create-entity storage :arg-value
                     {:owner-fn-id (:id fn-a)
                      :arg-schema-id (:id arg-schema-x)
-                     :value (:id call-site)})
+                     :value (:id fn-usage)})
   (sp/create-entity storage :arg-value
                     {:owner-fn-id (:id fn-b)
                      :arg-schema-id (:id arg-schema-y)
-                     :value (:id call-site)}))
+                     :value (:id fn-usage)}))
 ```
 
 **When to use:**

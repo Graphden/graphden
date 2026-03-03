@@ -2,10 +2,10 @@
   "Storage decorator that adds Git-like versioning with branch support.
 
    Wraps any storage implementation with branch-aware CRUD:
-   - Versioned entities (fn, fn-schema, arg-schema, fn-arg, call-site-arg)
+   - Versioned entities (fn, fn-schema, arg-schema, fn-arg)
      are intercepted: reads resolve versions on the current branch,
      writes append version records
-   - Non-versioned entities (arg-value, call-site, branch, branch-merge,
+   - Non-versioned entities (arg-value, fn-usage, branch, branch-merge,
      all version tables) delegate directly to base storage
    - ExecutionGraph resolution works transparently via CRUD interception
 

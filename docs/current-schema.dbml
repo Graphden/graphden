@@ -120,7 +120,7 @@ Table arg_schema_version {
 // value can be:
 // - literal (int, text, bool, etc.)
 // - UUID referencing fn (for HOF - pass function as object)
-// - UUID referencing call_site (for computed values - execute & cache)
+// - UUID referencing fn_usage (for computed values - execute & cache)
 // NOT versioned: changing an argument = pointing fn_arg to a different arg_value.
 Table arg_value {
   id uuid [primary key]
@@ -180,37 +180,37 @@ Table fn_arg_version {
   }
 }
 
-// === Non-versioned: call_site ===
+// === Non-versioned: fn_usage ===
 
 // Call site reference (function to execute at this point).
-// fn_id is fixed (call_site always calls the same fn).
-// NOT versioned: call_site itself doesn't change.
-Table call_site {
+// fn_id is fixed (fn_usage always calls the same fn).
+// NOT versioned: fn_usage itself doesn't change.
+Table fn_usage {
   id uuid [primary key]
   name text [not null, unique]
   fn_id uuid [not null, ref: > fn.id]
 }
 
-// === Versioned: call_site_arg ===
+// === Versioned: fn_usage_arg ===
 
-// Binding from call_site to arg_value (stable identity).
-Table call_site_arg {
+// Binding from fn_usage to arg_value (stable identity).
+Table fn_usage_arg {
   id uuid [primary key]
 }
 
-// Version of a call_site_arg binding. Append-only history.
+// Version of a fn_usage_arg binding. Append-only history.
 // Can change: arg_value_id.
-// Current version: latest by created_at for (call_site_arg_id, branch_id).
-Table call_site_arg_version {
+// Current version: latest by created_at for (fn_usage_arg_id, branch_id).
+Table fn_usage_arg_version {
   id uuid [primary key]
-  call_site_arg_id uuid [not null, ref: > call_site_arg.id]
+  fn_usage_arg_id uuid [not null, ref: > fn_usage_arg.id]
   branch_id uuid [not null, ref: > branch.id]
-  call_site_id uuid [not null, ref: > call_site.id]
+  fn_usage_id uuid [not null, ref: > fn_usage.id]
   arg_schema_id uuid [not null, ref: > arg_schema.id]
   arg_value_id uuid [not null, ref: > arg_value.id]
   created_at timestamptz [not null]
 
   indexes {
-    (call_site_arg_id, branch_id, created_at) [name: 'idx_call_site_arg_version_lookup']
+    (fn_usage_arg_id, branch_id, created_at) [name: 'idx_fn_usage_arg_version_lookup']
   }
 }

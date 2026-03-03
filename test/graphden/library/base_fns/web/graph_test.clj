@@ -86,25 +86,25 @@
       (is (= "fn-ref" (get-in node [:data :ref-type])))
       (is (get-in node [:data :is-ref]))))
 
-  (testing "converts arg-value entities with call-site reference"
+  (testing "converts arg-value entities with fn-usage reference"
     (let [entities {:arg-values [{:id #uuid "00000000-0000-0000-0000-000000000004"
-                                  :value {:call-site-id #uuid "00000000-0000-0000-0000-000000000006"}
+                                  :value {:fn-usage-id #uuid "00000000-0000-0000-0000-000000000006"}
                                   :owner-fn-id #uuid "00000000-0000-0000-0000-000000000002"
                                   :arg-schema-id #uuid "00000000-0000-0000-0000-000000000003"}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})
           node (first (:nodes result))]
-      (is (= "call-site-ref" (get-in node [:data :ref-type])))
+      (is (= "fn-usage-ref" (get-in node [:data :ref-type])))
       (is (get-in node [:data :is-ref]))))
 
-  (testing "converts call-site entities"
-    (let [entities {:call-sites [{:id #uuid "00000000-0000-0000-0000-000000000006"
-                                  :name :my-call-site
+  (testing "converts fn-usage entities"
+    (let [entities {:fn-usages [{:id #uuid "00000000-0000-0000-0000-000000000006"
+                                  :name :my-fn-usage
                                   :fn-id #uuid "00000000-0000-0000-0000-000000000002"}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})]
       (is (= 1 (count (:nodes result))))
       (let [node (first (:nodes result))]
-        (is (= "call-site" (get-in node [:data :type])))
-        (is (= "my-call-site" (get-in node [:data :label]))))))
+        (is (= "fn-usage" (get-in node [:data :type])))
+        (is (= "my-fn-usage" (get-in node [:data :label]))))))
 
   (testing "creates edges between entities"
     (let [fn-schema-id #uuid "00000000-0000-0000-0000-000000000001"

@@ -42,7 +42,7 @@
                               {:fn-schema-id (:id double-schema)
                                :name "x"
                                :type :int
-                               :required true})
+                               :required true :first-class false})
           double-fn (sp/create-entity storage :fn
                                       {:name "my-double"
                                        :fn-schema-id (:id double-schema)})
@@ -55,7 +55,7 @@
                               {:fn-schema-id (:id gt2-schema)
                                :name "x"
                                :type :int
-                               :required true})
+                               :required true :first-class false})
           gt2-fn (sp/create-entity storage :fn
                                    {:name "my-gt2"
                                     :fn-schema-id (:id gt2-schema)})
@@ -69,7 +69,7 @@
                               {:fn-schema-id (:id add-schema)
                                :name "pair"
                                :type :jsonb
-                               :required true})
+                               :required true :first-class false})
           add-fn (sp/create-entity storage :fn
                                    {:name "my-add-reducer"
                                     :fn-schema-id (:id add-schema)})
@@ -82,7 +82,7 @@
                               {:fn-schema-id (:id cat-schema)
                                :name "x"
                                :type :int
-                               :required true})
+                               :required true :first-class false})
           cat-fn (sp/create-entity storage :fn
                                    {:name "my-get-category"
                                     :fn-schema-id (:id cat-schema)})]
@@ -335,10 +335,10 @@
 
 
 ;; === Transducer Integration Tests ===
-;; Tests that comp + transduce work correctly with call-site references
+;; Tests that comp + transduce work correctly with fn-usage references
 
 (deftest transducer-comp-transduce-integration-test
-  (testing "comp + transduce pipeline works with call-site references"
+  (testing "comp + transduce pipeline works with fn-usage references"
     (let [storage (th/create-test-storage *container*)]
       (try
         ;; Register base functions
@@ -354,7 +354,7 @@
                                   {:fn-schema-id (:id gt2-schema)
                                    :name "x"
                                    :type :int
-                                   :required true})
+                                   :required true :first-class false})
               gt2-fn (sp/create-entity storage :fn
                                        {:name "my-gt2"
                                         :fn-schema-id (:id gt2-schema)})
@@ -367,7 +367,7 @@
                                   {:fn-schema-id (:id double-schema)
                                    :name "x"
                                    :type :int
-                                   :required true})
+                                   :required true :first-class false})
               double-fn (sp/create-entity storage :fn
                                           {:name "my-double"
                                            :fn-schema-id (:id double-schema)})
@@ -380,7 +380,7 @@
                                   {:fn-schema-id (:id add-schema)
                                    :name "pair"
                                    :type :jsonb
-                                   :required true})
+                                   :required true :first-class false})
               add-fn (sp/create-entity storage :fn
                                        {:name "my-add-reducer"
                                         :fn-schema-id (:id add-schema)})]
@@ -400,7 +400,7 @@
                                       (+ acc item))))
 
           ;; Create transducer-returning functions and compose them
-          ;; The key here is using fn-composition which creates call-sites
+          ;; The key here is using fn-composition which creates fn-usages
           (fn-composition/sync-fns-to-storage! storage
                                                [;; filter-xf: (filter gt2) - returns transducer
                                                 {:name :filter-xf
@@ -456,7 +456,7 @@
                                   {:fn-schema-id (:id counting-pred-schema)
                                    :name "x"
                                    :type :int
-                                   :required true})
+                                   :required true :first-class false})
               counting-pred-fn (sp/create-entity storage :fn
                                                  {:name "my-counting-pred"
                                                   :fn-schema-id (:id counting-pred-schema)})
@@ -468,7 +468,7 @@
                                   {:fn-schema-id (:id counting-map-schema)
                                    :name "x"
                                    :type :int
-                                   :required true})
+                                   :required true :first-class false})
               counting-map-fn (sp/create-entity storage :fn
                                                 {:name "my-counting-map"
                                                  :fn-schema-id (:id counting-map-schema)})
@@ -480,7 +480,7 @@
                                   {:fn-schema-id (:id add-schema)
                                    :name "pair"
                                    :type :jsonb
-                                   :required true})
+                                   :required true :first-class false})
               add-fn (sp/create-entity storage :fn
                                        {:name "my-add-reducer2"
                                         :fn-schema-id (:id add-schema)})]

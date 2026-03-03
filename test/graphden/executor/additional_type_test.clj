@@ -30,7 +30,7 @@
                                   {:fn-schema-id (:id fn-schema)
                                    :name "n"
                                    :type :numeric
-                                   :required true})
+                                   :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-numeric"
                                     :fn-schema-id (:id fn-schema)})
@@ -54,7 +54,7 @@
                                   {:fn-schema-id (:id fn-schema)
                                    :name "n"
                                    :type :numeric
-                                   :required true})
+                                   :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-numeric"
                                     :fn-schema-id (:id fn-schema)})
@@ -78,7 +78,7 @@
                                      {:fn-schema-id (:id fn-schema)
                                       :name "data"
                                       :type :jsonb
-                                      :required true})
+                                      :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-jsonb"
                                     :fn-schema-id (:id fn-schema)})
@@ -102,7 +102,7 @@
                                      {:fn-schema-id (:id fn-schema)
                                       :name "data"
                                       :type :jsonb
-                                      :required true})
+                                      :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-jsonb"
                                     :fn-schema-id (:id fn-schema)})
@@ -124,7 +124,7 @@
                                      {:fn-schema-id (:id fn-schema)
                                       :name "data"
                                       :type :jsonb
-                                      :required true})
+                                      :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-jsonb"
                                     :fn-schema-id (:id fn-schema)})
@@ -148,7 +148,7 @@
                                      {:fn-schema-id (:id fn-schema)
                                       :name "data"
                                       :type :bytes
-                                      :required true})
+                                      :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-bytes"
                                     :fn-schema-id (:id fn-schema)})
@@ -172,7 +172,7 @@
                                      {:fn-schema-id (:id fn-schema)
                                       :name "data"
                                       :type :bytes
-                                      :required true})
+                                      :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-bytes"
                                     :fn-schema-id (:id fn-schema)})
@@ -196,7 +196,7 @@
                                    {:fn-schema-id (:id fn-schema)
                                     :name "ts"
                                     :type :timestamptz
-                                    :required true})
+                                    :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-timestamp"
                                     :fn-schema-id (:id fn-schema)})
@@ -220,7 +220,7 @@
                                    {:fn-schema-id (:id fn-schema)
                                     :name "ts"
                                     :type :timestamptz
-                                    :required true})
+                                    :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-timestamp"
                                     :fn-schema-id (:id fn-schema)})
@@ -243,7 +243,7 @@
                                    {:fn-schema-id (:id fn-schema)
                                     :name "ts"
                                     :type :timestamptz
-                                    :required true})
+                                    :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-timestamp"
                                     :fn-schema-id (:id fn-schema)})
@@ -275,7 +275,7 @@
                                    {:fn-schema-id (:id fn-schema)
                                     :name "id"
                                     :type :uuid
-                                    :required true})
+                                    :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-uuid"
                                     :fn-schema-id (:id fn-schema)})
@@ -299,7 +299,7 @@
                                    {:fn-schema-id (:id fn-schema)
                                     :name "id"
                                     :type :uuid
-                                    :required true})
+                                    :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-use-uuid"
                                     :fn-schema-id (:id fn-schema)})

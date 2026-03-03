@@ -74,12 +74,12 @@
 (defn- classify-uuid-refs
   [ds uuid-refs]
   (if (empty? uuid-refs)
-    {:fn-ids #{} :call-sites {}}
+    {:fn-ids #{} :fn-usages {}}
     (let [uuids-vec (vec uuid-refs)
           combined-query
           [(str "SELECT 'fn' as entity_type, id, NULL::uuid as fn_id FROM fn WHERE id = ANY(?)"
                 " UNION ALL "
-                "SELECT 'cs' as entity_type, id, fn_id FROM call_site WHERE id = ANY(?)")
+                "SELECT 'fu' as entity_type, id, fn_id FROM fn_usage WHERE id = ANY(?)")
            (into-array java.util.UUID uuids-vec)
            (into-array java.util.UUID uuids-vec)]
           rows (jdbc/execute! ds combined-query (query-opts))]
@@ -87,12 +87,12 @@
         (fn [acc row]
           (case (str (:entity-type row))
             "fn" (update acc :fn-ids conj (:id row))
-            "cs" (-> acc
-                     (update :call-site-ids conj (:id row))
-                     (assoc-in [:call-sites (:id row)]
+            "fu" (-> acc
+                     (update :fn-usage-ids conj (:id row))
+                     (assoc-in [:fn-usages (:id row)]
                                {:id (:id row) :fn-id (:fn-id row)}))
             acc))
-        {:fn-ids #{} :call-site-ids #{} :call-sites {}}
+        {:fn-ids #{} :fn-usage-ids #{} :fn-usages {}}
         rows))))
 
 
@@ -111,7 +111,7 @@
     (loop [to-visit #{fn-id}
            visited #{}
            all-resolved-args {}
-           all-call-sites {}
+           all-fn-usages {}
            iter-count 0]
       (sp/check-graph-iteration-limit! iter-count fn-id)
       (if (empty? to-visit)
@@ -133,7 +133,7 @@
              :fn-schemas fn-schemas
              :arg-schemas arg-schemas
              :resolved-args all-resolved-args
-             :call-sites all-call-sites}))
+             :fn-usages all-fn-usages}))
         (let [batch (vec to-visit)
               new-visited (into visited batch)
               resolved-args-batch (into {}
@@ -145,13 +145,13 @@
                                       (mapcat sp/extract-uuid-refs-from-arg-values)
                                       set)
               new-candidates (set/difference all-potential-refs new-visited)
-              {:keys [fn-ids call-sites]} (classify-uuid-refs ds new-candidates)
-              cs-fn-ids (set (map :fn-id (vals call-sites)))
-              all-new-fn-refs (set/union fn-ids (set/difference cs-fn-ids new-visited))]
+              {:keys [fn-ids fn-usages]} (classify-uuid-refs ds new-candidates)
+              fu-fn-ids (set (map :fn-id (vals fn-usages)))
+              all-new-fn-refs (set/union fn-ids (set/difference fu-fn-ids new-visited))]
           (recur all-new-fn-refs
                  new-visited
                  (merge all-resolved-args resolved-args-batch)
-                 (merge all-call-sites call-sites)
+                 (merge all-fn-usages fn-usages)
                  (+ iter-count (count batch))))))))
 
 

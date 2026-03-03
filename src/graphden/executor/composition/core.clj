@@ -22,8 +22,8 @@
 
    At the TOP LEVEL of args, both syntaxes work:
    - `:fn-name` - ref<fn>: pass fn as callable (for HOF, won't execute)
-   - `:fn-name>` - ref<call-site>: execute fn and use result
-   - `:fn-name>result-name` - ref<call-site> with explicit name
+   - `:fn-name>` - ref<fn-usage>: execute fn and use result
+   - `:fn-name>result-name` - ref<fn-usage> with explicit name
 
    In NESTED structures (maps, vectors inside arg values), only the
    `:fn-name>` syntax works. Plain keywords are kept as-is because
@@ -38,11 +38,11 @@
    ```
 
    The `:home-handler>` and `:api-handler>` will be resolved recursively,
-   creating call-sites and replacing references with call-site-ids.
+   creating fn-usages and replacing references with fn-usage-ids.
    Other keywords like `:handler` (map key) are kept as-is.
 
-   Multiple references to `:fn-name>` create one call-site (same name).
-   Use `:fn-name>name1`, `:fn-name>name2` for different call-sites.
+   Multiple references to `:fn-name>` create one fn-usage (same name).
+   Use `:fn-name>name1`, `:fn-name>name2` for different fn-usages.
 
    ## Name Resolution
 
@@ -80,10 +80,10 @@
 
 
 (defn- parse-fn-result-ref
-  "Parses a keyword or string that might be a call-site reference.
+  "Parses a keyword or string that might be a fn-usage reference.
    :fn-name> or \"fn-name>\" means execute fn-name, result name defaults to fn-name
    :fn-name>result-name means execute fn-name, result name is result-name
-   Returns [fn-name result-name] or nil if not a call-site ref.
+   Returns [fn-name result-name] or nil if not a fn-usage ref.
 
    Also handles strings (for JSONB round-trip where keywords become strings)."
   [value]
@@ -110,12 +110,12 @@
 (defn- extract-fn-ref
   "Extracts the fn name from an arg value.
    Returns [fn-name :fn nil] for keyword refs (pass as callable).
-   Returns [fn-name :call-site result-name] for :fn-name> refs (execute and use result).
+   Returns [fn-name :fn-usage result-name] for :fn-name> refs (execute and use result).
    Returns nil for literal values."
   [arg-value]
   (when (keyword? arg-value)
     (if-let [[fn-name result-name] (parse-fn-result-ref arg-value)]
-      [fn-name :call-site result-name]
+      [fn-name :fn-usage result-name]
       [arg-value :fn nil])))
 
 
@@ -338,33 +338,33 @@
 
    At top-level (the arg value itself):
    - :fn-name -> resolve to fn-id (for HOF)
-   - :fn-name> -> create call-site and resolve to call-site-id
+   - :fn-name> -> create fn-usage and resolve to fn-usage-id
 
-   NOTE: Nested structures with fn/call-site references are NOT resolved.
+   NOTE: Nested structures with fn/fn-usage references are NOT resolved.
    Use explicit graph functions (pair, assoc-any, conj-any) to build
-   structures containing fn/call-site references."
-  [arg-value storage created-fns created-call-sites]
+   structures containing fn/fn-usage references."
+  [arg-value storage created-fns created-fn-usages]
   (if-let [ref-info (extract-fn-ref arg-value)]
     ;; Top-level fn reference
     (let [[fn-name ref-type result-name] ref-info]
       (condp = ref-type
-        ;; :fn-name> - get or create call-site
-        :call-site
+        ;; :fn-name> - get or create fn-usage
+        :fn-usage
         (let [result-name-str (name result-name)]
-          (if-let [existing-cs-id (get @created-call-sites result-name)]
-            existing-cs-id
-            ;; Check storage for existing call-site with same name
-            (let [existing-in-db (sp/query-entities storage :call-site {:name result-name-str})]
+          (if-let [existing-fu-id (get @created-fn-usages result-name)]
+            existing-fu-id
+            ;; Check storage for existing fn-usage with same name
+            (let [existing-in-db (sp/query-entities storage :fn-usage {:name result-name-str})]
               (if (seq existing-in-db)
-                (let [cs-id (:id (first existing-in-db))]
-                  (swap! created-call-sites assoc result-name cs-id)
-                  cs-id)
+                (let [fu-id (:id (first existing-in-db))]
+                  (swap! created-fn-usages assoc result-name fu-id)
+                  fu-id)
                 (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                      call-site (sp/create-entity storage :call-site
+                      fn-usage (sp/create-entity storage :fn-usage
                                                   {:fn-id ref-fn-id
                                                    :name result-name-str})]
-                  (swap! created-call-sites assoc result-name (:id call-site))
-                  (:id call-site))))))
+                  (swap! created-fn-usages assoc result-name (:id fn-usage))
+                  (:id fn-usage))))))
 
         ;; :fn-name - resolve to fn id
         :fn
@@ -397,25 +397,25 @@
    Resolves top-level references to other fns.
 
    At top-level args, both :fn-name and :fn-name> syntax work.
-   NOTE: Nested structures with fn/call-site references are NOT resolved.
+   NOTE: Nested structures with fn/fn-usage references are NOT resolved.
    Use explicit graph functions (pair, assoc-any, conj-any) to build
-   structures containing fn/call-site references.
+   structures containing fn/fn-usage references.
 
    With normalized schema:
    - arg-value is a pure value (no owner-fn-id)
    - fn-arg binds fn to arg-value
    - arg-values with same (arg-schema-id, value) are deduplicated
 
-   The created-call-sites atom tracks call-sites created
+   The created-fn-usages atom tracks fn-usages created
    in this sync batch, keyed by their name (keyword).
    The created-arg-values atom tracks arg-values created for deduplication."
-  [storage fn-entity fn-def created-fns created-call-sites created-arg-values]
+  [storage fn-entity fn-def created-fns created-fn-usages created-arg-values]
   (let [{:keys [parent args]} fn-def
         fn-id (:id fn-entity)]
     (doseq [[arg-name arg-value] args]
       (let [arg-schema-id (resolve-arg-schema-id parent arg-name)
             ;; Resolve the arg value (handles top-level and nested refs)
-            resolved-value (resolve-arg-value arg-value storage created-fns created-call-sites)
+            resolved-value (resolve-arg-value arg-value storage created-fns created-fn-usages)
             ;; Get or create arg-value (deduplicated)
             arg-value-id (get-or-create-arg-value! storage arg-schema-id resolved-value created-arg-values)]
         ;; Get or create fn-arg binding (fn -> arg-value)
@@ -437,7 +437,7 @@
    5. Creates all arg-value and fn-arg entities
       - arg-values are deduplicated by (arg-schema-id, value)
       - fn-arg binds fn to arg-value
-      - call-sites are deduplicated by name
+      - fn-usages are deduplicated by name
 
    Returns map of {fn-name -> fn-id} for created fns.
 
@@ -453,8 +453,8 @@
       (validate-all-defs! fn-defs)
       ;; 2. Topological sort
       (let [sorted-defs (topological-sort fn-defs)
-            ;; Track call-sites created during sync for deduplication
-            created-call-sites (atom {})
+            ;; Track fn-usages created during sync for deduplication
+            created-fn-usages (atom {})
             ;; Track arg-values created during sync for deduplication
             created-arg-values (atom {})]
         ;; 3. Warn if order was wrong
@@ -469,5 +469,5 @@
                   new-created (assoc created-fns (:name fn-def) (:id fn-entity))]
               ;; 5. Create arg-values and fn-arg bindings for this fn
               (create-arg-values! storage fn-entity fn-def new-created
-                                  created-call-sites created-arg-values)
+                                  created-fn-usages created-arg-values)
               (recur (rest remaining) new-created))))))))

@@ -98,7 +98,7 @@
     (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-fn-schema))
     (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-arg-schemas))
     (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-resolved-args))
-    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-call-site)))
+    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-fn-usage)))
 
   (testing "ExecutionGraphResult implements ExecutionGraphReader"
     (let [fn-id (random-uuid)
@@ -110,7 +110,7 @@
                    :fn-schemas {fn-schema-id {:id fn-schema-id :name "test-fn"}}
                    :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id}}
                    :resolved-args {fn-id {arg-schema-id {:value 42}}}
-                   :call-sites {cs-id {:id cs-id :value "result"}}})]
+                   :fn-usages {cs-id {:id cs-id :value "result"}}})]
       ;; Test protocol methods
       (is (= {:id fn-id :fn-schema-id fn-schema-id}
              (storage/graph-get-fn graph fn-id)))
@@ -122,7 +122,7 @@
       (is (= {arg-schema-id {:value 42}}
              (storage/graph-get-resolved-args graph fn-id)))
       (is (= {:id cs-id :value "result"}
-             (storage/graph-get-call-site graph cs-id)))))
+             (storage/graph-get-fn-usage graph cs-id)))))
 
   (testing "ExecutionGraphReader returns nil/empty for missing keys"
     (let [graph (storage/->execution-graph
@@ -135,4 +135,4 @@
       ;; Returns empty map for missing fn-schema-id (no matching arg-schemas)
       (is (= {} (storage/graph-get-arg-schemas graph (random-uuid))))
       (is (nil? (storage/graph-get-resolved-args graph (random-uuid))))
-      (is (nil? (storage/graph-get-call-site graph (random-uuid)))))))
+      (is (nil? (storage/graph-get-fn-usage graph (random-uuid)))))))

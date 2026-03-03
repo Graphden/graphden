@@ -4,11 +4,10 @@
    Defines the schema for a function composition graph:
    - fn-schema: function signatures (name, return type)
    - arg-schema: argument definitions for functions
-   - fn: actual function instances
+   - fn: actual function instances (with optional owner-fn-id for local scoping)
    - arg-value: argument values (literals or references) - pure values, no owner
    - fn-arg: binding from fn to arg-value
-   - call-site: call site reference (function to execute at this point)
-   - call-site-arg: binding from call-site to arg-value (for free args)"
+   - fn-usage: usage of a function at a computation point (formerly call-site)"
   (:require
     [graphden.schema.fields.interface :as ft]
     [graphden.schema.protocol.interface :as ds]))
@@ -76,12 +75,9 @@
   #uuid "f1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c")
 
 
-(def ^:private call-site-entity-uuid
+;; fn-usage (formerly call-site) - same UUID enables rename migration
+(def ^:private fn-usage-entity-uuid
   #uuid "d4f8a2b1-7c3e-4d9f-a5b6-8e1c2f3d4a5b")
-
-
-(def ^:private call-site-arg-entity-uuid
-  #uuid "a9b8c7d6-e5f4-3a2b-1c0d-9e8f7a6b5c4d")
 
 
 ;; Field UUIDs for :fn-schema entity
@@ -120,6 +116,11 @@
   #uuid "a1d4e8c2-5f67-4b3a-9c12-8e0f7d6b5a4c")
 
 
+(def ^:private arg-schema-first-class-field-uuid
+  "Indicates if arg is passed as first-class fn (HOF) vs computed value."
+  #uuid "b2e5f9d3-6a78-4c1b-9d23-9f1e8c7a6b5d")
+
+
 ;; Field UUIDs for :fn entity
 (def ^:private fn-name-field-uuid
   #uuid "af336498-6d1e-4879-b2a5-b0d6c1994d12")
@@ -127,6 +128,11 @@
 
 (def ^:private fn-fn-schema-id-field-uuid
   #uuid "3a685253-07f7-4469-be8b-1a585ba3e7d4")
+
+
+(def ^:private fn-owner-fn-id-field-uuid
+  "Owner fn for local scoping. NULL = global fn, set = local fn."
+  #uuid "c3f6a0e4-7b89-4d2c-ae34-0a2b1c8d9e7f")
 
 
 ;; Field UUIDs for :arg-value entity (no owner - pure value)
@@ -151,26 +157,19 @@
   #uuid "a3b4c5d6-e7f8-9a0b-1c2d-3e4f5a6b7c8d")
 
 
-;; Field UUIDs for :call-site entity
-(def ^:private call-site-fn-id-field-uuid
+;; Field UUIDs for :fn-usage entity (formerly call-site)
+;; Keeping same UUIDs enables field rename migration
+(def ^:private fn-usage-fn-id-field-uuid
   #uuid "e5a9b3c2-8d4f-5e0a-b6c7-9f2d3e4a5b6c")
 
 
-(def ^:private call-site-name-field-uuid
+(def ^:private fn-usage-name-field-uuid
   #uuid "da238d29-4cd4-4077-9a75-3ad3436b7466")
 
 
-;; Field UUIDs for :call-site-arg entity (binding: call-site → arg-value)
-(def ^:private call-site-arg-call-site-id-field-uuid
-  #uuid "b4c5d6e7-f8a9-0b1c-2d3e-4f5a6b7c8d9e")
-
-
-(def ^:private call-site-arg-arg-schema-id-field-uuid
-  #uuid "c5d6e7f8-a9b0-1c2d-3e4f-5a6b7c8d9e0f")
-
-
-(def ^:private call-site-arg-arg-value-id-field-uuid
-  #uuid "d6e7f8a9-b0c1-2d3e-4f5a-6b7c8d9e0f1a")
+(def ^:private fn-usage-owner-fn-id-field-uuid
+  "Owner fn for local scoping. NULL = global usage, set = local usage."
+  #uuid "d4a7b1e5-8c90-4f3d-bf45-1b3c2d9e0f8a")
 
 
 (defn- value-kind-enum-values
@@ -188,14 +187,14 @@
   "Generates union variants for arg-value.
    Variants:
    - ref to fn: for HOF (passing function as first-class value)
-   - ref to call-site: for computed values (execute fn, cache result)
+   - ref to fn-usage: for computed values (execute fn, cache result)
    - :any/:fn types
    - literal types
 
    Public for reuse by cache-data-schema."
   []
   (into [{:type :ref :ref-entity :fn}
-         {:type :ref :ref-entity :call-site}
+         {:type :ref :ref-entity :fn-usage}
          {:type :any}
          {:type :fn}]
         (map (fn [t] {:type t}) ft/supported-types)))
@@ -229,21 +228,27 @@
 
       ;; arg_schema: defines function arguments
       ;; required defaults to true in business logic (not enforced at schema level)
+      ;; first-class: true = pass fn as value (HOF), false = execute and use result
       (ds/add-entity :arg-schema arg-schema-entity-uuid
                      {:fn-schema-id {:uuid arg-schema-fn-schema-id-field-uuid
                                      :type :ref :ref-entity :fn-schema}
                       :name {:uuid arg-schema-name-field-uuid :type :text}
                       :type {:uuid arg-schema-type-field-uuid
                              :type :enum :enum-name :value-kind}
-                      :required {:uuid arg-schema-required-field-uuid :type :bool}})
+                      :required {:uuid arg-schema-required-field-uuid :type :bool}
+                      :first-class {:uuid arg-schema-first-class-field-uuid :type :bool}})
       (ds/add-constraint :arg-schema {:type :unique :fields [:fn-schema-id :name]})
 
       ;; fn: actual function instances
+      ;; owner-fn-id: NULL = global fn (shown in search), set = local fn (scoped to owner)
       (ds/add-entity :fn fn-entity-uuid
                      {:name {:uuid fn-name-field-uuid :type :text}
                       :fn-schema-id {:uuid fn-fn-schema-id-field-uuid
-                                     :type :ref :ref-entity :fn-schema}})
-      (ds/add-constraint :fn {:type :unique :fields [:name]})
+                                     :type :ref :ref-entity :fn-schema}
+                      :owner-fn-id {:uuid fn-owner-fn-id-field-uuid
+                                    :type :ref :ref-entity :fn
+                                    :nullable? true}})
+      (ds/add-constraint :fn {:type :unique :fields [:owner-fn-id :name]})
 
       ;; arg_value: pure argument values (no owner)
       ;; value is a union: ref to fn (HOF), ref to call-site (computed), or literal
@@ -266,26 +271,19 @@
                                      :type :ref :ref-entity :arg-value}})
       (ds/add-constraint :fn-arg {:type :unique :fields [:fn-id :arg-schema-id]})
 
-      ;; call_site: call site reference (function to execute at this point)
-      ;; Multiple arg-values can reference the same call-site to reuse computed value
-      ;; name: unique identifier for this call site
-      (ds/add-entity :call-site call-site-entity-uuid
-                     {:fn-id {:uuid call-site-fn-id-field-uuid
+      ;; fn_usage: usage of a function at a computation point (formerly call-site)
+      ;; Multiple arg-values can reference the same fn-usage to reuse computed value
+      ;; owner-fn-id: NULL = global usage, set = local usage (scoped to owner fn)
+      ;; Same UUID as old call-site enables rename migration
+      (ds/add-entity :fn-usage fn-usage-entity-uuid
+                     {:fn-id {:uuid fn-usage-fn-id-field-uuid
                               :type :ref :ref-entity :fn}
-                      :name {:uuid call-site-name-field-uuid
-                             :type :text}})
-      (ds/add-constraint :call-site {:type :unique :fields [:name]})
-
-      ;; call_site_arg: binding from call-site to arg-value (for free args)
-      ;; arg-schema-id denormalized for UNIQUE constraint
-      (ds/add-entity :call-site-arg call-site-arg-entity-uuid
-                     {:call-site-id {:uuid call-site-arg-call-site-id-field-uuid
-                                     :type :ref :ref-entity :call-site}
-                      :arg-schema-id {:uuid call-site-arg-arg-schema-id-field-uuid
-                                      :type :ref :ref-entity :arg-schema}
-                      :arg-value-id {:uuid call-site-arg-arg-value-id-field-uuid
-                                     :type :ref :ref-entity :arg-value}})
-      (ds/add-constraint :call-site-arg {:type :unique :fields [:call-site-id :arg-schema-id]})))
+                      :name {:uuid fn-usage-name-field-uuid
+                             :type :text}
+                      :owner-fn-id {:uuid fn-usage-owner-fn-id-field-uuid
+                                    :type :ref :ref-entity :fn
+                                    :nullable? true}})
+      (ds/add-constraint :fn-usage {:type :unique :fields [:owner-fn-id :name]})))
 
 
 (defn build-schema

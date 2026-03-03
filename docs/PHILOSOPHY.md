@@ -99,16 +99,16 @@ Following SICP, a language has three aspects:
 3. **Means of abstraction** — how to name and reuse compositions
 
 In graphden:
-- **Primitives**: Nodes (fn, fn-schema, arg-schema, arg-value, call-site)
+- **Primitives**: Nodes (fn, fn-schema, arg-schema, arg-value, fn-usage)
 - **Combination**: Edges (references between nodes)
-- **Abstraction**: Base functions (reusable implementations) and result caching (call-site)
+- **Abstraction**: Base functions (reusable implementations) and result caching (fn-usage)
 
 **We resist adding new entity types or edge types.** Every addition increases cognitive load and implementation complexity.
 
 #### 2.2 DRY (Don't Repeat Yourself)
 
 Abstractions must minimize the need to define anything twice:
-- call-site enables sharing computed results
+- fn-usage enables sharing computed results
 - Base functions provide reusable implementations
 - UI can offer "create based on" = copying with ability to change
 
@@ -145,12 +145,12 @@ The system should support (or enable) development tools:
 | `arg-schema` | Argument definition (name, type, required) |
 | `fn` | Function instance (implements schema) |
 | `arg-value` | Bound argument value (literal or reference) |
-| `call-site` | Cached computation reference (memoization within execution) |
+| `fn-usage` | Cached computation reference (memoization within execution) |
 
 **Why these five?** They are the minimal set needed to express:
 - Function definitions (fn-schema + arg-schema)
 - Function instances with values (fn + arg-value)
-- Result caching / sharing (call-site)
+- Result caching / sharing (fn-usage)
 
 ### Means of Combination
 
@@ -159,7 +159,7 @@ Two types of references in arg-value:
 | Reference Type | Syntax (in fn-defs) | Behavior |
 |---------------|---------------------|----------|
 | `ref<fn>` | `:fn-name` | Pass fn-id as value (for HOF) |
-| `ref<call-site>` | `:fn-name>` | Execute and use result |
+| `ref<fn-usage>` | `:fn-name>` | Execute and use result |
 
 **Why two types?** Higher-order functions (map, filter, reduce) need to receive functions as values, not their results. This is the minimum necessary distinction.
 
@@ -247,12 +247,12 @@ This approach:
 
 ### Means of Abstraction
 
-#### call-site (Named Intermediate Results)
+#### fn-usage (Named Intermediate Results)
 
 ```
 fn: report
-  sales:   ref<call-site:FRV-1>  ← FRV-1 points to calculate-sales
-  summary: ref<call-site:FRV-1>  ← Same FRV-1, result computed once
+  sales:   ref<fn-usage:FRV-1>  ← FRV-1 points to calculate-sales
+  summary: ref<fn-usage:FRV-1>  ← Same FRV-1, result computed once
 ```
 
 This enables:
@@ -268,7 +268,7 @@ This enables:
 
 #### Two Reference Types
 
-We wanted a single edge type, but HOF require passing functions as values. The `>` suffix (call-site) vs plain reference (fn) is the minimum distinction needed.
+We wanted a single edge type, but HOF require passing functions as values. The `>` suffix (fn-usage) vs plain reference (fn) is the minimum distinction needed.
 
 **Mitigation**: In visual UI, this can be shown as edge color or style, not requiring user to remember syntax.
 
@@ -311,7 +311,7 @@ This section maps each system component to the principles it serves. Use this to
 | `arg-schema` | Minimal entities, Explicit | Arguments are explicit, typed, named |
 | `fn` | DRY, Expressiveness | Inheritance enables reuse without duplication |
 | `arg-value` | Explicit, Locality | Values are explicit; changing one doesn't affect siblings |
-| `call-site` | DRY, Performance | Share computed results; cache expensive operations |
+| `fn-usage` | DRY, Performance | Share computed results; cache expensive operations |
 
 ### Storage Layer
 
@@ -349,9 +349,9 @@ This section maps each system component to the principles it serves. Use this to
 
 | Decision | Principles Served | Trade-off |
 |----------|-------------------|-----------|
-| Two reference types (`ref<fn>` vs `ref<call-site>`) | Expressiveness (HOF support) | +1 concept, but minimum for HOF |
+| Two reference types (`ref<fn>` vs `ref<fn-usage>`) | Expressiveness (HOF support) | +1 concept, but minimum for HOF |
 | Union type for arg-value.value | Minimal entities | Single field instead of multiple tables |
-| call-site as separate entity | DRY, Performance | +1 entity, but enables caching and sharing |
+| fn-usage as separate entity | DRY, Performance | +1 entity, but enables caching and sharing |
 
 ### Bundles
 
@@ -416,7 +416,7 @@ The boundaries between roles are enforced by the permission system, not by techn
 
 ### Extension Modularity Problem
 
-The core system is simple: base-fn implementations + graph composition (fn, arg-value, call-site) + executor. But production features — versioning, caching, logging, permissions, environment management, secret storage — all require modifications to either storage (new fields, tables, query logic) or executor (new resolution steps, middleware).
+The core system is simple: base-fn implementations + graph composition (fn, arg-value, fn-usage) + executor. But production features — versioning, caching, logging, permissions, environment management, secret storage — all require modifications to either storage (new fields, tables, query logic) or executor (new resolution steps, middleware).
 
 Hardwiring these features into the core has problems:
 - Forces all users to use them, even when unnecessary
@@ -486,7 +486,7 @@ The system separates concerns into three distinct layers:
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                         EXECUTOR                                 │
-│  - Receives fn-id + call-site-args                              │
+│  - Receives fn-id + fn-usage-args                              │
 │  - Knows about laziness (Clojure delays)                        │
 │  - Resolves base-fn implementations                             │
 │  - Does NOT know about storage details                          │
@@ -606,7 +606,7 @@ This is analogous to Lisp's self-hosting capability: the language is expressive 
 
 **Question**: How does graphden handle this?
 
-**Current answer**: call-site names results, but primarily for caching, not readability. Visual UI may need to support annotations or labels.
+**Current answer**: fn-usage names results, but primarily for caching, not readability. Visual UI may need to support annotations or labels.
 
 ### Error Messages
 

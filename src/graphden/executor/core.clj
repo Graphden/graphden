@@ -31,7 +31,7 @@
 
 
 ;; Forward declaration: execute-internal is defined later but referenced by
-;; build-delay, execute-call-site, and make-single-arg-callable.
+;; build-delay, execute-fn-usage, and make-single-arg-callable.
 ;; The recursion is lazy (via delays) - functions create delays that capture
 ;; execute-internal for later evaluation during argument resolution.
 (declare execute-internal)
@@ -121,7 +121,7 @@
       (execute-internal context fn-id {arg-schema-id value}))))
 
 
-;; === call-site Execution ===
+;; === fn-usage Execution ===
 
 ;; Use centralized limit from storage-protocol config
 (def ^:private cache-eviction-ratio
@@ -152,7 +152,7 @@
    If at limit, evicts oldest entries (by insertion order) to make room.
    This prevents OOM from unbounded execution graphs while allowing
    execution to continue with reduced caching."
-  [context call-site-id]
+  [context fn-usage-id]
   (let [result-cache (:result-cache context)
         current-size (count @result-cache)
         cache-max-size (:cache-max-size context)]
@@ -163,38 +163,38 @@
                   {:cache-max-size cache-max-size
                    :evicted-count evicted
                    :new-size (count @result-cache)
-                   :call-site-id call-site-id
+                   :fn-usage-id fn-usage-id
                    :hint "Large caches may indicate deep recursion or unbounded graphs"})))))
 
 
-(defn- get-call-site!
-  "Gets call-site from execution graph.
+(defn- get-fn-usage!
+  "Gets fn-usage from execution graph.
    Throws if not found."
-  [context call-site-id]
+  [context fn-usage-id]
   (let [execution-graph (:execution-graph context)
-        call-sites (:call-sites execution-graph)
-        cs (get call-sites call-site-id)]
-    (when-not cs
-      (throw (ex-info "call-site not found in execution graph"
-                      {:type :execution-error/call-site-not-found
-                       :call-site-id call-site-id})))
-    cs))
+        fn-usages (:fn-usages execution-graph)
+        fu (get fn-usages fn-usage-id)]
+    (when-not fu
+      (throw (ex-info "fn-usage not found in execution graph"
+                      {:type :execution-error/fn-usage-not-found
+                       :fn-usage-id fn-usage-id})))
+    fu))
 
 
 (defn- execute-and-cache-result!
-  "Executes call-site and stores result in cache.
+  "Executes fn-usage and stores result in cache.
    Logs warning once when cache reaches warning threshold.
    Returns the computed result."
-  [context call-site-id cs]
+  [context fn-usage-id fu]
   (let [result-cache (:result-cache context)
         cache-max-size (:cache-max-size context)
         cache-warning-threshold (:cache-warning-threshold context)]
-    (log/debug "call-site cache miss, executing"
-               {:call-site-id call-site-id
-                :fn-id (:fn-id cs)})
-    (let [fn-id (:fn-id cs)
+    (log/debug "fn-usage cache miss, executing"
+               {:fn-usage-id fn-usage-id
+                :fn-id (:fn-id fu)})
+    (let [fn-id (:fn-id fu)
           result (execute-internal context fn-id nil)
-          new-size (count (swap! result-cache assoc call-site-id result))]
+          new-size (count (swap! result-cache assoc fn-usage-id result))]
       ;; Warn once when cache crosses threshold (check if we just crossed)
       (when (= new-size cache-warning-threshold)
         (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
@@ -205,31 +205,31 @@
       result)))
 
 
-(defn- execute-call-site
-  "Executes a call-site, using cache for memoization.
-   If the call-site-id is already in cache, returns cached value.
+(defn- execute-fn-usage
+  "Executes a fn-usage, using cache for memoization.
+   If the fn-usage-id is already in cache, returns cached value.
    Otherwise executes the underlying fn, caches the result, and returns it.
 
    Structure:
    1. Check cache for existing result (fast path)
    2. Check cache limit before adding new entry
-   3. Get call-site from graph
+   3. Get fn-usage from graph
    4. Execute and cache the result"
-  [context call-site-id]
+  [context fn-usage-id]
   (let [result-cache (:result-cache context)
-        cached (get @result-cache call-site-id)]
+        cached (get @result-cache fn-usage-id)]
     (if (some? cached)
       ;; Fast path: cache hit
       (do
-        (log/debug "call-site cache hit"
-                   {:call-site-id call-site-id
+        (log/debug "fn-usage cache hit"
+                   {:fn-usage-id fn-usage-id
                     :cache-size (count @result-cache)})
         cached)
       ;; Slow path: cache miss - check limits, execute, cache
       (do
-        (check-cache-limit! context call-site-id)
-        (let [cs (get-call-site! context call-site-id)]
-          (execute-and-cache-result! context call-site-id cs))))))
+        (check-cache-limit! context fn-usage-id)
+        (let [fu (get-fn-usage! context fn-usage-id)]
+          (execute-and-cache-result! context fn-usage-id fu))))))
 
 
 ;; === Execution ===
@@ -316,9 +316,9 @@
                        :fn-name fn-name
                        :registry-size (count registry)})))
     (let [new-context (update context :depth inc)
-          ;; Pass execute-call-site for resolving call-site references
+          ;; Pass execute-fn-usage for resolving fn-usage references
           arg-delays (arg-res/build-arg-delays new-context fn-data provided-args
-                                               execute-call-site)]
+                                               execute-fn-usage)]
       (base-fn arg-delays new-context))))
 
 

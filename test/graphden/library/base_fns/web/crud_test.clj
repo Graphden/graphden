@@ -378,14 +378,14 @@
                    :fn [{:id (random-uuid) :name :f1}]
                    :arg-schema [{:id (random-uuid) :name :a1}]
                    :arg-value [{:id (random-uuid) :value 42}]
-                   :call-site [{:id (random-uuid) :name :c1}])
+                   :fn-usage [{:id (random-uuid) :name :c1}])
           ctx {:storage storage}
           result (call-impl-with-ctx crud/list-all-graph-entities-impl {} ctx)]
       (is (= 1 (count (:fn-schemas result))))
       (is (= 1 (count (:fns result))))
       (is (= 1 (count (:arg-schemas result))))
       (is (= 1 (count (:arg-values result))))
-      (is (= 1 (count (:call-sites result)))))))
+      (is (= 1 (count (:fn-usages result)))))))
 
 
 (deftest all-entities-json-handler-with-storage-test
@@ -427,12 +427,12 @@
           response (handler-fn {:path-params {:type "fn"}})]
       (is (= 200 (:status response)))))
 
-  (testing "returns form for call-site entity type"
+  (testing "returns form for fn-usage entity type"
     (let [storage (create-mock-storage)
           _ (swap! (:data storage) assoc :fn [{:id (random-uuid) :name :test}])
           ctx {:storage storage}
           handler-fn ((:impl crud/entity-form-handler-impl) {} ctx)
-          response (handler-fn {:path-params {:type "call-site"}})]
+          response (handler-fn {:path-params {:type "fn-usage"}})]
       (is (= 200 (:status response)))))
 
   (testing "returns form for arg-value entity type"
@@ -457,13 +457,13 @@
                                 :body (str "name=new-fn&fn-schema-id=" schema-id)})]
       (is (= 200 (:status response)))))
 
-  (testing "creates call-site entity"
+  (testing "creates fn-usage entity"
     (let [storage (create-mock-storage)
           fn-id (random-uuid)
           _ (swap! (:data storage) assoc :fn [{:id fn-id :name :test}])
           ctx {:storage storage}
           handler-fn ((:impl crud/create-entity-api-handler-impl) {} ctx)
-          response (handler-fn {:path-params {:type "call-site"}
+          response (handler-fn {:path-params {:type "fn-usage"}
                                 :body (str "fn-id=" fn-id)})]
       (is (= 200 (:status response))))))
 
@@ -556,51 +556,51 @@
       (is (= 200 (:status response)))
       (is (str/includes? (:body response) "ref&lt;fn:"))))
 
-  (testing "returns HTML for arg-value entity with call-site-id reference"
+  (testing "returns HTML for arg-value entity with fn-usage-id reference"
     (let [storage (create-mock-storage)
           fn-id (random-uuid)
-          call-site-id (random-uuid)
+          fn-usage-id (random-uuid)
           arg-schema-id (random-uuid)
           arg-value-id (random-uuid)
           _ (swap! (:data storage) assoc
                    :fn [{:id fn-id :name :test-fn}]
                    :arg-schema [{:id arg-schema-id :name :arg1}]
-                   :call-site [{:id call-site-id :name :cs1 :fn-id fn-id}]
+                   :fn-usage [{:id fn-usage-id :name :cs1 :fn-id fn-id}]
                    :arg-value [{:id arg-value-id
-                                :value {:call-site-id call-site-id}
+                                :value {:fn-usage-id fn-usage-id}
                                 :owner-fn-id fn-id
                                 :arg-schema-id arg-schema-id}])
           ctx {:storage storage}
           handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
           response (handler-fn {:path-params {:type "arg-value" :id (str arg-value-id)}})]
       (is (= 200 (:status response)))
-      (is (str/includes? (:body response) "ref&lt;call-site:")))))
+      (is (str/includes? (:body response) "ref&lt;fn-usage:")))))
 
 
-(deftest entity-details-handler-call-site-entity-test
-  (testing "returns HTML for call-site entity with name"
+(deftest entity-details-handler-fn-usage-entity-test
+  (testing "returns HTML for fn-usage entity with name"
     (let [storage (create-mock-storage)
           fn-id (random-uuid)
-          call-site-id (random-uuid)
+          fn-usage-id (random-uuid)
           _ (swap! (:data storage) assoc
                    :fn [{:id fn-id :name :test-fn}]
-                   :call-site [{:id call-site-id :name :my-call-site :fn-id fn-id}])
+                   :fn-usage [{:id fn-usage-id :name :my-fn-usage :fn-id fn-id}])
           ctx {:storage storage}
           handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
-          response (handler-fn {:path-params {:type "call-site" :id (str call-site-id)}})]
+          response (handler-fn {:path-params {:type "fn-usage" :id (str fn-usage-id)}})]
       (is (= 200 (:status response)))
-      (is (str/includes? (:body response) "my-call-site"))))
+      (is (str/includes? (:body response) "my-fn-usage"))))
 
-  (testing "returns HTML for call-site entity without name"
+  (testing "returns HTML for fn-usage entity without name"
     (let [storage (create-mock-storage)
           fn-id (random-uuid)
-          call-site-id (random-uuid)
+          fn-usage-id (random-uuid)
           _ (swap! (:data storage) assoc
                    :fn [{:id fn-id :name :test-fn}]
-                   :call-site [{:id call-site-id :fn-id fn-id}])
+                   :fn-usage [{:id fn-usage-id :fn-id fn-id}])
           ctx {:storage storage}
           handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
-          response (handler-fn {:path-params {:type "call-site" :id (str call-site-id)}})]
+          response (handler-fn {:path-params {:type "fn-usage" :id (str fn-usage-id)}})]
       (is (= 200 (:status response))))))
 
 
@@ -633,17 +633,17 @@
       (is (str/includes? (:body response) "Edit")))))
 
 
-(deftest entity-form-handler-edit-call-site-test
-  (testing "returns edit form for existing call-site entity"
+(deftest entity-form-handler-edit-fn-usage-test
+  (testing "returns edit form for existing fn-usage entity"
     (let [storage (create-mock-storage)
           fn-id (random-uuid)
-          call-site-id (random-uuid)
+          fn-usage-id (random-uuid)
           _ (swap! (:data storage) assoc
                    :fn [{:id fn-id :name :test-fn}]
-                   :call-site [{:id call-site-id :name :existing-cs :fn-id fn-id}])
+                   :fn-usage [{:id fn-usage-id :name :existing-cs :fn-id fn-id}])
           ctx {:storage storage}
           handler-fn ((:impl crud/entity-form-handler-impl) {} ctx)
-          response (handler-fn {:path-params {:type "call-site" :id (str call-site-id)}})]
+          response (handler-fn {:path-params {:type "fn-usage" :id (str fn-usage-id)}})]
       (is (= 200 (:status response)))
       (is (str/includes? (:body response) "Edit")))))
 
@@ -698,15 +698,15 @@
       (is (= 200 (:status response))))))
 
 
-(deftest create-entity-api-handler-call-site-with-name-test
-  (testing "creates call-site entity with optional name"
+(deftest create-entity-api-handler-fn-usage-with-name-test
+  (testing "creates fn-usage entity with optional name"
     (let [storage (create-mock-storage)
           fn-id (random-uuid)
           _ (swap! (:data storage) assoc :fn [{:id fn-id :name :test-fn}])
           ctx {:storage storage}
           handler-fn ((:impl crud/create-entity-api-handler-impl) {} ctx)
-          response (handler-fn {:path-params {:type "call-site"}
-                                :body (str "name=my-call-site&fn-id=" fn-id)})]
+          response (handler-fn {:path-params {:type "fn-usage"}
+                                :body (str "name=my-fn-usage&fn-id=" fn-id)})]
       (is (= 200 (:status response))))))
 
 

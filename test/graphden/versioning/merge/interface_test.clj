@@ -45,7 +45,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           av (sp/create-entity storage :arg-value
                                {:arg-schema-id (:id as) :value 42})]
       (mp/add-merge-protection! storage (:id av))
@@ -58,7 +58,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           av (sp/create-entity storage :arg-value
                                {:arg-schema-id (:id as) :value 42})]
       (mp/add-merge-protection! storage (:id av))
@@ -78,7 +78,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           av (sp/create-entity storage :arg-value
                                {:arg-schema-id (:id as) :value 42})]
       (mp/add-merge-protection! storage (:id av))
@@ -95,7 +95,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "main-fn" :fn-schema-id (:id fs)})
           av (sp/create-entity storage :arg-value
@@ -125,7 +125,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           ;; Create feature branch
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
@@ -154,7 +154,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           ;; Create feature branch with protected value
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
@@ -180,7 +180,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           av (sp/create-entity feature :arg-value
@@ -203,7 +203,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           av (sp/create-entity feature :arg-value
@@ -228,7 +228,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           av (sp/create-entity feature :arg-value
@@ -254,7 +254,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           ;; Create protected value on main
           av-protected (sp/create-entity storage :arg-value
                                          {:arg-schema-id (:id as) :value "main-secret"})
@@ -279,30 +279,3 @@
       (is (some? merge-rec)))))
 
 
-(deftest protection-check-with-call-site-arg-test
-  (testing "detects protected arg-value in call-site-arg transfer"
-    (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "base-fn" :fn-schema-id (:id fs)})
-          cs (sp/create-entity storage :call-site
-                               {:fn-id (:id fn-rec) :name "cs1"})
-          ;; Create feature branch
-          branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          ;; Create protected arg-value and bind via call-site-arg
-          av-secret (sp/create-entity feature :arg-value
-                                      {:arg-schema-id (:id as) :value "api-key"})
-          _ (sp/create-entity feature :call-site-arg
-                              {:call-site-id (:id cs) :arg-schema-id (:id as)
-                               :arg-value-id (:id av-secret)})]
-      (mp/add-merge-protection! feature (:id av-secret))
-
-      (let [{:keys [protected-transfers blocked?]}
-            (mp/detect-protected-transfers storage (:id branch))]
-        (is (seq protected-transfers))
-        (is (true? blocked?))
-        (is (= :call-site-arg (:entity-type (first protected-transfers))))))))

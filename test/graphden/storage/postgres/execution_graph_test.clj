@@ -29,10 +29,12 @@
                                           {:name "add" :returned-type "int"})
               arg-a (sp/create-entity storage :arg-schema
                                       {:fn-schema-id (:id fn-schema)
-                                       :name "a" :type "int" :required true})
+                                       :name "a" :type "int" :required true
+                                       :first-class false})
               arg-b (sp/create-entity storage :arg-schema
                                       {:fn-schema-id (:id fn-schema)
-                                       :name "b" :type "int" :required true})
+                                       :name "b" :type "int" :required true
+                                       :first-class false})
               fn-add (sp/create-entity storage :fn
                                        {:name "add-1-2"
                                         :fn-schema-id (:id fn-schema)})
@@ -60,15 +62,18 @@
                                              {:name "const-int" :returned-type "int"})
               const-arg (sp/create-entity storage :arg-schema
                                           {:fn-schema-id (:id const-schema)
-                                           :name "value" :type "int" :required true})
+                                           :name "value" :type "int" :required true
+                                           :first-class false})
               add-schema (sp/create-entity storage :fn-schema
                                            {:name "add" :returned-type "int"})
               add-arg-a (sp/create-entity storage :arg-schema
                                           {:fn-schema-id (:id add-schema)
-                                           :name "a" :type "int" :required true})
+                                           :name "a" :type "int" :required true
+                                           :first-class false})
               add-arg-b (sp/create-entity storage :arg-schema
                                           {:fn-schema-id (:id add-schema)
-                                           :name "b" :type "int" :required true})
+                                           :name "b" :type "int" :required true
+                                           :first-class false})
               const-3 (sp/create-entity storage :fn
                                         {:name "const-3"
                                          :fn-schema-id (:id const-schema)})
@@ -114,10 +119,12 @@
               ;; Various arg types with literal values
               arg-text (sp/create-entity storage :arg-schema
                                          {:fn-schema-id (:id fn-schema)
-                                          :name "text-arg" :type "text" :required true})
+                                          :name "text-arg" :type "text" :required true
+                                          :first-class false})
               arg-int (sp/create-entity storage :arg-schema
                                         {:fn-schema-id (:id fn-schema)
-                                         :name "int-arg" :type "int" :required true})
+                                         :name "int-arg" :type "int" :required true
+                                         :first-class false})
               fn-rec (sp/create-entity storage :fn
                                        {:name "my-process"
                                         :fn-schema-id (:id fn-schema)})
@@ -145,7 +152,8 @@
                                           {:name "echo" :returned-type "text"})
               arg-val (sp/create-entity storage :arg-schema
                                         {:fn-schema-id (:id fn-schema)
-                                         :name "value" :type "text" :required true})
+                                         :name "value" :type "text" :required true
+                                         :first-class false})
               fn-rec (sp/create-entity storage :fn
                                        {:name "my-echo"
                                         :fn-schema-id (:id fn-schema)})
@@ -170,16 +178,19 @@
                                              {:name "const-shared" :returned-type "int"})
               const-arg (sp/create-entity storage :arg-schema
                                           {:fn-schema-id (:id const-schema)
-                                           :name "value" :type "int" :required true})
+                                           :name "value" :type "int" :required true
+                                           :first-class false})
               ;; add schema - both args reference fns
               add-schema (sp/create-entity storage :fn-schema
                                            {:name "add-shared" :returned-type "int"})
               add-arg-a (sp/create-entity storage :arg-schema
                                           {:fn-schema-id (:id add-schema)
-                                           :name "a" :type "int" :required true})
+                                           :name "a" :type "int" :required true
+                                           :first-class false})
               add-arg-b (sp/create-entity storage :arg-schema
                                           {:fn-schema-id (:id add-schema)
-                                           :name "b" :type "int" :required true})
+                                           :name "b" :type "int" :required true
+                                           :first-class false})
               ;; const-5 fn - will be referenced TWICE
               const-5 (sp/create-entity storage :fn
                                         {:name "const-5-shared"
@@ -217,10 +228,12 @@
               ;; 'self' arg will reference the fn itself (for recursion)
               arg-self (sp/create-entity storage :arg-schema
                                          {:fn-schema-id (:id rec-schema)
-                                          :name "self" :type "fn" :required true}) ; :fn type
+                                          :name "self" :type "fn" :required true
+                                          :first-class false}) ; :fn type
               arg-n (sp/create-entity storage :arg-schema
                                       {:fn-schema-id (:id rec-schema)
-                                       :name "n" :type "int" :required true})
+                                       :name "n" :type "int" :required true
+                                       :first-class false})
               ;; Create fn instance that references itself
               rec-fn (sp/create-entity storage :fn
                                        {:name "factorial"
@@ -256,7 +269,8 @@
                                           {:fn-schema-id (:id fn-schema)
                                            :name "ref-arg"
                                            :type "ref"
-                                           :required false}
+                                           :required false
+                                           :first-class false}
                                           nil)
               ;; Create a fn
               fn-rec (crud/create-entity pool :fn
@@ -306,7 +320,8 @@
                                           {:fn-schema-id (:id fn-schema)
                                            :name "ref-arg"
                                            :type "ref"
-                                           :required false}
+                                           :required false
+                                           :first-class false}
                                           nil)
               ;; Create main fn
               main-fn (crud/create-entity pool :fn

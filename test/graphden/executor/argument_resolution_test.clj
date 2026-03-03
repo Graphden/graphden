@@ -106,7 +106,7 @@
     (is (nil? (#'arg-res/try-parse-uuid {:a 1})))))
 
 
-;; === resolve-nested-call-sites tests ===
+;; === resolve-nested-fn-usages tests ===
 
 (defn mock-storage
   "Creates a mock storage that returns specified entities."
@@ -124,7 +124,7 @@
     (query-entities [_ _ _] nil)))
 
 
-;; NOTE: resolve-nested-call-sites and execute-external-call-site tests removed.
+;; NOTE: resolve-nested-fn-usages and execute-external-fn-usage tests removed.
 ;; These functions were removed as part of simplifying the architecture.
-;; Nested fn/call-site resolution is no longer supported.
+;; Nested fn/fn-usage resolution is no longer supported.
 ;; Use explicit collection functions (pair, assoc-any, conj-any) instead.

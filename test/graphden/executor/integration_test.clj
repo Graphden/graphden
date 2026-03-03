@@ -4,7 +4,7 @@
    These tests exercise the complete stack:
    - Base function registration
    - fn-composition sync to storage
-   - Execution with call-sites
+   - Execution with fn-usages
    - Cache behavior under load
    - Limit handling (depth, timeout)"
   (:require
@@ -27,8 +27,8 @@
 
 ;; === Full Execution Flow Tests ===
 
-(deftest full-execution-with-call-sites-test
-  (testing "executes composed functions with call-site references"
+(deftest full-execution-with-fn-usages-test
+  (testing "executes composed functions with fn-usage references"
     (let [storage (setup/create-test-storage)]
       (try
         ;; Initialize base functions
@@ -61,7 +61,7 @@
         (finally
           (sp/close storage)))))
 
-  (testing "call-sites are cached and reused"
+  (testing "fn-usages are cached and reused"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)]
       (try
@@ -76,15 +76,15 @@
                                           :return-type :int
                                           :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
 
-        ;; Define functions where same call-site is used twice
+        ;; Define functions where same fn-usage is used twice
         (fn-composition/sync-fns-to-storage! storage
                                              [{:name :value-fn
                                                :parent :counted-const
                                                :args {:x 10}}
                                               {:name :double-fn
                                                :parent :add
-                                               :args {:a :value-fn>   ; Same call-site
-                                                      :b :value-fn>}}]) ; Same call-site (deduplicated)
+                                               :args {:a :value-fn>   ; Same fn-usage
+                                                      :b :value-fn>}}]) ; Same fn-usage (deduplicated)
 
         (let [double-fn (first (sp/query-entities storage :fn {:name "double-fn"}))
               ctx (exec/create-context {:storage storage})
@@ -191,7 +191,7 @@
                                             :return-type :any
                                             :impl (fn [{:keys [x]} _] @x)}}])
 
-        ;; Create many call-sites to fill cache
+        ;; Create many fn-usages to fill cache
         (let [fn-defs (vec
                         (for [i (range 10)]
                           {:name (keyword (str "val-" i))

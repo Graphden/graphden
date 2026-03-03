@@ -155,11 +155,11 @@
   (testing "extracts fn ref from keyword"
     (is (= [:my-fn :fn nil] (#'core/extract-fn-ref :my-fn))))
 
-  (testing "extracts call-site ref from :fn-name> keyword"
-    (is (= [:my-fn :call-site :my-fn] (#'core/extract-fn-ref :my-fn>))))
+  (testing "extracts fn-usage ref from :fn-name> keyword"
+    (is (= [:my-fn :fn-usage :my-fn] (#'core/extract-fn-ref :my-fn>))))
 
-  (testing "extracts call-site with custom name"
-    (is (= [:my-fn :call-site :custom] (#'core/extract-fn-ref :my-fn>custom))))
+  (testing "extracts fn-usage with custom name"
+    (is (= [:my-fn :fn-usage :custom] (#'core/extract-fn-ref :my-fn>custom))))
 
   (testing "returns nil for literals"
     (is (nil? (#'core/extract-fn-ref 42)))
@@ -167,8 +167,8 @@
     (is (nil? (#'core/extract-fn-ref {:map "value"})))))
 
 
-(deftest call-site-test
-  (testing "creates call-site entities for :fn-name> args"
+(deftest fn-usage-test
+  (testing "creates fn-usage entities for :fn-name> args"
     (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
@@ -177,7 +177,7 @@
                                        {:assoc-fn {:args {:m :jsonb :k :text :v :any}
                                                    :return-type :jsonb
                                                    :impl (fn [_ _] {})}}])
-          ;; Define fns with call-site ref
+          ;; Define fns with fn-usage ref
           fn-composition-data [{:name :handler-fn
                                 :parent :const
                                 :args {:x {:status 200}}}
@@ -185,15 +185,15 @@
                                 :parent :assoc-fn
                                 :args {:m {}
                                        :k "handler"
-                                       :v :handler-fn>}}]  ; This should create call-site
+                                       :v :handler-fn>}}]  ; This should create fn-usage
           result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
-          ;; Verify call-site was created
-          frvs (sp/query-entities storage :call-site {:fn-id handler-fn-id})]
+          ;; Verify fn-usage was created
+          frvs (sp/query-entities storage :fn-usage {:fn-id handler-fn-id})]
       (is (= 1 (count frvs)))
       (is (= "handler-fn" (:name (first frvs))))))
 
-  (testing "deduplicates call-sites with same name"
+  (testing "deduplicates fn-usages with same name"
     (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
@@ -217,11 +217,11 @@
                                 :args {:m {} :k "b" :v :handler-fn>}}]  ; Same ref, should reuse
           result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
-          ;; Should have only ONE call-site (deduplicated)
-          frvs (sp/query-entities storage :call-site {:fn-id handler-fn-id})]
+          ;; Should have only ONE fn-usage (deduplicated)
+          frvs (sp/query-entities storage :fn-usage {:fn-id handler-fn-id})]
       (is (= 1 (count frvs)))))
 
-  (testing "creates separate call-sites with different names"
+  (testing "creates separate fn-usages with different names"
     (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
@@ -242,8 +242,8 @@
                                 :args {:m {} :k "b" :v :handler-fn>result2}}]
           result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
-          ;; Should have TWO call-sites with different names
-          frvs (sp/query-entities storage :call-site {:fn-id handler-fn-id})]
+          ;; Should have TWO fn-usages with different names
+          frvs (sp/query-entities storage :fn-usage {:fn-id handler-fn-id})]
       (is (= 2 (count frvs)))
       (is (= #{"result1" "result2"} (set (map :name frvs)))))))
 
@@ -325,7 +325,7 @@
     (let [fn-def {:name :my-fn
                   :parent :base
                   :args {:a :other-fn   ; fn ref
-                         :b :third-fn>  ; call-site ref
+                         :b :third-fn>  ; fn-usage ref
                          :c 42}}        ; literal (ignored)
           fn-names #{:other-fn :third-fn}
           deps (#'core/extract-dependencies fn-def fn-names)]
@@ -385,10 +385,10 @@
             (#'core/topological-sort fn-defs))))))
 
 
-;; === call-site edge cases ===
+;; === fn-usage edge cases ===
 
-(deftest call-site-unresolved-test
-  (testing "throws when call-site references non-existent fn"
+(deftest fn-usage-unresolved-test
+  (testing "throws when fn-usage references non-existent fn"
     (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:base-fn {:args {:ref :any}
@@ -435,6 +435,6 @@
 
 ;; NOTE: collect-refs-recursively, resolve-refs-recursively, and nested-routes-integration tests removed.
 ;; These functions and features were removed as part of simplifying the architecture.
-;; Nested fn/call-site resolution is no longer supported.
+;; Nested fn/fn-usage resolution is no longer supported.
 ;; Use explicit collection functions (pair, assoc-any, conj-any) to build structures
-;; containing fn/call-site references.
+;; containing fn/fn-usage references.

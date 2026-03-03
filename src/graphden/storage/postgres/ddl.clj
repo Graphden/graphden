@@ -166,13 +166,37 @@
     (str "idx_" (util/kw->snake-case entity-name) "_" fields-str "_unique")))
 
 
+(defn- jsonb-field?
+  "Returns true if the field type maps to JSONB in PostgreSQL.
+   These types can have large values that exceed btree index limits."
+  [field-spec]
+  (#{:union :jsonb :any} (:type field-spec)))
+
+
+(defn- constraint-column-sql
+  "Returns SQL for a constraint column.
+   For JSONB fields, uses md5(column::text) to avoid btree size limits.
+   For other fields, uses the column name directly."
+  [field-name field-spec]
+  (let [col-name (util/ident->sql field-name)]
+    (if (jsonb-field? field-spec)
+      (str "md5(" col-name "::text)")
+      col-name)))
+
+
 (defn- create-constraint!
-  "Creates a unique constraint (as unique index) in PostgreSQL."
-  [ds entity-name constraint]
+  "Creates a unique constraint (as unique index) in PostgreSQL.
+   For JSONB fields (union, jsonb, any types), uses MD5 hash to avoid
+   PostgreSQL btree index size limit (~2704 bytes)."
+  [ds schema entity-name constraint]
   (util/with-sql-error-handling "DDL error" :create-constraint {:entity-name entity-name :constraint constraint}
                                 (let [table-name (util/ident->sql entity-name)
                                       index-name (constraint-index-name entity-name constraint)
-                                      columns-sql (str/join ", " (map util/ident->sql (:fields constraint)))]
+                                      fields (ds/entity-fields schema entity-name)
+                                      columns-sql (str/join ", "
+                                                            (map (fn [field-name]
+                                                                   (constraint-column-sql field-name (get fields field-name)))
+                                                                 (:fields constraint)))]
                                   (jdbc/execute! ds [(str "CREATE UNIQUE INDEX \"" index-name "\" ON " table-name
                                                           " (" columns-sql ")")]))))
 
@@ -180,5 +204,5 @@
 (defn create-entity-constraints!
   "Creates all constraints for a single entity."
   [ds schema entity-name]
-  (run! #(create-constraint! ds entity-name %)
+  (run! #(create-constraint! ds schema entity-name %)
         (ds/entity-constraints schema entity-name)))

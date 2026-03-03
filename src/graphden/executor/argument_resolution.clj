@@ -3,7 +3,7 @@
 
    This module handles:
    - Building delays for lazy argument evaluation
-   - Resolving argument values from various sources (provided, call-site-args, DB)
+   - Resolving argument values from various sources (provided, call-site-args runtime API, DB)
    - Type validation for provided arguments
 
    ## Why Delays?
@@ -16,7 +16,7 @@
 
    Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
    - ref<fn> → pass fn-id directly (for HOF, handlers, etc. - don't execute)
-   - ref<call-site> → execute fn and use result (with caching)
+   - ref<fn-usage> → execute fn and use result (with caching)
 
    This means HOF (map, filter, reduce) receive fn-id and create callables themselves.
 
@@ -139,24 +139,24 @@
 
 
 (defn- build-uuid-ref-delay
-  "Builds a delay for a UUID reference (fn or call-site).
+  "Builds a delay for a UUID reference (fn or fn-usage).
 
    Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
-   - ref<call-site> → execute fn and use result (with caching)
+   - ref<fn-usage> → execute fn and use result (with caching)
    - ref<fn> → pass fn-id directly (for HOF, handlers, etc.)
 
    Parameters:
    - context: Execution context
    - uuid-value: The UUID reference
    - arg-name: Argument name for error context
-   - call-sites: Map of call-sites from execution graph
-   - execute-call-site-fn: Function to execute call-sites (injected)"
-  [context uuid-value arg-name call-sites execute-call-site-fn]
-  (if (contains? call-sites uuid-value)
-    ;; ref<call-site>: execute with caching
-    (let [cs-context (assoc context :current-call-site-id uuid-value)]
-      (wrap-delay-with-context arg-name :call-site
-                               #(execute-call-site-fn cs-context uuid-value)))
+   - fn-usages: Map of fn-usages from execution graph
+   - execute-fn-usage-fn: Function to execute fn-usages (injected)"
+  [context uuid-value arg-name fn-usages execute-fn-usage-fn]
+  (if (contains? fn-usages uuid-value)
+    ;; ref<fn-usage>: execute with caching
+    (let [fu-context (assoc context :current-fn-usage-id uuid-value)]
+      (wrap-delay-with-context arg-name :fn-usage
+                               #(execute-fn-usage-fn fu-context uuid-value)))
     ;; ref<fn>: pass fn-id directly (don't execute)
     (delay uuid-value)))
 
@@ -209,36 +209,36 @@
   "Builds a delay for an arg-value with error context.
 
    Resolution is based on the TYPE OF REFERENCE, not arg-schema type:
-   - UUID in call-sites map → execute fn and use result (cached)
-   - UUID not in call-sites → pass as fn-id (for HOF, handlers, etc.)
+   - UUID in fn-usages map → execute fn and use result (cached)
+   - UUID not in fn-usages → pass as fn-id (for HOF, handlers, etc.)
    - Non-UUID → literal value (returned as-is)
 
-   NOTE: Nested structures with fn/call-site references are NOT resolved.
+   NOTE: Nested structures with fn/fn-usage references are NOT resolved.
    Use explicit graph functions (pair, assoc-any, conj-any) to build
-   structures containing fn/call-site references.
+   structures containing fn/fn-usage references.
 
    Parameters:
    - context: Execution context
    - arg-value: The argument value record OR direct value (from cache)
    - arg-schema: The argument schema
-   - execute-call-site-fn: Injected function to execute call-sites
+   - execute-fn-usage-fn: Injected function to execute fn-usages
 
    All delays include error context (arg-name, source) for better diagnostics.
 
    Note: UUID references may come as strings from PostgreSQL JSONB storage,
    so we parse them with try-parse-uuid. The arg-value format varies between
    direct resolution (map with :value) and cached resolution (direct value)."
-  ^clojure.lang.Delay [context arg-value arg-schema execute-call-site-fn]
+  ^clojure.lang.Delay [context arg-value arg-schema execute-fn-usage-fn]
   (let [raw-value (extract-arg-value arg-value)
         arg-name (:name arg-schema)
         ;; Try to parse as UUID - handles both native UUIDs and UUID strings
         ;; from PostgreSQL JSONB storage
         parsed-uuid (try-parse-uuid raw-value)]
     (if parsed-uuid
-      ;; UUID: reference to fn or call-site
-      (let [call-sites (-> context :execution-graph :call-sites)]
-        (build-uuid-ref-delay context parsed-uuid arg-name call-sites
-                              execute-call-site-fn))
+      ;; UUID: reference to fn or fn-usage
+      (let [fn-usages (-> context :execution-graph :fn-usages)]
+        (build-uuid-ref-delay context parsed-uuid arg-name fn-usages
+                              execute-fn-usage-fn))
       ;; Literal or complex value - return as-is (no nested resolution)
       (wrap-delay-with-context arg-name :db-value
                                #(identity raw-value)))))
@@ -247,18 +247,20 @@
 ;; === Call Site Argument Resolution ===
 
 (defn get-call-site-arg
-  "Gets a runtime argument value from call-site-args.
+  "Gets a runtime argument value from call-site-args (runtime API).
 
-   For root function (current-call-site-id is nil): looks up by arg-schema-id directly
-   For nested fns via call-site: looks up by [call-site-id arg-schema-id]
+   For root function (current-fn-usage-id is nil): looks up by arg-schema-id directly
+   For nested fns via fn-usage: looks up by [fn-usage-id arg-schema-id]
 
-   Returns the value or nil if not found."
+   Returns the value or nil if not found.
+
+   NOTE: call-site-args is the runtime API name (stays as-is), not the entity name."
   [context arg-schema-id]
-  (let [current-call-site-id (:current-call-site-id context)
+  (let [current-fn-usage-id (:current-fn-usage-id context)
         call-site-args (:call-site-args context)]
-    (if current-call-site-id
-      ;; Nested fn via call-site: use [call-site-id arg-schema-id] as key
-      (get call-site-args [current-call-site-id arg-schema-id])
+    (if current-fn-usage-id
+      ;; Nested fn via fn-usage: use [fn-usage-id arg-schema-id] as key
+      (get call-site-args [current-fn-usage-id arg-schema-id])
       ;; Root function: use arg-schema-id directly
       (get call-site-args arg-schema-id))))
 
@@ -286,27 +288,27 @@
    SECURITY: Does NOT log actual values to prevent sensitive data leakage.
    Only logs type information which is safe for debugging."
   [context arg-value arg-schema arg-schema-id arg-name source
-   execute-call-site-fn]
+   execute-fn-usage-fn]
   (log/warn (str (name source) " ignored: argument already defined in DB (DB value takes precedence)")
             {:arg-schema-id arg-schema-id
-             :current-call-site-id (:current-call-site-id context)
+             :current-fn-usage-id (:current-fn-usage-id context)
              :arg-name arg-name
              :source source
              ;; SECURITY: Log types only, not actual values
              :db-value-type (type (:value arg-value))
              :arg-type (:type arg-schema)
              :hint "Update DB arg-value to change this argument"})
-  (build-delay context arg-value arg-schema execute-call-site-fn))
+  (build-delay context arg-value arg-schema execute-fn-usage-fn))
 
 
 (defn throw-missing-required-arg!
   "Throws error for required arg with no value."
-  [arg-schema-id arg-name current-call-site-id]
+  [arg-schema-id arg-name current-fn-usage-id]
   (throw (ex-info (str "Required argument '" arg-name "' not provided")
                   {:type :execution-error/missing-required-arg
                    :arg-schema-id arg-schema-id
                    :arg-name arg-name
-                   :current-call-site-id current-call-site-id})))
+                   :current-fn-usage-id current-fn-usage-id})))
 
 
 ;; === Main Argument Resolution ===
@@ -323,9 +325,9 @@
    1. Stored arg-value from DB (ALWAYS takes precedence, cannot be overridden)
       - If provided-arg or call-site-arg also exists -> warning logged, DB value used
    2. Provided value (from HOF callable calls) - only if no DB value
-   3. Call-site-arg value - only if no DB value and no provided-arg:
+   3. Call-site-arg value (runtime API) - only if no DB value and no provided-arg:
       - For root fn: looked up by arg-schema-id
-      - For nested fn via call-site: looked up by [call-site-id arg-schema-id]
+      - For nested fn via fn-usage: looked up by [fn-usage-id arg-schema-id]
    4. Required arg with no value -> error
    5. Optional arg with no value -> delay returning nil
 
@@ -334,10 +336,10 @@
    - context: Execution context
    - fn-data: Function data from graph {:arg-schemas {...} :arg-values {...}}
    - provided-args: Map of {arg-schema-id -> value} provided at call time (only for free args)
-   - execute-call-site-fn: Injected function to execute call-sites"
-  [context fn-data provided-args execute-call-site-fn]
+   - execute-fn-usage-fn: Injected function to execute fn-usages"
+  [context fn-data provided-args execute-fn-usage-fn]
   (let [{:keys [arg-schemas arg-values]} fn-data
-        current-call-site-id (:current-call-site-id context)
+        current-fn-usage-id (:current-fn-usage-id context)
         strict? (:strict-type-validation? context)
         max-unknown-types (:max-unknown-types context)
         unknown-type-counter (:unknown-type-counter context)]
@@ -356,13 +358,13 @@
               (when (some? provided-value)
                 (handle-runtime-arg-with-db-value context arg-value arg-schema
                                                   arg-schema-id arg-name :provided-arg
-                                                  execute-call-site-fn))
+                                                  execute-fn-usage-fn))
               (when (some? call-site-arg-value)
                 (handle-runtime-arg-with-db-value context arg-value arg-schema
                                                   arg-schema-id arg-name :call-site-arg
-                                                  execute-call-site-fn))
+                                                  execute-fn-usage-fn))
               (assoc acc arg-name-kw (build-delay context arg-value arg-schema
-                                                  execute-call-site-fn)))
+                                                  execute-fn-usage-fn)))
 
             ;; 2. No DB value - use provided-arg if available
             (some? provided-value)
@@ -374,7 +376,7 @@
 
             ;; 4. Required arg with no value -> error
             (:required arg-schema)
-            (throw-missing-required-arg! arg-schema-id arg-name current-call-site-id)
+            (throw-missing-required-arg! arg-schema-id arg-name current-fn-usage-id)
 
             ;; 5. Optional arg with no value -> delay returning nil
             :else

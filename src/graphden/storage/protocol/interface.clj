@@ -242,9 +242,9 @@
     [this fn-id]
     "Returns map of resolved arg-values for fn-id.")
 
-  (graph-get-call-site
-    [this call-site-id]
-    "Returns call-site record for call-site-id."))
+  (graph-get-fn-usage
+    [this fn-usage-id]
+    "Returns fn-usage record for fn-usage-id."))
 
 
 ;; ============================================================================
@@ -286,8 +286,8 @@
   (graph-get-resolved-args [this fn-id]
     (get (:resolved-args this) fn-id))
 
-  (graph-get-call-site [this call-site-id]
-    (get (:call-sites this) call-site-id)))
+  (graph-get-fn-usage [this fn-usage-id]
+    (get (:fn-usages this) fn-usage-id)))
 
 
 ;; ============================================================================
@@ -599,9 +599,9 @@
   graph/get-graph-resolved-args)
 
 
-(def get-graph-call-sites
-  "Returns the call-sites map from an execution graph."
-  graph/get-graph-call-sites)
+(def get-graph-fn-usages
+  "Returns the fn-usages map from an execution graph."
+  graph/get-graph-fn-usages)
 
 
 ;; === Constraint limits re-exports ===

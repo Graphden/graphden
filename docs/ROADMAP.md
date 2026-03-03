@@ -43,8 +43,8 @@
 - `fn-schema` with `base-fn-name`
 - `arg-schema` with `required`
 - `fn` (function instance)
-- `call-site` for cached computation results
-- `arg-value` with union types (including refs to call-site)
+- `fn-usage` for cached computation results
+- `arg-value` with union types (including refs to fn-usage)
 
 **1.2 GraphConstraints protocol** - All 5 validators
 
@@ -88,14 +88,14 @@
 Arguments are wrapped in Clojure `delay` objects:
 - Literal values → immediate delay
 - fn references → delay that executes function
-- call-site references → delay with result caching within execution
+- fn-usage references → delay with result caching within execution
 
 **3.3 Executor:**
 - `execute` - Main entry point
 - `execute-with-named-args` - Execute with named arguments
 - `execute-by-name` - Execute by function name
 - Depth/timeout protection
-- `call-site-args` for runtime free argument values (keyed by arg-schema-id or [call-site-id arg-schema-id])
+- `fn-usage-args` for runtime free argument values (keyed by arg-schema-id or [fn-usage-id arg-schema-id])
 
 **3.4 fn-registry component:**
 - `register-base-fns!` - Register implementations
@@ -188,16 +188,16 @@ Arguments are wrapped in Clojure `delay` objects:
 
 **Problem**: When executing a function with free arguments via UI, users see technical identifiers (UUIDs). We need human-readable aliases.
 
-**Solution**: New entity `free-arg-alias` linking `call-site` + `arg-schema` to a display name.
+**Solution**: New entity `free-arg-alias` linking `fn-usage` + `arg-schema` to a display name.
 
 **Schema:**
 ```
 free-arg-alias:
   id: uuid (PK)
-  call-site-id: ref<call-site>
+  fn-usage-id: ref<fn-usage>
   arg-schema-id: ref<arg-schema>
   alias: text (human-readable name)
-  UNIQUE(call-site-id, arg-schema-id)
+  UNIQUE(fn-usage-id, arg-schema-id)
 ```
 
 **Lifecycle:**

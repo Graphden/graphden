@@ -49,24 +49,24 @@
 
 
 (defn- classify-uuid-refs
-  "Classifies UUIDs into fn-refs vs call-site-refs via StorageCRUD.
-   Returns {:fn-refs #{fn-ids} :call-sites {cs-id -> cs-record}}.
-   Call-site :fn-id values are also added to :fn-refs so the BFS
-   traverses through call-sites to their target functions."
+  "Classifies UUIDs into fn-refs vs fn-usage-refs via StorageCRUD.
+   Returns {:fn-refs #{fn-ids} :fn-usages {fu-id -> fu-record}}.
+   fn-usage :fn-id values are also added to :fn-refs so the BFS
+   traverses through fn-usages to their target functions."
   [storage uuid-refs]
   (if (empty? uuid-refs)
-    {:fn-refs #{} :call-sites {}}
+    {:fn-refs #{} :fn-usages {}}
     (let [refs-vec (vec uuid-refs)
           fn-results (sp/read-entities storage :fn refs-vec)
           fn-ref-ids (set (keys fn-results))
           remaining (remove fn-ref-ids refs-vec)
-          call-site-results (if (empty? remaining)
+          fn-usage-results (if (empty? remaining)
                               {}
-                              (sp/read-entities storage :call-site (vec remaining)))
-          ;; Also visit the fn that each call-site points to
-          call-site-fn-ids (into #{} (keep :fn-id) (vals call-site-results))]
-      {:fn-refs (into fn-ref-ids call-site-fn-ids)
-       :call-sites call-site-results})))
+                              (sp/read-entities storage :fn-usage (vec remaining)))
+          ;; Also visit the fn that each fn-usage points to
+          fn-usage-fn-ids (into #{} (keep :fn-id) (vals fn-usage-results))]
+      {:fn-refs (into fn-ref-ids fn-usage-fn-ids)
+       :fn-usages fn-usage-results})))
 
 
 (defn resolve-execution-graph

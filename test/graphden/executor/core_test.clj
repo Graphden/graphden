@@ -101,7 +101,7 @@
                                       {:fn-schema-id (:id const-schema)
                                        :name "value"
                                        :type :int
-                                       :required true})
+                                       :required true :first-class false})
           ;; Create two const functions
           const-3 (sp/create-entity storage :fn
                                     {:name "const-3"
@@ -113,12 +113,12 @@
           _ (setup/create-arg-value-with-binding! storage (:id const-5) (:id const-arg) 5)
           ;; Create add fn-schema
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          ;; Set arg-values to reference const functions via call-site
-          ;; (call-site means: execute the fn and use its result)
+          ;; Set arg-values to reference const functions via fn-usage
+          ;; (fn-usage means: execute the fn and use its result)
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a)
-                                                  (setup/create-call-site! storage (:id const-3)))
+                                                  (setup/create-fn-usage! storage (:id const-3)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b)
-                                                  (setup/create-call-site! storage (:id const-5)))
+                                                  (setup/create-fn-usage! storage (:id const-5)))
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id fn-rec) {})]
       (is (= 8 result))
@@ -141,16 +141,16 @@
                                    {:fn-schema-id (:id id-schema)
                                     :name "x"
                                     :type :int
-                                    :required true})
+                                    :required true :first-class false})
           ;; Create chain of functions that reference each other
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
-          ;; fn-a -> fn-b -> fn-c -> literal (via call-site to trigger execution)
+          ;; fn-a -> fn-b -> fn-c -> literal (via fn-usage to trigger execution)
           _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id id-arg)
-                                                  (setup/create-call-site! storage (:id fn-b)))
+                                                  (setup/create-fn-usage! storage (:id fn-b)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id id-arg)
-                                                  (setup/create-call-site! storage (:id fn-c)))
+                                                  (setup/create-fn-usage! storage (:id fn-c)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
           ;; Execute with max-depth=1 (should fail at fn-c which runs at depth=2)
           ctx (exec/create-context {:storage storage :max-depth 1})]
@@ -214,7 +214,7 @@
                                      {:fn-schema-id (:id slow-schema)
                                       :name "x"
                                       :type :int
-                                      :required true})
+                                      :required true :first-class false})
           ;; Create a chain: fn-a -> fn-b -> fn-c -> literal
           ;; Each step sleeps 50ms, so by fn-c the timeout should be exceeded
           fn-a (sp/create-entity storage :fn
@@ -227,9 +227,9 @@
                                  {:name "slow-c"
                                   :fn-schema-id (:id slow-schema)})
           _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id slow-arg)
-                                                  (setup/create-call-site! storage (:id fn-b)))
+                                                  (setup/create-fn-usage! storage (:id fn-b)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id slow-arg)
-                                                  (setup/create-call-site! storage (:id fn-c)))
+                                                  (setup/create-fn-usage! storage (:id fn-c)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id slow-arg) 42)
           ;; Create context with 80ms timeout (fn-a sleeps 50ms, fn-b starts, sleeps 50ms = 100ms > 80ms)
           ctx (exec/create-context {:storage storage :timeout-ms 80})]
@@ -263,12 +263,12 @@
                                         {:fn-schema-id (:id apply-schema)
                                          :name "f"
                                          :type :fn  ; This is HOF - returns a callable
-                                         :required true})
+                                         :required true :first-class false})
           apply-value-arg (sp/create-entity storage :arg-schema
                                             {:fn-schema-id (:id apply-schema)
                                              :name "value"
                                              :type :int
-                                             :required true})
+                                             :required true :first-class false})
           ;; Create double fn-schema
           double-schema (sp/create-entity storage :fn-schema
                                           {:name "double"
@@ -277,7 +277,7 @@
                                         {:fn-schema-id (:id double-schema)
                                          :name "x"
                                          :type :int
-                                         :required true})
+                                         :required true :first-class false})
           ;; Create double fn instance WITHOUT x value - it's a FREE arg
           ;; HOF will provide the value at call time
           double-fn (sp/create-entity storage :fn
@@ -318,12 +318,12 @@
                                         {:fn-schema-id (:id apply-schema)
                                          :name "f"
                                          :type :fn
-                                         :required true})
+                                         :required true :first-class false})
           apply-value-arg (sp/create-entity storage :arg-schema
                                             {:fn-schema-id (:id apply-schema)
                                              :name "value"
                                              :type :int
-                                             :required true})
+                                             :required true :first-class false})
           double-schema (sp/create-entity storage :fn-schema
                                           {:name "double-fixed"
                                            :returned-type :int})
@@ -331,7 +331,7 @@
                                        {:fn-schema-id (:id double-schema)
                                         :name "x"
                                         :type :int
-                                        :required true})
+                                        :required true :first-class false})
           ;; Create double fn WITH x=10 in DB - it's FIXED
           double-fn (sp/create-entity storage :fn
                                       {:name "my-double-fixed"
@@ -370,13 +370,13 @@
                                      {:fn-schema-id (:id greet-schema)
                                       :name "the-name"
                                       :type :text
-                                      :required true})
+                                      :required true :first-class false})
           ;; Optional arg - just need to define it in schema
           _ (sp/create-entity storage :arg-schema
                               {:fn-schema-id (:id greet-schema)
                                :name "suffix"
                                :type :text
-                               :required false})
+                               :required false :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "greet-world"
                                     :fn-schema-id (:id greet-schema)})
@@ -430,7 +430,7 @@
 
 
 (deftest fn-not-found-in-graph-test
-  (testing "throws when call-site references non-existent fn during execution"
+  (testing "throws when fn-usage references non-existent fn during execution"
     (let [storage (setup/create-test-storage)
           ;; Register identity function that forces its arg
           _ (exec/register-base-fn!
@@ -445,19 +445,19 @@
                                    {:fn-schema-id (:id id-schema)
                                     :name "x"
                                     :type :int
-                                    :required true})
+                                    :required true :first-class false})
           ;; Create identity fn instance
           id-fn (sp/create-entity storage :fn
                                   {:name "my-identity"
                                    :fn-schema-id (:id id-schema)})
-          ;; Create call-site pointing to non-existent fn
+          ;; Create fn-usage pointing to non-existent fn
           non-existent-fn-id (random-uuid)
-          bad-call-site (sp/create-entity storage :call-site
+          bad-fn-usage (sp/create-entity storage :fn-usage
                                           {:fn-id non-existent-fn-id
-                                           :name "bad-call-site"})
-          _ (setup/create-arg-value-with-binding! storage (:id id-fn) (:id id-arg) (:id bad-call-site))
+                                           :name "bad-fn-usage"})
+          _ (setup/create-arg-value-with-binding! storage (:id id-fn) (:id id-arg) (:id bad-fn-usage))
           ctx (exec/create-context {:storage storage})]
-      ;; When we execute, it will try to resolve the call-site which points
+      ;; When we execute, it will try to resolve the fn-usage which points
       ;; to a non-existent fn - should throw
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found in execution graph"
             (exec/execute ctx (:id id-fn) {})))
@@ -473,35 +473,35 @@
                             #"storage must implement ExecutionGraph protocol"
             (exec/create-context {:storage invalid-storage})))))
 
-  (testing "throws when call-site-args exceed max count"
+  (testing "throws when fn-usage-args exceed max count"
     (let [storage (setup/create-test-storage)
-          ;; Create 1001 call-site-args (max is 1000)
-          large-call-site-args (into {}
+          ;; Create 1001 fn-usage-args (max is 1000)
+          large-fn-usage-args (into {}
                                      (for [i (range 1001)]
                                        [(random-uuid) i]))]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"call-site-args count exceeds maximum"
-              (exec/create-context {:storage storage :call-site-args large-call-site-args})))
+                              #"fn-usage-args count exceeds maximum"
+              (exec/create-context {:storage storage :fn-usage-args large-fn-usage-args})))
         (finally
           (sp/close storage)))))
 
-  (testing "throws when call-site-args keys have invalid format"
+  (testing "throws when fn-usage-args keys have invalid format"
     (let [storage (setup/create-test-storage)]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                              #"call-site-args keys must be UUID or"
+                              #"fn-usage-args keys must be UUID or"
               (exec/create-context {:storage storage
-                                    :call-site-args {"string-key" 42}})))
+                                    :fn-usage-args {"string-key" 42}})))
         (finally
           (sp/close storage)))))
 
   (testing "throws with multiple validation errors combined"
     (let [invalid-storage {:fake "storage"}]
-      ;; Missing storage + call-site-args not a map
+      ;; Missing storage + fn-usage-args not a map
       (try
         (exec/create-context {:storage invalid-storage
-                              :call-site-args "not-a-map"
+                              :fn-usage-args "not-a-map"
                               :max-depth -1
                               :timeout-ms 10})
         (is false "should have thrown")
@@ -509,20 +509,20 @@
           (let [errors (:validation-errors (ex-data e))]
             (is (> (count errors) 1) "should have multiple errors"))))))
 
-  (testing "accepts call-site-args with valid UUID keys"
+  (testing "accepts fn-usage-args with valid UUID keys"
     (let [storage (setup/create-test-storage)
-          call-site-args {(random-uuid) 42}]
+          fn-usage-args {(random-uuid) 42}]
       (try
-        (let [ctx (exec/create-context {:storage storage :call-site-args call-site-args})]
+        (let [ctx (exec/create-context {:storage storage :fn-usage-args fn-usage-args})]
           (is (some? ctx)))
         (finally
           (sp/close storage)))))
 
-  (testing "accepts call-site-args with valid [UUID UUID] vector keys"
+  (testing "accepts fn-usage-args with valid [UUID UUID] vector keys"
     (let [storage (setup/create-test-storage)
-          call-site-args {[(random-uuid) (random-uuid)] 42}]
+          fn-usage-args {[(random-uuid) (random-uuid)] 42}]
       (try
-        (let [ctx (exec/create-context {:storage storage :call-site-args call-site-args})]
+        (let [ctx (exec/create-context {:storage storage :fn-usage-args fn-usage-args})]
           (is (some? ctx)))
         (finally
           (sp/close storage))))))
@@ -630,7 +630,7 @@
                                     {:fn-schema-id (:id hof-schema)
                                      :name "f"
                                      :type :fn
-                                     :required true})
+                                     :required true :first-class false})
           ;; Create a function with NO required args (all optional)
           _ (exec/register-base-fn!
               :no-args-fn
@@ -643,7 +643,7 @@
                               {:fn-schema-id (:id no-args-schema)
                                :name "optional"
                                :type :int
-                               :required false})
+                               :required false :first-class false})
           no-args-fn (sp/create-entity storage :fn
                                        {:name "no-args"
                                         :fn-schema-id (:id no-args-schema)})
@@ -677,7 +677,7 @@
                                     {:fn-schema-id (:id hof-schema)
                                      :name "f"
                                      :type :fn
-                                     :required true})
+                                     :required true :first-class false})
           ;; Create a function with multiple required args (like add)
           {:keys [fn-rec]} (setup/setup-add-function! storage)
           ;; Create hof-caller instance
@@ -732,7 +732,7 @@
       (sp/close storage))))
 
 
-;; === call-site cache eviction test ===
+;; === fn-usage cache eviction test ===
 
 (deftest cache-eviction-test
   (testing "evicts oldest entries when cache limit reached"
@@ -750,7 +750,7 @@
                                       {:fn-schema-id (:id const-schema)
                                        :name "value"
                                        :type :int
-                                       :required true})
+                                       :required true :first-class false})
           ;; Create 10 const functions
           fns (doall
                 (for [i (range 10)]

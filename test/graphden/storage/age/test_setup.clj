@@ -131,7 +131,7 @@
 
 
 (defn make-graph-schema
-  "Creates standard graph schema with fn-schema, arg-schema, fn, call-site, arg-value, fn-arg, and call-site-arg entities.
+  "Creates standard graph schema with fn-schema, arg-schema, fn, fn-usage, arg-value, and fn-arg entities.
    Uses the official graph-data-schema for full compatibility with fn-registry and executor."
   []
   (gds/build-schema (mds/create-builder)))

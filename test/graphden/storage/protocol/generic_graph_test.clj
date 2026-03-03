@@ -27,7 +27,7 @@
 
 
 (defn- make-graph-schema
-  "Creates schema with fn-schema, arg-schema, fn, arg-value, fn-arg, and call-site."
+  "Creates schema with fn-schema, arg-schema, fn, arg-value, fn-arg, and fn-usage."
   []
   (-> (mds/create-builder)
       (ds/add-entity :fn-schema #uuid "00000000-0000-0000-0001-000000000001"
@@ -43,12 +43,17 @@
                       :type {:uuid #uuid "00000000-0000-0000-0002-000000000004"
                              :type :text}
                       :required {:uuid #uuid "00000000-0000-0000-0002-000000000005"
-                                 :type :bool}})
+                                 :type :bool}
+                      :first-class {:uuid #uuid "00000000-0000-0000-0002-000000000006"
+                                    :type :bool}})
       (ds/add-entity :fn #uuid "00000000-0000-0000-0003-000000000001"
                      {:name {:uuid #uuid "00000000-0000-0000-0003-000000000002"
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
-                                     :type :uuid}})
+                                     :type :uuid}
+                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0003-000000000004"
+                                    :type :uuid
+                                    :nullable? true}})
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
                      {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
                                       :type :uuid}
@@ -87,7 +92,7 @@
                               {:id fn-schema-id :name "add" :returned-type "int"})
           _ (sp/create-entity storage :arg-schema
                               {:id arg-schema-id :fn-schema-id fn-schema-id
-                               :name "x" :type "int" :required true})
+                               :name "x" :type "int" :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-add" :fn-schema-id fn-schema-id})
           _ (create-arg-value-with-binding! storage (:id fn-rec) arg-schema-id "42")
@@ -111,7 +116,7 @@
                               {:id fn-schema-id :name "identity" :returned-type "int"})
           _ (sp/create-entity storage :arg-schema
                               {:id arg-schema-id :fn-schema-id fn-schema-id
-                               :name "x" :type "int" :required true})
+                               :name "x" :type "int" :required true :first-class false})
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id fn-schema-id})
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id fn-schema-id})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id fn-schema-id})

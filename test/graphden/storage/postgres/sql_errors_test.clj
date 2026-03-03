@@ -171,7 +171,7 @@
                                             {:name "test" :returned-type "int"} nil)
               arg-schema (crud/create-entity pool :arg-schema
                                              {:fn-schema-id (:id fn-schema)
-                                              :name "ref" :type "ref" :required false} nil)
+                                              :name "ref" :type "ref" :required false :first-class false} nil)
               main-fn (crud/create-entity pool :fn
                                           {:name "main" :fn-schema-id (:id fn-schema)} nil)
               ref-fn (crud/create-entity pool :fn
@@ -245,7 +245,7 @@
         (let [pool (:pool storage)
               classify-fn #'graph/classify-and-load-refs
               result (classify-fn pool #{})]
-          (is (= {:fn-ids #{} :call-site-ids #{} :call-sites {}} result)))
+          (is (= {:fn-ids #{} :fn-usage-ids #{} :fn-usages {}} result)))
         (finally
           (sp/close storage)))))
 

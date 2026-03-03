@@ -17,8 +17,7 @@
         (is (some #{:arg-schema} (ds/entities schema)))
         (is (some #{:arg-value} (ds/entities schema)))
         (is (some #{:fn-arg} (ds/entities schema)))
-        (is (some #{:call-site} (ds/entities schema)))
-        (is (some #{:call-site-arg} (ds/entities schema))))
+        (is (some #{:fn-usage} (ds/entities schema))))
 
       (testing "includes versioning entities"
         (is (some #{:branch} (ds/entities schema)))
@@ -27,7 +26,7 @@
         (is (some #{:fn-schema-version} (ds/entities schema)))
         (is (some #{:arg-schema-version} (ds/entities schema)))
         (is (some #{:fn-arg-version} (ds/entities schema)))
-        (is (some #{:call-site-arg-version} (ds/entities schema))))
+        (is (some #{:fn-usage-version} (ds/entities schema))))
 
       (testing "includes value-kind enum"
         (is (contains? (ds/enums schema) :value-kind))))))
@@ -114,18 +113,6 @@
       (is (= :timestamptz (:type (:created-at fields)))))))
 
 
-(deftest call-site-arg-version-entity-test
-  (testing "call-site-arg-version entity has correct fields"
-    (let [schema (vds/build-schema (malli/create-builder))
-          fields (ds/entity-fields schema :call-site-arg-version)]
-      (is (= :ref (:type (:call-site-arg-id fields))))
-      (is (= :call-site-arg (:ref-entity (:call-site-arg-id fields))))
-      (is (= :ref (:type (:branch-id fields))))
-      (is (= :ref (:type (:call-site-id fields))))
-      (is (= :call-site (:ref-entity (:call-site-id fields))))
-      (is (= :ref (:type (:arg-schema-id fields))))
-      (is (= :ref (:type (:arg-value-id fields))))
-      (is (= :timestamptz (:type (:created-at fields)))))))
 
 
 (deftest versioned-entities-constant-test
@@ -136,7 +123,7 @@
              :fn-schema-version
              :arg-schema-version
              :fn-arg-version
-             :call-site-arg-version}
+             :fn-usage-version}
            vds/versioned-entities))))
 
 
@@ -146,9 +133,8 @@
     (is (= :fn-schema-version (vds/version-entity-for :fn-schema)))
     (is (= :arg-schema-version (vds/version-entity-for :arg-schema)))
     (is (= :fn-arg-version (vds/version-entity-for :fn-arg)))
-    (is (= :call-site-arg-version (vds/version-entity-for :call-site-arg)))
     (is (nil? (vds/version-entity-for :arg-value)))
-    (is (nil? (vds/version-entity-for :call-site)))))
+    (is (= :fn-usage-version (vds/version-entity-for :fn-usage)))))
 
 
 (deftest version-id-field-for-test
@@ -156,8 +142,7 @@
     (is (= :fn-id (vds/version-id-field-for :fn)))
     (is (= :fn-schema-id (vds/version-id-field-for :fn-schema)))
     (is (= :arg-schema-id (vds/version-id-field-for :arg-schema)))
-    (is (= :fn-arg-id (vds/version-id-field-for :fn-arg)))
-    (is (= :call-site-arg-id (vds/version-id-field-for :call-site-arg)))))
+    (is (= :fn-arg-id (vds/version-id-field-for :fn-arg)))))
 
 
 (deftest extend-builder-test

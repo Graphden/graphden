@@ -38,12 +38,12 @@
                                   {:fn-schema-id (:id fn-schema)
                                    :name "n"
                                    :type :int
-                                   :required true})
+                                   :required true :first-class false})
           arg-partner (sp/create-entity storage :arg-schema
                                         {:fn-schema-id (:id fn-schema)
                                          :name "partner"
                                          :type :fn  ; :fn type means callable reference
-                                         :required true})
+                                         :required true :first-class false})
 
           ;; Create two fn instances that reference each other
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id fn-schema)})
@@ -93,12 +93,12 @@
                                   {:fn-schema-id (:id fn-schema)
                                    :name "n"
                                    :type :int
-                                   :required true})
+                                   :required true :first-class false})
           arg-self (sp/create-entity storage :arg-schema
                                      {:fn-schema-id (:id fn-schema)
                                       :name "self-ref"
                                       :type :fn
-                                      :required true})
+                                      :required true :first-class false})
 
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-self-fn"

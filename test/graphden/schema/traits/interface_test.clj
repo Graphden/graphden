@@ -72,7 +72,7 @@
                                        {:fn-schema-id (:id fn-schema)
                                         :name "password"
                                         :type :text
-                                        :required true})
+                                        :required true :first-class false})
           ;; Create arg-value
           arg-value (sp/create-entity storage :arg-value
                                       {:arg-schema-id (:id arg-schema)
@@ -98,7 +98,7 @@
                                        {:fn-schema-id (:id fn-schema)
                                         :name "x"
                                         :type :text
-                                        :required true})
+                                        :required true :first-class false})
           arg-value (sp/create-entity storage :arg-value
                                       {:arg-schema-id (:id arg-schema)
                                        :value "test"})
@@ -123,7 +123,7 @@
                                        {:fn-schema-id (:id fn-schema)
                                         :name "val"
                                         :type :text
-                                        :required true})
+                                        :required true :first-class false})
           arg-value (sp/create-entity storage :arg-value
                                       {:arg-schema-id (:id arg-schema)
                                        :value "myval"})

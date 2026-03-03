@@ -8,7 +8,7 @@
    - fn-schema-version: append-only version history for fn-schema entities
    - arg-schema-version: append-only version history for arg-schema entities
    - fn-arg-version: append-only version history for fn-arg entities
-   - call-site-arg-version: append-only version history for call-site-arg entities
+   - fn-usage-version: append-only version history for fn-usage entities
 
    Two-table pattern: stable identity (id only) + version table (data + branch_id + created_at).
    Version tables are append-only: each change adds a new record.
@@ -49,7 +49,7 @@
   #uuid "f6a7b8c9-d0e1-4f2a-3b4c-5d6e7f8a9b0c")
 
 
-(def ^:private call-site-arg-version-entity-uuid
+(def ^:private fn-usage-version-entity-uuid
   #uuid "a7b8c9d0-e1f2-4a3b-4c5d-6e7f8a9b0c1d")
 
 
@@ -193,29 +193,29 @@
   #uuid "56575859-6061-4f2a-3b4c-5d6e7f8a9b0c")
 
 
-;; === Field UUIDs for :call-site-arg-version ===
+;; === Field UUIDs for :fn-usage-version ===
 
-(def ^:private call-site-arg-version-call-site-arg-id-field-uuid
+(def ^:private fn-usage-version-fn-usage-id-field-uuid
   #uuid "61626364-6566-4a7b-8c9d-0e1f2a3b4c5d")
 
 
-(def ^:private call-site-arg-version-branch-id-field-uuid
+(def ^:private fn-usage-version-branch-id-field-uuid
   #uuid "62636465-6667-4b8c-9d0e-1f2a3b4c5d6e")
 
 
-(def ^:private call-site-arg-version-call-site-id-field-uuid
+(def ^:private fn-usage-version-fn-id-field-uuid
   #uuid "63646566-6768-4c9d-0e1f-2a3b4c5d6e7f")
 
 
-(def ^:private call-site-arg-version-arg-schema-id-field-uuid
+(def ^:private fn-usage-version-name-field-uuid
   #uuid "64656667-6869-4d0e-1f2a-3b4c5d6e7f8a")
 
 
-(def ^:private call-site-arg-version-arg-value-id-field-uuid
+(def ^:private fn-usage-version-owner-fn-id-field-uuid
   #uuid "65666768-6970-4e1f-2a3b-4c5d6e7f8a9b")
 
 
-(def ^:private call-site-arg-version-created-at-field-uuid
+(def ^:private fn-usage-version-created-at-field-uuid
   #uuid "66676869-7071-4f2a-3b4c-5d6e7f8a9b0c")
 
 
@@ -229,7 +229,7 @@
     :fn-schema-version
     :arg-schema-version
     :fn-arg-version
-    :call-site-arg-version})
+    :fn-usage-version})
 
 
 (def version-entity-for
@@ -239,7 +239,7 @@
    :fn-schema :fn-schema-version
    :arg-schema :arg-schema-version
    :fn-arg :fn-arg-version
-   :call-site-arg :call-site-arg-version})
+   :fn-usage :fn-usage-version})
 
 
 (def version-id-field-for
@@ -249,7 +249,7 @@
    :fn-schema :fn-schema-id
    :arg-schema :arg-schema-id
    :fn-arg :fn-arg-id
-   :call-site-arg :call-site-arg-id})
+   :fn-usage :fn-usage-id})
 
 
 (defn extend-builder
@@ -350,21 +350,22 @@
                                    :type :timestamptz}})
       (ds/add-constraint :fn-arg-version {:type :unique :fields [:fn-arg-id :branch-id :created-at]})
 
-      ;; call-site-arg-version: append-only version history for call-site-arg
-      (ds/add-entity :call-site-arg-version call-site-arg-version-entity-uuid
-                     {:call-site-arg-id {:uuid call-site-arg-version-call-site-arg-id-field-uuid
-                                         :type :ref :ref-entity :call-site-arg}
-                      :branch-id {:uuid call-site-arg-version-branch-id-field-uuid
+      ;; fn-usage-version: append-only version history for fn-usage
+      (ds/add-entity :fn-usage-version fn-usage-version-entity-uuid
+                     {:fn-usage-id {:uuid fn-usage-version-fn-usage-id-field-uuid
+                                    :type :ref :ref-entity :fn-usage}
+                      :branch-id {:uuid fn-usage-version-branch-id-field-uuid
                                   :type :ref :ref-entity :branch}
-                      :call-site-id {:uuid call-site-arg-version-call-site-id-field-uuid
-                                     :type :ref :ref-entity :call-site}
-                      :arg-schema-id {:uuid call-site-arg-version-arg-schema-id-field-uuid
-                                      :type :ref :ref-entity :arg-schema}
-                      :arg-value-id {:uuid call-site-arg-version-arg-value-id-field-uuid
-                                     :type :ref :ref-entity :arg-value}
-                      :created-at {:uuid call-site-arg-version-created-at-field-uuid
+                      :fn-id {:uuid fn-usage-version-fn-id-field-uuid
+                              :type :ref :ref-entity :fn}
+                      :name {:uuid fn-usage-version-name-field-uuid
+                             :type :text}
+                      :owner-fn-id {:uuid fn-usage-version-owner-fn-id-field-uuid
+                                    :type :uuid
+                                    :nullable? true}
+                      :created-at {:uuid fn-usage-version-created-at-field-uuid
                                    :type :timestamptz}})
-      (ds/add-constraint :call-site-arg-version {:type :unique :fields [:call-site-arg-id :branch-id :created-at]})))
+      (ds/add-constraint :fn-usage-version {:type :unique :fields [:fn-usage-id :branch-id :created-at]})))
 
 
 (defn build-schema

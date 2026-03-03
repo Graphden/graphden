@@ -26,7 +26,7 @@
 (def graph-entities
   "Entity types that are synced to the AGE graph.
    These entities form the execution graph structure."
-  #{:fn :fn-schema :arg-schema :arg-value :call-site :fn-arg :call-site-arg})
+  #{:fn :fn-schema :arg-schema :arg-value :fn-usage :fn-arg})
 
 
 (defn graph-entity?
@@ -217,9 +217,8 @@
     :fn-schema "FnSchema"
     :arg-schema "ArgSchema"
     :arg-value "ArgValue"
-    :call-site "CallSite"
+    :fn-usage "FnUsage"
     :fn-arg "FnArg"
-    :call-site-arg "CallSiteArg"
     (throw (ex-info "Unknown entity for AGE" {:entity-name entity-name}))))
 
 
@@ -282,10 +281,10 @@
           (encode-value (:value entity))))
 
 
-(defn- build-call-site-node-cypher
-  "Builds Cypher for creating/updating a CallSite node."
+(defn- build-fn-usage-node-cypher
+  "Builds Cypher for creating/updating a FnUsage node."
   [entity]
-  (format "MERGE (n:CallSite {id: '%s'})
+  (format "MERGE (n:FnUsage {id: '%s'})
            SET n.fn_id = '%s', n.name = '%s'
            RETURN n"
           (uuid->str (:id entity))
@@ -304,15 +303,9 @@
           (uuid->str (:arg-schema-id entity))))
 
 
-(defn- build-call-site-arg-edge-cypher
-  "Builds Cypher for creating CallSiteArg edge."
-  [entity]
-  (format "MATCH (cs:CallSite {id: '%s'}), (av:ArgValue {id: '%s'})
-           MERGE (cs)-[r:HAS_ARG {arg_schema_id: '%s'}]->(av)
-           RETURN r"
-          (uuid->str (:call-site-id entity))
-          (uuid->str (:arg-value-id entity))
-          (uuid->str (:arg-schema-id entity))))
+;; call-site-arg entity has been removed from schema
+;; Free arguments at fn-usage now handled by creating local fn with owner-fn-id
+;; Keeping this as a comment for historical reference
 
 
 (defn sync-entity-to-graph!
@@ -326,9 +319,8 @@
                           :fn-schema (build-fn-schema-node-cypher entity)
                           :arg-schema (build-arg-schema-node-cypher entity)
                           :arg-value (build-arg-value-node-cypher entity)
-                          :call-site (build-call-site-node-cypher entity)
+                          :fn-usage (build-fn-usage-node-cypher entity)
                           :fn-arg (build-fn-arg-edge-cypher entity)
-                          :call-site-arg (build-call-site-arg-edge-cypher entity)
                           nil)]
         (execute-cypher! conn graph-name cypher)))))
 

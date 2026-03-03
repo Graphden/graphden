@@ -93,7 +93,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})]
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})]
       (is (some? (:id as)))
       (is (= (:id fs) (:fn-schema-id as)))
       (is (= "x" (:name as)))
@@ -112,7 +112,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-fn" :fn-schema-id (:id fs)})
           av (sp/create-entity storage :arg-value
@@ -208,9 +208,9 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                              {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id fs) :name "y" :type :text :required false})
+                              {:fn-schema-id (:id fs) :name "y" :type :text :required false :first-class false})
           found (sp/query-entities storage :arg-schema {:fn-schema-id (:id fs)})]
       (is (= 2 (count found)))
       (is (every? #(= (:id fs) (:fn-schema-id %)) found)))))
@@ -224,20 +224,20 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           av (sp/create-entity storage :arg-value
                                {:arg-schema-id (:id as) :value 42})]
       (is (some? (:id av)))
       (is (= 42 (:value av)))
       (is (= 42 (:value (sp/read-entity storage :arg-value (:id av)))))))
 
-  (testing "call-site delegates directly"
+  (testing "fn-usage delegates directly"
     (let [storage (create-test-storage)
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-fn" :fn-schema-id (:id fs)})
-          cs (sp/create-entity storage :call-site
+          cs (sp/create-entity storage :fn-usage
                                {:fn-id (:id fn-rec) :name "cs1"})]
       (is (some? (:id cs)))
       (is (= (:id fn-rec) (:fn-id cs))))))
@@ -447,9 +447,9 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "add" :returned-type :int :base-fn-name "add"})
           as1 (sp/create-entity storage :arg-schema
-                                {:fn-schema-id (:id fs) :name "a" :type :int :required true})
+                                {:fn-schema-id (:id fs) :name "a" :type :int :required true :first-class false})
           as2 (sp/create-entity storage :arg-schema
-                                {:fn-schema-id (:id fs) :name "b" :type :int :required true})
+                                {:fn-schema-id (:id fs) :name "b" :type :int :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "add-fn" :fn-schema-id (:id fs)})
           av1 (sp/create-entity storage :arg-value {:arg-schema-id (:id as1) :value 1})
@@ -472,7 +472,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "const" :returned-type :int :base-fn-name "const"})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "const-fn" :fn-schema-id (:id fs)})
           av (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 42})
@@ -502,9 +502,8 @@
     (is (true? (res/versioned-entity? :fn-schema)))
     (is (true? (res/versioned-entity? :arg-schema)))
     (is (true? (res/versioned-entity? :fn-arg)))
-    (is (true? (res/versioned-entity? :call-site-arg)))
     (is (false? (res/versioned-entity? :arg-value)))
-    (is (false? (res/versioned-entity? :call-site)))
+    (is (false? (res/versioned-entity? :fn-usage)))
     (is (false? (res/versioned-entity? :branch)))
     (is (false? (res/versioned-entity? :fn-version)))))
 
@@ -812,7 +811,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           av1 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 1})
           av2 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 2})
           av3 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 3})]
@@ -900,7 +899,7 @@
           fs2 (sp/create-entity storage :fn-schema
                                 {:name "schema2" :returned-type :text})
           as1 (sp/create-entity storage :arg-schema
-                                {:fn-schema-id (:id fs1) :name "x" :type :int :required true})
+                                {:fn-schema-id (:id fs1) :name "x" :type :int :required true :first-class false})
           fn2 (sp/create-entity storage :fn
                                 {:name "fn2" :fn-schema-id (:id fs2)})]
       ;; arg-schema belongs to fs1, but fn2 uses fs2 - mismatch!
@@ -912,7 +911,7 @@
           fs (sp/create-entity storage :fn-schema
                                {:name "schema" :returned-type :int})
           as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
+                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-fn" :fn-schema-id (:id fs)})]
       ;; Should not throw - arg-schema belongs to same fn-schema as fn
@@ -948,33 +947,6 @@
       (is (nil? (get results missing-id))))))
 
 
-;; === call-site-arg CRUD Test ===
-
-(deftest call-site-arg-crud-test
-  (testing "call-site-arg is versioned and works correctly"
-    (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-fn" :fn-schema-id (:id fs)})
-          cs (sp/create-entity storage :call-site
-                               {:fn-id (:id fn-rec) :name "cs1"})
-          av (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 42})
-          csa (sp/create-entity storage :call-site-arg
-                                {:call-site-id (:id cs)
-                                 :arg-schema-id (:id as)
-                                 :arg-value-id (:id av)})]
-      (is (some? (:id csa)))
-      (is (= (:id cs) (:call-site-id csa)))
-      (is (= (:id as) (:arg-schema-id csa)))
-      (is (= (:id av) (:arg-value-id csa)))
-
-      (testing "read returns same data"
-        (let [read-csa (sp/read-entity storage :call-site-arg (:id csa))]
-          (is (some? read-csa))
-          (is (= (:id csa) (:id read-csa))))))))
 
 
 ;; === Delete Entities Returns Correct Count ===

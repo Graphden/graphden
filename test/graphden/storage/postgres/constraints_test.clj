@@ -29,7 +29,7 @@
           arg-schema-id #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
           _ (sp/create-entity storage :fn-schema {:id fn-schema-id :name "sum" :returned-type "int"})
           _ (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id fn-schema-id
-                                                   :name "x" :type "int" :required true})
+                                                   :name "x" :type "int" :required true :first-class false})
           _ (sp/create-entity storage :fn {:id fn-id :name "my-sum" :fn-schema-id fn-schema-id})]
       (try
         (is (nil? (sp/validate-arg-schema-belongs-to-fn! storage fn-id arg-schema-id)))
@@ -47,7 +47,7 @@
           _ (sp/create-entity storage :fn-schema {:id schema1-id :name "sum" :returned-type "int"})
           _ (sp/create-entity storage :fn-schema {:id schema2-id :name "sub" :returned-type "int"})
           _ (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id schema2-id
-                                                   :name "x" :type "int" :required true})
+                                                   :name "x" :type "int" :required true :first-class false})
           _ (sp/create-entity storage :fn {:id fn-id :name "my-sum" :fn-schema-id schema1-id})]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Arg-schema does not belong to fn's schema"
@@ -93,7 +93,7 @@
           arg-schema-id #uuid "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
           _ (sp/create-entity storage :fn-schema {:id fn-schema-id :name "test" :returned-type "int"})
           _ (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id fn-schema-id
-                                                   :name "x" :type "int" :required true})
+                                                   :name "x" :type "int" :required true :first-class false})
           _ (sp/create-entity storage :fn {:id fn-a-id :name "fn-a" :fn-schema-id fn-schema-id})
           _ (sp/create-entity storage :fn {:id fn-b-id :name "fn-b" :fn-schema-id fn-schema-id})
           _ (sp/create-entity storage :fn {:id fn-c-id :name "fn-c" :fn-schema-id fn-schema-id})

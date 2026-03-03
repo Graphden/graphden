@@ -17,7 +17,7 @@
    - fn: Function instance (green)
    - arg-schema: Argument definition (orange)
    - arg-value: Bound argument value (gray)
-   - call-site: Call site reference (purple)"
+   - fn-usage: Function usage reference (purple)"
   (:require
     [cheshire.core :as json]
     [graphden.executor.registry.macros :refer [defbase]]))
@@ -64,17 +64,17 @@
   (let [;; Determine if value is a reference
         is-ref (and (map? value)
                     (or (:fn-id value)
-                        (:call-site-id value)))
+                        (:fn-usage-id value)))
         ref-type (cond
                    (and (map? value) (:fn-id value)) "fn-ref"
-                   (and (map? value) (:call-site-id value)) "call-site-ref"
+                   (and (map? value) (:fn-usage-id value)) "fn-usage-ref"
                    :else "literal")
         display-value (cond
                         (and (map? value) (:fn-id value))
                         (str "ref<fn:" (:fn-id value) ">")
 
-                        (and (map? value) (:call-site-id value))
-                        (str "ref<cs:" (:call-site-id value) ">")
+                        (and (map? value) (:fn-usage-id value))
+                        (str "ref<fu:" (:fn-usage-id value) ">")
 
                         (string? value)
                         (if (> (count value) 20)
@@ -95,18 +95,19 @@
             :arg-schema-id (str arg-schema-id)}}))
 
 
-(defn- call-site-to-node
-  "Converts call-site entity to Cytoscape node."
-  [{:keys [id fn-id] entity-name :name}]
+(defn- fn-usage-to-node
+  "Converts fn-usage entity to Cytoscape node."
+  [{:keys [id fn-id owner-fn-id] entity-name :name}]
   {:data {:id (str id)
           :label (if entity-name (name entity-name) "unnamed")
-          :type "call-site"
-          :fn-id (str fn-id)}})
+          :type "fn-usage"
+          :fn-id (str fn-id)
+          :owner-fn-id (when owner-fn-id (str owner-fn-id))}})
 
 
 (defn- create-edges
   "Creates edges between entities based on relationships."
-  [{:keys [fns arg-schemas arg-values call-sites]}]
+  [{:keys [fns arg-schemas arg-values fn-usages]}]
   (let [;; fn → fn-schema edges
         fn-to-schema-edges
         (for [f fns
@@ -143,25 +144,25 @@
                   :target (str (:arg-schema-id av))
                   :type "value-for"}})
 
-        ;; arg-value ref edges (fn-ref or call-site-ref)
+        ;; arg-value ref edges (fn-ref or fn-usage-ref)
         arg-value-ref-edges
         (for [av arg-values
               :let [v (:value av)]
               :when (map? v)
-              :let [target-id (or (:fn-id v) (:call-site-id v))]
+              :let [target-id (or (:fn-id v) (:fn-usage-id v))]
               :when target-id]
           {:data {:id (str "e-av-ref-" (:id av))
                   :source (str (:id av))
                   :target (str target-id)
                   :type "references"}})
 
-        ;; call-site → fn edges
-        call-site-edges
-        (for [cs call-sites
-              :when (:fn-id cs)]
-          {:data {:id (str "e-cs-" (:id cs))
-                  :source (str (:id cs))
-                  :target (str (:fn-id cs))
+        ;; fn-usage → fn edges
+        fn-usage-edges
+        (for [fu fn-usages
+              :when (:fn-id fu)]
+          {:data {:id (str "e-fu-" (:id fu))
+                  :source (str (:id fu))
+                  :target (str (:fn-id fu))
                   :type "calls"}})]
 
     (vec (concat fn-to-schema-edges
@@ -169,35 +170,35 @@
                  arg-value-owner-edges
                  arg-value-schema-edges
                  arg-value-ref-edges
-                 call-site-edges))))
+                 fn-usage-edges))))
 
 
 (defbase entities-to-cytoscape
   "Converts Graphden entities to Cytoscape.js element format.
 
    Arguments:
-   - entities: Map with keys :fns, :fn-schemas, :arg-schemas, :arg-values, :call-sites
+   - entities: Map with keys :fns, :fn-schemas, :arg-schemas, :arg-values, :fn-usages
                Each value is a sequence of entity maps.
 
    Returns:
    {:nodes [...] :edges [...]} suitable for Cytoscape initialization."
   {:args {:entities :jsonb}
    :return-type :jsonb}
-  (let [{:keys [fns fn-schemas arg-schemas arg-values call-sites]
-         :or {fns [] fn-schemas [] arg-schemas [] arg-values [] call-sites []}}
+  (let [{:keys [fns fn-schemas arg-schemas arg-values fn-usages]
+         :or {fns [] fn-schemas [] arg-schemas [] arg-values [] fn-usages []}}
         entities
 
         fn-schema-nodes (mapv fn-schema-to-node fn-schemas)
         fn-nodes (mapv fn->node fns)
         arg-schema-nodes (mapv arg-schema-to-node arg-schemas)
         arg-value-nodes (mapv arg-value-to-node arg-values)
-        call-site-nodes (mapv call-site-to-node call-sites)
+        fn-usage-nodes (mapv fn-usage-to-node fn-usages)
 
         all-nodes (vec (concat fn-schema-nodes
                                fn-nodes
                                arg-schema-nodes
                                arg-value-nodes
-                               call-site-nodes))
+                               fn-usage-nodes))
 
         edges (create-edges entities)]
 
@@ -244,7 +245,7 @@
    {:selector "node[type='arg-value'][is-ref]"
     :style {:background-color "#D9534F"}}
 
-   {:selector "node[type='call-site']"
+   {:selector "node[type='fn-usage']"
     :style {:background-color "#9B59B6"
             :shape "hexagon"}}
 

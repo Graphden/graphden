@@ -78,14 +78,20 @@
                       :type {:uuid #uuid "00000000-0000-0000-0000-000000000023"
                              :type :text}
                       :required {:uuid #uuid "00000000-0000-0000-0000-000000000024"
-                                 :type :bool}})
+                                 :type :bool}
+                      :first-class {:uuid #uuid "00000000-0000-0000-0000-000000000025"
+                                    :type :bool}})
       (ds/add-entity :fn
                      #uuid "00000000-0000-0000-0000-000000000030"
                      {:name {:uuid #uuid "00000000-0000-0000-0000-000000000031"
                              :type :text}
                       :fn-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000032"
                                      :type :ref
-                                     :ref-entity :fn-schema}})
+                                     :ref-entity :fn-schema}
+                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000033"
+                                    :type :ref
+                                    :ref-entity :fn
+                                    :nullable? true}})
       ;; arg-value: pure value (no owner-fn-id)
       (ds/add-entity :arg-value
                      #uuid "00000000-0000-0000-0000-000000000040"

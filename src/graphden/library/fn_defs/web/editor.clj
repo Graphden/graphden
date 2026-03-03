@@ -167,12 +167,12 @@
     const argSchemaMap = new Map();
     const fnMap = new Map();
     const fnArgMap = new Map();  // fn_id -> [{argSchemaId, argValue}]
-    const callSiteMap = new Map();
+    const fnUsageMap = new Map();
 
     (data.fn_schemas || []).forEach(fs => fnSchemaMap.set(fs.id, fs));
     (data.arg_schemas || []).forEach(as => argSchemaMap.set(as.id, as));
     (data.fns || []).forEach(f => fnMap.set(f.id, f));
-    (data.call_sites || []).forEach(cs => callSiteMap.set(cs.id, cs));
+    (data.fn_usages || []).forEach(fu => fnUsageMap.set(fu.id, fu));
 
     // Build arg_value lookup map: arg-value-id -> arg-value
     const argValueMap = new Map();
@@ -192,7 +192,7 @@
       });
     });
 
-    return { fnSchemaMap, argSchemaMap, fnMap, fnArgMap, callSiteMap };
+    return { fnSchemaMap, argSchemaMap, fnMap, fnArgMap, fnUsageMap };
   }
 
   // Update sidebar - show only fn entities
@@ -373,15 +373,15 @@
       const value = av.arg_value.value;
       if (value && typeof value === 'object') {
         let targetFnId = null;
-        let isCallSite = false;
+        let isFnUsage = false;
 
         if (value.fn_id) {
           targetFnId = value.fn_id;
-        } else if (value.call_site_id) {
-          const cs = lookups.callSiteMap.get(value.call_site_id);
-          if (cs) {
-            targetFnId = cs.fn_id;
-            isCallSite = true;
+        } else if (value.fn_usage_id) {
+          const fu = lookups.fnUsageMap.get(value.fn_usage_id);
+          if (fu) {
+            targetFnId = fu.fn_id;
+            isFnUsage = true;
           }
         }
 
@@ -390,7 +390,7 @@
             fnId: targetFnId,
             argSchemaId: av.arg_schema_id,
             argValueId: av.arg_value.id,
-            isCallSite: isCallSite
+            isFnUsage: isFnUsage
           });
         }
       }
@@ -471,16 +471,16 @@
             // Arg has a value - check if it's a fn reference or literal
             const value = argValue.value;
             let targetFnId = null;
-            let isCallSite = false;
+            let isFnUsage = false;
 
             if (value && typeof value === 'object') {
               if (value['fn-id']) {
                 targetFnId = value['fn-id'];
-              } else if (value['call-site-id']) {
-                const cs = lookups.callSiteMap.get(value['call-site-id']);
-                if (cs) {
-                  targetFnId = cs['fn-id'];
-                  isCallSite = true;
+              } else if (value['fn-usage-id']) {
+                const fu = lookups.fnUsageMap.get(value['fn-usage-id']);
+                if (fu) {
+                  targetFnId = fu['fn-id'];
+                  isFnUsage = true;
                 }
               }
             }
@@ -492,7 +492,7 @@
                   id: 'e-' + argValue.id,
                   source: fnId,
                   target: targetFnId,
-                  type: isCallSite ? 'call-site' : 'arg',
+                  type: isFnUsage ? 'fn-usage' : 'arg',
                   argName: argName
                 }
               });
@@ -734,7 +734,7 @@
    ;; Health route: ["/health" {"get" {"handler" health-handler}}]
    {:name :health-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :health-handler}}
+    :args {:m {}, :k "handler", :v :health-handler>}}
    {:name :health-route-methods
     :parent :assoc-any
     :args {:m {}, :k "get", :v :health-route-opts>}}
@@ -745,7 +745,7 @@
    ;; Favicon route
    {:name :favicon-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :favicon-handler}}
+    :args {:m {}, :k "handler", :v :favicon-handler>}}
    {:name :favicon-route-methods
     :parent :assoc-any
     :args {:m {}, :k "get", :v :favicon-route-opts>}}
@@ -756,7 +756,7 @@
    ;; Editor (home) route
    {:name :editor-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :editor-handler}}
+    :args {:m {}, :k "handler", :v :editor-handler>}}
    {:name :editor-route-methods
     :parent :assoc-any
     :args {:m {}, :k "get", :v :editor-route-opts>}}
@@ -767,7 +767,7 @@
    ;; API entities route
    {:name :api-entities-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :api-entities-handler}}
+    :args {:m {}, :k "handler", :v :api-entities-handler>}}
    {:name :api-entities-route-methods
     :parent :assoc-any
     :args {:m {}, :k "get", :v :api-entities-route-opts>}}
@@ -778,7 +778,7 @@
    ;; Entity details partial route
    {:name :entity-details-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :entity-details-handler}}
+    :args {:m {}, :k "handler", :v :entity-details-handler>}}
    {:name :entity-details-route-methods
     :parent :assoc-any
     :args {:m {}, :k "get", :v :entity-details-route-opts>}}
@@ -789,7 +789,7 @@
    ;; Entity form partial route (create)
    {:name :entity-form-create-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :entity-form-handler}}
+    :args {:m {}, :k "handler", :v :entity-form-handler>}}
    {:name :entity-form-create-route-methods
     :parent :assoc-any
     :args {:m {}, :k "get", :v :entity-form-create-route-opts>}}
@@ -800,7 +800,7 @@
    ;; Entity form partial route (edit)
    {:name :entity-form-edit-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :entity-form-handler}}
+    :args {:m {}, :k "handler", :v :entity-form-handler>}}
    {:name :entity-form-edit-route-methods
     :parent :assoc-any
     :args {:m {}, :k "get", :v :entity-form-edit-route-opts>}}
@@ -811,7 +811,7 @@
    ;; Create entity API route
    {:name :create-entity-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :create-entity-handler}}
+    :args {:m {}, :k "handler", :v :create-entity-handler>}}
    {:name :create-entity-route-methods
     :parent :assoc-any
     :args {:m {}, :k "post", :v :create-entity-route-opts>}}
@@ -822,7 +822,7 @@
    ;; Delete entity API route
    {:name :delete-entity-route-opts
     :parent :assoc-any
-    :args {:m {}, :k "handler", :v :delete-entity-handler}}
+    :args {:m {}, :k "handler", :v :delete-entity-handler>}}
    {:name :delete-entity-route-methods
     :parent :assoc-any
     :args {:m {}, :k "delete", :v :delete-entity-route-opts>}}

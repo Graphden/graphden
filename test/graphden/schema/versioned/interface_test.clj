@@ -25,8 +25,7 @@
         (is (some #{:fn-version} (ds/entities schema)))
         (is (some #{:fn-schema-version} (ds/entities schema)))
         (is (some #{:arg-schema-version} (ds/entities schema)))
-        (is (some #{:fn-arg-version} (ds/entities schema)))
-        (is (some #{:fn-usage-version} (ds/entities schema))))
+        (is (some #{:fn-arg-version} (ds/entities schema))))
 
       (testing "includes value-kind enum"
         (is (contains? (ds/enums schema) :value-kind))))))
@@ -120,8 +119,7 @@
              :fn-version
              :fn-schema-version
              :arg-schema-version
-             :fn-arg-version
-             :fn-usage-version}
+             :fn-arg-version}
            vds/versioned-entities))))
 
 
@@ -132,7 +130,7 @@
     (is (= :arg-schema-version (vds/version-entity-for :arg-schema)))
     (is (= :fn-arg-version (vds/version-entity-for :fn-arg)))
     (is (nil? (vds/version-entity-for :arg-value)))
-    (is (= :fn-usage-version (vds/version-entity-for :fn-usage)))))
+    (is (nil? (vds/version-entity-for :fn-usage)) "fn-usage is not versioned")))
 
 
 (deftest version-id-field-for-test

@@ -8,7 +8,9 @@
    - fn-schema-version: append-only version history for fn-schema entities
    - arg-schema-version: append-only version history for arg-schema entities
    - fn-arg-version: append-only version history for fn-arg entities
-   - fn-usage-version: append-only version history for fn-usage entities
+
+   Note: fn-usage is NOT versioned because fn_id is fixed (fn_usage always calls the same fn).
+   The referenced fn is versioned, which is sufficient.
 
    Two-table pattern: stable identity (id only) + version table (data + branch_id + created_at).
    Version tables are append-only: each change adds a new record.
@@ -47,10 +49,6 @@
 
 (def ^:private fn-arg-version-entity-uuid
   #uuid "f6a7b8c9-d0e1-4f2a-3b4c-5d6e7f8a9b0c")
-
-
-(def ^:private fn-usage-version-entity-uuid
-  #uuid "a7b8c9d0-e1f2-4a3b-4c5d-6e7f8a9b0c1d")
 
 
 ;; === Field UUIDs for :branch ===
@@ -193,32 +191,6 @@
   #uuid "56575859-6061-4f2a-3b4c-5d6e7f8a9b0c")
 
 
-;; === Field UUIDs for :fn-usage-version ===
-
-(def ^:private fn-usage-version-fn-usage-id-field-uuid
-  #uuid "61626364-6566-4a7b-8c9d-0e1f2a3b4c5d")
-
-
-(def ^:private fn-usage-version-branch-id-field-uuid
-  #uuid "62636465-6667-4b8c-9d0e-1f2a3b4c5d6e")
-
-
-(def ^:private fn-usage-version-fn-id-field-uuid
-  #uuid "63646566-6768-4c9d-0e1f-2a3b4c5d6e7f")
-
-
-(def ^:private fn-usage-version-name-field-uuid
-  #uuid "64656667-6869-4d0e-1f2a-3b4c5d6e7f8a")
-
-
-(def ^:private fn-usage-version-owner-fn-id-field-uuid
-  #uuid "65666768-6970-4e1f-2a3b-4c5d6e7f8a9b")
-
-
-(def ^:private fn-usage-version-created-at-field-uuid
-  #uuid "66676869-7071-4f2a-3b4c-5d6e7f8a9b0c")
-
-
 ;; === Public API ===
 
 (def versioned-entities
@@ -228,18 +200,17 @@
     :fn-version
     :fn-schema-version
     :arg-schema-version
-    :fn-arg-version
-    :fn-usage-version})
+    :fn-arg-version})
 
 
 (def version-entity-for
   "Map from base entity name to its version entity name.
-   Only versioned entities are included."
+   Only versioned entities are included.
+   Note: fn-usage is NOT versioned because fn_id is fixed."
   {:fn :fn-version
    :fn-schema :fn-schema-version
    :arg-schema :arg-schema-version
-   :fn-arg :fn-arg-version
-   :fn-usage :fn-usage-version})
+   :fn-arg :fn-arg-version})
 
 
 (def version-id-field-for
@@ -248,8 +219,7 @@
   {:fn :fn-id
    :fn-schema :fn-schema-id
    :arg-schema :arg-schema-id
-   :fn-arg :fn-arg-id
-   :fn-usage :fn-usage-id})
+   :fn-arg :fn-arg-id})
 
 
 (defn extend-builder
@@ -348,24 +318,7 @@
                                      :type :ref :ref-entity :arg-value}
                       :created-at {:uuid fn-arg-version-created-at-field-uuid
                                    :type :timestamptz}})
-      (ds/add-constraint :fn-arg-version {:type :unique :fields [:fn-arg-id :branch-id :created-at]})
-
-      ;; fn-usage-version: append-only version history for fn-usage
-      (ds/add-entity :fn-usage-version fn-usage-version-entity-uuid
-                     {:fn-usage-id {:uuid fn-usage-version-fn-usage-id-field-uuid
-                                    :type :ref :ref-entity :fn-usage}
-                      :branch-id {:uuid fn-usage-version-branch-id-field-uuid
-                                  :type :ref :ref-entity :branch}
-                      :fn-id {:uuid fn-usage-version-fn-id-field-uuid
-                              :type :ref :ref-entity :fn}
-                      :name {:uuid fn-usage-version-name-field-uuid
-                             :type :text}
-                      :owner-fn-id {:uuid fn-usage-version-owner-fn-id-field-uuid
-                                    :type :uuid
-                                    :nullable? true}
-                      :created-at {:uuid fn-usage-version-created-at-field-uuid
-                                   :type :timestamptz}})
-      (ds/add-constraint :fn-usage-version {:type :unique :fields [:fn-usage-id :branch-id :created-at]})))
+      (ds/add-constraint :fn-arg-version {:type :unique :fields [:fn-arg-id :branch-id :created-at]})))
 
 
 (defn build-schema

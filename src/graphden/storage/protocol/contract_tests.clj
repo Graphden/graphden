@@ -13,7 +13,7 @@
    ```"
   (:require
     [clojure.test :refer [is testing]]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.interface :as ds]
     [graphden.storage.protocol.interface :as sp]))
 

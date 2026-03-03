@@ -39,6 +39,12 @@
   pool/close-pool)
 
 
+(def with-query-timeout
+  "Executes f with a custom query timeout (in milliseconds).
+   See util/with-query-timeout for details."
+  util/with-query-timeout)
+
+
 ;; === Storage record ===
 
 (defn- build-entity-fields-index

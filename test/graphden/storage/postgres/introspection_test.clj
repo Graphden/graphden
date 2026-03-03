@@ -3,9 +3,9 @@
    Tests querying information_schema and pg_catalog with real database."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.interface :as ds]
-    [graphden.storage.postgres.interface :as pg]
+    [graphden.storage.postgres.core :as pg]
     [graphden.storage.postgres.introspection :as introspection]
     [graphden.storage.protocol.interface :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]

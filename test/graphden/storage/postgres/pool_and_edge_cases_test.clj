@@ -2,10 +2,9 @@
   "Tests for PostgreSQL storage pool management, timeouts, and edge cases."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.interface :as ds]
-    [graphden.storage.postgres.core :as core]
-    [graphden.storage.postgres.interface :as pg]
+    [graphden.storage.postgres.core :as pg]
     [graphden.storage.postgres.introspection :as introspection]
     [graphden.storage.postgres.metadata :as metadata]
     [graphden.storage.postgres.test-setup :as setup]
@@ -51,16 +50,16 @@
 
 (deftest close-pool-idempotency-test
   (testing "close-pool with nil pool returns true (no-op)"
-    (is (true? (core/close-pool nil))))
+    (is (true? (pg/close-pool nil))))
 
   (testing "close-pool is idempotent - can be called multiple times"
-    (let [pool (core/create-pool (merge (setup/get-container-config)
-                                        {:pool-size 1 :min-idle 1}))]
+    (let [pool (pg/create-pool (merge (setup/get-container-config)
+                                      {:pool-size 1 :min-idle 1}))]
       ;; First close - returns true on success
-      (is (true? (core/close-pool pool)))
+      (is (true? (pg/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool)))
       ;; Second close - returns true (pool already closed, no-op)
-      (is (true? (core/close-pool pool)))
+      (is (true? (pg/close-pool pool)))
       (is (true? (HikariDataSource/.isClosed pool))))))
 
 
@@ -70,61 +69,61 @@
     (testing "pool-size must be positive integer"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size must be a positive integer"
-            (core/create-pool (assoc valid-opts :pool-size 0))))
+            (pg/create-pool (assoc valid-opts :pool-size 0))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size must be a positive integer"
-            (core/create-pool (assoc valid-opts :pool-size -1))))
+            (pg/create-pool (assoc valid-opts :pool-size -1))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size must be a positive integer"
-            (core/create-pool (assoc valid-opts :pool-size "10")))))
+            (pg/create-pool (assoc valid-opts :pool-size "10")))))
 
     (testing "min-idle must be positive integer"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"min-idle must be a positive integer"
-            (core/create-pool (assoc valid-opts :min-idle 0))))
+            (pg/create-pool (assoc valid-opts :min-idle 0))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"min-idle must be a positive integer"
-            (core/create-pool (assoc valid-opts :min-idle -1)))))
+            (pg/create-pool (assoc valid-opts :min-idle -1)))))
 
     (testing "min-idle cannot exceed pool-size"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"min-idle cannot exceed pool-size"
-            (core/create-pool (assoc valid-opts :pool-size 5 :min-idle 10)))))
+            (pg/create-pool (assoc valid-opts :pool-size 5 :min-idle 10)))))
 
     (testing "connection-timeout must be positive integer"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"connection-timeout must be a positive integer"
-            (core/create-pool (assoc valid-opts :connection-timeout 0))))
+            (pg/create-pool (assoc valid-opts :connection-timeout 0))))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"connection-timeout must be a positive integer"
-            (core/create-pool (assoc valid-opts :connection-timeout -1000)))))
+            (pg/create-pool (assoc valid-opts :connection-timeout -1000)))))
 
     (testing "pool-size cannot exceed 100"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size exceeds maximum allowed value of 100"
-            (core/create-pool (assoc valid-opts :pool-size 101)))))
+            (pg/create-pool (assoc valid-opts :pool-size 101)))))
 
     (testing "idle-timeout must be less than max-lifetime"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"idle-timeout must be less than max-lifetime"
-            (core/create-pool (assoc valid-opts
-                                     :idle-timeout 600000
-                                     :max-lifetime 500000))))
+            (pg/create-pool (assoc valid-opts
+                                   :idle-timeout 600000
+                                   :max-lifetime 500000))))
       ;; Equal values should also fail
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"idle-timeout must be less than max-lifetime"
-            (core/create-pool (assoc valid-opts
-                                     :idle-timeout 600000
-                                     :max-lifetime 600000)))))
+            (pg/create-pool (assoc valid-opts
+                                   :idle-timeout 600000
+                                   :max-lifetime 600000)))))
 
     (testing "idle-timeout = 0 is allowed (never retire idle connections)"
       ;; idle-timeout = 0 is a special case meaning "never retire"
       ;; This should not throw even though 0 < max-lifetime
-      (let [pool (core/create-pool (assoc valid-opts
-                                          :idle-timeout 0
-                                          :max-lifetime 1800000))]
+      (let [pool (pg/create-pool (assoc valid-opts
+                                        :idle-timeout 0
+                                        :max-lifetime 1800000))]
         (is (some? pool))
-        (core/close-pool pool)))))
+        (pg/close-pool pool)))))
 
 
 ;; === Unknown PostgreSQL type coverage tests ===

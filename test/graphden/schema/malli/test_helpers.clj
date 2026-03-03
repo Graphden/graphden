@@ -1,7 +1,7 @@
 (ns graphden.schema.malli.test-helpers
   "Test helpers and example schema for malli-data-schema tests."
   (:require
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.interface :as ds]))
 
 

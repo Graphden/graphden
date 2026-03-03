@@ -26,7 +26,7 @@
   (:require
     [graphden.executor.registry.core :as core]
     [graphden.executor.registry.macros :as macros]
-    [graphden.library.interface :as bf]
+    [graphden.library.base-fns.core :as bf]
     [graphden.storage.protocol.interface :as sp]))
 
 
@@ -108,9 +108,9 @@
   [storage]
   (try
     ;; Register base functions in executor
-    (register-base-fns! (bf/get-all-defs))
+    (register-base-fns! bf/all-defs)
     ;; Sync base function schemas to storage
-    (sync-defs-to-storage! storage (bf/get-all-defs))
+    (sync-defs-to-storage! storage bf/all-defs)
     storage
     (catch Exception e
       (sp/close storage)
@@ -132,7 +132,7 @@
 
    Example:
      (initialize-all! storage
-       [(bf/get-all-defs)           ; arithmetic, strings
+       [bf/all-defs           ; arithmetic, strings
         web-server/all-defs         ; http-kit, reitit
         handlers/all-defs])         ; hello, health, router"
   [storage def-sets]

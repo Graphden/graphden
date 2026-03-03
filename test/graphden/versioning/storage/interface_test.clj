@@ -1,9 +1,9 @@
 (ns graphden.versioning.storage.interface-test
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.versioned.interface :as vds]
-    [graphden.storage.postgres.interface :as pg]
+    [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.interface :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.versioning.storage.interface :as vs]

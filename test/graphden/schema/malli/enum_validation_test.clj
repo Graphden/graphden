@@ -3,7 +3,7 @@
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.malli.test-helpers :refer [uuid]]
     [graphden.schema.protocol.interface :as ds]))
 

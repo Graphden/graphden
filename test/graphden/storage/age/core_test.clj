@@ -8,7 +8,7 @@
    - StorageErrorClassifier protocol"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.storage.age.interface :as age]
+    [graphden.storage.age.core :as age]
     [graphden.storage.age.test-setup :as setup]
     [graphden.storage.protocol.interface :as sp]))
 

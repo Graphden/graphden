@@ -3,7 +3,7 @@
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.fields.interface :as ft]
     [graphden.schema.graph.interface :as graph]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.interface :as ds]))
 
 

@@ -2,11 +2,11 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.interface :as gds]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.interface :as ds]
     [graphden.schema.traits.interface :as vts]
     [graphden.schema.versioned.interface :as vds]
-    [graphden.storage.postgres.interface :as pg]
+    [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.interface :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as th]
     [graphden.versioning.merge.interface :as mp]

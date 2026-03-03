@@ -3,7 +3,7 @@
    Uses malli-data-schema as reference implementation."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.interface :as ds]))
 
 

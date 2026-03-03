@@ -3,7 +3,7 @@
    These tests exercise loops and branches multiple times to increase coverage."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.malli.test-helpers :refer [uuid]]
     [graphden.schema.malli.validators :as validators]
     [graphden.schema.protocol.interface :as ds]))

@@ -14,18 +14,18 @@
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
+    [graphden.library.base-fns.core :as bf]
     [graphden.library.base-fns.web.crud :as crud-fns]
     [graphden.library.base-fns.web.graph :as graph-fns]
     [graphden.library.base-fns.web.html :as html-fns]
     [graphden.library.base-fns.web.http-kit :as http-kit-fns]
     [graphden.library.base-fns.web.reitit :as reitit-fns]
-    [graphden.library.interface :as bf]
     [graphden.schema.graph.interface :as gds]
-    [graphden.schema.malli.interface :as mds]
+    [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.interface :as ds]
     [graphden.schema.traits.interface :as vts]
     [graphden.schema.versioned.interface :as vds]
-    [graphden.storage.age.interface :as age]
+    [graphden.storage.age.core :as age]
     [graphden.storage.protocol.interface :as sp]
     [graphden.versioning.storage.interface :as vs]
     [integrant.core :as ig]))
@@ -86,7 +86,7 @@
 (defmethod ig/init-key :exec/base-fns [_ {:keys [storage]}]
   (log/info "Registering base functions...")
   (registry/initialize-all! storage
-                            [(bf/get-all-defs)
+                            [bf/all-defs
                              http-kit-fns/all-defs
                              reitit-fns/all-defs
                              html-fns/all-defs

@@ -3,8 +3,8 @@
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
+    [graphden.library.base-fns.core :as bf]
     [graphden.library.base-fns.core.test-helpers :as h]
-    [graphden.library.interface :as bf]
     [graphden.storage.age.test-setup :as th]
     [graphden.storage.protocol.interface :as sp]))
 
@@ -77,7 +77,7 @@
           (sp/close storage)))))
 
   (testing "get-all-defs returns function definitions"
-    (let [defs (bf/get-all-defs)]
+    (let [defs bf/all-defs]
       (is (map? defs))
       (is (contains? defs :add))
       (is (contains? defs :map))

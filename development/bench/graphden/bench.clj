@@ -9,8 +9,8 @@
   (:require
     [criterium.core :as crit]
     [graphden.schema.graph.interface :as gds]
-    [graphden.schema.malli.interface :as mds]
-    [graphden.storage.age.interface :as age]
+    [graphden.schema.malli.core :as mds]
+    [graphden.storage.age.core :as age]
     [graphden.storage.protocol.interface :as sp])
   (:import
     (org.testcontainers.containers

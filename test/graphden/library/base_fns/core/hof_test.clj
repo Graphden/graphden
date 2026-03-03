@@ -5,8 +5,8 @@
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
+    [graphden.library.base-fns.core :as bf]
     [graphden.library.base-fns.core.test-helpers :as h]
-    [graphden.library.interface :as bf]
     [graphden.storage.age.test-setup :as th]
     [graphden.storage.protocol.interface :as sp]))
 
@@ -32,7 +32,7 @@
   (let [storage (th/create-test-storage *container*)]
     (h/register-all!)
     ;; Sync base function schemas to storage so HOF can be found
-    (registry/sync-defs-to-storage! storage (bf/get-all-defs))
+    (registry/sync-defs-to-storage! storage bf/all-defs)
 
     ;; Create 'double' function: x -> x * 2 (single required arg)
     (let [double-schema (sp/create-entity storage :fn-schema
@@ -343,7 +343,7 @@
       (try
         ;; Register base functions
         (h/register-all!)
-        (registry/sync-defs-to-storage! storage (bf/get-all-defs))
+        (registry/sync-defs-to-storage! storage bf/all-defs)
 
         ;; Setup: create helper predicate and transform functions
         ;; gt2: x -> x > 2
@@ -446,7 +446,7 @@
       (try
         ;; Register base functions
         (h/register-all!)
-        (registry/sync-defs-to-storage! storage (bf/get-all-defs))
+        (registry/sync-defs-to-storage! storage bf/all-defs)
 
         ;; Create counting predicate and transform
         (let [counting-pred-schema (sp/create-entity storage :fn-schema

@@ -3,8 +3,7 @@
   (:require
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
-    [graphden.library.base-fns.core :as core]
-    [graphden.library.interface :as bf]))
+    [graphden.library.base-fns.core :as bf]))
 
 
 ;; === Helper Functions ===
@@ -27,44 +26,44 @@
 
 (defn register-all!
   []
-  (registry/register-base-fns! (bf/get-all-defs)))
+  (registry/register-base-fns! bf/all-defs))
 
 
 (defn register-arithmetic!
   []
-  (registry/register-base-fns! core/arithmetic-defs))
+  (registry/register-base-fns! bf/arithmetic-defs))
 
 
 (defn register-comparison!
   []
-  (registry/register-base-fns! core/comparison-defs))
+  (registry/register-base-fns! bf/comparison-defs))
 
 
 (defn register-logic!
   []
-  (registry/register-base-fns! core/logic-defs))
+  (registry/register-base-fns! bf/logic-defs))
 
 
 (defn register-conditionals!
   []
-  (registry/register-base-fns! core/conditional-defs))
+  (registry/register-base-fns! bf/conditional-defs))
 
 
 (defn register-strings!
   []
-  (registry/register-base-fns! core/string-defs))
+  (registry/register-base-fns! bf/string-defs))
 
 
 (defn register-collections!
   []
-  (registry/register-base-fns! core/collection-defs))
+  (registry/register-base-fns! bf/collection-defs))
 
 
 (defn register-hof!
   []
-  (registry/register-base-fns! core/hof-defs))
+  (registry/register-base-fns! bf/hof-defs))
 
 
 (defn sync-storage!
   [storage]
-  (registry/sync-defs-to-storage! storage (bf/get-all-defs)))
+  (registry/sync-defs-to-storage! storage bf/all-defs))

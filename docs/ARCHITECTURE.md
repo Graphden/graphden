@@ -48,8 +48,10 @@ fn:
 arg-value:
   id: uuid (PK)
   arg-schema-id: ref<arg-schema>
-  value: union<ref<fn> | ref<fn-usage> | literal-types...>
-  UNIQUE(arg-schema-id, value) - deduplication
+  value: JSONB (nullable) - literal value
+  fn-usage-id: ref<fn-usage> (nullable) - reference to fn-usage
+  XOR constraint: exactly one of (value, fn-usage-id) must be set
+  UNIQUE(arg-schema-id, value) or UNIQUE(arg-schema-id, fn-usage-id) - deduplication
 
 fn-arg:
   id: uuid (PK)
@@ -249,8 +251,10 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 +------------------------------------------------------------------+
 | id: uuid (PK)                                                     |
 | arg-schema-id: ref<arg-schema>                                    |
-| value: union<ref<fn> | ref<fn-usage> | literal-types...>         |
-| UNIQUE(arg-schema-id, value) - enables deduplication              |
+| value: JSONB (nullable) - literal value                           |
+| fn-usage-id: ref<fn-usage> (nullable) - reference to fn-usage    |
+| XOR: exactly one of (value, fn-usage-id) must be set             |
+| UNIQUE(arg-schema-id, value/fn-usage-id) - enables deduplication  |
 +------------------------------------------------------------------+
 
 +------------------------------------------------------------------+
@@ -337,12 +341,19 @@ Arguments are resolved in this order (highest priority first):
 
 ### Argument Types and Their Handling
 
-| type in arg-schema | Value in arg-value | Delay Behavior |
-|--------------------|-------------------|----------------|
-| :int, :text, etc. | Literal | `@delay` → literal value |
-| :int, :text, etc. | ref<fn> | `@delay` → executes fn each time forced |
-| :int, :text, etc. | ref<fn-usage> | `@delay` → executes fn (cached in result-cache) |
-| :fn | ref<fn> | `@delay` → fn-id UUID (for HOF) |
+**arg-value has two mutually exclusive fields:**
+- `value` (JSONB) - literal value
+- `fn-usage-id` (ref<fn-usage>) - reference to fn-usage
+
+**Runtime behavior is controlled by `arg-schema.first-class` flag:**
+
+| arg-value field | arg-schema.first-class | Delay Behavior |
+|-----------------|------------------------|----------------|
+| value (literal) | any | `@delay` → literal value |
+| fn-usage-id | false | `@delay` → execute fn-usage, use result (cached) |
+| fn-usage-id | true | `@delay` → get fn-id from fn-usage, pass directly (for HOF) |
+
+**Key principle:** The FUNCTION (via arg-schema.first-class) decides how to handle the argument, NOT the caller.
 
 ### fn-usage: Call Site Identity
 
@@ -382,13 +393,16 @@ fn: report
          {[fn-usage-a-id arg-schema-a-id] 42})
 ```
 
-**Comparison with direct fn reference:**
+**How fn-usage works:**
 
-| Reference type | Behavior |
-|---------------|----------|
-| `ref<fn>` with type=:fn | HOF: pass function as value, don't execute |
-| `ref<fn>` with other type | Execute function each time arg is forced |
-| `ref<fn-usage>` | Execute at this call site, cache result, support free args |
+All arg-value references use fn-usage-id (never direct fn-id). Behavior depends on arg-schema.first-class:
+
+| arg-schema.first-class | Behavior |
+|------------------------|----------|
+| true | Get fn-id from fn-usage, pass directly (for HOF) |
+| false | Execute fn-usage, cache result, support free args |
+
+**Key insight:** The function (via arg-schema) decides how to handle the argument, NOT the caller.
 
 ### Base Functions and Their Types
 
@@ -654,12 +668,16 @@ Each fn-def is a map with:
 
 ### Reference Syntax: `:fn-name` vs `:fn-name>`
 
-The `>` suffix determines whether to execute the referenced function:
+Both syntaxes create `fn-usage` entities in storage. The difference is naming convention:
 
-| Syntax | Storage Entity | Execution Behavior |
-|--------|---------------|-------------------|
-| `:fn-name` | `ref<fn>` | Pass fn-id (UUID), don't execute |
-| `:fn-name>` | `ref<fn-usage>` | Execute fn, use result value |
+| Syntax | fn-usage name | Typical use case |
+|--------|--------------|------------------|
+| `:fn-name` | "fn-name-ref" | HOF arguments (arg-schema.first-class=true) |
+| `:fn-name>` | "fn-name" or suffix | Computed values (arg-schema.first-class=false) |
+
+**Runtime behavior is controlled by `arg-schema.first-class`, NOT by syntax:**
+- `first-class=true` → get fn-id from fn-usage, pass directly (for HOF)
+- `first-class=false` → execute fn-usage, use result value
 
 **When to use each:**
 

@@ -37,7 +37,7 @@ Graphden is a visual functional programming environment where functions and thei
 - `fn-schema` — function signature (name, return type, optional base-fn-name linking to Clojure impl)
 - `arg-schema` — argument definition (belongs to fn-schema, includes first-class flag for HOF support)
 - `fn` — function instance (references fn-schema, optional owner-fn-id for local scoping)
-- `arg-value` — bound argument value (literal or reference to fn/fn-usage)
+- `arg-value` — bound argument value (literal via `value` field, or reference via `fn-usage-id` field)
 - `fn-usage` — function usage reference (distinguishes multiple uses of same function)
 - `fn-arg` — binding that connects fn to arg-schema and arg-value
 
@@ -161,10 +161,14 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
 ### Reference Types
 
-| Syntax | Meaning | Use case |
-|--------|---------|----------|
-| `:fn-name` | Pass fn-id without executing | HOF (map, filter, reduce) |
-| `:fn-name>` | Execute fn and use result | When you need computed value |
+Both syntaxes create `fn-usage` entities. Runtime behavior is controlled by `arg-schema.first-class`:
+
+| Syntax | Storage | Runtime behavior (depends on first-class) |
+|--------|---------|-------------------------------------------|
+| `:fn-name` | `fn-usage` (name: "fn-name-ref") | first-class=true: pass fn-id (HOF) |
+| `:fn-name>` | `fn-usage` (name: "fn-name") | first-class=false: execute and use result |
+
+**Key principle:** The FUNCTION (via arg-schema.first-class) decides how to handle the argument, NOT the caller.
 
 ### Base Function Arg Types
 

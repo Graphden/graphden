@@ -20,10 +20,14 @@
 
    ## Arg Value Syntax
 
-   At the TOP LEVEL of args, both syntaxes work:
-   - `:fn-name` - ref<fn>: pass fn as callable (for HOF, won't execute)
-   - `:fn-name>` - ref<fn-usage>: execute fn and use result
-   - `:fn-name>result-name` - ref<fn-usage> with explicit name
+   At the TOP LEVEL of args, both syntaxes work (both create fn-usage):
+   - `:fn-name` - fn-usage with name 'fn-name-ref' (for HOF with first-class=true)
+   - `:fn-name>` - fn-usage with name 'fn-name' (for computed values with first-class=false)
+   - `:fn-name>result-name` - fn-usage with explicit name
+
+   Runtime behavior is controlled by arg-schema.first-class flag:
+   - first-class=true: get fn-id from fn-usage, pass directly (for HOF)
+   - first-class=false: execute fn-usage, use result
 
    In NESTED structures (maps, vectors inside arg values), only the
    `:fn-name>` syntax works. Plain keywords are kept as-is because

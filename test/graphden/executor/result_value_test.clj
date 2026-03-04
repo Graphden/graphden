@@ -70,8 +70,8 @@
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
           ;; Both args reference the SAME fn-usage
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result))
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result))
           ctx (exec/create-context {:storage storage})]
       ;; Execute add-fn
       (exec/execute ctx (:id add-fn) nil)
@@ -124,8 +124,8 @@
                                    {:name "add-fn"
                                     :fn-schema-id (:id add-schema)})
           ;; a -> result-1, b -> result-2
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id result-1))
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id result-2))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-a) (:id result-1))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-b) (:id result-2))
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id add-fn) nil)]
       ;; incrementer should be called TWICE (once for each fn-usage)
@@ -179,8 +179,8 @@
                                     :fn-schema-id (:id add-schema)})
           ;; a -> fn-usage-1 (executes counter)
           ;; b -> fn-usage-2 (executes counter again - different fn-usage)
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result-1))
-          _ (setup/create-arg-value-with-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result-2))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result-1))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result-2))
           ctx (exec/create-context {:storage storage})]
       (exec/execute ctx (:id add-fn) nil)
       ;; counter should be called TWICE - once for each fn-usage

@@ -67,7 +67,6 @@
   (testing "converts arg-value entities with literal value"
     (let [entities {:arg-values [{:id #uuid "00000000-0000-0000-0000-000000000004"
                                   :value "hello"
-                                  :owner-fn-id #uuid "00000000-0000-0000-0000-000000000002"
                                   :arg-schema-id #uuid "00000000-0000-0000-0000-000000000003"}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})]
       (is (= 1 (count (:nodes result))))
@@ -76,20 +75,9 @@
         (is (= "literal" (get-in node [:data :ref-type])))
         (is (false? (get-in node [:data :is-ref]))))))
 
-  (testing "converts arg-value entities with fn reference"
+  (testing "converts arg-value entities with fn-usage reference (new FK format)"
     (let [entities {:arg-values [{:id #uuid "00000000-0000-0000-0000-000000000004"
-                                  :value {:fn-id #uuid "00000000-0000-0000-0000-000000000005"}
-                                  :owner-fn-id #uuid "00000000-0000-0000-0000-000000000002"
-                                  :arg-schema-id #uuid "00000000-0000-0000-0000-000000000003"}]}
-          result (call-impl graph/entities-to-cytoscape {:entities entities})
-          node (first (:nodes result))]
-      (is (= "fn-ref" (get-in node [:data :ref-type])))
-      (is (get-in node [:data :is-ref]))))
-
-  (testing "converts arg-value entities with fn-usage reference"
-    (let [entities {:arg-values [{:id #uuid "00000000-0000-0000-0000-000000000004"
-                                  :value {:fn-usage-id #uuid "00000000-0000-0000-0000-000000000006"}
-                                  :owner-fn-id #uuid "00000000-0000-0000-0000-000000000002"
+                                  :fn-usage-id #uuid "00000000-0000-0000-0000-000000000006"
                                   :arg-schema-id #uuid "00000000-0000-0000-0000-000000000003"}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})
           node (first (:nodes result))]
@@ -123,7 +111,6 @@
     (let [long-string (str/join (repeat 50 "x"))
           entities {:arg-values [{:id #uuid "00000000-0000-0000-0000-000000000004"
                                   :value long-string
-                                  :owner-fn-id #uuid "00000000-0000-0000-0000-000000000002"
                                   :arg-schema-id #uuid "00000000-0000-0000-0000-000000000003"}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})
           label (get-in (first (:nodes result)) [:data :label])]

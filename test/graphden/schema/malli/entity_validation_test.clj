@@ -49,32 +49,28 @@
     (testing "valid arg-value with literal int value"
       (is (nil? (ds/validate-entity example-schema :arg-value
                                     {:id (random-uuid)
-                                     :owner-fn-id valid-fn-id
                                      :arg-schema-id valid-arg-schema-id
                                      :value 42}))))
 
     (testing "valid arg-value with literal string value"
       (is (nil? (ds/validate-entity example-schema :arg-value
                                     {:id (random-uuid)
-                                     :owner-fn-id valid-fn-id
                                      :arg-schema-id valid-arg-schema-id
                                      :value "hello"}))))
 
-    (testing "valid arg-value with fn reference as value"
+    (testing "valid arg-value with fn-usage-id (fn usage reference)"
       (is (nil? (ds/validate-entity example-schema :arg-value
                                     {:id (random-uuid)
-                                     :owner-fn-id valid-fn-id
                                      :arg-schema-id valid-arg-schema-id
-                                     :value valid-fn-id}))))
+                                     :fn-usage-id valid-fn-id}))))
 
-    (testing "invalid arg-value - owner-fn-id is required"
-      (let [result (ds/validate-entity example-schema :arg-value
-                                       {:id (random-uuid)
-                                        :owner-fn-id nil
-                                        :arg-schema-id valid-arg-schema-id
-                                        :value 42})]
-        (is (some? result))
-        (is (contains? (:errors result) :owner-fn-id))))
+    (testing "valid arg-value with all nullable fields nil"
+      ;; XOR constraint (exactly one set) is enforced at DB level, not schema level
+      (is (nil? (ds/validate-entity example-schema :arg-value
+                                    {:id (random-uuid)
+                                     :arg-schema-id valid-arg-schema-id
+                                     :value nil
+                                     :fn-usage-id nil}))))
 
     (testing "unknown entity validation"
       (let [result (ds/validate-entity example-schema :unknown-entity {:id (random-uuid)})]

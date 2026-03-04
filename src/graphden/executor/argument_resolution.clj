@@ -14,12 +14,14 @@
 
    ## Reference Types
 
-   Resolution is based on arg-schema.first-class flag:
-   - first-class=true → get fn-id from fn-usage, pass directly (for HOF)
-   - first-class=false → execute fn-usage and use result (with caching)
+   arg-value has two mutually exclusive fields (XOR constraint at DB level):
+   - value: JSONB literal value
+   - fn-usage-id: FK to fn-usage
 
-   All function references are stored as fn-usage UUIDs in arg-value.value.
-   The first-class flag determines whether to pass fn-id or execute.
+   Resolution is based on which field is set AND arg-schema.first-class flag:
+   - fn-usage-id set + first-class=true → get fn-id from fn-usage, pass directly (for HOF)
+   - fn-usage-id set + first-class=false → execute fn-usage and use result
+   - value set → literal value
 
    ## Argument Resolution Priority
 
@@ -166,57 +168,36 @@
     (delay uuid-value)))
 
 
-(defn- try-parse-uuid
-  "Attempts to parse value as UUID.
-   Returns UUID if value is already a UUID or a valid UUID string.
-   Returns nil for non-UUID values.
-
-   This is needed because PostgreSQL JSONB stores UUIDs as strings,
-   so when reading arg-values back, UUIDs appear as strings."
-  [v]
-  (cond
-    (uuid? v) v
-    (string? v) (try
-                  (java.util.UUID/fromString v)
-                  (catch IllegalArgumentException _ nil))
-    :else nil))
-
-
 (defn- extract-arg-value
-  "Extracts the actual value from an arg-value.
-   Handles multiple formats:
-   1. Union format from cache with fn-ref: {:kind :fn-ref :fn-id <uuid>}
-   2. Union format from cache with literal: {:kind :literal :value <value>}
-   3. arg-value record with :value key (from direct resolution or tests)
-   4. Direct value (already unwrapped)
+  "Extracts the actual value from an arg-value record.
+   Returns a map with :type and :value keys:
+   - {:type :fn-usage :value <fn-usage-id>}
+   - {:type :literal :value <literal-value>}
 
-   The cache stores values in union format (see cache-protocol.value-codec),
-   while direct resolution stores arg-value records with :id and :value."
+   Handles arg-value records with FK fields (fn-usage-id, value)
+   or direct values (already unwrapped)."
   [arg-value]
   (cond
-    ;; Union format: {:kind :fn-ref :fn-id <uuid>}
-    (and (map? arg-value) (= :fn-ref (:kind arg-value)))
-    (:fn-id arg-value)
+    ;; fn-usage-id set: reference to fn-usage
+    (and (map? arg-value) (some? (:fn-usage-id arg-value)))
+    {:type :fn-usage :value (:fn-usage-id arg-value)}
 
-    ;; Union format with :value OR arg-value record/test format with :value key
-    (or (and (map? arg-value) (= :literal (:kind arg-value)))
-        (and (map? arg-value)
-             (contains? arg-value :value)
-             (not (contains? arg-value :kind))))
-    (:value arg-value)
+    ;; :value field set: literal value in arg-value record
+    (and (map? arg-value) (contains? arg-value :value))
+    {:type :literal :value (:value arg-value)}
 
     ;; Direct value (already unwrapped)
     :else
-    arg-value))
+    {:type :literal :value arg-value}))
 
 
 (defn build-delay
   "Builds a delay for an arg-value with error context.
 
-   Resolution is based on arg-schema.first-class flag:
-   - first-class=true: get fn-id from fn-usage, pass directly (for HOF)
-   - first-class=false: execute fn-usage and use result (cached)
-   - Non-UUID → literal value (returned as-is)
+   Resolution is based on arg-value type AND arg-schema.first-class flag:
+   - :fn-usage + first-class=true: get fn-id from fn-usage, pass directly (for HOF)
+   - :fn-usage + first-class=false: execute fn-usage and use result (cached)
+   - :literal: literal value (returned as-is)
 
    NOTE: Nested structures with fn-usage references are NOT resolved.
    Use explicit graph functions (pair, assoc-any, conj-any) to build
@@ -228,26 +209,23 @@
    - arg-schema: The argument schema (includes first-class flag)
    - execute-fn-usage-fn: Injected function to execute fn-usages
 
-   All delays include error context (arg-name, source) for better diagnostics.
-
-   Note: UUID references may come as strings from PostgreSQL JSONB storage,
-   so we parse them with try-parse-uuid. The arg-value format varies between
-   direct resolution (map with :value) and cached resolution (direct value)."
+   All delays include error context (arg-name, source) for better diagnostics."
   ^clojure.lang.Delay [context arg-value arg-schema execute-fn-usage-fn]
-  (let [raw-value (extract-arg-value arg-value)
+  (let [{value-type :type the-value :value} (extract-arg-value arg-value)
         arg-name (:name arg-schema)
         first-class? (:first-class arg-schema)
-        ;; Try to parse as UUID - handles both native UUIDs and UUID strings
-        ;; from PostgreSQL JSONB storage
-        parsed-uuid (try-parse-uuid raw-value)]
-    (if parsed-uuid
-      ;; UUID: reference to fn-usage
-      (let [fn-usages (-> context :execution-graph :fn-usages)]
-        (build-uuid-ref-delay context parsed-uuid arg-name fn-usages
-                              first-class? execute-fn-usage-fn))
-      ;; Literal or complex value - return as-is (no nested resolution)
+        fn-usages (-> context :execution-graph :fn-usages)]
+    (case value-type
+      ;; fn-usage-id set: reference to fn-usage
+      ;; Behavior depends on first-class? flag from arg-schema
+      :fn-usage
+      (build-uuid-ref-delay context the-value arg-name fn-usages
+                            first-class? execute-fn-usage-fn)
+
+      ;; value set: literal value
+      :literal
       (wrap-delay-with-context arg-name :db-value
-                               #(identity raw-value)))))
+                               #(identity the-value)))))
 
 
 ;; === Argument Validation Helpers ===

@@ -97,11 +97,16 @@
                                     :type :ref :ref-entity :fn
                                     :nullable? true}})
       ;; arg-value: pure value (no owner-fn-id)
+      ;; Exactly ONE of (value, fn-usage-id) must be set.
       (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
                      {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
                                       :type :ref :ref-entity :arg-schema}
                       :value {:uuid #uuid "00000000-0000-0000-0004-000000000004"
-                              :type :jsonb}})
+                              :type :jsonb
+                              :nullable? true}
+                      :fn-usage-id {:uuid #uuid "00000000-0000-0000-0004-000000000005"
+                                    :type :ref :ref-entity :fn-usage
+                                    :nullable? true}})
       ;; fn-arg: binding from fn to arg-value
       (ds/add-entity :fn-arg #uuid "00000000-0000-0000-0006-000000000001"
                      {:fn-id {:uuid #uuid "00000000-0000-0000-0006-000000000002"
@@ -114,12 +119,42 @@
 
 
 (defn create-arg-value-with-binding!
-  "Creates arg-value and fn-arg binding. Returns the arg-value.
-   Helper for tests that need to create argument values."
+  "Creates arg-value with a literal value and fn-arg binding. Returns the arg-value.
+   Helper for tests that need to create argument values.
+
+   For fn-usage references (including HOF with first-class=true), use create-arg-value-with-fn-usage-binding! instead."
   [storage fn-id arg-schema-id value]
   (let [av (sp/create-entity storage :arg-value
                              {:arg-schema-id arg-schema-id
                               :value value})]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))
+
+
+(defn create-fn-usage!
+  "Creates a fn-usage entity pointing to a fn. Returns the fn-usage id.
+
+   Use this when you want the referenced fn to be EXECUTED and its
+   result used as the argument value."
+  ([storage fn-id]
+   (create-fn-usage! storage fn-id (str (random-uuid))))
+  ([storage fn-id result-name]
+   (:id (sp/create-entity storage :fn-usage {:fn-id fn-id :name result-name}))))
+
+
+(defn create-arg-value-with-fn-usage-binding!
+  "Creates arg-value referencing a fn-usage and fn-arg binding. Returns the arg-value.
+
+   Behavior depends on arg-schema.first-class flag:
+   - first-class=false: execute fn-usage and use result
+   - first-class=true: pass fn-id directly (for HOF like map, filter, reduce)"
+  [storage fn-id arg-schema-id fn-usage-id]
+  (let [av (sp/create-entity storage :arg-value
+                             {:arg-schema-id arg-schema-id
+                              :fn-usage-id fn-usage-id})]
     (sp/create-entity storage :fn-arg
                       {:fn-id fn-id
                        :arg-schema-id arg-schema-id

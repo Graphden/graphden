@@ -69,15 +69,31 @@
 
 
 (defn create-arg-value-with-binding!
-  "Creates arg-value and fn-arg binding. Returns the arg-value.
+  "Creates arg-value with a literal value and fn-arg binding. Returns the arg-value.
 
-   With normalized schema:
-   - arg-value is a pure value (no owner-fn-id)
-   - fn-arg binds fn to arg-value"
+   For fn-usage references (both execution and HOF), use
+   create-arg-value-with-fn-usage-binding! instead."
   [storage fn-id arg-schema-id value]
   (let [av (sp/create-entity storage :arg-value
                              {:arg-schema-id arg-schema-id
                               :value value})]
+    (sp/create-entity storage :fn-arg
+                      {:fn-id fn-id
+                       :arg-schema-id arg-schema-id
+                       :arg-value-id (:id av)})
+    av))
+
+
+(defn create-arg-value-with-fn-usage-binding!
+  "Creates arg-value referencing a fn-usage and fn-arg binding. Returns the arg-value.
+
+   Behavior depends on arg-schema.first-class flag:
+   - first-class=false: execute fn-usage and use result
+   - first-class=true: pass fn-id directly (for HOF like map, filter, reduce)"
+  [storage fn-id arg-schema-id fn-usage-id]
+  (let [av (sp/create-entity storage :arg-value
+                             {:arg-schema-id arg-schema-id
+                              :fn-usage-id fn-usage-id})]
     (sp/create-entity storage :fn-arg
                       {:fn-id fn-id
                        :arg-schema-id arg-schema-id

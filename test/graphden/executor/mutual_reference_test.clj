@@ -43,19 +43,21 @@
                                         {:fn-schema-id (:id fn-schema)
                                          :name "partner"
                                          :type :fn  ; :fn type means callable reference
-                                         :required true :first-class false})
+                                         :required true :first-class true})  ; first-class=true for HOF
 
           ;; Create two fn instances that reference each other
           fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id fn-schema)})
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id fn-schema)})
 
-          ;; fn-a's n = 1, partner = fn-b
+          ;; fn-a's n = 1, partner = fn-b via fn-usage
           _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id arg-n) 1)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id arg-partner) (:id fn-b))
+          fn-b-usage-id (setup/create-fn-usage! storage (:id fn-b) "fn-b-ref")
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-a) (:id arg-partner) fn-b-usage-id)
 
-          ;; fn-b's n = 2, partner = fn-a
+          ;; fn-b's n = 2, partner = fn-a via fn-usage
           _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id arg-n) 2)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id arg-partner) (:id fn-a))
+          fn-a-usage-id (setup/create-fn-usage! storage (:id fn-a) "fn-a-ref")
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-b) (:id arg-partner) fn-a-usage-id)
 
           ctx (exec/create-context {:storage storage})]
 
@@ -98,7 +100,7 @@
                                      {:fn-schema-id (:id fn-schema)
                                       :name "self-ref"
                                       :type :fn
-                                      :required true :first-class false})
+                                      :required true :first-class true})  ; first-class=true for HOF
 
           fn-rec (sp/create-entity storage :fn
                                    {:name "my-self-fn"
@@ -106,8 +108,9 @@
 
           ;; n = 42
           _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-n) 42)
-          ;; Self-reference
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-self) (:id fn-rec))
+          ;; Self-reference via fn-usage
+          self-usage-id (setup/create-fn-usage! storage (:id fn-rec) "self-ref")
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-rec) (:id arg-self) self-usage-id)
 
           ctx (exec/create-context {:storage storage})]
 

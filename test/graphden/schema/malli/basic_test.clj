@@ -11,7 +11,7 @@
 (deftest entities-test
   (testing "schema contains all expected entities"
     (let [entities (set (ds/entities example-schema))]
-      (is (= #{:fn-schema :arg-schema :fn :arg-value} entities)))))
+      (is (= #{:fn-schema :arg-schema :fn :fn-usage :arg-value} entities)))))
 
 
 (deftest enums-test
@@ -35,11 +35,18 @@
       (is (= :ref (get-in fields [:fn-schema-id :type])))
       (is (= :fn-schema (get-in fields [:fn-schema-id :ref-entity])))))
 
-  (testing "arg-value has union type for value"
+  (testing "arg-value has nullable FK fields for references"
     (let [fields (ds/entity-fields example-schema :arg-value)]
-      (is (= :ref (get-in fields [:owner-fn-id :type])))
-      (is (= :union (get-in fields [:value :type])))
-      (is (= 9 (count (get-in fields [:value :variants]))))))
+      ;; arg-schema-id is required FK
+      (is (= :ref (get-in fields [:arg-schema-id :type])))
+      (is (= :arg-schema (get-in fields [:arg-schema-id :ref-entity])))
+      ;; value is nullable jsonb for literals
+      (is (= :jsonb (get-in fields [:value :type])))
+      (is (true? (get-in fields [:value :nullable?])))
+      ;; fn-usage-id is nullable FK for fn-usage references
+      (is (= :ref (get-in fields [:fn-usage-id :type])))
+      (is (= :fn-usage (get-in fields [:fn-usage-id :ref-entity])))
+      (is (true? (get-in fields [:fn-usage-id :nullable?])))))
 
   (testing "constraints are accessible"
     (is (= [{:type :unique :fields [:name]}]

@@ -204,7 +204,7 @@
                                        {:fn-schema-id (:id map-schema)
                                         :name "f"
                                         :type :fn  ; HOF!
-                                        :required true :first-class false})
+                                        :required true :first-class true})  ; first-class=true for HOF
           map-arg-coll (sp/create-entity storage :arg-schema
                                          {:fn-schema-id (:id map-schema)
                                           :name "coll"
@@ -227,8 +227,9 @@
           map-fn (sp/create-entity storage :fn
                                    {:name "map-fn"
                                     :fn-schema-id (:id map-schema)})
-          ;; map-fn's f -> rec-fn (direct ref, HOF)
-          _ (setup/create-arg-value-with-binding! storage (:id map-fn) (:id _map-arg-f) (:id rec-fn))
+          ;; map-fn's f -> rec-fn via fn-usage (first-class=true passes fn-id)
+          rec-fn-usage-id (setup/create-fn-usage! storage (:id rec-fn) "rec-fn-ref")
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id map-fn) (:id _map-arg-f) rec-fn-usage-id)
           ;; map-fn's coll -> [1 2 3]
           _ (setup/create-arg-value-with-binding! storage (:id map-fn) (:id map-arg-coll) [1 2 3])
           ctx (exec/create-context {:storage storage})]

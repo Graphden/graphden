@@ -93,6 +93,7 @@
                                     :ref-entity :fn
                                     :nullable? true}})
       ;; arg-value: pure value (no owner-fn-id)
+      ;; Exactly ONE of (value, fn-usage-id) must be set.
       (ds/add-entity :arg-value
                      #uuid "00000000-0000-0000-0000-000000000040"
                      {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000042"
@@ -100,7 +101,11 @@
                                       :ref-entity :arg-schema}
                       :value {:uuid #uuid "00000000-0000-0000-0000-000000000043"
                               :type :jsonb
-                              :nullable? true}})
+                              :nullable? true}
+                      :fn-usage-id {:uuid #uuid "00000000-0000-0000-0000-000000000044"
+                                    :type :ref
+                                    :ref-entity :fn-usage
+                                    :nullable? true}})
       ;; fn-arg: binding (fn -> arg-value)
       (ds/add-entity :fn-arg
                      #uuid "00000000-0000-0000-0000-000000000050"

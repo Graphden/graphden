@@ -164,7 +164,7 @@
                                                          :type :int
                                                          :required true}}
                             ;; resolved-arg value is a fn-usage UUID (wrapped in arg-value record)
-                            :resolved-args {fn-id {arg-schema-id {:value missing-cs-id}}}
+                            :resolved-args {fn-id {arg-schema-id {:fn-usage-id missing-cs-id}}}
                             ;; fn-usage exists but references a fn not in :fns
                             :fn-usages {missing-cs-id {:id missing-cs-id
                                                        :fn-id child-fn-id
@@ -219,7 +219,7 @@
                               (map-indexed
                                 (fn [i fid]
                                   (if (< i (dec num-fns))
-                                    [fid {arg-schema-id {:value (get cs-ids i)}}]
+                                    [fid {arg-schema-id {:fn-usage-id (get cs-ids i)}}]
                                     [fid {}]))
                                 fn-ids))
           arg-schemas {arg-schema-id {:id arg-schema-id
@@ -267,7 +267,7 @@
                               (map-indexed
                                 (fn [i fid]
                                   (if (< i (dec num-fns))
-                                    [fid {arg-schema-id {:value (get cs-ids i)}}]
+                                    [fid {arg-schema-id {:fn-usage-id (get cs-ids i)}}]
                                     [fid {}]))
                                 fn-ids))
           arg-schemas {arg-schema-id {:id arg-schema-id
@@ -330,7 +330,7 @@
                           :arg-schemas {arg-schema-id {:id arg-schema-id
                                                        :fn-schema-id fn-schema-id
                                                        :name "x" :type :int :required true}}
-                          :resolved-args {fn-id {arg-schema-id {:value cs-id}}
+                          :resolved-args {fn-id {arg-schema-id {:fn-usage-id cs-id}}
                                           child-fn-id {}}
                           :fn-usages {cs-id {:id cs-id :fn-id child-fn-id :name "r"}}})
           ;; Clock advances past timeout between calls

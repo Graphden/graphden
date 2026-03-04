@@ -27,7 +27,7 @@
    - :bool        - Boolean true/false only
    - :numeric     - Arbitrary precision number (BigDecimal in Clojure, NUMERIC in PostgreSQL)
    - :timestamptz - Timestamp with timezone, microsecond precision (java.time.Instant)
-   - :jsonb       - JSON data, maps and vectors only (no raw scalars at top level)
+   - :jsonb       - JSON data, any JSON-serializable value (scalars, arrays, objects)
    - :bytes       - Binary data (byte array), no size limit but memory-constrained"
   {:uuid        {:description "UUID identifier"
                  :clojure-type 'java.util.UUID}
@@ -46,8 +46,8 @@
    :timestamptz {:description "Timestamp with timezone"
                  :clojure-type 'java.time.Instant
                  :precision "microseconds"}
-   :jsonb       {:description "JSON data (maps/vectors)"
-                 :clojure-type '(or clojure.lang.IPersistentMap clojure.lang.IPersistentVector)}
+   :jsonb       {:description "JSON data (any JSON-serializable value)"
+                 :clojure-type 'Object}
    :bytes       {:description "Binary data"
                  :clojure-type 'bytes}})
 
@@ -123,7 +123,7 @@
    :bool        boolean?
    :text        string?
    :numeric     number?
-   :jsonb       #(or (map? %) (vector? %))
+   :jsonb       (constantly true)  ; Any JSON-serializable value
    :bytes       bytes?
    :timestamptz #(or (instance? java.time.Instant %)
                      (instance? java.time.LocalDateTime %)

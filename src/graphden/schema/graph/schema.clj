@@ -141,7 +141,16 @@
 
 
 (def ^:private arg-value-value-field-uuid
+  "Literal value (JSONB). Nullable - set when arg is a literal, NULL when it's a reference."
   #uuid "b6780ba3-d050-4162-aba8-5f68ac17bcb8")
+
+
+(def ^:private arg-value-fn-usage-id-field-uuid
+  "FK to fn-usage. Set when arg references a fn-usage.
+   Behavior depends on arg-schema.first-class flag:
+   - first-class=false: execute fn-usage and use result
+   - first-class=true: pass fn-id directly (for HOF)"
+  #uuid "c7891ca4-e161-5273-cba9-6f79bd28cdc9")
 
 
 ;; Field UUIDs for :fn-arg entity (binding: fn → arg-value)
@@ -183,24 +192,9 @@
              ft/supported-types)))
 
 
-(defn value-variants
-  "Generates union variants for arg-value.
-   Variants:
-   - ref to fn-usage: for function references (both HOF and computed)
-   - :any/:fn types
-   - literal types
-
-   Function references always go through fn-usage. The arg-schema.first-class
-   field determines how the executor handles it:
-   - first-class=true: pass fn-id from fn-usage (for HOF)
-   - first-class=false: execute fn-usage and use result
-
-   Public for reuse by cache-data-schema."
-  []
-  (into [{:type :ref :ref-entity :fn-usage}
-         {:type :any}
-         {:type :fn}]
-        (map (fn [t] {:type t}) ft/supported-types)))
+;; NOTE: value-variants function removed - no longer using union types for arg-value.
+;; The schema uses separate nullable FK columns: value, fn-usage-id.
+;; See arg-value entity definition below.
 
 
 (defn extend-builder
@@ -253,15 +247,39 @@
                                     :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:owner-fn-id :name]})
 
+      ;; fn_usage: usage of a function at a computation point
+      ;; Multiple arg-values can reference the same fn-usage to reuse computed value
+      ;; owner-fn-id: NULL = global usage, set = local usage (scoped to owner fn)
+      ;; NOTE: Must be defined BEFORE arg-value because arg-value references fn-usage
+      (ds/add-entity :fn-usage fn-usage-entity-uuid
+                     {:fn-id {:uuid fn-usage-fn-id-field-uuid
+                              :type :ref :ref-entity :fn}
+                      :name {:uuid fn-usage-name-field-uuid
+                             :type :text}
+                      :owner-fn-id {:uuid fn-usage-owner-fn-id-field-uuid
+                                    :type :ref :ref-entity :fn
+                                    :nullable? true}})
+      (ds/add-constraint :fn-usage {:type :unique :fields [:owner-fn-id :name]})
+
       ;; arg_value: pure argument values (no owner)
-      ;; value is a union: ref to fn (HOF), ref to fn-usage (computed), or literal
-      ;; Deduplication: same (arg-schema-id, value) → reuse existing arg-value
+      ;; Exactly ONE of (value, fn-usage-id) must be set:
+      ;; - value: literal JSONB value
+      ;; - fn-usage-id: ref to fn-usage (behavior depends on arg-schema.first-class)
+      ;;   * first-class=false: execute fn-usage and use result
+      ;;   * first-class=true: pass fn-id directly (for HOF)
+      ;; XOR constraint enforced at DB level via CHECK constraint.
+      ;; Deduplication: query by the non-null field + arg-schema-id
       (ds/add-entity :arg-value arg-value-entity-uuid
                      {:arg-schema-id {:uuid arg-value-arg-schema-id-field-uuid
                                       :type :ref :ref-entity :arg-schema}
                       :value {:uuid arg-value-value-field-uuid
-                              :type :union :variants (value-variants)}})
-      (ds/add-constraint :arg-value {:type :unique :fields [:arg-schema-id :value]})
+                              :type :jsonb
+                              :nullable? true}
+                      :fn-usage-id {:uuid arg-value-fn-usage-id-field-uuid
+                                    :type :ref :ref-entity :fn-usage
+                                    :nullable? true}})
+      ;; Note: Full deduplication requires partial unique indexes in PostgreSQL.
+      ;; For now, application code handles deduplication by querying with the set field.
 
       ;; fn_arg: binding from fn to arg-value
       ;; arg-schema-id denormalized for UNIQUE constraint
@@ -272,20 +290,7 @@
                                       :type :ref :ref-entity :arg-schema}
                       :arg-value-id {:uuid fn-arg-arg-value-id-field-uuid
                                      :type :ref :ref-entity :arg-value}})
-      (ds/add-constraint :fn-arg {:type :unique :fields [:fn-id :arg-schema-id]})
-
-      ;; fn_usage: usage of a function at a computation point
-      ;; Multiple arg-values can reference the same fn-usage to reuse computed value
-      ;; owner-fn-id: NULL = global usage, set = local usage (scoped to owner fn)
-      (ds/add-entity :fn-usage fn-usage-entity-uuid
-                     {:fn-id {:uuid fn-usage-fn-id-field-uuid
-                              :type :ref :ref-entity :fn}
-                      :name {:uuid fn-usage-name-field-uuid
-                             :type :text}
-                      :owner-fn-id {:uuid fn-usage-owner-fn-id-field-uuid
-                                    :type :ref :ref-entity :fn
-                                    :nullable? true}})
-      (ds/add-constraint :fn-usage {:type :unique :fields [:owner-fn-id :name]})))
+      (ds/add-constraint :fn-arg {:type :unique :fields [:fn-id :arg-schema-id]})))
 
 
 (defn build-schema

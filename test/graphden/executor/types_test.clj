@@ -158,8 +158,9 @@
       (is (true? (types/type-mismatch? :text :keyword true 10 counter)))
       ;; uuid expects UUID
       (is (true? (types/type-mismatch? :uuid "not-uuid" true 10 counter)))
-      ;; jsonb expects map or vector
-      (is (true? (types/type-mismatch? :jsonb "string" true 10 counter))))))
+      ;; Note: jsonb now accepts any JSON-serializable value (strings, numbers, etc.)
+      ;; See src/graphden/schema/fields/types.clj for rationale
+      )))
 
 
 (deftest type-mismatch-unknown-types-strict-test

@@ -56,20 +56,18 @@
                       :fn-schema-id {:uuid (uuid) :type :ref :ref-entity :fn-schema}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
+      ;; fn-usage: tracks specific call sites of functions
+      (ds/add-entity :fn-usage (uuid)
+                     {:fn-id {:uuid (uuid) :type :ref :ref-entity :fn}
+                      :name {:uuid (uuid) :type :text}})
+
       ;; arg_value: argument values for function instances
-      ;; value is a union: either a reference to another fn, or a literal value
+      ;; Uses separate FK fields instead of union type:
+      ;; - value: nullable JSONB for literal values
+      ;; - fn-usage-id: nullable FK to fn-usage (behavior depends on arg-schema.first-class)
       (ds/add-entity :arg-value (uuid)
-                     {:owner-fn-id {:uuid (uuid) :type :ref :ref-entity :fn}
-                      :arg-schema-id {:uuid (uuid) :type :ref :ref-entity :arg-schema}
-                      :value {:uuid (uuid) :type :union
-                              :variants [{:type :ref :ref-entity :fn}
-                                         {:type :bool}
-                                         {:type :int}
-                                         {:type :numeric}
-                                         {:type :text}
-                                         {:type :uuid}
-                                         {:type :timestamptz}
-                                         {:type :jsonb}
-                                         {:type :bytes}]}})
+                     {:arg-schema-id {:uuid (uuid) :type :ref :ref-entity :arg-schema}
+                      :value {:uuid (uuid) :type :jsonb :nullable? true}
+                      :fn-usage-id {:uuid (uuid) :type :ref :ref-entity :fn-usage :nullable? true}})
 
       (ds/build)))

@@ -67,43 +67,19 @@
 ;; === extract-arg-value tests ===
 
 (deftest extract-arg-value-test
-  (testing "extracts fn-id from :fn-ref union format"
-    (let [fn-id (random-uuid)
-          result (#'arg-res/extract-arg-value {:kind :fn-ref :fn-id fn-id})]
-      (is (= fn-id result))))
-
-  (testing "extracts value from :literal union format"
-    (let [result (#'arg-res/extract-arg-value {:kind :literal :value 42})]
-      (is (= 42 result))))
-
-  (testing "extracts value from arg-value record format"
+  (testing "extracts value from arg-value record with :value field"
     (let [result (#'arg-res/extract-arg-value {:id (random-uuid) :value "test"})]
-      (is (= "test" result))))
+      (is (= {:type :literal :value "test"} result))))
 
-  (testing "returns direct value when already unwrapped"
-    (is (= 42 (#'arg-res/extract-arg-value 42)))
-    (is (= "hello" (#'arg-res/extract-arg-value "hello")))
-    (is (= [1 2 3] (#'arg-res/extract-arg-value [1 2 3])))))
+  (testing "extracts fn-usage-id from arg-value record"
+    (let [fu-id (random-uuid)
+          result (#'arg-res/extract-arg-value {:fn-usage-id fu-id})]
+      (is (= {:type :fn-usage :value fu-id} result))))
 
-
-;; === try-parse-uuid tests ===
-
-(deftest try-parse-uuid-test
-  (testing "returns UUID for UUID input"
-    (let [id (random-uuid)]
-      (is (= id (#'arg-res/try-parse-uuid id)))))
-
-  (testing "parses UUID string"
-    (let [id (random-uuid)
-          result (#'arg-res/try-parse-uuid (str id))]
-      (is (= id result))))
-
-  (testing "returns nil for non-UUID string"
-    (is (nil? (#'arg-res/try-parse-uuid "not-a-uuid"))))
-
-  (testing "returns nil for non-string/non-UUID"
-    (is (nil? (#'arg-res/try-parse-uuid 42)))
-    (is (nil? (#'arg-res/try-parse-uuid {:a 1})))))
+  (testing "returns direct value as literal when already unwrapped"
+    (is (= {:type :literal :value 42} (#'arg-res/extract-arg-value 42)))
+    (is (= {:type :literal :value "hello"} (#'arg-res/extract-arg-value "hello")))
+    (is (= {:type :literal :value [1 2 3]} (#'arg-res/extract-arg-value [1 2 3])))))
 
 
 ;; === resolve-nested-fn-usages tests ===

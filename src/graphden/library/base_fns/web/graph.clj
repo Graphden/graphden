@@ -59,22 +59,18 @@
 
 
 (defn- arg-value-to-node
-  "Converts arg-value entity to Cytoscape node."
-  [{:keys [id value owner-fn-id arg-schema-id]}]
-  (let [;; Determine if value is a reference
-        is-ref (and (map? value)
-                    (or (:fn-id value)
-                        (:fn-usage-id value)))
-        ref-type (cond
-                   (and (map? value) (:fn-id value)) "fn-ref"
-                   (and (map? value) (:fn-usage-id value)) "fn-usage-ref"
-                   :else "literal")
+  "Converts arg-value entity to Cytoscape node.
+   Supports both new FK-based format and legacy nested map format."
+  [{:keys [id value fn-usage-id arg-schema-id]}]
+  (let [;; Support both new FK format and legacy nested map format
+        actual-fn-usage-id (or fn-usage-id
+                               (when (map? value) (:fn-usage-id value)))
+        ;; Determine if value is a reference
+        is-ref (boolean actual-fn-usage-id)
+        ref-type (if actual-fn-usage-id "fn-usage-ref" "literal")
         display-value (cond
-                        (and (map? value) (:fn-id value))
-                        (str "ref<fn:" (:fn-id value) ">")
-
-                        (and (map? value) (:fn-usage-id value))
-                        (str "ref<fu:" (:fn-usage-id value) ">")
+                        actual-fn-usage-id
+                        (str "ref<fu:" actual-fn-usage-id ">")
 
                         (string? value)
                         (if (> (count value) 20)
@@ -91,7 +87,6 @@
             :type "arg-value"
             :ref-type ref-type
             :is-ref is-ref
-            :owner-fn-id (str owner-fn-id)
             :arg-schema-id (str arg-schema-id)}}))
 
 
@@ -106,8 +101,9 @@
 
 
 (defn- create-edges
-  "Creates edges between entities based on relationships."
-  [{:keys [fns arg-schemas arg-values fn-usages]}]
+  "Creates edges between entities based on relationships.
+   Supports both new FK-based format and legacy nested map format."
+  [{:keys [fns arg-schemas arg-values fn-usages fn-args]}]
   (let [;; fn → fn-schema edges
         fn-to-schema-edges
         (for [f fns
@@ -126,13 +122,13 @@
                   :target (str (:id as))
                   :type "has-arg"}})
 
-        ;; arg-value → owner-fn edges
-        arg-value-owner-edges
-        (for [av arg-values
-              :when (:owner-fn-id av)]
-          {:data {:id (str "e-av-owner-" (:id av))
-                  :source (str (:owner-fn-id av))
-                  :target (str (:id av))
+        ;; fn-arg edges (new schema: fn → arg-value via fn-arg entity)
+        fn-arg-edges
+        (for [fa (or fn-args [])
+              :when (and (:fn-id fa) (:arg-value-id fa))]
+          {:data {:id (str "e-fn-arg-" (:id fa))
+                  :source (str (:fn-id fa))
+                  :target (str (:arg-value-id fa))
                   :type "has-value"}})
 
         ;; arg-value → arg-schema edges
@@ -144,12 +140,15 @@
                   :target (str (:arg-schema-id av))
                   :type "value-for"}})
 
-        ;; arg-value ref edges (fn-ref or fn-usage-ref)
+        ;; arg-value ref edges - support both new FK format and legacy nested map
         arg-value-ref-edges
         (for [av arg-values
-              :let [v (:value av)]
-              :when (map? v)
-              :let [target-id (or (:fn-id v) (:fn-usage-id v))]
+              :let [;; New FK format
+                    fn-usage-id (:fn-usage-id av)
+                    ;; Legacy nested map format
+                    v (:value av)
+                    legacy-target (when (map? v) (:fn-usage-id v))
+                    target-id (or fn-usage-id legacy-target)]
               :when target-id]
           {:data {:id (str "e-av-ref-" (:id av))
                   :source (str (:id av))
@@ -167,7 +166,7 @@
 
     (vec (concat fn-to-schema-edges
                  arg-schema-edges
-                 arg-value-owner-edges
+                 fn-arg-edges
                  arg-value-schema-edges
                  arg-value-ref-edges
                  fn-usage-edges))))

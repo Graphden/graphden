@@ -64,8 +64,10 @@
 
 (def uuid-regex-pattern
   "PostgreSQL regex pattern for UUID validation.
-   Used in recursive CTEs to extract UUID references from JSONB values.
-   Format: 8-4-4-4-12 hexadecimal characters."
+   Format: 8-4-4-4-12 hexadecimal characters.
+
+   NOTE: With the new arg-value schema using explicit FK column (fn-usage-id),
+   this pattern is no longer needed for UUID extraction. Kept for backwards compatibility."
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
@@ -283,11 +285,24 @@
 
 (defn extract-uuid-refs-from-arg-values
   "Extracts UUIDs referenced in arg-values.
-   Returns set of UUIDs that could be fn or fn-usage references."
+   Returns set of UUIDs that could be fn or fn-usage references.
+
+   Handles two formats:
+   1. New schema with FK field: fn-usage-id
+   2. Legacy format: UUID stored as string in :value field
+
+   The legacy format is still needed for:
+   - Backward compatibility with existing data
+   - Tests using minimal schemas without FK fields"
   [arg-values-map]
   (->> (vals arg-values-map)
-       (map :value)
-       (keep try-parse-uuid)
+       (mapcat (fn [av]
+                 (cond-> []
+                   ;; New FK field (preferred)
+                   (some? (:fn-usage-id av)) (conj (:fn-usage-id av))
+                   ;; Legacy: try to parse UUID from value field
+                   (some? (:value av)) (conj (try-parse-uuid (:value av))))))
+       (remove nil?)
        (set)))
 
 

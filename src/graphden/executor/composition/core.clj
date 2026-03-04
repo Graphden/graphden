@@ -309,71 +309,122 @@
 
 
 (defn- get-or-create-arg-value!
-  "Gets existing arg-value with same (arg-schema-id, value) or creates new one.
+  "Gets existing arg-value or creates new one.
    Returns arg-value id.
 
-   Deduplication: same (arg-schema-id, value) pair reuses existing arg-value."
+   resolved-value is a map with :type and :value keys:
+   - {:type :fn-usage :value <fn-usage-id>} -> sets fn-usage-id FK
+   - {:type :literal :value <literal>} -> sets value field
+
+   Deduplication: same (arg-schema-id, type, value) reuses existing arg-value."
   [storage arg-schema-id resolved-value created-arg-values]
-  (let [cache-key [arg-schema-id resolved-value]]
+  (let [{value-type :type the-value :value} resolved-value
+        cache-key [arg-schema-id value-type the-value]]
     (if-let [existing-id (get @created-arg-values cache-key)]
       existing-id
-      ;; Check storage for existing arg-value with same (arg-schema-id, value)
-      (let [existing (sp/query-entities storage :arg-value
-                                        {:arg-schema-id arg-schema-id
-                                         :value resolved-value})]
+      ;; Build query map based on type
+      (let [query-map (case value-type
+                        :fn-usage {:arg-schema-id arg-schema-id :fn-usage-id the-value}
+                        :literal {:arg-schema-id arg-schema-id :value the-value})
+            existing (sp/query-entities storage :arg-value query-map)]
         (if (seq existing)
           (let [id (:id (first existing))]
             (swap! created-arg-values assoc cache-key id)
             id)
-          ;; Create new arg-value (no owner - pure value)
-          (let [av (sp/create-entity storage :arg-value
-                                     {:arg-schema-id arg-schema-id
-                                      :value resolved-value})]
+          ;; Create new arg-value with appropriate FK field
+          (let [create-map (case value-type
+                             :fn-usage {:arg-schema-id arg-schema-id :fn-usage-id the-value}
+                             :literal {:arg-schema-id arg-schema-id :value the-value})
+                av (sp/create-entity storage :arg-value create-map)]
             (swap! created-arg-values assoc cache-key (:id av))
             (:id av)))))))
 
 
 (defn- resolve-arg-value
   "Resolves an arg value, handling top-level references only.
+   Returns a map with :type and :value keys for proper FK field assignment:
+   - {:type :fn-usage :value <fn-usage-id>}
+   - {:type :literal :value <literal-value>}
 
    At top-level (the arg value itself):
-   - :fn-name -> resolve to fn-id (for HOF)
+   - :fn-name -> create fn-usage (for HOF, behavior controlled by first-class flag)
    - :fn-name> -> create fn-usage and resolve to fn-usage-id
+   - raw UUID -> create fn-usage for it
 
-   NOTE: Nested structures with fn/fn-usage references are NOT resolved.
+   Runtime behavior is determined by arg-schema.first-class flag:
+   - first-class=true -> get fn-id from fn-usage, pass directly (for HOF)
+   - first-class=false -> execute fn-usage and use result
+
+   NOTE: Nested structures with fn-usage references are NOT resolved.
    Use explicit graph functions (pair, assoc-any, conj-any) to build
-   structures containing fn/fn-usage references."
+   structures containing fn-usage references."
   [arg-value storage created-fns created-fn-usages]
-  (if-let [ref-info (extract-fn-ref arg-value)]
-    ;; Top-level fn reference
-    (let [[fn-name ref-type result-name] ref-info]
-      (condp = ref-type
-        ;; :fn-name> - get or create fn-usage
-        :fn-usage
-        (let [result-name-str (name result-name)]
-          (if-let [existing-fu-id (get @created-fn-usages result-name)]
-            existing-fu-id
-            ;; Check storage for existing fn-usage with same name
-            (let [existing-in-db (sp/query-entities storage :fn-usage {:name result-name-str})]
-              (if (seq existing-in-db)
-                (let [fu-id (:id (first existing-in-db))]
-                  (swap! created-fn-usages assoc result-name fu-id)
-                  fu-id)
-                (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                      fn-usage (sp/create-entity storage :fn-usage
-                                                 {:fn-id ref-fn-id
-                                                  :name result-name-str})]
-                  (swap! created-fn-usages assoc result-name (:id fn-usage))
-                  (:id fn-usage))))))
+  (cond
+    ;; Raw UUID - create fn-usage for it (behavior controlled by first-class flag)
+    (uuid? arg-value)
+    (let [result-name (str "ref-" arg-value)]
+      (if-let [existing-fu-id (get @created-fn-usages arg-value)]
+        {:type :fn-usage :value existing-fu-id}
+        (let [existing-in-db (sp/query-entities storage :fn-usage {:name result-name})]
+          (if (seq existing-in-db)
+            (let [fu-id (:id (first existing-in-db))]
+              (swap! created-fn-usages assoc arg-value fu-id)
+              {:type :fn-usage :value fu-id})
+            (let [fn-usage (sp/create-entity storage :fn-usage
+                                             {:fn-id arg-value
+                                              :name result-name})]
+              (swap! created-fn-usages assoc arg-value (:id fn-usage))
+              {:type :fn-usage :value (:id fn-usage)})))))
 
-        ;; :fn-name - resolve to fn id
-        :fn
-        (resolve-fn-id storage created-fns fn-name)
+    ;; Top-level fn reference (keyword syntax)
+    (keyword? arg-value)
+    (if-let [ref-info (extract-fn-ref arg-value)]
+      ;; Top-level fn reference
+      (let [[fn-name ref-type result-name] ref-info]
+        (condp = ref-type
+          ;; :fn-name> - get or create fn-usage
+          :fn-usage
+          (let [result-name-str (name result-name)]
+            (if-let [existing-fu-id (get @created-fn-usages result-name)]
+              {:type :fn-usage :value existing-fu-id}
+              ;; Check storage for existing fn-usage with same name
+              (let [existing-in-db (sp/query-entities storage :fn-usage {:name result-name-str})]
+                (if (seq existing-in-db)
+                  (let [fu-id (:id (first existing-in-db))]
+                    (swap! created-fn-usages assoc result-name fu-id)
+                    {:type :fn-usage :value fu-id})
+                  (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
+                        fn-usage (sp/create-entity storage :fn-usage
+                                                   {:fn-id ref-fn-id
+                                                    :name result-name-str})]
+                    (swap! created-fn-usages assoc result-name (:id fn-usage))
+                    {:type :fn-usage :value (:id fn-usage)})))))
 
-        ;; default
-        arg-value))
-    ;; Not a top-level ref - return literal value as-is (no nested resolution)
-    arg-value))
+          ;; :fn-name - create fn-usage (for HOF, behavior controlled by first-class flag)
+          :fn
+          (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
+                result-name (str (name fn-name) "-ref")]
+            (if-let [existing-fu-id (get @created-fn-usages fn-name)]
+              {:type :fn-usage :value existing-fu-id}
+              (let [existing-in-db (sp/query-entities storage :fn-usage {:name result-name})]
+                (if (seq existing-in-db)
+                  (let [fu-id (:id (first existing-in-db))]
+                    (swap! created-fn-usages assoc fn-name fu-id)
+                    {:type :fn-usage :value fu-id})
+                  (let [fn-usage (sp/create-entity storage :fn-usage
+                                                   {:fn-id ref-fn-id
+                                                    :name result-name})]
+                    (swap! created-fn-usages assoc fn-name (:id fn-usage))
+                    {:type :fn-usage :value (:id fn-usage)})))))
+
+          ;; default - should not happen, treat as literal
+          {:type :literal :value arg-value}))
+      ;; Keyword but not a fn reference - literal
+      {:type :literal :value arg-value})
+
+    ;; Everything else - literal value
+    :else
+    {:type :literal :value arg-value}))
 
 
 (defn- get-or-create-fn-arg!
@@ -407,9 +458,9 @@
    structures containing fn/fn-usage references.
 
    With normalized schema:
-   - arg-value is a pure value (no owner-fn-id)
+   - arg-value is a pure value with one FK field set (fn-usage-id or value)
    - fn-arg binds fn to arg-value
-   - arg-values with same (arg-schema-id, value) are deduplicated
+   - arg-values are deduplicated by (arg-schema-id, type, value)
 
    The created-fn-usages atom tracks fn-usages created
    in this sync batch, keyed by their name (keyword).
@@ -419,9 +470,9 @@
         fn-id (:id fn-entity)]
     (doseq [[arg-name arg-value] args]
       (let [arg-schema-id (resolve-arg-schema-id parent arg-name)
-            ;; Resolve the arg value (handles top-level and nested refs)
+            ;; Resolve the arg value (returns {:type ... :value ...})
             resolved-value (resolve-arg-value arg-value storage created-fns created-fn-usages)
-            ;; Get or create arg-value (deduplicated)
+            ;; Get or create arg-value (deduplicated by type+value)
             arg-value-id (get-or-create-arg-value! storage arg-schema-id resolved-value created-arg-values)]
         ;; Get or create fn-arg binding (fn -> arg-value)
         (get-or-create-fn-arg! storage fn-id arg-schema-id arg-value-id)))))

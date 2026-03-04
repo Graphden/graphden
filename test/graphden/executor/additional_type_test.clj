@@ -65,7 +65,9 @@
 
 
 (deftest jsonb-type-validation-test
-  (testing "throws when :jsonb type arg is provided with non-map/vector value"
+  ;; Note: :jsonb now accepts any JSON-serializable value (strings, numbers, etc.)
+  ;; See src/graphden/schema/fields/types.clj for rationale
+  (testing "accepts string values for :jsonb type (any JSON-serializable value)"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn!
               :use-jsonb
@@ -84,9 +86,8 @@
                                     :fn-schema-id (:id fn-schema)})
           ;; No arg-value in DB - arg is free
           ctx (exec/create-context {:storage storage})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Type mismatch for argument 'data': expected jsonb"
-            (exec/execute ctx (:id fn-rec) {(:id data-arg) "not-jsonb"})))
+      ;; Strings are valid JSON values
+      (is (= "a-string-value" (exec/execute ctx (:id fn-rec) {(:id data-arg) "a-string-value"})))
       (sp/close storage)))
 
   (testing "accepts valid jsonb values (map)"

@@ -117,11 +117,13 @@
     (is (ft/valid-type? :numeric 42M))
     (is (not (ft/valid-type? :numeric "42"))))
 
-  (testing "jsonb validation"
+  (testing "jsonb validation - accepts any JSON-serializable value"
     (is (ft/valid-type? :jsonb {:a 1}))
     (is (ft/valid-type? :jsonb [1 2 3]))
-    (is (not (ft/valid-type? :jsonb "string")))
-    (is (not (ft/valid-type? :jsonb 42))))
+    (is (ft/valid-type? :jsonb "string"))
+    (is (ft/valid-type? :jsonb 42))
+    (is (ft/valid-type? :jsonb nil))
+    (is (ft/valid-type? :jsonb true)))
 
   (testing "union accepts any value"
     (is (ft/valid-type? :union 42))

@@ -115,10 +115,10 @@
           {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Set arg-values to reference const functions via fn-usage
           ;; (fn-usage means: execute the fn and use its result)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a)
-                                                  (setup/create-fn-usage! storage (:id const-3)))
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b)
-                                                  (setup/create-fn-usage! storage (:id const-5)))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-rec) (:id arg-a)
+                                                           (setup/create-fn-usage! storage (:id const-3)))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-rec) (:id arg-b)
+                                                           (setup/create-fn-usage! storage (:id const-5)))
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id fn-rec) {})]
       (is (= 8 result))
@@ -147,10 +147,10 @@
           fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
           fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
           ;; fn-a -> fn-b -> fn-c -> literal (via fn-usage to trigger execution)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id id-arg)
-                                                  (setup/create-fn-usage! storage (:id fn-b)))
-          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id id-arg)
-                                                  (setup/create-fn-usage! storage (:id fn-c)))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-a) (:id id-arg)
+                                                           (setup/create-fn-usage! storage (:id fn-b)))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-b) (:id id-arg)
+                                                           (setup/create-fn-usage! storage (:id fn-c)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
           ;; Execute with max-depth=1 (should fail at fn-c which runs at depth=2)
           ctx (exec/create-context {:storage storage :max-depth 1})]
@@ -226,10 +226,10 @@
           fn-c (sp/create-entity storage :fn
                                  {:name "slow-c"
                                   :fn-schema-id (:id slow-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id slow-arg)
-                                                  (setup/create-fn-usage! storage (:id fn-b)))
-          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id slow-arg)
-                                                  (setup/create-fn-usage! storage (:id fn-c)))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-a) (:id slow-arg)
+                                                           (setup/create-fn-usage! storage (:id fn-b)))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-b) (:id slow-arg)
+                                                           (setup/create-fn-usage! storage (:id fn-c)))
           _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id slow-arg) 42)
           ;; Create context with 80ms timeout (fn-a sleeps 50ms, fn-b starts, sleeps 50ms = 100ms > 80ms)
           ctx (exec/create-context {:storage storage :timeout-ms 80})]
@@ -263,7 +263,7 @@
                                         {:fn-schema-id (:id apply-schema)
                                          :name "f"
                                          :type :fn  ; This is HOF - returns a callable
-                                         :required true :first-class false})
+                                         :required true :first-class true})  ; first-class=true for HOF
           apply-value-arg (sp/create-entity storage :arg-schema
                                             {:fn-schema-id (:id apply-schema)
                                              :name "value"
@@ -288,7 +288,9 @@
           apply-fn (sp/create-entity storage :fn
                                      {:name "my-apply"
                                       :fn-schema-id (:id apply-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-f-arg) (:id double-fn))  ; Reference to double-fn
+          ;; Create fn-usage for HOF reference (first-class=true passes fn-id)
+          double-fn-usage-id (setup/create-fn-usage! storage (:id double-fn) "double-ref")
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id apply-fn) (:id apply-f-arg) double-fn-usage-id)
           _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-value-arg) 5)
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id apply-fn) {})]
@@ -318,7 +320,7 @@
                                         {:fn-schema-id (:id apply-schema)
                                          :name "f"
                                          :type :fn
-                                         :required true :first-class false})
+                                         :required true :first-class true})  ; first-class=true for HOF
           apply-value-arg (sp/create-entity storage :arg-schema
                                             {:fn-schema-id (:id apply-schema)
                                              :name "value"
@@ -341,7 +343,9 @@
           apply-fn (sp/create-entity storage :fn
                                      {:name "my-apply-override"
                                       :fn-schema-id (:id apply-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-f-arg) (:id double-fn))
+          ;; Create fn-usage for HOF reference (first-class=true passes fn-id)
+          double-fn-usage-id (setup/create-fn-usage! storage (:id double-fn) "double-fixed-ref")
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id apply-fn) (:id apply-f-arg) double-fn-usage-id)
           _ (setup/create-arg-value-with-binding! storage (:id apply-fn) (:id apply-value-arg) 5)
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id apply-fn) {})]
@@ -455,7 +459,7 @@
           bad-fn-usage (sp/create-entity storage :fn-usage
                                          {:fn-id non-existent-fn-id
                                           :name "bad-fn-usage"})
-          _ (setup/create-arg-value-with-binding! storage (:id id-fn) (:id id-arg) (:id bad-fn-usage))
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id id-fn) (:id id-arg) (:id bad-fn-usage))
           ctx (exec/create-context {:storage storage})]
       ;; When we execute, it will try to resolve the fn-usage which points
       ;; to a non-existent fn - should throw
@@ -587,7 +591,7 @@
                                     {:fn-schema-id (:id hof-schema)
                                      :name "f"
                                      :type :fn
-                                     :required true :first-class false})
+                                     :required true :first-class true})  ; first-class=true for HOF
           ;; Create a function with NO required args (all optional)
           _ (exec/register-base-fn!
               :no-args-fn
@@ -608,7 +612,9 @@
           hof-fn (sp/create-entity storage :fn
                                    {:name "my-hof"
                                     :fn-schema-id (:id hof-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id hof-fn) (:id hof-arg) (:id no-args-fn))
+          ;; Create fn-usage for HOF reference
+          no-args-fn-usage-id (setup/create-fn-usage! storage (:id no-args-fn) "no-args-ref")
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id hof-fn) (:id hof-arg) no-args-fn-usage-id)
           ctx (exec/create-context {:storage storage})]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -634,14 +640,16 @@
                                     {:fn-schema-id (:id hof-schema)
                                      :name "f"
                                      :type :fn
-                                     :required true :first-class false})
+                                     :required true :first-class true})  ; first-class=true for HOF
           ;; Create a function with multiple required args (like add)
           {:keys [fn-rec]} (setup/setup-add-function! storage)
           ;; Create hof-caller instance
           hof-fn (sp/create-entity storage :fn
                                    {:name "my-hof"
                                     :fn-schema-id (:id hof-schema)})
-          _ (setup/create-arg-value-with-binding! storage (:id hof-fn) (:id hof-arg) (:id fn-rec))
+          ;; Create fn-usage for HOF reference
+          add-fn-usage-id (setup/create-fn-usage! storage (:id fn-rec) "add-ref")
+          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id hof-fn) (:id hof-arg) add-fn-usage-id)
           ctx (exec/create-context {:storage storage})]
       (try
         (is (thrown-with-msg? clojure.lang.ExceptionInfo

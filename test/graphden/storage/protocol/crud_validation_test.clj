@@ -403,10 +403,9 @@
       (is (= :uuid (:expected result)))
       (is (= :int (:actual result)))))
 
-  (testing "returns error map for string instead of jsonb"
-    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "not-json" :jsonb)]
-      (is (= :jsonb (:expected result)))
-      (is (= :text (:actual result))))))
+  ;; Note: :jsonb now accepts any JSON-serializable value (strings, numbers, etc.)
+  ;; See src/graphden/schema/fields/types.clj for rationale
+  )
 
 
 ;; === validate-required-fields! tests ===

@@ -12,26 +12,22 @@
    - 1 query for fns
    - 1 query for fn-schemas
    - 1 query for arg-schemas
-   - 1 query for arg-values"
+   - 1 query for arg-values
+
+   ## Schema Design
+
+   arg_value has three mutually exclusive fields (XOR constraint):
+   - value: JSONB literal value
+   - fn_usage_id: FK to fn_usage (execute and use result)
+   - fn_ref_id: FK to fn (pass as HOF callable)
+
+   This allows direct JOINs without regex-based UUID extraction."
   (:require
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.protocol.graph :as spg]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]))
-
-
-;; =============================================================================
-;; PostgreSQL-specific HoneySQL helpers
-;; =============================================================================
-
-(defn- uuid-from-jsonb
-  "Extracts UUID from JSONB if it matches UUID regex, else NULL.
-   Pattern: CASE WHEN (col#>>'{}') ~ 'uuid-regex' THEN (col#>>'{}')::uuid ELSE NULL END"
-  [col]
-  [:raw (str "CASE WHEN (" (name col) "#>>'{}') ~ '" spg/uuid-regex-pattern
-             "' THEN (" (name col) "#>>'{}')::uuid ELSE NULL END")])
 
 
 ;; =============================================================================
@@ -47,12 +43,11 @@
    1. fn_graph: recursively find all fn-ids (direct AND indirect via fn_usage)
    2. fu_refs: find all fn_usage references from discovered fns
 
-   The key insight is that the recursive CTE must follow BOTH:
-   - Direct fn references: arg_value.value -> fn.id
-   - Indirect fn references: arg_value.value -> fn_usage.id -> fn_usage.fn_id
+   With the new schema, arg_value has explicit FK columns:
+   - fn_ref_id: direct FK to fn (for HOF)
+   - fn_usage_id: FK to fn_usage -> fn_usage.fn_id (for computed values)
 
-   PostgreSQL only allows ONE recursive term, so we combine both cases using
-   LEFT JOINs and COALESCE to pick the matching fn_id."
+   This allows simple direct JOINs without regex-based UUID extraction."
   [root-fn-id max-depth]
   {:with-recursive
    [;; Base case + single recursive case handling both direct and indirect refs
@@ -63,21 +58,21 @@
         :from [:fn]
         :where [:= :id root-fn-id]}
        ;; Recursive case: handles BOTH direct fn refs AND indirect via fn_usage
-       ;; Uses LEFT JOINs to try both paths, COALESCE picks whichever matched
+       ;; Uses LEFT JOINs on FK columns, COALESCE picks whichever matched
        {:select-distinct
         [[[:raw "COALESCE(f_direct.id, f_via_fu.id)"]]
          [[:+ :g.depth [:inline 1]] :depth]]
         :from [[:fn_graph :g]]
         :join [[:fn_arg :fa] [:= :fa.fn_id :g.id]
                [:arg_value :av] [:= :av.id :fa.arg_value_id]]
-        :left-join [;; Direct path: arg_value.value = fn.id
-                    [:fn :f_direct] [:= :f_direct.id (uuid-from-jsonb :av.value)]
-                    ;; Indirect path: arg_value.value = fn_usage.id -> fn_usage.fn_id
-                    [:fn_usage :fu] [:= :fu.id (uuid-from-jsonb :av.value)]
+        :left-join [;; Direct path: arg_value.fn_ref_id -> fn.id
+                    [:fn :f_direct] [:= :f_direct.id :av.fn_ref_id]
+                    ;; Indirect path: arg_value.fn_usage_id -> fn_usage.fn_id -> fn.id
+                    [:fn_usage :fu] [:= :fu.id :av.fn_usage_id]
                     [:fn :f_via_fu] [:= :f_via_fu.id :fu.fn_id]]
         :where [:and
                 [:< :g.depth max-depth]
-                ;; At least one path must match
+                ;; At least one path must match (has a fn reference)
                 [:or [:is-not :f_direct.id nil] [:is-not :f_via_fu.id nil]]]}]}]
 
     ;; All fn_usage references from any fn in fn_graph
@@ -86,7 +81,8 @@
       :from [[:fn_graph :g]]
       :join [[:fn_arg :fa] [:= :fa.fn_id :g.id]
              [:arg_value :av] [:= :av.id :fa.arg_value_id]
-             [:fn_usage :fu] [:= :fu.id (uuid-from-jsonb :av.value)]]}]]
+             ;; Direct JOIN on FK column
+             [:fn_usage :fu] [:= :fu.id :av.fn_usage_id]]}]]
 
    ;; Final select: union all results
    :union-all
@@ -101,7 +97,7 @@
    Returns {:fn-ids #{...} :fn-usages {fn-usage-id -> {:id ... :fn-id ...}}}.
 
    This is a SINGLE database query that traverses the entire graph.
-   The CTE recursively follows UUID references in arg_value.value fields."
+   The CTE follows FK references via arg_value.fn_usage_id and arg_value.fn_ref_id."
   [ds root-fn-id]
   (let [query-map (build-graph-discovery-query root-fn-id sp/*max-graph-iterations*)
         query (sql/format query-map)]

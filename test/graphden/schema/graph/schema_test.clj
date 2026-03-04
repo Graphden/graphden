@@ -46,12 +46,15 @@
       (is (= :text (get-in fields [:name :type])))
       (is (= :ref (get-in fields [:fn-schema-id :type])))))
 
-  (testing "arg-value has union type for value"
+  (testing "arg-value has separate FK fields instead of union"
     (let [fields (ds/entity-fields schema :arg-value)]
-      (is (= :union (get-in fields [:value :type])))
-      ;; Variants: 1 ref (fn-usage) + :any + :fn + all literal types = 3 + count(supported-types)
-      (is (= (+ 3 (count ft/supported-types))
-             (count (get-in fields [:value :variants]))))))
+      ;; value is nullable JSONB for literal values
+      (is (= :jsonb (get-in fields [:value :type])))
+      (is (true? (get-in fields [:value :nullable?])))
+      ;; fn-usage-id is nullable ref to fn-usage
+      (is (= :ref (get-in fields [:fn-usage-id :type])))
+      (is (= :fn-usage (get-in fields [:fn-usage-id :ref-entity])))
+      (is (true? (get-in fields [:fn-usage-id :nullable?])))))
 
   (testing "fn-usage has expected fields"
     (let [fields (ds/entity-fields schema :fn-usage)]
@@ -88,11 +91,11 @@
                                    :arg-schema-id (random-uuid)
                                    :value 42}))))
 
-  (testing "valid arg-value with fn reference (no owner)"
+  (testing "valid arg-value with fn-usage-id (computed value reference)"
     (is (nil? (ds/validate-entity schema :arg-value
                                   {:id (random-uuid)
                                    :arg-schema-id (random-uuid)
-                                   :value (random-uuid)}))))
+                                   :fn-usage-id (random-uuid)}))))
 
   (testing "valid fn-arg binding"
     (is (nil? (ds/validate-entity schema :fn-arg

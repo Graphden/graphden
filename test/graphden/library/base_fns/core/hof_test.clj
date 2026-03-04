@@ -131,15 +131,14 @@
 
 
 (defn- get-or-create-arg-value!
-  "Gets existing arg-value or creates new one."
+  "Gets existing arg-value or creates new one.
+   Uses value field for all values (including UUIDs which will be literals)."
   [storage arg-schema-id value]
-  (if-let [existing (first (sp/query-entities storage :arg-value
-                                              {:arg-schema-id arg-schema-id
-                                               :value value}))]
-    existing
-    (sp/create-entity storage :arg-value
-                      {:arg-schema-id arg-schema-id
-                       :value value})))
+  (let [query-map {:arg-schema-id arg-schema-id :value value}
+        existing (sp/query-entities storage :arg-value query-map)]
+    (if (seq existing)
+      (first existing)
+      (sp/create-entity storage :arg-value query-map))))
 
 
 (defn- create-arg-value-with-binding!

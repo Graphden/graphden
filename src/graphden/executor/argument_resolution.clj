@@ -223,9 +223,18 @@
                             first-class? execute-fn-usage-fn)
 
       ;; value set: literal value
+      ;; Special case: :fn type args stored in JSONB come back as string UUIDs
+      ;; Convert them to actual UUIDs for proper execution graph lookup
       :literal
-      (wrap-delay-with-context arg-name :db-value
-                               #(identity the-value)))))
+      (let [resolved-value (if (and (= :fn (:type arg-schema))
+                                    (string? the-value))
+                             (try
+                               (java.util.UUID/fromString the-value)
+                               (catch IllegalArgumentException _
+                                 the-value))
+                             the-value)]
+        (wrap-delay-with-context arg-name :db-value
+                                 #(identity resolved-value))))))
 
 
 ;; === Argument Validation Helpers ===

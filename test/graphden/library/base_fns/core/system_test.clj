@@ -16,13 +16,6 @@
     (impl delays nil)))
 
 
-;; NOTE: json-response and json-handler tests removed.
-;; These functions were refactored to use primitives:
-;; - ring-response for response construction
-;; - make-handler for handler creation
-;; - to-json-string for JSON serialization
-
-
 ;; =============================================================================
 ;; jvm-info tests
 ;; =============================================================================

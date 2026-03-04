@@ -42,9 +42,6 @@
             (exec/execute ctx (:id fn-rec) {(:id f-arg) "not-a-uuid"})))
       (sp/close storage)))
 
-  ;; NOTE: :ref type test removed because :ref is not a valid type in value_kind enum.
-  ;; References are handled via :fn type or through arg-value union variants.
-
   (testing "throws when :int type arg is provided with non-integer value"
     (let [storage (setup/create-test-storage)
           {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)

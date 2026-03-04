@@ -3,8 +3,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.argument-resolution :as arg-res]
-    [graphden.storage.protocol.config :as config]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.config :as config]))
 
 
 (deftest realize-lazy-seq-bounded-test
@@ -80,27 +79,3 @@
     (is (= {:type :literal :value 42} (#'arg-res/extract-arg-value 42)))
     (is (= {:type :literal :value "hello"} (#'arg-res/extract-arg-value "hello")))
     (is (= {:type :literal :value [1 2 3]} (#'arg-res/extract-arg-value [1 2 3])))))
-
-
-;; === resolve-nested-fn-usages tests ===
-
-(defn mock-storage
-  "Creates a mock storage that returns specified entities."
-  [entities]
-  (reify
-    sp/StorageCRUD
-    (create-entity [_ _ _] nil)
-
-    (read-entity [_ entity-type id] (get-in entities [entity-type id]))
-
-    (update-entity [_ _ _ _] nil)
-
-    (delete-entity [_ _ _] nil)
-
-    (query-entities [_ _ _] nil)))
-
-
-;; NOTE: resolve-nested-fn-usages and execute-external-fn-usage tests removed.
-;; These functions were removed as part of simplifying the architecture.
-;; Nested fn/fn-usage resolution is no longer supported.
-;; Use explicit collection functions (pair, assoc-any, conj-any) instead.

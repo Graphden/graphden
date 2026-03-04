@@ -18,11 +18,6 @@
     (impl delays nil)))
 
 
-;; NOTE: get-path-param test removed.
-;; This function was removed - use composition with get-in + str-to-keyword instead:
-;; (get-in request [:path-params (str-to-keyword param-name)])
-
-
 (deftest get-query-param-test
   (testing "extracts query parameter from request"
     (let [request {:query-string "foo=bar&baz=qux"}]
@@ -106,7 +101,6 @@
     (is (contains? crud/all-defs :entity-form-handler))
     (is (contains? crud/all-defs :create-entity-api-handler))
     (is (contains? crud/all-defs :delete-entity-api-handler))
-    ;; get-path-param removed - use composition with get-in + str-to-keyword
     (is (contains? crud/all-defs :get-query-param))
     (is (contains? crud/all-defs :parse-form-body))
     (is (contains? crud/all-defs :parse-json-body))

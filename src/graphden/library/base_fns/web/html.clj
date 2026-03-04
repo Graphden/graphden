@@ -63,13 +63,6 @@
      :body html-str}))
 
 
-;; NOTE: html-handler, htmx-handler, htmx-fragment were removed.
-;; They hardcoded status 200 and duplicated html-response + make-handler logic.
-;; Use fn-compositions instead:
-;;   - For handler: html-response > make-handler (from system.clj)
-;;   - For response: html-response (supports optional :status arg)
-
-
 ;; =============================================================================
 ;; Hiccup Helpers
 ;; =============================================================================

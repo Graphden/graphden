@@ -63,13 +63,6 @@
       (is (= 404 (:status response))))))
 
 
-;; NOTE: html-handler, htmx-fragment, htmx-handler tests removed.
-;; These functions were refactored to use primitives:
-;; - html-response for response construction (supports optional :status arg)
-;; - make-handler (from system.clj) for handler creation
-;; Use fn-compositions instead of these removed base-fns.
-
-
 ;; =============================================================================
 ;; html-page tests
 ;; =============================================================================

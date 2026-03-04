@@ -268,14 +268,3 @@
       ;; nil should work fine
       (is (= 3 (exec/execute ctx (:id fn-rec) nil)))
       (sp/close storage))))
-
-
-;; NOTE: Unknown type validation tests were removed because PostgreSQL
-;; enforces enum values at the database level. The :type field uses
-;; PostgreSQL enum 'value_kind' which only accepts known values.
-;; In the old memory-storage, arbitrary keywords could be stored,
-;; but PostgreSQL correctly rejects invalid enum values.
-;;
-;; The executor's strict-type-validation? feature is still useful for
-;; validation of runtime-provided argument values against known types,
-;; but the database already ensures only valid types can be stored.

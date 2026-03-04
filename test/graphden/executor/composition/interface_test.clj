@@ -492,10 +492,3 @@
           arg-values (sp/query-entities storage :arg-value {})]
       (is (= 2 (count arg-values))
           "Different values should create separate arg-values"))))
-
-
-;; NOTE: collect-refs-recursively, resolve-refs-recursively, and nested-routes-integration tests removed.
-;; These functions and features were removed as part of simplifying the architecture.
-;; Nested fn/fn-usage resolution is no longer supported.
-;; Use explicit collection functions (pair, assoc-any, conj-any) to build structures
-;; containing fn/fn-usage references.

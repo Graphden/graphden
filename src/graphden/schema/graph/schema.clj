@@ -192,11 +192,6 @@
              ft/supported-types)))
 
 
-;; NOTE: value-variants function removed - no longer using union types for arg-value.
-;; The schema uses separate nullable FK columns: value, fn-usage-id.
-;; See arg-value entity definition below.
-
-
 (defn extend-builder
   "Extends a builder with graph data schema entities without finalizing.
    Returns the builder (not a built schema) for further extension.

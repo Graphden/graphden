@@ -255,13 +255,6 @@
       (sp/close storage))))
 
 
-;; NOTE: enum-type-validation-test was removed because :enum is not a
-;; valid type in the value_kind PostgreSQL enum. The schema only supports:
-;; :null, :uuid, :text, :int, :bool, :numeric, :timestamptz, :jsonb, :bytes, :any, :fn
-;;
-;; Keyword/enum values can be stored using :jsonb or :text types.
-
-
 (deftest uuid-type-validation-test
   (testing "throws when :uuid type arg is provided with non-UUID value"
     (let [storage (setup/create-test-storage)

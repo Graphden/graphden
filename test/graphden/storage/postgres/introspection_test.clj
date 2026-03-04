@@ -1,4 +1,4 @@
-(ns graphden.storage.postgres.introspection-test
+(ns ^:integration graphden.storage.postgres.introspection-test
   "Integration tests for PostgreSQL introspection functions.
    Tests querying information_schema and pg_catalog with real database."
   (:require

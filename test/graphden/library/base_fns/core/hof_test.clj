@@ -1,4 +1,4 @@
-(ns graphden.library.base-fns.core.hof-test
+(ns ^:integration graphden.library.base-fns.core.hof-test
   "Tests for higher-order function base functions."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]

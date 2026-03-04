@@ -1,4 +1,4 @@
-(ns graphden.storage.protocol.backend-template-test
+(ns ^:integration graphden.storage.protocol.backend-template-test
   "Tests for backend-template helper functions."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]

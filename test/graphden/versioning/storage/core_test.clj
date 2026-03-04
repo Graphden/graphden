@@ -1,4 +1,4 @@
-(ns graphden.versioning.storage.core-test
+(ns ^:integration graphden.versioning.storage.core-test
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.malli.core :as mds]

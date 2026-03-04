@@ -1,4 +1,4 @@
-(ns graphden.schema.traits.schema-test
+(ns ^:integration graphden.schema.traits.schema-test
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]

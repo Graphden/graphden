@@ -1,4 +1,4 @@
-(ns graphden.versioning.merge.core-test
+(ns ^:integration graphden.versioning.merge.core-test
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]

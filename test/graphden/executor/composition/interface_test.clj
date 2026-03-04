@@ -1,4 +1,4 @@
-(ns graphden.executor.composition.interface-test
+(ns ^:integration graphden.executor.composition.interface-test
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]

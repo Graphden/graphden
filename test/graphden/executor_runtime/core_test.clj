@@ -1,4 +1,4 @@
-(ns graphden.executor-runtime.core-test
+(ns ^:integration graphden.executor-runtime.core-test
   "Tests for executor runtime lifecycle management.
 
    These tests verify:

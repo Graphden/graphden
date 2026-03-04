@@ -1,4 +1,4 @@
-(ns graphden.executor.registry.registration-test
+(ns ^:integration graphden.executor.registry.registration-test
   "Tests for fn-registry function registration."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]

@@ -1,4 +1,4 @@
-(ns graphden.storage.protocol.generic-graph-test
+(ns ^:integration graphden.storage.protocol.generic-graph-test
   "Tests for generic ExecutionGraph resolution via StorageCRUD."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]

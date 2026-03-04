@@ -1,4 +1,4 @@
-(ns graphden.library.base-fns.core.storage-sync-test
+(ns ^:integration graphden.library.base-fns.core.storage-sync-test
   "Tests for syncing base functions to storage."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]

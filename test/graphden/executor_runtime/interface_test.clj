@@ -1,4 +1,4 @@
-(ns graphden.executor-runtime.interface-test
+(ns ^:integration graphden.executor-runtime.interface-test
   "Tests for executor-runtime/interface.clj public API.
 
    These tests verify that the interface module correctly delegates

@@ -1,10 +1,18 @@
 #kaocha/v1
 {:tests
- [{:id :unit
-   :test-paths ["test"]}]
+ [;; Unit tests - run in parallel, skip ^:integration
+  {:id :unit
+   :test-paths ["test"]
+   :skip-meta [:integration]
+   :kaocha/parallelism 4}
+
+  ;; Integration tests - run sequentially, use shared container
+  {:id :integration
+   :test-paths ["test"]
+   :focus-meta [:integration]}]
 
  ;; Plugins:
  ;; - profiling: Shows slowest tests
- ;; - shared-container: Manages global PostgreSQL container lifecycle
+ ;; - shared-container: Manages global PostgreSQL container for integration tests
  :plugins [:kaocha.plugin/profiling
            :kaocha.plugin/shared-container]}

@@ -164,10 +164,10 @@
 ;; =============================================================================
 
 (def list-all-graph-entities-impl
-  "Lists all graph entities (fn-schemas, fns, arg-schemas, arg-values, fn-usages).
+  "Lists all graph entities (fn-schemas, fns, arg-schemas, arg-values, fn-usages, fn-args).
 
    Returns:
-   Map with keys :fn-schemas, :fns, :arg-schemas, :arg-values, :fn-usages,
+   Map with keys :fn-schemas, :fns, :arg-schemas, :arg-values, :fn-usages, :fn-args,
    each containing a vector of entities.
 
    Requires :storage in execution context."
@@ -179,7 +179,8 @@
               :fns (vec (sp/query-entities storage :fn {}))
               :arg-schemas (vec (sp/query-entities storage :arg-schema {}))
               :arg-values (vec (sp/query-entities storage :arg-value {}))
-              :fn-usages (vec (sp/query-entities storage :fn-usage {}))}
+              :fn-usages (vec (sp/query-entities storage :fn-usage {}))
+              :fn-args (vec (sp/query-entities storage :fn-arg {}))}
              (throw (ex-info "Storage not available in context"
                              {:type :execution-error/missing-storage}))))})
 
@@ -383,15 +384,25 @@
 
 
 (defn- render-arg-value-details
-  "Renders arg-value entity details."
+  "Renders arg-value entity details.
+   Supports both new FK format (fn-usage-id as top-level field) and
+   legacy nested map format (fn-usage-id inside value map)."
   [entity]
   (let [value (:value entity)
-        is-ref (and (map? value) (or (:fn-id value) (:fn-usage-id value)))
+        ;; New FK format: fn-usage-id is a top-level field
+        direct-fn-usage-id (:fn-usage-id entity)
+        ;; Legacy nested map format
+        legacy-fn-id (when (map? value) (:fn-id value))
+        legacy-fn-usage-id (when (map? value) (:fn-usage-id value))
+        ;; Determine actual reference
+        is-ref (or direct-fn-usage-id legacy-fn-id legacy-fn-usage-id)
         display-value (cond
-                        (and (map? value) (:fn-id value))
-                        [:span "ref<fn:" [:code (str (:fn-id value))] ">"]
-                        (and (map? value) (:fn-usage-id value))
-                        [:span "ref<fn-usage:" [:code (str (:fn-usage-id value))] ">"]
+                        direct-fn-usage-id
+                        [:span "ref<fn-usage:" [:code (str direct-fn-usage-id)] ">"]
+                        legacy-fn-id
+                        [:span "ref<fn:" [:code (str legacy-fn-id)] ">"]
+                        legacy-fn-usage-id
+                        [:span "ref<fn-usage:" [:code (str legacy-fn-usage-id)] ">"]
                         :else
                         [:code (pr-str value)])]
     [:div
@@ -400,7 +411,7 @@
       [:span {:class "field-label"} "Value"]
       [:span {:class "field-value"} display-value]]
      (render-field-row "Is Reference" (if is-ref "Yes" "No"))
-     (render-field-row "Owner Fn ID" (:owner-fn-id entity))
+     (render-field-row "Fn Usage ID" (:fn-usage-id entity))
      (render-field-row "Arg Schema ID" (:arg-schema-id entity))]))
 
 

@@ -370,12 +370,21 @@
     const argValues = lookups.fnArgMap.get(fnId) || [];
 
     argValues.forEach(av => {
-      const value = av.arg_value.value;
+      const value = av.argValue.value;
+      const fnUsageId = av.argValue['fn-usage-id'];  // New FK-based reference
       let targetFnId = null;
       let isFnUsage = false;
 
-      // Value is stored as a plain UUID string referencing fn or fn_usage
-      if (typeof value === 'string' && value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+      // First check new FK-based fn-usage-id field
+      if (fnUsageId) {
+        const fu = lookups.fnUsageMap.get(fnUsageId);
+        if (fu) {
+          targetFnId = fu['fn-id'];
+          isFnUsage = true;
+        }
+      }
+      // Fallback: Value is stored as a plain UUID string referencing fn or fn_usage
+      else if (typeof value === 'string' && value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
         // First check if it's a fn_usage reference
         const fu = lookups.fnUsageMap.get(value);
         if (fu) {
@@ -390,8 +399,8 @@
       if (targetFnId) {
         deps.push({
           fnId: targetFnId,
-          argSchemaId: av.arg_schema_id,
-          argValueId: av.arg_value.id,
+          argSchemaId: av.argSchemaId,
+          argValueId: av.argValue.id,
           isFnUsage: isFnUsage
         });
       }
@@ -471,10 +480,18 @@
           if (argValue) {
             // Arg has a value - check if it's a fn reference or literal
             const value = argValue.value;
+            const fnUsageId = argValue['fn-usage-id'];  // New FK-based reference
             let targetFnId = null;
 
-            // Value is stored as a plain UUID string referencing fn or fn_usage
-            if (typeof value === 'string' && value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
+            // First check new FK-based fn-usage-id field
+            if (fnUsageId) {
+              const fu = lookups.fnUsageMap.get(fnUsageId);
+              if (fu) {
+                targetFnId = fu['fn-id'];
+              }
+            }
+            // Fallback: Value is stored as a plain UUID string referencing fn or fn_usage
+            else if (typeof value === 'string' && value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
               // First check if it's a fn_usage reference
               const fu = lookups.fnUsageMap.get(value);
               if (fu) {

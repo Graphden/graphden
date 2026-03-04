@@ -947,3 +947,107 @@
           response (handler-fn {:path-params {:type "arg-schema"}})]
       (is (= 200 (:status response)))
       (is (str/includes? (:body response) "not yet implemented")))))
+
+
+;; =============================================================================
+;; get-path-param tests (not exported in all-defs but still defined)
+;; =============================================================================
+
+(deftest get-path-param-test
+  (testing "extracts path parameter from request"
+    (let [request {:path-params {:id "123" :type "fn"}}]
+      (is (= "123" (call-impl crud/get-path-param {:request request :param "id"})))
+      (is (= "fn" (call-impl crud/get-path-param {:request request :param "type"})))))
+
+  (testing "returns nil when parameter not found"
+    (let [request {:path-params {:id "123"}}]
+      (is (nil? (call-impl crud/get-path-param {:request request :param "missing"})))))
+
+  (testing "handles request without path-params"
+    (let [request {}]
+      (is (nil? (call-impl crud/get-path-param {:request request :param "id"}))))))
+
+
+;; =============================================================================
+;; Additional edge case tests for complete coverage
+;; =============================================================================
+
+(deftest delete-entity-api-handler-invalid-uuid-test
+  (testing "returns 500 for invalid UUID format in delete"
+    (let [storage (create-mock-storage)
+          ctx {:storage storage}
+          handler-fn ((:impl crud/delete-entity-api-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "fn" :id "not-a-uuid"}})]
+      (is (= 500 (:status response)))
+      (is (str/includes? (:body response) "Error")))))
+
+
+(deftest delete-entity-api-handler-invalid-type-test
+  (testing "returns 400 for invalid entity type in delete"
+    (let [storage (create-mock-storage)
+          ctx {:storage storage}
+          handler-fn ((:impl crud/delete-entity-api-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "invalid-type" :id "00000000-0000-0000-0000-000000000001"}})]
+      (is (= 400 (:status response))))))
+
+
+(deftest entity-details-handler-fn-usage-with-owner-fn-id-test
+  (testing "returns HTML for fn-usage entity with owner-fn-id"
+    (let [storage (create-mock-storage)
+          owner-fn-id (random-uuid)
+          fn-id (random-uuid)
+          fn-usage-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id owner-fn-id :name :owner-fn}
+                        {:id fn-id :name :called-fn}]
+                   :fn-usage [{:id fn-usage-id :name :cs1 :fn-id fn-id :owner-fn-id owner-fn-id}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "fn-usage" :id (str fn-usage-id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) (str owner-fn-id))))))
+
+
+(deftest entity-details-handler-arg-value-nil-value-test
+  (testing "handles arg-value with nil value"
+    (let [storage (create-mock-storage)
+          fn-id (random-uuid)
+          arg-schema-id (random-uuid)
+          arg-value-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id fn-id :name :test-fn}]
+                   :arg-schema [{:id arg-schema-id :name :arg1}]
+                   :arg-value [{:id arg-value-id
+                                :value nil
+                                :owner-fn-id fn-id
+                                :arg-schema-id arg-schema-id}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "arg-value" :id (str arg-value-id)}})]
+      (is (= 200 (:status response))))))
+
+
+(deftest entity-form-handler-fn-usage-with-no-name-test
+  (testing "returns edit form for fn-usage without name"
+    (let [storage (create-mock-storage)
+          fn-id (random-uuid)
+          fn-usage-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id fn-id :name :test-fn}]
+                   :fn-usage [{:id fn-usage-id :fn-id fn-id}])  ; no :name field
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-form-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "fn-usage" :id (str fn-usage-id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "Edit")))))
+
+
+(deftest all-entities-json-handler-includes-fn-args-test
+  (testing "all-entities-json-handler includes fn_args in response"
+    (let [storage (create-mock-storage)
+          _ (swap! (:data storage) assoc :fn-arg [{:id (random-uuid) :name :test-arg}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/all-entities-json-handler-impl) {} ctx)
+          response (handler-fn {})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "fn_args")))))

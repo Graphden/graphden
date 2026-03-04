@@ -23,6 +23,7 @@
 (def ^:dynamic *container* nil)
 
 (use-fixtures :once (pth/create-container-fixture #'*container*))
+(use-fixtures :each (pth/create-clean-db-fixture #'*container*))
 
 
 ;; =============================================================================

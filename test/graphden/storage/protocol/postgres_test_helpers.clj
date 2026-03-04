@@ -16,8 +16,15 @@
      (def ^:dynamic *container* nil)
 
      (use-fixtures :once (create-container-fixture #'*container*))
-     (use-fixtures :each (create-clean-db-fixture *container*))"
+     (use-fixtures :each (create-clean-db-fixture *container*))
+
+   PERFORMANCE NOTE:
+   By default, create-container-fixture uses a global shared container
+   managed by graphden.test-infra.shared-container. This dramatically
+   reduces test startup time (1 container vs 38+ containers).
+   Use :use-shared false to create a dedicated container per namespace."
   (:require
+    [graphden.test-infra.shared-container :as sc]
     [next.jdbc :as jdbc])
   (:import
     (org.testcontainers.containers
@@ -104,13 +111,17 @@
 ;; ============================================================================
 
 (defn create-container-fixture
-  "Creates a :once fixture that starts/stops a PostgreSQL container.
+  "Creates a :once fixture that binds a PostgreSQL container to a var.
+
+   By default, uses the global shared container for fast test startup.
+   Set :use-shared false to create a dedicated container per namespace.
 
    Arguments:
    - container-var: A var to bind the container to (e.g., #'*container*)
    - opts: Optional map with:
-     - :image - Docker image (default: postgres:16-alpine)
-     - :startup-attempts - Number of retry attempts (default: 3)
+     - :use-shared - Use shared container (default: true)
+     - :image - Docker image (default: postgres:16-alpine, only for dedicated)
+     - :startup-attempts - Number of retry attempts (default: 3, only for dedicated)
 
    Returns a fixture function suitable for use-fixtures :once.
 
@@ -119,23 +130,28 @@
      (use-fixtures :once (create-container-fixture #'*container*))"
   ([container-var]
    (create-container-fixture container-var {}))
-  ([container-var {:keys [image startup-attempts]
-                   :or {image default-postgres-image
+  ([container-var {:keys [use-shared image startup-attempts]
+                   :or {use-shared true
+                        image default-postgres-image
                         startup-attempts 3}}]
-   (fn [f]
-     (let [container (doto (PostgreSQLContainer. ^String image)
-                       (PostgreSQLContainer/.withStartupAttempts startup-attempts)
-                       ;; Increase max_connections for parallel test execution
-                       (PostgreSQLContainer/.withCommand "postgres -c max_connections=500"))]
-       (PostgreSQLContainer/.start container)
-       (when-not (PostgreSQLContainer/.isRunning container)
-         (throw (ex-info "Failed to start PostgreSQL test container"
-                         {:image image :attempts startup-attempts})))
-       (try
-         (with-bindings {container-var container}
-           (f))
-         (finally
-           (PostgreSQLContainer/.stop container)))))))
+   (if use-shared
+     ;; Use global shared container (fast path - no start/stop per namespace)
+     (sc/shared-container-fixture container-var)
+     ;; Create dedicated container per namespace (slow path)
+     (fn [f]
+       (let [container (doto (PostgreSQLContainer. ^String image)
+                         (PostgreSQLContainer/.withStartupAttempts startup-attempts)
+                         ;; Increase max_connections for parallel test execution
+                         (PostgreSQLContainer/.withCommand "postgres -c max_connections=500"))]
+         (PostgreSQLContainer/.start container)
+         (when-not (PostgreSQLContainer/.isRunning container)
+           (throw (ex-info "Failed to start PostgreSQL test container"
+                           {:image image :attempts startup-attempts})))
+         (try
+           (with-bindings {container-var container}
+             (f))
+           (finally
+             (PostgreSQLContainer/.stop container))))))))
 
 
 (defn create-clean-db-fixture

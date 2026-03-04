@@ -2,4 +2,9 @@
 {:tests
  [{:id :unit
    :test-paths ["test"]}]
- :plugins [:kaocha.plugin/profiling]}
+
+ ;; Plugins:
+ ;; - profiling: Shows slowest tests
+ ;; - shared-container: Manages global PostgreSQL container lifecycle
+ :plugins [:kaocha.plugin/profiling
+           :kaocha.plugin/shared-container]}

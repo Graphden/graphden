@@ -69,12 +69,14 @@
    - :value - literal JSONB value
    - :ref-id - FK to fn (execute and use result)
    - :is-fn - pass fn-id directly (for HOF)"
-  [storage fn-id {:keys [name type required is-fn source-id value ref-id]
+  [storage fn-id {:keys [required is-fn source-id value ref-id]
+                  arg-name :name
+                  arg-type :type
                   :or {required true is-fn false}}]
   (sp/create-entity storage :arg
                     (cond-> {:fn-id fn-id
-                             :name name
-                             :type type
+                             :name arg-name
+                             :type arg-type
                              :required required
                              :is-fn is-fn}
                       source-id (assoc :source-id source-id)
@@ -85,17 +87,17 @@
 (defn create-composed-fn!
   "Creates a composed fn with parent-id set.
    Returns the fn entity."
-  [storage name parent-id]
-  (sp/create-entity storage :fn {:name name :parent-id parent-id}))
+  [storage entity-name parent-id]
+  (sp/create-entity storage :fn {:name entity-name :parent-id parent-id}))
 
 
 (defn create-base-fn!
   "Creates a base fn (parent-id=nil).
    The name field is used for registry lookup.
    Returns the fn entity."
-  [storage name return-type]
+  [storage entity-name return-type]
   (sp/create-entity storage :fn
-                    {:name name
+                    {:name entity-name
                      :return-type return-type}))
 
 
@@ -125,7 +127,7 @@
                            {:name "b" :type :int :required true :is-fn false})
         ;; Create composed fn instance with unique name
         composed-fn (create-composed-fn! storage (str "my-add-" unique-suffix) (:id base-fn))]
-    {:fn base-fn
+    {:base-fn base-fn
      :arg-a arg-a
      :arg-b arg-b
      :composed-fn composed-fn}))

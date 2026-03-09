@@ -824,4 +824,3 @@
       ;; Try to delete one existing and one non-existing
       ;; Only one should be counted as deleted
       (is (= 1 (sp/delete-entities storage :fn [(:id f1) missing-id]))))))
-

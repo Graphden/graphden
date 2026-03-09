@@ -31,9 +31,9 @@
 (deftest execute-with-named-args-test
   (testing "executes with named args mapped to schema ids for free args"
     (let [storage (setup/create-test-storage)
-          {:keys [fn]} (setup/setup-add-function! storage)
+          {:keys [base-fn]} (setup/setup-add-function! storage)
           ;; Create composed fn with no args - both args are free
-          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           ctx (exec/create-context {:storage storage})]
       ;; Provide both free args by name
       (is (= 30 (exec/execute-with-named-args ctx (:id composed-fn) {:a 10 :b 20})))
@@ -41,9 +41,9 @@
 
   (testing "executes with named args - partial free args"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
+          {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
           ;; Create composed fn with both args: :a bound, :b free
-          composed-fn (setup/create-composed-fn! storage "partial-add" (:id fn))
+          composed-fn (setup/create-composed-fn! storage "partial-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
                                {:name "a" :type :int :required true :is-fn false
                                 :source-id (:id arg-a) :value 100})
@@ -58,8 +58,8 @@
 
   (testing "executes with nil named-args (uses defaults)"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
-          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
                                {:name "a" :type :int :required true :is-fn false
                                 :source-id (:id arg-a) :value 5})
@@ -72,8 +72,8 @@
 
   (testing "executes with empty named-args map (uses defaults)"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
-          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
                                {:name "a" :type :int :required true :is-fn false
                                 :source-id (:id arg-a) :value 3})
@@ -86,8 +86,8 @@
 
   (testing "throws on invalid named-args type"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
-          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
                                {:name "a" :type :int :required true :is-fn false
                                 :source-id (:id arg-a) :value 1})
@@ -108,8 +108,8 @@
 
   (testing "throws on unknown arg name"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
-          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
                                {:name "a" :type :int :required true :is-fn false
                                 :source-id (:id arg-a) :value 1})
@@ -128,8 +128,8 @@
 (deftest execute-by-name-test
   (testing "executes function by name"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
-          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
           _ (setup/create-arg! storage (:id composed-fn)
                                {:name "a" :type :int :required true :is-fn false
                                 :source-id (:id arg-a) :value 10})
@@ -143,9 +143,9 @@
 
   (testing "executes function by name with named args"
     (let [storage (setup/create-test-storage)
-          {:keys [fn]} (setup/setup-add-function! storage)
+          {:keys [base-fn]} (setup/setup-add-function! storage)
           ;; Create composed fn with no args (free args)
-          _ (setup/create-composed-fn! storage "my-add" (:id fn))
+          _ (setup/create-composed-fn! storage "my-add" (:id base-fn))
           ctx (exec/create-context {:storage storage})]
       ;; Note: the fn entity is named "my-add"
       (is (= 15 (exec/execute-by-name ctx "my-add" {:a 5 :b 10})))

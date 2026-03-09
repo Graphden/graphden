@@ -137,7 +137,7 @@
         (registry/initialize-with-base-fns! storage)
         ;; Create a composed function that uses :add
         (let [add-fn-id (registry/fn-uuid :add)
-              add-fn (sp/read-entity storage :fn add-fn-id)
+              _ (sp/read-entity storage :fn add-fn-id)  ; verify fn exists
               add-args (sp/query-entities storage :arg {:fn-id add-fn-id})
               nums-arg (first (filter #(= "nums" (:name %)) add-args))
               ;; Create composed fn with parent-id = add-fn

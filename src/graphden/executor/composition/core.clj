@@ -17,14 +17,16 @@
 
     {:name :web-server
      :parent :http-server
-     :args {:handler :router-handler>   ; ref to fn (execute)
-            :port 8080}}]               ; literal value
+     :args {:handler :router-handler   ; ref to fn
+            :port 8080}}]              ; literal value
    ```
 
    ## Arg Value Syntax
 
-   - `:fn-name` - pass fn-id directly (for HOF with is-fn=true)
-   - `:fn-name>` - execute fn and use result (creates ref-id)
+   - `:fn-name` - reference to fn (creates ref-id)
+
+   Behavior (execute vs pass fn-id) is determined by is-fn field on parent arg,
+   which is inherited via source-id. The executor checks is-fn to decide.
 
    ## Name Resolution
 
@@ -50,18 +52,12 @@
 
 (defn- parse-fn-ref
   "Parses a keyword that might be a fn reference.
-   :fn-name> means execute fn-name and use result
-   :fn-name means pass fn-id directly (for HOF)
-   Returns [fn-name execute?] or nil if not a fn ref."
+   Returns fn-name keyword or nil if not a fn ref."
   [value]
   (when (keyword? value)
     (let [kw-name (name value)]
-      (if (str/ends-with? kw-name ">")
-        (let [fn-name (subs kw-name 0 (dec (count kw-name)))]
-          (when (valid-identifier? fn-name)
-            [(keyword fn-name) true]))
-        (when (valid-identifier? kw-name)
-          [value false])))))
+      (when (valid-identifier? kw-name)
+        value))))
 
 
 ;; === Name Resolution ===
@@ -107,9 +103,7 @@
   [fn-def fn-names-in-set]
   (let [args (:args fn-def {})]
     (->> (vals args)
-         (keep (fn [v]
-                 (when-let [[fn-name _] (parse-fn-ref v)]
-                   fn-name)))
+         (keep parse-fn-ref)
          (filter fn-names-in-set)
          set)))
 
@@ -230,7 +224,7 @@
    Returns the arg entity or throws if not found."
   [storage parent-fn-id arg-name]
   (let [args (sp/query-entities storage :arg {:fn-id parent-fn-id
-                                               :name (name arg-name)})]
+                                              :name (name arg-name)})]
     (when (empty? args)
       (throw (ex-info (str "Argument not found in parent: " arg-name)
                       {:type :fn-composition/unresolved-arg
@@ -248,18 +242,22 @@
         source-id (:id parent-arg)
         ;; Check if arg already exists
         existing (sp/query-entities storage :arg {:fn-id fn-id
-                                                   :source-id source-id})
+                                                  :source-id source-id})
         ;; Resolve arg value
+        ;; For fn refs (keyword matching valid identifier or UUID), always use ref-id.
+        ;; Executor uses is-fn field (inherited from parent arg) to decide behavior.
         resolved (cond
                    (nil? arg-value)
                    {:value nil :ref-id nil}
 
+                   ;; UUID is a direct fn reference
+                   (uuid? arg-value)
+                   {:value nil :ref-id arg-value}
+
                    (keyword? arg-value)
-                   (if-let [[ref-fn-name execute?] (parse-fn-ref arg-value)]
+                   (if-let [ref-fn-name (parse-fn-ref arg-value)]
                      (let [ref-fn-id (resolve-fn-id storage created-fns ref-fn-name)]
-                       (if execute?
-                         {:value nil :ref-id ref-fn-id}
-                         {:value (str ref-fn-id) :ref-id nil}))
+                       {:value nil :ref-id ref-fn-id})
                      {:value arg-value :ref-id nil})
 
                    :else
@@ -270,12 +268,13 @@
                   (not= (:ref-id existing-arg) (:ref-id resolved)))
           (sp/update-entity storage :arg (:id existing-arg) resolved))
         existing-arg)
-      ;; Copy name and type from parent arg for argument resolution
+      ;; Copy name, type, and is-fn from parent arg for argument resolution
       (sp/create-entity storage :arg
                         (merge {:fn-id fn-id
                                 :source-id source-id
                                 :name (:name parent-arg)
-                                :type (:type parent-arg)}
+                                :type (:type parent-arg)
+                                :is-fn (:is-fn parent-arg)}
                                resolved)))))
 
 

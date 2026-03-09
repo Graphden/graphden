@@ -44,7 +44,7 @@
           _ (sp/create-entity storage :arg {:fn-id (:id fn-rec) :name "x" :type "int" :value 42})
           graph (gg/resolve-execution-graph storage (:id fn-rec))]
       (is (sp/execution-graph? graph))
-      (is (= 2 (count (:fns graph)))) ;; fn-rec + base-fn
+      (is (= 2 (count (:fns graph)))) ; fn-rec + base-fn
       (is (contains? (:fns graph) (:id fn-rec)))
       (is (contains? (:fns graph) (:id base-fn)))
       (is (= 1 (count (:args graph))))
@@ -68,7 +68,7 @@
           _ (sp/create-entity storage :arg {:fn-id (:id fn-a) :name "x" :ref-id (:id fn-b) :is-fn false})
           graph (gg/resolve-execution-graph storage (:id fn-a))]
       (is (sp/execution-graph? graph))
-      (is (= 4 (count (:fns graph)))) ;; fn-a, fn-b, fn-c, base-fn
+      (is (= 4 (count (:fns graph)))) ; fn-a, fn-b, fn-c, base-fn
       (is (contains? (:fns graph) (:id fn-a)))
       (is (contains? (:fns graph) (:id fn-b)))
       (is (contains? (:fns graph) (:id fn-c)))
@@ -85,7 +85,7 @@
           fn-rec (sp/create-entity storage :fn {:name "my-noop" :parent-id (:id base-fn)})
           graph (gg/resolve-execution-graph storage (:id fn-rec))]
       (is (sp/execution-graph? graph))
-      (is (= 2 (count (:fns graph)))) ;; fn-rec + base-fn
+      (is (= 2 (count (:fns graph)))) ; fn-rec + base-fn
       (is (= [] (sp/graph-get-args graph (:id fn-rec))))
       (sp/close storage))))
 

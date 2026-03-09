@@ -148,19 +148,18 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 {:name :my-fn           ; unique function name
  :parent :base-fn-name  ; base function to use
  :args {:arg1 value     ; literal value
-        :arg2 :other-fn>}}  ; reference (> = execute)
+        :arg2 :other-fn}}  ; reference to fn
 ```
 
 ### Reference Types
 
-References are stored in the `ref-id` field of arg entities. Runtime behavior is controlled by `is-fn`:
+All function references are stored in the `ref-id` field.
 
-| Syntax | Storage | Runtime behavior |
-|--------|---------|------------------|
-| `:fn-name` | `ref-id` + `is-fn=true` | Pass fn-id directly (for HOF) |
-| `:fn-name>` | `ref-id` + `is-fn=false` | Execute fn and use result |
+| Syntax | Storage | Notes |
+|--------|---------|-------|
+| `:fn-name` | `ref-id` set | Reference to another fn |
 
-**Key principle:** The `is-fn` flag on the arg determines whether to pass the fn-id or execute the function.
+**Key principle:** The `is-fn` flag on the **parent arg** (inherited via `source-id`) determines whether to pass the fn-id directly (for HOF) or execute the function and use its result. This flag is set automatically when syncing base functions based on arg type (`:fn` type → `is-fn=true`).
 
 ### Base Function Arg Types
 
@@ -232,9 +231,9 @@ HOFs like `map`, `filter` support two modes via optional `coll` argument:
 ;; CORRECT approach
 {:name :editor-styles, :parent :const, :args {:x "CSS here..."}}
 {:name :editor-body, :parent :const, :args {:x [:div ...]}}
-{:name :editor-page, :parent :html-page, :args {:title "Editor" :body :editor-body>}}
+{:name :editor-page, :parent :html-page, :args {:title "Editor" :body :editor-body}}
 {:name :editor-router, :parent :router, :args {:routes [...]}}
-{:name :web-server, :parent :http-server, :args {:handler :editor-router> :port 8080}}
+{:name :web-server, :parent :http-server, :args {:handler :editor-router :port 8080}}
 ```
 
 See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) "Base Functions Philosophy" for full details.

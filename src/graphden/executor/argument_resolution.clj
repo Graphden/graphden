@@ -211,14 +211,14 @@
             (do
               (when (some? provided-value)
                 (handle-runtime-arg-with-db-value context arg arg-id arg-name
-                                                   :provided-arg execute-ref-fn))
+                                                  :provided-arg execute-ref-fn))
               (assoc acc arg-name-kw (build-delay context arg execute-ref-fn)))
 
             (some? provided-value)
             (assoc acc arg-name-kw (handle-validated-arg provided-value arg
-                                                          strict? max-unknown-types
-                                                          arg-name unknown-type-counter
-                                                          :provided-arg))
+                                                         strict? max-unknown-types
+                                                         arg-name unknown-type-counter
+                                                         :provided-arg))
 
             (:required arg)
             (throw-missing-required-arg! arg-id arg-name)

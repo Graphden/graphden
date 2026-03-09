@@ -244,7 +244,7 @@
   (testing "throws when args is not nil or a map"
     (let [storage (setup/create-test-storage)
           ;; Setup add function and bind args with values
-          {:keys [fn arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
+          {:keys [arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
           ;; Create args for composed fn with values
           _ (setup/create-arg! storage (:id composed-fn)
                                {:name "a" :type :int :required true :is-fn false
@@ -266,7 +266,7 @@
 
   (testing "accepts nil args"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
+          {:keys [arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
           ;; Create args for composed fn with values
           _ (setup/create-arg! storage (:id composed-fn)
                                {:name "a" :type :int :required true :is-fn false

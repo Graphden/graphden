@@ -50,8 +50,8 @@
                                                :args {:x 3}}
                                               {:name :sum-fn
                                                :parent :add
-                                               :args {:a :five-fn>   ; Execute five-fn, use result
-                                                      :b :three-fn>}}]) ; Execute three-fn, use result
+                                               :args {:a :five-fn   ; Execute five-fn, use result
+                                                      :b :three-fn}}]) ; Execute three-fn, use result
 
         ;; Get the sum-fn id
         (let [sum-fn (first (sp/query-entities storage :fn {:name "sum-fn"}))
@@ -83,8 +83,8 @@
                                                :args {:x 10}}
                                               {:name :double-fn
                                                :parent :add
-                                               :args {:a :value-fn>   ; Same fn-usage
-                                                      :b :value-fn>}}]) ; Same fn-usage (deduplicated)
+                                               :args {:a :value-fn   ; Same fn-usage
+                                                      :b :value-fn}}]) ; Same fn-usage (deduplicated)
 
         (let [double-fn (first (sp/query-entities storage :fn {:name "double-fn"}))
               ctx (exec/create-context {:storage storage})
@@ -119,7 +119,7 @@
                              (for [i (range 1 12)]
                                {:name (keyword (str "fn-" i))
                                 :parent :identity
-                                :args {:x (keyword (str "fn-" (dec i) ">"))}})))]
+                                :args {:x (keyword (str "fn-" (dec i)))}})))]
           (fn-composition/sync-fns-to-storage! storage chain-defs)
 
           (let [last-fn (first (sp/query-entities storage :fn {:name "fn-11"}))
@@ -158,16 +158,16 @@
                                                :args {:x 42}}
                                               {:name :slow-1
                                                :parent :slow-fn
-                                               :args {:x :slow-0>}}
+                                               :args {:x :slow-0}}
                                               {:name :slow-2
                                                :parent :slow-fn
-                                               :args {:x :slow-1>}}
+                                               :args {:x :slow-1}}
                                               {:name :slow-3
                                                :parent :slow-fn
-                                               :args {:x :slow-2>}}
+                                               :args {:x :slow-2}}
                                               {:name :slow-4
                                                :parent :slow-fn
-                                               :args {:x :slow-3>}}])
+                                               :args {:x :slow-3}}])
 
         (let [last-slow-fn (first (sp/query-entities storage :fn {:name "slow-4"}))
               ctx (exec/create-context {:storage storage
@@ -241,12 +241,12 @@
                                                :args {:x 4}}
                                               {:name :inner-mult
                                                :parent :multiply
-                                               :args {:a :three>
-                                                      :b :four>}}
+                                               :args {:a :three
+                                                      :b :four}}
                                               {:name :outer-mult
                                                :parent :multiply
-                                               :args {:a :two>
-                                                      :b :inner-mult>}}])
+                                               :args {:a :two
+                                                      :b :inner-mult}}])
 
         (let [outer-fn (first (sp/query-entities storage :fn {:name "outer-mult"}))
               ctx (exec/create-context {:storage storage})

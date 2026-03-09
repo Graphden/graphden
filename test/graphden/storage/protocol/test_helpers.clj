@@ -187,10 +187,10 @@
 
    Example:
      (create-arg-with-value! storage fn-id \"x\" 42)"
-  [storage fn-id name value]
+  [storage fn-id arg-name value]
   (sp/create-entity storage :arg
                     {:fn-id fn-id
-                     :name name
+                     :name arg-name
                      :value value}))
 
 
@@ -208,9 +208,9 @@
 
    Example:
      (create-arg-with-ref! storage fn-id \"f\" other-fn-id true)"
-  [storage fn-id name ref-id is-fn]
+  [storage fn-id arg-name ref-id is-fn]
   (sp/create-entity storage :arg
                     {:fn-id fn-id
-                     :name name
+                     :name arg-name
                      :ref-id ref-id
                      :is-fn is-fn}))

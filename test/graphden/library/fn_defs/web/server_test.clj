@@ -28,14 +28,14 @@
   (testing "web-server-fn has correct parent and args"
     (let [ws-def (first (filter #(= :web-server (:name %)) web-server/fn-defs))]
       (is (= :http-server (:parent ws-def)))
-      ;; handler uses :router-fn> (execute router and use result as handler)
-      (is (= :router-fn> (get-in ws-def [:args :handler])))
+      ;; handler uses :router-fn (fn reference - behavior determined by is-fn on parent arg)
+      (is (= :router-fn (get-in ws-def [:args :handler])))
       (is (= 8080 (get-in ws-def [:args :port])))))
 
-  (testing "router-fn references routes-fn (via fn-usage)"
+  (testing "router-fn references routes-fn"
     (let [router-def (first (filter #(= :router-fn (:name %)) web-server/fn-defs))]
       (is (= :router (:parent router-def)))
-      (is (= :routes-fn> (get-in router-def [:args :routes])))))
+      (is (= :routes-fn (get-in router-def [:args :routes])))))
 
   (testing "hello handler uses const base-fn"
     (let [hello-def (first (filter #(= :hello-handler-fn (:name %)) web-server/fn-defs))]
@@ -49,8 +49,8 @@
       (is (= :make-handler (:parent health-def)))
       (is (= :make-handler (:parent metrics-def)))
       ;; response arg references the response-fn (which wraps json body)
-      (is (= :health-response-fn> (get-in health-def [:args :response])))
-      (is (= :metrics-response-fn> (get-in metrics-def [:args :response])))))
+      (is (= :health-response-fn (get-in health-def [:args :response])))
+      (is (= :metrics-response-fn (get-in metrics-def [:args :response])))))
 
   (testing "json body fns use to-json-string with data sources"
     (let [health-json (first (filter #(= :health-json-body-fn (:name %)) web-server/fn-defs))
@@ -58,8 +58,8 @@
       (is (= :to-json-string (:parent health-json)))
       (is (= :to-json-string (:parent metrics-json)))
       ;; Data sources
-      (is (= :health-status> (get-in health-json [:args :data])))
-      (is (= :jvm-info> (get-in metrics-json [:args :data]))))))
+      (is (= :health-status (get-in health-json [:args :data])))
+      (is (= :jvm-info (get-in metrics-json [:args :data]))))))
 
 
 (deftest startup-fn-name-test

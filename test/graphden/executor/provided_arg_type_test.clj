@@ -51,13 +51,13 @@
 
   (testing "throws when :int type arg is provided with non-integer value"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a]} (setup/setup-add-function! storage)
+          {:keys [base-fn arg-a]} (setup/setup-add-function! storage)
           ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
       ;; Provide a string instead of int
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'a': expected int"
-            (exec/execute ctx (:id fn) {(:id arg-a) "not-an-int"})))
+            (exec/execute ctx (:id base-fn) {(:id arg-a) "not-an-int"})))
       (sp/close storage)))
 
   (testing "throws when :bool type arg is provided with non-boolean value"
@@ -106,12 +106,12 @@
 
   (testing "valid types pass without throwing"
     (let [storage (setup/create-test-storage)
-          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
+          {:keys [base-fn arg-a arg-b]} (setup/setup-add-function! storage)
           ;; No value set - args are free
           ctx (exec/create-context {:storage storage})
           ;; Provide valid int values
-          result (exec/execute ctx (:id fn) {(:id arg-a) 10
-                                              (:id arg-b) 20})]
+          result (exec/execute ctx (:id base-fn) {(:id arg-a) 10
+                                                  (:id arg-b) 20})]
       (is (= 30 result))
       (sp/close storage)))
 

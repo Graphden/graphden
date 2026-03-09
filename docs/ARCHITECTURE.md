@@ -591,7 +591,7 @@ Graphden separates function definitions into two layers:
 
  {:name :web-server-fn
   :parent :http-server
-  :args {:handler :router-fn>
+  :args {:handler :router-fn
          :port 8080}}]
 ```
 
@@ -602,32 +602,29 @@ Each fn-def is a map with:
 - `:parent` — base function or another fn-def to inherit from
 - `:args` — argument values (literals or references)
 
-### Reference Syntax: `:fn-name` vs `:fn-name>`
+### Reference Syntax and `is-fn` Field
 
-Both syntaxes create references to functions. The runtime behavior is controlled by `is-fn` flag:
+References to functions use simple keyword syntax: `:fn-name`. The runtime behavior is **automatically determined by the `is-fn` field** inherited from the parent arg definition.
 
-| Syntax | is-fn | Typical use case |
-|--------|-------|------------------|
-| `:fn-name` | `true` | HOF arguments (pass fn-id directly) |
-| `:fn-name>` | `false` | Computed values (execute and use result) |
-
-**Runtime behavior is controlled by `is-fn` flag on the arg:**
+**Runtime behavior is controlled by `is-fn` flag on the parent arg:**
 - `is-fn=true` → pass fn-id directly (for HOF to call)
 - `is-fn=false` → execute fn, use result value
 
-**When to use each:**
+**Examples:**
 
 ```clojure
-;; WITHOUT > — Pass fn as value (for HOF)
+;; HOF case: map-fn has arg {:f :fn}, so is-fn=true
+;; The fn-id is passed directly to map-fn
 {:name :double-all
  :parent :map-fn
  :args {:f :double-fn     ; map-fn will call double-fn for each element
         :coll [1 2 3]}}
 
-;; WITH > — Execute and use result
+;; Non-HOF case: http-server has arg {:handler :any}, so is-fn=false
+;; The fn is executed and its result is passed
 {:name :web-server-fn
  :parent :http-server
- :args {:handler :router-fn>  ; router returns Clojure fn, pass that fn
+ :args {:handler :router-fn  ; router returns Clojure fn, pass that fn
         :port 8080}}
 ```
 
@@ -674,15 +671,15 @@ The arg type in defbase controls special handling:
   :args {:x {:status 200 :body "Hello"}}}
 
  ;; 2. Route data: {"handler" <clojure-fn>}
- ;; Note: :hello-handler-fn> executes const, gets the fn it returns
+ ;; Note: assoc's :v arg has is-fn=false, so :hello-handler-fn is executed
  {:name :hello-handler-map-fn
   :parent :assoc
-  :args {:m {}, :k "handler", :v :hello-handler-fn>}}
+  :args {:m {}, :k "handler", :v :hello-handler-fn}}
 
  ;; 3. Method map: {"get" {"handler" <fn>}}
  {:name :hello-method-map-fn
   :parent :assoc
-  :args {:m {}, :k "get", :v :hello-handler-map-fn>}}
+  :args {:m {}, :k "get", :v :hello-handler-map-fn}}
 
  ;; 4. Route tuple: ["/" {"get" {"handler" <fn>}}]
  {:name :hello-route-path-fn
@@ -691,23 +688,23 @@ The arg type in defbase controls special handling:
 
  {:name :hello-route-fn
   :parent :conj
-  :args {:coll :hello-route-path-fn>, :x :hello-method-map-fn>}}
+  :args {:coll :hello-route-path-fn, :x :hello-method-map-fn}}
 
  ;; 5. Routes collection: [["/" {...}]]
  {:name :routes-fn
   :parent :conj
-  :args {:coll [], :x :hello-route-fn>}}
+  :args {:coll [], :x :hello-route-fn}}
 
  ;; 6. Router: creates Ring handler from routes
  {:name :router-fn
   :parent :router
-  :args {:routes :routes-fn>}}
+  :args {:routes :routes-fn}}
 
  ;; 7. Server: starts http-kit with router as handler
- ;; :router-fn> executes router and passes the Ring handler fn
+ ;; http-server's :handler arg has is-fn=false, so :router-fn is executed
  {:name :web-server-fn
   :parent :http-server
-  :args {:handler :router-fn>
+  :args {:handler :router-fn
          :port 8080}}]
 ```
 
@@ -715,9 +712,9 @@ The arg type in defbase controls special handling:
 
 When executing `:web-server-fn`:
 
-1. Resolve `:router-fn>` → execute `:router-fn`
-2. `:router-fn` needs `:routes-fn>` → execute `:routes-fn`
-3. Continue recursively until all `>` refs are resolved
+1. Resolve `:router-fn` reference → `is-fn=false` → execute `:router-fn`
+2. `:router-fn` needs `:routes-fn` → `is-fn=false` → execute `:routes-fn`
+3. Continue recursively until all refs with `is-fn=false` are resolved
 4. `:const` returns `(fn [_] response)` — this Clojure fn propagates up
 5. `:http-server` receives Clojure fn as `:handler`, starts server
 

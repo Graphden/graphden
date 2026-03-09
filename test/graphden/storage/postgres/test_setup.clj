@@ -111,9 +111,9 @@
 (defn create-base-fn!
   "Creates a base fn entity. Returns the fn record.
    Base fns have parent-id=nil. The name field is used for registry lookup."
-  [storage name return-type]
+  [storage entity-name return-type]
   (sp/create-entity storage :fn
-                    {:name name
+                    {:name entity-name
                      :parent-id nil
                      :return-type (clojure.core/name return-type)}))
 
@@ -121,9 +121,9 @@
 (defn create-composed-fn!
   "Creates a composed fn entity. Returns the fn record.
    Composed fns have parent-id set to their base fn."
-  [storage name parent-id]
+  [storage entity-name parent-id]
   (sp/create-entity storage :fn
-                    {:name name
+                    {:name entity-name
                      :parent-id parent-id}))
 
 
@@ -138,11 +138,13 @@
    - :source-id - parent arg this inherits from
    - :value - literal value (mutually exclusive with ref-id)
    - :ref-id - reference to another fn (mutually exclusive with value)"
-  [storage fn-id {:keys [name type required is-fn source-id value ref-id]}]
+  [storage fn-id {:keys [required is-fn source-id value ref-id]
+                  arg-name :name
+                  arg-type :type}]
   (sp/create-entity storage :arg
                     {:fn-id fn-id
-                     :name name
-                     :type (clojure.core/name type)
+                     :name arg-name
+                     :type (clojure.core/name arg-type)
                      :required required
                      :is-fn is-fn
                      :source-id source-id

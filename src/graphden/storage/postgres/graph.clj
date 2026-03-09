@@ -85,8 +85,8 @@
   [ds root-fn-id]
   (let [query (build-graph-discovery-sql root-fn-id sp/*max-graph-iterations*)]
     (util/with-sql-error-handling "Database error" :discover-graph-cte {:fn-id root-fn-id}
-      (let [rows (jdbc/execute! ds query (util/query-opts))]
-        (into #{} (map :id) rows)))))
+                                  (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                    (into #{} (map :id) rows)))))
 
 
 (defn- load-entities-batch
@@ -100,11 +100,11 @@
                              :where [:in key-column (vec values)]}
                             {:quoted true})]
       (util/with-sql-error-handling "Database error" :load-entities-batch {:table table :count (count values)}
-        (let [rows (jdbc/execute! ds query (util/query-opts))]
-          (->> rows
-               (map codec/row->entity)
-               (map (juxt :id identity))
-               (into {})))))))
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                      (->> rows
+                                           (map codec/row->entity)
+                                           (map (juxt :id identity))
+                                           (into {})))))))
 
 
 (defn- load-fns-batch
@@ -124,8 +124,8 @@
                              :from [:arg]
                              :where [:in :fn_id fn-ids-vec]})]
       (util/with-sql-error-handling "Database error" :load-args-batch {:fn-count (count fn-ids)}
-        (let [rows (jdbc/execute! ds query (util/query-opts))]
-          (mapv codec/row->entity rows))))))
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                      (mapv codec/row->entity rows))))))
 
 
 (defn resolve-execution-graph

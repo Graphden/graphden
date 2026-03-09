@@ -430,4 +430,3 @@
         ;; Should have all 4 fns, fn-d only once
         (is (= 4 (count (:fns result))))
         (is (contains? (:fns result) fn-d))))))
-

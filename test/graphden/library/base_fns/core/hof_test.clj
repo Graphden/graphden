@@ -143,27 +143,6 @@
        :cat-fn-id (:id cat-fn)})))
 
 
-(defn- create-arg-with-value!
-  "Creates arg with literal value on fn."
-  [storage fn-id name type value]
-  (sp/create-entity storage :arg
-                    {:fn-id fn-id
-                     :name name
-                     :type type
-                     :value value}))
-
-
-(defn- create-arg-with-ref!
-  "Creates arg with ref-id (execute fn and use result)."
-  [storage fn-id name type ref-fn-id & {:keys [is-fn]}]
-  (sp/create-entity storage :arg
-                    (cond-> {:fn-id fn-id
-                             :name name
-                             :type type
-                             :ref-id ref-fn-id}
-                      (some? is-fn) (assoc :is-fn is-fn))))
-
-
 (defn- create-hof-caller
   "Creates a function that calls a HOF (map/filter/etc) with given fn-id and collection.
    Returns the result of executing the HOF."
@@ -180,7 +159,7 @@
                              :name f-arg-name
                              :type :fn
                              :is-fn true
-                             :value fn-id})
+                             :ref-id fn-id})
         ;; Set :coll arg
         _ (sp/create-entity storage :arg
                             {:fn-id (:id hof-fn)
@@ -196,14 +175,14 @@
   [storage fn-id init coll]
   (let [reduce-base (first (sp/query-entities storage :fn {:name "reduce"}))
         reduce-fn (sp/create-entity storage :fn
-                                     {:name (str "test-reduce-" (random-uuid))
-                                      :parent-id (:id reduce-base)})
+                                    {:name (str "test-reduce-" (random-uuid))
+                                     :parent-id (:id reduce-base)})
         _ (sp/create-entity storage :arg
                             {:fn-id (:id reduce-fn)
                              :name "f"
                              :type :fn
                              :is-fn true
-                             :value fn-id})
+                             :ref-id fn-id})
         _ (sp/create-entity storage :arg
                             {:fn-id (:id reduce-fn)
                              :name "init"
@@ -230,7 +209,7 @@
                              :name "f"
                              :type :fn
                              :is-fn true
-                             :value fn-id})
+                             :ref-id fn-id})
         _ (sp/create-entity storage :arg
                             {:fn-id (:id apply-fn)
                              :name "args"
@@ -467,17 +446,17 @@
                                                 ;; Build pair of transducers explicitly
                                                 {:name :xf-pair
                                                  :parent :pair
-                                                 :args {:a :filter-xf> :b :map-xf>}}
+                                                 :args {:a :filter-xf :b :map-xf}}
 
                                                 ;; composed-xf: (comp filter-xf map-xf)
                                                 {:name :composed-xf
                                                  :parent :comp
-                                                 :args {:fns :xf-pair>}}
+                                                 :args {:fns :xf-pair}}
 
                                                 ;; final-result: (transduce composed-xf add-reducer 0 [1 2 3 4 5])
                                                 {:name :final-result
                                                  :parent :transduce
-                                                 :args {:xf :composed-xf>
+                                                 :args {:xf :composed-xf
                                                         :rf (:id add-fn)
                                                         :init 0
                                                         :coll [1 2 3 4 5]}}])
@@ -568,15 +547,15 @@
                                                 ;; Build pair of transducers explicitly
                                                 {:name :counting-xf-pair
                                                  :parent :pair
-                                                 :args {:a :counting-filter-xf> :b :counting-map-xf>}}
+                                                 :args {:a :counting-filter-xf :b :counting-map-xf}}
 
                                                 {:name :counting-composed-xf
                                                  :parent :comp
-                                                 :args {:fns :counting-xf-pair>}}
+                                                 :args {:fns :counting-xf-pair}}
 
                                                 {:name :counting-result
                                                  :parent :transduce
-                                                 :args {:xf :counting-composed-xf>
+                                                 :args {:xf :counting-composed-xf
                                                         :rf (:id add-fn)
                                                         :init 0
                                                         :coll [1 2 3 4 5 6 7 8 9 10]}}])

@@ -34,26 +34,24 @@ Graphden separates **base functions** (Clojure implementations) from **fn entiti
     :args {:x {:status 200 :body "Hello from Graphden!"}}}
 
    ;; Build route map: {"handler" <fn>}
-   ;; Note: :hello-handler-fn> means "execute and use result"
+   ;; Note: :hello-handler-fn is executed because assoc's :v arg has is-fn=false
    {:name :hello-route-data-fn
     :parent :assoc
-    :args {:m {}, :k "handler", :v :hello-handler-fn>}}
+    :args {:m {}, :k "handler", :v :hello-handler-fn}}
 
    ;; Create router from routes
    {:name :router-fn
     :parent :router
-    :args {:routes [["/" {:get :hello-route-data-fn>}]]}}
+    :args {:routes [["/" {:get :hello-route-data-fn}]]}}
 
    ;; Start HTTP server
-   ;; :router-fn> executes router, passes resulting Ring handler
    {:name :web-server-fn
     :parent :http-server
-    :args {:handler :router-fn>
+    :args {:handler :router-fn
            :port 8080}}])
 
-;; Reference syntax:
-;; :fn-name  = pass fn-id (for HOF like map/filter)
-;; :fn-name> = execute fn and use result
+;; Reference syntax: :fn-name creates ref to function
+;; Behavior (execute vs pass fn-id) is determined by is-fn field on parent arg
 ```
 
 The executor resolves this graph and starts a working HTTP server.

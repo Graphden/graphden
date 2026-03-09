@@ -173,8 +173,8 @@
                        (vs/unwrap storage)
                        storage)
         arg-traits (sp/query-entities base-storage :arg-trait
-                                       {:arg-id arg-id
-                                        :trait-id vts/merge-protected-trait-uuid})]
+                                      {:arg-id arg-id
+                                       :trait-id vts/merge-protected-trait-uuid})]
     (doseq [at arg-traits]
       (sp/delete-entity base-storage :arg-trait (:id at)))
     (boolean (seq arg-traits))))

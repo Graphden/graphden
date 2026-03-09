@@ -146,18 +146,20 @@
 ;; === Test internal parsing functions via core namespace ===
 
 (deftest parse-fn-ref-test
-  (testing "parses :fn-name as pass-through reference"
-    (is (= [:my-fn false] (#'core/parse-fn-ref :my-fn))))
+  (testing "parses :fn-name as fn reference"
+    (is (= :my-fn (#'core/parse-fn-ref :my-fn))))
 
-  (testing "parses :fn-name> syntax (execute fn)"
-    (is (= [:my-fn true] (#'core/parse-fn-ref :my-fn>))))
+  (testing "parses valid identifier keywords"
+    (is (= :handler (#'core/parse-fn-ref :handler)))
+    (is (= :my-fn-123 (#'core/parse-fn-ref :my-fn-123))))
 
   (testing "returns nil for non-fn refs"
     (is (nil? (#'core/parse-fn-ref "not-a-keyword")))
     (is (nil? (#'core/parse-fn-ref 123))))
 
-  (testing "returns nil for just >"
-    (is (nil? (#'core/parse-fn-ref :>)))))
+  (testing "returns nil for invalid identifiers"
+    (is (nil? (#'core/parse-fn-ref :>)))
+    (is (nil? (#'core/parse-fn-ref :123-starts-with-digit)))))
 
 
 ;; === extract-dependencies edge case tests ===
@@ -167,7 +169,7 @@
     (let [fn-def {:name :my-fn
                   :parent :base
                   :args {:a :other-fn   ; fn ref
-                         :b :third-fn>  ; fn ref (execute)
+                         :b :third-fn   ; fn ref
                          :c 42}}        ; literal (ignored)
           fn-names #{:other-fn :third-fn}
           deps (#'core/extract-dependencies fn-def fn-names)]
@@ -191,7 +193,7 @@
 
 (deftest build-dependency-graph-test
   (testing "builds correct dependency graph"
-    (let [fn-defs [{:name :a :parent :base :args {:x :b>}}
+    (let [fn-defs [{:name :a :parent :base :args {:x :b}}
                    {:name :b :parent :base :args {:x :c}}
                    {:name :c :parent :base}]
           graph (#'core/build-dependency-graph fn-defs)]
@@ -215,14 +217,14 @@
       (is (= #{:a :b :c} (set (mapv :name sorted))))))
 
   (testing "throws on self-reference cycle"
-    (let [fn-defs [{:name :self-ref :parent :base :args {:x :self-ref>}}]]
+    (let [fn-defs [{:name :self-ref :parent :base :args {:x :self-ref}}]]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
             (#'core/topological-sort fn-defs)))))
 
   (testing "throws on three-way cycle"
-    (let [fn-defs [{:name :a :parent :base :args {:x :b>}}
-                   {:name :b :parent :base :args {:x :c>}}
-                   {:name :c :parent :base :args {:x :a>}}]]
+    (let [fn-defs [{:name :a :parent :base :args {:x :b}}
+                   {:name :b :parent :base :args {:x :c}}
+                   {:name :c :parent :base :args {:x :a}}]]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
             (#'core/topological-sort fn-defs))))))
 
@@ -290,7 +292,7 @@
                                                    :return-type :any
                                                    :impl (fn [_ _] nil)}}])
           result (fn-composition/sync-fns-to-storage! storage
-                                                       [{:name :my-fn :parent :const-fn :args {:x 42}}])
+                                                      [{:name :my-fn :parent :const-fn :args {:x 42}}])
           fn-id (:my-fn result)
           ;; Get composed fn's args
           composed-args (sp/query-entities storage :arg {:fn-id fn-id})]
@@ -302,7 +304,7 @@
         ;; Arg should have value set
         (is (= 42 (:value arg))))))
 
-  (testing "creates arg with ref-id for :fn-name> references"
+  (testing "creates arg with ref-id for fn references"
     (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const {:args {:x :any}
@@ -317,7 +319,7 @@
                                 :args {:x {:status 200}}}
                                {:name :use-handler
                                 :parent :use-fn
-                                :args {:f :handler-fn>}}]  ; Execute reference
+                                :args {:f :handler-fn}}]  ; fn reference (behavior determined by is-fn on parent arg)
           result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
           handler-fn-id (:handler-fn result)
           use-handler-id (:use-handler result)
@@ -338,7 +340,7 @@
                                                    :impl (fn [_ _] nil)}}])
           ;; First sync with value 42
           result1 (fn-composition/sync-fns-to-storage! storage
-                                                        [{:name :my-fn :parent :const-fn :args {:x 42}}])
+                                                       [{:name :my-fn :parent :const-fn :args {:x 42}}])
           fn-id (:my-fn result1)
           args-before (sp/query-entities storage :arg {:fn-id fn-id})
           arg-id-before (:id (first args-before))]

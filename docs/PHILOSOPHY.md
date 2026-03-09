@@ -217,13 +217,13 @@ They should be:
 {:name :editor-page
  :parent :html-page
  :args {:title "Graph Editor"
-        :head :editor-head>
-        :body :editor-page-body>
-        :scripts :editor-scripts>}}
+        :head :editor-head
+        :body :editor-page-body
+        :scripts :editor-scripts}}
 
 {:name :editor-handler
  :parent :html-handler
- :args {:body :editor-page>}}
+ :args {:body :editor-page}}
 
 {:name :editor-router
  :parent :router
@@ -233,7 +233,7 @@ They should be:
 
 {:name :graph-editor-server
  :parent :http-server
- :args {:handler :editor-router>
+ :args {:handler :editor-router
         :port 8080}}
 ```
 

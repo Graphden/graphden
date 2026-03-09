@@ -231,8 +231,7 @@
           ;; Manually corrupt name in storage
           (sp/update-entity storage :fn fn-id
                             {:name "wrong-name"
-                             :return-type :int
-                             })
+                             :return-type :int})
           ;; Re-sync - should update because name differs
           (registry/sync-defs-to-storage! storage defs)
           (let [schema-after (sp/read-entity storage :fn fn-id)]
@@ -279,7 +278,7 @@
           (sp/update-entity storage :fn fn-id
                             {:name "impl-hash-test"
                              :return-type :int
-                             
+
                              :impl-hash "corrupted-hash"})
           ;; Verify corruption
           (let [corrupted (sp/read-entity storage :fn fn-id)]

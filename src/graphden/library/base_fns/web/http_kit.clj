@@ -47,7 +47,7 @@
    Arguments:
    - handler: Ring handler function (Clojure fn that takes request map, returns response map).
               This should be the RESULT of executing a router function, not a fn-id.
-              Use :router-fn> syntax in fn-defs to pass the executed result.
+              Use :router-fn syntax in fn-defs to pass the executed result.
    - port: Port number to listen on
 
    The handler function must accept a single argument (request map) and return

@@ -93,8 +93,7 @@
           (let [base-fn (sp/create-entity storage :fn
                                           {:name "test-fn"
                                            :parent-id nil
-                                           :return-type "int"
-})]
+                                           :return-type "int"})]
             ;; Should allow nil ref-id (literal value, not a fn reference)
             (is (nil? (sp/validate-no-dependency-cycle! storage (:id base-fn) nil))))
           (finally
@@ -107,8 +106,7 @@
           (let [base-fn (sp/create-entity storage :fn
                                           {:name "test-fn"
                                            :parent-id nil
-                                           :return-type "int"
-})]
+                                           :return-type "int"})]
             ;; Self-reference is a cycle at storage level
             ;; Recursion is handled at executor level via lazy evaluation
             (is (thrown-with-msg?
@@ -125,13 +123,11 @@
           (let [fn-a (sp/create-entity storage :fn
                                        {:name "fn-a"
                                         :parent-id nil
-                                        :return-type "int"
-})
+                                        :return-type "int"})
                 fn-b (sp/create-entity storage :fn
                                        {:name "fn-b"
                                         :parent-id nil
-                                        :return-type "int"
-})]
+                                        :return-type "int"})]
             ;; Should allow reference to a different fn
             (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b)))))
           (finally
@@ -150,8 +146,7 @@
               fn-record (sp/create-entity storage :fn
                                           {:name "concurrent-fn"
                                            :parent-id nil
-                                           :return-type "int"
-})
+                                           :return-type "int"})
               fn-id (:id fn-record)
               ;; Run concurrent reads while updating
               read-results (atom [])
@@ -191,8 +186,7 @@
                 (let [fns (for [i (range fns-per-thread)]
                             {:name (str "batch-fn-" t "-" i)
                              :parent-id nil
-                             :return-type "int"
-})]
+                             :return-type "int"})]
                   (swap! results concat (sp/create-entities storage :fn fns)))
                 (finally
                   (java.util.concurrent.CountDownLatch/.countDown latch)))))

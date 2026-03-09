@@ -7,11 +7,19 @@
 (deftest fn-defs-test
   (testing "fn-defs contains all expected definitions"
     (is (vector? web-server/fn-defs))
-    ;; 24 fns: handlers, route maps, route tuples, routes collection, router, server
-    ;; hello (5) + health (7: json-body, response, handler, handler-map, method-map, route-path, route)
-    ;; + metrics (7) + routes collection (3) + router + server = 24
+    ;; 24 fns total:
+    ;; - Building blocks: 3 (assoc-empty, assoc-handler, assoc-get)
+    ;; - Hello: 4 (handler-fn, handler-map, method-map, route)
+    ;; - Health: 7 (json-body, response, handler, handler-map, method-map, route)
+    ;; - Metrics: 7 (same as health)
+    ;; - Routes collection: 3 (routes-with-hello, routes-with-health, routes-fn)
+    ;; - Router + Server: 2 (router-fn, web-server)
     (is (= 24 (count web-server/fn-defs)))
     (let [names (set (map :name web-server/fn-defs))]
+      ;; Building blocks (multi-level inheritance)
+      (is (contains? names :assoc-empty))
+      (is (contains? names :assoc-handler))
+      (is (contains? names :assoc-get))
       ;; Core fns
       (is (contains? names :web-server))
       (is (contains? names :router-fn))
@@ -20,10 +28,10 @@
       (is (contains? names :hello-handler-fn))
       (is (contains? names :health-handler-fn))
       (is (contains? names :metrics-handler-fn))
-      ;; Route building fns
-      (is (contains? names :hello-route-fn))
-      (is (contains? names :health-route-fn))
-      (is (contains? names :metrics-route-fn))))
+      ;; Route definitions (using pair)
+      (is (contains? names :hello-route))
+      (is (contains? names :health-route))
+      (is (contains? names :metrics-route))))
 
   (testing "web-server-fn has correct parent and args"
     (let [ws-def (first (filter #(= :web-server (:name %)) web-server/fn-defs))]
@@ -59,7 +67,32 @@
       (is (= :to-json-string (:parent metrics-json)))
       ;; Data sources
       (is (= :health-status (get-in health-json [:args :data])))
-      (is (= :jvm-info (get-in metrics-json [:args :data]))))))
+      (is (= :jvm-info (get-in metrics-json [:args :data])))))
+
+  (testing "building blocks create multi-level inheritance"
+    (let [assoc-empty (first (filter #(= :assoc-empty (:name %)) web-server/fn-defs))
+          assoc-handler (first (filter #(= :assoc-handler (:name %)) web-server/fn-defs))
+          assoc-get (first (filter #(= :assoc-get (:name %)) web-server/fn-defs))]
+      ;; assoc-empty inherits from assoc-any with m={}
+      (is (= :assoc-any (:parent assoc-empty)))
+      (is (= {} (get-in assoc-empty [:args :m])))
+      ;; assoc-handler inherits from assoc-empty with k="handler"
+      (is (= :assoc-empty (:parent assoc-handler)))
+      (is (= "handler" (get-in assoc-handler [:args :k])))
+      ;; assoc-get inherits from assoc-empty with k="get"
+      (is (= :assoc-empty (:parent assoc-get)))
+      (is (= "get" (get-in assoc-get [:args :k])))))
+
+  (testing "routes use pair for clean [path method-map] structure"
+    (let [hello-route (first (filter #(= :hello-route (:name %)) web-server/fn-defs))
+          health-route (first (filter #(= :health-route (:name %)) web-server/fn-defs))
+          metrics-route (first (filter #(= :metrics-route (:name %)) web-server/fn-defs))]
+      (is (= :pair (:parent hello-route)))
+      (is (= "/" (get-in hello-route [:args :a])))
+      (is (= :pair (:parent health-route)))
+      (is (= "/health" (get-in health-route [:args :a])))
+      (is (= :pair (:parent metrics-route)))
+      (is (= "/metrics" (get-in metrics-route [:args :a]))))))
 
 
 (deftest startup-fn-name-test

@@ -189,6 +189,26 @@
                      ids))))
 
 
+  (update-entities
+    [this entity-name data-seq]
+    (if-not (res/versioned-entity? entity-name)
+      (sp/update-entities base-storage entity-name data-seq)
+      (mapv #(sp/update-entity this entity-name (:id %) (dissoc % :id)) data-seq)))
+
+
+  (upsert-entities
+    [this entity-name data-seq]
+    (if-not (res/versioned-entity? entity-name)
+      (sp/upsert-entities base-storage entity-name data-seq)
+      ;; For versioned: check existence and create/update accordingly
+      (mapv (fn [data]
+              (let [id (:id data)]
+                (if (sp/read-entity this entity-name id)
+                  (sp/update-entity this entity-name id (dissoc data :id))
+                  (sp/create-entity this entity-name data))))
+            data-seq)))
+
+
   (delete-entities
     [this entity-name ids]
     (if-not (res/versioned-entity? entity-name)

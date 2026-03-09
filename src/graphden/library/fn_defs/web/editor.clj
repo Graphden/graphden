@@ -551,12 +551,56 @@
 (def fn-defs
   "Fn definitions for the graph editor.
 
+   ## Multi-Level Inheritance
+
+   Building blocks are created via fn inheritance:
+   1. assoc-empty inherits from assoc-any, sets m={}
+   2. assoc-handler inherits from assoc-empty, sets k=\"handler\"
+   3. assoc-get/post/delete inherit from assoc-empty, set k=\"get\"/\"post\"/\"delete\"
+
+   Route definitions then inherit from these building blocks,
+   setting only the specific arg (v or path).
+
    Composes base-fns to create the editor:
    - html-page: Creates HTML structure with HTMX + Cytoscape
    - html-handler: Wraps HTML as Ring handler
    - router: Routes requests to handlers
    - http-server: Serves HTTP on port"
-  [;; Head elements with scripts
+  [;; ============================================================
+   ;; REUSABLE BUILDING BLOCKS
+   ;; These create a multi-level inheritance chain
+   ;; ============================================================
+
+   ;; Level 1: assoc with empty map preset
+   {:name :assoc-empty
+    :parent :assoc-any
+    :args {:m {}}}
+
+   ;; Level 2: assoc with k="handler"
+   {:name :assoc-handler
+    :parent :assoc-empty
+    :args {:k "handler"}}
+
+   ;; Level 2: assoc with k="get"
+   {:name :assoc-get
+    :parent :assoc-empty
+    :args {:k "get"}}
+
+   ;; Level 2: assoc with k="post"
+   {:name :assoc-post
+    :parent :assoc-empty
+    :args {:k "post"}}
+
+   ;; Level 2: assoc with k="delete"
+   {:name :assoc-delete
+    :parent :assoc-empty
+    :args {:k "delete"}}
+
+   ;; ============================================================
+   ;; HTML PAGE
+   ;; ============================================================
+
+   ;; Head elements with scripts
    {:name :editor-head
     :parent :with-htmx
     :args {:head :editor-cytoscape-head}}
@@ -584,19 +628,16 @@
     :parent :make-handler
     :args {:response :editor-response}}
 
+   ;; ============================================================
+   ;; API HANDLERS
+   ;; ============================================================
+
    ;; API handler for graph entities (JSON)
    {:name :api-entities-handler
     :parent :all-entities-json-handler
     :args {}}
 
-   ;; HTMX partial handlers
-   {:name :entity-details-handler
-    :parent :entity-details-handler
-    :args {}}
-
-   {:name :entity-form-handler
-    :parent :entity-form-handler
-    :args {}}
+   ;; HTMX partial handlers - use base-fns directly via references in route opts
 
    {:name :create-entity-handler
     :parent :create-entity-api-handler
@@ -606,7 +647,10 @@
     :parent :delete-entity-api-handler
     :args {}}
 
-   ;; Health check
+   ;; ============================================================
+   ;; HEALTH CHECK
+   ;; ============================================================
+
    {:name :health-data
     :parent :health-status
     :args {}}
@@ -625,7 +669,10 @@
     :parent :make-handler
     :args {:response :health-response}}
 
-   ;; Favicon - SVG graph icon
+   ;; ============================================================
+   ;; FAVICON
+   ;; ============================================================
+
    {:name :favicon-response
     :parent :ring-response
     :args {:status 200
@@ -637,108 +684,121 @@
     :parent :make-handler
     :args {:response :favicon-response}}
 
-   ;; === Route Building ===
+   ;; ============================================================
+   ;; ROUTES (using building blocks)
+   ;; ============================================================
 
-   ;; Health route
-   {:name :health-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :health-handler}}
-   {:name :health-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "get", :v :health-route-opts}}
+   ;; Health route - shows only {:v :health-handler} at handler-opts level
+   {:name :health-handler-opts
+    :parent :assoc-handler
+    :args {:v :health-handler}}
+   {:name :health-method-map
+    :parent :assoc-get
+    :args {:v :health-handler-opts}}
    {:name :health-route
     :parent :pair
-    :args {:a "/health", :b :health-route-methods}}
+    :args {:a "/health", :b :health-method-map}}
 
    ;; Favicon route
-   {:name :favicon-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :favicon-handler}}
-   {:name :favicon-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "get", :v :favicon-route-opts}}
+   {:name :favicon-handler-opts
+    :parent :assoc-handler
+    :args {:v :favicon-handler}}
+   {:name :favicon-method-map
+    :parent :assoc-get
+    :args {:v :favicon-handler-opts}}
    {:name :favicon-route
     :parent :pair
-    :args {:a "/favicon.ico", :b :favicon-route-methods}}
+    :args {:a "/favicon.ico", :b :favicon-method-map}}
 
    ;; Editor (home) route
-   {:name :editor-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :editor-handler}}
-   {:name :editor-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "get", :v :editor-route-opts}}
+   {:name :editor-handler-opts
+    :parent :assoc-handler
+    :args {:v :editor-handler}}
+   {:name :editor-method-map
+    :parent :assoc-get
+    :args {:v :editor-handler-opts}}
    {:name :editor-route
     :parent :pair
-    :args {:a "/", :b :editor-route-methods}}
+    :args {:a "/", :b :editor-method-map}}
 
    ;; API entities route
-   {:name :api-entities-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :api-entities-handler}}
-   {:name :api-entities-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "get", :v :api-entities-route-opts}}
+   {:name :api-entities-handler-opts
+    :parent :assoc-handler
+    :args {:v :api-entities-handler}}
+   {:name :api-entities-method-map
+    :parent :assoc-get
+    :args {:v :api-entities-handler-opts}}
    {:name :api-entities-route
     :parent :pair
-    :args {:a "/api/graph/entities", :b :api-entities-route-methods}}
+    :args {:a "/api/graph/entities", :b :api-entities-method-map}}
+
+   ;; HTMX partial handlers - fn entities wrapping base-fns
+   {:name :entity-details-handler-fn
+    :parent :entity-details-handler
+    :args {}}
+   {:name :entity-form-handler-fn
+    :parent :entity-form-handler
+    :args {}}
 
    ;; Entity details partial route
-   {:name :entity-details-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :entity-details-handler}}
-   {:name :entity-details-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "get", :v :entity-details-route-opts}}
+   {:name :entity-details-handler-opts
+    :parent :assoc-handler
+    :args {:v :entity-details-handler-fn}}
+   {:name :entity-details-method-map
+    :parent :assoc-get
+    :args {:v :entity-details-handler-opts}}
    {:name :entity-details-route
     :parent :pair
-    :args {:a "/partials/entity-details/:type/:id", :b :entity-details-route-methods}}
+    :args {:a "/partials/entity-details/:type/:id", :b :entity-details-method-map}}
 
    ;; Entity form partial route (create)
-   {:name :entity-form-create-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :entity-form-handler}}
-   {:name :entity-form-create-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "get", :v :entity-form-create-route-opts}}
+   {:name :entity-form-create-handler-opts
+    :parent :assoc-handler
+    :args {:v :entity-form-handler-fn}}
+   {:name :entity-form-create-method-map
+    :parent :assoc-get
+    :args {:v :entity-form-create-handler-opts}}
    {:name :entity-form-create-route
     :parent :pair
-    :args {:a "/partials/entity-form/:type", :b :entity-form-create-route-methods}}
+    :args {:a "/partials/entity-form/:type", :b :entity-form-create-method-map}}
 
    ;; Entity form partial route (edit)
-   {:name :entity-form-edit-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :entity-form-handler}}
-   {:name :entity-form-edit-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "get", :v :entity-form-edit-route-opts}}
+   {:name :entity-form-edit-handler-opts
+    :parent :assoc-handler
+    :args {:v :entity-form-handler-fn}}
+   {:name :entity-form-edit-method-map
+    :parent :assoc-get
+    :args {:v :entity-form-edit-handler-opts}}
    {:name :entity-form-edit-route
     :parent :pair
-    :args {:a "/partials/entity-form/:type/:id", :b :entity-form-edit-route-methods}}
+    :args {:a "/partials/entity-form/:type/:id", :b :entity-form-edit-method-map}}
 
-   ;; Create entity API route
-   {:name :create-entity-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :create-entity-handler}}
-   {:name :create-entity-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "post", :v :create-entity-route-opts}}
+   ;; Create entity API route (POST)
+   {:name :create-entity-handler-opts
+    :parent :assoc-handler
+    :args {:v :create-entity-handler}}
+   {:name :create-entity-method-map
+    :parent :assoc-post
+    :args {:v :create-entity-handler-opts}}
    {:name :create-entity-route
     :parent :pair
-    :args {:a "/api/entities/:type", :b :create-entity-route-methods}}
+    :args {:a "/api/entities/:type", :b :create-entity-method-map}}
 
-   ;; Delete entity API route
-   {:name :delete-entity-route-opts
-    :parent :assoc-any
-    :args {:m {}, :k "handler", :v :delete-entity-handler}}
-   {:name :delete-entity-route-methods
-    :parent :assoc-any
-    :args {:m {}, :k "delete", :v :delete-entity-route-opts}}
+   ;; Delete entity API route (DELETE)
+   {:name :delete-entity-handler-opts
+    :parent :assoc-handler
+    :args {:v :delete-entity-handler}}
+   {:name :delete-entity-method-map
+    :parent :assoc-delete
+    :args {:v :delete-entity-handler-opts}}
    {:name :delete-entity-route
     :parent :pair
-    :args {:a "/api/entities/:type/:id", :b :delete-entity-route-methods}}
+    :args {:a "/api/entities/:type/:id", :b :delete-entity-method-map}}
 
-   ;; Build routes vector
+   ;; ============================================================
+   ;; ROUTES COLLECTION
+   ;; ============================================================
+
    {:name :routes-0
     :parent :conj-any
     :args {:coll [], :x :health-route}}
@@ -767,12 +827,14 @@
     :parent :conj-any
     :args {:coll :routes-7, :x :delete-entity-route}}
 
-   ;; Router with all routes
+   ;; ============================================================
+   ;; ROUTER + SERVER
+   ;; ============================================================
+
    {:name :editor-router
     :parent :router
     :args {:routes :all-routes}}
 
-   ;; HTTP server with router
    {:name :web-server
     :parent :http-server
     :args {:handler :editor-router

@@ -64,16 +64,28 @@
 
 (defn- resolve-parent-fn-id
   "Resolves a parent name to fn-id.
-   Parent must be a base-fn (fn with parent-id=nil).
+   Parent can be a base-fn OR a composed fn (multi-level inheritance).
+   Looks up in:
+   1. Registry (for base-fns)
+   2. Storage (for composed fns, by name)
    Returns UUID or throws if not found."
-  [storage parent-name]
-  (let [fn-id (registry/fn-uuid parent-name)]
-    (when-not (sp/read-entity storage :fn fn-id)
-      (throw (ex-info (str "Parent base-fn not found: " parent-name
-                           ". Did you forget to add base-functions?")
+  [storage created-fns parent-name]
+  ;; First check if it's already created in this batch
+  (or (get created-fns parent-name)
+      ;; Then try registry (base-fns)
+      (let [base-fn-id (registry/fn-uuid parent-name)]
+        (when (sp/read-entity storage :fn base-fn-id)
+          base-fn-id))
+      ;; Finally try storage lookup by name (composed fns)
+      (let [existing (sp/query-entities storage :fn {:name (name parent-name)})]
+        (when (seq existing)
+          (:id (first existing))))
+      ;; Not found - throw
+      (throw (ex-info (str "Parent fn not found: " parent-name
+                           ". It must be a base-fn or defined earlier.")
                       {:type :fn-composition/unresolved-parent
-                       :parent-name parent-name})))
-    fn-id))
+                       :parent-name parent-name
+                       :available-fns (keys created-fns)}))))
 
 
 (defn- resolve-fn-id
@@ -98,14 +110,19 @@
 ;; === Dependency Analysis ===
 
 (defn- extract-dependencies
-  "Extracts fn names that this fn-def depends on (from args).
+  "Extracts fn names that this fn-def depends on (from args and parent).
    Returns set of keywords."
   [fn-def fn-names-in-set]
-  (let [args (:args fn-def {})]
-    (->> (vals args)
-         (keep parse-fn-ref)
-         (filter fn-names-in-set)
-         set)))
+  (let [args (:args fn-def {})
+        parent (:parent fn-def)
+        arg-deps (->> (vals args)
+                      (keep parse-fn-ref)
+                      (filter fn-names-in-set)
+                      set)
+        ;; If parent is a composed fn (in fn-names-in-set), it's a dependency
+        parent-dep (when (and parent (fn-names-in-set parent))
+                     #{parent})]
+    (into arg-deps parent-dep)))
 
 
 (defn- build-dependency-graph
@@ -201,95 +218,162 @@
     (validate-fn-def! fn-def)))
 
 
-;; === Storage Sync ===
+;; === Storage Sync (Batch Optimized) ===
 
-(defn- get-or-create-fn-entity!
-  "Gets existing fn with same name or creates new one.
-   Returns the fn entity."
-  [storage fn-def]
-  (let [fn-name (:name fn-def)
-        fn-name-str (clojure.core/name fn-name)
-        existing (sp/query-entities storage :fn {:name fn-name-str})]
-    (if (seq existing)
-      (first existing)
-      (let [parent (:parent fn-def)
-            parent-fn-id (resolve-parent-fn-id storage parent)]
-        (sp/create-entity storage :fn
-                          {:name fn-name-str
-                           :parent-id parent-fn-id})))))
+(defn- preload-existing-fns
+  "Loads all existing fn entities by names in one query.
+   Returns map of {fn-name-str -> fn-entity}."
+  [storage fn-names]
+  (if (empty? fn-names)
+    {}
+    (let [name-strs (mapv name fn-names)
+          ;; Query all fns - we'll filter in memory
+          ;; This is faster than N individual queries
+          all-fns (sp/query-entities storage :fn {})]
+      (into {}
+            (comp
+              (filter #(contains? (set name-strs) (:name %)))
+              (map (juxt :name identity)))
+            all-fns))))
 
 
-(defn- get-parent-arg
-  "Gets the parent's arg entity for an arg name.
+(defn- preload-all-args
+  "Loads all arg entities for given fn-ids in one query.
+   Returns map of {fn-id -> [args]}."
+  [storage fn-ids]
+  (if (empty? fn-ids)
+    {}
+    (let [all-args (sp/query-entities storage :arg {})]
+      (group-by :fn-id
+                (filter #(contains? (set fn-ids) (:fn-id %)) all-args)))))
+
+
+(defn- get-parent-arg-cached
+  "Gets the parent's arg entity for an arg name using cache.
+   Follows inheritance chain (via parent-id) to find the arg.
    Returns the arg entity or throws if not found."
-  [storage parent-fn-id arg-name]
-  (let [args (sp/query-entities storage :arg {:fn-id parent-fn-id
-                                              :name (name arg-name)})]
-    (when (empty? args)
-      (throw (ex-info (str "Argument not found in parent: " arg-name)
-                      {:type :fn-composition/unresolved-arg
-                       :parent-fn-id parent-fn-id
-                       :arg-name arg-name})))
-    (first args)))
+  [fn-cache args-cache parent-fn-id arg-name]
+  (loop [fn-id parent-fn-id
+         depth 0]
+    (when (> depth sp/*max-graph-iterations*)
+      (throw (ex-info "Parent chain too deep while resolving arg"
+                      {:type :fn-composition/parent-chain-too-deep
+                       :arg-name arg-name
+                       :max-depth sp/*max-graph-iterations*})))
+    (let [fn-args (get args-cache fn-id [])
+          matching (filter #(= (:name %) (name arg-name)) fn-args)]
+      (if (seq matching)
+        (first matching)
+        ;; Not found on this fn, check parent
+        (let [fn-entity (get fn-cache fn-id)]
+          (if-let [next-parent-id (:parent-id fn-entity)]
+            (recur next-parent-id (inc depth))
+            ;; No more parents - arg not found
+            (throw (ex-info (str "Argument not found in parent chain: " arg-name)
+                            {:type :fn-composition/unresolved-arg
+                             :parent-fn-id parent-fn-id
+                             :arg-name arg-name}))))))))
 
 
-(defn- create-arg!
-  "Creates or updates an arg entity for a composed fn.
-   Inherits from parent's arg via source-id."
-  [storage fn-id parent-fn-id arg-name arg-value created-fns]
-  (let [;; Get parent's arg to inherit from
-        parent-arg (get-parent-arg storage parent-fn-id arg-name)
+(defn- resolve-parent-fn-id-cached
+  "Resolves a parent name to fn-id using caches.
+   Returns UUID or throws if not found."
+  [fn-name-cache fn-id-cache created-fns parent-name]
+  (or (get created-fns parent-name)
+      ;; Try registry (base-fns)
+      (let [base-fn-id (registry/fn-uuid parent-name)]
+        (when (contains? fn-id-cache base-fn-id)
+          base-fn-id))
+      ;; Try by name (composed fns)
+      (when-let [existing (get fn-name-cache (name parent-name))]
+        (:id existing))
+      ;; Not found - throw
+      (throw (ex-info (str "Parent fn not found: " parent-name
+                           ". It must be a base-fn or defined earlier.")
+                      {:type :fn-composition/unresolved-parent
+                       :parent-name parent-name
+                       :available-fns (keys created-fns)}))))
+
+
+(defn- resolve-fn-id-cached
+  "Resolves a fn name to fn-id using caches."
+  [fn-name-cache created-fns fn-name]
+  (or
+    (get created-fns fn-name)
+    (when-let [existing (get fn-name-cache (name fn-name))]
+      (:id existing))
+    (throw (ex-info (str "Referenced fn not found: " fn-name
+                         ". It must be defined earlier or exist in storage.")
+                    {:type :fn-composition/unresolved-fn-ref
+                     :fn-name fn-name
+                     :available-fns (keys created-fns)}))))
+
+
+(defn- prepare-fn-record
+  "Prepares a fn record for batch upsert.
+   Returns {:id :name :parent-id} or nil if already exists."
+  [fn-name-cache fn-id-cache created-fns fn-def]
+  (let [fn-name (:name fn-def)
+        fn-name-str (clojure.core/name fn-name)]
+    (if-let [existing (get fn-name-cache fn-name-str)]
+      ;; Already exists
+      {:existing existing}
+      ;; Need to create
+      (let [parent (:parent fn-def)
+            parent-fn-id (resolve-parent-fn-id-cached
+                           fn-name-cache fn-id-cache created-fns parent)]
+        {:new {:id (random-uuid)
+               :name fn-name-str
+               :parent-id parent-fn-id}}))))
+
+
+(defn- prepare-arg-record
+  "Prepares an arg record for batch upsert."
+  [fn-cache args-cache fn-name-cache created-fns fn-id parent-fn-id arg-name arg-value]
+  (when-not fn-id
+    (throw (ex-info "fn-id cannot be nil when preparing arg record"
+                    {:type :fn-composition/internal-error
+                     :arg-name arg-name
+                     :parent-fn-id parent-fn-id})))
+  (let [parent-arg (get-parent-arg-cached fn-cache args-cache parent-fn-id arg-name)
         source-id (:id parent-arg)
-        ;; Check if arg already exists
-        existing (sp/query-entities storage :arg {:fn-id fn-id
-                                                  :source-id source-id})
+        ;; Check if arg already exists for this fn
+        fn-args (get args-cache fn-id [])
+        existing (first (filter #(= (:source-id %) source-id) fn-args))
         ;; Resolve arg value
-        ;; For fn refs (keyword matching valid identifier or UUID), always use ref-id.
-        ;; Executor uses is-fn field (inherited from parent arg) to decide behavior.
         resolved (cond
                    (nil? arg-value)
                    {:value nil :ref-id nil}
 
-                   ;; UUID is a direct fn reference
                    (uuid? arg-value)
                    {:value nil :ref-id arg-value}
 
                    (keyword? arg-value)
                    (if-let [ref-fn-name (parse-fn-ref arg-value)]
-                     (let [ref-fn-id (resolve-fn-id storage created-fns ref-fn-name)]
+                     (let [ref-fn-id (resolve-fn-id-cached fn-name-cache created-fns ref-fn-name)]
                        {:value nil :ref-id ref-fn-id})
                      {:value arg-value :ref-id nil})
 
                    :else
                    {:value arg-value :ref-id nil})]
-    (if (seq existing)
-      (let [existing-arg (first existing)]
-        (when (or (not= (:value existing-arg) (:value resolved))
-                  (not= (:ref-id existing-arg) (:ref-id resolved)))
-          (sp/update-entity storage :arg (:id existing-arg) resolved))
-        existing-arg)
-      ;; Copy name, type, and is-fn from parent arg for argument resolution
-      (sp/create-entity storage :arg
-                        (merge {:fn-id fn-id
-                                :source-id source-id
-                                :name (:name parent-arg)
-                                :type (:type parent-arg)
-                                :is-fn (:is-fn parent-arg)}
-                               resolved)))))
-
-
-(defn- create-args!
-  "Creates arg entities for a composed fn."
-  [storage fn-entity fn-def created-fns]
-  (let [{:keys [parent args]} fn-def
-        fn-id (:id fn-entity)
-        parent-fn-id (resolve-parent-fn-id storage parent)]
-    (doseq [[arg-name arg-value] args]
-      (create-arg! storage fn-id parent-fn-id arg-name arg-value created-fns))))
+    (if existing
+      ;; Check if update needed
+      (when (or (not= (:value existing) (:value resolved))
+                (not= (:ref-id existing) (:ref-id resolved)))
+        ;; Merge full existing record with resolved to preserve all required fields
+        {:update (merge existing resolved)})
+      ;; Create new
+      {:new (merge {:id (random-uuid)
+                    :fn-id fn-id
+                    :source-id source-id
+                    :name (:name parent-arg)
+                    :type (:type parent-arg)
+                    :is-fn (:is-fn parent-arg)}
+                   resolved)})))
 
 
 (defn sync-fns-to-storage!
-  "Syncs fn definitions to storage.
+  "Syncs fn definitions to storage using batch operations.
 
    Arguments:
    - storage: initialized storage with base-fn schemas already synced
@@ -298,9 +382,9 @@
    Process:
    1. Validates all definitions
    2. Topologically sorts by dependencies
-   3. Warns if original order was wrong
-   4. Creates all fn entities
-   5. Creates all arg entities
+   3. Pre-loads existing fns and args (2 queries instead of N*M)
+   4. Batch upserts all fn entities
+   5. Batch upserts all arg entities
 
    Returns map of {fn-name -> fn-id} for created fns.
 
@@ -313,14 +397,89 @@
     {}
     (do
       (validate-all-defs! fn-defs)
-      (let [sorted-defs (topological-sort fn-defs)]
-        (check-order-and-warn fn-defs sorted-defs)
-        (loop [remaining sorted-defs
-               created-fns {}]
-          (if (empty? remaining)
-            created-fns
-            (let [fn-def (first remaining)
-                  fn-entity (get-or-create-fn-entity! storage fn-def)
-                  new-created (assoc created-fns (:name fn-def) (:id fn-entity))]
-              (create-args! storage fn-entity fn-def new-created)
-              (recur (rest remaining) new-created))))))))
+      (let [sorted-defs (topological-sort fn-defs)
+            _ (check-order-and-warn fn-defs sorted-defs)
+
+            ;; Phase 1: Pre-load existing data
+            def-names (set (map :name sorted-defs))
+            existing-fns-by-name (preload-existing-fns storage def-names)
+
+            ;; Also load all fns for parent resolution
+            all-fns (sp/query-entities storage :fn {})
+            fn-id-cache (into {} (map (juxt :id identity) all-fns))
+            fn-name-cache (into existing-fns-by-name
+                               (map (juxt :name identity) all-fns))
+
+            ;; Pre-load all args
+            all-fn-ids (set (map :id all-fns))
+            args-cache (preload-all-args storage all-fn-ids)
+
+            ;; Phase 2: Prepare and create fns in topological order
+            ;; We need to do this sequentially due to dependencies
+            ;; created-fns: {fn-name -> fn-id}
+            ;; created-fn-entities: {fn-id -> fn-entity} - needed for parent chain lookup
+            {:keys [created-fns created-fn-entities new-fns]}
+            (loop [remaining sorted-defs
+                   created {}
+                   created-entities {}
+                   new-fns []
+                   fn-name-cache' fn-name-cache]
+              (if (empty? remaining)
+                ;; Batch upsert new fns
+                (do
+                  (when (seq new-fns)
+                    (sp/upsert-entities storage :fn new-fns))
+                  {:created-fns created
+                   :created-fn-entities created-entities
+                   :new-fns new-fns})
+                (let [fn-def (first remaining)
+                      result (prepare-fn-record fn-name-cache' fn-id-cache created fn-def)
+                      fn-entity (or (:existing result) (:new result))
+                      fn-id (:id fn-entity)
+                      new-created (assoc created (:name fn-def) fn-id)
+                      ;; Track full entity for parent-id lookup
+                      new-created-entities (assoc created-entities fn-id fn-entity)
+                      new-fns' (if (:new result)
+                                 (conj new-fns (:new result))
+                                 new-fns)
+                      ;; Update cache with new fn
+                      fn-name-cache'' (if (:new result)
+                                        (assoc fn-name-cache' (name (:name fn-def)) fn-entity)
+                                        fn-name-cache')]
+                  (recur (rest remaining) new-created new-created-entities new-fns' fn-name-cache''))))
+
+            ;; Update caches with newly created fns
+            fn-name-cache-final (merge fn-name-cache
+                                       (into {}
+                                             (map (fn [[k v]] [(name k) {:id v :name (name k)}]))
+                                             created-fns))
+            ;; Include full fn-entities with parent-id for parent chain lookup
+            fn-id-cache-final (merge fn-id-cache created-fn-entities)
+
+            ;; Phase 3: Prepare and batch upsert args
+            arg-records
+            (for [fn-def sorted-defs
+                  :let [fn-name (:name fn-def)
+                        fn-id (get created-fns fn-name)
+                        parent (:parent fn-def)
+                        parent-fn-id (resolve-parent-fn-id-cached
+                                       fn-name-cache-final fn-id-cache-final created-fns parent)]
+                  [arg-name arg-value] (:args fn-def)
+                  :let [record (prepare-arg-record
+                                 fn-id-cache-final args-cache fn-name-cache-final
+                                 created-fns fn-id parent-fn-id arg-name arg-value)]
+                  :when record]
+              record)
+
+            new-args (keep :new arg-records)
+            update-args (keep :update arg-records)]
+
+        ;; Batch upsert new args
+        (when (seq new-args)
+          (sp/upsert-entities storage :arg new-args))
+
+        ;; Batch update existing args (if any changed)
+        (when (seq update-args)
+          (sp/upsert-entities storage :arg update-args))
+
+        created-fns))))

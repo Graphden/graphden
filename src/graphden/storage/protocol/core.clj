@@ -150,6 +150,15 @@
     [this entity-name ids]
     "Reads multiple entity records by IDs.")
 
+  (update-entities
+    [this entity-name data-seq]
+    "Updates multiple entity records. Each record must have :id.")
+
+  (upsert-entities
+    [this entity-name data-seq]
+    "Inserts or updates multiple entity records (INSERT ... ON CONFLICT DO UPDATE).
+     Each record must have :id. Returns seq of upserted records.")
+
   (delete-entities
     [this entity-name ids]
     "Deletes multiple entity records."))

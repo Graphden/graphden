@@ -103,7 +103,17 @@
 
                          (query-entities
                            [_ _ _]
-                           (throw (ex-info "Mock query error" {:type :test-error}))))]
+                           (throw (ex-info "Mock query error" {:type :test-error})))
+
+                         sp/StorageBatchCRUD
+
+                         (read-entities
+                           [_ _ _]
+                           {})
+
+                         (upsert-entities
+                           [_ _ _]
+                           (throw (ex-info "Mock upsert error" {:type :test-error}))))]
       (is (thrown? clojure.lang.ExceptionInfo
             (registry/initialize-with-base-fns! mock-storage)))
       (is @closed? "Storage should be closed on error"))))

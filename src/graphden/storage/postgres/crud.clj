@@ -212,6 +212,117 @@
                                            (into {})))))))
 
 
+(defn update-entities
+  "Updates multiple entity records in a single batch.
+   Each record must have :id. Returns seq of updated records.
+   Uses PostgreSQL UPDATE ... FROM VALUES for efficient batch update.
+   Throws :not-found if any entity doesn't exist."
+  [ds entity-name data-seq fields]
+  (if (empty? data-seq)
+    []
+    (do
+      (sp/validate-batch-size! (count data-seq) :update-entities {:entity-name entity-name})
+      (sp/validate-no-duplicate-ids! entity-name data-seq)
+      (let [table-name (keyword (util/kw->snake-case entity-name))
+            ;; Validate all records have :id
+            _ (doseq [data data-seq]
+                (when-not (:id data)
+                  (throw (ex-info "Each record must have :id for batch update"
+                                  {:type :invalid-data
+                                   :entity-name entity-name
+                                   :data (sp/redact-sensitive-map data)}))))
+            records (vec data-seq)
+            batch-size (count records)
+            ;; Convert to rows
+            rows (map #(entity->row % fields) records)
+            ;; Get consistent column order from first row
+            columns (vec (keys (first rows)))
+            ;; Build individual UPDATE statements and execute in transaction
+            results (try
+                      (jdbc/with-transaction [tx ds]
+                        (doall
+                          (map (fn [record]
+                                 (let [row (entity->row (dissoc record :id) fields)
+                                       query (sql/format {:update table-name
+                                                          :set row
+                                                          :where [:= :id (:id record)]
+                                                          :returning [:*]}
+                                                         {:quoted true})
+                                       result (jdbc/execute-one! tx query (util/query-opts))]
+                                   (when-not result
+                                     (throw (ex-info "Entity not found"
+                                                     {:type :not-found
+                                                      :entity entity-name
+                                                      :id (:id record)})))
+                                   result))
+                               records)))
+                      (catch java.sql.SQLException e
+                        (let [wrapped (errors/wrap-sql-error e "Database error" :update-entities
+                                                             {:entity-name entity-name})]
+                          (throw (sp/wrap-batch-error wrapped -1 batch-size nil)))))]
+        (map codec/row->entity results)))))
+
+
+(defn upsert-entities
+  "Inserts or updates multiple entity records using INSERT ... ON CONFLICT DO UPDATE.
+   Each record must have :id. Returns seq of upserted records.
+   Uses single SQL statement for efficiency."
+  [ds entity-name data-seq fields]
+  (if (empty? data-seq)
+    []
+    (do
+      (sp/validate-batch-size! (count data-seq) :upsert-entities {:entity-name entity-name})
+      (sp/validate-no-duplicate-ids! entity-name data-seq)
+      (let [table-name (keyword (util/kw->snake-case entity-name))
+            ;; Validate all records have :id
+            _ (doseq [data data-seq]
+                (when-not (:id data)
+                  (throw (ex-info "Each record must have :id for upsert"
+                                  {:type :invalid-data
+                                   :entity-name entity-name
+                                   :data (sp/redact-sensitive-map data)}))))
+            records (vec data-seq)
+            batch-size (count records)
+            batch-ids (mapv :id records)
+            ;; Convert to rows using codec
+            rows (map #(entity->row % fields) records)
+            ;; Get consistent column order from first row
+            columns (vec (keys (first rows)))
+            ;; Extract values in column order
+            values (vec (map (fn [row]
+                               (mapv #(get row %) columns))
+                             rows))
+            ;; Build ON CONFLICT DO UPDATE SET for all columns except :id
+            ;; HoneySQL auto-generates SET col = EXCLUDED.col when given a vector
+            update-columns (vec (remove #{:id} columns))
+            query (sql/format {:insert-into table-name
+                               :columns columns
+                               :values values
+                               :on-conflict [:id]
+                               :do-update-set update-columns
+                               :returning [:*]}
+                              {:quoted true})
+            result-rows (try
+                          (jdbc/execute! ds query (util/query-opts))
+                          (catch java.sql.SQLException e
+                            (let [wrapped (errors/wrap-sql-error e "Database error" :upsert-entities
+                                                                 {:entity-name entity-name
+                                                                  :batch-ids batch-ids})]
+                              (throw (sp/wrap-batch-error wrapped -1 batch-size nil))))
+                          (catch Exception e
+                            (throw (sp/wrap-batch-error e -1 batch-size nil))))
+            expected-count batch-size
+            actual-count (count result-rows)]
+        ;; Validate that all records were upserted
+        (when (not= expected-count actual-count)
+          (throw (ex-info "Batch upsert returned unexpected number of records"
+                          {:type :batch-upsert-mismatch
+                           :entity-name entity-name
+                           :expected-count expected-count
+                           :actual-count actual-count})))
+        (map codec/row->entity result-rows)))))
+
+
 (defn delete-entities
   "Deletes multiple entities by ids. Returns count of deleted records.
    Throws :foreign-key-violation if any entity is referenced."

@@ -275,7 +275,20 @@
 
                     (query-entities
                       [_ entity-name where]
-                      (sp/query-entities storage entity-name where)))]
+                      (sp/query-entities storage entity-name where))
+
+                    sp/StorageBatchCRUD
+
+                    (read-entities
+                      [_ entity-name ids]
+                      (sp/read-entities storage entity-name ids))
+
+                    (upsert-entities
+                      [_ entity-name data-seq]
+                      ;; Fail on fn upsert to trigger error path
+                      (if (= entity-name :fn)
+                        (throw (ex-info "Simulated failure" {:type :test-error}))
+                        (sp/upsert-entities storage entity-name data-seq))))]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Simulated failure"
             (registry/initialize-with-base-fns! wrapped)))
       ;; Verify close was called

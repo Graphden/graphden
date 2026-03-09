@@ -242,6 +242,18 @@
     (crud/read-entities pool entity-name ids))
 
 
+  (update-entities
+    [_this entity-name data-seq]
+    (crud/update-entities pool entity-name data-seq
+                          (get-entity-fields pool metadata-cache rw-lock entity-name)))
+
+
+  (upsert-entities
+    [_this entity-name data-seq]
+    (crud/upsert-entities pool entity-name data-seq
+                          (get-entity-fields pool metadata-cache rw-lock entity-name)))
+
+
   (delete-entities
     [_this entity-name ids]
     (crud/delete-entities pool entity-name ids))

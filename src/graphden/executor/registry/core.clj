@@ -230,59 +230,35 @@
     (parse-arg-spec arg-name arg-spec)))
 
 
-(defn- sync-base-fn!
-  "Syncs a single base fn to storage. Creates or updates.
+(defn- prepare-fn-record
+  "Prepares a fn record for batch upsert.
    Base fn = fn entity with parent-id=nil."
-  [storage fn-name fn-def]
+  [fn-name fn-def]
   (let [{:keys [return-type]} fn-def
         id (fn-uuid fn-name)
-        impl-hash (compute-impl-hash fn-def)
-        existing (sp/read-entity storage :fn id)]
-    (if existing
-      (let [new-data {:name (name fn-name)
-                      :return-type return-type
-                      :impl-hash impl-hash}]
-        (when (or (not= (:name existing) (:name new-data))
-                  (not= (:return-type existing) (:return-type new-data))
-                  (not= (:impl-hash existing) (:impl-hash new-data)))
-          (sp/update-entity storage :fn id new-data)))
-      (sp/create-entity storage :fn
-                        {:id id
-                         :name (name fn-name)
-                         :return-type return-type
-                         :impl-hash impl-hash}))
-    id))
+        impl-hash (compute-impl-hash fn-def)]
+    {:id id
+     :name (name fn-name)
+     :return-type return-type
+     :impl-hash impl-hash}))
 
 
-(defn- sync-args!
-  "Syncs arg entities for a base function to storage.
+(defn- prepare-arg-records
+  "Prepares arg records for a base function.
    Primary args = arg entities with source-id=nil.
    Sets is-fn=true for :fn type args (HOF)."
-  [storage fn-name fn-id args]
-  (doseq [[arg-name arg-spec] args]
-    (let [{:keys [arg-type required]} (parse-arg-spec arg-name arg-spec)
-          is-fn? (= :fn arg-type)
-          id (arg-uuid fn-name arg-name)
-          existing (sp/read-entity storage :arg id)]
-      (if existing
-        (let [new-data {:fn-id fn-id
-                        :name (name arg-name)
-                        :type arg-type
-                        :required required
-                        :is-fn is-fn?}]
-          (when (or (not= (:fn-id existing) fn-id)
-                    (not= (:name existing) (:name new-data))
-                    (not= (:type existing) (:type new-data))
-                    (not= (:required existing) required)
-                    (not= (:is-fn existing) is-fn?))
-            (sp/update-entity storage :arg id new-data)))
-        (sp/create-entity storage :arg
-                          {:id id
-                           :fn-id fn-id
-                           :name (name arg-name)
-                           :type arg-type
-                           :required required
-                           :is-fn is-fn?})))))
+  [fn-name fn-id args]
+  (mapv (fn [[arg-name arg-spec]]
+          (let [{:keys [arg-type required]} (parse-arg-spec arg-name arg-spec)
+                is-fn? (= :fn arg-type)
+                id (arg-uuid fn-name arg-name)]
+            {:id id
+             :fn-id fn-id
+             :name (name arg-name)
+             :type arg-type
+             :required required
+             :is-fn is-fn?}))
+        args))
 
 
 (defn validate-all-defs!
@@ -295,14 +271,24 @@
 (def ^:private max-sync-batch-size sp/max-sync-batch-size)
 
 
+(defn- count-existing-ids
+  "Counts how many ids already exist in storage."
+  [storage entity-name ids]
+  (if (empty? ids)
+    0
+    (count (sp/read-entities storage entity-name ids))))
+
+
 (defn sync-defs-to-storage!
-  "Syncs function definitions to storage.
+  "Syncs function definitions to storage using batch upsert.
    Creates fn and arg entities for each base function.
    Uses deterministic UUIDs so syncing is idempotent.
 
-   Returns a map with counts:
-   {:fns {:created n :updated m}
-    :args {:created n :updated m}}"
+   Optimized: Uses batch INSERT ... ON CONFLICT DO UPDATE
+   instead of individual queries (N+1 → 4 queries).
+
+   Returns counts:
+   {:fns {:created n :updated m} :args {:created n :updated m}}"
   [storage defs]
   (when (> (count defs) max-sync-batch-size)
     (throw (ex-info (str "Too many function definitions to sync: " (count defs)
@@ -312,21 +298,28 @@
                      :max-batch-size max-sync-batch-size
                      :operation :sync-defs-to-storage})))
   (validate-all-defs! defs)
-  (let [fn-stats (atom {:created 0 :updated 0})
-        arg-stats (atom {:created 0 :updated 0})]
-    (doseq [[fn-name fn-def] defs]
-      (let [fn-id (fn-uuid fn-name)
-            existed? (some? (sp/read-entity storage :fn fn-id))]
-        (sync-base-fn! storage fn-name fn-def)
-        (if existed?
-          (swap! fn-stats update :updated inc)
-          (swap! fn-stats update :created inc))
-        (doseq [[arg-name _] (:args fn-def)]
-          (let [arg-id (arg-uuid fn-name arg-name)
-                arg-existed? (some? (sp/read-entity storage :arg arg-id))]
-            (sync-args! storage fn-name fn-id {arg-name (get-in fn-def [:args arg-name])})
-            (if arg-existed?
-              (swap! arg-stats update :updated inc)
-              (swap! arg-stats update :created inc))))))
-    {:fns @fn-stats
-     :args @arg-stats}))
+  ;; Prepare all fn records
+  (let [fn-records (mapv (fn [[fn-name fn-def]]
+                           (prepare-fn-record fn-name fn-def))
+                         defs)
+        ;; Prepare all arg records
+        arg-records (into []
+                          (mapcat (fn [[fn-name fn-def]]
+                                    (let [fn-id (fn-uuid fn-name)]
+                                      (prepare-arg-records fn-name fn-id (:args fn-def))))
+                                  defs))
+        ;; Count existing records (for created/updated stats)
+        fn-ids (mapv :id fn-records)
+        arg-ids (mapv :id arg-records)
+        existing-fn-count (count-existing-ids storage :fn fn-ids)
+        existing-arg-count (count-existing-ids storage :arg arg-ids)]
+    ;; Batch upsert fns (single SQL statement)
+    (when (seq fn-records)
+      (sp/upsert-entities storage :fn fn-records))
+    ;; Batch upsert args (single SQL statement)
+    (when (seq arg-records)
+      (sp/upsert-entities storage :arg arg-records))
+    {:fns {:created (- (count fn-records) existing-fn-count)
+           :updated existing-fn-count}
+     :args {:created (- (count arg-records) existing-arg-count)
+            :updated existing-arg-count}}))

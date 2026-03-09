@@ -65,21 +65,28 @@
 
 
 (defn- get-fn-args-with-inheritance
-  "Gets args for a function, checking parent chain if fn has no own args.
-   This allows composed fns with 'free' args to be used in HOF."
+  "Collects args from entire parent chain, merging by name.
+   Child args override parent args (for multi-level inheritance).
+   Returns vector of all args needed to execute the base-fn."
   [execution-graph fn-id depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain exceeds maximum depth while resolving args"
                     {:type :execution-error/parent-chain-too-deep
                      :fn-id fn-id
                      :max-depth sp/*max-graph-iterations*})))
-  (let [args (sp/graph-get-args execution-graph fn-id)]
-    (if (seq args)
-      args
-      ;; If no args on this fn, check parent fn
-      (let [fn-rec (get (sp/get-graph-fns execution-graph) fn-id)]
-        (when-let [parent-id (:parent-id fn-rec)]
-          (recur execution-graph parent-id (inc depth)))))))
+  (let [fns (sp/get-graph-fns execution-graph)
+        fn-rec (get fns fn-id)
+        own-args (sp/graph-get-args execution-graph fn-id)
+        parent-id (:parent-id fn-rec)]
+    (if parent-id
+      ;; Merge with parent args - own args take precedence by name
+      (let [parent-args (get-fn-args-with-inheritance execution-graph parent-id (inc depth))
+            own-arg-names (set (map :name own-args))
+            ;; Keep parent args whose names are not overridden by own args
+            filtered-parent-args (remove #(own-arg-names (:name %)) parent-args)]
+        (into (vec own-args) filtered-parent-args))
+      ;; Base fn - just return own args
+      own-args)))
 
 
 (defn- get-fn-data-from-graph
@@ -294,7 +301,10 @@
                      :args-type (type args)})))
   (let [storage (:storage context)
         execution-graph (sp/resolve-execution-graph storage fn-id)
-        context-with-graph (assoc context :execution-graph execution-graph)]
+        ;; Reset start-time for each top-level execute call
+        context-with-graph (assoc context
+                                  :execution-graph execution-graph
+                                  :start-time (ctx/current-time-ms context))]
     (execute-internal context-with-graph fn-id args)))
 
 
@@ -333,7 +343,10 @@
     (let [storage (:storage context)
           execution-graph (sp/resolve-execution-graph storage fn-id)
           id-based-args (resolve-named-args execution-graph fn-id named-args)
-          context-with-graph (assoc context :execution-graph execution-graph)]
+          ;; Reset start-time for each top-level execute call
+          context-with-graph (assoc context
+                                    :execution-graph execution-graph
+                                    :start-time (ctx/current-time-ms context))]
       (execute-internal context-with-graph fn-id id-based-args))))
 
 

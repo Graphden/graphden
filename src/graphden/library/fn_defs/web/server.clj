@@ -6,19 +6,20 @@
 
    ## Architecture
 
-   Routes are built compositionally using base-fns:
-   - const: creates Ring handler functions from response maps
-   - to-json-string + ring-response + make-handler: composable JSON handler
-   - assoc: builds route data structures {:handler fn}
-   - vector: combines path + route-data into route tuples
+   Routes are built compositionally using multi-level inheritance:
 
-   web-server-fn
-     |-- http-server with handler=router-fn, port=8080
+   Reusable building blocks (inherit from base-fns):
+   - assoc-empty = assoc-any with m={}
+   - assoc-handler = assoc-empty with k=\"handler\"
+   - assoc-get = assoc-empty with k=\"get\"
 
-   router-fn
-     |-- router with routes=[hello-route, health-route, metrics-route]
+   Route definition pattern:
+   - handler-map = assoc-handler with v=handler-fn
+   - method-map = assoc-get with v=handler-map
+   - route = pair path method-map
 
-   Each route is built as: [path {:method {:handler handler-fn}}]
+   This way, when viewing a route in the UI, only the arg that was
+   specifically set on that fn is shown (the inherited args are hidden).
 
    ## Endpoints
 
@@ -53,46 +54,73 @@
 (def fn-defs
   "Fn definitions for creating web server.
 
-   Routes are built compositionally using conj to build vectors:
-   1. const/make-handler creates Ring handler fn
-   2. assoc builds {:handler fn} and {:get {...}} maps
-   3. conj builds route tuple: [] -> [\"/\"] -> [\"/\" {...}]
-   4. conj collects routes: [] -> [[route1]] -> [[route1] [route2]]
+   ## Multi-Level Inheritance
 
-   JSON handlers are built compositionally:
-   - to-json-string: converts data to JSON string
-   - ring-response: creates {:status :headers :body} map
-   - make-handler: creates (fn [_request] response)
+   Building blocks are created via fn inheritance:
+   1. assoc-empty inherits from assoc-any, sets m={}
+   2. assoc-handler inherits from assoc-empty, sets k=\"handler\"
+   3. assoc-get inherits from assoc-empty, sets k=\"get\"
+
+   Route definitions then inherit from these building blocks,
+   setting only the specific arg (v or path).
 
    Arg value syntax:
    - :fn-name = reference to fn (stored in ref-id)
    Behavior (execute vs pass fn-id) determined by is-fn on parent arg."
-  [;; === Hello Route ===
+  [;; ============================================================
+   ;; REUSABLE BUILDING BLOCKS
+   ;; These create a multi-level inheritance chain
+   ;; ============================================================
+
+   ;; Level 1: assoc with empty map preset
+   ;; assoc-empty shows only (k, v) in UI - m={} is inherited
+   {:name :assoc-empty
+    :parent :assoc-any
+    :args {:m {}}}
+
+   ;; Level 2: assoc with k="handler"
+   ;; assoc-handler shows only v in UI - m={}, k="handler" are inherited
+   {:name :assoc-handler
+    :parent :assoc-empty
+    :args {:k "handler"}}
+
+   ;; Level 2: assoc with k="get"
+   ;; assoc-get shows only v in UI - m={}, k="get" are inherited
+   {:name :assoc-get
+    :parent :assoc-empty
+    :args {:k "get"}}
+
+   ;; ============================================================
+   ;; HELLO ROUTE
+   ;; ============================================================
+
    ;; Ring handler: (fn [_] hello-response)
    {:name :hello-handler-fn
     :parent :const
     :args {:x hello-response}}
 
-   ;; {:handler <fn>} - execute hello-handler-fn to get Clojure fn, then put in map
-   {:name :hello-handler-map-fn
-    :parent :assoc
-    :args {:m {}, :k "handler", :v :hello-handler-fn}}
+   ;; {"handler" <fn>} - inherits k="handler", m={} from assoc-handler
+   ;; In UI shows only: {:v :hello-handler-fn}
+   {:name :hello-handler-map
+    :parent :assoc-handler
+    :args {:v :hello-handler-fn}}
 
-   ;; {:get {:handler <fn>}} - execute hello-handler-map-fn to get the map
-   {:name :hello-method-map-fn
-    :parent :assoc
-    :args {:m {}, :k "get", :v :hello-handler-map-fn}}
+   ;; {"get" {"handler" <fn>}} - inherits k="get", m={} from assoc-get
+   ;; In UI shows only: {:v :hello-handler-map}
+   {:name :hello-method-map
+    :parent :assoc-get
+    :args {:v :hello-handler-map}}
 
-   ;; Build route tuple: [] -> ["/"] -> ["/" {...}]
-   {:name :hello-route-path-fn
-    :parent :conj
-    :args {:coll [], :x "/"}}
+   ;; ["/" {:get {:handler fn}}] - pair creates 2-element vector
+   ;; In UI shows only: {:a "/" :b :hello-method-map}
+   {:name :hello-route
+    :parent :pair
+    :args {:a "/" :b :hello-method-map}}
 
-   {:name :hello-route-fn
-    :parent :conj
-    :args {:coll :hello-route-path-fn, :x :hello-method-map-fn}}
+   ;; ============================================================
+   ;; HEALTH ROUTE (Dynamic JSON)
+   ;; ============================================================
 
-   ;; === Health Route (Dynamic JSON) ===
    ;; Compositional JSON handler: to-json-string -> ring-response -> make-handler
    {:name :health-json-body-fn
     :parent :to-json-string
@@ -108,26 +136,25 @@
     :parent :make-handler
     :args {:response :health-response-fn}}
 
-   ;; {:handler <fn>}
-   {:name :health-handler-map-fn
-    :parent :assoc
-    :args {:m {}, :k "handler", :v :health-handler-fn}}
+   ;; {"handler" <fn>} - only shows {:v :health-handler-fn}
+   {:name :health-handler-map
+    :parent :assoc-handler
+    :args {:v :health-handler-fn}}
 
-   ;; {:get {:handler <fn>}}
-   {:name :health-method-map-fn
-    :parent :assoc
-    :args {:m {}, :k "get", :v :health-handler-map-fn}}
+   ;; {"get" ...} - only shows {:v :health-handler-map}
+   {:name :health-method-map
+    :parent :assoc-get
+    :args {:v :health-handler-map}}
 
-   ;; Build route tuple: ["/health" {...}]
-   {:name :health-route-path-fn
-    :parent :conj
-    :args {:coll [], :x "/health"}}
+   ;; ["/health" ...] - only shows path and method-map
+   {:name :health-route
+    :parent :pair
+    :args {:a "/health" :b :health-method-map}}
 
-   {:name :health-route-fn
-    :parent :conj
-    :args {:coll :health-route-path-fn, :x :health-method-map-fn}}
+   ;; ============================================================
+   ;; METRICS ROUTE (JVM Info)
+   ;; ============================================================
 
-   ;; === Metrics Route (JVM Info) ===
    ;; Compositional JSON handler: to-json-string -> ring-response -> make-handler
    {:name :metrics-json-body-fn
     :parent :to-json-string
@@ -143,40 +170,38 @@
     :parent :make-handler
     :args {:response :metrics-response-fn}}
 
-   ;; {:handler <fn>}
-   {:name :metrics-handler-map-fn
-    :parent :assoc
-    :args {:m {}, :k "handler", :v :metrics-handler-fn}}
+   ;; {"handler" <fn>} - only shows {:v :metrics-handler-fn}
+   {:name :metrics-handler-map
+    :parent :assoc-handler
+    :args {:v :metrics-handler-fn}}
 
-   ;; {:get {:handler <fn>}}
-   {:name :metrics-method-map-fn
-    :parent :assoc
-    :args {:m {}, :k "get", :v :metrics-handler-map-fn}}
+   ;; {"get" ...} - only shows {:v :metrics-handler-map}
+   {:name :metrics-method-map
+    :parent :assoc-get
+    :args {:v :metrics-handler-map}}
 
-   ;; Build route tuple: ["/metrics" {...}]
-   {:name :metrics-route-path-fn
-    :parent :conj
-    :args {:coll [], :x "/metrics"}}
+   ;; ["/metrics" ...] - only shows path and method-map
+   {:name :metrics-route
+    :parent :pair
+    :args {:a "/metrics" :b :metrics-method-map}}
 
-   {:name :metrics-route-fn
-    :parent :conj
-    :args {:coll :metrics-route-path-fn, :x :metrics-method-map-fn}}
+   ;; ============================================================
+   ;; ROUTES COLLECTION & SERVER
+   ;; ============================================================
 
-   ;; === Routes Collection ===
-   ;; Build routes: [] -> [[hello]] -> [[hello] [health]] -> [[hello] [health] [metrics]]
-   {:name :routes-with-hello-fn
-    :parent :conj
-    :args {:coll [], :x :hello-route-fn}}
+   ;; Build routes vector using conj-any (works with non-JSON values)
+   {:name :routes-with-hello
+    :parent :conj-any
+    :args {:coll [], :x :hello-route}}
 
-   {:name :routes-with-health-fn
-    :parent :conj
-    :args {:coll :routes-with-hello-fn, :x :health-route-fn}}
+   {:name :routes-with-health
+    :parent :conj-any
+    :args {:coll :routes-with-hello, :x :health-route}}
 
    {:name :routes-fn
-    :parent :conj
-    :args {:coll :routes-with-health-fn, :x :metrics-route-fn}}
+    :parent :conj-any
+    :args {:coll :routes-with-health, :x :metrics-route}}
 
-   ;; === Router & Server ===
    ;; Router receives routes vector (executed)
    {:name :router-fn
     :parent :router

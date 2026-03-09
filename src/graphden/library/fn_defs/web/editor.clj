@@ -1,21 +1,17 @@
 (ns graphden.library.fn-defs.web.editor
   "Graph Editor fn-defs.
 
-   This component defines fn entities (NOT base-fns) that compose
-   base functions to create the graph editor UI.
+   ## 2-Entity Schema
 
-   ## Architecture
-
-   The graph editor is built using:
-   - HTMX for dynamic updates without full page reloads
-   - Cytoscape.js for graph visualization
-   - Hiccup for HTML templating
+   The graph uses a minimal 2-entity schema:
+   - fn: function entity (parent-id=nil for base-fn, parent-id set for composed)
+   - arg: argument entity (source-id for inheritance, value/ref-id for data)
 
    ## Pages
 
    - GET / - Main graph editor page with Cytoscape visualization
-   - GET /api/entities - JSON endpoint for all entities (for Cytoscape)
-   - GET /api/entities/:type - List entities of a type
+   - GET /api/graph/entities - JSON endpoint for all entities (for Cytoscape)
+   - GET /api/entities/:type - List entities of a type (:fn or :arg)
    - GET /api/entities/:type/:id - Get single entity
    - POST /api/entities/:type - Create entity
    - PUT /api/entities/:type/:id - Update entity
@@ -122,22 +118,7 @@
   .modal-body { padding: 16px; }
   .modal-footer { padding: 16px; border-top: 1px solid #ddd; display: flex; justify-content: flex-end; gap: 8px; }
 
-  /* Schema info panel - shown on hover/click */
-  .schema-info { font-size: 11px; color: #666; margin-top: 4px; padding-left: 12px;
-    border-left: 2px solid #ddd; }
-  .schema-info .arg { margin: 4px 0; }
-  .schema-info .arg-name { font-weight: 500; }
-  .schema-info .arg-type { color: #888; }
-  .schema-info .arg-unset { opacity: 0.5; font-style: italic; }
-  .schema-info .arg-set { font-weight: 500; }
-
-  /* Arg value indicator */
-  .arg-indicator { display: inline-block; width: 8px; height: 8px; border: 1px solid #000;
-    margin-right: 4px; }
-  .arg-indicator.set { background: #000; }
-  .arg-indicator.unset { background: #fff; }
-
-  /* Arg labels in sidebar */
+  /* Arg display in sidebar */
   .fn-args { margin-top: 8px; padding-left: 12px; border-left: 2px solid #ddd; }
   .fn-arg { font-size: 11px; margin: 4px 0; display: flex; gap: 6px; }
   .fn-arg .arg-name { color: #666; }
@@ -152,50 +133,35 @@
 ;; =============================================================================
 
 (def editor-script
-  "JavaScript for graph editor functionality - fn-centric visualization."
+  "JavaScript for graph editor functionality - 2-entity schema visualization."
   "
   let cy = null;
   let selectedFnId = null;
   let graphData = null;
-  let maxDepth = 100; // Show all levels
+  let maxDepth = 100;
   let lookups = null;
 
   // Build lookup maps for fast access
-  // Note: API returns kebab-case keys (fn-schema-id), so we use bracket notation
+  // 2-entity schema: fn (with parent-id) and arg (with source-id, value, ref-id)
   function buildLookups(data) {
-    const fnSchemaMap = new Map();
-    const argSchemaMap = new Map();
     const fnMap = new Map();
-    const fnArgMap = new Map();  // fn_id -> [{argSchemaId, argValue}]
-    const fnUsageMap = new Map();
+    const argMap = new Map();
+    const argsByFn = new Map();  // fn-id -> [args]
 
-    (data.fn_schemas || []).forEach(fs => fnSchemaMap.set(fs.id, fs));
-    (data.arg_schemas || []).forEach(as => argSchemaMap.set(as.id, as));
     (data.fns || []).forEach(f => fnMap.set(f.id, f));
-    (data.fn_usages || []).forEach(fu => fnUsageMap.set(fu.id, fu));
-
-    // Build arg_value lookup map: arg-value-id -> arg-value
-    const argValueMap = new Map();
-    (data.arg_values || []).forEach(av => argValueMap.set(av.id, av));
-
-    // Build fn_arg map from fn_args: fn-id -> [{argSchemaId, argValue}]
-    (data.fn_args || []).forEach(fa => {
-      const fnId = fa['fn-id'];
-      const argValueId = fa['arg-value-id'];
-      const argSchemaId = fa['arg-schema-id'];
-      const argValue = argValueMap.get(argValueId);
-      if (!fnId || !argValue) return;
-      if (!fnArgMap.has(fnId)) fnArgMap.set(fnId, []);
-      fnArgMap.get(fnId).push({
-        argSchemaId: argSchemaId,
-        argValue: argValue
-      });
+    (data.args || []).forEach(a => {
+      argMap.set(a.id, a);
+      const fnId = a['fn-id'];
+      if (fnId) {
+        if (!argsByFn.has(fnId)) argsByFn.set(fnId, []);
+        argsByFn.get(fnId).push(a);
+      }
     });
 
-    return { fnSchemaMap, argSchemaMap, fnMap, fnArgMap, fnUsageMap };
+    return { fnMap, argMap, argsByFn };
   }
 
-  // Update sidebar - show only fn entities
+  // Update sidebar - show fn entities
   function updateEntityList(data) {
     const list = document.getElementById('entity-list');
     list.innerHTML = '';
@@ -205,7 +171,11 @@
       li.className = 'entity-item';
       if (fn.id === selectedFnId) li.className += ' selected';
       li.dataset.fnId = fn.id;
-      li.innerHTML = '<div class=\"name\">' + fn.name + '</div>';
+
+      const isBase = !fn['parent-id'];
+      const badge = isBase ? '[base]' : '[composed]';
+
+      li.innerHTML = '<div class=\"name\">' + fn.name + ' <span style=\"color:#888;font-size:10px\">' + badge + '</span></div>';
       li.onclick = () => selectFn(fn.id);
       list.appendChild(li);
     });
@@ -275,7 +245,7 @@
       container: document.getElementById('cy'),
       elements: elements,
       style: [
-        // fn nodes - rounded rectangles (adapt to label width, multi-line support)
+        // fn nodes - rounded rectangles
         { selector: 'node[type=\"fn\"]', style: {
           'label': 'data(label)',
           'text-valign': 'center',
@@ -292,15 +262,16 @@
           'border-color': '#000',
           'color': '#000'
         }},
-        // Selected root fn - thicker border only
+        // Selected root fn - thicker border
         { selector: 'node[isRoot]', style: {
           'border-width': 4
         }},
-        // Placeholder for unset arg - dashed border (black/white only)
+        // Unset arg placeholder - dashed border
         { selector: 'node[isPlaceholder]', style: {
-          'border-style': 'dashed'
+          'border-style': 'dashed',
+          'border-color': '#999'
         }},
-        // Literal arg values - rectangles (different shape = different type)
+        // Literal arg values - rectangles
         { selector: 'node[type=\"arg\"]', style: {
           'label': 'data(label)',
           'text-valign': 'center',
@@ -311,8 +282,8 @@
           'height': 28,
           'padding': '8px',
           'shape': 'rectangle',
-          'background-color': '#fff',
-          'border-width': 2,
+          'background-color': '#f5f5f5',
+          'border-width': 1,
           'border-color': '#000',
           'color': '#000'
         }},
@@ -330,14 +301,20 @@
           'text-background-opacity': 1,
           'text-background-padding': '2px'
         }},
-        // Unset arg edges - dashed (black/white only)
+        // Inheritance edge (to parent)
+        { selector: 'edge[type=\"inherits\"]', style: {
+          'line-style': 'dashed',
+          'line-color': '#666'
+        }},
+        // Unset arg edges - dashed
         { selector: 'edge[type=\"arg-unset\"]', style: {
-          'line-style': 'dashed'
+          'line-style': 'dashed',
+          'line-color': '#999'
         }}
       ],
       layout: {
         name: 'dagre',
-        rankDir: 'LR',  // Left to right: root fn on left, deps on right
+        rankDir: 'LR',
         nodeSep: 60,
         edgeSep: 20,
         rankSep: 120
@@ -364,63 +341,17 @@
     cy.fit(50);
   }
 
-  // Get fn dependencies (fns referenced in arg_values) for a given fn
-  function getFnDependencies(fnId) {
-    const deps = [];
-    const argValues = lookups.fnArgMap.get(fnId) || [];
-
-    argValues.forEach(av => {
-      const value = av.argValue.value;
-      const fnUsageId = av.argValue['fn-usage-id'];  // New FK-based reference
-      let targetFnId = null;
-      let isFnUsage = false;
-
-      // First check new FK-based fn-usage-id field
-      if (fnUsageId) {
-        const fu = lookups.fnUsageMap.get(fnUsageId);
-        if (fu) {
-          targetFnId = fu['fn-id'];
-          isFnUsage = true;
-        }
-      }
-      // Fallback: Value is stored as a plain UUID string referencing fn or fn_usage
-      else if (typeof value === 'string' && value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-        // First check if it's a fn_usage reference
-        const fu = lookups.fnUsageMap.get(value);
-        if (fu) {
-          targetFnId = fu['fn-id'];
-          isFnUsage = true;
-        } else if (lookups.fnMap.has(value)) {
-          // Direct fn reference
-          targetFnId = value;
-        }
-      }
-
-      if (targetFnId) {
-        deps.push({
-          fnId: targetFnId,
-          argSchemaId: av.argSchemaId,
-          argValueId: av.argValue.id,
-          isFnUsage: isFnUsage
-        });
-      }
-    });
-
-    return deps;
-  }
-
-  // Convert data to fn-centric elements - only selected fn and its dependency tree
+  // Convert data to fn-centric elements using 2-entity schema
   function convertToFnCentricElements(data, depth, rootFnId) {
     const nodes = [];
     const edges = [];
     const addedFns = new Set();
 
     if (!rootFnId || !lookups.fnMap.has(rootFnId)) {
-      // No fn selected - show hint
       return { nodes: [], edges: [] };
     }
 
-    // Recursively collect fn and its dependencies to specified depth
+    // Recursively collect fn and its dependencies
     function collectFn(fnId, currentDepth, isRoot) {
       if (addedFns.has(fnId) || currentDepth > depth) return;
       addedFns.add(fnId);
@@ -428,17 +359,20 @@
       const fn = lookups.fnMap.get(fnId);
       if (!fn) return;
 
-      const schema = lookups.fnSchemaMap.get(fn['fn-schema-id']);
-      const baseFnName = schema ? schema['base-fn-name'] : null;
-      const isBase = !!baseFnName;
-      const returnType = schema ? schema['returned-type'] : '?';
+      const isBase = !fn['parent-id'];
+      const isComposed = !!fn['parent-id'];
 
-      // Build label: fn name, separator line, base-fn name (if different)
+      // Build label
       let label = fn.name;
-      if (baseFnName && baseFnName !== fn.name) {
-        const maxLen = Math.max(fn.name.length, baseFnName.length);
-        const separator = '─'.repeat(maxLen);
-        label = fn.name + '\\n' + separator + '\\n' + baseFnName;
+
+      // If composed, show parent name
+      if (isComposed) {
+        const parent = lookups.fnMap.get(fn['parent-id']);
+        if (parent && parent.name !== fn.name) {
+          const maxLen = Math.max(fn.name.length, parent.name.length);
+          const separator = String.fromCharCode(9472).repeat(maxLen); // box drawing char
+          label = fn.name + '\\n' + separator + '\\n' + parent.name;
+        }
       }
 
       nodes.push({
@@ -447,126 +381,89 @@
           label: label,
           type: 'fn',
           isBase: isBase,
-          baseFnName: baseFnName,
+          isComposed: isComposed,
           isRoot: isRoot,
-          returnType: returnType,
-          schemaId: fn['fn-schema-id']
+          parentId: fn['parent-id']
         }
       });
 
-      // Get all schema args for this fn and show them
-      // For wrapper fns (those with base-fn-name different from name), look up parent's args
-      if (schema) {
-        let argSchemaSourceId = schema.id;
-        const isWrapper = schema['base-fn-name'] && schema.name !== schema['base-fn-name'];
-        if (isWrapper) {
-          // Find the parent base function's schema by name
-          const parentSchema = Array.from(lookups.fnSchemaMap.values()).find(
-            s => s.name === schema['base-fn-name']
-          );
-          if (parentSchema) {
-            argSchemaSourceId = parentSchema.id;
+      // Get args for this fn
+      const args = lookups.argsByFn.get(fnId) || [];
+
+      args.forEach(arg => {
+        const argName = arg.name;
+        const hasValue = arg.value !== null && arg.value !== undefined;
+        const hasRef = !!arg['ref-id'];
+
+        if (hasRef) {
+          // Reference to another fn - edge to that fn
+          const refFnId = arg['ref-id'];
+          edges.push({
+            data: {
+              id: 'e-' + arg.id,
+              source: fnId,
+              target: refFnId,
+              type: 'arg-ref',
+              argName: argName
+            }
+          });
+          // Recurse into dependency
+          if (currentDepth < depth) {
+            collectFn(refFnId, currentDepth + 1, false);
           }
+        } else if (hasValue) {
+          // Literal value - show as arg node
+          const argNodeId = 'arg-' + fnId + '-' + arg.id;
+          let displayValue = JSON.stringify(arg.value);
+          if (displayValue.length > 20) {
+            displayValue = displayValue.substring(0, 17) + '...';
+          }
+          nodes.push({
+            data: {
+              id: argNodeId,
+              label: displayValue,
+              type: 'arg',
+              argId: arg.id,
+              rawValue: arg.value
+            }
+          });
+          edges.push({
+            data: {
+              id: 'e-arg-' + fnId + '-' + arg.id,
+              source: fnId,
+              target: argNodeId,
+              type: 'arg-literal',
+              argName: argName
+            }
+          });
+        } else {
+          // Unset arg - show as placeholder
+          const placeholderId = 'unset-' + fnId + '-' + arg.id;
+          const argType = arg.type || 'any';
+          nodes.push({
+            data: {
+              id: placeholderId,
+              label: argType,
+              type: 'fn',
+              isPlaceholder: true
+            }
+          });
+          edges.push({
+            data: {
+              id: 'e-unset-' + fnId + '-' + arg.id,
+              source: fnId,
+              target: placeholderId,
+              type: 'arg-unset',
+              argName: argName
+            }
+          });
         }
-        const schemaArgs = (data.arg_schemas || []).filter(as => as['fn-schema-id'] === argSchemaSourceId);
-        const boundArgs = lookups.fnArgMap.get(fnId) || [];
-        const boundBySchemaId = new Map();
-        boundArgs.forEach(ba => boundBySchemaId.set(ba.argSchemaId, ba.argValue));
+      });
 
-        schemaArgs.forEach(as => {
-          const argValue = boundBySchemaId.get(as.id);
-          const argName = as.name;
-
-          if (argValue) {
-            // Arg has a value - check if it's a fn reference or literal
-            const value = argValue.value;
-            const fnUsageId = argValue['fn-usage-id'];  // New FK-based reference
-            let targetFnId = null;
-
-            // First check new FK-based fn-usage-id field
-            if (fnUsageId) {
-              const fu = lookups.fnUsageMap.get(fnUsageId);
-              if (fu) {
-                targetFnId = fu['fn-id'];
-              }
-            }
-            // Fallback: Value is stored as a plain UUID string referencing fn or fn_usage
-            else if (typeof value === 'string' && value.match(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)) {
-              // First check if it's a fn_usage reference
-              const fu = lookups.fnUsageMap.get(value);
-              if (fu) {
-                targetFnId = fu['fn-id'];
-              } else if (lookups.fnMap.has(value)) {
-                // Direct fn reference
-                targetFnId = value;
-              }
-            }
-
-            if (targetFnId) {
-              // Both fn and fn-usage references: edge directly to the target fn
-              edges.push({
-                data: {
-                  id: 'e-' + argValue.id,
-                  source: fnId,
-                  target: targetFnId,
-                  type: 'arg',
-                  argName: argName
-                }
-              });
-              // Recurse into dependency
-              if (currentDepth < depth) {
-                collectFn(targetFnId, currentDepth + 1, false);
-              }
-            } else {
-              // It's a literal value - show as arg node
-              const argNodeId = 'arg-' + fnId + '-' + as.id;
-              let displayValue = JSON.stringify(value);
-              if (displayValue.length > 20) {
-                displayValue = displayValue.substring(0, 17) + '...';
-              }
-              nodes.push({
-                data: {
-                  id: argNodeId,
-                  label: displayValue,
-                  type: 'arg',
-                  argSchemaId: as.id,
-                  rawValue: value
-                }
-              });
-              edges.push({
-                data: {
-                  id: 'e-arg-' + fnId + '-' + as.id,
-                  source: fnId,
-                  target: argNodeId,
-                  type: 'arg-literal',
-                  argName: argName
-                }
-              });
-            }
-          } else {
-            // Arg is unset (free argument)
-            const placeholderId = 'unset-' + fnId + '-' + as.id;
-            const argType = as.type || 'any';
-            nodes.push({
-              data: {
-                id: placeholderId,
-                label: argType,
-                type: 'fn',
-                isBase: false,
-                isPlaceholder: true
-              }
-            });
-            edges.push({
-              data: {
-                id: 'e-unset-' + fnId + '-' + as.id,
-                source: fnId,
-                target: placeholderId,
-                type: 'arg-unset',
-                argName: argName
-              }
-            });
-          }
-        });
+      // Show inheritance edge to parent
+      if (isComposed && fn['parent-id']) {
+        // We don't add parent as a separate node since it may already be added
+        // Just note the inheritance in the label
       }
     }
 
@@ -634,7 +531,8 @@
     [:div {:class "header"}
      [:h1 "GRAPHDEN"]]
     [:div {:class "toolbar"}
-     [:button {:onclick "showCreateModal('fn')"} "+ fn"]]
+     [:button {:onclick "showCreateModal('fn')"} "+ fn"]
+     [:button {:onclick "showCreateModal('arg')"} "+ arg"]]
     [:div {:class "graph-container"}
      [:div {:id "cy"}]]]
    ;; Modal
@@ -642,7 +540,7 @@
     [:div {:class "modal"}
      [:div {:class "modal-header"}
       [:h3 "Create Entity"]
-      [:button {:class "close-btn" :onclick "hideModal()"} "×"]]
+      [:button {:class "close-btn" :onclick "hideModal()"} "x"]]
      [:div {:class "modal-body" :id "modal-content"}]]]])
 
 
@@ -657,10 +555,7 @@
    - html-page: Creates HTML structure with HTMX + Cytoscape
    - html-handler: Wraps HTML as Ring handler
    - router: Routes requests to handlers
-   - http-server: Serves HTTP on port
-
-   Routes are built using explicit collection functions (pair, assoc-any,
-   conj-any) to compose fn references into data structures."
+   - http-server: Serves HTTP on port"
   [;; Head elements with scripts
    {:name :editor-head
     :parent :with-htmx
@@ -681,7 +576,6 @@
                      [:script editor-script]]}}
 
    ;; Handler returns Ring response with HTML
-   ;; Two-step composition: html-response creates response, make-handler wraps as handler
    {:name :editor-response
     :parent :html-response
     :args {:body :editor-page>}}
@@ -712,8 +606,7 @@
     :parent :delete-entity-api-handler
     :args {}}
 
-   ;; Health check - composed from primitives
-   ;; Chain: health-status -> to-json-string -> ring-response -> make-handler
+   ;; Health check
    {:name :health-data
     :parent :health-status
     :args {}}
@@ -732,7 +625,7 @@
     :parent :make-handler
     :args {:response :health-response>}}
 
-   ;; Favicon - SVG graph icon, monochrome style matching UI
+   ;; Favicon - SVG graph icon
    {:name :favicon-response
     :parent :ring-response
     :args {:status 200
@@ -745,10 +638,8 @@
     :args {:response :favicon-response>}}
 
    ;; === Route Building ===
-   ;; Routes are built explicitly using pair/assoc-any/conj-any
-   ;; Each route is: [path {method {opts}}]
 
-   ;; Health route: ["/health" {"get" {"handler" health-handler}}]
+   ;; Health route
    {:name :health-route-opts
     :parent :assoc-any
     :args {:m {}, :k "handler", :v :health-handler>}}
@@ -847,7 +738,7 @@
     :parent :pair
     :args {:a "/api/entities/:type/:id", :b :delete-entity-route-methods>}}
 
-   ;; Build routes vector using conj-any
+   ;; Build routes vector
    {:name :routes-0
     :parent :conj-any
     :args {:coll [], :x :health-route>}}

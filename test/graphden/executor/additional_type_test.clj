@@ -1,6 +1,12 @@
 (ns graphden.executor.additional-type-test
   "Additional type validation tests for numeric, jsonb, bytes, timestamptz, enum, uuid.
-   Tests validation of provided args (free args) - DB values are not set so validation occurs."
+   Tests validation of provided args (free args) - DB values are not set so validation occurs.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -23,22 +29,21 @@
               :use-numeric
               (fn [{:keys [n]} _ctx]
                 @n))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-numeric"
-                                       :returned-type :numeric})
-          n-arg (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id fn-schema)
+          ;; Create base fn (parent-id=nil)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-numeric"
+                                     :parent-id nil
+                                     :return-type :numeric})
+          n-arg (sp/create-entity storage :arg
+                                  {:fn-id (:id base-fn)
                                    :name "n"
                                    :type :numeric
-                                   :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-numeric"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free, test provides value via execute
+                                   :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'n': expected numeric"
-            (exec/execute ctx (:id fn-rec) {(:id n-arg) "not-a-number"})))
+            (exec/execute ctx (:id base-fn) {(:id n-arg) "not-a-number"})))
       (sp/close storage)))
 
   (testing "accepts valid numeric values"
@@ -47,20 +52,18 @@
               :use-numeric
               (fn [{:keys [n]} _ctx]
                 @n))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-numeric"
-                                       :returned-type :numeric})
-          n-arg (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-numeric"
+                                     :parent-id nil
+                                     :return-type :numeric})
+          n-arg (sp/create-entity storage :arg
+                                  {:fn-id (:id base-fn)
                                    :name "n"
                                    :type :numeric
-                                   :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-numeric"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                   :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
-      (is (= 2.718M (exec/execute ctx (:id fn-rec) {(:id n-arg) 2.718M})))
+      (is (= 2.718M (exec/execute ctx (:id base-fn) {(:id n-arg) 2.718M})))
       (sp/close storage))))
 
 
@@ -73,21 +76,19 @@
               :use-jsonb
               (fn [{:keys [data]} _ctx]
                 @data))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-jsonb"
-                                       :returned-type :jsonb})
-          data-arg (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-jsonb"
+                                     :parent-id nil
+                                     :return-type :jsonb})
+          data-arg (sp/create-entity storage :arg
+                                     {:fn-id (:id base-fn)
                                       :name "data"
                                       :type :jsonb
-                                      :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-jsonb"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                      :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
       ;; Strings are valid JSON values
-      (is (= "a-string-value" (exec/execute ctx (:id fn-rec) {(:id data-arg) "a-string-value"})))
+      (is (= "a-string-value" (exec/execute ctx (:id base-fn) {(:id data-arg) "a-string-value"})))
       (sp/close storage)))
 
   (testing "accepts valid jsonb values (map)"
@@ -96,20 +97,18 @@
               :use-jsonb
               (fn [{:keys [data]} _ctx]
                 @data))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-jsonb"
-                                       :returned-type :jsonb})
-          data-arg (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-jsonb"
+                                     :parent-id nil
+                                     :return-type :jsonb})
+          data-arg (sp/create-entity storage :arg
+                                     {:fn-id (:id base-fn)
                                       :name "data"
                                       :type :jsonb
-                                      :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-jsonb"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                      :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
-      (is (= {:x 1 :y 2} (exec/execute ctx (:id fn-rec) {(:id data-arg) {:x 1 :y 2}})))
+      (is (= {:x 1 :y 2} (exec/execute ctx (:id base-fn) {(:id data-arg) {:x 1 :y 2}})))
       (sp/close storage)))
 
   (testing "accepts valid jsonb values (vector)"
@@ -118,20 +117,18 @@
               :use-jsonb
               (fn [{:keys [data]} _ctx]
                 @data))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-jsonb"
-                                       :returned-type :jsonb})
-          data-arg (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-jsonb"
+                                     :parent-id nil
+                                     :return-type :jsonb})
+          data-arg (sp/create-entity storage :arg
+                                     {:fn-id (:id base-fn)
                                       :name "data"
                                       :type :jsonb
-                                      :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-jsonb"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                      :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
-      (is (= [4 5 6] (exec/execute ctx (:id fn-rec) {(:id data-arg) [4 5 6]})))
+      (is (= [4 5 6] (exec/execute ctx (:id base-fn) {(:id data-arg) [4 5 6]})))
       (sp/close storage))))
 
 
@@ -142,22 +139,20 @@
               :use-bytes
               (fn [{:keys [data]} _ctx]
                 @data))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-bytes"
-                                       :returned-type :bytes})
-          data-arg (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-bytes"
+                                     :parent-id nil
+                                     :return-type :bytes})
+          data-arg (sp/create-entity storage :arg
+                                     {:fn-id (:id base-fn)
                                       :name "data"
                                       :type :bytes
-                                      :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-bytes"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                      :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'data': expected bytes"
-            (exec/execute ctx (:id fn-rec) {(:id data-arg) "not-bytes"})))
+            (exec/execute ctx (:id base-fn) {(:id data-arg) "not-bytes"})))
       (sp/close storage)))
 
   (testing "accepts valid bytes values"
@@ -166,20 +161,18 @@
               :use-bytes
               (fn [{:keys [data]} _ctx]
                 (vec @data)))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-bytes"
-                                       :returned-type :jsonb})
-          data-arg (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-bytes"
+                                     :parent-id nil
+                                     :return-type :jsonb})
+          data-arg (sp/create-entity storage :arg
+                                     {:fn-id (:id base-fn)
                                       :name "data"
                                       :type :bytes
-                                      :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-bytes"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                      :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
-      (is (= [4 5 6] (exec/execute ctx (:id fn-rec) {(:id data-arg) (byte-array [4 5 6])})))
+      (is (= [4 5 6] (exec/execute ctx (:id base-fn) {(:id data-arg) (byte-array [4 5 6])})))
       (sp/close storage))))
 
 
@@ -190,22 +183,20 @@
               :use-timestamp
               (fn [{:keys [ts]} _ctx]
                 @ts))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-timestamp"
-                                       :returned-type :timestamptz})
-          ts-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-timestamp"
+                                     :parent-id nil
+                                     :return-type :timestamptz})
+          ts-arg (sp/create-entity storage :arg
+                                   {:fn-id (:id base-fn)
                                     :name "ts"
                                     :type :timestamptz
-                                    :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-timestamp"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                    :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'ts': expected timestamptz"
-            (exec/execute ctx (:id fn-rec) {(:id ts-arg) "not-a-timestamp"})))
+            (exec/execute ctx (:id base-fn) {(:id ts-arg) "not-a-timestamp"})))
       (sp/close storage)))
 
   (testing "accepts valid Instant value"
@@ -214,21 +205,19 @@
               :use-timestamp
               (fn [{:keys [ts]} _ctx]
                 @ts))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-timestamp"
-                                       :returned-type :timestamptz})
-          ts-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-timestamp"
+                                     :parent-id nil
+                                     :return-type :timestamptz})
+          ts-arg (sp/create-entity storage :arg
+                                   {:fn-id (:id base-fn)
                                     :name "ts"
                                     :type :timestamptz
-                                    :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-timestamp"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                    :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})
           test-instant (java.time.Instant/parse "2024-01-01T00:00:00Z")]
-      (is (= test-instant (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-instant})))
+      (is (= test-instant (exec/execute ctx (:id base-fn) {(:id ts-arg) test-instant})))
       (sp/close storage)))
 
   (testing "accepts valid Date value"
@@ -237,21 +226,19 @@
               :use-timestamp
               (fn [{:keys [ts]} _ctx]
                 @ts))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-timestamp"
-                                       :returned-type :timestamptz})
-          ts-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-timestamp"
+                                     :parent-id nil
+                                     :return-type :timestamptz})
+          ts-arg (sp/create-entity storage :arg
+                                   {:fn-id (:id base-fn)
                                     :name "ts"
                                     :type :timestamptz
-                                    :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-timestamp"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                    :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})
           test-date (java.util.Date. 0)]
-      (is (= test-date (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-date})))
+      (is (= test-date (exec/execute ctx (:id base-fn) {(:id ts-arg) test-date})))
       (sp/close storage))))
 
 
@@ -262,22 +249,20 @@
               :use-uuid
               (fn [{:keys [id]} _ctx]
                 @id))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-uuid"
-                                       :returned-type :uuid})
-          id-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-uuid"
+                                     :parent-id nil
+                                     :return-type :uuid})
+          id-arg (sp/create-entity storage :arg
+                                   {:fn-id (:id base-fn)
                                     :name "id"
                                     :type :uuid
-                                    :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-uuid"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                    :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Type mismatch for argument 'id': expected uuid"
-            (exec/execute ctx (:id fn-rec) {(:id id-arg) "not-a-uuid"})))
+            (exec/execute ctx (:id base-fn) {(:id id-arg) "not-a-uuid"})))
       (sp/close storage)))
 
   (testing "accepts valid UUID value"
@@ -286,19 +271,17 @@
               :use-uuid
               (fn [{:keys [id]} _ctx]
                 @id))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-uuid"
-                                       :returned-type :uuid})
-          id-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id fn-schema)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "use-uuid"
+                                     :parent-id nil
+                                     :return-type :uuid})
+          id-arg (sp/create-entity storage :arg
+                                   {:fn-id (:id base-fn)
                                     :name "id"
                                     :type :uuid
-                                    :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-uuid"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free
+                                    :required true})
+          ;; No value set - arg is free
           ctx (exec/create-context {:storage storage})
           test-uuid #uuid "12345678-1234-1234-1234-123456789abc"]
-      (is (= test-uuid (exec/execute ctx (:id fn-rec) {(:id id-arg) test-uuid})))
+      (is (= test-uuid (exec/execute ctx (:id base-fn) {(:id id-arg) test-uuid})))
       (sp/close storage))))

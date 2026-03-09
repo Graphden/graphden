@@ -2,7 +2,13 @@
   "Shared test setup for executor tests.
 
    Provides helper functions for creating test storage and setting up
-   common test fixtures using PostgreSQL testcontainers."
+   common test fixtures using PostgreSQL testcontainers.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [graphden.executor.interface :as exec]
     [graphden.schema.graph.schema :as gds]
@@ -50,60 +56,57 @@
 
 
 ;; ============================================================================
-;; Test Helpers
+;; Test Helpers - 2-Entity Schema
 ;; ============================================================================
 
-(defn create-fn-usage!
-  "Creates a fn-usage entity pointing to a fn.
-   Returns the fn-usage id (for use as arg-value :value).
+(defn create-arg!
+  "Creates an arg entity with the given properties.
 
-   Use this when you want the referenced fn to be EXECUTED and its
-   result used as the argument value. If you want to pass the fn
-   itself (e.g., for HOF), use the fn-id directly.
+   For base-fn args (no inheritance): source-id should be nil
+   For composed fn args: source-id points to parent's arg
 
-   Optional second arg is the result-name for deduplication (defaults to random UUID string)."
-  ([storage fn-id]
-   (create-fn-usage! storage fn-id (str (random-uuid))))
-  ([storage fn-id result-name]
-   (:id (sp/create-entity storage :fn-usage {:fn-id fn-id :name result-name}))))
-
-
-(defn create-arg-value-with-binding!
-  "Creates arg-value with a literal value and fn-arg binding. Returns the arg-value.
-
-   For fn-usage references (both execution and HOF), use
-   create-arg-value-with-fn-usage-binding! instead."
-  [storage fn-id arg-schema-id value]
-  (let [av (sp/create-entity storage :arg-value
-                             {:arg-schema-id arg-schema-id
-                              :value value})]
-    (sp/create-entity storage :fn-arg
-                      {:fn-id fn-id
-                       :arg-schema-id arg-schema-id
-                       :arg-value-id (:id av)})
-    av))
+   Options:
+   - :value - literal JSONB value
+   - :ref-id - FK to fn (execute and use result)
+   - :is-fn - pass fn-id directly (for HOF)"
+  [storage fn-id {:keys [name type required is-fn source-id value ref-id]
+                  :or {required true is-fn false}}]
+  (sp/create-entity storage :arg
+                    (cond-> {:fn-id fn-id
+                             :name name
+                             :type type
+                             :required required
+                             :is-fn is-fn}
+                      source-id (assoc :source-id source-id)
+                      (some? value) (assoc :value value)
+                      ref-id (assoc :ref-id ref-id))))
 
 
-(defn create-arg-value-with-fn-usage-binding!
-  "Creates arg-value referencing a fn-usage and fn-arg binding. Returns the arg-value.
+(defn create-composed-fn!
+  "Creates a composed fn with parent-id set.
+   Returns the fn entity."
+  [storage name parent-id]
+  (sp/create-entity storage :fn {:name name :parent-id parent-id}))
 
-   Behavior depends on arg-schema.first-class flag:
-   - first-class=false: execute fn-usage and use result
-   - first-class=true: pass fn-id directly (for HOF like map, filter, reduce)"
-  [storage fn-id arg-schema-id fn-usage-id]
-  (let [av (sp/create-entity storage :arg-value
-                             {:arg-schema-id arg-schema-id
-                              :fn-usage-id fn-usage-id})]
-    (sp/create-entity storage :fn-arg
-                      {:fn-id fn-id
-                       :arg-schema-id arg-schema-id
-                       :arg-value-id (:id av)})
-    av))
+
+(defn create-base-fn!
+  "Creates a base fn (parent-id=nil).
+   The name field is used for registry lookup.
+   Returns the fn entity."
+  [storage name return-type]
+  (sp/create-entity storage :fn
+                    {:name name
+                     :return-type return-type}))
 
 
 (defn setup-add-function!
   "Sets up an 'add' function that adds two numbers.
-   Returns {:fn-schema fn-schema :arg-a arg-schema-a :arg-b arg-schema-b :fn fn-rec}"
+   Returns {:fn base-fn :arg-a arg-a :arg-b arg-b :composed-fn composed-fn}
+
+   In 2-entity schema:
+   - Creates base fn with parent-id=nil
+   - Creates args owned by base fn
+   - Creates composed fn with parent-id=base-fn-id"
   [storage]
   ;; Register the base function (args are delays, use @ to deref)
   (exec/register-base-fn!
@@ -111,26 +114,18 @@
     (fn [{:keys [a b]} _ctx]
       (+ @a @b)))
 
-  ;; Create fn-schema
-  (let [fn-schema (sp/create-entity storage :fn-schema
-                                    {:name "add"
-                                     :returned-type :int})
-        ;; Create arg-schemas
-        arg-a (sp/create-entity storage :arg-schema
-                                {:fn-schema-id (:id fn-schema)
-                                 :name "a"
-                                 :type :int
-                                 :required true :first-class false})
-        arg-b (sp/create-entity storage :arg-schema
-                                {:fn-schema-id (:id fn-schema)
-                                 :name "b"
-                                 :type :int
-                                 :required true :first-class false})
-        ;; Create fn instance
-        fn-rec (sp/create-entity storage :fn
-                                 {:name "my-add"
-                                  :fn-schema-id (:id fn-schema)})]
-    {:fn-schema fn-schema
+  ;; Create base fn - keep name "add" to match registry keyword
+  ;; Composed fn gets unique name to avoid conflicts
+  (let [unique-suffix (str (random-uuid))
+        base-fn (create-base-fn! storage "add" :int)
+        ;; Create args for base fn
+        arg-a (create-arg! storage (:id base-fn)
+                           {:name "a" :type :int :required true :is-fn false})
+        arg-b (create-arg! storage (:id base-fn)
+                           {:name "b" :type :int :required true :is-fn false})
+        ;; Create composed fn instance with unique name
+        composed-fn (create-composed-fn! storage (str "my-add-" unique-suffix) (:id base-fn))]
+    {:fn base-fn
      :arg-a arg-a
      :arg-b arg-b
-     :fn-rec fn-rec}))
+     :composed-fn composed-fn}))

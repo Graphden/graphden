@@ -158,25 +158,13 @@
 (defprotocol GraphConstraints
   "Constraints for graph integrity."
 
-  (validate-arg-schema-belongs-to-fn!
-    [this fn-id arg-schema-id]
-    "Validates that arg-schema belongs to the fn-schema of this fn.")
-
   (validate-no-dependency-cycle!
-    [this owner-fn-id value-fn-id]
-    "Validates that referencing value-fn does not create dependency cycle."))
+    [this owner-fn-id ref-fn-id]
+    "Validates that referencing ref-fn does not create dependency cycle."))
 
 
 (defprotocol ConstraintHelpers
   "Helper protocol for constraint validation."
-
-  (get-fn-schema-id-for-fn
-    [this fn-id]
-    "Returns the fn-schema-id for the given fn-id.")
-
-  (get-fn-schema-id-for-arg-schema
-    [this arg-schema-id]
-    "Returns the fn-schema-id for the given arg-schema-id.")
 
   (collect-dependency-chain
     [this fn-id]
@@ -230,40 +218,20 @@
     [this fn-id]
     "Returns fn record for fn-id.")
 
-  (graph-get-fn-schema
-    [this fn-schema-id]
-    "Returns fn-schema record for fn-schema-id.")
-
-  (graph-get-arg-schemas
-    [this fn-schema-id]
-    "Returns map of arg-schemas for fn-schema-id.")
-
-  (graph-get-resolved-args
+  (graph-get-args
     [this fn-id]
-    "Returns map of resolved arg-values for fn-id.")
-
-  (graph-get-fn-usage
-    [this fn-usage-id]
-    "Returns fn-usage record for fn-usage-id."))
+    "Returns args for fn-id."))
 
 
 ;; ============================================================================
 ;; CONSTRAINT HELPER IMPLEMENTATIONS
 ;; ============================================================================
 
-(defn validate-arg-schema-belongs-to-fn-impl
-  "Shared implementation of arg-schema-belongs-to-fn validation."
-  [helpers fn-id arg-schema-id]
-  (constraints/validate-arg-schema-belongs-to-fn-impl
-    get-fn-schema-id-for-fn get-fn-schema-id-for-arg-schema
-    helpers fn-id arg-schema-id))
-
-
 (defn validate-no-dependency-cycle-impl
   "Shared implementation of no-dependency-cycle validation."
-  [helpers owner-fn-id value-fn-id]
+  [helpers owner-fn-id ref-fn-id]
   (constraints/validate-no-dependency-cycle-impl
-    collect-dependency-chain helpers owner-fn-id value-fn-id))
+    collect-dependency-chain helpers owner-fn-id ref-fn-id))
 
 
 ;; ============================================================================
@@ -276,18 +244,8 @@
   (graph-get-fn [this fn-id]
     (get (:fns this) fn-id))
 
-  (graph-get-fn-schema [this fn-schema-id]
-    (get (:fn-schemas this) fn-schema-id))
-
-  (graph-get-arg-schemas [this fn-schema-id]
-    ;; O(1) lookup via pre-built index instead of O(n) filter
-    (get (:arg-schemas-by-fn-schema this) fn-schema-id {}))
-
-  (graph-get-resolved-args [this fn-id]
-    (get (:resolved-args this) fn-id))
-
-  (graph-get-fn-usage [this fn-usage-id]
-    (get (:fn-usages this) fn-usage-id)))
+  (graph-get-args [this fn-id]
+    (get (:args-by-fn this) fn-id [])))
 
 
 ;; ============================================================================
@@ -373,40 +331,6 @@
 
 
 ;; === Sensitive Field Registry ===
-;;
-;; Extensible system for identifying and redacting sensitive data in logs
-;; and error messages. Use these functions to protect PII, credentials,
-;; and other sensitive information from appearing in logs.
-;;
-;; Default protected fields: password, secret, token, api-key, auth-token,
-;; access-key, private-key, jdbc-url, connection-string, credentials, etc.
-;;
-;; Usage examples:
-;;
-;;   ;; Register a custom field name as sensitive
-;;   (register-sensitive-field-name! :patient-medical-id)
-;;   (register-sensitive-field-name! :social-security-number)
-;;
-;;   ;; Register a pattern for field name matching
-;;   (register-sensitive-field-pattern! #"(?i)hipaa[_-]?.*")
-;;   (register-sensitive-field-pattern! #"(?i)gdpr[_-]?data")
-;;
-;;   ;; Register a predicate for complex logic
-;;   (register-sensitive-field-predicate!
-;;     (fn [field-kw] (= "pii" (namespace field-kw))))
-;;
-;;   ;; Check if a field is sensitive
-;;   (sensitive-field? :password)        ; => true
-;;   (sensitive-field? :user-name)       ; => false
-;;   (sensitive-field? :patient-medical-id) ; => true (after registration)
-;;
-;;   ;; Redact sensitive values in maps
-;;   (redact-sensitive-map {:user "john" :password "secret123"})
-;;   ; => {:user "john" :password "[REDACTED]"}
-;;
-;;   ;; Deep redaction for nested structures
-;;   (redact-sensitive-deep {:config {:db {:password "x"}}})
-;;   ; => {:config {:db {:password "[REDACTED]"}}}
 
 (def register-sensitive-field-name!
   "Registers an explicit field name as sensitive for redaction.
@@ -443,13 +367,7 @@
 
 (defmacro with-sensitive-field-registry
   "Executes body with isolated sensitive field registry.
-   Automatically saves and restores registry state for test isolation.
-
-   Example:
-     (with-sensitive-field-registry
-       (register-sensitive-field-name! :test-field)
-       (is (sensitive-field? :test-field)))
-     ;; :test-field is no longer registered"
+   Automatically saves and restores registry state for test isolation."
   [& body]
   `(errors/with-sensitive-field-registry (do ~@body)))
 
@@ -573,7 +491,7 @@
   (graph/execution-graph? x))
 
 
-(def extract-uuid-refs-from-arg-values graph/extract-uuid-refs-from-arg-values)
+(def extract-fn-refs-from-args graph/extract-fn-refs-from-args)
 
 
 ;; === ExecutionGraph accessor functions ===
@@ -584,24 +502,14 @@
   graph/get-graph-fns)
 
 
-(def get-graph-fn-schemas
-  "Returns the fn-schemas map from an execution graph."
-  graph/get-graph-fn-schemas)
+(def get-graph-args
+  "Returns all args from an execution graph."
+  graph/get-graph-args)
 
 
-(def get-graph-arg-schemas
-  "Returns the arg-schemas map from an execution graph."
-  graph/get-graph-arg-schemas)
-
-
-(def get-graph-resolved-args
-  "Returns the resolved-args map from an execution graph."
-  graph/get-graph-resolved-args)
-
-
-(def get-graph-fn-usages
-  "Returns the fn-usages map from an execution graph."
-  graph/get-graph-fn-usages)
+(def get-graph-args-for-fn
+  "Returns args for a specific fn-id from an execution graph."
+  graph/get-graph-args-for-fn)
 
 
 ;; === Constraint limits re-exports ===
@@ -628,15 +536,6 @@
 
 ;; === Query timeout re-exports ===
 ;; === Dynamic Configuration Vars ===
-;;
-;; ARCHITECTURE NOTE: Dynamic vars are re-exported from config.clj to provide
-;; a unified API through this interface. Each var here shadows its canonical
-;; definition in config.clj. The wrapper functions (with-query-timeout,
-;; with-regex-limits) bind BOTH sets of vars to ensure consistent behavior
-;; regardless of which namespace the consuming code imports.
-;;
-;; Canonical source: graphden.storage.protocol.config
-;; This interface: re-exports for sp/* convenience
 
 (def ^:dynamic *query-timeout-ms*
   "Timeout for storage queries in milliseconds. Can be rebound per-thread.
@@ -675,9 +574,6 @@
 
 
 ;; === Regex safety configuration re-exports ===
-;;
-;; These are independent dynamic vars that can be bound separately from config.
-;; Use with-regex-limits to bind both sets of vars for full compatibility.
 
 (def ^:dynamic *max-regex-length*
   "Maximum regex pattern length to prevent complex pattern attacks. Default: 100."
@@ -729,9 +625,6 @@
 
 
 ;; === Centralized Limits Re-exports ===
-;;
-;; All hardcoded limits from config.clj for easy access.
-;; See config.clj for documentation and rationale.
 
 ;; Identifier limits
 (def max-identifier-length

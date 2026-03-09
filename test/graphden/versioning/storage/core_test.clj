@@ -1,4 +1,11 @@
 (ns ^:integration graphden.versioning.storage.core-test
+  "Tests for versioned storage with 2-entity schema.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.malli.core :as mds]
@@ -55,80 +62,70 @@
 
 ;; === Basic CRUD on Versioned Entities ===
 
-(deftest fn-schema-crud-test
-  (testing "create and read fn-schema"
-    (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "test-schema" :returned-type :int})]
-      (is (some? (:id fs)))
-      (is (= "test-schema" (:name fs)))
-      (is (= :int (:returned-type fs)))
-
-      (testing "read returns same data"
-        (let [read-fs (sp/read-entity storage :fn-schema (:id fs))]
-          (is (= "test-schema" (:name read-fs)))
-          (is (= :int (:returned-type read-fs))))))))
-
-
 (deftest fn-crud-test
   (testing "create and read fn entity"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "test-fn" :fn-schema-id (:id fs)})]
+                                   {:name "test-fn" :parent-id nil :return-type :int})]
       (is (some? (:id fn-rec)))
       (is (= "test-fn" (:name fn-rec)))
-      (is (= (:id fs) (:fn-schema-id fn-rec)))
+      (is (nil? (:parent-id fn-rec)))
+      (is (= :int (:return-type fn-rec)))
 
       (testing "read returns same record"
         (let [read-fn (sp/read-entity storage :fn (:id fn-rec))]
           (is (= "test-fn" (:name read-fn)))
-          (is (= (:id fs) (:fn-schema-id read-fn))))))))
+          (is (nil? (:parent-id read-fn))))))))
 
 
-(deftest arg-schema-crud-test
-  (testing "create and read arg-schema with identity field fn-schema-id"
+(deftest fn-with-parent-crud-test
+  (testing "create composed fn with parent-id"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})]
-      (is (some? (:id as)))
-      (is (= (:id fs) (:fn-schema-id as)))
-      (is (= "x" (:name as)))
-      (is (= :int (:type as)))
-      (is (true? (:required as)))
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base-add" :parent-id nil :return-type :int})
+          composed-fn (sp/create-entity storage :fn
+                                        {:name "add-1-2" :parent-id (:id base-fn) :return-type :int})]
+      (is (some? (:id composed-fn)))
+      (is (= (:id base-fn) (:parent-id composed-fn)))
 
-      (testing "read preserves fn-schema-id from identity"
-        (let [read-as (sp/read-entity storage :arg-schema (:id as))]
-          (is (= (:id fs) (:fn-schema-id read-as)))
-          (is (= "x" (:name read-as))))))))
+      (testing "read preserves parent-id"
+        (let [read-fn (sp/read-entity storage :fn (:id composed-fn))]
+          (is (= (:id base-fn) (:parent-id read-fn))))))))
 
 
-(deftest fn-arg-crud-test
-  (testing "create and read fn-arg"
+(deftest arg-crud-test
+  (testing "create and read arg entity"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "my-fn" :fn-schema-id (:id fs)})
-          av (sp/create-entity storage :arg-value
-                               {:arg-schema-id (:id as) :value 42})
-          fa (sp/create-entity storage :fn-arg
-                               {:fn-id (:id fn-rec) :arg-schema-id (:id as)
-                                :arg-value-id (:id av)})]
-      (is (some? (:id fa)))
-      (is (= (:id fn-rec) (:fn-id fa)))
-      (is (= (:id as) (:arg-schema-id fa)))
-      (is (= (:id av) (:arg-value-id fa)))
+                                   {:name "my-fn" :parent-id nil :return-type :int})
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id fn-rec) :name "x" :type :int :required true :is-fn false :value 42})]
+      (is (some? (:id arg)))
+      (is (= (:id fn-rec) (:fn-id arg)))
+      (is (= "x" (:name arg)))
+      (is (= :int (:type arg)))
+      (is (true? (:required arg)))
+      (is (= 42 (:value arg)))
 
-      (testing "query fn-arg by fn-id"
-        (let [found (sp/query-entities storage :fn-arg {:fn-id (:id fn-rec)})]
+      (testing "query arg by fn-id"
+        (let [found (sp/query-entities storage :arg {:fn-id (:id fn-rec)})]
           (is (= 1 (count found)))
-          (is (= (:id fa) (:id (first found)))))))))
+          (is (= (:id arg) (:id (first found)))))))))
+
+
+(deftest arg-with-ref-id-test
+  (testing "create arg with ref-id reference"
+    (let [storage (create-test-storage)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base" :parent-id nil :return-type :int})
+          ref-fn (sp/create-entity storage :fn
+                                   {:name "ref-target" :parent-id nil :return-type :int})
+          composed-fn (sp/create-entity storage :fn
+                                        {:name "composed" :parent-id (:id base-fn) :return-type :int})
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id composed-fn) :name "x" :type :int
+                                 :required true :is-fn false :ref-id (:id ref-fn)})]
+      (is (= (:id ref-fn) (:ref-id arg))))))
 
 
 ;; === Update Creates New Version ===
@@ -136,28 +133,27 @@
 (deftest update-creates-new-version-test
   (testing "update appends version, read returns latest"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "original" :fn-schema-id (:id fs)})
+                                   {:name "original" :parent-id nil :return-type :int})
           updated (sp/update-entity storage :fn (:id fn-rec)
                                     {:name "updated"})]
       (is (= "updated" (:name updated)))
-      (is (= (:id fs) (:fn-schema-id updated)))
+      (is (nil? (:parent-id updated)))
       (is (= "updated" (:name (sp/read-entity storage :fn (:id fn-rec))))))))
 
 
-(deftest update-fn-schema-test
-  (testing "update fn-schema fields"
+(deftest update-arg-test
+  (testing "update arg value"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int :base-fn-name "add"})
-          updated (sp/update-entity storage :fn-schema (:id fs)
-                                    {:name "schema-v2" :impl-hash "abc123"})]
-      (is (= "schema-v2" (:name updated)))
-      (is (= "abc123" (:impl-hash updated)))
-      (is (= :int (:returned-type updated)))
-      (is (= "add" (:base-fn-name updated))))))
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "my-fn" :parent-id nil :return-type :int})
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id fn-rec) :name "x" :type :int
+                                 :required true :is-fn false :value 1})
+          updated (sp/update-entity storage :arg (:id arg)
+                                    {:value 99})]
+      (is (= 99 (:value updated)))
+      (is (= 99 (:value (sp/read-entity storage :arg (:id arg))))))))
 
 
 ;; === Delete on Branch ===
@@ -165,10 +161,8 @@
 (deftest delete-versioned-entity-test
   (testing "delete removes version records on current branch"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "to-delete" :fn-schema-id (:id fs)})]
+                                   {:name "to-delete" :parent-id nil :return-type :int})]
       (is (some? (sp/read-entity storage :fn (:id fn-rec))))
       (is (true? (sp/delete-entity storage :fn (:id fn-rec))))
       (is (nil? (sp/read-entity storage :fn (:id fn-rec)))))))
@@ -185,62 +179,30 @@
 (deftest query-versioned-entities-test
   (testing "query returns resolved entities"
     (let [storage (create-test-storage)
-          fs1 (sp/create-entity storage :fn-schema
-                                {:name "s1" :returned-type :int})
-          fs2 (sp/create-entity storage :fn-schema
-                                {:name "s2" :returned-type :text})
-          _ (sp/create-entity storage :fn {:name "fn1" :fn-schema-id (:id fs1)})
-          _ (sp/create-entity storage :fn {:name "fn2" :fn-schema-id (:id fs2)})
+          _ (sp/create-entity storage :fn {:name "fn1" :parent-id nil :return-type :int})
+          _ (sp/create-entity storage :fn {:name "fn2" :parent-id nil :return-type :text})
           all-fns (sp/query-entities storage :fn {})]
       (is (= 2 (count all-fns)))
 
       (testing "filter by version field"
         (is (= 1 (count (sp/query-entities storage :fn {:name "fn1"})))))
 
-      (testing "filter by identity+version field"
-        (is (= 1 (count (sp/query-entities storage :fn
-                                           {:fn-schema-id (:id fs1)}))))))))
+      (testing "filter by return-type"
+        (is (= 1 (count (sp/query-entities storage :fn {:return-type :int}))))))))
 
 
-(deftest query-arg-schemas-test
-  (testing "query arg-schemas by fn-schema-id"
+(deftest query-args-test
+  (testing "query args by fn-id"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id fs) :name "y" :type :text :required false :first-class false})
-          found (sp/query-entities storage :arg-schema {:fn-schema-id (:id fs)})]
-      (is (= 2 (count found)))
-      (is (every? #(= (:id fs) (:fn-schema-id %)) found)))))
-
-
-;; === Non-Versioned Entity Passthrough ===
-
-(deftest non-versioned-entity-passthrough-test
-  (testing "arg-value delegates directly to base storage"
-    (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          av (sp/create-entity storage :arg-value
-                               {:arg-schema-id (:id as) :value 42})]
-      (is (some? (:id av)))
-      (is (= 42 (:value av)))
-      (is (= 42 (:value (sp/read-entity storage :arg-value (:id av)))))))
-
-  (testing "fn-usage delegates directly"
-    (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "my-fn" :fn-schema-id (:id fs)})
-          cs (sp/create-entity storage :fn-usage
-                               {:fn-id (:id fn-rec) :name "cs1"})]
-      (is (some? (:id cs)))
-      (is (= (:id fn-rec) (:fn-id cs))))))
+                                   {:name "my-fn" :parent-id nil :return-type :int})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id fn-rec) :name "x" :type :int :required true :is-fn false})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id fn-rec) :name "y" :type :text :required false :is-fn false})
+          found (sp/query-entities storage :arg {:fn-id (:id fn-rec)})]
+      (is (= 2 (count found)))
+      (is (every? #(= (:id fn-rec) (:fn-id %)) found)))))
 
 
 ;; === Batch Operations ===
@@ -248,10 +210,8 @@
 (deftest batch-read-versioned-test
   (testing "read-entities returns resolved records for versioned entities"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          f1 (sp/create-entity storage :fn {:name "fn1" :fn-schema-id (:id fs)})
-          f2 (sp/create-entity storage :fn {:name "fn2" :fn-schema-id (:id fs)})
+          f1 (sp/create-entity storage :fn {:name "fn1" :parent-id nil :return-type :int})
+          f2 (sp/create-entity storage :fn {:name "fn2" :parent-id nil :return-type :int})
           results (sp/read-entities storage :fn [(:id f1) (:id f2)])]
       (is (= 2 (count results)))
       (is (= "fn1" (:name (get results (:id f1)))))
@@ -261,11 +221,9 @@
 (deftest batch-create-versioned-test
   (testing "create-entities works for versioned entities"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           results (sp/create-entities storage :fn
-                                      [{:name "fn1" :fn-schema-id (:id fs)}
-                                       {:name "fn2" :fn-schema-id (:id fs)}])]
+                                      [{:name "fn1" :parent-id nil :return-type :int}
+                                       {:name "fn2" :parent-id nil :return-type :int}])]
       (is (= 2 (count results)))
       (is (= #{"fn1" "fn2"} (set (map :name results)))))))
 
@@ -303,10 +261,8 @@
 (deftest branch-isolation-read-test
   (testing "child branch inherits parent entities"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "main-fn" :fn-schema-id (:id fs)})
+                                   {:name "main-fn" :parent-id nil :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))]
 
@@ -319,10 +275,8 @@
 (deftest branch-isolation-update-test
   (testing "update on child doesn't affect parent"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "main-fn" :fn-schema-id (:id fs)})
+                                   {:name "main-fn" :parent-id nil :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))]
 
@@ -339,12 +293,10 @@
 (deftest branch-isolation-create-test
   (testing "entity created on child not visible on parent"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           child-fn (sp/create-entity feature :fn
-                                     {:name "child-only" :fn-schema-id (:id fs)})]
+                                     {:name "child-only" :parent-id nil :return-type :int})]
 
       (testing "visible on child"
         (is (some? (sp/read-entity feature :fn (:id child-fn)))))
@@ -356,16 +308,14 @@
 (deftest branch-isolation-delete-test
   (testing "delete on child doesn't affect parent"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          ;; Entity created on main — will be visible on child via inheritance
+          ;; Entity created on main
           fn-main (sp/create-entity storage :fn
-                                    {:name "shared" :fn-schema-id (:id fs)})
+                                    {:name "shared" :parent-id nil :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
-          ;; Entity created only on the child branch
+          ;; Entity created only on child
           fn-child (sp/create-entity feature :fn
-                                     {:name "child-only" :fn-schema-id (:id fs)})]
+                                     {:name "child-only" :parent-id nil :return-type :int})]
 
       ;; Delete child-only entity on child branch
       (is (true? (sp/delete-entity feature :fn (:id fn-child))))
@@ -385,14 +335,12 @@
 (deftest branch-isolation-query-test
   (testing "query on branch shows only branch-visible entities"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           _ (sp/create-entity storage :fn
-                              {:name "main-fn" :fn-schema-id (:id fs)})
+                              {:name "main-fn" :parent-id nil :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           _ (sp/create-entity feature :fn
-                              {:name "feature-fn" :fn-schema-id (:id fs)})]
+                              {:name "feature-fn" :parent-id nil :return-type :int})]
 
       (testing "parent sees only main entity"
         (is (= 1 (count (sp/query-entities storage :fn {})))))
@@ -406,10 +354,8 @@
 (deftest grandchild-branch-test
   (testing "grandchild inherits from parent chain"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "main-fn" :fn-schema-id (:id fs)})
+                                   {:name "main-fn" :parent-id nil :return-type :int})
           child-branch (vs/create-branch! storage "child")
           child (vs/switch-branch storage (:id child-branch))
           grandchild-branch (vs/create-branch! child "grandchild")
@@ -424,15 +370,12 @@
 (deftest deterministic-uuid-test
   (testing "create with explicit id is idempotent for identity"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           explicit-id (random-uuid)
           f1 (sp/create-entity storage :fn
-                               {:id explicit-id :name "fn-v1" :fn-schema-id (:id fs)})
+                               {:id explicit-id :name "fn-v1" :parent-id nil :return-type :int})
           ;; Simulate sync: create again with same id but different data
-          ;; Identity already exists, new version is created
           f2 (sp/create-entity storage :fn
-                               {:id explicit-id :name "fn-v2" :fn-schema-id (:id fs)})]
+                               {:id explicit-id :name "fn-v2" :parent-id nil :return-type :int})]
       (is (= explicit-id (:id f1)))
       (is (= explicit-id (:id f2)))
       ;; Read returns the latest version
@@ -444,53 +387,53 @@
 (deftest execution-graph-test
   (testing "resolve-execution-graph works through versioned CRUD"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "add" :returned-type :int :base-fn-name "add"})
-          as1 (sp/create-entity storage :arg-schema
-                                {:fn-schema-id (:id fs) :name "a" :type :int :required true :first-class false})
-          as2 (sp/create-entity storage :arg-schema
-                                {:fn-schema-id (:id fs) :name "b" :type :int :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "add-fn" :fn-schema-id (:id fs)})
-          av1 (sp/create-entity storage :arg-value {:arg-schema-id (:id as1) :value 1})
-          av2 (sp/create-entity storage :arg-value {:arg-schema-id (:id as2) :value 2})
-          _ (sp/create-entity storage :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as1)
-                               :arg-value-id (:id av1)})
-          _ (sp/create-entity storage :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as2)
-                               :arg-value-id (:id av2)})
-          graph (sp/resolve-execution-graph storage (:id fn-rec))]
+          ;; Create base fn
+          base-fn (sp/create-entity storage :fn
+                                    {:name "add" :parent-id nil :return-type :int :impl-hash "abc123"})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id base-fn) :name "a" :type :int :required true :is-fn false})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id base-fn) :name "b" :type :int :required true :is-fn false})
+          ;; Create composed fn
+          composed-fn (sp/create-entity storage :fn
+                                        {:name "add-1-2" :parent-id (:id base-fn) :return-type :int})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id composed-fn) :name "a" :type :int
+                               :required true :is-fn false :value 1})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id composed-fn) :name "b" :type :int
+                               :required true :is-fn false :value 2})
+          graph (sp/resolve-execution-graph storage (:id composed-fn))]
       (is (sp/execution-graph? graph))
-      (is (contains? (sp/get-graph-fns graph) (:id fn-rec)))
-      (is (contains? (sp/get-graph-fn-schemas graph) (:id fs))))))
+      (is (contains? (sp/get-graph-fns graph) (:id composed-fn)))
+      (is (contains? (sp/get-graph-fns graph) (:id base-fn))))))
 
 
 (deftest execution-graph-on-branch-test
   (testing "execution graph resolves on child branch"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "const" :returned-type :int :base-fn-name "const"})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "const-fn" :fn-schema-id (:id fs)})
-          av (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 42})
-          _ (sp/create-entity storage :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as)
-                               :arg-value-id (:id av)})
-          ;; Create branch and modify
+          ;; Create base fn on main
+          base-fn (sp/create-entity storage :fn
+                                    {:name "const" :parent-id nil :return-type :int :impl-hash "xyz"})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id base-fn) :name "x" :type :int :required true :is-fn false})
+          ;; Create composed fn
+          composed-fn (sp/create-entity storage :fn
+                                        {:name "const-42" :parent-id (:id base-fn) :return-type :int})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id composed-fn) :name "x" :type :int
+                               :required true :is-fn false :value 42})
+          ;; Create branch
           branch (vs/create-branch! storage "feature")
-          feature (vs/switch-branch storage (:id branch))
-          _av2 (sp/create-entity feature :arg-value {:arg-schema-id (:id as) :value 99})]
+          feature (vs/switch-branch storage (:id branch))]
 
-      (testing "main branch graph uses original value"
-        (let [graph (sp/resolve-execution-graph storage (:id fn-rec))
-              args (sp/get-graph-resolved-args graph)]
-          (is (some? (get args (:id fn-rec))))))
+      (testing "main branch graph works"
+        (let [graph (sp/resolve-execution-graph storage (:id composed-fn))
+              args (sp/get-graph-args graph)]
+          (is (some? args))))
 
       (testing "feature branch can also resolve graph"
-        (let [graph (sp/resolve-execution-graph feature (:id fn-rec))]
+        (let [graph (sp/resolve-execution-graph feature (:id composed-fn))]
           (is (sp/execution-graph? graph)))))))
 
 
@@ -499,13 +442,10 @@
 (deftest resolution-versioned-entity-predicate-test
   (testing "versioned-entity? returns correct results"
     (is (true? (res/versioned-entity? :fn)))
-    (is (true? (res/versioned-entity? :fn-schema)))
-    (is (true? (res/versioned-entity? :arg-schema)))
-    (is (true? (res/versioned-entity? :fn-arg)))
-    (is (false? (res/versioned-entity? :arg-value)))
-    (is (false? (res/versioned-entity? :fn-usage)))
+    (is (true? (res/versioned-entity? :arg)))
     (is (false? (res/versioned-entity? :branch)))
-    (is (false? (res/versioned-entity? :fn-version)))))
+    (is (false? (res/versioned-entity? :fn-version)))
+    (is (false? (res/versioned-entity? :arg-version)))))
 
 
 ;; === Unwrap ===
@@ -522,15 +462,13 @@
 (deftest merge-no-conflicts-test
   (testing "merge with no conflicts makes source changes visible on target"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           _fn-main (sp/create-entity storage :fn
-                                     {:name "main-fn" :fn-schema-id (:id fs)})
+                                     {:name "main-fn" :parent-id nil :return-type :int})
           ;; Create feature branch and add entity
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           fn-feat (sp/create-entity feature :fn
-                                    {:name "feat-fn" :fn-schema-id (:id fs)})]
+                                    {:name "feat-fn" :parent-id nil :return-type :int})]
 
       ;; Before merge: main doesn't see feature entity
       (is (nil? (sp/read-entity storage :fn (:id fn-feat))))
@@ -548,10 +486,8 @@
 (deftest merge-update-visible-test
   (testing "merge makes updates from source visible on target"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "original" :fn-schema-id (:id fs)})
+                                   {:name "original" :parent-id nil :return-type :int})
           ;; Feature branch updates the entity
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))]
@@ -570,10 +506,8 @@
 (deftest merge-conflict-throws-test
   (testing "merge with conflicts throws when no resolutions provided"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "original" :fn-schema-id (:id fs)})
+                                   {:name "original" :parent-id nil :return-type :int})
           ;; Create feature branch
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))]
@@ -591,10 +525,8 @@
 (deftest merge-conflict-detection-test
   (testing "detect-conflicts returns conflict details"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "original" :fn-schema-id (:id fs)})
+                                   {:name "original" :parent-id nil :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))]
 
@@ -615,10 +547,8 @@
 (deftest merge-conflict-resolve-source-test
   (testing "merge with :source resolution keeps source version"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "original" :fn-schema-id (:id fs)})
+                                   {:name "original" :parent-id nil :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))]
 
@@ -637,10 +567,8 @@
 (deftest merge-conflict-resolve-target-test
   (testing "merge with :target resolution keeps target version"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-rec (sp/create-entity storage :fn
-                                   {:name "original" :fn-schema-id (:id fs)})
+                                   {:name "original" :parent-id nil :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))]
 
@@ -659,8 +587,6 @@
 (deftest merge-multiple-merges-test
   (testing "multiple merges are all visible through resolution"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           ;; Create two feature branches
           b1 (vs/create-branch! storage "feat-1")
           feat1 (vs/switch-branch storage (:id b1))
@@ -668,9 +594,9 @@
           feat2 (vs/switch-branch storage (:id b2))
           ;; Each creates a different entity
           fn1 (sp/create-entity feat1 :fn
-                                {:name "fn-from-feat1" :fn-schema-id (:id fs)})
+                                {:name "fn-from-feat1" :parent-id nil :return-type :int})
           fn2 (sp/create-entity feat2 :fn
-                                {:name "fn-from-feat2" :fn-schema-id (:id fs)})]
+                                {:name "fn-from-feat2" :parent-id nil :return-type :int})]
 
       ;; Merge both into main
       (vs/merge-branch! storage (:id b1))
@@ -686,12 +612,10 @@
 (deftest delete-branch-success-test
   (testing "delete branch removes branch and version records"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           _fn-feat (sp/create-entity feature :fn
-                                     {:name "feat-fn" :fn-schema-id (:id fs)})]
+                                     {:name "feat-fn" :parent-id nil :return-type :int})]
 
       (is (true? (vs/delete-branch! storage (:id branch))))
 
@@ -724,10 +648,8 @@
 (deftest delete-branch-parent-unaffected-test
   (testing "after deleting branch, parent data is unaffected"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-main (sp/create-entity storage :fn
-                                    {:name "main-fn" :fn-schema-id (:id fs)})
+                                    {:name "main-fn" :parent-id nil :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))]
       ;; Modify entity on feature branch
@@ -790,11 +712,9 @@
 (deftest batch-delete-versioned-test
   (testing "delete-entities works for versioned entities"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          f1 (sp/create-entity storage :fn {:name "fn1" :fn-schema-id (:id fs)})
-          f2 (sp/create-entity storage :fn {:name "fn2" :fn-schema-id (:id fs)})
-          f3 (sp/create-entity storage :fn {:name "fn3" :fn-schema-id (:id fs)})]
+          f1 (sp/create-entity storage :fn {:name "fn1" :parent-id nil :return-type :int})
+          f2 (sp/create-entity storage :fn {:name "fn2" :parent-id nil :return-type :int})
+          f3 (sp/create-entity storage :fn {:name "fn3" :parent-id nil :return-type :int})]
       ;; Delete two of them
       (let [deleted-count (sp/delete-entities storage :fn [(:id f1) (:id f2)])]
         (is (= 2 deleted-count)))
@@ -805,41 +725,20 @@
       (is (some? (sp/read-entity storage :fn (:id f3)))))))
 
 
-(deftest batch-delete-non-versioned-test
-  (testing "delete-entities works for non-versioned entities"
-    (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          av1 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 1})
-          av2 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 2})
-          av3 (sp/create-entity storage :arg-value {:arg-schema-id (:id as) :value 3})]
-      ;; Delete two arg-values (non-versioned)
-      (let [deleted-count (sp/delete-entities storage :arg-value [(:id av1) (:id av2)])]
-        (is (= 2 deleted-count)))
-      ;; Verify
-      (is (nil? (sp/read-entity storage :arg-value (:id av1))))
-      (is (nil? (sp/read-entity storage :arg-value (:id av2))))
-      (is (some? (sp/read-entity storage :arg-value (:id av3)))))))
-
-
 ;; === Create Branch with Base Branch ID ===
 
 (deftest create-branch-with-base-branch-id-test
   (testing "create-branch! with explicit base-branch-id forks from specified branch"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           ;; Create entity on main
           fn-main (sp/create-entity storage :fn
-                                    {:name "main-fn" :fn-schema-id (:id fs)})
+                                    {:name "main-fn" :parent-id nil :return-type :int})
           ;; Create feature branch from main
           feature-branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id feature-branch))
           ;; Create entity only on feature
           fn-feature (sp/create-entity feature :fn
-                                       {:name "feature-fn" :fn-schema-id (:id fs)})
+                                       {:name "feature-fn" :parent-id nil :return-type :int})
           ;; Create hotfix branch from main (not from feature)
           hotfix-branch (vs/create-branch! feature "hotfix"
                                            {:base-branch-id (vs/current-branch-id storage)})
@@ -859,8 +758,7 @@
         (let [entities (sp/current-entities storage)]
           (is (set? entities))
           (is (contains? entities :fn))
-          (is (contains? entities :fn-schema))
-          (is (contains? entities :arg-schema))))
+          (is (contains? entities :arg))))
 
       (testing "current-fields returns field metadata"
         (let [fields (sp/current-fields storage :fn)]
@@ -891,42 +789,13 @@
 
 ;; === GraphConstraints Delegation ===
 
-(deftest graph-constraints-validation-test
-  (testing "validate-arg-schema-belongs-to-fn! throws for mismatched"
-    (let [storage (create-test-storage)
-          fs1 (sp/create-entity storage :fn-schema
-                                {:name "schema1" :returned-type :int})
-          fs2 (sp/create-entity storage :fn-schema
-                                {:name "schema2" :returned-type :text})
-          as1 (sp/create-entity storage :arg-schema
-                                {:fn-schema-id (:id fs1) :name "x" :type :int :required true :first-class false})
-          fn2 (sp/create-entity storage :fn
-                                {:name "fn2" :fn-schema-id (:id fs2)})]
-      ;; arg-schema belongs to fs1, but fn2 uses fs2 - mismatch!
-      (is (thrown? clojure.lang.ExceptionInfo
-            (sp/validate-arg-schema-belongs-to-fn! storage (:id fn2) (:id as1))))))
-
-  (testing "validate-arg-schema-belongs-to-fn! succeeds for matching"
-    (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-fn" :fn-schema-id (:id fs)})]
-      ;; Should not throw - arg-schema belongs to same fn-schema as fn
-      (is (nil? (sp/validate-arg-schema-belongs-to-fn! storage (:id fn-rec) (:id as)))))))
-
-
 (deftest no-dependency-cycle-validation-test
   (testing "validate-no-dependency-cycle! allows non-cyclic dependencies"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
           fn-a (sp/create-entity storage :fn
-                                 {:name "fn-a" :fn-schema-id (:id fs)})
+                                 {:name "fn-a" :parent-id nil :return-type :int})
           fn-b (sp/create-entity storage :fn
-                                 {:name "fn-b" :fn-schema-id (:id fs)})]
+                                 {:name "fn-b" :parent-id nil :return-type :int})]
       ;; fn-a depends on fn-b should be allowed
       (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b)))))))
 
@@ -936,9 +805,7 @@
 (deftest read-entities-missing-ids-test
   (testing "read-entities returns only found records for versioned entities"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          f1 (sp/create-entity storage :fn {:name "fn1" :fn-schema-id (:id fs)})
+          f1 (sp/create-entity storage :fn {:name "fn1" :parent-id nil :return-type :int})
           missing-id (random-uuid)
           results (sp/read-entities storage :fn [(:id f1) missing-id])]
       ;; Should only return the existing record
@@ -952,10 +819,9 @@
 (deftest delete-entities-partial-count-test
   (testing "delete-entities returns count of actually deleted entities"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          f1 (sp/create-entity storage :fn {:name "fn1" :fn-schema-id (:id fs)})
+          f1 (sp/create-entity storage :fn {:name "fn1" :parent-id nil :return-type :int})
           missing-id (random-uuid)]
       ;; Try to delete one existing and one non-existing
       ;; Only one should be counted as deleted
       (is (= 1 (sp/delete-entities storage :fn [(:id f1) missing-id]))))))
+

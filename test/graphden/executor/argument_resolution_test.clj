@@ -1,5 +1,12 @@
 (ns graphden.executor.argument-resolution-test
-  "Tests for argument resolution edge cases: lazy sequences, depth limits."
+  "Tests for argument resolution edge cases: lazy sequences, depth limits.
+
+   ## 2-Entity Schema
+
+   Arguments are stored directly in the arg entity:
+   - arg.value → literal JSONB value
+   - arg.ref-id → FK to fn (execute and use result)
+   - arg.is-fn → pass fn-id directly (for HOF)"
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.argument-resolution :as arg-res]
@@ -63,19 +70,66 @@
             (#'arg-res/realize-lazy-value (map identity (range 100))))))))
 
 
-;; === extract-arg-value tests ===
+;; === build-delay tests ===
 
-(deftest extract-arg-value-test
-  (testing "extracts value from arg-value record with :value field"
-    (let [result (#'arg-res/extract-arg-value {:id (random-uuid) :value "test"})]
-      (is (= {:type :literal :value "test"} result))))
+(deftest build-delay-test
+  (testing "builds delay for literal value"
+    (let [arg {:id (random-uuid)
+               :name "x"
+               :type :int
+               :value 42}
+          context {}
+          execute-ref-fn (fn [_ _] (throw (ex-info "Should not be called" {})))
+          result (#'arg-res/build-delay context arg execute-ref-fn)]
+      (is (delay? result))
+      (is (= 42 @result))))
 
-  (testing "extracts fn-usage-id from arg-value record"
-    (let [fu-id (random-uuid)
-          result (#'arg-res/extract-arg-value {:fn-usage-id fu-id})]
-      (is (= {:type :fn-usage :value fu-id} result))))
+  (testing "builds delay for ref-id with is-fn=true (pass fn-id directly)"
+    (let [ref-fn-id (random-uuid)
+          arg {:id (random-uuid)
+               :name "f"
+               :type :fn
+               :ref-id ref-fn-id
+               :is-fn true}
+          context {}
+          execute-ref-fn (fn [_ _] (throw (ex-info "Should not be called" {})))
+          result (#'arg-res/build-delay context arg execute-ref-fn)]
+      (is (delay? result))
+      (is (= ref-fn-id @result))))
 
-  (testing "returns direct value as literal when already unwrapped"
-    (is (= {:type :literal :value 42} (#'arg-res/extract-arg-value 42)))
-    (is (= {:type :literal :value "hello"} (#'arg-res/extract-arg-value "hello")))
-    (is (= {:type :literal :value [1 2 3]} (#'arg-res/extract-arg-value [1 2 3])))))
+  (testing "builds delay for ref-id with is-fn=false (execute fn)"
+    (let [ref-fn-id (random-uuid)
+          arg {:id (random-uuid)
+               :name "result"
+               :type :int
+               :ref-id ref-fn-id
+               :is-fn false}
+          context {:test true}
+          execute-ref-fn (fn [ctx fn-id]
+                           (is (= context ctx))
+                           (is (= ref-fn-id fn-id))
+                           100)
+          result (#'arg-res/build-delay context arg execute-ref-fn)]
+      (is (delay? result))
+      (is (= 100 @result))))
+
+  (testing "builds nil delay for arg with no value"
+    (let [arg {:id (random-uuid)
+               :name "optional"
+               :type :text}
+          context {}
+          execute-ref-fn (fn [_ _] (throw (ex-info "Should not be called" {})))
+          result (#'arg-res/build-delay context arg execute-ref-fn)]
+      (is (delay? result))
+      (is (nil? @result)))))
+
+
+(deftest arg-has-value-test
+  (testing "returns true when value is set"
+    (is (true? (#'arg-res/arg-has-value? {:value 42}))))
+
+  (testing "returns true when ref-id is set"
+    (is (true? (#'arg-res/arg-has-value? {:ref-id (random-uuid)}))))
+
+  (testing "returns false when neither is set"
+    (is (false? (#'arg-res/arg-has-value? {:name "x"})))))

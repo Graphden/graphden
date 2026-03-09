@@ -30,21 +30,21 @@
                          :impl (fn [{:keys [n]} _ctx] (- n))}}]
       (try
         (let [result (registry/sync-defs-to-storage! storage defs)]
-          (is (= 2 (:created (:fn-schemas result))))
-          (is (zero? (:updated (:fn-schemas result))))
-          (is (= 3 (:created (:arg-schemas result)))) ; 2 for my-add, 1 for my-neg
-          (is (zero? (:updated (:arg-schemas result)))))
+          (is (= 2 (:created (:fns result))))
+          (is (zero? (:updated (:fns result))))
+          (is (= 3 (:created (:args result)))) ; 2 for my-add, 1 for my-neg
+          (is (zero? (:updated (:args result)))))
 
         ;; Verify fn-schemas exist
-        (let [all-schemas (sp/query-entities storage :fn-schema {})]
+        (let [all-schemas (sp/query-entities storage :fn {})]
           (is (= 2 (count all-schemas)))
           (is (some #(= "my-add" (:name %)) all-schemas))
           (is (some #(= "my-neg" (:name %)) all-schemas)))
 
         ;; Verify arg-schemas exist
-        (let [all-args (sp/query-entities storage :arg-schema {})
-              add-schema (first (sp/query-entities storage :fn-schema {:name "my-add"}))
-              add-args (sp/query-entities storage :arg-schema {:fn-schema-id (:id add-schema)})]
+        (let [all-args (sp/query-entities storage :arg {})
+              add-schema (first (sp/query-entities storage :fn {:name "my-add"}))
+              add-args (sp/query-entities storage :arg {:fn-id (:id add-schema)})]
           (is (= 3 (count all-args)))
           (is (= 2 (count add-args)))
           (is (= #{"a" "b"} (set (map :name add-args)))))
@@ -59,15 +59,15 @@
       (try
         ;; First sync
         (registry/sync-defs-to-storage! storage defs)
-        (let [count-after-first (count (sp/query-entities storage :fn-schema {}))]
+        (let [count-after-first (count (sp/query-entities storage :fn {}))]
           ;; Second sync
           (let [result (registry/sync-defs-to-storage! storage defs)]
-            (is (zero? (:created (:fn-schemas result))))
-            (is (= 1 (:updated (:fn-schemas result))))
-            (is (zero? (:created (:arg-schemas result))))
-            (is (= 1 (:updated (:arg-schemas result)))))
+            (is (zero? (:created (:fns result))))
+            (is (= 1 (:updated (:fns result))))
+            (is (zero? (:created (:args result))))
+            (is (= 1 (:updated (:args result)))))
           ;; Same count
-          (is (= count-after-first (count (sp/query-entities storage :fn-schema {})))))
+          (is (= count-after-first (count (sp/query-entities storage :fn {})))))
         (finally
           (sp/close storage)))))
 
@@ -126,14 +126,14 @@
       (try
         ;; First sync
         (registry/sync-defs-to-storage! storage defs-v1)
-        (let [schema-v1 (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :changing-fn))]
-          (is (= :int (:returned-type schema-v1))))
+        (let [schema-v1 (sp/read-entity storage :fn (registry/fn-uuid :changing-fn))]
+          (is (= :int (:return-type schema-v1))))
 
         ;; Second sync with changes
         (registry/sync-defs-to-storage! storage defs-v2)
-        (let [schema-v2 (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :changing-fn))
-              all-args (sp/query-entities storage :arg-schema {:fn-schema-id (:id schema-v2)})]
-          (is (= :numeric (:returned-type schema-v2)))
+        (let [schema-v2 (sp/read-entity storage :fn (registry/fn-uuid :changing-fn))
+              all-args (sp/query-entities storage :arg {:fn-id (:id schema-v2)})]
+          (is (= :numeric (:return-type schema-v2)))
           (is (= 2 (count all-args)))
           (is (= #{"x" "y"} (set (map :name all-args)))))
         (finally
@@ -147,8 +147,8 @@
                          :impl (fn [_ _] nil)}}]
       (try
         (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :opt-fn)
-              args (sp/query-entities storage :arg-schema {:fn-schema-id fn-id})
+        (let [fn-id (registry/fn-uuid :opt-fn)
+              args (sp/query-entities storage :arg {:fn-id fn-id})
               req-arg (first (filter #(= "required" (:name %)) args))
               opt-arg (first (filter #(= "optional" (:name %)) args))]
           (is (true? (:required req-arg)))
@@ -166,11 +166,11 @@
                                 :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs-v1)
-        (let [schema-v1 (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :ret-change))]
-          (is (= :int (:returned-type schema-v1))))
+        (let [schema-v1 (sp/read-entity storage :fn (registry/fn-uuid :ret-change))]
+          (is (= :int (:return-type schema-v1))))
         (registry/sync-defs-to-storage! storage defs-v2)
-        (let [schema-v2 (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :ret-change))]
-          (is (= :numeric (:returned-type schema-v2))))
+        (let [schema-v2 (sp/read-entity storage :fn (registry/fn-uuid :ret-change))]
+          (is (= :numeric (:return-type schema-v2))))
         (finally
           (sp/close storage)))))
 
@@ -184,12 +184,12 @@
                                 :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs-v1)
-        (let [fn-id (registry/fn-schema-uuid :req-change)
-              arg-v1 (first (sp/query-entities storage :arg-schema {:fn-schema-id fn-id}))]
+        (let [fn-id (registry/fn-uuid :req-change)
+              arg-v1 (first (sp/query-entities storage :arg {:fn-id fn-id}))]
           (is (true? (:required arg-v1))))
         (registry/sync-defs-to-storage! storage defs-v2)
-        (let [fn-id (registry/fn-schema-uuid :req-change)
-              arg-v2 (first (sp/query-entities storage :arg-schema {:fn-schema-id fn-id}))]
+        (let [fn-id (registry/fn-uuid :req-change)
+              arg-v2 (first (sp/query-entities storage :arg {:fn-id fn-id}))]
           (is (false? (:required arg-v2))))
         (finally
           (sp/close storage)))))
@@ -204,12 +204,12 @@
                                  :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs-v1)
-        (let [fn-id (registry/fn-schema-uuid :type-change)
-              arg-v1 (first (sp/query-entities storage :arg-schema {:fn-schema-id fn-id}))]
+        (let [fn-id (registry/fn-uuid :type-change)
+              arg-v1 (first (sp/query-entities storage :arg {:fn-id fn-id}))]
           (is (= :int (:type arg-v1))))
         (registry/sync-defs-to-storage! storage defs-v2)
-        (let [fn-id (registry/fn-schema-uuid :type-change)
-              arg-v2 (first (sp/query-entities storage :arg-schema {:fn-schema-id fn-id}))]
+        (let [fn-id (registry/fn-uuid :type-change)
+              arg-v2 (first (sp/query-entities storage :arg {:fn-id fn-id}))]
           (is (= :numeric (:type arg-v2))))
         (finally
           (sp/close storage))))))
@@ -219,34 +219,6 @@
 ;; These tests ensure all branches of `or` conditions are evaluated
 
 (deftest sync-fn-schema-or-branches-test
-  (testing "sync-fn-schema! triggers update when only base-fn-name differs"
-    ;; This tests the third branch of the `or` in sync-fn-schema!
-    ;; We manually modify base-fn-name in storage, then sync to trigger update
-    (let [storage (setup/create-test-storage)
-          defs {:base-fn-test {:args {:x :int}
-                               :return-type :int
-                               :impl (fn [_ _] 1)}}]
-      (try
-        ;; First sync creates the fn-schema
-        (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :base-fn-test)
-              schema-before (sp/read-entity storage :fn-schema fn-id)]
-          (is (= "base-fn-test" (:base-fn-name schema-before)))
-          ;; Manually corrupt base-fn-name in storage
-          (sp/update-entity storage :fn-schema fn-id
-                            {:name "base-fn-test"
-                             :returned-type :int
-                             :base-fn-name "corrupted-name"})
-          ;; Verify corruption
-          (let [corrupted (sp/read-entity storage :fn-schema fn-id)]
-            (is (= "corrupted-name" (:base-fn-name corrupted))))
-          ;; Re-sync - should update because base-fn-name differs
-          (registry/sync-defs-to-storage! storage defs)
-          (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
-            (is (= "base-fn-test" (:base-fn-name schema-after)))))
-        (finally
-          (sp/close storage)))))
-
   (testing "sync-fn-schema! triggers update when only name differs"
     ;; This tests the first branch of the `or` in sync-fn-schema!
     (let [storage (setup/create-test-storage)
@@ -255,15 +227,15 @@
                             :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :name-test)]
+        (let [fn-id (registry/fn-uuid :name-test)]
           ;; Manually corrupt name in storage
-          (sp/update-entity storage :fn-schema fn-id
+          (sp/update-entity storage :fn fn-id
                             {:name "wrong-name"
-                             :returned-type :int
-                             :base-fn-name "name-test"})
+                             :return-type :int
+                             })
           ;; Re-sync - should update because name differs
           (registry/sync-defs-to-storage! storage defs)
-          (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
+          (let [schema-after (sp/read-entity storage :fn fn-id)]
             (is (= "name-test" (:name schema-after)))))
         (finally
           (sp/close storage)))))
@@ -276,19 +248,19 @@
                            :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :ret-test)]
-          ;; Manually corrupt returned-type in storage (keep name and base-fn-name correct)
-          (sp/update-entity storage :fn-schema fn-id
+        (let [fn-id (registry/fn-uuid :ret-test)]
+          ;; Manually corrupt returned-type in storage (keep name correct)
+          (sp/update-entity storage :fn fn-id
                             {:name "ret-test"
-                             :returned-type :text  ; Wrong type
-                             :base-fn-name "ret-test"})
+                             :return-type :text  ; Wrong type
+                             })
           ;; Verify corruption
-          (let [corrupted (sp/read-entity storage :fn-schema fn-id)]
-            (is (= :text (:returned-type corrupted))))
+          (let [corrupted (sp/read-entity storage :fn fn-id)]
+            (is (= :text (:return-type corrupted))))
           ;; Re-sync - should update because only returned-type differs
           (registry/sync-defs-to-storage! storage defs)
-          (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
-            (is (= :numeric (:returned-type schema-after)))))
+          (let [schema-after (sp/read-entity storage :fn fn-id)]
+            (is (= :numeric (:return-type schema-after)))))
         (finally
           (sp/close storage)))))
 
@@ -300,21 +272,21 @@
                                  :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :impl-hash-test)
-              schema-before (sp/read-entity storage :fn-schema fn-id)]
+        (let [fn-id (registry/fn-uuid :impl-hash-test)
+              schema-before (sp/read-entity storage :fn fn-id)]
           (is (some? (:impl-hash schema-before)))
-          ;; Manually corrupt impl-hash in storage (keep name, returned-type, base-fn-name correct)
-          (sp/update-entity storage :fn-schema fn-id
+          ;; Manually corrupt impl-hash in storage (keep name, returned-type correct)
+          (sp/update-entity storage :fn fn-id
                             {:name "impl-hash-test"
-                             :returned-type :int
-                             :base-fn-name "impl-hash-test"
+                             :return-type :int
+                             
                              :impl-hash "corrupted-hash"})
           ;; Verify corruption
-          (let [corrupted (sp/read-entity storage :fn-schema fn-id)]
+          (let [corrupted (sp/read-entity storage :fn fn-id)]
             (is (= "corrupted-hash" (:impl-hash corrupted))))
           ;; Re-sync - should update because impl-hash differs
           (registry/sync-defs-to-storage! storage defs)
-          (let [schema-after (sp/read-entity storage :fn-schema fn-id)]
+          (let [schema-after (sp/read-entity storage :fn fn-id)]
             (is (not= "corrupted-hash" (:impl-hash schema-after)))
             (is (= (:impl-hash schema-before) (:impl-hash schema-after)))))
         (finally
@@ -333,7 +305,7 @@
         (let [result (registry/sync-defs-to-storage! storage defs)]
           ;; updated should be 1 because the function goes through update path
           ;; but sp/update-entity shouldn't be called (when condition is false)
-          (is (= 1 (:updated (:fn-schemas result)))))
+          (is (= 1 (:updated (:fns result)))))
         (finally
           (sp/close storage))))))
 
@@ -346,23 +318,23 @@
                               :return-type :int
                               :impl (fn [_ _] 1)}}
           ;; Create a different fn-schema to use as wrong reference
-          wrong-schema (sp/create-entity storage :fn-schema
+          wrong-schema (sp/create-entity storage :fn
                                          {:name "wrong-schema"
-                                          :returned-type :text})]
+                                          :return-type :text})]
       (try
         (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :arg-fn-test)
-              arg-id (registry/arg-schema-uuid :arg-fn-test :x)]
+        (let [fn-id (registry/fn-uuid :arg-fn-test)
+              arg-id (registry/arg-uuid :arg-fn-test :x)]
           ;; Manually corrupt fn-schema-id in arg-schema
-          (sp/update-entity storage :arg-schema arg-id
-                            {:fn-schema-id (:id wrong-schema)
+          (sp/update-entity storage :arg arg-id
+                            {:fn-id (:id wrong-schema)
                              :name "x"
                              :type :int
                              :required true})
           ;; Re-sync - should update because fn-schema-id differs
           (registry/sync-defs-to-storage! storage defs)
-          (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
-            (is (= fn-id (:fn-schema-id arg-after)))))
+          (let [arg-after (sp/read-entity storage :arg arg-id)]
+            (is (= fn-id (:fn-id arg-after)))))
         (finally
           (sp/close storage)))))
 
@@ -374,17 +346,17 @@
                                 :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :arg-name-test)
-              arg-id (registry/arg-schema-uuid :arg-name-test :myarg)]
+        (let [fn-id (registry/fn-uuid :arg-name-test)
+              arg-id (registry/arg-uuid :arg-name-test :myarg)]
           ;; Manually corrupt name in arg-schema
-          (sp/update-entity storage :arg-schema arg-id
-                            {:fn-schema-id fn-id
+          (sp/update-entity storage :arg arg-id
+                            {:fn-id fn-id
                              :name "wrong-name"
                              :type :int
                              :required true})
           ;; Re-sync - should update because name differs
           (registry/sync-defs-to-storage! storage defs)
-          (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
+          (let [arg-after (sp/read-entity storage :arg arg-id)]
             (is (= "myarg" (:name arg-after)))))
         (finally
           (sp/close storage)))))
@@ -397,20 +369,20 @@
                                 :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :arg-type-test)
-              arg-id (registry/arg-schema-uuid :arg-type-test :z)]
+        (let [fn-id (registry/fn-uuid :arg-type-test)
+              arg-id (registry/arg-uuid :arg-type-test :z)]
           ;; Manually corrupt type in arg-schema (keep fn-schema-id, name, required correct)
-          (sp/update-entity storage :arg-schema arg-id
-                            {:fn-schema-id fn-id
+          (sp/update-entity storage :arg arg-id
+                            {:fn-id fn-id
                              :name "z"
                              :type :text  ; Wrong type
                              :required true})
           ;; Verify corruption
-          (let [corrupted (sp/read-entity storage :arg-schema arg-id)]
+          (let [corrupted (sp/read-entity storage :arg arg-id)]
             (is (= :text (:type corrupted))))
           ;; Re-sync - should update because only type differs
           (registry/sync-defs-to-storage! storage defs)
-          (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
+          (let [arg-after (sp/read-entity storage :arg arg-id)]
             (is (= :numeric (:type arg-after)))))
         (finally
           (sp/close storage)))))
@@ -423,20 +395,20 @@
                                :impl (fn [_ _] 1)}}]
       (try
         (registry/sync-defs-to-storage! storage defs)
-        (let [fn-id (registry/fn-schema-uuid :arg-req-test)
-              arg-id (registry/arg-schema-uuid :arg-req-test :w)]
+        (let [fn-id (registry/fn-uuid :arg-req-test)
+              arg-id (registry/arg-uuid :arg-req-test :w)]
           ;; Manually corrupt required in arg-schema (keep fn-schema-id, name, type correct)
-          (sp/update-entity storage :arg-schema arg-id
-                            {:fn-schema-id fn-id
+          (sp/update-entity storage :arg arg-id
+                            {:fn-id fn-id
                              :name "w"
                              :type :int
                              :required true})  ; Wrong required
           ;; Verify corruption
-          (let [corrupted (sp/read-entity storage :arg-schema arg-id)]
+          (let [corrupted (sp/read-entity storage :arg arg-id)]
             (is (true? (:required corrupted))))
           ;; Re-sync - should update because only required differs
           (registry/sync-defs-to-storage! storage defs)
-          (let [arg-after (sp/read-entity storage :arg-schema arg-id)]
+          (let [arg-after (sp/read-entity storage :arg arg-id)]
             (is (false? (:required arg-after)))))
         (finally
           (sp/close storage)))))
@@ -453,7 +425,7 @@
         ;; Second sync with same data
         (let [result (registry/sync-defs-to-storage! storage defs)]
           ;; updated should be 1 because the arg goes through update path
-          (is (= 1 (:updated (:arg-schemas result)))))
+          (is (= 1 (:updated (:args result)))))
         (finally
           (sp/close storage))))))
 
@@ -468,10 +440,10 @@
         (let [defs {:test-fn {:args {:x :int :y :int}
                               :return-type :int}}
               result (core/sync-defs-to-storage! storage defs)]
-          (is (= 1 (:created (:fn-schemas result))))
-          (is (zero? (:updated (:fn-schemas result))))
-          (is (= 2 (:created (:arg-schemas result))))
-          (is (zero? (:updated (:arg-schemas result)))))
+          (is (= 1 (:created (:fns result))))
+          (is (zero? (:updated (:fns result))))
+          (is (= 2 (:created (:args result))))
+          (is (zero? (:updated (:args result)))))
         (finally
           (sp/close storage)))))
 
@@ -482,10 +454,10 @@
         (core/sync-defs-to-storage! storage {:test-fn {:args {:x :int} :return-type :int}})
         ;; Second sync (update)
         (let [result (core/sync-defs-to-storage! storage {:test-fn {:args {:x :int} :return-type :int}})]
-          (is (zero? (:created (:fn-schemas result))))
-          (is (= 1 (:updated (:fn-schemas result))))
-          (is (zero? (:created (:arg-schemas result))))
-          (is (= 1 (:updated (:arg-schemas result)))))
+          (is (zero? (:created (:fns result))))
+          (is (= 1 (:updated (:fns result))))
+          (is (zero? (:created (:args result))))
+          (is (= 1 (:updated (:args result)))))
         (finally
           (sp/close storage)))))
 
@@ -493,10 +465,10 @@
     (let [storage (setup/create-test-storage)]
       (try
         (let [defs {:add {:args {:a :int :b :int} :return-type :int}}
-              fn-id-before (core/fn-schema-uuid :add)]
+              fn-id-before (core/fn-uuid :add)]
           (core/sync-defs-to-storage! storage defs)
           ;; Verify the fn-schema was created with expected UUID
-          (let [entity (sp/read-entity storage :fn-schema fn-id-before)]
+          (let [entity (sp/read-entity storage :fn fn-id-before)]
             (is (some? entity))
             (is (= "add" (:name entity)))))
         (finally
@@ -506,8 +478,8 @@
     (let [storage (setup/create-test-storage)]
       (try
         (let [result (core/sync-defs-to-storage! storage {})]
-          (is (= {:fn-schemas {:created 0 :updated 0}
-                  :arg-schemas {:created 0 :updated 0}}
+          (is (= {:fns {:created 0 :updated 0}
+                  :args {:created 0 :updated 0}}
                  result)))
         (finally
           (sp/close storage)))))
@@ -520,8 +492,8 @@
                              :return-type :int}}]
           (core/sync-defs-to-storage! storage defs)
           ;; Verify the optional arg was stored correctly
-          (let [arg-id (core/arg-schema-uuid :opt-fn :y)
-                arg-entity (sp/read-entity storage :arg-schema arg-id)]
+          (let [arg-id (core/arg-uuid :opt-fn :y)
+                arg-entity (sp/read-entity storage :arg arg-id)]
             (is (some? arg-entity))
             (is (false? (:required arg-entity)))))
         (finally
@@ -545,13 +517,13 @@
       (try
         ;; First sync with :int return type
         (core/sync-defs-to-storage! storage {:my-fn {:args {} :return-type :int}})
-        (let [fn-id (core/fn-schema-uuid :my-fn)
-              before (sp/read-entity storage :fn-schema fn-id)]
-          (is (= :int (:returned-type before)))
+        (let [fn-id (core/fn-uuid :my-fn)
+              before (sp/read-entity storage :fn fn-id)]
+          (is (= :int (:return-type before)))
           ;; Second sync with :text return type
           (core/sync-defs-to-storage! storage {:my-fn {:args {} :return-type :text}})
-          (let [after (sp/read-entity storage :fn-schema fn-id)]
-            (is (= :text (:returned-type after)))))
+          (let [after (sp/read-entity storage :fn fn-id)]
+            (is (= :text (:return-type after)))))
         (finally
           (sp/close storage)))))
 
@@ -561,7 +533,7 @@
         (core/sync-defs-to-storage! storage {:my-fn {:args {:x :int} :return-type :int}})
         ;; Same sync again - should report as update but no actual change
         (let [result (core/sync-defs-to-storage! storage {:my-fn {:args {:x :int} :return-type :int}})]
-          (is (= 1 (:updated (:fn-schemas result)))))
+          (is (= 1 (:updated (:fns result)))))
         (finally
           (sp/close storage))))))
 
@@ -573,12 +545,12 @@
     (let [storage (setup/create-test-storage)]
       (try
         (core/sync-defs-to-storage! storage {:my-fn {:args {:x :int} :return-type :int}})
-        (let [arg-id (core/arg-schema-uuid :my-fn :x)
-              before (sp/read-entity storage :arg-schema arg-id)]
+        (let [arg-id (core/arg-uuid :my-fn :x)
+              before (sp/read-entity storage :arg arg-id)]
           (is (= :int (:type before)))
           ;; Change arg type to :text
           (core/sync-defs-to-storage! storage {:my-fn {:args {:x :text} :return-type :int}})
-          (let [after (sp/read-entity storage :arg-schema arg-id)]
+          (let [after (sp/read-entity storage :arg arg-id)]
             (is (= :text (:type after)))))
         (finally
           (sp/close storage)))))
@@ -587,12 +559,12 @@
     (let [storage (setup/create-test-storage)]
       (try
         (core/sync-defs-to-storage! storage {:my-fn {:args {:x :int} :return-type :int}})
-        (let [arg-id (core/arg-schema-uuid :my-fn :x)
-              before (sp/read-entity storage :arg-schema arg-id)]
+        (let [arg-id (core/arg-uuid :my-fn :x)
+              before (sp/read-entity storage :arg arg-id)]
           (is (true? (:required before)))
           ;; Change to optional
           (core/sync-defs-to-storage! storage {:my-fn {:args {:x {:type :int :required false}} :return-type :int}})
-          (let [after (sp/read-entity storage :arg-schema arg-id)]
+          (let [after (sp/read-entity storage :arg arg-id)]
             (is (false? (:required after)))))
         (finally
           (sp/close storage))))))
@@ -641,7 +613,7 @@
                             {:args {} :return-type :int}]))]
       (try
         (let [result (core/sync-defs-to-storage! storage max-defs)]
-          (is (= 500 (:created (:fn-schemas result)))))
+          (is (= 500 (:created (:fns result)))))
         (finally
           (sp/close storage))))))
 

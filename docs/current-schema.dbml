@@ -1,6 +1,13 @@
-// Graphden Graph Data Schema
+// Graphden Graph Data Schema (2-Entity Model)
 // This schema defines the structure for storing function composition graphs.
-// Versioned entities use a two-table pattern: stable id + version table with data.
+//
+// === Core Entities ===
+// Only 2 entities: fn and arg
+// - fn: function (base-fn if parent_id=null, composed otherwise)
+// - arg: argument with value/ref-id, inheritance via source_id, HOF via is_fn
+//
+// === Versioning ===
+// Versioned entities use two-table pattern: stable id + version table.
 // Version tables are append-only: each change adds a new record.
 //
 // === Version Resolution Algorithm ===
@@ -58,146 +65,85 @@ Table branch_merge {
   }
 }
 
-// === Versioned: fn_schema (platform-level) ===
+// === Entity: fn ===
 
-// Function signature (stable identity).
-// Updated via platform migrations (base-fn changes) or user edits (composite fn signatures).
-Table fn_schema {
-  id uuid [primary key]
-}
-
-// Version of a function signature. Append-only history.
-// Can change: name, returned_type, base_fn_name, impl_hash.
-// Current version: latest by created_at for (fn_schema_id, branch_id).
-//
-// Platform updates (base-fn migration):
-//   - Compatible changes (new optional arg): update on platform branch, users merge when ready.
-//   - Breaking changes (removed arg, type change): register new base_fn_name,
-//     create new fn_schema. Old fn_schema + old code remain functional.
-//   - Clojure runtime must support old signatures until all users migrate.
-Table fn_schema_version {
-  id uuid [primary key]
-  fn_schema_id uuid [not null, ref: > fn_schema.id]
-  branch_id uuid [not null, ref: > branch.id]
-  name text [not null]
-  returned_type value_kind [not null]
-  base_fn_name text
-  impl_hash text
-  created_at timestamptz [not null]
-
-  indexes {
-    (fn_schema_id, branch_id, created_at) [name: 'idx_fn_schema_version_lookup']
-  }
-}
-
-// === Versioned: arg_schema (tied to fn_schema) ===
-
-// Argument definition (stable identity).
-// fn_schema_id is stable — arg always belongs to the same fn_schema.
-Table arg_schema {
-  id uuid [primary key]
-  fn_schema_id uuid [not null, ref: > fn_schema.id]
-}
-
-// Version of an argument definition. Append-only history.
-// Can change: name, type, required, first_class.
-// Current version: latest by created_at for (arg_schema_id, branch_id).
-// first_class: true = pass fn as value (HOF), false = execute and use result.
-Table arg_schema_version {
-  id uuid [primary key]
-  arg_schema_id uuid [not null, ref: > arg_schema.id]
-  branch_id uuid [not null, ref: > branch.id]
-  name text [not null]
-  type value_kind [not null]
-  required bool [not null]
-  first_class bool [not null]
-  created_at timestamptz [not null]
-
-  indexes {
-    (arg_schema_id, branch_id, created_at) [name: 'idx_arg_schema_version_lookup']
-  }
-}
-
-// Pure argument value (no owner). Immutable, deduplicated.
-// value can be:
-// - literal (int, text, bool, etc.)
-// - UUID referencing fn (for HOF - pass function as object)
-// - UUID referencing fn_usage (for computed values - execute & cache)
-// NOT versioned: changing an argument = pointing fn_arg to a different arg_value.
-Table arg_value {
-  id uuid [primary key]
-  arg_schema_id uuid [not null, ref: > arg_schema.id]
-  value jsonb
-
-  indexes {
-    (arg_schema_id, value) [unique]
-  }
-}
-
-// === Versioned: fn ===
-
-// Function instance (stable identity).
-// Other entities reference fn.id which never changes.
+// Function entity (stable identity).
+// - parent_id = null: base function (name references Clojure implementation)
+// - parent_id set: composed function (inherits from parent)
 Table fn {
   id uuid [primary key]
 }
 
 // Version of a function. Append-only history.
-// Can change: name, fn_schema_id, owner_fn_id.
+// Can change: name, parent_id, return_type, impl_hash.
 // Current version: latest by created_at for (fn_id, branch_id).
-// owner_fn_id: if set, fn is local (scoped to owner). NULL = global fn.
+//
+// Fields:
+// - name: unique function name (null allowed for local/anonymous functions)
+// - parent_id: reference to parent fn for inheritance (null = base function)
+// - return_type: return type of the function
+// - impl_hash: SHA-256 hash for base-fn version tracking
 Table fn_version {
   id uuid [primary key]
   fn_id uuid [not null, ref: > fn.id]
   branch_id uuid [not null, ref: > branch.id]
-  name text [not null]
-  fn_schema_id uuid [not null, ref: > fn_schema.id]
-  owner_fn_id uuid [ref: > fn.id]
+  name text
+  parent_id uuid [ref: > fn.id]
+  return_type value_kind
+  impl_hash text
   created_at timestamptz [not null]
 
   indexes {
     (fn_id, branch_id, created_at) [name: 'idx_fn_version_lookup']
+    (name) [unique, name: 'idx_fn_version_unique_name']
   }
 }
 
-// === Versioned: fn_arg ===
+// === Entity: arg ===
 
-// Binding from fn to arg_value (stable identity).
-Table fn_arg {
+// Argument entity (stable identity).
+// fn_id is stable — arg always belongs to the same fn.
+Table arg {
   id uuid [primary key]
+  fn_id uuid [not null, ref: > fn.id]
 }
 
-// Version of a fn_arg binding. Append-only history.
-// Can change: arg_value_id.
-// Current version: latest by created_at for (fn_arg_id, branch_id).
-Table fn_arg_version {
+// Version of an argument. Append-only history.
+// Can change: name, type, required, value, ref_id, is_fn, source_id.
+// Current version: latest by created_at for (arg_id, branch_id).
+//
+// Fields:
+// - source_id: reference to parent's arg for inheritance chain
+// - name: argument name (unique within fn)
+// - type: argument type
+// - required: whether argument is required
+// - value: literal value (JSONB) - mutually exclusive with ref_id
+// - ref_id: reference to another fn - mutually exclusive with value
+// - is_fn: HOF flag - when true, ref_id is passed without execution
+//
+// Inheritance model:
+// - Args inherit from parent fn's args via source_id
+// - Child can override value/ref_id while keeping source_id link
+//
+// Result caching:
+// - Results are cached by ref_id within execution context
+// - Same ref_id in multiple args = function executes once
+Table arg_version {
   id uuid [primary key]
-  fn_arg_id uuid [not null, ref: > fn_arg.id]
+  arg_id uuid [not null, ref: > arg.id]
   branch_id uuid [not null, ref: > branch.id]
-  fn_id uuid [not null, ref: > fn.id]
-  arg_schema_id uuid [not null, ref: > arg_schema.id]
-  arg_value_id uuid [not null, ref: > arg_value.id]
+  source_id uuid [ref: > arg.id]
+  name text
+  type value_kind
+  required bool
+  value jsonb
+  ref_id uuid [ref: > fn.id]
+  is_fn bool
   created_at timestamptz [not null]
 
   indexes {
-    (fn_arg_id, branch_id, created_at) [name: 'idx_fn_arg_version_lookup']
+    (arg_id, branch_id, created_at) [name: 'idx_arg_version_lookup']
+    (fn_id, source_id) [unique, name: 'idx_arg_version_unique_source']
+    (fn_id, name) [unique, name: 'idx_arg_version_unique_name']
   }
 }
-
-// === Non-versioned: fn_usage ===
-
-// Call site reference (function to execute at this point).
-// fn_id is fixed (fn_usage always calls the same fn).
-// owner_fn_id: if set, fn_usage is local (scoped to owner). NULL = global.
-// NOT versioned: fn_usage itself doesn't change.
-Table fn_usage {
-  id uuid [primary key]
-  name text [not null]
-  fn_id uuid [not null, ref: > fn.id]
-  owner_fn_id uuid [ref: > fn.id]
-
-  indexes {
-    (owner_fn_id, name) [unique, name: 'idx_fn_usage_unique_name']
-  }
-}
-

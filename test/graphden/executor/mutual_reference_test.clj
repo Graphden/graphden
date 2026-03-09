@@ -1,5 +1,11 @@
 (ns graphden.executor.mutual-reference-test
-  "Tests for mutual and self-references in execution graphs."
+  "Tests for mutual and self-references in execution graphs.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -30,34 +36,32 @@
                       partner-id @partner]
                   {:n n-val :partner-is-uuid (uuid? partner-id)})))
 
-          ;; Create fn-schemas
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "get-partner"
-                                       :returned-type :jsonb})
-          arg-n (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id fn-schema)
-                                   :name "n"
-                                   :type :int
-                                   :required true :first-class false})
-          arg-partner (sp/create-entity storage :arg-schema
-                                        {:fn-schema-id (:id fn-schema)
-                                         :name "partner"
-                                         :type :fn  ; :fn type means callable reference
-                                         :required true :first-class true})  ; first-class=true for HOF
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "get-partner" :jsonb)
+          arg-n (setup/create-arg! storage (:id base-fn)
+                                   {:name "n" :type :int :required true :is-fn false})
+          arg-partner (setup/create-arg! storage (:id base-fn)
+                                         {:name "partner" :type :fn :required true :is-fn true})
 
-          ;; Create two fn instances that reference each other
-          fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id fn-schema)})
-          fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id fn-schema)})
+          ;; Create two composed fn instances that reference each other
+          fn-a (setup/create-composed-fn! storage "fn-a" (:id base-fn))
+          fn-b (setup/create-composed-fn! storage "fn-b" (:id base-fn))
 
-          ;; fn-a's n = 1, partner = fn-b via fn-usage
-          _ (setup/create-arg-value-with-binding! storage (:id fn-a) (:id arg-n) 1)
-          fn-b-usage-id (setup/create-fn-usage! storage (:id fn-b) "fn-b-ref")
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-a) (:id arg-partner) fn-b-usage-id)
+          ;; fn-a's n = 1, partner = fn-b via ref-id
+          _ (setup/create-arg! storage (:id fn-a)
+                               {:name "n" :type :int :required true :is-fn false
+                                :source-id (:id arg-n) :value 1})
+          _ (setup/create-arg! storage (:id fn-a)
+                               {:name "partner" :type :fn :required true :is-fn true
+                                :source-id (:id arg-partner) :ref-id (:id fn-b)})
 
-          ;; fn-b's n = 2, partner = fn-a via fn-usage
-          _ (setup/create-arg-value-with-binding! storage (:id fn-b) (:id arg-n) 2)
-          fn-a-usage-id (setup/create-fn-usage! storage (:id fn-a) "fn-a-ref")
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-b) (:id arg-partner) fn-a-usage-id)
+          ;; fn-b's n = 2, partner = fn-a via ref-id
+          _ (setup/create-arg! storage (:id fn-b)
+                               {:name "n" :type :int :required true :is-fn false
+                                :source-id (:id arg-n) :value 2})
+          _ (setup/create-arg! storage (:id fn-b)
+                               {:name "partner" :type :fn :required true :is-fn true
+                                :source-id (:id arg-partner) :ref-id (:id fn-a)})
 
           ctx (exec/create-context {:storage storage})]
 
@@ -88,29 +92,24 @@
                       self-id @self-ref]
                   {:n n-val :self-is-uuid (uuid? self-id)})))
 
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "with-self"
-                                       :returned-type :jsonb})
-          arg-n (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id fn-schema)
-                                   :name "n"
-                                   :type :int
-                                   :required true :first-class false})
-          arg-self (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
-                                      :name "self-ref"
-                                      :type :fn
-                                      :required true :first-class true})  ; first-class=true for HOF
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "with-self" :jsonb)
+          arg-n (setup/create-arg! storage (:id base-fn)
+                                   {:name "n" :type :int :required true :is-fn false})
+          arg-self (setup/create-arg! storage (:id base-fn)
+                                      {:name "self-ref" :type :fn :required true :is-fn true})
 
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-self-fn"
-                                    :fn-schema-id (:id fn-schema)})
+          ;; Create composed fn
+          fn-rec (setup/create-composed-fn! storage "my-self-fn" (:id base-fn))
 
           ;; n = 42
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-n) 42)
-          ;; Self-reference via fn-usage
-          self-usage-id (setup/create-fn-usage! storage (:id fn-rec) "self-ref")
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-rec) (:id arg-self) self-usage-id)
+          _ (setup/create-arg! storage (:id fn-rec)
+                               {:name "n" :type :int :required true :is-fn false
+                                :source-id (:id arg-n) :value 42})
+          ;; Self-reference via ref-id
+          _ (setup/create-arg! storage (:id fn-rec)
+                               {:name "self-ref" :type :fn :required true :is-fn true
+                                :source-id (:id arg-self) :ref-id (:id fn-rec)})
 
           ctx (exec/create-context {:storage storage})]
 

@@ -259,7 +259,7 @@
 
   (testing "GraphConstraints protocol is defined"
     (is (some? storage/GraphConstraints))
-    (is (contains? (:sigs storage/GraphConstraints) :validate-arg-schema-belongs-to-fn!))
+    ;; In 2-entity schema, arg.fn-id is FK to fn - no separate arg-schema validation needed
     (is (contains? (:sigs storage/GraphConstraints) :validate-no-dependency-cycle!)))
 
   (testing "StorageValueCodec protocol is defined"

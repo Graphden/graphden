@@ -1,5 +1,11 @@
 (ns graphden.storage.protocol.constraints-test
-  "Tests for storage-protocol constraint helpers and implementations."
+  "Tests for storage-protocol constraint helpers and implementations.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.constraints :as constraints]
@@ -9,84 +15,25 @@
 ;; === Mock ConstraintHelpers for testing shared implementations ===
 
 (defrecord MockConstraintHelpers
-  [fn-schema-map arg-schema-fn-schema-map dependency-chain-map]
+  [dependency-chain-map]
 
   storage/ConstraintHelpers
-
-  (get-fn-schema-id-for-fn
-    [_this fn-id]
-    (get fn-schema-map fn-id))
-
-
-  (get-fn-schema-id-for-arg-schema
-    [_this arg-schema-id]
-    (get arg-schema-fn-schema-map arg-schema-id))
-
 
   (collect-dependency-chain
     [_this fn-id]
     (get dependency-chain-map fn-id #{})))
 
 
-;; === validate-arg-schema-belongs-to-fn-impl tests ===
-
-(deftest validate-arg-schema-belongs-to-fn-impl-test
-  (testing "arg-schema belongs to fn-schema doesn't throw"
-    (let [fn-id (random-uuid)
-          arg-schema-id (random-uuid)
-          schema-id (random-uuid)
-          helpers (->MockConstraintHelpers {fn-id schema-id} {arg-schema-id schema-id} {})]
-      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)))))
-
-  (testing "arg-schema from different fn-schema throws"
-    (let [fn-id (random-uuid)
-          arg-schema-id (random-uuid)
-          schema-a (random-uuid)
-          schema-b (random-uuid)
-          helpers (->MockConstraintHelpers {fn-id schema-a} {arg-schema-id schema-b} {})]
-      (is (thrown-with-msg?
-            clojure.lang.ExceptionInfo
-            #"Arg-schema does not belong to fn's schema"
-            (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)))))
-
-  (testing "exception contains correct data"
-    (let [fn-id (random-uuid)
-          arg-schema-id (random-uuid)
-          schema-a (random-uuid)
-          schema-b (random-uuid)
-          helpers (->MockConstraintHelpers {fn-id schema-a} {arg-schema-id schema-b} {})]
-      (try
-        (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id)
-        (catch clojure.lang.ExceptionInfo e
-          (is (= :constraint-violation/arg-schema-mismatch (:type (ex-data e))))
-          (is (= fn-id (:fn-id (ex-data e))))
-          (is (= arg-schema-id (:arg-schema-id (ex-data e))))
-          (is (= schema-a (:fn-schema-id (ex-data e))))
-          (is (= schema-b (:arg-fn-schema-id (ex-data e))))))))
-
-  (testing "missing fn-schema returns nil"
-    (let [helpers (->MockConstraintHelpers {} {} {})]
-      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers (random-uuid) (random-uuid))))))
-
-  (testing "fn-schema-id present but arg-fn-schema-id nil returns nil"
-    (let [fn-id (random-uuid)
-          arg-schema-id (random-uuid)
-          schema-id (random-uuid)
-          ;; fn has schema-id, but arg-schema has no fn-schema-id
-          helpers (->MockConstraintHelpers {fn-id schema-id} {} {})]
-      (is (nil? (storage/validate-arg-schema-belongs-to-fn-impl helpers fn-id arg-schema-id))))))
-
-
 ;; === validate-no-dependency-cycle-impl tests ===
 
 (deftest validate-no-dependency-cycle-impl-test
-  (testing "nil value-fn-id doesn't throw"
-    (let [helpers (->MockConstraintHelpers {} {} {})]
+  (testing "nil ref-fn-id doesn't throw"
+    (let [helpers (->MockConstraintHelpers {})]
       (is (nil? (storage/validate-no-dependency-cycle-impl helpers (random-uuid) nil)))))
 
   (testing "self-reference throws"
     (let [fn-id (random-uuid)
-          helpers (->MockConstraintHelpers {} {} {})]
+          helpers (->MockConstraintHelpers {})]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
             #"Reference would create dependency cycle"
@@ -94,19 +41,19 @@
 
   (testing "exception contains correct data for self-reference"
     (let [fn-id (random-uuid)
-          helpers (->MockConstraintHelpers {} {} {})]
+          helpers (->MockConstraintHelpers {})]
       (try
         (storage/validate-no-dependency-cycle-impl helpers fn-id fn-id)
         (catch clojure.lang.ExceptionInfo e
           (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
           (is (= fn-id (:owner-fn-id (ex-data e))))
-          (is (= fn-id (:value-fn-id (ex-data e))))))))
+          (is (= fn-id (:ref-fn-id (ex-data e))))))))
 
   (testing "non-cyclic dependency doesn't throw"
     (let [fn-a (random-uuid)
           fn-b (random-uuid)
           ;; fn-a depends on fn-b (not a cycle)
-          helpers (->MockConstraintHelpers {} {} {fn-b #{}})]
+          helpers (->MockConstraintHelpers {fn-b #{}})]
       (is (nil? (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)))))
 
   (testing "cycle through dependency chain throws"
@@ -115,7 +62,7 @@
           fn-c (random-uuid)
           ;; Dependency chain: fn-c -> fn-b -> fn-a
           ;; Trying to add fn-a -> fn-c (would create cycle)
-          helpers (->MockConstraintHelpers {} {} {fn-c #{fn-a fn-b}})]
+          helpers (->MockConstraintHelpers {fn-c #{fn-a fn-b}})]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
             #"Reference would create dependency cycle"
@@ -124,13 +71,13 @@
   (testing "exception contains data for chain cycle"
     (let [fn-a (random-uuid)
           fn-b (random-uuid)
-          helpers (->MockConstraintHelpers {} {} {fn-b #{fn-a}})]
+          helpers (->MockConstraintHelpers {fn-b #{fn-a}})]
       (try
         (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)
         (catch clojure.lang.ExceptionInfo e
           (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
           (is (= fn-a (:owner-fn-id (ex-data e))))
-          (is (= fn-b (:value-fn-id (ex-data e)))))))))
+          (is (= fn-b (:ref-fn-id (ex-data e)))))))))
 
 
 ;; === collect-dependency-chain-impl tests ===
@@ -139,12 +86,6 @@
   [dependencies-map]
 
   storage/ConstraintHelpers
-
-  (get-fn-schema-id-for-fn [_this _fn-id] nil)
-
-
-  (get-fn-schema-id-for-arg-schema [_this _arg-schema-id] nil)
-
 
   (collect-dependency-chain
     [this fn-id]

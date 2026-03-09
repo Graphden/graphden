@@ -1,4 +1,11 @@
 (ns ^:integration graphden.executor.composition.interface-test
+  "Tests for fn composition sync.
+
+   ## 2-Entity Schema
+
+   Composed functions use:
+   - fn entity with parent-id set (inherits from parent base-fn)
+   - arg entities with source-id set (inherits from parent's arg) + value/ref-id"
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
@@ -40,7 +47,7 @@
 (deftest sync-fns-to-storage!-test
   (testing "syncs fn definitions to storage"
     (let [storage (create-test-storage)
-          ;; First sync base-fns so we have fn-schemas
+          ;; First sync base-fns so we have parent fns
           _ (registry/initialize-all! storage
                                       [{:test-base-fn
                                         {:args {:a :int :b :int}
@@ -69,8 +76,8 @@
       (testing "creates fn entities in storage"
         (let [my-fn-id (:my-fn result)
               wrapper-fn-id (:wrapper-fn result)]
-          (is (some? (graphden.storage.protocol.core/read-entity storage :fn my-fn-id)))
-          (is (some? (graphden.storage.protocol.core/read-entity storage :fn wrapper-fn-id)))))))
+          (is (some? (sp/read-entity storage :fn my-fn-id)))
+          (is (some? (sp/read-entity storage :fn wrapper-fn-id)))))))
 
   (testing "validates definitions"
     (let [storage (create-test-storage)]
@@ -138,191 +145,19 @@
 
 ;; === Test internal parsing functions via core namespace ===
 
-(deftest parse-fn-result-ref-test
-  (testing "parses :fn-name> syntax (default result name)"
-    (is (= [:my-fn :my-fn] (#'core/parse-fn-result-ref :my-fn>))))
+(deftest parse-fn-ref-test
+  (testing "parses :fn-name as pass-through reference"
+    (is (= [:my-fn false] (#'core/parse-fn-ref :my-fn))))
 
-  (testing "parses :fn-name>result-name syntax"
-    (is (= [:my-fn :custom-result] (#'core/parse-fn-result-ref :my-fn>custom-result))))
+  (testing "parses :fn-name> syntax (execute fn)"
+    (is (= [:my-fn true] (#'core/parse-fn-ref :my-fn>))))
 
-  (testing "returns nil for non-fn-result refs"
-    (is (nil? (#'core/parse-fn-result-ref :my-fn)))
-    (is (nil? (#'core/parse-fn-result-ref "not-a-keyword")))
-    (is (nil? (#'core/parse-fn-result-ref 123))))
-
-  (testing "handles namespaced keywords"
-    (is (= [:ns/my-fn :ns/my-fn] (#'core/parse-fn-result-ref :ns/my-fn>)))
-    (is (= [:ns/my-fn :ns/result] (#'core/parse-fn-result-ref :ns/my-fn>result))))
+  (testing "returns nil for non-fn refs"
+    (is (nil? (#'core/parse-fn-ref "not-a-keyword")))
+    (is (nil? (#'core/parse-fn-ref 123))))
 
   (testing "returns nil for just >"
-    (is (nil? (#'core/parse-fn-result-ref :>)))))
-
-
-(deftest extract-fn-ref-test
-  (testing "extracts fn ref from keyword"
-    (is (= [:my-fn :fn nil] (#'core/extract-fn-ref :my-fn))))
-
-  (testing "extracts fn-usage ref from :fn-name> keyword"
-    (is (= [:my-fn :fn-usage :my-fn] (#'core/extract-fn-ref :my-fn>))))
-
-  (testing "extracts fn-usage with custom name"
-    (is (= [:my-fn :fn-usage :custom] (#'core/extract-fn-ref :my-fn>custom))))
-
-  (testing "returns nil for literals"
-    (is (nil? (#'core/extract-fn-ref 42)))
-    (is (nil? (#'core/extract-fn-ref "string")))
-    (is (nil? (#'core/extract-fn-ref {:map "value"})))))
-
-
-(deftest fn-usage-test
-  (testing "creates fn-usage entities for :fn-name> args"
-    (let [storage (create-test-storage)
-          _ (registry/initialize-all! storage
-                                      [{:const {:args {:x :any}
-                                                :return-type :fn
-                                                :impl (fn [_ _] (fn [_] nil))}}
-                                       {:assoc-fn {:args {:m :jsonb :k :text :v :any}
-                                                   :return-type :jsonb
-                                                   :impl (fn [_ _] {})}}])
-          ;; Define fns with fn-usage ref
-          fn-composition-data [{:name :handler-fn
-                                :parent :const
-                                :args {:x {:status 200}}}
-                               {:name :handler-map
-                                :parent :assoc-fn
-                                :args {:m {}
-                                       :k "handler"
-                                       :v :handler-fn>}}]  ; This should create fn-usage
-          result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
-          handler-fn-id (:handler-fn result)
-          ;; Verify fn-usage was created
-          frvs (sp/query-entities storage :fn-usage {:fn-id handler-fn-id})]
-      (is (= 1 (count frvs)))
-      (is (= "handler-fn" (:name (first frvs))))))
-
-  (testing "deduplicates fn-usages with same name"
-    (let [storage (create-test-storage)
-          _ (registry/initialize-all! storage
-                                      [{:const {:args {:x :any}
-                                                :return-type :fn
-                                                :impl (fn [_ _] (fn [_] nil))}}
-                                       {:assoc-fn {:args {:m :jsonb :k :text :v :any}
-                                                   :return-type :jsonb
-                                                   :impl (fn [_ _] {})}}
-                                       {:conj-fn {:args {:coll :jsonb :x :any}
-                                                  :return-type :jsonb
-                                                  :impl (fn [_ _] [])}}])
-          ;; Two refs to same :handler-fn>
-          fn-composition-data [{:name :handler-fn
-                                :parent :const
-                                :args {:x {:status 200}}}
-                               {:name :map1
-                                :parent :assoc-fn
-                                :args {:m {} :k "a" :v :handler-fn>}}
-                               {:name :map2
-                                :parent :assoc-fn
-                                :args {:m {} :k "b" :v :handler-fn>}}]  ; Same ref, should reuse
-          result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
-          handler-fn-id (:handler-fn result)
-          ;; Should have only ONE fn-usage (deduplicated)
-          frvs (sp/query-entities storage :fn-usage {:fn-id handler-fn-id})]
-      (is (= 1 (count frvs)))))
-
-  (testing "creates separate fn-usages with different names"
-    (let [storage (create-test-storage)
-          _ (registry/initialize-all! storage
-                                      [{:const {:args {:x :any}
-                                                :return-type :fn
-                                                :impl (fn [_ _] (fn [_] nil))}}
-                                       {:assoc-fn {:args {:m :jsonb :k :text :v :any}
-                                                   :return-type :jsonb
-                                                   :impl (fn [_ _] {})}}])
-          ;; Different explicit names: :handler-fn>result1, :handler-fn>result2
-          fn-composition-data [{:name :handler-fn
-                                :parent :const
-                                :args {:x {:status 200}}}
-                               {:name :map1
-                                :parent :assoc-fn
-                                :args {:m {} :k "a" :v :handler-fn>result1}}
-                               {:name :map2
-                                :parent :assoc-fn
-                                :args {:m {} :k "b" :v :handler-fn>result2}}]
-          result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
-          handler-fn-id (:handler-fn result)
-          ;; Should have TWO fn-usages with different names
-          frvs (sp/query-entities storage :fn-usage {:fn-id handler-fn-id})]
-      (is (= 2 (count frvs)))
-      (is (= #{"result1" "result2"} (set (map :name frvs)))))))
-
-
-(deftest validation-edge-cases-test
-  (testing "throws on non-keyword name"
-    (let [storage (create-test-storage)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword"
-            (fn-composition/sync-fns-to-storage! storage [{:name "string-name" :parent :foo}])))))
-
-  (testing "throws on non-map args"
-    (let [storage (create-test-storage)
-          _ (registry/initialize-all! storage
-                                      [{:base-fn {:args {:a :int} :return-type :int :impl (fn [_ _] 1)}}])]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"args must be a map"
-            (fn-composition/sync-fns-to-storage! storage [{:name :foo :parent :base-fn :args [1 2 3]}])))))
-
-  (testing "throws on non-sequential fn-composition"
-    (let [storage (create-test-storage)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a vector"
-            (fn-composition/sync-fns-to-storage! storage {:not "a vector"})))))
-
-  (testing "throws on unresolved fn reference in args"
-    (let [storage (create-test-storage)
-          _ (registry/initialize-all! storage
-                                      [{:base-fn {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
-            (fn-composition/sync-fns-to-storage! storage
-                                                 [{:name :foo :parent :base-fn :args {:ref :nonexistent-fn}}]))))))
-
-
-;; === resolve-fn-id edge case tests ===
-
-(deftest resolve-fn-id-from-storage-test
-  (testing "resolves fn by name from storage when not in created-fns"
-    (let [storage (create-test-storage)
-          _ (registry/initialize-all! storage
-                                      [{:base-fn {:args {:ref :fn}
-                                                  :return-type :any
-                                                  :impl (fn [_ _] nil)}}
-                                       {:const {:args {:x :any}
-                                                :return-type :int
-                                                :impl (fn [_ _] 42)}}])
-          ;; First, create an fn entity directly in storage
-          fn-schema-id (registry/fn-schema-uuid :const)
-          _ (sp/create-entity storage :fn
-                              {:name "existing-fn"
-                               :fn-schema-id fn-schema-id})
-          ;; Now sync a new fn that references the existing one
-          result (fn-composition/sync-fns-to-storage! storage
-                                                      [{:name :wrapper-fn
-                                                        :parent :base-fn
-                                                        :args {:ref :existing-fn}}])]
-      ;; Should succeed - existing-fn is resolved from storage
-      (is (uuid? (:wrapper-fn result))))))
-
-
-;; === parse-fn-result-ref edge case tests ===
-
-(deftest parse-fn-result-ref-edge-cases-test
-  (testing "handles empty string after >"
-    ;; :fn> should default result name to fn name
-    (is (= [:fn :fn] (#'core/parse-fn-result-ref :fn>))))
-
-  (testing "handles spaces in result name"
-    ;; This is a valid but unusual case
-    (is (= [:fn (keyword "name with space")]
-           (#'core/parse-fn-result-ref (keyword "fn>name with space")))))
-
-  (testing "handles multiple > characters"
-    ;; Only splits on first >
-    (is (= [:fn :a>b] (#'core/parse-fn-result-ref :fn>a>b)))))
+    (is (nil? (#'core/parse-fn-ref :>)))))
 
 
 ;; === extract-dependencies edge case tests ===
@@ -332,7 +167,7 @@
     (let [fn-def {:name :my-fn
                   :parent :base
                   :args {:a :other-fn   ; fn ref
-                         :b :third-fn>  ; fn-usage ref
+                         :b :third-fn>  ; fn ref (execute)
                          :c 42}}        ; literal (ignored)
           fn-names #{:other-fn :third-fn}
           deps (#'core/extract-dependencies fn-def fn-names)]
@@ -392,24 +227,110 @@
             (#'core/topological-sort fn-defs))))))
 
 
-;; === fn-usage edge cases ===
+(deftest validation-edge-cases-test
+  (testing "throws on non-keyword name"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword"
+            (fn-composition/sync-fns-to-storage! storage [{:name "string-name" :parent :foo}])))))
 
-(deftest fn-usage-unresolved-test
-  (testing "throws when fn-usage references non-existent fn"
+  (testing "throws on non-map args"
     (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
-                                      [{:base-fn {:args {:ref :any}
-                                                  :return-type :any
-                                                  :impl (fn [_ _] nil)}}])]
+                                      [{:base-fn {:args {:a :int} :return-type :int :impl (fn [_ _] 1)}}])]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"args must be a map"
+            (fn-composition/sync-fns-to-storage! storage [{:name :foo :parent :base-fn :args [1 2 3]}])))))
+
+  (testing "throws on non-sequential fn-composition"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a vector"
+            (fn-composition/sync-fns-to-storage! storage {:not "a vector"})))))
+
+  (testing "throws on unresolved fn reference in args"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:base-fn {:args {:ref :fn} :return-type :any :impl (fn [_ _] nil)}}])]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
             (fn-composition/sync-fns-to-storage! storage
-                                                 [{:name :broken
-                                                   :parent :base-fn
-                                                   :args {:ref :nonexistent>}}]))))))
+                                                 [{:name :foo :parent :base-fn :args {:ref :nonexistent-fn}}]))))))
 
 
-(deftest fn-arg-update-on-value-change-test
-  (testing "updates fn-arg when arg-value changes on re-sync"
+;; === resolve-fn-id edge case tests ===
+
+(deftest resolve-fn-id-from-storage-test
+  (testing "resolves fn by name from storage when not in created-fns"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:base-fn {:args {:ref :fn}
+                                                  :return-type :any
+                                                  :impl (fn [_ _] nil)}}
+                                       {:const {:args {:x :any}
+                                                :return-type :int
+                                                :impl (fn [_ _] 42)}}])
+          ;; First, create an fn entity directly in storage
+          const-fn-id (registry/fn-uuid :const)
+          _ (sp/create-entity storage :fn
+                              {:name "existing-fn"
+                               :parent-id const-fn-id})
+          ;; Now sync a new fn that references the existing one
+          result (fn-composition/sync-fns-to-storage! storage
+                                                      [{:name :wrapper-fn
+                                                        :parent :base-fn
+                                                        :args {:ref :existing-fn}}])]
+      ;; Should succeed - existing-fn is resolved from storage
+      (is (uuid? (:wrapper-fn result))))))
+
+
+;; === arg entity tests for 2-entity schema ===
+
+(deftest arg-creation-test
+  (testing "creates arg entities with source-id inheritance"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:const-fn {:args {:x :any}
+                                                   :return-type :any
+                                                   :impl (fn [_ _] nil)}}])
+          result (fn-composition/sync-fns-to-storage! storage
+                                                       [{:name :my-fn :parent :const-fn :args {:x 42}}])
+          fn-id (:my-fn result)
+          ;; Get composed fn's args
+          composed-args (sp/query-entities storage :arg {:fn-id fn-id})]
+      ;; Should have one arg
+      (is (= 1 (count composed-args)))
+      (let [arg (first composed-args)]
+        ;; Arg should have source-id set (inheriting from parent)
+        (is (uuid? (:source-id arg)))
+        ;; Arg should have value set
+        (is (= 42 (:value arg))))))
+
+  (testing "creates arg with ref-id for :fn-name> references"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:const {:args {:x :any}
+                                                :return-type :fn
+                                                :impl (fn [_ _] (fn [_] nil))}}
+                                       {:use-fn {:args {:f :any}
+                                                 :return-type :any
+                                                 :impl (fn [_ _] {})}}])
+          ;; Define fns with ref
+          fn-composition-data [{:name :handler-fn
+                                :parent :const
+                                :args {:x {:status 200}}}
+                               {:name :use-handler
+                                :parent :use-fn
+                                :args {:f :handler-fn>}}]  ; Execute reference
+          result (fn-composition/sync-fns-to-storage! storage fn-composition-data)
+          handler-fn-id (:handler-fn result)
+          use-handler-id (:use-handler result)
+          ;; Get arg from use-handler
+          args (sp/query-entities storage :arg {:fn-id use-handler-id})]
+      (is (= 1 (count args)))
+      (let [arg (first args)]
+        ;; Should have ref-id set to handler-fn-id
+        (is (= handler-fn-id (:ref-id arg)))))))
+
+
+(deftest arg-update-on-value-change-test
+  (testing "updates arg when value changes on re-sync"
     (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const-fn {:args {:x :any}
@@ -417,30 +338,25 @@
                                                    :impl (fn [_ _] nil)}}])
           ;; First sync with value 42
           result1 (fn-composition/sync-fns-to-storage! storage
-                                                       [{:name :my-fn :parent :const-fn :args {:x 42}}])
+                                                        [{:name :my-fn :parent :const-fn :args {:x 42}}])
           fn-id (:my-fn result1)
-          fn-args-before (sp/query-entities storage :fn-arg {:fn-id fn-id})
-          arg-value-id-before (:arg-value-id (first fn-args-before))
-          ;; Verify initial value
-          arg-value-before (sp/read-entity storage :arg-value arg-value-id-before)]
-      (is (= 42 (:value arg-value-before)))
+          args-before (sp/query-entities storage :arg {:fn-id fn-id})
+          arg-id-before (:id (first args-before))]
+      ;; Verify initial value
+      (is (= 42 (:value (first args-before))))
 
       ;; Re-sync with changed value 99
       (fn-composition/sync-fns-to-storage! storage
                                            [{:name :my-fn :parent :const-fn :args {:x 99}}])
-      ;; fn-arg should now point to different arg-value
-      (let [fn-args-after (sp/query-entities storage :fn-arg {:fn-id fn-id})
-            arg-value-id-after (:arg-value-id (first fn-args-after))
-            arg-value-after (sp/read-entity storage :arg-value arg-value-id-after)]
-        ;; Should still have exactly one fn-arg
-        (is (= 1 (count fn-args-after)))
-        ;; But it should point to a different arg-value
-        (is (not= arg-value-id-before arg-value-id-after)
-            "fn-arg should point to new arg-value after re-sync")
-        ;; And the new arg-value should have value 99
-        (is (= 99 (:value arg-value-after))))))
+      ;; arg should be updated
+      (let [args-after (sp/query-entities storage :arg {:fn-id fn-id})]
+        ;; Should still have exactly one arg
+        (is (= 1 (count args-after)))
+        ;; Same arg entity, but value updated
+        (is (= arg-id-before (:id (first args-after))))
+        (is (= 99 (:value (first args-after)))))))
 
-  (testing "does not update fn-arg when arg-value is same"
+  (testing "does not update arg when value is same"
     (let [storage (create-test-storage)
           _ (registry/initialize-all! storage
                                       [{:const-fn {:args {:x :any}
@@ -449,46 +365,11 @@
           _ (fn-composition/sync-fns-to-storage! storage
                                                  [{:name :my-fn :parent :const-fn :args {:x 42}}])
           fn-id (first (map :id (sp/query-entities storage :fn {:name "my-fn"})))
-          fn-args-before (sp/query-entities storage :fn-arg {:fn-id fn-id})
-          fn-arg-id-before (:id (first fn-args-before))
-          arg-value-id-before (:arg-value-id (first fn-args-before))]
+          args-before (sp/query-entities storage :arg {:fn-id fn-id})]
       ;; Re-sync with same value
       (fn-composition/sync-fns-to-storage! storage
                                            [{:name :my-fn :parent :const-fn :args {:x 42}}])
-      (let [fn-args-after (sp/query-entities storage :fn-arg {:fn-id fn-id})]
-        ;; fn-arg should be the same entity pointing to the same arg-value
-        (is (= fn-arg-id-before (:id (first fn-args-after))))
-        (is (= arg-value-id-before (:arg-value-id (first fn-args-after)))
-            "fn-arg should still point to same arg-value")))))
-
-
-(deftest arg-value-deduplication-test
-  (testing "reuses existing arg-value with same (arg-schema-id, value)"
-    (let [storage (create-test-storage)
-          _ (registry/initialize-all! storage
-                                      [{:const-fn {:args {:x :any}
-                                                   :return-type :any
-                                                   :impl (fn [_ _] nil)}}])
-          ;; Two fns with the same parent and same arg value
-          _ (fn-composition/sync-fns-to-storage! storage
-                                                 [{:name :fn-a :parent :const-fn :args {:x 42}}
-                                                  {:name :fn-b :parent :const-fn :args {:x 42}}])
-          ;; Both should reuse the same arg-value
-          arg-values (sp/query-entities storage :arg-value {})
-          values-with-42 (filter #(= 42 (:value %)) arg-values)]
-      ;; Should be exactly 1 arg-value with value 42 (deduplicated)
-      (is (= 1 (count values-with-42))
-          "Same (arg-schema-id, value) should be deduplicated")))
-
-  (testing "creates separate arg-values for different values"
-    (let [storage (create-test-storage)
-          _ (registry/initialize-all! storage
-                                      [{:const-fn {:args {:x :any}
-                                                   :return-type :any
-                                                   :impl (fn [_ _] nil)}}])
-          _ (fn-composition/sync-fns-to-storage! storage
-                                                 [{:name :fn-a :parent :const-fn :args {:x 42}}
-                                                  {:name :fn-b :parent :const-fn :args {:x 99}}])
-          arg-values (sp/query-entities storage :arg-value {})]
-      (is (= 2 (count arg-values))
-          "Different values should create separate arg-values"))))
+      (let [args-after (sp/query-entities storage :arg {:fn-id fn-id})]
+        ;; arg should be the same
+        (is (= (:id (first args-before)) (:id (first args-after))))
+        (is (= 42 (:value (first args-after))))))))

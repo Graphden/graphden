@@ -7,7 +7,13 @@
 
    Conflict detection: an entity is conflicted when it has been modified on both
    the source and target branches after the fork point (branch creation time or
-   last merge between the two)."
+   last merge between the two).
+
+   ## 2-Entity Schema
+
+   Detects conflicts in versioned entities:
+   - fn: function entity (parent-id for inheritance)
+   - arg: argument entity (source-id for inheritance, value/ref-id for data)"
   (:require
     [clojure.set :as set]
     [graphden.storage.protocol.core :as sp]
@@ -51,7 +57,7 @@
 
 (defn- modified-entities-after
   "Returns set of entity ids that have been modified on a branch after the fork point.
-   Checks all versioned entity types."
+   Checks all versioned entity types (fn and arg)."
   [base-storage branch-id after-ts]
   (reduce-kv
     (fn [acc entity-name {:keys [version-entity version-id-field]}]

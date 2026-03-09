@@ -1,6 +1,6 @@
 # Graphden: Visual Functional Programming System
 
-> **Last updated:** 2026-03-03
+> **Last updated:** 2026-03-09
 >
 > This document describes the technical architecture of graphden.
 > For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
@@ -20,52 +20,73 @@
 
 ## Part 1: Design Overview
 
-### Simple Graph Model
+### 2-Entity Graph Model
 
-Each function (`fn`) has argument bindings via `fn-arg` entities pointing to `arg-value` entities:
+The graph uses only two entity types: `fn` and `arg`. This minimal model enables
+function composition through inheritance.
 
-```
-fn: create-user
-  fn-schema: http-request
-  fn-args: [
-    {arg: url, value: "https://api.example.com"},
-    {arg: method, value: "POST"},
-    {arg: headers, value: {...}},
-    {arg: body, value: {...}}
-  ]
-```
+**fn (function):**
+- `parent-id=nil` → base-fn (has Clojure implementation)
+- `parent-id` set → composed fn (inherits from parent)
+- `name=nil` → local fn (scoped, not globally visible)
 
-**Schema (normalized):**
+**arg (argument):**
+- `source-id=nil` → primary argument (defines interface)
+- `source-id` set → inherited/forwarded argument
+- `value` → literal JSONB value
+- `ref-id` → reference to fn (execute and use result)
+- `is-fn=true` → pass fn-id directly (for HOF)
+
+**Schema:**
 
 ```
 fn:
   id: uuid (PK)
-  name: text
-  fn-schema-id: ref<fn-schema>
-  owner-fn-id: ref<fn> (nullable) - for local scoping
-  UNIQUE(owner-fn-id, name)
+  name: text (nullable) - nil for local fns
+  parent-id: ref<fn> (nullable) - nil for base-fn
+  return-type: enum<value-kind> (nullable)
+  impl-hash: text (nullable) - for base-fn version tracking
+  UNIQUE(name)
 
-arg-value:
-  id: uuid (PK)
-  arg-schema-id: ref<arg-schema>
-  value: JSONB (nullable) - literal value
-  fn-usage-id: ref<fn-usage> (nullable) - reference to fn-usage
-  XOR constraint: exactly one of (value, fn-usage-id) must be set
-  UNIQUE(arg-schema-id, value) or UNIQUE(arg-schema-id, fn-usage-id) - deduplication
-
-fn-arg:
+arg:
   id: uuid (PK)
   fn-id: ref<fn>
-  arg-schema-id: ref<arg-schema>
-  arg-value-id: ref<arg-value>
-  UNIQUE(fn-id, arg-schema-id)
+  via-fn-id: ref<fn> (nullable) - for forwarding through nested fns
+  source-id: ref<arg> (nullable) - nil for primary, set for inherited
+  value: JSONB (nullable) - literal value
+  ref-id: ref<fn> (nullable) - reference to fn
+  name: text (nullable)
+  type: enum<value-kind> (nullable)
+  required: bool (nullable)
+  is-fn: bool (nullable) - true for HOF args
+  UNIQUE(fn-id, source-id)
+  UNIQUE(fn-id, name)
+```
+
+**Example: Composing an add function:**
+
+```
+;; Base function (Clojure implementation)
+fn: add
+  parent-id: nil
+  return-type: :int
+  args:
+    - {name: "a", type: :int, required: true}
+    - {name: "b", type: :int, required: true}
+
+;; Composed function (inherits from add, binds 'a' to 10)
+fn: add-10
+  parent-id: add
+  args:
+    - {source-id: add/a, value: 10}  ; binds parent's 'a'
+    ; 'b' not specified = exposed to callers
 ```
 
 **Benefits:**
-- arg-value is pure (no owner) - enables deduplication
-- fn-arg is the binding between fn and arg-value
-- Local scoping via fn.owner-fn-id
-- UI can offer "create based on" = copying with ability to change
+- Only 2 entity types (down from 6)
+- Inheritance via parent-id eliminates separate schema entities
+- Args combine schema + value in one entity
+- All-or-nothing inheritance: if fn has ANY args, use only those
 
 **Constraints are extracted into an explicit protocol** - each storage MUST implement them.
 
@@ -83,16 +104,10 @@ fn-arg:
    Each storage MUST implement this protocol.
    Violation of any constraint = exception thrown."
 
-  (validate-arg-schema-belongs-to-fn!
-    [this fn-id arg-schema-id]
-    "Constraint: arg-schema must belong to this fn's fn-schema.
-     Called when creating arg-value.
-     Throws: :constraint-violation/arg-schema-mismatch")
-
   (validate-no-dependency-cycle!
     [this owner-fn-id target-fn-id]
     "Constraint: reference to target-fn must not create a dependency cycle.
-     Called when creating arg-value with value = ref<fn>.
+     Called when creating arg with ref-id pointing to another fn.
      Throws: :constraint-violation/dependency-cycle"))
 ```
 
@@ -103,14 +118,12 @@ The implementation uses a **shared validation logic** pattern with pluggable hel
 ```clojure
 ;; ConstraintHelpers protocol - each storage implements this
 (defprotocol ConstraintHelpers
-  (get-fn-schema-id-for-fn [this fn-id])
-  (get-fn-schema-id-for-arg-schema [this arg-schema-id])
   (collect-dependency-chain [this fn-id]))
 ```
 
 **Benefits of this approach:**
 - Code reuse across all storage backends
-- Each backend optimizes its helpers (SQL queries, Datomic queries, in-memory traversal)
+- Each backend optimizes its helpers (SQL queries, graph traversal)
 - Consistent error messages and behavior
 
 ### Implementation in Storage Backends
@@ -169,7 +182,7 @@ fn: B
 
 **Difference from recursion**: Recursion is one function calling itself (controlled). Cycle is two functions calling each other (uncontrolled).
 
-**Solution**: Forbid cycles when creating arg-value via `validate-no-dependency-cycle!`.
+**Solution**: Forbid cycles when creating arg with ref-id via `validate-no-dependency-cycle!`.
 
 | Storage | Implementation |
 |---------|----------------|
@@ -195,111 +208,84 @@ Technically this is a cycle (A->B->A), but this is a VALID pattern.
 
 ## Part 4: Data Schema
 
-### Entities
+### Entities (2-Entity Model)
 
 ```
 +------------------------------------------------------------------+
-| fn-schema (function schema)                                       |
+| fn (function)                                                     |
 +------------------------------------------------------------------+
 | id: uuid (PK)                                                     |
-| name: text (UNIQUE)                                               |
-| returned-type: enum<value-kind>                                   |
-| base-fn-name: text (nullable) - Clojure function name            |
-|                                 null = composite function         |
+| name: text (nullable) - nil for local fns                        |
+| parent-id: ref<fn> (nullable) - nil for base-fn                  |
+| return-type: enum<value-kind> (nullable)                         |
+| impl-hash: text (nullable) - for base-fn version tracking        |
+| UNIQUE(name)                                                      |
++------------------------------------------------------------------+
+| parent-id=nil → base-fn (has Clojure implementation)             |
+| parent-id set → composed fn (inherits from parent)               |
+| name=nil → local fn (scoped, not globally visible)               |
 +------------------------------------------------------------------+
          |
          | 1:N
          v
 +------------------------------------------------------------------+
-| arg-schema (argument schema)                                      |
-+------------------------------------------------------------------+
-| id: uuid (PK)                                                     |
-| fn-schema-id: ref<fn-schema>                                      |
-| name: text                                                        |
-| type: enum<value-kind>                                            |
-| required: bool (default true)                                     |
-| first-class: bool (default true) - visible in UI                 |
-| UNIQUE(fn-schema-id, name)                                        |
-+------------------------------------------------------------------+
-
-+------------------------------------------------------------------+
-| fn (function instance)                                            |
-+------------------------------------------------------------------+
-| id: uuid (PK)                                                     |
-| name: text                                                        |
-| fn-schema-id: ref<fn-schema>                                      |
-| owner-fn-id: ref<fn> (nullable) - for local scoping              |
-| UNIQUE(owner-fn-id, name)                                         |
-+------------------------------------------------------------------+
-         |
-         | 1:N (via fn-arg)
-         v
-+------------------------------------------------------------------+
-| fn-arg (argument binding)                                         |
+| arg (argument)                                                    |
 +------------------------------------------------------------------+
 | id: uuid (PK)                                                     |
 | fn-id: ref<fn>                                                    |
-| arg-schema-id: ref<arg-schema>                                    |
-| arg-value-id: ref<arg-value>                                      |
-| UNIQUE(fn-id, arg-schema-id)                                      |
+| via-fn-id: ref<fn> (nullable) - for forwarding through nested    |
+| source-id: ref<arg> (nullable) - nil for primary arg             |
+| value: JSONB (nullable) - literal value                          |
+| ref-id: ref<fn> (nullable) - reference to fn                     |
+| name: text (nullable) - inherited from source if nil             |
+| type: enum<value-kind> (nullable) - inherited from source        |
+| required: bool (nullable) - inherited from source                |
+| is-fn: bool (nullable) - true for HOF args                       |
+| UNIQUE(fn-id, source-id)                                         |
+| UNIQUE(fn-id, name)                                               |
 +------------------------------------------------------------------+
-         |
-         | N:1
-         v
+| source-id=nil → primary argument (defines interface)             |
+| source-id set → inherited/forwarded argument                     |
+| value set → literal value bound                                  |
+| ref-id set → reference to fn (execute and use result)            |
+| is-fn=true → pass fn-id directly (for HOF)                       |
+| value=nil AND ref-id=nil → exposed (part of fn interface)        |
 +------------------------------------------------------------------+
-| arg-value (argument value - pure, no owner)                       |
-+------------------------------------------------------------------+
-| id: uuid (PK)                                                     |
-| arg-schema-id: ref<arg-schema>                                    |
-| value: JSONB (nullable) - literal value                           |
-| fn-usage-id: ref<fn-usage> (nullable) - reference to fn-usage    |
-| XOR: exactly one of (value, fn-usage-id) must be set             |
-| UNIQUE(arg-schema-id, value/fn-usage-id) - enables deduplication  |
-+------------------------------------------------------------------+
+```
 
-+------------------------------------------------------------------+
-| fn-usage (function usage reference)                               |
-+------------------------------------------------------------------+
-| id: uuid (PK)                                                     |
-| fn-id: ref<fn> - function to execute at this usage               |
-| name: text - identifier for this fn-usage                        |
-| owner-fn-id: ref<fn> (nullable) - owning fn for local scoping    |
-| UNIQUE(owner-fn-id, name)                                         |
-+------------------------------------------------------------------+
-| PRIMARY PURPOSE: Distinguish same function at different usage    |
-| points. Example: current-time before sleep vs after sleep.       |
-|                                                                  |
-| SECONDARY: Results are cached within execution (memoization).    |
-+------------------------------------------------------------------+
+### Inheritance Model
+
+**All-or-nothing inheritance:** If a composed fn has ANY args, only those args are used.
+Args without value/ref-id are exposed to callers (they form the fn's interface).
+
+**Example:**
+```
+fn: add (base-fn)
+  args: [{name: "a", type: :int}, {name: "b", type: :int}]
+
+fn: add-10 (parent-id: add)
+  args: [{source-id: add/a, value: 10}]  ; only 'a' is bound
+  ; 'b' is NOT automatically inherited - caller must provide it
 ```
 
 ### Constraints and Their Implementation
 
-| # | Constraint | PostgreSQL | Apache AGE |
-|---|------------|------------|------------|
-| 1 | fn-schema.name is unique | UNIQUE constraint | UNIQUE constraint |
-| 2 | fn.name is unique within scope | UNIQUE(owner-fn-id, name) | UNIQUE(owner-fn-id, name) |
-| 3 | arg-schema is unique within fn-schema | UNIQUE(fn-schema-id, name) | UNIQUE(fn-schema-id, name) |
-| 4 | arg-value deduplication | UNIQUE(arg-schema-id, value) | UNIQUE(arg-schema-id, value) |
-| 5 | fn-arg is unique per fn | UNIQUE(fn-id, arg-schema-id) | UNIQUE(fn-id, arg-schema-id) |
-| 6 | fn-arg.arg-schema-id matches fn.fn-schema-id | Clojure validation | Clojure validation |
-| 7 | No cycles in fn graph through fn-arg | Recursive CTE | Cypher path query |
+| # | Constraint | PostgreSQL |
+|---|------------|------------|
+| 1 | fn.name is unique | UNIQUE(name) |
+| 2 | arg is unique per fn + source | UNIQUE(fn-id, source-id) |
+| 3 | arg name is unique within fn | UNIQUE(fn-id, name) |
+| 4 | No cycles in fn graph through ref-id | Recursive CTE |
 
-### Constraint #6 in Detail (Arg-Schema Belongs to Fn)
+### Constraint #4 in Detail (No Dependency Cycles)
 
-**Problem**: fn-arg binds arg-value to fn. The arg-schema-id must belong to the fn's fn-schema.
+**When creating arg with ref-id:**
 
-**Implementation**: All storage backends use shared Clojure validation via `validate-arg-schema-belongs-to-fn!`.
+1. Get target-fn-id from ref-id
+2. Recursively collect all fns that target-fn references through args with ref-id
+3. If fn-id (owner of this arg) is in this set -> REJECT (cycle)
 
-### Constraint #7 in Detail (No Dependency Cycles)
-
-**When creating fn-arg with arg-value.value = ref<fn>:**
-
-1. Get target-fn-id from arg-value.value
-2. Recursively collect all fns that target-fn references through fn-arg → arg-value
-3. If fn-id (the fn being bound) is in this set -> REJECT (cycle)
-
-**Implementation**: `validate-no-dependency-cycle!` with backend-specific optimizations.
+**Implementation**: `validate-no-dependency-cycle!` with recursive CTE.
 
 ---
 
@@ -325,84 +311,54 @@ Arguments are wrapped in Clojure `delay` objects for lazy evaluation. This nativ
 (wrap-delay-with-context arg-name :fn-ref
   #(execute-internal context uuid-value nil))
 
-;; fn-usage reference → delay with caching
-(wrap-delay-with-context arg-name :fn-usage
-  #(execute-fn-usage context uuid-value))
+;; fn reference with is-fn=false → delay that executes and caches by ref-id
+(wrap-delay-with-context arg-name :fn-ref
+  #(execute-with-caching context ref-fn-id))
 ```
 
 ### Argument Resolution Priority
 
 Arguments are resolved in this order (highest priority first):
 
-1. **fn-arg bindings** — Stored bindings from database (fn-arg → arg-value, always takes precedence)
-2. **provided-args** — Explicitly passed at execute time (from HOF callables, only for free args)
+1. **Own args** — Args directly on the fn being executed
+2. **provided-args** — Explicitly passed at execute time (from HOF callables, for exposed args)
 3. Required arg with no value → error
 4. Optional arg with no value → delay returning nil
 
 ### Argument Types and Their Handling
 
-**arg-value has two mutually exclusive fields:**
+**arg has mutually exclusive value fields:**
 - `value` (JSONB) - literal value
-- `fn-usage-id` (ref<fn-usage>) - reference to fn-usage
+- `ref-id` (ref<fn>) - reference to another fn
 
-**Runtime behavior is controlled by `arg-schema.first-class` flag:**
+**Runtime behavior is controlled by `is-fn` flag:**
 
-| arg-value field | arg-schema.first-class | Delay Behavior |
-|-----------------|------------------------|----------------|
+| arg field | is-fn | Delay Behavior |
+|-----------|-------|----------------|
 | value (literal) | any | `@delay` → literal value |
-| fn-usage-id | false | `@delay` → execute fn-usage, use result (cached) |
-| fn-usage-id | true | `@delay` → get fn-id from fn-usage, pass directly (for HOF) |
+| ref-id | false | `@delay` → execute fn, use result (cached) |
+| ref-id | true | `@delay` → pass fn-id directly (for HOF) |
 
-**Key principle:** The FUNCTION (via arg-schema.first-class) decides how to handle the argument, NOT the caller.
+**Key principle:** The `is-fn` flag on the arg decides how to handle the reference.
 
-### fn-usage: Call Site Identity
+### Result Caching
 
-**Primary purpose:** Distinguish the same function called at different points in the graph.
-
-```
-;; Problem: How to get time BEFORE and AFTER sleep?
-;; Both would reference the same fn: current-time
-
-;; Solution: Two fn-usages pointing to the same fn
-fn-usage: time-before  → fn: current-time
-fn-usage: time-after   → fn: current-time
-
-fn: my-program
-  t1: ref<fn-usage:time-before>   ← first call site
-  wait: ref<fn-usage:sleep-5s>
-  t2: ref<fn-usage:time-after>    ← second call site (different!)
-```
-
-**Secondary purpose:** Results are cached within execution (memoization).
+Results of executed refs are cached within execution by ref-fn-id:
 
 ```
 fn: report
-  sales: ref<fn-usage:A>     ← A points to calculate-sales
-  summary: ref<fn-usage:A>   ← Same A, result is cached
+  arg1: {ref-id: calculate-sales}      ← executes calculate-sales
+  arg2: {ref-id: calculate-sales}      ← same ref-id, result is cached
 
-// calculate-sales executes ONCE, result shared between sales and summary
+// calculate-sales executes ONCE, result shared between arg1 and arg2
 ```
 
-**Free arguments:** If the referenced fn has unbound arguments, pass them at runtime:
+**Exposed arguments:** Args without value/ref-id form the fn's interface. Pass them at runtime:
 
 ```clojure
-;; fn-a has free argument arg-schema-a
-;; fn-usage-a points to fn-a
-
-(execute ctx root-fn-id
-         {[fn-usage-a-id arg-schema-a-id] 42})
+;; fn-a has exposed argument arg-id
+(execute ctx fn-a-id {arg-id 42})
 ```
-
-**How fn-usage works:**
-
-All arg-value references use fn-usage-id (never direct fn-id). Behavior depends on arg-schema.first-class:
-
-| arg-schema.first-class | Behavior |
-|------------------------|----------|
-| true | Get fn-id from fn-usage, pass directly (for HOF) |
-| false | Execute fn-usage, cache result, support free args |
-
-**Key insight:** The function (via arg-schema) decides how to handle the argument, NOT the caller.
 
 ### Base Functions and Their Types
 
@@ -454,8 +410,8 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
    timeout-ms        ; Maximum execution time (default: 30000ms)
    start-time        ; Execution start time
    depth             ; Current recursion depth
-   current-fn-usage-id  ; Current fn-usage-id (nil for root function)
-   result-cache      ; Atom: {fn-usage-id -> computed-result}
+   current-ref-fn-id ; Current ref-fn-id being evaluated (nil for root)
+   result-cache      ; Atom: {ref-fn-id -> computed-result}
    strict-type-validation?  ; If true (default), throw on unknown types
    max-unknown-types ; Circuit breaker for forward compat mode (default: 10)
    unknown-type-counter     ; Atom: count of unknown types encountered
@@ -468,8 +424,8 @@ Base functions receive arguments as delays and use `@` (deref) to get values:
 1. **`execution-graph` caching** — Graph resolved once at top level, reused for all nested calls
 2. **`base-fns` registry** — Direct access to implementations without global state
 3. **`storage` reference** — Enables `ExecutionGraph` protocol calls if needed
-4. **`result-cache`** — Shared cache for `fn-usage` computations within execution
-5. **`current-fn-usage-id`** — Tracks which fn-usage is being evaluated
+4. **`result-cache`** — Shared cache for fn computations within execution (by ref-fn-id)
+5. **`current-ref-fn-id`** — Tracks which ref-fn is being evaluated
 6. **`clock`** — Injectable time source for deterministic timeout testing
 7. **Forward compatibility** — `strict-type-validation?` + circuit breaker for schema migrations
 
@@ -507,48 +463,32 @@ This ensures errors occur at argument evaluation time, not during consumption by
 
 **Problem**: How to provide different argument values for the same function at different call sites?
 
-**Solution**: Create a local fn with `owner-fn-id` pointing to the parent function. This fn inherits the same fn-schema but can have different fn-arg bindings.
+**Solution**: Create a composed fn that inherits from the base-fn and provides specific arg values.
 
 ```
-;; Example: Using add-fn twice with different arguments in a parent function
+;; Example: Using add twice with different arguments
 
-;; 1. Base add function (no owner, no bindings)
-fn: add-fn
-  fn-schema-id: add-schema
-  ;; No fn-arg bindings - this is the "template"
+;; 1. Base add function
+fn: add (parent-id: nil)
+  args: [{name: "a", type: :int}, {name: "b", type: :int}]
 
-;; 2. Local fn for first usage (owned by parent)
-fn: add-10-20
-  fn-schema-id: add-schema
-  owner-fn-id: parent-fn-id  ;; Local to parent
+;; 2. Composed fn for first usage (adds 10 + 20)
+fn: add-10-20 (parent-id: add)
+  args: [{source-id: add/a, value: 10},
+         {source-id: add/b, value: 20}]
 
-;; fn-arg bindings for add-10-20:
-fn-arg: {fn-id: add-10-20, arg-schema-id: a, arg-value-id: val-10}
-fn-arg: {fn-id: add-10-20, arg-schema-id: b, arg-value-id: val-20}
+;; 3. Composed fn for second usage (adds 30 + 40)
+fn: add-30-40 (parent-id: add)
+  args: [{source-id: add/a, value: 30},
+         {source-id: add/b, value: 40}]
 
-;; arg-values (pure, reusable):
-arg-value: val-10 {arg-schema-id: a, value: 10}
-arg-value: val-20 {arg-schema-id: b, value: 20}
-
-;; 3. Local fn for second usage (owned by same parent)
-fn: add-30-40
-  fn-schema-id: add-schema
-  owner-fn-id: parent-fn-id  ;; Local to parent
-
-;; fn-arg bindings for add-30-40:
-fn-arg: {fn-id: add-30-40, arg-schema-id: a, arg-value-id: val-30}
-fn-arg: {fn-id: add-30-40, arg-schema-id: b, arg-value-id: val-40}
-
-;; 4. Parent function uses both via fn-usage
-fn-usage: first-sum  → fn: add-10-20
-fn-usage: second-sum → fn: add-30-40
-
-fn: parent-fn
-  fn-arg: {arg-schema-id: x, arg-value-id: ref<fn-usage:first-sum>}   ;; Result: 30
-  fn-arg: {arg-schema-id: y, arg-value-id: ref<fn-usage:second-sum>}  ;; Result: 70
+;; 4. Parent function uses both
+fn: parent-fn (parent-id: some-combiner)
+  args: [{ref-id: add-10-20},   ;; Result: 30
+         {ref-id: add-30-40}]   ;; Result: 70
 ```
 
-**Key insight**: All argument binding happens in the database via fn-arg (binding) + arg-value (pure values). No runtime argument injection is needed. The graph structure (fn with owner-fn-id + fn-arg bindings) is sufficient for all use cases.
+**Key insight**: All argument binding happens in the database via arg entities. No runtime argument injection is needed. The graph structure (fn + args with source-id + value) is sufficient for all use cases.
 
 ### HOF Single-Argument Model
 
@@ -575,7 +515,7 @@ Higher-order functions (map, filter, reduce, etc.) use a **single-argument model
 
 1. HOF receives `fn-id` (UUID) for the `:fn` type argument
 2. HOF calls `exec/make-single-arg-callable` to create a callable
-3. `make-single-arg-callable` finds the single required arg-schema and creates a function that passes values to it
+3. `make-single-arg-callable` finds the single required arg and creates a function that passes values to it
 
 ```clojure
 ;; Inside map implementation
@@ -603,19 +543,15 @@ Higher-order functions (map, filter, reduce, etc.) use a **single-argument model
 **Usage example in graph:**
 
 ```
-;; 1. Create function for doubling
-fn-schema: double-fn-schema
-  arg-schema: x (type: :int, required: true)  ← exactly 1 required arg
-  returned-type: :int
-
-fn: double-fn
-  fn-schema-id: double-fn-schema
+;; 1. Create base function for doubling (1 required arg)
+fn: double-fn (parent-id: mul)
+  args: [{source-id: mul/a, value: 2},   ; bind 'a' to 2
+         {source-id: mul/b, name: "n"}]  ; expose 'b' as 'n'
 
 ;; 2. Use in map
-fn: map-doubles
-  fn-schema-id: map-schema
-  arg-value: f -> ref<double-fn>      ← fn reference
-  arg-value: coll -> [1, 2, 3]        ← literal
+fn: map-doubles (parent-id: map-fn)
+  args: [{source-id: map/f, ref-id: double-fn, is-fn: true},  ; fn reference
+         {source-id: map/coll, value: [1, 2, 3]}]             ; literal
 
 ;; 3. Execute: map calls double-fn with each element
 ;; Result: [2, 4, 6]
@@ -668,16 +604,16 @@ Each fn-def is a map with:
 
 ### Reference Syntax: `:fn-name` vs `:fn-name>`
 
-Both syntaxes create `fn-usage` entities in storage. The difference is naming convention:
+Both syntaxes create references to functions. The runtime behavior is controlled by `is-fn` flag:
 
-| Syntax | fn-usage name | Typical use case |
-|--------|--------------|------------------|
-| `:fn-name` | "fn-name-ref" | HOF arguments (arg-schema.first-class=true) |
-| `:fn-name>` | "fn-name" or suffix | Computed values (arg-schema.first-class=false) |
+| Syntax | is-fn | Typical use case |
+|--------|-------|------------------|
+| `:fn-name` | `true` | HOF arguments (pass fn-id directly) |
+| `:fn-name>` | `false` | Computed values (execute and use result) |
 
-**Runtime behavior is controlled by `arg-schema.first-class`, NOT by syntax:**
-- `first-class=true` → get fn-id from fn-usage, pass directly (for HOF)
-- `first-class=false` → execute fn-usage, use result value
+**Runtime behavior is controlled by `is-fn` flag on the arg:**
+- `is-fn=true` → pass fn-id directly (for HOF to call)
+- `is-fn=false` → execute fn, use result value
 
 **When to use each:**
 
@@ -787,10 +723,10 @@ When executing `:web-server-fn`:
 
 ### Key Insight
 
-The `>` suffix creates a **fn-usage** entity in storage, which means:
-- Result is computed once and cached within execution
-- Multiple references to same `:fn-name>` share the cached result
-- Without `>`, you pass the fn-id for HOF to call multiple times
+References with `is-fn=false` (the `>` suffix in fn-defs) are cached within execution:
+- Result is computed once and cached by ref-id
+- Multiple args with same ref-id share the cached result
+- With `is-fn=true`, you pass the fn-id for HOF to call multiple times
 
 ---
 
@@ -808,7 +744,7 @@ The `>` suffix creates a **fn-usage** entity in storage, which means:
 ### What Can Break
 
 1. **Infinite recursion** - protection via depth/timeout, but error at runtime
-2. **Races during cycle detection** - if two processes create fn-arg bindings simultaneously
+2. **Races during cycle detection** - if two processes create arg bindings simultaneously
    - *Mitigation*: PostgreSQL uses transactions; Datomic is inherently serialized
 3. **Performance on deep graphs** - many DB queries
    - *Mitigation*: Apache AGE optimized Cypher queries for graph traversal

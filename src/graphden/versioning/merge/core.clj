@@ -1,10 +1,10 @@
 (ns graphden.versioning.merge.core
-  "Merge protection for arg-values with the merge-protected trait.
+  "Merge protection for args with sensitive values.
 
-   When merging branches, arg-values marked with the 'merge-protected' trait
+   When merging branches, args marked with the 'merge-protected' trait
    should not be transferred from source to target branch. This module provides:
 
-   - Detection of protected arg-values that would be transferred during merge
+   - Detection of protected args that would be transferred during merge
    - Validation that prevents merge of protected values
    - Integration with versioned-storage merge flow
 
@@ -13,8 +13,14 @@
    - Environment-specific secrets shouldn't leak across branches
    - Sensitive data isolation between branches
 
+   ## 2-Entity Schema
+
+   In the 2-entity schema:
+   - arg: stores value directly in the entity
+   - value-trait: marks specific arg-ids as merge-protected
+
    Usage:
-   1. Mark arg-values with merge-protected trait using value-traits-schema
+   1. Mark args with merge-protected trait using value-traits-schema
    2. Before merging, call detect-protected-transfers to find violations
    3. Either block merge or exclude protected values from transfer"
   (:require
@@ -24,46 +30,43 @@
     [graphden.versioning.storage.core :as vs]))
 
 
-(defn- get-merge-protected-arg-value-ids
-  "Returns set of arg-value-ids that have the merge-protected trait."
+(defn- get-merge-protected-arg-ids
+  "Returns set of arg-ids that have the merge-protected trait."
   [base-storage]
-  (let [value-traits (sp/query-entities base-storage :value-trait
-                                        {:trait-id vts/merge-protected-trait-uuid})]
-    (set (map :arg-value-id value-traits))))
+  (let [arg-traits (sp/query-entities base-storage :arg-trait
+                                      {:trait-id vts/merge-protected-trait-uuid})]
+    (set (map :arg-id arg-traits))))
 
 
-(defn- find-transferred-arg-value-ids
-  "Finds arg-value-ids referenced by versions that would become visible on target.
+(defn- find-transferred-arg-ids
+  "Finds arg-ids referenced by versions that would become visible on target.
 
    A version is 'transferred' when:
    - It exists only on source branch (not on target)
    - It will become visible on target after merge via the branch-merge record
 
-   Checks fn-arg-version table."
+   Checks arg-version table."
   [base-storage source-branch-id target-branch-id]
-  (let [;; Get all fn-arg-versions on source branch
-        source-fn-arg-versions (sp/query-entities base-storage :fn-arg-version
-                                                  {:branch-id source-branch-id})
-        ;; Get all fn-arg-versions on target branch
-        target-fn-arg-versions (sp/query-entities base-storage :fn-arg-version
-                                                  {:branch-id target-branch-id})
-        target-fn-arg-ids (set (map :fn-arg-id target-fn-arg-versions))
+  (let [;; Get all arg-versions on source branch
+        source-arg-versions (sp/query-entities base-storage :arg-version
+                                               {:branch-id source-branch-id})
+        ;; Get all arg-versions on target branch
+        target-arg-versions (sp/query-entities base-storage :arg-version
+                                               {:branch-id target-branch-id})
+        target-arg-ids (set (map :arg-id target-arg-versions))
 
         ;; Versions that exist only on source (would be transferred)
-        transferred-fn-arg-versions (remove #(contains? target-fn-arg-ids (:fn-arg-id %))
-                                            source-fn-arg-versions)
+        transferred-arg-versions (remove #(contains? target-arg-ids (:arg-id %))
+                                         source-arg-versions)]
 
-        ;; Collect all arg-value-ids from transferred versions
-        fn-arg-value-ids (keep :arg-value-id transferred-fn-arg-versions)]
-    (set fn-arg-value-ids)))
+    (set (map :arg-id transferred-arg-versions))))
 
 
 (defn detect-protected-transfers
-  "Detects merge-protected arg-values that would be transferred during merge.
+  "Detects merge-protected args that would be transferred during merge.
 
    Returns a map:
-   {:protected-transfers [{:arg-value-id uuid
-                           :entity-type :fn-arg
+   {:protected-transfers [{:arg-id uuid
                            :version <version record>}]
     :blocked? boolean}
 
@@ -71,41 +74,40 @@
   [versioned-storage source-branch-id]
   (let [base-storage (vs/unwrap versioned-storage)
         target-branch-id (vs/current-branch-id versioned-storage)
-        protected-ids (get-merge-protected-arg-value-ids base-storage)
+        protected-ids (get-merge-protected-arg-ids base-storage)
 
         ;; Only check if there are any protected values
         transfers (when (seq protected-ids)
-                    (let [transferred-ids (find-transferred-arg-value-ids
+                    (let [transferred-ids (find-transferred-arg-ids
                                             base-storage source-branch-id target-branch-id)
                           violations (set/intersection protected-ids transferred-ids)]
 
-                      ;; Find which versions reference these protected values
+                      ;; Find which versions reference these protected args
                       (when (seq violations)
-                        (let [source-fn-arg-versions
-                              (sp/query-entities base-storage :fn-arg-version
+                        (let [source-arg-versions
+                              (sp/query-entities base-storage :arg-version
                                                  {:branch-id source-branch-id})
 
-                              fn-arg-transfers
-                              (for [v source-fn-arg-versions
-                                    :when (contains? violations (:arg-value-id v))]
-                                {:arg-value-id (:arg-value-id v)
-                                 :entity-type :fn-arg
-                                 :entity-id (:fn-arg-id v)
+                              arg-transfers
+                              (for [v source-arg-versions
+                                    :when (contains? violations (:arg-id v))]
+                                {:arg-id (:arg-id v)
+                                 :entity-type :arg
                                  :version v})]
-                          (vec fn-arg-transfers)))))]
+                          (vec arg-transfers)))))]
 
     {:protected-transfers (or transfers [])
      :blocked? (boolean (seq transfers))}))
 
 
 (defn validate-merge!
-  "Validates that merge doesn't transfer merge-protected arg-values.
+  "Validates that merge doesn't transfer merge-protected args.
    Throws if protected values would be transferred."
   [versioned-storage source-branch-id]
   (let [{:keys [protected-transfers blocked?]}
         (detect-protected-transfers versioned-storage source-branch-id)]
     (when blocked?
-      (throw (ex-info "Merge blocked: protected arg-values would be transferred"
+      (throw (ex-info "Merge blocked: protected args would be transferred"
                       {:type :merge-protection-violation
                        :protected-transfers protected-transfers
                        :source-branch-id source-branch-id
@@ -116,7 +118,7 @@
   "Merges source branch into target with merge-protection validation.
 
    Same as vs/merge-branch! but first validates that no merge-protected
-   arg-values would be transferred.
+   args would be transferred.
 
    Arguments:
    - versioned-storage: VersionedStorage instance (target branch)
@@ -138,41 +140,41 @@
 
 
 (defn has-merge-protected-trait?
-  "Returns true if the given arg-value has the merge-protected trait."
-  [storage arg-value-id]
+  "Returns true if the given arg has the merge-protected trait."
+  [storage arg-id]
   (let [base-storage (if (vs/versioned-storage? storage)
                        (vs/unwrap storage)
                        storage)]
-    (boolean (seq (sp/query-entities base-storage :value-trait
-                                     {:arg-value-id arg-value-id
+    (boolean (seq (sp/query-entities base-storage :arg-trait
+                                     {:arg-id arg-id
                                       :trait-id vts/merge-protected-trait-uuid})))))
 
 
 (defn add-merge-protection!
-  "Adds the merge-protected trait to an arg-value.
+  "Adds the merge-protected trait to an arg.
    Idempotent - safe to call multiple times."
-  [storage arg-value-id]
+  [storage arg-id]
   (let [base-storage (if (vs/versioned-storage? storage)
                        (vs/unwrap storage)
                        storage)]
     ;; First ensure the trait exists (call seed if needed)
     (vts/seed-traits! base-storage)
     ;; Check if already protected
-    (when-not (has-merge-protected-trait? base-storage arg-value-id)
-      (sp/create-entity base-storage :value-trait
-                        {:arg-value-id arg-value-id
+    (when-not (has-merge-protected-trait? base-storage arg-id)
+      (sp/create-entity base-storage :arg-trait
+                        {:arg-id arg-id
                          :trait-id vts/merge-protected-trait-uuid}))))
 
 
 (defn remove-merge-protection!
-  "Removes the merge-protected trait from an arg-value."
-  [storage arg-value-id]
+  "Removes the merge-protected trait from an arg."
+  [storage arg-id]
   (let [base-storage (if (vs/versioned-storage? storage)
                        (vs/unwrap storage)
                        storage)
-        value-traits (sp/query-entities base-storage :value-trait
-                                        {:arg-value-id arg-value-id
-                                         :trait-id vts/merge-protected-trait-uuid})]
-    (doseq [vt value-traits]
-      (sp/delete-entity base-storage :value-trait (:id vt)))
-    (boolean (seq value-traits))))
+        arg-traits (sp/query-entities base-storage :arg-trait
+                                       {:arg-id arg-id
+                                        :trait-id vts/merge-protected-trait-uuid})]
+    (doseq [at arg-traits]
+      (sp/delete-entity base-storage :arg-trait (:id at)))
+    (boolean (seq arg-traits))))

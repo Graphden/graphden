@@ -1,4 +1,16 @@
 (ns graphden.schema.versioned.schema-test
+  "Tests for versioned data schema with 2-entity model.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+
+   Versioning entities:
+   - branch, branch-merge: branch management
+   - fn-version: version history for fn
+   - arg-version: version history for arg"
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.malli.core :as malli]
@@ -11,21 +23,15 @@
     (let [builder (malli/create-builder)
           schema (vds/build-schema builder)]
 
-      (testing "includes graph entities"
+      (testing "includes graph entities (2-entity model)"
         (is (some #{:fn} (ds/entities schema)))
-        (is (some #{:fn-schema} (ds/entities schema)))
-        (is (some #{:arg-schema} (ds/entities schema)))
-        (is (some #{:arg-value} (ds/entities schema)))
-        (is (some #{:fn-arg} (ds/entities schema)))
-        (is (some #{:fn-usage} (ds/entities schema))))
+        (is (some #{:arg} (ds/entities schema))))
 
       (testing "includes versioning entities"
         (is (some #{:branch} (ds/entities schema)))
         (is (some #{:branch-merge} (ds/entities schema)))
         (is (some #{:fn-version} (ds/entities schema)))
-        (is (some #{:fn-schema-version} (ds/entities schema)))
-        (is (some #{:arg-schema-version} (ds/entities schema)))
-        (is (some #{:fn-arg-version} (ds/entities schema))))
+        (is (some #{:arg-version} (ds/entities schema))))
 
       (testing "includes value-kind enum"
         (is (contains? (ds/enums schema) :value-kind))))))
@@ -59,57 +65,65 @@
 
 
 (deftest fn-version-entity-test
-  (testing "fn-version entity has correct fields"
+  (testing "fn-version entity has correct fields for 2-entity schema"
     (let [schema (vds/build-schema (malli/create-builder))
           fields (ds/entity-fields schema :fn-version)]
+      ;; Core references
       (is (= :ref (:type (:fn-id fields))))
       (is (= :fn (:ref-entity (:fn-id fields))))
       (is (= :ref (:type (:branch-id fields))))
       (is (= :branch (:ref-entity (:branch-id fields))))
-      (is (= :text (:type (:name fields))))
-      (is (= :uuid (:type (:fn-schema-id fields))))
-      (is (= :timestamptz (:type (:created-at fields)))))))
 
-
-(deftest fn-schema-version-entity-test
-  (testing "fn-schema-version entity has correct fields"
-    (let [schema (vds/build-schema (malli/create-builder))
-          fields (ds/entity-fields schema :fn-schema-version)]
-      (is (= :ref (:type (:fn-schema-id fields))))
-      (is (= :fn-schema (:ref-entity (:fn-schema-id fields))))
-      (is (= :ref (:type (:branch-id fields))))
+      ;; fn data fields (versioned snapshot)
       (is (= :text (:type (:name fields))))
-      (is (= :enum (:type (:returned-type fields))))
-      (is (true? (:nullable? (:base-fn-name fields))))
+      (is (true? (:nullable? (:name fields))))
+      (is (= :uuid (:type (:parent-id fields))))
+      (is (true? (:nullable? (:parent-id fields))))
+      (is (= :enum (:type (:return-type fields))))
+      (is (true? (:nullable? (:return-type fields))))
+      (is (= :text (:type (:impl-hash fields))))
       (is (true? (:nullable? (:impl-hash fields))))
-      (is (= :timestamptz (:type (:created-at fields)))))))
+
+      ;; Timestamps
+      (is (= :timestamptz (:type (:created-at fields))))
+      (is (= :timestamptz (:type (:deleted-at fields))))
+      (is (true? (:nullable? (:deleted-at fields)))))))
 
 
-(deftest arg-schema-version-entity-test
-  (testing "arg-schema-version entity has correct fields"
+(deftest arg-version-entity-test
+  (testing "arg-version entity has correct fields for 2-entity schema"
     (let [schema (vds/build-schema (malli/create-builder))
-          fields (ds/entity-fields schema :arg-schema-version)]
-      (is (= :ref (:type (:arg-schema-id fields))))
-      (is (= :arg-schema (:ref-entity (:arg-schema-id fields))))
+          fields (ds/entity-fields schema :arg-version)]
+      ;; Core references
+      (is (= :ref (:type (:arg-id fields))))
+      (is (= :arg (:ref-entity (:arg-id fields))))
       (is (= :ref (:type (:branch-id fields))))
-      (is (= :text (:type (:name fields))))
-      (is (= :enum (:type (:type fields))))
-      (is (= :bool (:type (:required fields))))
-      (is (= :timestamptz (:type (:created-at fields)))))))
-
-
-(deftest fn-arg-version-entity-test
-  (testing "fn-arg-version entity has correct fields"
-    (let [schema (vds/build-schema (malli/create-builder))
-          fields (ds/entity-fields schema :fn-arg-version)]
-      (is (= :ref (:type (:fn-arg-id fields))))
-      (is (= :fn-arg (:ref-entity (:fn-arg-id fields))))
-      (is (= :ref (:type (:branch-id fields))))
+      (is (= :branch (:ref-entity (:branch-id fields))))
       (is (= :ref (:type (:fn-id fields))))
       (is (= :fn (:ref-entity (:fn-id fields))))
-      (is (= :ref (:type (:arg-schema-id fields))))
-      (is (= :ref (:type (:arg-value-id fields))))
-      (is (= :timestamptz (:type (:created-at fields)))))))
+
+      ;; arg data fields (versioned snapshot)
+      (is (= :uuid (:type (:via-fn-id fields))))
+      (is (true? (:nullable? (:via-fn-id fields))))
+      (is (= :uuid (:type (:source-id fields))))
+      (is (true? (:nullable? (:source-id fields))))
+      (is (= :jsonb (:type (:value fields))))
+      (is (true? (:nullable? (:value fields))))
+      (is (= :uuid (:type (:ref-id fields))))
+      (is (true? (:nullable? (:ref-id fields))))
+      (is (= :text (:type (:name fields))))
+      (is (true? (:nullable? (:name fields))))
+      (is (= :enum (:type (:type fields))))
+      (is (true? (:nullable? (:type fields))))
+      (is (= :bool (:type (:required fields))))
+      (is (true? (:nullable? (:required fields))))
+      (is (= :bool (:type (:is-fn fields))))
+      (is (true? (:nullable? (:is-fn fields))))
+
+      ;; Timestamps
+      (is (= :timestamptz (:type (:created-at fields))))
+      (is (= :timestamptz (:type (:deleted-at fields))))
+      (is (true? (:nullable? (:deleted-at fields)))))))
 
 
 (deftest versioned-entities-constant-test
@@ -117,28 +131,22 @@
     (is (= #{:branch
              :branch-merge
              :fn-version
-             :fn-schema-version
-             :arg-schema-version
-             :fn-arg-version}
+             :arg-version}
            vds/versioned-entities))))
 
 
 (deftest version-entity-for-test
-  (testing "maps base entities to their version entities"
+  (testing "maps base entities to their version entities (2-entity schema)"
     (is (= :fn-version (vds/version-entity-for :fn)))
-    (is (= :fn-schema-version (vds/version-entity-for :fn-schema)))
-    (is (= :arg-schema-version (vds/version-entity-for :arg-schema)))
-    (is (= :fn-arg-version (vds/version-entity-for :fn-arg)))
-    (is (nil? (vds/version-entity-for :arg-value)))
-    (is (nil? (vds/version-entity-for :fn-usage)) "fn-usage is not versioned")))
+    (is (= :arg-version (vds/version-entity-for :arg)))
+    (is (nil? (vds/version-entity-for :branch)) "branch is not versioned")
+    (is (nil? (vds/version-entity-for :branch-merge)) "branch-merge is not versioned")))
 
 
 (deftest version-id-field-for-test
   (testing "maps base entities to their id field in version entity"
     (is (= :fn-id (vds/version-id-field-for :fn)))
-    (is (= :fn-schema-id (vds/version-id-field-for :fn-schema)))
-    (is (= :arg-schema-id (vds/version-id-field-for :arg-schema)))
-    (is (= :fn-arg-id (vds/version-id-field-for :fn-arg)))))
+    (is (= :arg-id (vds/version-id-field-for :arg)))))
 
 
 (deftest extend-builder-test
@@ -157,5 +165,7 @@
       (is (satisfies? ds/DataSchemaBuilder builder))
       (let [schema (ds/build builder)]
         (is (some #{:fn} (ds/entities schema)))
+        (is (some #{:arg} (ds/entities schema)))
         (is (some #{:branch} (ds/entities schema)))
-        (is (some #{:fn-version} (ds/entities schema)))))))
+        (is (some #{:fn-version} (ds/entities schema)))
+        (is (some #{:arg-version} (ds/entities schema)))))))

@@ -1,6 +1,6 @@
 # Graphden Philosophy
 
-> **Last updated:** 2026-01-20
+> **Last updated:** 2026-03-09
 >
 > This document describes the core principles and philosophy behind graphden.
 > For technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -99,16 +99,17 @@ Following SICP, a language has three aspects:
 3. **Means of abstraction** — how to name and reuse compositions
 
 In graphden:
-- **Primitives**: Nodes (fn, fn-schema, arg-schema, arg-value, fn-usage)
-- **Combination**: Edges (references between nodes)
-- **Abstraction**: Base functions (reusable implementations) and result caching (fn-usage)
+- **Primitives**: Two entity types (fn, arg)
+- **Combination**: Parent-child inheritance (parent-id) and references (ref-id)
+- **Abstraction**: Base functions (Clojure implementations) and composed functions (parent-id inheritance)
 
 **We resist adding new entity types or edge types.** Every addition increases cognitive load and implementation complexity.
 
 #### 2.2 DRY (Don't Repeat Yourself)
 
 Abstractions must minimize the need to define anything twice:
-- fn-usage enables sharing computed results
+- Result caching (by ref-id within execution) enables sharing computed results
+- Composed functions (via parent-id) enable reuse without duplication
 - Base functions provide reusable implementations
 - UI can offer "create based on" = copying with ability to change
 
@@ -141,31 +142,28 @@ The system should support (or enable) development tools:
 
 | Entity | Purpose |
 |--------|---------|
-| `fn-schema` | Function signature (args, return type, optional base-fn-name) |
-| `arg-schema` | Argument definition (name, type, required) |
-| `fn` | Function instance (implements schema) |
-| `arg-value` | Bound argument value (literal or reference) |
-| `fn-usage` | Cached computation reference (memoization within execution) |
+| `fn` | Function (base or composed via parent-id) |
+| `arg` | Argument (schema + value in one, inherits via source-id) |
 
-**Why these five?** They are the minimal set needed to express:
-- Function definitions (fn-schema + arg-schema)
-- Function instances with values (fn + arg-value)
-- Result caching / sharing (fn-usage)
+**Why only two?** They are the minimal set needed to express:
+- Base functions (fn with parent-id=nil, impl-hash links to Clojure)
+- Composed functions (fn with parent-id inherits behavior)
+- Argument definitions (arg with source-id=nil defines interface)
+- Argument binding (arg with value or ref-id provides data)
+- Argument inheritance (arg with source-id links to parent's arg)
 
 ### Means of Combination
 
-Two types of references in arg-value:
+References use the `ref-id` field with behavior controlled by `is-fn`:
 
-| Reference Type | Syntax (in fn-defs) | Behavior |
-|---------------|---------------------|----------|
-| `ref<fn>` | `:fn-name` | Pass fn-id as value (for HOF) |
-| `ref<fn-usage>` | `:fn-name>` | Execute and use result |
+| Arg Field | is-fn | Behavior |
+|-----------|-------|----------|
+| `ref-id` | `true` | Pass fn-id as value (for HOF) |
+| `ref-id` | `false` | Execute fn and use result |
 
-**Why two types?** Higher-order functions (map, filter, reduce) need to receive functions as values, not their results. This is the minimum necessary distinction.
+**Why is-fn flag?** Higher-order functions (map, filter, reduce) need to receive functions as values, not their results. The flag on the arg itself determines behavior.
 
-**We considered alternatives**:
-- Inferring from arg-schema type — possible but makes behavior implicit
-- Single reference type with explicit "execute" node — more entities
+**Simplification from old model**: Previously fn-usage was a separate entity. Now references point directly to fn, and is-fn determines execution behavior.
 
 ### Base Functions Philosophy
 
@@ -247,18 +245,18 @@ This approach:
 
 ### Means of Abstraction
 
-#### fn-usage (Named Intermediate Results)
+#### Result Caching (via ref-id)
 
 ```
 fn: report
-  sales:   ref<fn-usage:FRV-1>  ← FRV-1 points to calculate-sales
-  summary: ref<fn-usage:FRV-1>  ← Same FRV-1, result computed once
+  arg1: {ref-id: calculate-sales}  ← executes calculate-sales
+  arg2: {ref-id: calculate-sales}  ← same ref-id, result cached
 ```
 
 This enables:
-- Sharing expensive computations
+- Sharing expensive computations (same ref-id = computed once)
 - Consistent snapshots (same value for multiple consumers)
-- Explicit caching (user controls what gets cached)
+- Automatic caching within execution context
 
 ---
 
@@ -266,17 +264,19 @@ This enables:
 
 ### Accepted Complexity
 
-#### Two Reference Types
+#### is-fn Flag for Reference Behavior
 
-We wanted a single edge type, but HOF require passing functions as values. The `>` suffix (fn-usage) vs plain reference (fn) is the minimum distinction needed.
+We wanted a single reference behavior, but HOF require passing functions as values. The `is-fn` flag on arg controls whether ref-id is passed directly (true) or executed (false).
 
-**Mitigation**: In visual UI, this can be shown as edge color or style, not requiring user to remember syntax.
+**Mitigation**: In visual UI, this can be shown as edge color or style, not requiring user to understand the flag.
 
-#### Five Entity Types
+#### Two Entity Types
 
-More than ideal, but less than most languages. Each serves a distinct purpose:
-- Removing any one would lose essential capability
-- Adding more would need strong justification
+The minimum needed for function composition:
+- `fn` - functions (base or composed via parent-id)
+- `arg` - arguments (primary or inherited via source-id)
+
+Both are essential - removing either would make the system non-functional.
 
 ### Performance Concerns
 
@@ -307,11 +307,8 @@ This section maps each system component to the principles it serves. Use this to
 
 | Entity | Principles Served | How |
 |--------|-------------------|-----|
-| `fn-schema` | Minimal entities, Expressiveness | Defines function signature — single concept for all functions |
-| `arg-schema` | Minimal entities, Explicit | Arguments are explicit, typed, named |
-| `fn` | DRY, Expressiveness | Inheritance enables reuse without duplication |
-| `arg-value` | Explicit, Locality | Values are explicit; changing one doesn't affect siblings |
-| `fn-usage` | DRY, Performance | Share computed results; cache expensive operations |
+| `fn` | Minimal entities, Expressiveness, DRY | Single entity for base and composed functions; inheritance via parent-id |
+| `arg` | Minimal entities, Explicit, Locality | Combines schema + value; inherits via source-id; values are explicit |
 
 ### Storage Layer
 
@@ -326,7 +323,7 @@ This section maps each system component to the principles it serves. Use this to
 | Component | Principles Served | How |
 |-----------|-------------------|-----|
 | `graph-protocol` | Correctness, Modularity | Graph-specific protocols: GraphReader, GraphConstraints |
-| `graph-data-schema` | Minimal entities | Core graph entities: fn, fn-schema, arg-schema, arg-value |
+| `graph-data-schema` | Minimal entities | Core graph entities: fn, arg (only 2!) |
 | `graph-storage-*` | Dev simplicity | Pre-configured storage + graph schema bundles |
 
 ### Execution Layer
@@ -343,15 +340,18 @@ This section maps each system component to the principles it serves. Use this to
 | Constraint | Principles Served | How |
 |------------|-------------------|-----|
 | No dependency cycles | Correctness | Prevents infinite loops at write time |
-| Arg-schema belongs to fn-schema | Correctness | Type safety for argument binding |
+| source-id references valid parent arg | Correctness | Type safety for arg inheritance |
+| Unique (fn-id, source-id) | Correctness | No duplicate inherited args |
+| Unique (fn-id, name) | Correctness | No duplicate arg names |
 
 ### Protocol Design Decisions
 
 | Decision | Principles Served | Trade-off |
 |----------|-------------------|-----------|
-| Two reference types (`ref<fn>` vs `ref<fn-usage>`) | Expressiveness (HOF support) | +1 concept, but minimum for HOF |
-| Union type for arg-value.value | Minimal entities | Single field instead of multiple tables |
-| fn-usage as separate entity | DRY, Performance | +1 entity, but enables caching and sharing |
+| `is-fn` flag for reference behavior | Expressiveness (HOF support) | +1 field, but minimum for HOF |
+| Union value/ref-id on arg | Minimal entities | Single arg entity instead of separate value types |
+| Result caching by ref-id | DRY, Performance | Cache logic in executor, not schema |
+| Inheritance via parent-id/source-id | DRY, Minimal entities | Eliminates schema/instance split |
 
 ### Bundles
 
@@ -407,7 +407,7 @@ Even a classic forum has this: developers write the engine, admins create sectio
 
 **Graphden should support this entire chain.** Through access levels to functions and graph operations, each role sees only what they need:
 
-- Platform developer: writes base-fn in Clojure, defines fn-schema
+- Platform developer: writes base-fn in Clojure, defines fn entity with impl-hash
 - System integrator: composes base-fn into graphs, configures storage and infrastructure
 - Domain builder: creates domain-specific functions from existing compositions, configures routing
 - End user: invokes functions through UI, provides runtime arguments
@@ -416,7 +416,7 @@ The boundaries between roles are enforced by the permission system, not by techn
 
 ### Extension Modularity Problem
 
-The core system is simple: base-fn implementations + graph composition (fn, arg-value, fn-usage) + executor. But production features — versioning, caching, logging, permissions, environment management, secret storage — all require modifications to either storage (new fields, tables, query logic) or executor (new resolution steps, middleware).
+The core system is simple: base-fn implementations + graph composition (fn, arg) + executor. But production features — versioning, caching, logging, permissions, environment management, secret storage — all require modifications to either storage (new fields, tables, query logic) or executor (new resolution steps, middleware).
 
 Hardwiring these features into the core has problems:
 - Forces all users to use them, even when unnecessary
@@ -497,7 +497,7 @@ The system separates concerns into three distinct layers:
 ┌─────────────────────────────────────────────────────────────────┐
 │                       GRAPH LAYER                                │
 │  - Provides execution graph for a fn-id                         │
-│  - Knows about graph entities (fn, fn-schema, arg-value, etc.)  │
+│  - Knows about graph entities (fn, arg)                         │
 │  - Middleware pattern: composable GraphReader implementations   │
 │    • DirectGraphReader(storage) — direct queries                │
 │    • CachedGraphReader(storage, cache) — DB-level caching       │
@@ -523,9 +523,9 @@ The system separates concerns into three distinct layers:
 │                     DATA SCHEMA LAYER                            │
 │  - Defines entity types, fields, constraints                    │
 │  - Schema extensions are composable:                            │
-│    • graph-data-schema — fn, fn-schema, arg-value, etc.        │
-│    • cache-data-schema — cached-fn, cached-merged-arg          │
-│    • versioned-data-schema — branch, fn-version, etc.          │
+│    • graph-data-schema — fn, arg (minimal 2-entity model)      │
+│    • cache-data-schema — cached execution results              │
+│    • versioned-data-schema — branch, fn-version, arg-version   │
 │  - Pure data definitions, no behavior                           │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -537,7 +537,7 @@ The system separates concerns into three distinct layers:
 | Protocol | Layer | Reason |
 |----------|-------|--------|
 | `StorageCRUD` | Storage | Generic CRUD, schema-agnostic |
-| `GraphConstraints` | Graph | Knows about fn→arg-value→fn relationships |
+| `GraphConstraints` | Graph | Knows about fn→arg→fn relationships |
 | `ExecutionGraph` | Graph | Resolves graph structure for execution |
 | `GraphReader` | Graph | Provides graph data to executor |
 
@@ -606,7 +606,7 @@ This is analogous to Lisp's self-hosting capability: the language is expressive 
 
 **Question**: How does graphden handle this?
 
-**Current answer**: fn-usage names results, but primarily for caching, not readability. Visual UI may need to support annotations or labels.
+**Current answer**: Result caching by ref-id provides sharing, but primarily for efficiency, not readability. Visual UI may need to support annotations or labels.
 
 ### Error Messages
 
@@ -614,16 +614,16 @@ This is analogous to Lisp's self-hosting capability: the language is expressive 
 
 **Question**: What do graphden errors reference?
 
-**Current answer**: fn-id, arg-schema-id, execution path. Visual UI can highlight the relevant node. But textual representation needs thought.
+**Current answer**: fn-id, arg-id, execution path. Visual UI can highlight the relevant node. But textual representation needs thought.
 
 ### Schema Evolution
 
-**Problem**: Changing fn-schema (adding/removing args) affects all fn instances.
+**Problem**: Changing base-fn args affects all composed fns that inherit from it.
 
 **Question**: How to handle breaking changes?
 
 **Possible approaches**:
-- Versioning (planned)
+- Versioning (implemented via parent-id inheritance)
 - Migration tools
 - Compatibility analysis before changes
 

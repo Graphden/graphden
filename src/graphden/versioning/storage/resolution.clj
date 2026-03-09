@@ -1,12 +1,18 @@
 (ns graphden.versioning.storage.resolution
   "Version resolution algorithm for branch-aware entity reads.
 
-   Implements the version resolution algorithm from docs/current-schema.dbml:
+   Implements the version resolution algorithm:
    1. Find latest own version on this branch
    2. Check branch-merge records for incoming merges
    3. For each merge, find latest version in source branch
    4. Pick candidate with greatest effective timestamp
-   5. If nothing found, recurse to parent branch (base-branch-id)"
+   5. If nothing found, recurse to parent branch (base-branch-id)
+
+   ## 2-Entity Schema
+
+   Only two entities are versioned:
+   - fn: function entity (parent-id for inheritance)
+   - arg: argument entity (source-id for inheritance, value/ref-id for data)"
   (:require
     [graphden.storage.protocol.core :as sp]))
 
@@ -22,22 +28,11 @@
    Maps base entity name to version table metadata."
   {:fn {:version-entity :fn-version
         :version-id-field :fn-id
-        :version-data-fields #{:name :fn-schema-id}}
+        :version-data-fields #{:name :parent-id :return-type :impl-hash}}
 
-   :fn-schema {:version-entity :fn-schema-version
-               :version-id-field :fn-schema-id
-               :version-data-fields #{:name :returned-type :base-fn-name :impl-hash}}
-
-   :arg-schema {:version-entity :arg-schema-version
-                :version-id-field :arg-schema-id
-                :version-data-fields #{:name :type :required}}
-
-   :fn-arg {:version-entity :fn-arg-version
-            :version-id-field :fn-arg-id
-            :version-data-fields #{:fn-id :arg-schema-id :arg-value-id}}
-
-   ;; Free arguments at fn-usage now handled by creating local fn with owner-fn-id
-   })
+   :arg {:version-entity :arg-version
+         :version-id-field :arg-id
+         :version-data-fields #{:fn-id :name :type :source-id :value :ref-id :is-fn :required}}})
 
 
 (defn versioned-entity?

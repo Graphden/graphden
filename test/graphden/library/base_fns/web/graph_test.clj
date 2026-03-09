@@ -1,4 +1,11 @@
 (ns graphden.library.base-fns.web.graph-test
+  "Tests for graph visualization functions.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]
@@ -18,7 +25,7 @@
 
 
 ;; =============================================================================
-;; entities-to-cytoscape tests
+;; entities-to-cytoscape tests (2-entity schema)
 ;; =============================================================================
 
 (deftest entities-to-cytoscape-test
@@ -28,93 +35,111 @@
       (is (= [] (:nodes result)))
       (is (= [] (:edges result)))))
 
-  (testing "converts fn-schema entities"
-    (let [entities {:fn-schemas [{:id #uuid "00000000-0000-0000-0000-000000000001"
-                                  :name :my-fn
-                                  :returned-type :int
-                                  :base-fn-name nil}]}
+  (testing "converts fn entities (base fn with parent-id=nil)"
+    (let [entities {:fns [{:id #uuid "00000000-0000-0000-0000-000000000001"
+                           :name "my-base-fn"
+                           :parent-id nil
+                           :return-type "int"}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})]
       (is (= 1 (count (:nodes result))))
       (let [node (first (:nodes result))]
         (is (= "00000000-0000-0000-0000-000000000001" (get-in node [:data :id])))
-        (is (= "my-fn" (get-in node [:data :label])))
-        (is (= "fn-schema" (get-in node [:data :type]))))))
+        (is (= "my-base-fn" (get-in node [:data :label])))
+        (is (= "fn" (get-in node [:data :type]))))))
 
-  (testing "converts fn entities"
-    (let [fn-schema-id #uuid "00000000-0000-0000-0000-000000000001"
+  (testing "converts fn entities (composed fn with parent-id set)"
+    (let [base-fn-id #uuid "00000000-0000-0000-0000-000000000001"
           entities {:fns [{:id #uuid "00000000-0000-0000-0000-000000000002"
-                           :name :my-fn-instance
-                           :fn-schema-id fn-schema-id}]}
+                           :name "my-composed-fn"
+                           :parent-id base-fn-id}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})]
       (is (= 1 (count (:nodes result))))
       (let [node (first (:nodes result))]
         (is (= "fn" (get-in node [:data :type])))
-        (is (= (str fn-schema-id) (get-in node [:data :fn-schema-id]))))))
+        (is (= (str base-fn-id) (get-in node [:data :parent-id]))))))
 
-  (testing "converts arg-schema entities"
-    (let [entities {:arg-schemas [{:id #uuid "00000000-0000-0000-0000-000000000003"
-                                   :name :my-arg
-                                   :type :int
-                                   :required true
-                                   :fn-schema-id #uuid "00000000-0000-0000-0000-000000000001"}]}
+  (testing "converts arg entities with literal value"
+    (let [fn-id #uuid "00000000-0000-0000-0000-000000000001"
+          entities {:args [{:id #uuid "00000000-0000-0000-0000-000000000003"
+                            :fn-id fn-id
+                            :name "x"
+                            :type "int"
+                            :value 42}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})]
       (is (= 1 (count (:nodes result))))
       (let [node (first (:nodes result))]
-        (is (= "arg-schema" (get-in node [:data :type])))
+        (is (= "arg" (get-in node [:data :type])))
         (is (= "int" (get-in node [:data :arg-type])))
-        (is (true? (get-in node [:data :required]))))))
-
-  (testing "converts arg-value entities with literal value"
-    (let [entities {:arg-values [{:id #uuid "00000000-0000-0000-0000-000000000004"
-                                  :value "hello"
-                                  :arg-schema-id #uuid "00000000-0000-0000-0000-000000000003"}]}
-          result (call-impl graph/entities-to-cytoscape {:entities entities})]
-      (is (= 1 (count (:nodes result))))
-      (let [node (first (:nodes result))]
-        (is (= "arg-value" (get-in node [:data :type])))
         (is (= "literal" (get-in node [:data :ref-type])))
         (is (false? (get-in node [:data :is-ref]))))))
 
-  (testing "converts arg-value entities with fn-usage reference (new FK format)"
-    (let [entities {:arg-values [{:id #uuid "00000000-0000-0000-0000-000000000004"
-                                  :fn-usage-id #uuid "00000000-0000-0000-0000-000000000006"
-                                  :arg-schema-id #uuid "00000000-0000-0000-0000-000000000003"}]}
+  (testing "converts arg entities with ref-id reference"
+    (let [fn-id #uuid "00000000-0000-0000-0000-000000000001"
+          ref-fn-id #uuid "00000000-0000-0000-0000-000000000002"
+          entities {:args [{:id #uuid "00000000-0000-0000-0000-000000000003"
+                            :fn-id fn-id
+                            :name "x"
+                            :type "int"
+                            :ref-id ref-fn-id}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})
           node (first (:nodes result))]
-      (is (= "fn-usage-ref" (get-in node [:data :ref-type])))
+      (is (= "fn-ref" (get-in node [:data :ref-type])))
       (is (get-in node [:data :is-ref]))))
 
-  (testing "converts fn-usage entities"
-    (let [entities {:fn-usages [{:id #uuid "00000000-0000-0000-0000-000000000006"
-                                 :name :my-fn-usage
-                                 :fn-id #uuid "00000000-0000-0000-0000-000000000002"}]}
-          result (call-impl graph/entities-to-cytoscape {:entities entities})]
-      (is (= 1 (count (:nodes result))))
-      (let [node (first (:nodes result))]
-        (is (= "fn-usage" (get-in node [:data :type])))
-        (is (= "my-fn-usage" (get-in node [:data :label]))))))
+  (testing "converts arg entities with is-fn=true (HOF)"
+    (let [fn-id #uuid "00000000-0000-0000-0000-000000000001"
+          hof-fn-id #uuid "00000000-0000-0000-0000-000000000002"
+          entities {:args [{:id #uuid "00000000-0000-0000-0000-000000000003"
+                            :fn-id fn-id
+                            :name "f"
+                            :type "fn"
+                            :is-fn true
+                            :ref-id hof-fn-id}]}
+          result (call-impl graph/entities-to-cytoscape {:entities entities})
+          node (first (:nodes result))]
+      (is (= "arg" (get-in node [:data :type])))
+      (is (true? (get-in node [:data :is-fn])))))
 
-  (testing "creates edges between entities"
-    (let [fn-schema-id #uuid "00000000-0000-0000-0000-000000000001"
-          fn-id #uuid "00000000-0000-0000-0000-000000000002"
-          entities {:fn-schemas [{:id fn-schema-id :name :schema}]
-                    :fns [{:id fn-id :name :fn :fn-schema-id fn-schema-id}]}
+  (testing "creates edges between fn and its args"
+    (let [fn-id #uuid "00000000-0000-0000-0000-000000000001"
+          arg-id #uuid "00000000-0000-0000-0000-000000000002"
+          entities {:fns [{:id fn-id :name "test-fn" :parent-id nil}]
+                    :args [{:id arg-id :fn-id fn-id :name "x" :type "int" :value 42}]}
+          result (call-impl graph/entities-to-cytoscape {:entities entities})]
+      (is (= 2 (count (:nodes result))))
+      (is (>= (count (:edges result)) 1))
+      ;; Check edge from fn to arg (fn "has-arg")
+      (let [edge (first (:edges result))]
+        (is (= (str fn-id) (get-in edge [:data :source])))
+        (is (= (str arg-id) (get-in edge [:data :target])))
+        (is (= "has-arg" (get-in edge [:data :type]))))))
+
+  (testing "creates edges for composed fn to parent fn"
+    (let [base-fn-id #uuid "00000000-0000-0000-0000-000000000001"
+          composed-fn-id #uuid "00000000-0000-0000-0000-000000000002"
+          entities {:fns [{:id base-fn-id :name "base-fn" :parent-id nil}
+                          {:id composed-fn-id :name "composed-fn" :parent-id base-fn-id}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})]
       (is (= 2 (count (:nodes result))))
       (is (= 1 (count (:edges result))))
       (let [edge (first (:edges result))]
-        (is (= (str fn-id) (get-in edge [:data :source])))
-        (is (= (str fn-schema-id) (get-in edge [:data :target])))
-        (is (= "has-schema" (get-in edge [:data :type]))))))
+        (is (= (str composed-fn-id) (get-in edge [:data :source])))
+        (is (= (str base-fn-id) (get-in edge [:data :target])))
+        (is (= "inherits" (get-in edge [:data :type]))))))
 
   (testing "truncates long string values"
     (let [long-string (str/join (repeat 50 "x"))
-          entities {:arg-values [{:id #uuid "00000000-0000-0000-0000-000000000004"
-                                  :value long-string
-                                  :arg-schema-id #uuid "00000000-0000-0000-0000-000000000003"}]}
+          fn-id #uuid "00000000-0000-0000-0000-000000000001"
+          entities {:args [{:id #uuid "00000000-0000-0000-0000-000000000003"
+                            :fn-id fn-id
+                            :name "x"
+                            :type "text"
+                            :value long-string}]}
           result (call-impl graph/entities-to-cytoscape {:entities entities})
           label (get-in (first (:nodes result)) [:data :label])]
-      (is (<= (count label) 23)))))
+      ;; Label format: "name: value..." where value is truncated to 20+3 chars
+      ;; With name "x", total is "x: " (3) + truncated value (23) = 26 chars
+      (is (<= (count label) 26)))))
 
 
 ;; =============================================================================

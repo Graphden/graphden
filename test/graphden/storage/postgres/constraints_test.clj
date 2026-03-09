@@ -2,9 +2,14 @@
   "Tests for PostgreSQL storage GraphConstraints protocol.
 
    Covers:
-   - validate-arg-schema-belongs-to-fn!
    - validate-no-dependency-cycle!
-   - GraphConstraints contract tests"
+   - GraphConstraints contract tests
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.postgres.test-setup :as setup]
@@ -19,66 +24,37 @@
 ;; === GraphConstraints tests ===
 
 
-(deftest validate-arg-schema-belongs-to-fn-test
-  (testing "allows matching schema"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)
-          fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-          fn-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-          arg-schema-id #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
-          _ (sp/create-entity storage :fn-schema {:id fn-schema-id :name "sum" :returned-type "int"})
-          _ (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id fn-schema-id
-                                                   :name "x" :type "int" :required true :first-class false})
-          _ (sp/create-entity storage :fn {:id fn-id :name "my-sum" :fn-schema-id fn-schema-id})]
-      (try
-        (is (nil? (sp/validate-arg-schema-belongs-to-fn! storage fn-id arg-schema-id)))
-        (finally
-          (sp/close storage)))))
-
-  (testing "throws on mismatched schema"
-    (let [storage (setup/create-test-storage)
-          schema (setup/make-graph-schema)
-          _ (sp/initialize storage schema)
-          schema1-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-          schema2-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-bbbbbbbbbbbb"
-          fn-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-          arg-schema-id #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
-          _ (sp/create-entity storage :fn-schema {:id schema1-id :name "sum" :returned-type "int"})
-          _ (sp/create-entity storage :fn-schema {:id schema2-id :name "sub" :returned-type "int"})
-          _ (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id schema2-id
-                                                   :name "x" :type "int" :required true :first-class false})
-          _ (sp/create-entity storage :fn {:id fn-id :name "my-sum" :fn-schema-id schema1-id})]
-      (try
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Arg-schema does not belong to fn's schema"
-              (sp/validate-arg-schema-belongs-to-fn! storage fn-id arg-schema-id)))
-        (finally
-          (sp/close storage))))))
-
-
 (deftest validate-no-dependency-cycle-test
   (testing "allows non-cyclic reference"
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-          owner-fn-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-          value-fn-id #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
-          _ (sp/create-entity storage :fn-schema {:id fn-schema-id :name "sum" :returned-type "int"})
-          _ (sp/create-entity storage :fn {:id owner-fn-id :name "owner" :fn-schema-id fn-schema-id})
-          _ (sp/create-entity storage :fn {:id value-fn-id :name "value" :fn-schema-id fn-schema-id})]
+          ;; Create two independent fns
+          fn-a (setup/create-base-fn! storage "fn-a" :int)
+          fn-b (setup/create-base-fn! storage "fn-b" :int)]
       (try
-        (is (nil? (sp/validate-no-dependency-cycle! storage owner-fn-id value-fn-id)))
+        (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b))))
         (finally
           (sp/close storage)))))
 
-  (testing "allows nil value-fn-id"
+  (testing "allows nil ref-id"
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          owner-fn-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
+          fn-a (setup/create-base-fn! storage "fn-a" :int)]
       (try
-        (is (nil? (sp/validate-no-dependency-cycle! storage owner-fn-id nil)))
+        (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-a) nil)))
+        (finally
+          (sp/close storage)))))
+
+  (testing "rejects self-reference as cycle"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)
+          fn-a (setup/create-base-fn! storage "fn-a" :int)]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"cycle"
+              (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-a))))
         (finally
           (sp/close storage)))))
 
@@ -86,25 +62,26 @@
     (let [storage (setup/create-test-storage)
           schema (setup/make-graph-schema)
           _ (sp/initialize storage schema)
-          fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-          fn-a-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-          fn-b-id #uuid "cccccccc-cccc-cccc-cccc-cccccccccccc"
-          fn-c-id #uuid "dddddddd-dddd-dddd-dddd-dddddddddddd"
-          arg-schema-id #uuid "eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee"
-          _ (sp/create-entity storage :fn-schema {:id fn-schema-id :name "test" :returned-type "int"})
-          _ (sp/create-entity storage :arg-schema {:id arg-schema-id :fn-schema-id fn-schema-id
-                                                   :name "x" :type "int" :required true :first-class false})
-          _ (sp/create-entity storage :fn {:id fn-a-id :name "fn-a" :fn-schema-id fn-schema-id})
-          _ (sp/create-entity storage :fn {:id fn-b-id :name "fn-b" :fn-schema-id fn-schema-id})
-          _ (sp/create-entity storage :fn {:id fn-c-id :name "fn-c" :fn-schema-id fn-schema-id})
-          ;; Create b -> c reference (b depends on c)
-          _ (setup/create-arg-value-with-binding! storage fn-b-id arg-schema-id (str fn-c-id))
-          ;; Create c -> a reference (c depends on a)
-          _ (setup/create-arg-value-with-binding! storage fn-c-id arg-schema-id (str fn-a-id))]
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "base-fn" :int)
+          base-arg (setup/create-arg! storage (:id base-fn)
+                                      {:name "x" :type :int :required true :is-fn false})
+          ;; Create fn-a, fn-b, fn-c
+          fn-a (setup/create-composed-fn! storage "fn-a" (:id base-fn))
+          fn-b (setup/create-composed-fn! storage "fn-b" (:id base-fn))
+          fn-c (setup/create-composed-fn! storage "fn-c" (:id base-fn))
+          ;; fn-b's x -> fn-c via ref-id (b depends on c)
+          _ (setup/create-arg! storage (:id fn-b)
+                               {:name "x" :type :int :required true :is-fn false
+                                :source-id (:id base-arg) :ref-id (:id fn-c)})
+          ;; fn-c's x -> fn-a via ref-id (c depends on a)
+          _ (setup/create-arg! storage (:id fn-c)
+                               {:name "x" :type :int :required true :is-fn false
+                                :source-id (:id base-arg) :ref-id (:id fn-a)})]
       (try
         ;; Try to validate a -> b, which would create cycle: a -> b -> c -> a
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"dependency cycle"
-              (sp/validate-no-dependency-cycle! storage fn-a-id fn-b-id)))
+              (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b))))
         (finally
           (sp/close storage))))))
 

@@ -1,4 +1,15 @@
 (ns ^:integration graphden.schema.traits.schema-test
+  "Tests for traits schema with 2-entity model.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+
+   Traits entities:
+   - trait: named trait definition
+   - arg-trait: assigns trait to arg"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]
@@ -39,7 +50,7 @@
                      (ds/build))]
       (is (some? schema))
       (is (contains? (set (ds/entities schema)) :trait))
-      (is (contains? (set (ds/entities schema)) :value-trait)))))
+      (is (contains? (set (ds/entities schema)) :arg-trait)))))
 
 
 (deftest trait-crud-test
@@ -62,81 +73,75 @@
 
 
 (deftest value-trait-crud-test
-  (testing "can assign trait to arg-value"
+  (testing "can assign trait to arg (2-entity schema)"
     (let [storage (create-test-storage)
-          ;; Create fn-schema and arg-schema first
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "test-schema"
-                                       :returned-type :text})
-          arg-schema (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id fn-schema)
-                                        :name "password"
-                                        :type :text
-                                        :required true :first-class false})
-          ;; Create arg-value
-          arg-value (sp/create-entity storage :arg-value
-                                      {:arg-schema-id (:id arg-schema)
-                                       :value "secret123"})
-          ;; Create trait and assign
+          ;; Create base fn
+          base-fn (sp/create-entity storage :fn
+                                    {:name "test-fn"
+                                     :parent-id nil
+                                     :return-type :text})
+          ;; Create arg with value
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id base-fn)
+                                 :name "password"
+                                 :type :text
+                                 :value "secret123"})
+          ;; Create trait and assign to arg
           trait (sp/create-entity storage :trait
                                   {:name "secret"
                                    :description "Should be hidden"})
-          value-trait (sp/create-entity storage :value-trait
-                                        {:arg-value-id (:id arg-value)
+          value-trait (sp/create-entity storage :arg-trait
+                                        {:arg-id (:id arg)
                                          :trait-id (:id trait)})]
       (is (uuid? (:id value-trait)))
-      (is (= (:id arg-value) (:arg-value-id value-trait)))
+      (is (= (:id arg) (:arg-id value-trait)))
       (is (= (:id trait) (:trait-id value-trait)))
       (sp/close storage)))
 
-  (testing "same trait cannot be assigned twice to same value"
+  (testing "same trait cannot be assigned twice to same arg"
     (let [storage (create-test-storage)
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "test-schema"
-                                       :returned-type :text})
-          arg-schema (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id fn-schema)
-                                        :name "x"
-                                        :type :text
-                                        :required true :first-class false})
-          arg-value (sp/create-entity storage :arg-value
-                                      {:arg-schema-id (:id arg-schema)
-                                       :value "test"})
+          base-fn (sp/create-entity storage :fn
+                                    {:name "test-fn"
+                                     :parent-id nil
+                                     :return-type :text})
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id base-fn)
+                                 :name "x"
+                                 :type :text
+                                 :value "test"})
           trait (sp/create-entity storage :trait {:name "my-trait"})]
-      (sp/create-entity storage :value-trait
-                        {:arg-value-id (:id arg-value)
+      (sp/create-entity storage :arg-trait
+                        {:arg-id (:id arg)
                          :trait-id (:id trait)})
       (is (thrown? Exception
-            (sp/create-entity storage :value-trait
-                              {:arg-value-id (:id arg-value)
+            (sp/create-entity storage :arg-trait
+                              {:arg-id (:id arg)
                                :trait-id (:id trait)})))
       (sp/close storage))))
 
 
 (deftest query-traits-test
-  (testing "can query traits for a value"
+  (testing "can query traits for an arg"
     (let [storage (create-test-storage)
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "test-schema"
-                                       :returned-type :text})
-          arg-schema (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id fn-schema)
-                                        :name "val"
-                                        :type :text
-                                        :required true :first-class false})
-          arg-value (sp/create-entity storage :arg-value
-                                      {:arg-schema-id (:id arg-schema)
-                                       :value "myval"})
+          base-fn (sp/create-entity storage :fn
+                                    {:name "test-fn"
+                                     :parent-id nil
+                                     :return-type :text})
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id base-fn)
+                                 :name "val"
+                                 :type :text
+                                 :value "myval"})
           trait1 (sp/create-entity storage :trait {:name "trait-a"})
           trait2 (sp/create-entity storage :trait {:name "trait-b"})
-          _ (sp/create-entity storage :value-trait
-                              {:arg-value-id (:id arg-value)
+          _ (sp/create-entity storage :arg-trait
+                              {:arg-id (:id arg)
                                :trait-id (:id trait1)})
-          _ (sp/create-entity storage :value-trait
-                              {:arg-value-id (:id arg-value)
+          _ (sp/create-entity storage :arg-trait
+                              {:arg-id (:id arg)
                                :trait-id (:id trait2)})
-          value-traits (sp/query-entities storage :value-trait
-                                          {:arg-value-id (:id arg-value)})]
+          value-traits (sp/query-entities storage :arg-trait
+                                          {:arg-id (:id arg)})]
       (is (= 2 (count value-traits)))
       (is (= #{(:id trait1) (:id trait2)}
              (set (map :trait-id value-traits))))
@@ -152,4 +157,4 @@
 
 (deftest trait-entities-test
   (testing "trait-entities set is correct"
-    (is (= #{:trait :value-trait} vts/trait-entities))))
+    (is (= #{:trait :arg-trait} vts/trait-entities))))

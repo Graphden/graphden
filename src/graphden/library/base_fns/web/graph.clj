@@ -2,8 +2,14 @@
   "Graph visualization base functions for Cytoscape.js integration.
 
    Provides base functions for converting Graphden entities to Cytoscape format:
-   - entities-to-cytoscape: Converts fn/fn-schema entities to Cytoscape elements
+   - entities-to-cytoscape: Converts fn/arg entities to Cytoscape elements
    - cytoscape-init-script: Generates initialization JavaScript
+
+   ## 2-Entity Schema
+
+   The graph uses a minimal 2-entity schema:
+   - fn: function entity (parent-id=nil for base-fn, parent-id set for composed)
+   - arg: argument entity (source-id for inheritance, value/ref-id for data)
 
    ## Cytoscape Element Format
 
@@ -13,11 +19,9 @@
 
    ## Node Types
 
-   - fn-schema: Function signature (blue)
-   - fn: Function instance (green)
-   - arg-schema: Argument definition (orange)
-   - arg-value: Bound argument value (gray)
-   - fn-usage: Function usage reference (purple)"
+   - fn (base): Function with Clojure implementation (parent-id=nil)
+   - fn (composed): Function referencing a parent (parent-id set)
+   - arg: Argument with value or reference"
   (:require
     [cheshire.core :as json]
     [graphden.executor.registry.macros :refer [defbase]]))
@@ -27,178 +31,122 @@
 ;; Entity to Cytoscape Conversion
 ;; =============================================================================
 
-(defn- fn-schema-to-node
-  "Converts fn-schema entity to Cytoscape node."
-  [{:keys [id returned-type base-fn-name] entity-name :name}]
-  {:data {:id (str id)
-          :label (name entity-name)
-          :type "fn-schema"
-          :returned-type (when returned-type (name returned-type))
-          :base-fn-name (when base-fn-name (name base-fn-name))
-          :is-base-fn (boolean base-fn-name)}})
-
-
 (defn- fn->node
   "Converts fn entity to Cytoscape node."
-  [{:keys [id fn-schema-id] entity-name :name}]
-  {:data {:id (str id)
-          :label (name entity-name)
-          :type "fn"
-          :fn-schema-id (str fn-schema-id)}})
+  [{:keys [id parent-id return-type] entity-name :name}]
+  (let [is-base? (nil? parent-id)]
+    {:data {:id (str id)
+            :label (if entity-name (name entity-name) "unnamed")
+            :type "fn"
+            :is-base is-base?
+            :parent-id (when parent-id (str parent-id))
+            :return-type (when return-type (name return-type))}}))
 
 
-(defn- arg-schema-to-node
-  "Converts arg-schema entity to Cytoscape node."
-  [{:keys [id required fn-schema-id] entity-name :name arg-type :type}]
-  {:data {:id (str id)
-          :label (name entity-name)
-          :type "arg-schema"
-          :arg-type (when arg-type (name arg-type))
-          :required (boolean required)
-          :fn-schema-id (str fn-schema-id)}})
-
-
-(defn- arg-value-to-node
-  "Converts arg-value entity to Cytoscape node.
-   Supports both new FK-based format and legacy nested map format."
-  [{:keys [id value fn-usage-id arg-schema-id]}]
-  (let [;; Support both new FK format and legacy nested map format
-        actual-fn-usage-id (or fn-usage-id
-                               (when (map? value) (:fn-usage-id value)))
-        ;; Determine if value is a reference
-        is-ref (boolean actual-fn-usage-id)
-        ref-type (if actual-fn-usage-id "fn-usage-ref" "literal")
+(defn- arg->node
+  "Converts arg entity to Cytoscape node."
+  [{:keys [id fn-id source-id value ref-id is-fn required] entity-name :name arg-type :type}]
+  (let [has-value? (or (some? value) (some? ref-id))
+        ;; ref-type: "literal" for value, "fn-ref" for ref-id, "unset" otherwise
+        ref-type (cond
+                   (some? ref-id) "fn-ref"
+                   (some? value) "literal"
+                   :else "unset")
+        ;; is-ref: true if ref-id is set (fn reference)
+        is-ref? (some? ref-id)
         display-value (cond
-                        actual-fn-usage-id
-                        (str "ref<fu:" actual-fn-usage-id ">")
+                        ref-id
+                        (str "ref<fn:" ref-id ">")
 
-                        (string? value)
+                        (and (some? value) (string? value))
                         (if (> (count value) 20)
                           (str (subs value 0 20) "...")
                           value)
 
-                        :else
+                        (some? value)
                         (let [s (pr-str value)]
                           (if (> (count s) 20)
                             (str (subs s 0 20) "...")
-                            s)))]
+                            s))
+
+                        :else
+                        "unset")]
     {:data {:id (str id)
-            :label display-value
-            :type "arg-value"
+            :label (str (if entity-name (name entity-name) "?") ": " display-value)
+            :type "arg"
+            :fn-id (str fn-id)
+            :source-id (when source-id (str source-id))
+            :arg-type (when arg-type (name arg-type))
+            :has-value has-value?
+            :is-fn (boolean is-fn)
+            :is-ref is-ref?
             :ref-type ref-type
-            :is-ref is-ref
-            :arg-schema-id (str arg-schema-id)}}))
-
-
-(defn- fn-usage-to-node
-  "Converts fn-usage entity to Cytoscape node."
-  [{:keys [id fn-id owner-fn-id] entity-name :name}]
-  {:data {:id (str id)
-          :label (if entity-name (name entity-name) "unnamed")
-          :type "fn-usage"
-          :fn-id (str fn-id)
-          :owner-fn-id (when owner-fn-id (str owner-fn-id))}})
+            :required (boolean required)
+            :ref-id (when ref-id (str ref-id))}}))
 
 
 (defn- create-edges
-  "Creates edges between entities based on relationships.
-   Supports both new FK-based format and legacy nested map format."
-  [{:keys [fns arg-schemas arg-values fn-usages fn-args]}]
-  (let [;; fn → fn-schema edges
-        fn-to-schema-edges
+  "Creates edges between entities based on relationships."
+  [{:keys [fns args]}]
+  (let [;; fn → parent-fn edges (for composed functions)
+        fn-parent-edges
         (for [f fns
-              :when (:fn-schema-id f)]
-          {:data {:id (str "e-fn-schema-" (:id f))
+              :when (:parent-id f)]
+          {:data {:id (str "e-parent-" (:id f))
                   :source (str (:id f))
-                  :target (str (:fn-schema-id f))
-                  :type "has-schema"}})
+                  :target (str (:parent-id f))
+                  :type "inherits"}})
 
-        ;; arg-schema → fn-schema edges
-        arg-schema-edges
-        (for [as arg-schemas
-              :when (:fn-schema-id as)]
-          {:data {:id (str "e-arg-schema-" (:id as))
-                  :source (str (:fn-schema-id as))
-                  :target (str (:id as))
+        ;; fn → arg edges
+        fn-arg-edges
+        (for [arg args]
+          {:data {:id (str "e-fn-arg-" (:id arg))
+                  :source (str (:fn-id arg))
+                  :target (str (:id arg))
                   :type "has-arg"}})
 
-        ;; fn-arg edges (new schema: fn → arg-value via fn-arg entity)
-        fn-arg-edges
-        (for [fa (or fn-args [])
-              :when (and (:fn-id fa) (:arg-value-id fa))]
-          {:data {:id (str "e-fn-arg-" (:id fa))
-                  :source (str (:fn-id fa))
-                  :target (str (:arg-value-id fa))
-                  :type "has-value"}})
+        ;; arg → source-arg edges (for inherited args)
+        arg-source-edges
+        (for [arg args
+              :when (:source-id arg)]
+          {:data {:id (str "e-source-" (:id arg))
+                  :source (str (:id arg))
+                  :target (str (:source-id arg))
+                  :type "inherits-from"}})
 
-        ;; arg-value → arg-schema edges
-        arg-value-schema-edges
-        (for [av arg-values
-              :when (:arg-schema-id av)]
-          {:data {:id (str "e-av-schema-" (:id av))
-                  :source (str (:id av))
-                  :target (str (:arg-schema-id av))
-                  :type "value-for"}})
+        ;; arg → ref-fn edges (for fn references)
+        arg-ref-edges
+        (for [arg args
+              :when (:ref-id arg)]
+          {:data {:id (str "e-ref-" (:id arg))
+                  :source (str (:id arg))
+                  :target (str (:ref-id arg))
+                  :type "references"}})]
 
-        ;; arg-value ref edges - support both new FK format and legacy nested map
-        arg-value-ref-edges
-        (for [av arg-values
-              :let [;; New FK format
-                    fn-usage-id (:fn-usage-id av)
-                    ;; Legacy nested map format
-                    v (:value av)
-                    legacy-target (when (map? v) (:fn-usage-id v))
-                    target-id (or fn-usage-id legacy-target)]
-              :when target-id]
-          {:data {:id (str "e-av-ref-" (:id av))
-                  :source (str (:id av))
-                  :target (str target-id)
-                  :type "references"}})
-
-        ;; fn-usage → fn edges
-        fn-usage-edges
-        (for [fu fn-usages
-              :when (:fn-id fu)]
-          {:data {:id (str "e-fu-" (:id fu))
-                  :source (str (:id fu))
-                  :target (str (:fn-id fu))
-                  :type "calls"}})]
-
-    (vec (concat fn-to-schema-edges
-                 arg-schema-edges
+    (vec (concat fn-parent-edges
                  fn-arg-edges
-                 arg-value-schema-edges
-                 arg-value-ref-edges
-                 fn-usage-edges))))
+                 arg-source-edges
+                 arg-ref-edges))))
 
 
 (defbase entities-to-cytoscape
   "Converts Graphden entities to Cytoscape.js element format.
 
    Arguments:
-   - entities: Map with keys :fns, :fn-schemas, :arg-schemas, :arg-values, :fn-usages
+   - entities: Map with keys :fns and :args
                Each value is a sequence of entity maps.
 
    Returns:
    {:nodes [...] :edges [...]} suitable for Cytoscape initialization."
   {:args {:entities :jsonb}
    :return-type :jsonb}
-  (let [{:keys [fns fn-schemas arg-schemas arg-values fn-usages]
-         :or {fns [] fn-schemas [] arg-schemas [] arg-values [] fn-usages []}}
+  (let [{:keys [fns args]
+         :or {fns [] args []}}
         entities
 
-        fn-schema-nodes (mapv fn-schema-to-node fn-schemas)
         fn-nodes (mapv fn->node fns)
-        arg-schema-nodes (mapv arg-schema-to-node arg-schemas)
-        arg-value-nodes (mapv arg-value-to-node arg-values)
-        fn-usage-nodes (mapv fn-usage-to-node fn-usages)
-
-        all-nodes (vec (concat fn-schema-nodes
-                               fn-nodes
-                               arg-schema-nodes
-                               arg-value-nodes
-                               fn-usage-nodes))
-
+        arg-nodes (mapv arg->node args)
+        all-nodes (vec (concat fn-nodes arg-nodes))
         edges (create-edges entities)]
 
     {:nodes all-nodes
@@ -210,67 +158,68 @@
 ;; =============================================================================
 
 (def ^:private default-style
-  "Default Cytoscape stylesheet."
+  "Default Cytoscape stylesheet for 2-entity schema."
   [{:selector "node"
     :style {:label "data(label)"
             :text-valign "center"
             :text-halign "center"
             :font-size "12px"
-            :width 60
-            :height 60}}
-
-   {:selector "node[type='fn-schema']"
-    :style {:background-color "#4A90D9"
-            :shape "rectangle"
             :width 80
             :height 40}}
 
-   {:selector "node[type='fn']"
-    :style {:background-color "#5CB85C"
-            :shape "ellipse"}}
+   ;; Base fn - solid border
+   {:selector "node[type='fn'][is-base]"
+    :style {:background-color "#fff"
+            :border-width 2
+            :border-color "#000"
+            :shape "round-rectangle"}}
 
-   {:selector "node[type='arg-schema']"
-    :style {:background-color "#F0AD4E"
-            :shape "diamond"
-            :width 50
-            :height 50}}
+   ;; Composed fn - solid border (same as base)
+   {:selector "node[type='fn'][!is-base]"
+    :style {:background-color "#fff"
+            :border-width 2
+            :border-color "#000"
+            :shape "round-rectangle"}}
 
-   {:selector "node[type='arg-value']"
-    :style {:background-color "#999999"
-            :shape "round-rectangle"
-            :width 70
-            :height 35}}
+   ;; Arg with value
+   {:selector "node[type='arg'][has-value]"
+    :style {:background-color "#f5f5f5"
+            :border-width 1
+            :border-color "#000"
+            :shape "rectangle"
+            :width 100
+            :height 30}}
 
-   {:selector "node[type='arg-value'][is-ref]"
-    :style {:background-color "#D9534F"}}
+   ;; Arg without value (unset)
+   {:selector "node[type='arg'][!has-value]"
+    :style {:background-color "#fff"
+            :border-width 1
+            :border-color "#999"
+            :border-style "dashed"
+            :shape "rectangle"
+            :width 100
+            :height 30}}
 
-   {:selector "node[type='fn-usage']"
-    :style {:background-color "#9B59B6"
-            :shape "hexagon"}}
-
+   ;; Edges
    {:selector "edge"
     :style {:width 2
-            :line-color "#CCCCCC"
-            :target-arrow-color "#CCCCCC"
+            :line-color "#ccc"
+            :target-arrow-color "#ccc"
             :target-arrow-shape "triangle"
             :curve-style "bezier"}}
 
-   {:selector "edge[type='has-schema']"
-    :style {:line-color "#4A90D9"
-            :target-arrow-color "#4A90D9"
+   {:selector "edge[type='inherits']"
+    :style {:line-color "#000"
+            :target-arrow-color "#000"
             :line-style "dashed"}}
 
    {:selector "edge[type='references']"
-    :style {:line-color "#D9534F"
-            :target-arrow-color "#D9534F"}}
-
-   {:selector "edge[type='calls']"
-    :style {:line-color "#9B59B6"
-            :target-arrow-color "#9B59B6"}}
+    :style {:line-color "#666"
+            :target-arrow-color "#666"}}
 
    {:selector ":selected"
     :style {:border-width 3
-            :border-color "#000000"}}])
+            :border-color "#000"}}])
 
 
 (def ^:private default-layout

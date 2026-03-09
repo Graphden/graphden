@@ -1,4 +1,11 @@
 (ns graphden.schema.graph.schema-test
+  "Tests for graph schema with 2-entity model.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.fields.types :as ft]
@@ -13,8 +20,8 @@
 
 
 (deftest entities-test
-  (testing "schema contains all expected entities"
-    (is (= #{:fn-schema :arg-schema :fn :arg-value :fn-arg :fn-usage}
+  (testing "schema contains only fn and arg entities"
+    (is (= #{:fn :arg}
            (set (ds/entities schema))))))
 
 
@@ -29,101 +36,85 @@
 
 
 (deftest entity-fields-test
-  (testing "fn-schema has expected fields"
-    (let [fields (ds/entity-fields schema :fn-schema)]
-      (is (= :text (get-in fields [:name :type])))
-      (is (= :enum (get-in fields [:returned-type :type])))))
-
-  (testing "arg-schema has expected fields including required"
-    (let [fields (ds/entity-fields schema :arg-schema)]
-      (is (= :ref (get-in fields [:fn-schema-id :type])))
-      (is (= :text (get-in fields [:name :type])))
-      (is (= :enum (get-in fields [:type :type])))
-      (is (= :bool (get-in fields [:required :type])))))
-
   (testing "fn has expected fields"
     (let [fields (ds/entity-fields schema :fn)]
       (is (= :text (get-in fields [:name :type])))
-      (is (= :ref (get-in fields [:fn-schema-id :type])))))
+      (is (= :ref (get-in fields [:parent-id :type])))
+      (is (= :fn (get-in fields [:parent-id :ref-entity])))
+      (is (true? (get-in fields [:parent-id :nullable?])))
+      (is (= :enum (get-in fields [:return-type :type])))
+      (is (= :text (get-in fields [:impl-hash :type])))))
 
-  (testing "arg-value has separate FK fields instead of union"
-    (let [fields (ds/entity-fields schema :arg-value)]
-      ;; value is nullable JSONB for literal values
-      (is (= :jsonb (get-in fields [:value :type])))
-      (is (true? (get-in fields [:value :nullable?])))
-      ;; fn-usage-id is nullable ref to fn-usage
-      (is (= :ref (get-in fields [:fn-usage-id :type])))
-      (is (= :fn-usage (get-in fields [:fn-usage-id :ref-entity])))
-      (is (true? (get-in fields [:fn-usage-id :nullable?])))))
-
-  (testing "fn-usage has expected fields"
-    (let [fields (ds/entity-fields schema :fn-usage)]
-      (is (= :ref (get-in fields [:fn-id :type])))
-      (is (= :fn (get-in fields [:fn-id :ref-entity])))))
-
-  (testing "fn-arg has expected fields"
-    (let [fields (ds/entity-fields schema :fn-arg)]
+  (testing "arg has expected fields"
+    (let [fields (ds/entity-fields schema :arg)]
       (is (= :ref (get-in fields [:fn-id :type])))
       (is (= :fn (get-in fields [:fn-id :ref-entity])))
-      (is (= :ref (get-in fields [:arg-schema-id :type])))
-      (is (= :arg-schema (get-in fields [:arg-schema-id :ref-entity])))
-      (is (= :ref (get-in fields [:arg-value-id :type])))
-      (is (= :arg-value (get-in fields [:arg-value-id :ref-entity]))))))
+      (is (= :text (get-in fields [:name :type])))
+      (is (= :enum (get-in fields [:type :type])))
+      (is (= :ref (get-in fields [:source-id :type])))
+      (is (= :arg (get-in fields [:source-id :ref-entity])))
+      (is (true? (get-in fields [:source-id :nullable?])))
+      (is (= :jsonb (get-in fields [:value :type])))
+      (is (true? (get-in fields [:value :nullable?])))
+      (is (= :ref (get-in fields [:ref-id :type])))
+      (is (= :fn (get-in fields [:ref-id :ref-entity])))
+      (is (true? (get-in fields [:ref-id :nullable?])))
+      (is (= :bool (get-in fields [:is-fn :type])))
+      (is (= :bool (get-in fields [:required :type]))))))
 
 
 (deftest validation-test
-  (testing "valid fn-schema entity"
-    (is (nil? (ds/validate-entity schema :fn-schema
-                                  {:id (random-uuid)
-                                   :name "add"
-                                   :returned-type :int}))))
-
-  (testing "invalid fn-schema - missing required field"
-    (let [result (ds/validate-entity schema :fn-schema
-                                     {:id (random-uuid)
-                                      :returned-type :int})]
-      (is (some? result))
-      (is (contains? (:errors result) :name))))
-
-  (testing "valid arg-value with literal int (no owner)"
-    (is (nil? (ds/validate-entity schema :arg-value
-                                  {:id (random-uuid)
-                                   :arg-schema-id (random-uuid)
-                                   :value 42}))))
-
-  (testing "valid arg-value with fn-usage-id (computed value reference)"
-    (is (nil? (ds/validate-entity schema :arg-value
-                                  {:id (random-uuid)
-                                   :arg-schema-id (random-uuid)
-                                   :fn-usage-id (random-uuid)}))))
-
-  (testing "valid fn-arg binding"
-    (is (nil? (ds/validate-entity schema :fn-arg
-                                  {:id (random-uuid)
-                                   :fn-id (random-uuid)
-                                   :arg-schema-id (random-uuid)
-                                   :arg-value-id (random-uuid)}))))
-
-  (testing "valid fn"
+  (testing "valid base fn (parent-id=nil)"
     (is (nil? (ds/validate-entity schema :fn
                                   {:id (random-uuid)
-                                   :name "my-fn"
-                                   :fn-schema-id (random-uuid)}))))
+                                   :name "add"
+                                   :parent-id nil
+                                   :return-type :int}))))
 
-  (testing "valid arg-schema with required true"
-    (is (nil? (ds/validate-entity schema :arg-schema
+  (testing "valid composed fn (parent-id set)"
+    (is (nil? (ds/validate-entity schema :fn
                                   {:id (random-uuid)
-                                   :fn-schema-id (random-uuid)
+                                   :name "my-add"
+                                   :parent-id (random-uuid)
+                                   :return-type :int}))))
+
+  ;; Note: fn.name is nullable (for local fns), so missing name is valid
+  ;; Test that fn-id is required for arg entity instead
+  (testing "invalid arg - missing required fn-id"
+    (let [result (ds/validate-entity schema :arg
+                                     {:id (random-uuid)
+                                      :name "x"
+                                      :type :int})]
+      (is (some? result))
+      (is (contains? (:errors result) :fn-id))))
+
+  (testing "valid arg with literal value"
+    (is (nil? (ds/validate-entity schema :arg
+                                  {:id (random-uuid)
+                                   :fn-id (random-uuid)
                                    :name "x"
                                    :type :int
-                                   :required true
-                                   :first-class false}))))
+                                   :value 42}))))
 
-  (testing "valid arg-schema with required false"
-    (is (nil? (ds/validate-entity schema :arg-schema
+  (testing "valid arg with fn reference (execute result)"
+    (is (nil? (ds/validate-entity schema :arg
                                   {:id (random-uuid)
-                                   :fn-schema-id (random-uuid)
-                                   :name "optional-arg"
-                                   :type :text
-                                   :required false
-                                   :first-class false})))))
+                                   :fn-id (random-uuid)
+                                   :name "result"
+                                   :ref-id (random-uuid)
+                                   :is-fn false}))))
+
+  (testing "valid arg with fn reference (HOF, pass fn as value)"
+    (is (nil? (ds/validate-entity schema :arg
+                                  {:id (random-uuid)
+                                   :fn-id (random-uuid)
+                                   :name "f"
+                                   :ref-id (random-uuid)
+                                   :is-fn true}))))
+
+  (testing "valid arg with source-id (inheritance)"
+    (is (nil? (ds/validate-entity schema :arg
+                                  {:id (random-uuid)
+                                   :fn-id (random-uuid)
+                                   :name "x"
+                                   :source-id (random-uuid)})))))

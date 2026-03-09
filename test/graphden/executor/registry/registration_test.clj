@@ -125,9 +125,9 @@
           ;; Base functions should be registered in executor
           (is (some? (exec/get-base-fn :add)))
           (is (some? (exec/get-base-fn :map)))
-          ;; fn-schemas should be in storage
-          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :add))))
-          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :map)))))
+          ;; fns should be in storage
+          (is (some? (sp/read-entity storage :fn (registry/fn-uuid :add))))
+          (is (some? (sp/read-entity storage :fn (registry/fn-uuid :map)))))
         (finally
           (sp/close storage)))))
 
@@ -135,20 +135,24 @@
     (let [storage (create-test-storage)]
       (try
         (registry/initialize-with-base-fns! storage)
-        ;; Create a function that uses :add
-        (let [add-schema (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :add))
-              add-args (sp/query-entities storage :arg-schema {:fn-schema-id (:id add-schema)})
+        ;; Create a composed function that uses :add
+        (let [add-fn-id (registry/fn-uuid :add)
+              add-fn (sp/read-entity storage :fn add-fn-id)
+              add-args (sp/query-entities storage :arg {:fn-id add-fn-id})
               nums-arg (first (filter #(= "nums" (:name %)) add-args))
+              ;; Create composed fn with parent-id = add-fn
               my-fn (sp/create-entity storage :fn
                                       {:name "test-add"
-                                       :fn-schema-id (:id add-schema)})
-              av (sp/create-entity storage :arg-value
-                                   {:arg-schema-id (:id nums-arg)
-                                    :value [1 2 3 4 5]})
-              _ (sp/create-entity storage :fn-arg
+                                       :parent-id add-fn-id})
+              ;; Create arg with source-id and value
+              _ (sp/create-entity storage :arg
                                   {:fn-id (:id my-fn)
-                                   :arg-schema-id (:id nums-arg)
-                                   :arg-value-id (:id av)})
+                                   :source-id (:id nums-arg)
+                                   :name "nums"
+                                   :type :jsonb
+                                   :required true
+                                   :is-fn false
+                                   :value [1 2 3 4 5]})
               ctx (exec/create-context {:storage storage})]
           (is (= 15 (exec/execute ctx (:id my-fn) nil))))
         (finally
@@ -166,8 +170,8 @@
         (is (some? storage))
         ;; Base functions should be registered
         (is (some? (exec/get-base-fn :add)))
-        ;; fn-schemas should be in storage
-        (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :add))))
+        ;; fns should be in storage
+        (is (some? (sp/read-entity storage :fn (registry/fn-uuid :add))))
         (finally
           (sp/close storage))))))
 
@@ -188,10 +192,10 @@
           (is (some? (exec/get-base-fn :test-fn1)))
           (is (some? (exec/get-base-fn :test-fn2)))
           (is (some? (exec/get-base-fn :test-fn3)))
-          ;; All fn-schemas should be in storage
-          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :test-fn1))))
-          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :test-fn2))))
-          (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :test-fn3)))))
+          ;; All fns should be in storage
+          (is (some? (sp/read-entity storage :fn (registry/fn-uuid :test-fn1))))
+          (is (some? (sp/read-entity storage :fn (registry/fn-uuid :test-fn2))))
+          (is (some? (sp/read-entity storage :fn (registry/fn-uuid :test-fn3)))))
         (finally
           (sp/close storage)))))
 
@@ -212,8 +216,8 @@
         (registry/initialize-all! storage [defs1 defs2])
         ;; Function should be registered (second impl wins)
         (is (some? (exec/get-base-fn :overlap-fn)))
-        ;; fn-schema should exist
-        (is (some? (sp/read-entity storage :fn-schema (registry/fn-schema-uuid :overlap-fn))))
+        ;; fn should exist
+        (is (some? (sp/read-entity storage :fn (registry/fn-uuid :overlap-fn))))
         (finally
           (sp/close storage))))))
 
@@ -252,8 +256,8 @@
 
                     (create-entity
                       [_ entity-name data]
-                      ;; Fail on fn-schema creation to trigger error path
-                      (if (= entity-name :fn-schema)
+                      ;; Fail on fn creation to trigger error path
+                      (if (= entity-name :fn)
                         (throw (ex-info "Simulated failure" {:type :test-error}))
                         (sp/create-entity storage entity-name data)))
 

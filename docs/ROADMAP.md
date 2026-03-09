@@ -1,6 +1,6 @@
 # Graphden Roadmap
 
-> **Last updated:** 2026-01-10
+> **Last updated:** 2026-03-09
 >
 > This document tracks implementation status and future plans.
 > For technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
@@ -9,7 +9,7 @@
 
 | Component | Status | Notes |
 |-----------|--------|-------|
-| GraphConstraints Protocol | Done | All validators implemented |
+| GraphConstraints Protocol | Done | No-cycle validation |
 | StorageCRUD Protocol | Done | + Batch operations |
 | Executor with Delays | Done | Lazy evaluation via Clojure delays |
 | Base Functions | Partial | 50+ functions done; I/O server done |
@@ -20,6 +20,7 @@
 | Logging | Done | Structured logging with MDC |
 | Web Server | Done | HTTP-kit + Reitit router |
 | Versioning | Done | VersionedStorage decorator |
+| 2-Entity Schema | Done | fn + arg model |
 | REST API | Planned | Phase 5 |
 | Web UI | Planned | Phase 5 |
 | Type System | Planned | Future work |
@@ -30,8 +31,7 @@
 ## Phase 0: Documentation [DONE]
 
 - Main README.md
-- Component READMEs for all 23 components
-- ARCHITECTURE.md document (with caching section)
+- ARCHITECTURE.md document
 - CONSTRAINTS.md, ERROR_CODES.md, EXTENDING.md
 - This ROADMAP.md document
 
@@ -39,14 +39,15 @@
 
 ## Phase 1: Data Schema and Constraints [DONE]
 
-**1.1 graph-data-schema** - All entities with all fields:
-- `fn-schema` with `base-fn-name`
-- `arg-schema` with `required`
-- `fn` (function instance)
-- `fn-usage` for cached computation results
-- `arg-value` with union types (including refs to fn-usage)
+**1.1 graph-data-schema** - 2-entity model:
+- `fn` — function entity (parent-id=nil for base-fn, parent-id set for composed)
+- `arg` — argument entity with value/ref-id, source-id for inheritance, is-fn for HOF
 
-**1.2 GraphConstraints protocol** - All 5 validators
+**1.2 GraphConstraints protocol** - Validators:
+- No dependency cycles via ref-id references
+- Unique fn name (NULL allowed for local functions)
+- Unique arg per fn + source-id combination
+- Unique arg name within fn
 
 **1.3 Contract tests** - Comprehensive test coverage
 
@@ -87,17 +88,21 @@
 **3.2 Lazy Evaluation:**
 Arguments are wrapped in Clojure `delay` objects:
 - Literal values → immediate delay
-- fn references → delay that executes function
-- fn-usage references → delay with result caching within execution
+- ref-id references → delay that executes function
+- is-fn=true refs → delay returning fn-id (for HOF)
 
-**3.3 Executor:**
+**3.3 Result Caching:**
+- Results cached by ref-id within execution context
+- Same ref-id in multiple args → function executes once
+
+**3.4 Executor:**
 - `execute` - Main entry point
 - `execute-with-named-args` - Execute with named arguments
 - `execute-by-name` - Execute by function name
 - Depth/timeout protection
-- Local fn with owner-fn-id for scoped argument binding
+- Inheritance resolution via parent-id chain
 
-**3.4 fn-registry component:**
+**3.5 fn-registry component:**
 - `register-base-fns!` - Register implementations
 - `sync-defs-to-storage!` - Sync schemas to storage
 - Deterministic UUID generation for idempotent operations
@@ -188,37 +193,32 @@ Arguments are wrapped in Clojure `delay` objects:
 
 **Problem**: When executing a function with free arguments via UI, users see technical identifiers (UUIDs). We need human-readable aliases.
 
-**Solution**: New entity `free-arg-alias` linking `fn-usage` + `arg-schema` to a display name.
+**Solution**: New entity `free-arg-alias` linking fn + arg to a display name.
 
 **Schema:**
 ```
 free-arg-alias:
   id: uuid (PK)
-  fn-usage-id: ref<fn-usage>
-  arg-schema-id: ref<arg-schema>
+  fn-id: ref<fn>
+  arg-id: ref<arg>
   alias: text (human-readable name)
-  UNIQUE(fn-usage-id, arg-schema-id)
+  UNIQUE(fn-id, arg-id)
 ```
 
 **Lifecycle:**
 - Created manually via UI when naming free arguments
-- **Auto-deleted** when the argument gets a value (arg-value is created for the referenced function)
+- **Auto-deleted** when the argument gets a value
 - This ensures aliases only exist for truly "free" arguments
 
 **UI Usage:**
 ```
 Execute function: calculate-report
 ┌─────────────────────────────────────┐
-│ Sales Region: [_______________]     │  ← alias for cs-1 + region-arg
-│ Start Date:   [_______________]     │  ← alias for cs-2 + date-arg
-│ Currency:     [USD v]               │  ← alias for cs-1 + currency-arg
+│ Sales Region: [_______________]     │  ← alias for arg
+│ Start Date:   [_______________]     │  ← alias for arg
+│ Currency:     [USD v]               │  ← alias for arg
 └─────────────────────────────────────┘
 ```
-
-**Implementation notes:**
-- Storage constraint: validate that arg is actually free (no arg-value exists for this fn + arg-schema)
-- Cascade delete via trigger/transaction function when arg-value is created
-- Root function free args don't need aliases — they already have human-readable names via `arg-schema.name`
 
 **Complexity**: Low-Medium.
 
@@ -229,7 +229,7 @@ Execute function: calculate-report
 **Goal**: Static type checking, UI hints, automatic type inference.
 
 **What's needed:**
-- Types for fn-schema (input types -> output type)
+- Types for functions (input types -> output type)
 - Parametric polymorphism (List[T], Map[K,V])
 - Type inference for compositions (Hindley-Milner or subset)
 - Types for HOF: `map : (a -> b) -> List[a] -> List[b]`
@@ -242,8 +242,8 @@ Execute function: calculate-report
 
 **Goal**: Detect when base function implementations change to enable safe upgrades.
 
-**Implementation (Phase 1):**
-- `impl-hash` field in `fn-schema` entity (SHA-256 hash)
+**Implementation:**
+- `impl-hash` field in `fn` entity (SHA-256 hash)
 - `impl-source` stored in `defbase` macro output
 - Hash computed from: args, return-type, impl-source (body forms)
 - Canonical form normalization (sorted maps, pr-str)
@@ -259,18 +259,11 @@ Execute function: calculate-report
 - Comments
 - Map key ordering
 
-**Files:**
-- `graph-data-schema/interface.clj` - impl-hash field
-- `fn-registry/core.clj` - compute-impl-hash function
-- `fn-registry/macros.clj` - impl-source in defbase
-
 ---
 
-### Git-like Versioning
+### Git-like Versioning [DONE]
 
 **Goal**: Change history, rollback, branches, merge for function graphs.
-
-**Schema**: See [current-schema.dbml](current-schema.dbml) for full schema.
 
 **Design decisions:**
 
@@ -280,21 +273,15 @@ Execute function: calculate-report
 | History model | Append-only version records | No data loss; current version = latest by created_at |
 | Unique constraint | Non-unique (entity_id, branch_id) — multiple records per entity per branch | Enables full history without separate history tables |
 | Branch model | Branch table with base_branch_id for inheritance chain | Resolution walks up the chain until version found |
-| Merge mechanism | `branch_merge` table (no record duplication) | Single merge record makes source versions visible in target; see current-schema.dbml |
+| Merge mechanism | `branch_merge` table (no record duplication) | Single merge record makes source versions visible in target |
 | Conflict detection | Git-style: entity modified in both branches after fork point | User resolves: take source / take target / custom |
-| Performance strategy | Variant B: full resolve at cache time | Expensive on cache miss, O(1) on hit. Fits existing cached-storage pattern |
-| Modularity | Independent component (versioned-storage decorator) | Must be composable with/without caching independently |
 
 **What is versioned (graph structure changes):**
 
 | Entity | Versioned? | What changes |
 |--------|-----------|--------------|
-| `fn` | Yes (fn + fn_version) | name, fn_schema_id, owner_fn_id |
-| `fn_arg` | Yes (fn_arg + fn_arg_version) | arg_value_id binding |
-| `fn_schema` | Yes (fn_schema + fn_schema_version) | name, returned_type, base_fn_name, impl_hash |
-| `arg_schema` | Yes (arg_schema + arg_schema_version) | name, type, required |
-| `arg_value` | No | Immutable, deduplicated; change = point to different arg_value |
-| `fn_usage` | No | fn_id is fixed; only its arg bindings change |
+| `fn` | Yes (fn + fn_version) | name, parent-id, return-type, impl-hash |
+| `arg` | Yes (arg + arg_version) | name, type, required, value, ref-id, is-fn, source-id |
 
 **Branch operations:**
 
@@ -302,7 +289,7 @@ Execute function: calculate-report
 |-----------|-----------|
 | Create branch | Insert into `branch` with `base_branch_id` |
 | Edit on branch | Append new version record with branch_id |
-| Read on branch | Walk branch chain upward; check branch_merge records for merged versions (see resolution algorithm in current-schema.dbml) |
+| Read on branch | Walk branch chain upward; check branch_merge records for merged versions |
 | Merge B into A | Insert `branch_merge(source=B, source_timestamp=now, target=A, target_timestamp=now)`. No records copied. Detect conflicts: entity modified in both B and A after fork point |
 | Conflict resolution | User chooses: take source version / take target version / create custom version |
 | Delete branch | Forbid if child branches exist; delete all version records and branch_merge records, then branch |
@@ -313,53 +300,17 @@ Execute function: calculate-report
 - No branch specified = default branch (base_branch_id = NULL)
 - Branch is transparent to functions — they don't know which branch they're on
 
-**Performance: Variant B (resolve at cache time):**
-- On cache miss: full version resolution for all entities in execution graph (expensive)
-- On cache hit: O(1) — pre-resolved graph returned directly
-- Fits existing `cached-storage` decorator pattern
-- Cache invalidation: merge operation invalidates affected caches in target branch
-- No materialized views needed initially
-
-**Multi-tenant model:**
-- Each tenant operates on their own branch derived from main
-- Test branches are children of tenant branch
-
-**Running branches (live deployment):**
-- Most branches are development-only — no running services, no resource consumption
-- User explicitly marks a branch as "live" — platform reacts by provisioning executor
-- Each live branch is a separate deployment (separate service/endpoint)
-- Platform assigns a URL on its own domain: `branch-name.project-id.graphden.io`
-- User optionally configures their DNS (CNAME) to point their domain at the branch service
-- No subdomain parsing or header-based routing needed — each branch has its own endpoint
-- Functions never know about branches — branch is set in executor context before graph execution
-
-**Executor allocation modes:**
-
-| Mode | When | How |
-|------|------|-----|
-| Shared executor | Cheap tier, preview branches | One executor service handles multiple branches. Platform ingress maps hostname → branch_id, passes to executor |
-| Dedicated executor | Production, high load | Separate pod, configured for one branch |
-| Preloaded | Latency-critical | Graph pre-resolved, handler in memory |
-
 **Component architecture:**
 - `versioned-storage` — independent component (storage decorator)
-- `cached-versioned-storage` — optional combining module (cache + versioning)
-- Any combination works: base only, cached only, versioned only, cached+versioned
+- Any combination works: base only, versioned only
 - Executor works with any storage through unified `ExecutionGraph` protocol — no executor changes needed
 
-**Open questions (under consideration):**
-- **Tags for arg_schema properties**: env_local, secret, and similar cross-cutting properties need a generic mechanism. Problem: each new boolean field (is_env_local, is_secret) proliferates across schema, storage, and merge logic. Possible direction: tags set on arg_schema, but design not finalized.
-
 **Base function update strategy:**
-- Platform migrations update `fn_schema` and `arg_schema` on a platform branch
+- Platform migrations update base-fns on a platform branch
 - Users' branches don't see the change until they merge
-- Compatible changes (new optional arg): one `base_fn_name`, Clojure code supports both old and new signatures
-- Breaking changes (removed arg, changed type): register new `base_fn_name` (e.g., `map-fn-v2`), old code remains functional
+- Compatible changes (new optional arg): single base fn name, Clojure code supports both old and new signatures
+- Breaking changes (removed arg, changed type): register new fn name (e.g., `map-v2`), old code remains functional
 - Implementation-only changes (bug fix, same signature): all users get the new code automatically (Clojure runtime is shared), `impl_hash` updated on platform branch
-- Clojure runtime must maintain backward compatibility until all users migrate from old `base_fn_name`
-
-**Postponed:**
-- Personal rename / alias layer
 
 ---
 

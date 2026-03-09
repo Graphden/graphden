@@ -1,8 +1,11 @@
 (ns graphden.executor.composition.core
   "Data-driven fn definitions and storage sync.
 
-   This component provides a declarative way to define fn entities
-   (not base-fns) that compose base functions through the graph.
+   ## 2-Entity Schema
+
+   Composed functions are stored as:
+   - fn entity with parent-id set (inherits from parent base-fn)
+   - arg entities with source-id set (inherits from parent's arg) + value/ref-id
 
    ## Format
 
@@ -10,60 +13,24 @@
 
    ```clojure
    [{:name :router-handler
-     :parent :default-router-handler}  ; parent is base-fn
+     :parent :default-router-handler}
 
     {:name :web-server
-     :parent :http-server              ; parent is base-fn
-     :args {:handler :router-handler  ; ref to fn by name
-            :port 8080}}]              ; literal value
+     :parent :http-server
+     :args {:handler :router-handler>   ; ref to fn (execute)
+            :port 8080}}]               ; literal value
    ```
 
    ## Arg Value Syntax
 
-   At the TOP LEVEL of args, both syntaxes work (both create fn-usage):
-   - `:fn-name` - fn-usage with name 'fn-name-ref' (for HOF with first-class=true)
-   - `:fn-name>` - fn-usage with name 'fn-name' (for computed values with first-class=false)
-   - `:fn-name>result-name` - fn-usage with explicit name
-
-   Runtime behavior is controlled by arg-schema.first-class flag:
-   - first-class=true: get fn-id from fn-usage, pass directly (for HOF)
-   - first-class=false: execute fn-usage, use result
-
-   In NESTED structures (maps, vectors inside arg values), only the
-   `:fn-name>` syntax works. Plain keywords are kept as-is because
-   we can't distinguish `:some-fn` (intended fn ref) from `:status` (data).
-
-   Example with nested references:
-   ```clojure
-   {:name :my-router
-    :parent :router
-    :args {:routes [[\"GET\" \"/\" {:handler :home-handler>}]
-                    [\"GET\" \"/api\" {:handler :api-handler>}]]}}
-   ```
-
-   The `:home-handler>` and `:api-handler>` will be resolved recursively,
-   creating fn-usages and replacing references with fn-usage-ids.
-   Other keywords like `:handler` (map key) are kept as-is.
-
-   Multiple references to `:fn-name>` create one fn-usage (same name).
-   Use `:fn-name>name1`, `:fn-name>name2` for different fn-usages.
+   - `:fn-name` - pass fn-id directly (for HOF with is-fn=true)
+   - `:fn-name>` - execute fn and use result (creates ref-id)
 
    ## Name Resolution
 
    Names in :parent and :args are resolved in this order:
-   1. fn-schema from base-fns (by name)
-   2. fn from this definition set (by name)
-   3. fn already in storage (by name)
-
-   ## Topological Sort
-
-   Functions must be defined AFTER their dependencies.
-   If order is violated, a warning is printed with suggested fix,
-   but sync proceeds in correct order.
-
-   ## Transaction
-
-   All entities are created atomically - if any fails, all roll back."
+   1. fn from this definition set (by name)
+   2. fn already in storage (by name)"
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
@@ -74,70 +41,43 @@
 ;; === Arg Value Parsing ===
 
 (defn- valid-identifier?
-  "Returns true if s looks like a valid Clojure keyword name.
-   Valid identifiers don't contain whitespace, newlines, or other special chars."
+  "Returns true if s looks like a valid Clojure keyword name."
   [s]
   (when (and (string? s) (seq s))
-    ;; Simple check: no whitespace, must start with letter/underscore/dash
     (and (not (re-find #"\s" s))
          (re-matches #"[a-zA-Z_\-][a-zA-Z0-9_\-]*" s))))
 
 
-(defn- parse-fn-result-ref
-  "Parses a keyword or string that might be a fn-usage reference.
-   :fn-name> or \"fn-name>\" means execute fn-name, result name defaults to fn-name
-   :fn-name>result-name means execute fn-name, result name is result-name
-   Returns [fn-name result-name] or nil if not a fn-usage ref.
-
-   Also handles strings (for JSONB round-trip where keywords become strings)."
+(defn- parse-fn-ref
+  "Parses a keyword that might be a fn reference.
+   :fn-name> means execute fn-name and use result
+   :fn-name means pass fn-id directly (for HOF)
+   Returns [fn-name execute?] or nil if not a fn ref."
   [value]
-  (let [[kw-name kw-ns]
-        (cond
-          (keyword? value) [(name value) (namespace value)]
-          (string? value) [value nil]
-          :else [nil nil])]
-    (when (and kw-name (str/includes? kw-name ">"))
-      (let [parts (str/split kw-name #">" 2)
-            fn-name (first parts)
-            result-name (second parts)]
-        ;; Only match if fn-name looks like a valid identifier
-        (when (and (seq fn-name) (valid-identifier? fn-name))
-          ;; Reconstruct keyword with namespace if present
-          (let [fn-kw (if kw-ns (keyword kw-ns fn-name) (keyword fn-name))
-                ;; If result-name is empty (just ":fn>"), use fn-name as default
-                result-kw (if (or (nil? result-name) (str/blank? result-name))
-                            fn-kw
-                            (if kw-ns (keyword kw-ns result-name) (keyword result-name)))]
-            [fn-kw result-kw]))))))
-
-
-(defn- extract-fn-ref
-  "Extracts the fn name from an arg value.
-   Returns [fn-name :fn nil] for keyword refs (pass as callable).
-   Returns [fn-name :fn-usage result-name] for :fn-name> refs (execute and use result).
-   Returns nil for literal values."
-  [arg-value]
-  (when (keyword? arg-value)
-    (if-let [[fn-name result-name] (parse-fn-result-ref arg-value)]
-      [fn-name :fn-usage result-name]
-      [arg-value :fn nil])))
+  (when (keyword? value)
+    (let [kw-name (name value)]
+      (if (str/ends-with? kw-name ">")
+        (let [fn-name (subs kw-name 0 (dec (count kw-name)))]
+          (when (valid-identifier? fn-name)
+            [(keyword fn-name) true]))
+        (when (valid-identifier? kw-name)
+          [value false])))))
 
 
 ;; === Name Resolution ===
 
-(defn- resolve-fn-schema-id
-  "Resolves a parent name to fn-schema-id.
-   Parent must be a base-fn name (fn-schema with base-fn-name set).
+(defn- resolve-parent-fn-id
+  "Resolves a parent name to fn-id.
+   Parent must be a base-fn (fn with parent-id=nil).
    Returns UUID or throws if not found."
   [storage parent-name]
-  (let [fn-schema-id (registry/fn-schema-uuid parent-name)]
-    ;; Verify it exists
-    (when-not (sp/read-entity storage :fn-schema fn-schema-id)
+  (let [fn-id (registry/fn-uuid parent-name)]
+    (when-not (sp/read-entity storage :fn fn-id)
       (throw (ex-info (str "Parent base-fn not found: " parent-name
                            ". Did you forget to add base-functions?")
                       {:type :fn-composition/unresolved-parent
                        :parent-name parent-name})))
-    fn-schema-id))
+    fn-id))
 
 
 (defn- resolve-fn-id
@@ -148,50 +88,28 @@
    Returns UUID or throws if not found."
   [storage created-fns fn-name]
   (or
-    ;; Check fns created in this batch
     (get created-fns fn-name)
-    ;; Check storage by name
     (let [existing (sp/query-entities storage :fn {:name (name fn-name)})]
       (when (seq existing)
         (:id (first existing))))
-    ;; Not found
     (throw (ex-info (str "Referenced fn not found: " fn-name
-                         ". It must be defined earlier in the set or exist in storage.")
+                         ". It must be defined earlier or exist in storage.")
                     {:type :fn-composition/unresolved-fn-ref
                      :fn-name fn-name
                      :available-fns (keys created-fns)}))))
 
 
-(defn- resolve-arg-schema-id
-  "Resolves arg-schema-id from parent base-fn name and arg name."
-  [parent-name arg-name]
-  (registry/arg-schema-uuid parent-name arg-name))
-
-
 ;; === Dependency Analysis ===
-
-(defn- collect-deps-from-value
-  "Collects fn dependencies from a single arg value.
-   Only handles top-level refs (:fn-name and :fn-name> syntax).
-   Nested structures with refs are NOT supported - use explicit
-   graph functions (pair, assoc-any, conj-any) to build them."
-  [value]
-  (if-let [ref-info (extract-fn-ref value)]
-    ;; Top-level: both :fn-name and :fn-name> work
-    #{(first ref-info)}
-    ;; Not a top-level ref - no nested collection (nested not supported)
-    #{}))
-
 
 (defn- extract-dependencies
   "Extracts fn names that this fn-def depends on (from args).
-   At top-level args, handles both :fn-name and :fn-name> syntax.
-   In nested structures, only :fn-name> syntax is supported.
    Returns set of keywords."
   [fn-def fn-names-in-set]
   (let [args (:args fn-def {})]
     (->> (vals args)
-         (mapcat collect-deps-from-value)
+         (keep (fn [v]
+                 (when-let [[fn-name _] (parse-fn-ref v)]
+                   fn-name)))
          (filter fn-names-in-set)
          set)))
 
@@ -219,7 +137,6 @@
            visited #{}]
       (if (empty? remaining)
         (mapv fn-def-map sorted)
-        ;; Find fn with no unmet dependencies
         (if-let [ready (->> remaining
                             (filter (fn [fn-name]
                                       (let [deps (get dep-graph fn-name #{})]
@@ -228,7 +145,6 @@
           (recur (conj sorted ready)
                  (disj remaining ready)
                  (conj visited ready))
-          ;; No ready fn - cycle detected
           (throw (ex-info "Circular dependency detected in fn definitions"
                           {:type :fn-composition/circular-dependency
                            :remaining remaining
@@ -244,8 +160,7 @@
     (when (not= original-order sorted-order)
       (log/warn "fn-defs are not in dependency order."
                 "Current order:" (str/join " -> " (map name original-order))
-                "Suggested order:" (str/join " -> " (map name sorted-order))
-                "Consider reordering for clarity."))))
+                "Suggested order:" (str/join " -> " (map name sorted-order))))))
 
 
 ;; === Validation ===
@@ -279,7 +194,6 @@
     (throw (ex-info "fn-defs must be a vector/list"
                     {:type :fn-composition/invalid-defs
                      :fn-defs-type (type fn-defs)})))
-  ;; Check for duplicate names
   (let [names (map :name fn-defs)
         duplicates (->> names
                         frequencies
@@ -289,7 +203,6 @@
       (throw (ex-info "Duplicate fn names in definitions"
                       {:type :fn-composition/duplicate-names
                        :duplicates duplicates}))))
-  ;; Validate each def
   (doseq [fn-def fn-defs]
     (validate-fn-def! fn-def)))
 
@@ -306,180 +219,74 @@
     (if (seq existing)
       (first existing)
       (let [parent (:parent fn-def)
-            fn-schema-id (resolve-fn-schema-id storage parent)]
+            parent-fn-id (resolve-parent-fn-id storage parent)]
         (sp/create-entity storage :fn
                           {:name fn-name-str
-                           :fn-schema-id fn-schema-id})))))
+                           :parent-id parent-fn-id})))))
 
 
-(defn- get-or-create-arg-value!
-  "Gets existing arg-value or creates new one.
-   Returns arg-value id.
-
-   resolved-value is a map with :type and :value keys:
-   - {:type :fn-usage :value <fn-usage-id>} -> sets fn-usage-id FK
-   - {:type :literal :value <literal>} -> sets value field
-
-   Deduplication: same (arg-schema-id, type, value) reuses existing arg-value."
-  [storage arg-schema-id resolved-value created-arg-values]
-  (let [{value-type :type the-value :value} resolved-value
-        cache-key [arg-schema-id value-type the-value]]
-    (if-let [existing-id (get @created-arg-values cache-key)]
-      existing-id
-      ;; Build query map based on type
-      (let [query-map (case value-type
-                        :fn-usage {:arg-schema-id arg-schema-id :fn-usage-id the-value}
-                        :literal {:arg-schema-id arg-schema-id :value the-value})
-            existing (sp/query-entities storage :arg-value query-map)]
-        (if (seq existing)
-          (let [id (:id (first existing))]
-            (swap! created-arg-values assoc cache-key id)
-            id)
-          ;; Create new arg-value with appropriate FK field
-          (let [create-map (case value-type
-                             :fn-usage {:arg-schema-id arg-schema-id :fn-usage-id the-value}
-                             :literal {:arg-schema-id arg-schema-id :value the-value})
-                av (sp/create-entity storage :arg-value create-map)]
-            (swap! created-arg-values assoc cache-key (:id av))
-            (:id av)))))))
+(defn- get-parent-arg
+  "Gets the parent's arg entity for an arg name.
+   Returns the arg entity or throws if not found."
+  [storage parent-fn-id arg-name]
+  (let [args (sp/query-entities storage :arg {:fn-id parent-fn-id
+                                               :name (name arg-name)})]
+    (when (empty? args)
+      (throw (ex-info (str "Argument not found in parent: " arg-name)
+                      {:type :fn-composition/unresolved-arg
+                       :parent-fn-id parent-fn-id
+                       :arg-name arg-name})))
+    (first args)))
 
 
-(defn- resolve-arg-value
-  "Resolves an arg value, handling top-level references only.
-   Returns a map with :type and :value keys for proper FK field assignment:
-   - {:type :fn-usage :value <fn-usage-id>}
-   - {:type :literal :value <literal-value>}
+(defn- create-arg!
+  "Creates or updates an arg entity for a composed fn.
+   Inherits from parent's arg via source-id."
+  [storage fn-id parent-fn-id arg-name arg-value created-fns]
+  (let [;; Get parent's arg to inherit from
+        parent-arg (get-parent-arg storage parent-fn-id arg-name)
+        source-id (:id parent-arg)
+        ;; Check if arg already exists
+        existing (sp/query-entities storage :arg {:fn-id fn-id
+                                                   :source-id source-id})
+        ;; Resolve arg value
+        resolved (cond
+                   (nil? arg-value)
+                   {:value nil :ref-id nil}
 
-   At top-level (the arg value itself):
-   - :fn-name -> create fn-usage (for HOF, behavior controlled by first-class flag)
-   - :fn-name> -> create fn-usage and resolve to fn-usage-id
-   - raw UUID -> create fn-usage for it
+                   (keyword? arg-value)
+                   (if-let [[ref-fn-name execute?] (parse-fn-ref arg-value)]
+                     (let [ref-fn-id (resolve-fn-id storage created-fns ref-fn-name)]
+                       (if execute?
+                         {:value nil :ref-id ref-fn-id}
+                         {:value (str ref-fn-id) :ref-id nil}))
+                     {:value arg-value :ref-id nil})
 
-   Runtime behavior is determined by arg-schema.first-class flag:
-   - first-class=true -> get fn-id from fn-usage, pass directly (for HOF)
-   - first-class=false -> execute fn-usage and use result
-
-   NOTE: Nested structures with fn-usage references are NOT resolved.
-   Use explicit graph functions (pair, assoc-any, conj-any) to build
-   structures containing fn-usage references."
-  [arg-value storage created-fns created-fn-usages]
-  (cond
-    ;; Raw UUID - create fn-usage for it (behavior controlled by first-class flag)
-    (uuid? arg-value)
-    (let [result-name (str "ref-" arg-value)]
-      (if-let [existing-fu-id (get @created-fn-usages arg-value)]
-        {:type :fn-usage :value existing-fu-id}
-        (let [existing-in-db (sp/query-entities storage :fn-usage {:name result-name})]
-          (if (seq existing-in-db)
-            (let [fu-id (:id (first existing-in-db))]
-              (swap! created-fn-usages assoc arg-value fu-id)
-              {:type :fn-usage :value fu-id})
-            (let [fn-usage (sp/create-entity storage :fn-usage
-                                             {:fn-id arg-value
-                                              :name result-name})]
-              (swap! created-fn-usages assoc arg-value (:id fn-usage))
-              {:type :fn-usage :value (:id fn-usage)})))))
-
-    ;; Top-level fn reference (keyword syntax)
-    (keyword? arg-value)
-    (if-let [ref-info (extract-fn-ref arg-value)]
-      ;; Top-level fn reference
-      (let [[fn-name ref-type result-name] ref-info]
-        (condp = ref-type
-          ;; :fn-name> - get or create fn-usage
-          :fn-usage
-          (let [result-name-str (name result-name)]
-            (if-let [existing-fu-id (get @created-fn-usages result-name)]
-              {:type :fn-usage :value existing-fu-id}
-              ;; Check storage for existing fn-usage with same name
-              (let [existing-in-db (sp/query-entities storage :fn-usage {:name result-name-str})]
-                (if (seq existing-in-db)
-                  (let [fu-id (:id (first existing-in-db))]
-                    (swap! created-fn-usages assoc result-name fu-id)
-                    {:type :fn-usage :value fu-id})
-                  (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                        fn-usage (sp/create-entity storage :fn-usage
-                                                   {:fn-id ref-fn-id
-                                                    :name result-name-str})]
-                    (swap! created-fn-usages assoc result-name (:id fn-usage))
-                    {:type :fn-usage :value (:id fn-usage)})))))
-
-          ;; :fn-name - create fn-usage (for HOF, behavior controlled by first-class flag)
-          :fn
-          (let [ref-fn-id (resolve-fn-id storage created-fns fn-name)
-                result-name (str (name fn-name) "-ref")]
-            (if-let [existing-fu-id (get @created-fn-usages fn-name)]
-              {:type :fn-usage :value existing-fu-id}
-              (let [existing-in-db (sp/query-entities storage :fn-usage {:name result-name})]
-                (if (seq existing-in-db)
-                  (let [fu-id (:id (first existing-in-db))]
-                    (swap! created-fn-usages assoc fn-name fu-id)
-                    {:type :fn-usage :value fu-id})
-                  (let [fn-usage (sp/create-entity storage :fn-usage
-                                                   {:fn-id ref-fn-id
-                                                    :name result-name})]
-                    (swap! created-fn-usages assoc fn-name (:id fn-usage))
-                    {:type :fn-usage :value (:id fn-usage)})))))
-
-          ;; default - should not happen, treat as literal
-          {:type :literal :value arg-value}))
-      ;; Keyword but not a fn reference - literal
-      {:type :literal :value arg-value})
-
-    ;; Everything else - literal value
-    :else
-    {:type :literal :value arg-value}))
-
-
-(defn- get-or-create-fn-arg!
-  "Gets existing fn-arg binding or creates/updates one.
-   The unique constraint is on (fn-id, arg-schema-id).
-   If existing fn-arg has different arg-value-id, updates it.
-   Returns the fn-arg entity."
-  [storage fn-id arg-schema-id arg-value-id]
-  (let [existing (sp/query-entities storage :fn-arg
-                                    {:fn-id fn-id
-                                     :arg-schema-id arg-schema-id})]
+                   :else
+                   {:value arg-value :ref-id nil})]
     (if (seq existing)
-      (let [existing-fn-arg (first existing)]
-        (if (= (:arg-value-id existing-fn-arg) arg-value-id)
-          existing-fn-arg
-          (sp/update-entity storage :fn-arg (:id existing-fn-arg)
-                            {:arg-value-id arg-value-id})))
-      (sp/create-entity storage :fn-arg
-                        {:fn-id fn-id
-                         :arg-schema-id arg-schema-id
-                         :arg-value-id arg-value-id}))))
+      (let [existing-arg (first existing)]
+        (when (or (not= (:value existing-arg) (:value resolved))
+                  (not= (:ref-id existing-arg) (:ref-id resolved)))
+          (sp/update-entity storage :arg (:id existing-arg) resolved))
+        existing-arg)
+      ;; Copy name and type from parent arg for argument resolution
+      (sp/create-entity storage :arg
+                        (merge {:fn-id fn-id
+                                :source-id source-id
+                                :name (:name parent-arg)
+                                :type (:type parent-arg)}
+                               resolved)))))
 
 
-(defn- create-arg-values!
-  "Creates arg-value entities and fn-arg bindings for a fn.
-   Resolves top-level references to other fns.
-
-   At top-level args, both :fn-name and :fn-name> syntax work.
-   NOTE: Nested structures with fn/fn-usage references are NOT resolved.
-   Use explicit graph functions (pair, assoc-any, conj-any) to build
-   structures containing fn/fn-usage references.
-
-   With normalized schema:
-   - arg-value is a pure value with one FK field set (fn-usage-id or value)
-   - fn-arg binds fn to arg-value
-   - arg-values are deduplicated by (arg-schema-id, type, value)
-
-   The created-fn-usages atom tracks fn-usages created
-   in this sync batch, keyed by their name (keyword).
-   The created-arg-values atom tracks arg-values created for deduplication."
-  [storage fn-entity fn-def created-fns created-fn-usages created-arg-values]
+(defn- create-args!
+  "Creates arg entities for a composed fn."
+  [storage fn-entity fn-def created-fns]
   (let [{:keys [parent args]} fn-def
-        fn-id (:id fn-entity)]
+        fn-id (:id fn-entity)
+        parent-fn-id (resolve-parent-fn-id storage parent)]
     (doseq [[arg-name arg-value] args]
-      (let [arg-schema-id (resolve-arg-schema-id parent arg-name)
-            ;; Resolve the arg value (returns {:type ... :value ...})
-            resolved-value (resolve-arg-value arg-value storage created-fns created-fn-usages)
-            ;; Get or create arg-value (deduplicated by type+value)
-            arg-value-id (get-or-create-arg-value! storage arg-schema-id resolved-value created-arg-values)]
-        ;; Get or create fn-arg binding (fn -> arg-value)
-        (get-or-create-fn-arg! storage fn-id arg-schema-id arg-value-id)))))
+      (create-arg! storage fn-id parent-fn-id arg-name arg-value created-fns))))
 
 
 (defn sync-fns-to-storage!
@@ -494,10 +301,7 @@
    2. Topologically sorts by dependencies
    3. Warns if original order was wrong
    4. Creates all fn entities
-   5. Creates all arg-value and fn-arg entities
-      - arg-values are deduplicated by (arg-schema-id, value)
-      - fn-arg binds fn to arg-value
-      - fn-usages are deduplicated by name
+   5. Creates all arg entities
 
    Returns map of {fn-name -> fn-id} for created fns.
 
@@ -509,17 +313,9 @@
   (if (empty? fn-defs)
     {}
     (do
-      ;; 1. Validate
       (validate-all-defs! fn-defs)
-      ;; 2. Topological sort
-      (let [sorted-defs (topological-sort fn-defs)
-            ;; Track fn-usages created during sync for deduplication
-            created-fn-usages (atom {})
-            ;; Track arg-values created during sync for deduplication
-            created-arg-values (atom {})]
-        ;; 3. Warn if order was wrong
+      (let [sorted-defs (topological-sort fn-defs)]
         (check-order-and-warn fn-defs sorted-defs)
-        ;; 4. Create fns in sorted order, tracking created ids
         (loop [remaining sorted-defs
                created-fns {}]
           (if (empty? remaining)
@@ -527,7 +323,5 @@
             (let [fn-def (first remaining)
                   fn-entity (get-or-create-fn-entity! storage fn-def)
                   new-created (assoc created-fns (:name fn-def) (:id fn-entity))]
-              ;; 5. Create arg-values and fn-arg bindings for this fn
-              (create-arg-values! storage fn-entity fn-def new-created
-                                  created-fn-usages created-arg-values)
+              (create-args! storage fn-entity fn-def new-created)
               (recur (rest remaining) new-created))))))))

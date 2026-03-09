@@ -9,7 +9,13 @@
    - Timestamp type tests
    - Timeout validation tests
    - Execute args validation tests
-   - Unknown type validation tests"
+   - Unknown type validation tests
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
@@ -35,24 +41,20 @@
               :use-any
               (fn [{:keys [data]} _ctx]
                 @data))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-any"
-                                       :returned-type :any})
-          data-arg (sp/create-entity storage :arg-schema
-                                     {:fn-schema-id (:id fn-schema)
-                                      :name "data"
-                                      :type :any
-                                      :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-any"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - test provides values via execute (free arg)
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "use-any" :any)
+          ;; Create arg for base fn
+          data-arg (setup/create-arg! storage (:id base-fn)
+                                      {:name "data" :type :any :required true :is-fn false})
+          ;; Create composed fn
+          composed-fn (setup/create-composed-fn! storage "my-use-any" (:id base-fn))
+          ;; No arg value - test provides values via execute (free arg)
           ctx (exec/create-context {:storage storage})]
       ;; Any type should accept any value (provided at runtime since no DB value)
-      (is (= "a string" (exec/execute ctx (:id fn-rec) {(:id data-arg) "a string"})))
-      (is (= 12345 (exec/execute ctx (:id fn-rec) {(:id data-arg) 12345})))
-      (is (= {:key "value"} (exec/execute ctx (:id fn-rec) {(:id data-arg) {:key "value"}})))
-      (is (= [1 2 3] (exec/execute ctx (:id fn-rec) {(:id data-arg) [1 2 3]})))
+      (is (= "a string" (exec/execute ctx (:id composed-fn) {(:id data-arg) "a string"})))
+      (is (= 12345 (exec/execute ctx (:id composed-fn) {(:id data-arg) 12345})))
+      (is (= {:key "value"} (exec/execute ctx (:id composed-fn) {(:id data-arg) {:key "value"}})))
+      (is (= [1 2 3] (exec/execute ctx (:id composed-fn) {(:id data-arg) [1 2 3]})))
       (sp/close storage))))
 
 
@@ -72,24 +74,20 @@
               :use-int
               (fn [{:keys [n]} _ctx]
                 @n))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-int"
-                                       :returned-type :int})
-          n-arg (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id fn-schema)
-                                   :name "n"
-                                   :type :int
-                                   :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-int"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free, test provides invalid type via execute
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "use-int" :int)
+          ;; Create arg for base fn
+          n-arg (setup/create-arg! storage (:id base-fn)
+                                   {:name "n" :type :int :required true :is-fn false})
+          ;; Create composed fn
+          composed-fn (setup/create-composed-fn! storage "my-use-int" (:id base-fn))
+          ;; No arg value - test provides via execute
           ctx (exec/create-context {:storage storage})
           ;; Create a very large string (> 100 chars) that will be truncated
           large-string (str/join (repeat 200 "x"))]
       (try
         ;; Providing string to :int type arg should trigger type mismatch error
-        (exec/execute ctx (:id fn-rec) {(:id n-arg) large-string})
+        (exec/execute ctx (:id composed-fn) {(:id n-arg) large-string})
         (is false "Should have thrown")
         (catch clojure.lang.ExceptionInfo e
           (let [data (ex-data e)
@@ -111,25 +109,26 @@
               :identity
               (fn [{:keys [x]} _ctx]
                 @x))
-          ;; Create identity fn-schema
-          id-schema (sp/create-entity storage :fn-schema
-                                      {:name "identity"
-                                       :returned-type :int})
-          id-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id id-schema)
-                                    :name "x"
-                                    :type :int
-                                    :required true :first-class false})
-          ;; Create a chain of 3 functions
-          fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
-          fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
-          fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
-          ;; fn-a -> fn-b -> fn-c -> literal (via fn-usage to trigger execution)
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-a) (:id id-arg)
-                                                           (setup/create-fn-usage! storage (:id fn-b)))
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-b) (:id id-arg)
-                                                           (setup/create-fn-usage! storage (:id fn-c)))
-          _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
+          ;; Create base fn (identity)
+          base-fn (setup/create-base-fn! storage "identity" :int)
+          x-arg (setup/create-arg! storage (:id base-fn)
+                                   {:name "x" :type :int :required true :is-fn false})
+          ;; Create a chain of 3 composed functions
+          fn-a (setup/create-composed-fn! storage "fn-a" (:id base-fn))
+          fn-b (setup/create-composed-fn! storage "fn-b" (:id base-fn))
+          fn-c (setup/create-composed-fn! storage "fn-c" (:id base-fn))
+          ;; fn-a -> fn-b (via ref-id to execute fn-b)
+          _ (setup/create-arg! storage (:id fn-a)
+                               {:name "x" :type :int :required true :is-fn false
+                                :source-id (:id x-arg) :ref-id (:id fn-b)})
+          ;; fn-b -> fn-c (via ref-id to execute fn-c)
+          _ (setup/create-arg! storage (:id fn-b)
+                               {:name "x" :type :int :required true :is-fn false
+                                :source-id (:id x-arg) :ref-id (:id fn-c)})
+          ;; fn-c -> literal 42
+          _ (setup/create-arg! storage (:id fn-c)
+                               {:name "x" :type :int :required true :is-fn false
+                                :source-id (:id x-arg) :value 42})
           ;; max-depth=3 means: fn-a(0) -> fn-b(1) -> fn-c(2) -> literal
           ;; This should work as 2 < 3
           ctx (exec/create-context {:storage storage :max-depth 3})]
@@ -142,22 +141,26 @@
               :identity
               (fn [{:keys [x]} _ctx]
                 @x))
-          id-schema (sp/create-entity storage :fn-schema
-                                      {:name "identity"
-                                       :returned-type :int})
-          id-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id id-schema)
-                                    :name "x"
-                                    :type :int
-                                    :required true :first-class false})
-          fn-a (sp/create-entity storage :fn {:name "fn-a" :fn-schema-id (:id id-schema)})
-          fn-b (sp/create-entity storage :fn {:name "fn-b" :fn-schema-id (:id id-schema)})
-          fn-c (sp/create-entity storage :fn {:name "fn-c" :fn-schema-id (:id id-schema)})
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-a) (:id id-arg)
-                                                           (setup/create-fn-usage! storage (:id fn-b)))
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id fn-b) (:id id-arg)
-                                                           (setup/create-fn-usage! storage (:id fn-c)))
-          _ (setup/create-arg-value-with-binding! storage (:id fn-c) (:id id-arg) 42)
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "identity" :int)
+          x-arg (setup/create-arg! storage (:id base-fn)
+                                   {:name "x" :type :int :required true :is-fn false})
+          ;; Create chain of 3 composed functions
+          fn-a (setup/create-composed-fn! storage "fn-a" (:id base-fn))
+          fn-b (setup/create-composed-fn! storage "fn-b" (:id base-fn))
+          fn-c (setup/create-composed-fn! storage "fn-c" (:id base-fn))
+          ;; fn-a -> fn-b
+          _ (setup/create-arg! storage (:id fn-a)
+                               {:name "x" :type :int :required true :is-fn false
+                                :source-id (:id x-arg) :ref-id (:id fn-b)})
+          ;; fn-b -> fn-c
+          _ (setup/create-arg! storage (:id fn-b)
+                               {:name "x" :type :int :required true :is-fn false
+                                :source-id (:id x-arg) :ref-id (:id fn-c)})
+          ;; fn-c -> literal
+          _ (setup/create-arg! storage (:id fn-c)
+                               {:name "x" :type :int :required true :is-fn false
+                                :source-id (:id x-arg) :value 42})
           ;; max-depth=1: fn-a(0) ok, fn-b(1) ok, fn-c(2) fails because depth=2 > max-depth=1
           ctx (exec/create-context {:storage storage :max-depth 1})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Maximum recursion depth exceeded"
@@ -201,21 +204,17 @@
               :use-timestamp
               (fn [{:keys [ts]} _ctx]
                 @ts))
-          fn-schema (sp/create-entity storage :fn-schema
-                                      {:name "use-timestamp"
-                                       :returned-type :timestamptz})
-          ts-arg (sp/create-entity storage :arg-schema
-                                   {:fn-schema-id (:id fn-schema)
-                                    :name "ts"
-                                    :type :timestamptz
-                                    :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "my-use-timestamp"
-                                    :fn-schema-id (:id fn-schema)})
-          ;; No arg-value in DB - arg is free for runtime provision
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "use-timestamp" :timestamptz)
+          ;; Create arg for base fn
+          ts-arg (setup/create-arg! storage (:id base-fn)
+                                    {:name "ts" :type :timestamptz :required true :is-fn false})
+          ;; Create composed fn
+          composed-fn (setup/create-composed-fn! storage "my-use-timestamp" (:id base-fn))
+          ;; No arg value - provide at runtime
           ctx (exec/create-context {:storage storage})
           test-ldt (java.time.LocalDateTime/of 2024 1 1 12 0 0)]
-      (is (= test-ldt (exec/execute ctx (:id fn-rec) {(:id ts-arg) test-ldt})))
+      (is (= test-ldt (exec/execute ctx (:id composed-fn) {(:id ts-arg) test-ldt})))
       (sp/close storage))))
 
 
@@ -244,27 +243,38 @@
 (deftest execute-args-validation-test
   (testing "throws when args is not nil or a map"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
+          ;; Setup add function and bind args with values
+          {:keys [fn arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
+          ;; Create args for composed fn with values
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 1})
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b) :value 2})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"args must be nil or a map"
-            (exec/execute ctx (:id fn-rec) "not a map")))
+            (exec/execute ctx (:id composed-fn) "not a map")))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"args must be nil or a map"
-            (exec/execute ctx (:id fn-rec) [:a :vector])))
+            (exec/execute ctx (:id composed-fn) [:a :vector])))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"args must be nil or a map"
-            (exec/execute ctx (:id fn-rec) 123)))
+            (exec/execute ctx (:id composed-fn) 123)))
       (sp/close storage)))
 
   (testing "accepts nil args"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
+          {:keys [fn arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
+          ;; Create args for composed fn with values
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 1})
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b) :value 2})
           ctx (exec/create-context {:storage storage})]
       ;; nil should work fine
-      (is (= 3 (exec/execute ctx (:id fn-rec) nil)))
+      (is (= 3 (exec/execute ctx (:id composed-fn) nil)))
       (sp/close storage))))

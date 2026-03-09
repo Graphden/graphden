@@ -11,7 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 | 1 | **Correctness first** | No feature justifies bugs. Comprehensive tests required. |
 | 2 | **Minimal entities** | Resist adding new entity types, fields, or edge types. Each addition increases complexity everywhere. |
 | 3 | **Explicit over implicit** | Behavior must be visible in graph structure. No magic, no context-dependent semantics. |
-| 4 | **DRY** | Never define the same thing twice. Use base-functions and fn-usage for reuse. |
+| 4 | **DRY** | Never define the same thing twice. Use inheritance (parent-id) and result caching for reuse. |
 | 5 | **Expressiveness parity** | Can do everything classical languages can. No "sorry, you can't do that." |
 | 6 | **No unnecessary expressiveness** | Don't add features just because we can. |
 | 7 | **Locality of changes** | Changing one node shouldn't require changes elsewhere. |
@@ -29,61 +29,53 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full rationale and module mappi
 Graphden is a visual functional programming environment where functions and their compositions are stored as a graph in a database.
 
 **Key concepts:**
-- **Code = Graph in DB** — functions, schemas, and argument values stored as entities
+- **Code = Graph in DB** — functions and arguments stored as entities
 - **Lazy Execution** — delay-based evaluation, only computes what's needed
 - **Storage backend** — PostgreSQL with recursive CTE for graph traversal
 
-**Core entities** (only 6 — kept minimal by design):
-- `fn-schema` — function signature (name, return type, optional base-fn-name linking to Clojure impl)
-- `arg-schema` — argument definition (belongs to fn-schema, includes first-class flag for HOF support)
-- `fn` — function instance (references fn-schema, optional owner-fn-id for local scoping)
-- `arg-value` — bound argument value (literal via `value` field, or reference via `fn-usage-id` field)
-- `fn-usage` — function usage reference (distinguishes multiple uses of same function)
-- `fn-arg` — binding that connects fn to arg-schema and arg-value
+**Core entities** (only 2 — minimal by design):
+- `fn` — function (base or composed)
+  - `parent-id=nil` → base-fn (has Clojure implementation)
+  - `parent-id` set → composed fn (inherits from parent)
+  - `name=nil` → local fn (scoped, not globally visible)
+- `arg` — argument (primary or inherited)
+  - `source-id=nil` → primary argument (defines interface)
+  - `source-id` set → inherited/forwarded argument
+  - `value` → literal JSONB value
+  - `ref-id` → reference to fn (execute and use result)
+  - `is-fn=true` → pass fn-id directly (for HOF)
 
-## Core Concept: fn-usage
+## Core Concept: 2-Entity Inheritance Model
 
-**fn-usage is NOT primarily about caching. Its main purpose is structural:**
+The system uses a unified inheritance model where functions inherit from other functions:
 
-It distinguishes between the same function called at different points in the execution graph.
-
-**Example:** Get current time, sleep 5 seconds, get current time again, print both.
+**Base function (parent-id=nil):**
 ```
-fn: current-time (base function)
-fn: sleep (base function)
-fn: print-two-times (base function with args: t1, t2)
-
-;; These are TWO DIFFERENT fn-usages pointing to the SAME fn
-fn-usage: time-before  → fn: current-time
-fn-usage: time-after   → fn: current-time
-
-fn: my-program
-  arg: t1 = ref<fn-usage:time-before>   ;; first call
-  arg: wait = ref<fn-usage:sleep-5s>
-  arg: t2 = ref<fn-usage:time-after>    ;; second call (different!)
+fn: add (base-fn)
+  parent-id: nil         ; marks this as base-fn
+  return-type: :int
+  impl-hash: "sha256..." ; links to Clojure implementation
+  args:
+    - {name: "a", type: :int, required: true}
+    - {name: "b", type: :int, required: true}
 ```
 
-Without fn-usage, we couldn't distinguish "time before sleep" from "time after sleep" — they'd be the same function reference.
+**Composed function (parent-id set):**
+```
+fn: add-10
+  parent-id: add         ; inherits from add
+  args:
+    - {source-id: add/a, value: 10}  ; binds parent's 'a' to 10
+    ; 'b' not specified = exposed to callers
+```
 
-**Local argument binding via fn with owner-fn-id:**
+**Using the composed function:**
 ```clojure
-;; To provide different argument values at different call sites,
-;; create a local fn with owner-fn-id:
-
-;; Local fn owned by parent function
-(sp/create-entity storage :fn
-  {:name "local-add"
-   :fn-schema-id add-schema-id
-   :owner-fn-id parent-fn-id})  ;; Makes this fn local to parent
-
-;; Bind arguments for the local fn
-(sp/create-entity storage :fn-arg
-  {:fn-id local-fn-id
-   :arg-schema-id a-schema-id
-   :arg-value-id (create-literal-value 42)})
+;; Execute add-10 with b=5 → returns 15
+(execute ctx add-10-id {:b-arg-id 5})
 ```
 
-**Key insight:** All argument binding happens in the database via fn-arg entities. No runtime argument injection needed.
+**Key insight:** All argument binding happens in the database via arg entities. No separate fn-arg/arg-value entities needed. The arg entity combines schema, value, and inheritance in one place.
 
 ## Documentation Map
 
@@ -161,14 +153,14 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) for full architecture rationale.
 
 ### Reference Types
 
-Both syntaxes create `fn-usage` entities. Runtime behavior is controlled by `arg-schema.first-class`:
+References are stored in the `ref-id` field of arg entities. Runtime behavior is controlled by `is-fn`:
 
-| Syntax | Storage | Runtime behavior (depends on first-class) |
-|--------|---------|-------------------------------------------|
-| `:fn-name` | `fn-usage` (name: "fn-name-ref") | first-class=true: pass fn-id (HOF) |
-| `:fn-name>` | `fn-usage` (name: "fn-name") | first-class=false: execute and use result |
+| Syntax | Storage | Runtime behavior |
+|--------|---------|------------------|
+| `:fn-name` | `ref-id` + `is-fn=true` | Pass fn-id directly (for HOF) |
+| `:fn-name>` | `ref-id` + `is-fn=false` | Execute fn and use result |
 
-**Key principle:** The FUNCTION (via arg-schema.first-class) decides how to handle the argument, NOT the caller.
+**Key principle:** The `is-fn` flag on the arg determines whether to pass the fn-id or execute the function.
 
 ### Base Function Arg Types
 
@@ -203,7 +195,7 @@ HOFs like `map`, `filter` support two modes via optional `coll` argument:
 
 | Level | What it is | Where it lives | Examples |
 |-------|------------|----------------|----------|
-| **fn (graph)** | Composition description | Database | fn-schema, arg bindings |
+| **fn (graph)** | Composition description | Database | fn entity, arg entities |
 | **Runtime fn** | Actual Clojure object | Executor memory | transducers, composed fns |
 
 **Key insight:** The graph in DB is just a *description* of how functions compose. Actual Clojure functions (like transducers, composed functions) exist only at runtime in executor memory.
@@ -249,7 +241,7 @@ See [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) "Base Functions Philosophy" for ful
 
 ### Base Function impl-hash
 
-Each base function has an `impl-hash` stored in `fn-schema` for version tracking:
+Each base function has an `impl-hash` stored in the `fn` entity for version tracking:
 - SHA-256 hash of canonical form (args, return-type, impl-source)
 - Detects: body changes, arg changes, return-type changes
 - Ignores: whitespace, comments, map key ordering
@@ -261,7 +253,9 @@ See [docs/EXTENDING.md](docs/EXTENDING.md) for details.
 Enforced at write time by `GraphConstraints` protocol (part of Graph Layer):
 
 1. **No dependency cycles** — A→B→A forbidden (self-recursion allowed with depth limit)
-2. **Arg-schema belongs to fn-schema** — type safety for argument binding
+2. **Arg source-id references valid parent arg** — type safety for inheritance
+3. **Unique arg per fn + source** — no duplicate inherited args
+4. **Unique arg name within fn** — no duplicate arg names
 
 These constraints are implemented in `storage-protocol` and enforced by storage implementations.
 

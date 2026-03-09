@@ -10,7 +10,7 @@
 (deftest kw->snake-case-test
   (testing "converts kebab-case to snake_case"
     (is (= "user_name" (storage/kw->snake-case :user-name)))
-    (is (= "fn_schema_id" (storage/kw->snake-case :fn-schema-id))))
+    (is (= "parent_id" (storage/kw->snake-case :parent-id))))
 
   (testing "handles simple keywords"
     (is (= "id" (storage/kw->snake-case :id)))
@@ -20,7 +20,7 @@
 (deftest snake->kw-test
   (testing "converts snake_case to kebab-case keyword"
     (is (= :user-name (storage/snake->kw "user_name")))
-    (is (= :fn-schema-id (storage/snake->kw "fn_schema_id"))))
+    (is (= :parent-id (storage/snake->kw "parent_id"))))
 
   (testing "handles simple strings"
     (is (= :id (storage/snake->kw "id")))
@@ -29,7 +29,7 @@
 
 (deftest check-snake-case-collisions!-test
   (testing "passes for unique snake_case names"
-    (is (nil? (storage/check-snake-case-collisions! {:context "test"} [:user :fn-schema :arg-value]))))
+    (is (nil? (storage/check-snake-case-collisions! {:context "test"} [:user :fn :arg]))))
 
   (testing "throws for colliding names"
     ;; :user-name and :user_name would both become user_name

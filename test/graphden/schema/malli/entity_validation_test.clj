@@ -1,5 +1,11 @@
 (ns graphden.schema.malli.entity-validation-test
-  "Entity validation tests for malli-data-schema."
+  "Entity validation tests for malli-data-schema.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.schema.malli.core :as mds]
@@ -8,69 +14,74 @@
 
 
 (deftest validate-entity-test
-  (let [valid-fn-schema-id (random-uuid)
-        valid-fn-id (random-uuid)
-        valid-arg-schema-id (random-uuid)]
+  (let [valid-fn-id (random-uuid)]
 
-    (testing "valid fn-schema entity"
-      (is (nil? (ds/validate-entity example-schema :fn-schema
+    (testing "valid fn entity (base fn with parent-id nil)"
+      (is (nil? (ds/validate-entity example-schema :fn
                                     {:id (random-uuid)
                                      :name "add"
-                                     :returned-type :int}))))
+                                     :parent-id nil
+                                     :return-type :int}))))
 
-    (testing "invalid fn-schema - missing required field"
-      (let [result (ds/validate-entity example-schema :fn-schema
+    (testing "valid fn entity (composed fn with parent-id)"
+      (is (nil? (ds/validate-entity example-schema :fn
+                                    {:id (random-uuid)
+                                     :name "my-add"
+                                     :parent-id valid-fn-id
+                                     :return-type :int}))))
+
+    (testing "invalid fn - missing required field"
+      (let [result (ds/validate-entity example-schema :fn
                                        {:id (random-uuid)
-                                        :returned-type :int})]
+                                        :return-type :int})]
         (is (some? result))
         (is (contains? (:errors result) :name))))
 
-    (testing "invalid fn-schema - wrong enum value"
-      (let [result (ds/validate-entity example-schema :fn-schema
+    (testing "invalid fn - wrong enum value"
+      (let [result (ds/validate-entity example-schema :fn
                                        {:id (random-uuid)
                                         :name "add"
-                                        :returned-type :unknown-type})]
+                                        :return-type :unknown-type})]
         (is (some? result))
-        (is (contains? (:errors result) :returned-type))))
+        (is (contains? (:errors result) :return-type))))
 
-    (testing "valid arg-schema with reference"
-      (is (nil? (ds/validate-entity example-schema :arg-schema
+    (testing "valid arg with literal value"
+      (is (nil? (ds/validate-entity example-schema :arg
                                     {:id (random-uuid)
-                                     :fn-schema-id valid-fn-schema-id
+                                     :fn-id valid-fn-id
                                      :name "x"
-                                     :type :int}))))
-
-    (testing "valid fn entity"
-      (is (nil? (ds/validate-entity example-schema :fn
-                                    {:id (random-uuid)
-                                     :name "add-two"
-                                     :fn-schema-id valid-fn-schema-id}))))
-
-    (testing "valid arg-value with literal int value"
-      (is (nil? (ds/validate-entity example-schema :arg-value
-                                    {:id (random-uuid)
-                                     :arg-schema-id valid-arg-schema-id
+                                     :type :int
                                      :value 42}))))
 
-    (testing "valid arg-value with literal string value"
-      (is (nil? (ds/validate-entity example-schema :arg-value
+    (testing "valid arg with ref-id (execute fn and use result)"
+      (is (nil? (ds/validate-entity example-schema :arg
                                     {:id (random-uuid)
-                                     :arg-schema-id valid-arg-schema-id
-                                     :value "hello"}))))
+                                     :fn-id valid-fn-id
+                                     :name "x"
+                                     :type :int
+                                     :ref-id valid-fn-id}))))
 
-    (testing "valid arg-value with fn-usage-id (fn usage reference)"
-      (is (nil? (ds/validate-entity example-schema :arg-value
+    (testing "valid arg with is-fn true (HOF)"
+      ;; For HOF, fn-id goes in ref-id (not value - value is for literals)
+      (is (nil? (ds/validate-entity example-schema :arg
                                     {:id (random-uuid)
-                                     :arg-schema-id valid-arg-schema-id
-                                     :fn-usage-id valid-fn-id}))))
+                                     :fn-id valid-fn-id
+                                     :name "f"
+                                     :type :fn
+                                     :is-fn true
+                                     :ref-id valid-fn-id}))))
 
-    (testing "valid arg-value with all nullable fields nil"
-      ;; XOR constraint (exactly one set) is enforced at DB level, not schema level
-      (is (nil? (ds/validate-entity example-schema :arg-value
+    (testing "valid arg with all nullable fields nil"
+      (is (nil? (ds/validate-entity example-schema :arg
                                     {:id (random-uuid)
-                                     :arg-schema-id valid-arg-schema-id
+                                     :fn-id valid-fn-id
+                                     :name "x"
+                                     :type :int
                                      :value nil
-                                     :fn-usage-id nil}))))
+                                     :ref-id nil
+                                     :source-id nil
+                                     :is-fn nil
+                                     :required nil}))))
 
     (testing "unknown entity validation"
       (let [result (ds/validate-entity example-schema :unknown-entity {:id (random-uuid)})]

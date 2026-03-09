@@ -1,4 +1,12 @@
 (ns ^:integration graphden.versioning.merge.core-test
+  "Tests for merge protection with 2-entity schema.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+   - arg-trait: assigns trait to arg (not to old arg-value entity)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.schema.graph.schema :as gds]
@@ -22,7 +30,7 @@
 
 
 (defn- create-test-storage
-  "Creates a versioned storage with both versioned-data-schema and value-traits-schema.
+  "Creates a versioned storage with graph, versioned, and traits schemas.
    Cleans the database before creating storage to ensure test isolation."
   []
   (th/clean-database-fast! *container*)
@@ -40,34 +48,44 @@
 ;; === Basic Trait Operations ===
 
 (deftest add-merge-protection-test
-  (testing "can add merge-protected trait to arg-value"
+  (testing "can add merge-protected trait to arg"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          av (sp/create-entity storage :arg-value
-                               {:arg-schema-id (:id as) :value 42})]
-      (mp/add-merge-protection! storage (:id av))
-      (is (true? (mp/has-merge-protected-trait? storage (:id av)))))))
+          ;; Create base fn (parent-id=nil)
+          base-fn (sp/create-entity storage :fn
+                                    {:name "schema"
+                                     :parent-id nil
+                                     :return-type :int})
+          ;; Create arg directly on fn
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id base-fn)
+                                 :name "x"
+                                 :type :int
+                                 :value 42
+                                 :required true})]
+      (mp/add-merge-protection! storage (:id arg))
+      (is (true? (mp/has-merge-protected-trait? storage (:id arg)))))))
 
 
 (deftest add-merge-protection-idempotent-test
   (testing "adding protection twice is idempotent"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          av (sp/create-entity storage :arg-value
-                               {:arg-schema-id (:id as) :value 42})]
-      (mp/add-merge-protection! storage (:id av))
-      (mp/add-merge-protection! storage (:id av))
-      (is (true? (mp/has-merge-protected-trait? storage (:id av))))
-      ;; Should have only one value-trait record
+          base-fn (sp/create-entity storage :fn
+                                    {:name "schema"
+                                     :parent-id nil
+                                     :return-type :int})
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id base-fn)
+                                 :name "x"
+                                 :type :int
+                                 :value 42
+                                 :required true})]
+      (mp/add-merge-protection! storage (:id arg))
+      (mp/add-merge-protection! storage (:id arg))
+      (is (true? (mp/has-merge-protected-trait? storage (:id arg))))
+      ;; Should have only one arg-trait record
       (let [base (vs/unwrap storage)
-            traits (sp/query-entities base :value-trait
-                                      {:arg-value-id (:id av)
+            traits (sp/query-entities base :arg-trait
+                                      {:arg-id (:id arg)
                                        :trait-id vts/merge-protected-trait-uuid})]
         (is (= 1 (count traits)))))))
 
@@ -75,145 +93,156 @@
 (deftest remove-merge-protection-test
   (testing "can remove merge-protected trait"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          av (sp/create-entity storage :arg-value
-                               {:arg-schema-id (:id as) :value 42})]
-      (mp/add-merge-protection! storage (:id av))
-      (is (true? (mp/has-merge-protected-trait? storage (:id av))))
-      (mp/remove-merge-protection! storage (:id av))
-      (is (false? (mp/has-merge-protected-trait? storage (:id av)))))))
+          base-fn (sp/create-entity storage :fn
+                                    {:name "schema"
+                                     :parent-id nil
+                                     :return-type :int})
+          arg (sp/create-entity storage :arg
+                                {:fn-id (:id base-fn)
+                                 :name "x"
+                                 :type :int
+                                 :value 42
+                                 :required true})]
+      (mp/add-merge-protection! storage (:id arg))
+      (is (true? (mp/has-merge-protected-trait? storage (:id arg))))
+      (mp/remove-merge-protection! storage (:id arg))
+      (is (false? (mp/has-merge-protected-trait? storage (:id arg)))))))
 
 
 ;; === Merge Protection Detection ===
 
 (deftest detect-no-protected-transfers-test
-  (testing "detect-protected-transfers returns empty when no protected values"
+  (testing "detect-protected-transfers returns empty when no protected args"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          fn-rec (sp/create-entity storage :fn
-                                   {:name "main-fn" :fn-schema-id (:id fs)})
-          av (sp/create-entity storage :arg-value
-                               {:arg-schema-id (:id as) :value 42})
-          _ (sp/create-entity storage :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as)
-                               :arg-value-id (:id av)})
-          ;; Create feature branch with new fn-arg
+          ;; Create base fn and composed fn on main
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base"
+                                     :parent-id nil
+                                     :return-type :int})
+          main-fn (sp/create-entity storage :fn
+                                    {:name "main-fn"
+                                     :parent-id (:id base-fn)})
+          _main-arg (sp/create-entity storage :arg
+                                      {:fn-id (:id main-fn)
+                                       :name "x"
+                                       :type :int
+                                       :value 42})
+          ;; Create feature branch with new fn
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
-          av2 (sp/create-entity feature :arg-value
-                                {:arg-schema-id (:id as) :value 99})
-          fn-rec2 (sp/create-entity feature :fn
-                                    {:name "feat-fn" :fn-schema-id (:id fs)})
-          _ (sp/create-entity feature :fn-arg
-                              {:fn-id (:id fn-rec2) :arg-schema-id (:id as)
-                               :arg-value-id (:id av2)})
+          feat-fn (sp/create-entity feature :fn
+                                    {:name "feat-fn"
+                                     :parent-id (:id base-fn)})
+          _feat-arg (sp/create-entity feature :arg
+                                      {:fn-id (:id feat-fn)
+                                       :name "y"
+                                       :type :int
+                                       :value 99})
           {:keys [protected-transfers blocked?]}
           (mp/detect-protected-transfers storage (:id branch))]
       (is (empty? protected-transfers))
       (is (false? blocked?)))))
 
 
-(deftest detect-protected-transfer-fn-arg-test
-  (testing "detects protected arg-value in fn-arg transfer"
+(deftest detect-protected-transfer-arg-test
+  (testing "detects protected arg in transfer"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base"
+                                     :parent-id nil
+                                     :return-type :int})
           ;; Create feature branch
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
-          ;; Create protected arg-value on feature branch
-          av-secret (sp/create-entity feature :arg-value
-                                      {:arg-schema-id (:id as) :value "secret"})
-          fn-rec (sp/create-entity feature :fn
-                                   {:name "feat-fn" :fn-schema-id (:id fs)})
-          _ (sp/create-entity feature :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as)
-                               :arg-value-id (:id av-secret)})]
-      ;; Mark arg-value as protected
-      (mp/add-merge-protection! feature (:id av-secret))
+          ;; Create protected arg on feature branch
+          feat-fn (sp/create-entity feature :fn
+                                    {:name "feat-fn"
+                                     :parent-id (:id base-fn)})
+          secret-arg (sp/create-entity feature :arg
+                                       {:fn-id (:id feat-fn)
+                                        :name "password"
+                                        :type :text
+                                        :value "secret"})]
+      ;; Mark arg as protected
+      (mp/add-merge-protection! feature (:id secret-arg))
 
       (let [{:keys [protected-transfers blocked?]}
             (mp/detect-protected-transfers storage (:id branch))]
         (is (seq protected-transfers))
         (is (true? blocked?))
-        (is (= (:id av-secret) (:arg-value-id (first protected-transfers))))
-        (is (= :fn-arg (:entity-type (first protected-transfers))))))))
+        (is (= (:id secret-arg) (:arg-id (first protected-transfers))))
+        (is (= :arg (:entity-type (first protected-transfers))))))))
 
 
 (deftest validate-merge-throws-test
-  (testing "validate-merge! throws when protected values would transfer"
+  (testing "validate-merge! throws when protected args would transfer"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          ;; Create feature branch with protected value
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base"
+                                     :parent-id nil
+                                     :return-type :int})
+          ;; Create feature branch with protected arg
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
-          av (sp/create-entity feature :arg-value
-                               {:arg-schema-id (:id as) :value "prod-creds"})
-          fn-rec (sp/create-entity feature :fn
-                                   {:name "feat-fn" :fn-schema-id (:id fs)})
-          _ (sp/create-entity feature :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as)
-                               :arg-value-id (:id av)})]
-      (mp/add-merge-protection! feature (:id av))
+          feat-fn (sp/create-entity feature :fn
+                                    {:name "feat-fn"
+                                     :parent-id (:id base-fn)})
+          arg (sp/create-entity feature :arg
+                                {:fn-id (:id feat-fn)
+                                 :name "creds"
+                                 :type :text
+                                 :value "prod-creds"})]
+      (mp/add-merge-protection! feature (:id arg))
 
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Merge blocked: protected arg-values would be transferred"
+                            #"Merge blocked: protected args would be transferred"
             (mp/validate-merge! storage (:id branch)))))))
 
 
 ;; === Safe Merge ===
 
 (deftest safe-merge-blocks-protected-test
-  (testing "safe-merge-branch! blocks merge with protected values"
+  (testing "safe-merge-branch! blocks merge with protected args"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base"
+                                     :parent-id nil
+                                     :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
-          av (sp/create-entity feature :arg-value
-                               {:arg-schema-id (:id as) :value "secret"})
-          fn-rec (sp/create-entity feature :fn
-                                   {:name "feat-fn" :fn-schema-id (:id fs)})
-          _ (sp/create-entity feature :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as)
-                               :arg-value-id (:id av)})]
-      (mp/add-merge-protection! feature (:id av))
+          feat-fn (sp/create-entity feature :fn
+                                    {:name "feat-fn"
+                                     :parent-id (:id base-fn)})
+          arg (sp/create-entity feature :arg
+                                {:fn-id (:id feat-fn)
+                                 :name "secret"
+                                 :type :text
+                                 :value "secret"})]
+      (mp/add-merge-protection! feature (:id arg))
 
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"protected arg-values would be transferred"
+                            #"protected args would be transferred"
             (mp/safe-merge-branch! storage (:id branch)))))))
 
 
 (deftest safe-merge-skip-protection-test
   (testing "safe-merge-branch! with skip-protection-check allows merge"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base"
+                                     :parent-id nil
+                                     :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
-          av (sp/create-entity feature :arg-value
-                               {:arg-schema-id (:id as) :value "secret"})
-          fn-rec (sp/create-entity feature :fn
-                                   {:name "feat-fn" :fn-schema-id (:id fs)})
-          _ (sp/create-entity feature :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as)
-                               :arg-value-id (:id av)})]
-      (mp/add-merge-protection! feature (:id av))
+          feat-fn (sp/create-entity feature :fn
+                                    {:name "feat-fn"
+                                     :parent-id (:id base-fn)})
+          arg (sp/create-entity feature :arg
+                                {:fn-id (:id feat-fn)
+                                 :name "secret"
+                                 :type :text
+                                 :value "secret"})]
+      (mp/add-merge-protection! feature (:id arg))
 
       ;; With skip-protection-check, merge should succeed
       (let [merge-rec (mp/safe-merge-branch! storage (:id branch)
@@ -223,57 +252,60 @@
 
 
 (deftest safe-merge-allows-unprotected-test
-  (testing "safe-merge-branch! allows merge without protected values"
+  (testing "safe-merge-branch! allows merge without protected args"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base"
+                                     :parent-id nil
+                                     :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
-          av (sp/create-entity feature :arg-value
-                               {:arg-schema-id (:id as) :value "normal-value"})
-          fn-rec (sp/create-entity feature :fn
-                                   {:name "feat-fn" :fn-schema-id (:id fs)})
-          _ (sp/create-entity feature :fn-arg
-                              {:fn-id (:id fn-rec) :arg-schema-id (:id as)
-                               :arg-value-id (:id av)})
+          feat-fn (sp/create-entity feature :fn
+                                    {:name "feat-fn"
+                                     :parent-id (:id base-fn)})
+          _arg (sp/create-entity feature :arg
+                                 {:fn-id (:id feat-fn)
+                                  :name "normal"
+                                  :type :text
+                                  :value "normal-value"})
           ;; No protection added - merge should succeed
           merge-rec (mp/safe-merge-branch! storage (:id branch))]
       (is (some? merge-rec))
       (is (uuid? (:id merge-rec)))
       ;; Entity now visible on main
-      (is (some? (sp/read-entity storage :fn (:id fn-rec)))))))
+      (is (some? (sp/read-entity storage :fn (:id feat-fn)))))))
 
 
 ;; === Edge Cases ===
 
-(deftest protected-value-on-target-not-blocked-test
-  (testing "protected value already on target doesn't block merge"
+(deftest protected-arg-on-target-not-blocked-test
+  (testing "protected arg already on target doesn't block merge"
     (let [storage (create-test-storage)
-          fs (sp/create-entity storage :fn-schema
-                               {:name "schema" :returned-type :int})
-          as (sp/create-entity storage :arg-schema
-                               {:fn-schema-id (:id fs) :name "x" :type :int :required true :first-class false})
-          ;; Create protected value on main
-          av-protected (sp/create-entity storage :arg-value
-                                         {:arg-schema-id (:id as) :value "main-secret"})
-          fn-main (sp/create-entity storage :fn
-                                    {:name "main-fn" :fn-schema-id (:id fs)})
-          _ (sp/create-entity storage :fn-arg
-                              {:fn-id (:id fn-main) :arg-schema-id (:id as)
-                               :arg-value-id (:id av-protected)})
-          _ (mp/add-merge-protection! storage (:id av-protected))
+          base-fn (sp/create-entity storage :fn
+                                    {:name "base"
+                                     :parent-id nil
+                                     :return-type :int})
+          ;; Create protected arg on main
+          main-fn (sp/create-entity storage :fn
+                                    {:name "main-fn"
+                                     :parent-id (:id base-fn)})
+          protected-arg (sp/create-entity storage :arg
+                                          {:fn-id (:id main-fn)
+                                           :name "main-secret"
+                                           :type :text
+                                           :value "main-secret"})
+          _ (mp/add-merge-protection! storage (:id protected-arg))
           ;; Create feature branch with unrelated entity
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
-          av2 (sp/create-entity feature :arg-value
-                                {:arg-schema-id (:id as) :value "feat-value"})
-          fn-feat (sp/create-entity feature :fn
-                                    {:name "feat-fn" :fn-schema-id (:id fs)})
-          _ (sp/create-entity feature :fn-arg
-                              {:fn-id (:id fn-feat) :arg-schema-id (:id as)
-                               :arg-value-id (:id av2)})
-          ;; Merge should succeed - protected value stays on main
+          feat-fn (sp/create-entity feature :fn
+                                    {:name "feat-fn"
+                                     :parent-id (:id base-fn)})
+          _feat-arg (sp/create-entity feature :arg
+                                      {:fn-id (:id feat-fn)
+                                       :name "feat-value"
+                                       :type :text
+                                       :value "feat-value"})
+          ;; Merge should succeed - protected arg stays on main
           merge-rec (mp/safe-merge-branch! storage (:id branch))]
       (is (some? merge-rec)))))

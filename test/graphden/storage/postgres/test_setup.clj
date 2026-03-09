@@ -7,6 +7,12 @@
    - Helper function for creating test storage
    - Common test schemas (make-graph-schema)
 
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+
    Usage in test namespaces:
    ```clojure
    (use-fixtures :once (setup/container-fixture))
@@ -59,104 +65,86 @@
 
 
 (defn make-graph-schema
-  "Creates schema with fn-schema, arg-schema, fn, fn-usage, arg-value, and fn-arg entities.
-   This is the standard graph schema used by executor and constraint tests.
-   Uses normalized schema where arg-value has no owner, and fn-arg binds fn to arg-value."
+  "Creates schema with fn + arg entities.
+   This is the standard 2-entity graph schema used by executor and constraint tests.
+
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   []
   (-> (mds/create-builder)
-      (ds/add-entity :fn-schema #uuid "00000000-0000-0000-0001-000000000001"
+      ;; fn entity
+      (ds/add-entity :fn #uuid "00000000-0000-0000-0001-000000000001"
                      {:name {:uuid #uuid "00000000-0000-0000-0001-000000000002"
                              :type :text}
-                      :returned-type {:uuid #uuid "00000000-0000-0000-0001-000000000003"
-                                      :type :text}})
-      (ds/add-entity :arg-schema #uuid "00000000-0000-0000-0002-000000000001"
-                     {:fn-schema-id {:uuid #uuid "00000000-0000-0000-0002-000000000002"
-                                     :type :ref :ref-entity :fn-schema}
+                      :parent-id {:uuid #uuid "00000000-0000-0000-0001-000000000003"
+                                  :type :uuid
+                                  :nullable? true}
+                      :return-type {:uuid #uuid "00000000-0000-0000-0001-000000000004"
+                                    :type :text
+                                    :nullable? true}})
+      (ds/add-constraint :fn {:type :unique :fields [:name]})
+      ;; arg entity
+      (ds/add-entity :arg #uuid "00000000-0000-0000-0002-000000000001"
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0002-000000000002"
+                              :type :uuid}
                       :name {:uuid #uuid "00000000-0000-0000-0002-000000000003"
                              :type :text}
                       :type {:uuid #uuid "00000000-0000-0000-0002-000000000004"
                              :type :text}
                       :required {:uuid #uuid "00000000-0000-0000-0002-000000000005"
                                  :type :bool}
-                      :first-class {:uuid #uuid "00000000-0000-0000-0002-000000000006"
-                                    :type :bool}})
-      (ds/add-entity :fn #uuid "00000000-0000-0000-0003-000000000001"
-                     {:name {:uuid #uuid "00000000-0000-0000-0003-000000000002"
-                             :type :text}
-                      :fn-schema-id {:uuid #uuid "00000000-0000-0000-0003-000000000003"
-                                     :type :ref :ref-entity :fn-schema}
-                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0003-000000000004"
-                                    :type :ref :ref-entity :fn
-                                    :nullable? true}})
-      (ds/add-entity :fn-usage #uuid "00000000-0000-0000-0005-000000000001"
-                     {:fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000002"
-                              :type :ref :ref-entity :fn}
-                      :name {:uuid #uuid "00000000-0000-0000-0005-000000000003"
-                             :type :text}
-                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0005-000000000004"
-                                    :type :ref :ref-entity :fn
-                                    :nullable? true}})
-      ;; arg-value: pure value (no owner-fn-id)
-      ;; Exactly ONE of (value, fn-usage-id) must be set.
-      (ds/add-entity :arg-value #uuid "00000000-0000-0000-0004-000000000001"
-                     {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0004-000000000003"
-                                      :type :ref :ref-entity :arg-schema}
-                      :value {:uuid #uuid "00000000-0000-0000-0004-000000000004"
+                      :is-fn {:uuid #uuid "00000000-0000-0000-0002-000000000006"
+                              :type :bool}
+                      :source-id {:uuid #uuid "00000000-0000-0000-0002-000000000007"
+                                  :type :uuid
+                                  :nullable? true}
+                      :value {:uuid #uuid "00000000-0000-0000-0002-000000000008"
                               :type :jsonb
                               :nullable? true}
-                      :fn-usage-id {:uuid #uuid "00000000-0000-0000-0004-000000000005"
-                                    :type :ref :ref-entity :fn-usage
-                                    :nullable? true}})
-      ;; fn-arg: binding from fn to arg-value
-      (ds/add-entity :fn-arg #uuid "00000000-0000-0000-0006-000000000001"
-                     {:fn-id {:uuid #uuid "00000000-0000-0000-0006-000000000002"
-                              :type :ref :ref-entity :fn}
-                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0006-000000000003"
-                                      :type :ref :ref-entity :arg-schema}
-                      :arg-value-id {:uuid #uuid "00000000-0000-0000-0006-000000000004"
-                                     :type :ref :ref-entity :arg-value}})
+                      :ref-id {:uuid #uuid "00000000-0000-0000-0002-000000000009"
+                               :type :uuid
+                               :nullable? true}})
+      (ds/add-constraint :arg {:type :unique :fields [:fn-id :name]})
       ds/build))
 
 
-(defn create-arg-value-with-binding!
-  "Creates arg-value with a literal value and fn-arg binding. Returns the arg-value.
-   Helper for tests that need to create argument values.
-
-   For fn-usage references (including HOF with first-class=true), use create-arg-value-with-fn-usage-binding! instead."
-  [storage fn-id arg-schema-id value]
-  (let [av (sp/create-entity storage :arg-value
-                             {:arg-schema-id arg-schema-id
-                              :value value})]
-    (sp/create-entity storage :fn-arg
-                      {:fn-id fn-id
-                       :arg-schema-id arg-schema-id
-                       :arg-value-id (:id av)})
-    av))
+(defn create-base-fn!
+  "Creates a base fn entity. Returns the fn record.
+   Base fns have parent-id=nil. The name field is used for registry lookup."
+  [storage name return-type]
+  (sp/create-entity storage :fn
+                    {:name name
+                     :parent-id nil
+                     :return-type (clojure.core/name return-type)}))
 
 
-(defn create-fn-usage!
-  "Creates a fn-usage entity pointing to a fn. Returns the fn-usage id.
-
-   Use this when you want the referenced fn to be EXECUTED and its
-   result used as the argument value."
-  ([storage fn-id]
-   (create-fn-usage! storage fn-id (str (random-uuid))))
-  ([storage fn-id result-name]
-   (:id (sp/create-entity storage :fn-usage {:fn-id fn-id :name result-name}))))
+(defn create-composed-fn!
+  "Creates a composed fn entity. Returns the fn record.
+   Composed fns have parent-id set to their base fn."
+  [storage name parent-id]
+  (sp/create-entity storage :fn
+                    {:name name
+                     :parent-id parent-id}))
 
 
-(defn create-arg-value-with-fn-usage-binding!
-  "Creates arg-value referencing a fn-usage and fn-arg binding. Returns the arg-value.
+(defn create-arg!
+  "Creates an arg entity. Returns the arg record.
 
-   Behavior depends on arg-schema.first-class flag:
-   - first-class=false: execute fn-usage and use result
-   - first-class=true: pass fn-id directly (for HOF like map, filter, reduce)"
-  [storage fn-id arg-schema-id fn-usage-id]
-  (let [av (sp/create-entity storage :arg-value
-                             {:arg-schema-id arg-schema-id
-                              :fn-usage-id fn-usage-id})]
-    (sp/create-entity storage :fn-arg
-                      {:fn-id fn-id
-                       :arg-schema-id arg-schema-id
-                       :arg-value-id (:id av)})
-    av))
+   Required:
+   - fn-id: the fn this arg belongs to
+   - opts map with :name, :type, :required, :is-fn
+
+   Optional in opts:
+   - :source-id - parent arg this inherits from
+   - :value - literal value (mutually exclusive with ref-id)
+   - :ref-id - reference to another fn (mutually exclusive with value)"
+  [storage fn-id {:keys [name type required is-fn source-id value ref-id]}]
+  (sp/create-entity storage :arg
+                    {:fn-id fn-id
+                     :name name
+                     :type (clojure.core/name type)
+                     :required required
+                     :is-fn is-fn
+                     :source-id source-id
+                     :value value
+                     :ref-id ref-id}))

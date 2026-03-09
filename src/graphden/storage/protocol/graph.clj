@@ -26,10 +26,7 @@
 
    The record contains all data needed to execute a function:
    - :fns - Map of fn-id -> fn record
-   - :fn-schemas - Map of fn-schema-id -> fn-schema record
-   - :arg-schemas - Map of arg-schema-id -> arg-schema record
-   - :resolved-args - Map of fn-id -> {arg-schema-id -> arg-value}
-   - :fn-usages - Map of fn-usage-id -> fn-usage record
+   - :args - Map of fn-id -> [arg records with resolved inheritance]
 
    Note: This namespace does NOT define protocols to avoid circular deps.
    The ExecutionGraphReader extension is done in interface.clj."
@@ -64,10 +61,7 @@
 
 (def uuid-regex-pattern
   "PostgreSQL regex pattern for UUID validation.
-   Format: 8-4-4-4-12 hexadecimal characters.
-
-   NOTE: With the new arg-value schema using explicit FK column (fn-usage-id),
-   this pattern is no longer needed for UUID extraction. Kept for backwards compatibility."
+   Format: 8-4-4-4-12 hexadecimal characters."
   "^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
@@ -146,17 +140,6 @@
    - :max-iterations - Override default iteration limit (default: *max-graph-iterations*)
    - :context-id - ID for error context in limit messages (default: start-id)
 
-   Example:
-   ```clojure
-   ;; Collect all function dependencies
-   (traverse-bfs fn-id
-     (fn [id]
-       (->> (get-arg-values-for-fn id)
-            (map :value)
-            (filter uuid?)
-            (filter fn-exists?))))
-   ```
-
    Returns: Set of all visited node IDs (including start-id)"
   ([start-id get-neighbors-fn]
    (traverse-bfs start-id get-neighbors-fn {}))
@@ -193,46 +176,36 @@
 ;; === ExecutionGraphResult record ===
 
 (defrecord ExecutionGraphResult
-  [fns fn-schemas arg-schemas resolved-args fn-usages arg-schemas-by-fn-schema])
+  [fns args args-by-fn])
 
 
-(defn- build-arg-schemas-index
-  "Builds index of fn-schema-id -> {arg-schema-id -> arg-schema}.
-   Provides O(1) lookup by fn-schema-id instead of O(n) filter."
-  [arg-schemas]
-  (reduce-kv
-    (fn [acc arg-schema-id arg-schema]
-      (update acc (:fn-schema-id arg-schema) assoc arg-schema-id arg-schema))
+(defn- build-args-by-fn-index
+  "Builds index of fn-id -> [args].
+   Provides O(1) lookup by fn-id instead of O(n) filter."
+  [args]
+  (reduce
+    (fn [acc arg]
+      (update acc (:fn-id arg) (fnil conj []) arg))
     {}
-    arg-schemas))
+    args))
 
 
 (defn ->execution-graph
   "Creates an ExecutionGraphResult record from a map.
    Validates that all required keys are present and non-empty.
-   Builds arg-schemas-by-fn-schema index for O(1) lookup."
-  [{:keys [fns fn-schemas arg-schemas resolved-args fn-usages]
-    :or {fn-usages {}}}]
+   Builds args-by-fn index for O(1) lookup."
+  [{:keys [fns args]
+    :or {args []}}]
   (when-not (map? fns)
     (throw (ex-info "ExecutionGraphResult requires :fns map"
                     {:type :invalid-data :received (type fns)})))
   (when (empty? fns)
     (throw (ex-info "ExecutionGraphResult :fns must contain at least target function"
                     {:type :invalid-data :hint "Check that fn-id exists in storage"})))
-  (when-not (map? fn-schemas)
-    (throw (ex-info "ExecutionGraphResult requires :fn-schemas map"
-                    {:type :invalid-data :received (type fn-schemas)})))
-  (when (empty? fn-schemas)
-    (throw (ex-info "ExecutionGraphResult :fn-schemas must contain at least one schema"
-                    {:type :invalid-data :hint "Check that fn has valid fn-schema-id"})))
-  (when-not (map? arg-schemas)
-    (throw (ex-info "ExecutionGraphResult requires :arg-schemas map"
-                    {:type :invalid-data :received (type arg-schemas)})))
-  (when-not (map? resolved-args)
-    (throw (ex-info "ExecutionGraphResult requires :resolved-args map"
-                    {:type :invalid-data :received (type resolved-args)})))
-  (->ExecutionGraphResult fns fn-schemas arg-schemas resolved-args fn-usages
-                          (build-arg-schemas-index arg-schemas)))
+  (when-not (sequential? args)
+    (throw (ex-info "ExecutionGraphResult requires :args sequence"
+                    {:type :invalid-data :received (type args)})))
+  (->ExecutionGraphResult fns args (build-args-by-fn-index args)))
 
 
 (defn execution-graph?
@@ -253,63 +226,18 @@
   (:fns graph))
 
 
-(defn get-graph-fn-schemas
-  "Returns the fn-schemas map from an execution graph.
-   Prefer this over direct :fn-schemas access for forward compatibility."
+(defn get-graph-args
+  "Returns all args from an execution graph.
+   Prefer this over direct :args access for forward compatibility."
   [graph]
-  (:fn-schemas graph))
+  (:args graph))
 
 
-(defn get-graph-arg-schemas
-  "Returns the arg-schemas map from an execution graph.
-   Prefer this over direct :arg-schemas access for forward compatibility."
-  [graph]
-  (:arg-schemas graph))
-
-
-(defn get-graph-resolved-args
-  "Returns the resolved-args map from an execution graph.
-   Prefer this over direct :resolved-args access for forward compatibility."
-  [graph]
-  (:resolved-args graph))
-
-
-(defn get-graph-fn-usages
-  "Returns the fn-usages map from an execution graph.
-   Prefer this over direct :fn-usages access for forward compatibility."
-  [graph]
-  (:fn-usages graph))
-
-
-;; === Execution Graph Utilities ===
-
-(defn extract-uuid-refs-from-arg-values
-  "Extracts UUIDs referenced in arg-values.
-   Returns set of UUIDs that could be fn or fn-usage references.
-
-   Handles two formats:
-   1. New schema with FK field: fn-usage-id
-   2. Legacy format: UUID stored as string in :value field
-
-   The legacy format is still needed for:
-   - Backward compatibility with existing data
-   - Tests using minimal schemas without FK fields"
-  [arg-values-map]
-  (->> (vals arg-values-map)
-       (mapcat (fn [av]
-                 (cond-> []
-                   ;; New FK field (preferred)
-                   (some? (:fn-usage-id av)) (conj (:fn-usage-id av))
-                   ;; Legacy: try to parse UUID from value field
-                   (some? (:value av)) (conj (try-parse-uuid (:value av))))))
-       (remove nil?)
-       (set)))
-
-
-(defn- arg-values-to-map
-  "Converts a sequence of arg-value records to {arg-schema-id -> arg-value}."
-  [arg-values]
-  (into {} (map (juxt :arg-schema-id identity) arg-values)))
+(defn get-graph-args-for-fn
+  "Returns args for a specific fn-id from an execution graph.
+   Uses pre-built index for O(1) lookup."
+  [graph fn-id]
+  (get (:args-by-fn graph) fn-id []))
 
 
 ;; === Graph Resolution BFS Algorithm ===
@@ -317,41 +245,44 @@
 ;; These functions take loader-specific functions as parameters to avoid
 ;; protocol dependencies. Storage backends provide the loader functions.
 
+(defn extract-fn-refs-from-args
+  "Extracts fn-ids referenced in args.
+   Returns set of fn-ids that need to be loaded.
+
+   Two reference types:
+   1. ref-id: direct fn reference (execute and use result)
+   2. value with UUID: fn-id passed as value (for HOF)"
+  [args]
+  (->> args
+       (mapcat (fn [arg]
+                 (cond-> []
+                   (some? (:ref-id arg)) (conj (:ref-id arg))
+                   (and (some? (:value arg)) (uuid? (:value arg))) (conj (:value arg)))))
+       (remove nil?)
+       (set)))
+
+
 (defn process-fn-node
   "Processes a single fn node during graph resolution.
-   Returns {:graph updated-graph :new-fn-refs #{fn-ids-to-visit}}.
+   Returns {:fns updated-fns :args updated-args :new-fn-refs #{fn-ids-to-visit}}.
 
    Arguments:
    - load-fn-record: (fn [fn-id] -> fn-record)
-   - load-fn-schema-record: (fn [fn-schema-id] -> fn-schema-record)
-   - load-arg-schemas-for-fn-schema: (fn [fn-schema-id] -> {arg-schema-id -> record})
-   - load-arg-values-for-fn: (fn [fn-id] -> [arg-value-records])
-   - classify-uuid-refs: (fn [uuid-refs] -> {:fn-refs #{} :fn-usages {}})
+   - load-args-for-fn: (fn [fn-id] -> [arg-records])
    - current-fn-id: UUID of fn to process
-   - graph: current accumulated graph state"
-  [load-fn-record load-fn-schema-record load-arg-schemas-for-fn-schema
-   load-arg-values-for-fn classify-uuid-refs
-   current-fn-id graph]
+   - fns: current accumulated fns map
+   - args: current accumulated args vector"
+  [load-fn-record load-args-for-fn current-fn-id fns args]
   (if-let [fn-rec (load-fn-record current-fn-id)]
-    (let [fn-schema-id (:fn-schema-id fn-rec)
-          fn-schema (when-not (contains? (:fn-schemas graph) fn-schema-id)
-                      (load-fn-schema-record fn-schema-id))
-          new-arg-schemas (if fn-schema
-                            (load-arg-schemas-for-fn-schema fn-schema-id)
-                            {})
-          ;; Load arg-values directly for this fn
-          arg-values (load-arg-values-for-fn current-fn-id)
-          resolved-args (arg-values-to-map arg-values)
-          all-refs (extract-uuid-refs-from-arg-values resolved-args)
-          {:keys [fn-refs fn-usages]} (classify-uuid-refs all-refs)]
-      {:graph (-> graph
-                  (update :fns assoc current-fn-id fn-rec)
-                  (update :fn-schemas #(if fn-schema (assoc % fn-schema-id fn-schema) %))
-                  (update :arg-schemas merge new-arg-schemas)
-                  (update :resolved-args assoc current-fn-id resolved-args)
-                  (update :fn-usages merge fn-usages))
-       :new-fn-refs fn-refs})
-    {:graph graph :new-fn-refs #{}}))
+    (let [fn-args (load-args-for-fn current-fn-id)
+          new-fn-refs (extract-fn-refs-from-args fn-args)
+          ;; Also check parent-id reference
+          parent-ref (when-let [parent-id (:parent-id fn-rec)]
+                       #{parent-id})]
+      {:fns (assoc fns current-fn-id fn-rec)
+       :args (into args fn-args)
+       :new-fn-refs (set/union new-fn-refs (or parent-ref #{}))})
+    {:fns fns :args args :new-fn-refs #{}}))
 
 
 (defn resolve-execution-graph-bfs
@@ -360,35 +291,28 @@
 
    Arguments:
    - load-fn-record: (fn [fn-id] -> fn-record)
-   - load-fn-schema-record: (fn [fn-schema-id] -> fn-schema-record)
-   - load-arg-schemas-for-fn-schema: (fn [fn-schema-id] -> {arg-schema-id -> record})
-   - load-arg-values-for-fn: (fn [fn-id] -> [arg-value-records])
-   - classify-uuid-refs: (fn [uuid-refs] -> {:fn-refs #{} :fn-usages {}})
+   - load-args-for-fn: (fn [fn-id] -> [arg-records])
    - fn-id: starting function UUID
 
    Returns ExecutionGraphResult record."
-  [load-fn-record load-fn-schema-record load-arg-schemas-for-fn-schema
-   load-arg-values-for-fn classify-uuid-refs
-   fn-id]
-  (let [init-graph {:fns {} :fn-schemas {} :arg-schemas {}
-                    :resolved-args {} :fn-usages {}}]
-    (loop [to-visit #{fn-id}
-           visited #{fn-id}
-           graph init-graph
-           iter-count 0]
-      (check-graph-iteration-limit! iter-count fn-id)
-      (if (empty? to-visit)
-        (->execution-graph graph)
-        (let [current-fn-id (first to-visit)
-              rest-to-visit (disj to-visit current-fn-id)
-              {:keys [graph new-fn-refs]}
-              (process-fn-node load-fn-record load-fn-schema-record
-                               load-arg-schemas-for-fn-schema
-                               load-arg-values-for-fn classify-uuid-refs
-                               current-fn-id graph)
-              new-to-visit (set/difference new-fn-refs visited)
-              new-visited (set/union visited new-to-visit)]
-          (recur (set/union rest-to-visit new-to-visit)
-                 new-visited
-                 graph
-                 (inc iter-count)))))))
+  [load-fn-record load-args-for-fn fn-id]
+  (loop [to-visit #{fn-id}
+         visited #{fn-id}
+         fns {}
+         args []
+         iter-count 0]
+    (check-graph-iteration-limit! iter-count fn-id)
+    (if (empty? to-visit)
+      (->execution-graph {:fns fns :args args})
+      (let [current-fn-id (first to-visit)
+            rest-to-visit (disj to-visit current-fn-id)
+            {:keys [fns args new-fn-refs]}
+            (process-fn-node load-fn-record load-args-for-fn
+                             current-fn-id fns args)
+            new-to-visit (set/difference new-fn-refs visited)
+            new-visited (set/union visited new-to-visit)]
+        (recur (set/union rest-to-visit new-to-visit)
+               new-visited
+               fns
+               args
+               (inc iter-count))))))

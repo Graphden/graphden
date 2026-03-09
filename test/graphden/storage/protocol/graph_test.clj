@@ -1,5 +1,11 @@
 (ns graphden.storage.protocol.graph-test
-  "Tests for storage-protocol.graph - ExecutionGraph utilities and BFS algorithm."
+  "Tests for storage-protocol.graph - ExecutionGraph utilities and BFS algorithm.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.graph :as graph]))
@@ -184,83 +190,69 @@
 
 (deftest ->execution-graph-test
   (let [fn-id (random-uuid)
-        fn-schema-id (random-uuid)]
+        parent-id (random-uuid)
+        arg-id (random-uuid)]
     (testing "creates valid ExecutionGraphResult"
       (let [result (graph/->execution-graph
-                     {:fns {fn-id {:id fn-id}}
-                      :fn-schemas {fn-schema-id {:id fn-schema-id}}
-                      :arg-schemas {}
-                      :resolved-args {}})]
+                     {:fns {fn-id {:id fn-id :name "test" :parent-id parent-id}
+                            parent-id {:id parent-id :name "base" :parent-id nil}}
+                      :args [{:id arg-id :fn-id fn-id :name "x" :type :int}]})]
         (is (graph/execution-graph? result))
-        (is (= {fn-id {:id fn-id}} (:fns result)))
-        (is (= {} (:fn-usages result)))))  ; defaults to empty
+        (is (= 2 (count (:fns result))))
+        (is (= 1 (count (:args result))))))
 
-    (testing "includes fn-usages when provided"
-      (let [cs-id (random-uuid)
-            result (graph/->execution-graph
+    (testing "allows empty :args sequence"
+      (let [result (graph/->execution-graph
                      {:fns {fn-id {:id fn-id}}
-                      :fn-schemas {fn-schema-id {:id fn-schema-id}}
-                      :arg-schemas {}
-                      :resolved-args {}
-                      :fn-usages {cs-id {:id cs-id :value 42}}})]
-        (is (= {cs-id {:id cs-id :value 42}} (:fn-usages result)))))
+                      :args []})]
+        (is (graph/execution-graph? result))
+        (is (= [] (:args result)))))
+
+    (testing "defaults :args to empty sequence"
+      (let [result (graph/->execution-graph
+                     {:fns {fn-id {:id fn-id}}})]
+        (is (graph/execution-graph? result))
+        (is (= [] (:args result)))))
+
+    (testing "builds args-by-fn index"
+      (let [fn-1-id (random-uuid)
+            fn-2-id (random-uuid)
+            arg-1-id (random-uuid)
+            arg-2-id (random-uuid)
+            arg-3-id (random-uuid)
+            result (graph/->execution-graph
+                     {:fns {fn-1-id {:id fn-1-id}
+                            fn-2-id {:id fn-2-id}}
+                      :args [{:id arg-1-id :fn-id fn-1-id :name "a"}
+                             {:id arg-2-id :fn-id fn-1-id :name "b"}
+                             {:id arg-3-id :fn-id fn-2-id :name "c"}]})]
+        (is (= 2 (count (get-in result [:args-by-fn fn-1-id]))))
+        (is (= 1 (count (get-in result [:args-by-fn fn-2-id]))))))
 
     (testing "throws when :fns is not a map"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :fns map"
             (graph/->execution-graph
               {:fns []
-               :fn-schemas {fn-schema-id {}}
-               :arg-schemas {}
-               :resolved-args {}}))))
+               :args []}))))
 
     (testing "throws when :fns is empty"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #":fns must contain"
             (graph/->execution-graph
               {:fns {}
-               :fn-schemas {fn-schema-id {}}
-               :arg-schemas {}
-               :resolved-args {}}))))
+               :args []}))))
 
-    (testing "throws when :fn-schemas is not a map"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :fn-schemas map"
+    (testing "throws when :args is not a sequence"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :args sequence"
             (graph/->execution-graph
-              {:fns {fn-id {}}
-               :fn-schemas "invalid"
-               :arg-schemas {}
-               :resolved-args {}}))))
-
-    (testing "throws when :fn-schemas is empty"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":fn-schemas must contain"
-            (graph/->execution-graph
-              {:fns {fn-id {}}
-               :fn-schemas {}
-               :arg-schemas {}
-               :resolved-args {}}))))
-
-    (testing "throws when :arg-schemas is not a map"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :arg-schemas map"
-            (graph/->execution-graph
-              {:fns {fn-id {}}
-               :fn-schemas {fn-schema-id {}}
-               :arg-schemas nil
-               :resolved-args {}}))))
-
-    (testing "throws when :resolved-args is not a map"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :resolved-args map"
-            (graph/->execution-graph
-              {:fns {fn-id {}}
-               :fn-schemas {fn-schema-id {}}
-               :arg-schemas {}
-               :resolved-args []}))))))
+              {:fns {fn-id {:id fn-id}}
+               :args "invalid"}))))))
 
 
 (deftest execution-graph?-test
   (testing "returns true for ExecutionGraphResult"
     (let [result (graph/->execution-graph
-                   {:fns {(random-uuid) {}}
-                    :fn-schemas {(random-uuid) {}}
-                    :arg-schemas {}
-                    :resolved-args {}})]
+                   {:fns {(random-uuid) {:id (random-uuid)}}
+                    :args []})]
       (is (true? (graph/execution-graph? result)))))
 
   (testing "returns false for other types"
@@ -269,128 +261,173 @@
     (is (false? (graph/execution-graph? [])))))
 
 
-;; === extract-uuid-refs-from-arg-values tests ===
+;; === extract-fn-refs-from-args tests ===
 
-(deftest extract-uuid-refs-from-arg-values-test
-  (testing "extracts UUID values"
-    (let [uuid1 (random-uuid)
-          uuid2 (random-uuid)
-          k1 (random-uuid)
-          k2 (random-uuid)
-          arg-values {k1 {:value uuid1}
-                      k2 {:value uuid2}}]
-      (is (= #{uuid1 uuid2}
-             (graph/extract-uuid-refs-from-arg-values arg-values)))))
+(deftest extract-fn-refs-from-args-test
+  (testing "extracts ref-id references"
+    (let [ref-fn-1 (random-uuid)
+          ref-fn-2 (random-uuid)
+          args [{:id (random-uuid) :fn-id (random-uuid) :name "a" :ref-id ref-fn-1}
+                {:id (random-uuid) :fn-id (random-uuid) :name "b" :ref-id ref-fn-2}]]
+      (is (= #{ref-fn-1 ref-fn-2}
+             (graph/extract-fn-refs-from-args args)))))
 
-  (testing "parses UUID strings"
-    (let [uuid (random-uuid)
-          k1 (random-uuid)
-          arg-values {k1 {:value (str uuid)}}]
-      (is (= #{uuid}
-             (graph/extract-uuid-refs-from-arg-values arg-values)))))
+  (testing "extracts UUID values (HOF pattern)"
+    (let [ref-fn (random-uuid)
+          args [{:id (random-uuid) :fn-id (random-uuid) :name "f" :value ref-fn :is-fn true}]]
+      (is (= #{ref-fn}
+             (graph/extract-fn-refs-from-args args)))))
 
   (testing "ignores non-UUID values"
-    (let [k1 (random-uuid)
-          k2 (random-uuid)
-          k3 (random-uuid)
-          arg-values {k1 {:value "not-uuid"}
-                      k2 {:value 123}
-                      k3 {:value nil}}]
+    (let [args [{:id (random-uuid) :fn-id (random-uuid) :name "a" :value "string"}
+                {:id (random-uuid) :fn-id (random-uuid) :name "b" :value 123}
+                {:id (random-uuid) :fn-id (random-uuid) :name "c" :value nil}]]
       (is (= #{}
-             (graph/extract-uuid-refs-from-arg-values arg-values)))))
+             (graph/extract-fn-refs-from-args args)))))
 
-  (testing "handles empty map"
-    (is (= #{} (graph/extract-uuid-refs-from-arg-values {}))))
+  (testing "handles empty sequence"
+    (is (= #{} (graph/extract-fn-refs-from-args []))))
 
-  (testing "handles mixed values"
-    (let [uuid (random-uuid)
-          k1 (random-uuid)
-          k2 (random-uuid)
-          k3 (random-uuid)
-          arg-values {k1 {:value uuid}
-                      k2 {:value "text"}
-                      k3 {:value 42}}]
-      (is (= #{uuid}
-             (graph/extract-uuid-refs-from-arg-values arg-values))))))
+  (testing "handles mixed references"
+    (let [ref-fn-1 (random-uuid)
+          ref-fn-2 (random-uuid)
+          args [{:id (random-uuid) :fn-id (random-uuid) :name "a" :ref-id ref-fn-1}
+                {:id (random-uuid) :fn-id (random-uuid) :name "b" :value ref-fn-2}
+                {:id (random-uuid) :fn-id (random-uuid) :name "c" :value 42}]]
+      (is (= #{ref-fn-1 ref-fn-2}
+             (graph/extract-fn-refs-from-args args)))))
+
+  (testing "deduplicates shared references"
+    (let [shared-ref (random-uuid)
+          args [{:id (random-uuid) :fn-id (random-uuid) :name "a" :ref-id shared-ref}
+                {:id (random-uuid) :fn-id (random-uuid) :name "b" :ref-id shared-ref}]]
+      (is (= #{shared-ref}
+             (graph/extract-fn-refs-from-args args))))))
 
 
 ;; === process-fn-node tests ===
 
 (deftest process-fn-node-test
   (let [fn-id (random-uuid)
-        fn-schema-id (random-uuid)
-        arg-schema-id (random-uuid)]
+        parent-id (random-uuid)]
 
     (testing "returns empty when fn not found"
       (let [load-fn (constantly nil)
-            result (graph/process-fn-node
-                     load-fn nil nil nil nil fn-id
-                     {:fns {} :fn-schemas {} :arg-schemas {}
-                      :resolved-args {} :fn-usages {}})]
-        (is (= {} (:fns (:graph result))))
+            load-args (constantly [])
+            result (graph/process-fn-node load-fn load-args fn-id {} [])]
+        (is (= {} (:fns result)))
+        (is (= [] (:args result)))
         (is (= #{} (:new-fn-refs result)))))
 
     (testing "adds fn to graph when found"
-      (let [fn-rec {:id fn-id :fn-schema-id fn-schema-id}
-            fn-schema {:id fn-schema-id :name "test"}
+      (let [fn-rec {:id fn-id :name "test" :parent-id parent-id}
             load-fn (fn [id] (when (= id fn-id) fn-rec))
-            load-fn-schema (fn [id] (when (= id fn-schema-id) fn-schema))
-            load-arg-schemas (constantly {arg-schema-id {:id arg-schema-id}})
-            load-arg-values (constantly [])
-            classify-refs (constantly {:fn-refs #{} :frvs {}})
-            init-graph {:fns {} :fn-schemas {} :arg-schemas {}
-                        :resolved-args {} :fn-usages {}}
+            load-args (constantly [])
+            result (graph/process-fn-node load-fn load-args fn-id {} [])]
+        (is (= fn-rec (get (:fns result) fn-id)))
+        (is (contains? (:new-fn-refs result) parent-id))))
+
+    (testing "includes args in result"
+      (let [fn-rec {:id fn-id :name "test" :parent-id nil}
+            arg-1 {:id (random-uuid) :fn-id fn-id :name "a"}
+            arg-2 {:id (random-uuid) :fn-id fn-id :name "b"}
+            load-fn (fn [id] (when (= id fn-id) fn-rec))
+            load-args (fn [id] (when (= id fn-id) [arg-1 arg-2]))
+            result (graph/process-fn-node load-fn load-args fn-id {} [])]
+        (is (= 2 (count (:args result))))
+        (is (= [arg-1 arg-2] (:args result)))))
+
+    (testing "extracts ref-id references"
+      (let [ref-fn-id (random-uuid)
+            fn-rec {:id fn-id :name "test" :parent-id nil}
+            args [{:id (random-uuid) :fn-id fn-id :name "x" :ref-id ref-fn-id}]
+            load-fn (fn [id] (when (= id fn-id) fn-rec))
+            load-args (fn [id] (when (= id fn-id) args))
+            result (graph/process-fn-node load-fn load-args fn-id {} [])]
+        (is (contains? (:new-fn-refs result) ref-fn-id))))
+
+    (testing "accumulates with existing state"
+      (let [existing-fn {:id parent-id :name "existing"}
+            existing-arg {:id (random-uuid) :fn-id parent-id :name "y"}
+            fn-rec {:id fn-id :name "test" :parent-id nil}
+            new-arg {:id (random-uuid) :fn-id fn-id :name "x"}
+            load-fn (fn [id] (when (= id fn-id) fn-rec))
+            load-args (fn [id] (when (= id fn-id) [new-arg]))
             result (graph/process-fn-node
-                     load-fn load-fn-schema load-arg-schemas
-                     load-arg-values classify-refs
-                     fn-id init-graph)]
-        (is (= fn-rec (get-in result [:graph :fns fn-id])))
-        (is (= fn-schema (get-in result [:graph :fn-schemas fn-schema-id])))
-        (is (some? (get-in result [:graph :arg-schemas arg-schema-id])))))))
+                     load-fn load-args fn-id
+                     {parent-id existing-fn}
+                     [existing-arg])]
+        (is (= 2 (count (:fns result))))
+        (is (= 2 (count (:args result))))))))
 
 
 ;; === resolve-execution-graph-bfs tests ===
 
 (deftest resolve-execution-graph-bfs-test
   (let [fn-id (random-uuid)
-        fn-schema-id (random-uuid)]
+        parent-id (random-uuid)]
 
     (testing "resolves single function"
-      (let [fn-rec {:id fn-id :fn-schema-id fn-schema-id}
-            fn-schema {:id fn-schema-id :name "test"}
+      (let [fn-rec {:id fn-id :name "test" :parent-id nil}
             load-fn (fn [id] (when (= id fn-id) fn-rec))
-            load-fn-schema (fn [id] (when (= id fn-schema-id) fn-schema))
-            load-arg-schemas (constantly {})
-            load-arg-values (constantly [])
-            classify-refs (constantly {:fn-refs #{} :frvs {}})
-            result (graph/resolve-execution-graph-bfs
-                     load-fn load-fn-schema load-arg-schemas
-                     load-arg-values classify-refs
-                     fn-id)]
+            load-args (constantly [])
+            result (graph/resolve-execution-graph-bfs load-fn load-args fn-id)]
         (is (graph/execution-graph? result))
-        (is (= fn-rec (get (:fns result) fn-id)))
-        (is (= fn-schema (get (:fn-schemas result) fn-schema-id)))))
+        (is (= fn-rec (get (:fns result) fn-id)))))
 
-    (testing "follows fn references"
-      (let [fn-id-a (random-uuid)
-            fn-id-b (random-uuid)
-            fn-schema-id (random-uuid)
-            fns {fn-id-a {:id fn-id-a :fn-schema-id fn-schema-id}
-                 fn-id-b {:id fn-id-b :fn-schema-id fn-schema-id}}
+    (testing "follows parent-id references"
+      (let [fn-rec {:id fn-id :name "composed" :parent-id parent-id}
+            parent-rec {:id parent-id :name "base" :parent-id nil}
+            fns {fn-id fn-rec parent-id parent-rec}
             load-fn #(get fns %)
-            load-fn-schema (fn [_] {:id fn-schema-id :name "test"})
-            load-arg-schemas (constantly {})
-            load-arg-values (constantly [])
-            ;; First call returns reference to fn-id-b, subsequent calls return empty
-            calls (atom 0)
-            classify-refs (fn [_]
-                            (swap! calls inc)
-                            (if (= 1 @calls)
-                              {:fn-refs #{fn-id-b} :frvs {}}
-                              {:fn-refs #{} :frvs {}}))
-            result (graph/resolve-execution-graph-bfs
-                     load-fn load-fn-schema load-arg-schemas
-                     load-arg-values classify-refs
-                     fn-id-a)]
-        (is (contains? (:fns result) fn-id-a))
-        (is (contains? (:fns result) fn-id-b))))))
+            load-args (constantly [])
+            result (graph/resolve-execution-graph-bfs load-fn load-args fn-id)]
+        (is (contains? (:fns result) fn-id))
+        (is (contains? (:fns result) parent-id))))
+
+    (testing "follows ref-id references"
+      (let [ref-fn-id (random-uuid)
+            fn-rec {:id fn-id :name "test" :parent-id nil}
+            ref-fn-rec {:id ref-fn-id :name "referenced" :parent-id nil}
+            fns {fn-id fn-rec ref-fn-id ref-fn-rec}
+            args {fn-id [{:id (random-uuid) :fn-id fn-id :name "x" :ref-id ref-fn-id}]}
+            load-fn #(get fns %)
+            load-args #(get args % [])
+            result (graph/resolve-execution-graph-bfs load-fn load-args fn-id)]
+        (is (contains? (:fns result) fn-id))
+        (is (contains? (:fns result) ref-fn-id))))
+
+    (testing "collects all args"
+      (let [fn-rec {:id fn-id :name "test" :parent-id parent-id}
+            parent-rec {:id parent-id :name "base" :parent-id nil}
+            fns {fn-id fn-rec parent-id parent-rec}
+            fn-args [{:id (random-uuid) :fn-id fn-id :name "a"}
+                     {:id (random-uuid) :fn-id fn-id :name "b"}]
+            parent-args [{:id (random-uuid) :fn-id parent-id :name "x"}]
+            args-map {fn-id fn-args parent-id parent-args}
+            load-fn #(get fns %)
+            load-args #(get args-map % [])
+            result (graph/resolve-execution-graph-bfs load-fn load-args fn-id)]
+        (is (= 3 (count (:args result))))))
+
+    (testing "handles diamond pattern (shared dependency)"
+      (let [;; fn-a -> fn-b, fn-a -> fn-c, fn-b -> fn-d, fn-c -> fn-d
+            fn-a (random-uuid)
+            fn-b (random-uuid)
+            fn-c (random-uuid)
+            fn-d (random-uuid)
+            fns {fn-a {:id fn-a :name "a" :parent-id nil}
+                 fn-b {:id fn-b :name "b" :parent-id nil}
+                 fn-c {:id fn-c :name "c" :parent-id nil}
+                 fn-d {:id fn-d :name "d" :parent-id nil}}
+            args-map {fn-a [{:id (random-uuid) :fn-id fn-a :name "x" :ref-id fn-b}
+                            {:id (random-uuid) :fn-id fn-a :name "y" :ref-id fn-c}]
+                      fn-b [{:id (random-uuid) :fn-id fn-b :name "z" :ref-id fn-d}]
+                      fn-c [{:id (random-uuid) :fn-id fn-c :name "w" :ref-id fn-d}]}
+            load-fn #(get fns %)
+            load-args #(get args-map % [])
+            result (graph/resolve-execution-graph-bfs load-fn load-args fn-a)]
+        ;; Should have all 4 fns, fn-d only once
+        (is (= 4 (count (:fns result))))
+        (is (contains? (:fns result) fn-d))))))
+

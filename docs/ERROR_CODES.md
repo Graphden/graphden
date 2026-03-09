@@ -67,26 +67,25 @@ Error types follow the pattern `:category/specific-error` where:
 **Component:** storage-protocol
 **Description:** Attempted to insert a record with a duplicate unique key.
 **Ex-data keys:**
-- `:entity` - Entity name (e.g., `:fn`, `:fn-schema`)
+- `:entity` - Entity name (`:fn` or `:arg`)
 - `:field` - Field that violated uniqueness
 - `:value` - The duplicate value
 
-### `:constraint-violation/arg-schema-mismatch`
-**Component:** storage-protocol (GraphConstraints)
-**Description:** Arg-schema does not belong to the fn-schema of this function.
-**Ex-data keys:**
-- `:fn-id` - The function
-- `:arg-schema-id` - The mismatched arg-schema
-- `:fn-schema-id` - Expected fn-schema
-- `:arg-schema-fn-schema-id` - Actual fn-schema of the arg
-
 ### `:constraint-violation/dependency-cycle`
 **Component:** storage-protocol (GraphConstraints)
-**Description:** Creating an arg-value reference would create a dependency cycle.
+**Description:** Creating an arg with ref-id would create a dependency cycle.
 **Ex-data keys:**
-- `:owner-fn-id` - Function owning the arg-value
-- `:value-fn-id` - Target function being referenced
+- `:owner-fn-id` - Function owning the arg
+- `:target-fn-id` - Target function being referenced via ref-id
 - `:cycle-path` - Path showing the cycle
+
+### `:constraint-violation/invalid-source-id`
+**Component:** storage-protocol (GraphConstraints)
+**Description:** Arg's source-id doesn't reference a valid ancestor arg.
+**Ex-data keys:**
+- `:fn-id` - The function owning the arg
+- `:source-id` - The invalid source-id
+- `:parent-id` - The function's parent-id
 
 ## Execution Errors
 
@@ -100,23 +99,19 @@ Error types follow the pattern `:category/specific-error` where:
 **Description:** Provided argument value doesn't match the expected type.
 **Ex-data keys:**
 - `:arg-name` - Name of the argument
-- `:expected-type` - Expected type (`:fn`, `:ref`, `:int`, `:bool`, `:text`, `:numeric`, `:jsonb`, `:bytes`, `:timestamptz`, `:enum`, `:uuid`)
+- `:expected-type` - Expected type (`:fn`, `:int`, `:bool`, `:text`, `:numeric`, `:jsonb`, `:bytes`, `:timestamptz`, `:enum`, `:uuid`)
 - `:provided-value` - The value that was provided
 - `:provided-type` - Actual Java type of the value
 
-### `:execution-error/invalid-arg-schema`
+### `:execution-error/invalid-arg`
 **Component:** executor
-**Description:** Arg-schema is missing the `:type` field.
+**Description:** Arg is missing the `:type` field.
 **Ex-data keys:**
-- `:arg-schema` - The invalid arg-schema
+- `:arg` - The invalid arg
 
-### `:execution-error/nil-arg-value`
+### `:execution-error/nil-value`
 **Component:** executor
-**Description:** Arg-value cannot be nil (defensive check).
-
-### `:execution-error/nil-arg-schema`
-**Component:** executor
-**Description:** Arg-schema cannot be nil (defensive check).
+**Description:** Arg value cannot be nil (defensive check).
 
 ### `:execution-error/fn-not-found`
 **Component:** executor
@@ -124,18 +119,18 @@ Error types follow the pattern `:category/specific-error` where:
 **Ex-data keys:**
 - `:fn-id` - The missing function's UUID
 
-### `:execution-error/fn-schema-not-found`
+### `:execution-error/parent-not-found`
 **Component:** executor
-**Description:** Function schema not found in the execution graph.
+**Description:** Parent function (base-fn) not found in the execution graph.
 **Ex-data keys:**
 - `:fn-id` - The function ID
-- `:fn-schema-id` - The missing schema's UUID
+- `:parent-id` - The missing parent's UUID
 
 ### `:execution-error/missing-required-arg`
 **Component:** executor
 **Description:** A required argument was not provided and has no default value.
 **Ex-data keys:**
-- `:arg-schema-id` - The arg-schema ID
+- `:arg-id` - The arg ID
 - `:arg-name` - Name of the missing argument
 
 ### `:execution-error/max-depth-exceeded`
@@ -173,7 +168,7 @@ Error types follow the pattern `:category/specific-error` where:
 **Description:** A required field is missing from the data being validated.
 **Ex-data keys:**
 - `:field` - Name of the missing field
-- `:entity` - Entity type
+- `:entity` - Entity type (`:fn` or `:arg`)
 
 ### `:validation-error/duplicate-ids`
 **Component:** storage-protocol

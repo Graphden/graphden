@@ -10,19 +10,28 @@
    - context.clj - ExecutionContext record and creation
    - types.clj - Type hints and validation
 
+   ## 2-Entity Schema
+
+   The executor works with a simplified schema:
+   - fn: function entity (base or composed)
+     - parent-id=nil → base-fn (has Clojure implementation)
+     - parent-id set → composed fn (inherits from parent)
+   - arg: argument entity
+     - value → literal JSONB value
+     - ref-id → FK to fn (execute and use result)
+     - is-fn=true → pass fn-id directly (for HOF)
+
    ## Lazy Arguments
 
    Arguments are passed to base functions as Clojure `delay` objects.
    This enables lazy evaluation - values are only computed when dereferenced.
 
-   For :fn type arguments, the delay contains a callable (a Clojure function)
-   that can be invoked with a map of named arguments.
+   For :fn type arguments (is-fn=true), the delay contains the fn-id
+   that can be used to create a callable.
 
    Base functions should use @ (deref) to get values:
      (+ @a @b)           ; for regular args
-     (f {:item x})       ; for :fn args (f is already a callable after deref)
-
-   The defbase macro in fn-registry handles this automatically."
+     (f {:item x})       ; for :fn args (f is a callable after wrapping)"
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.argument-resolution :as arg-res]
@@ -30,66 +39,91 @@
     [graphden.storage.protocol.core :as sp]))
 
 
-;; Forward declaration: execute-internal is defined later but referenced by
-;; build-delay, execute-fn-usage, and make-single-arg-callable.
-;; The recursion is lazy (via delays) - functions create delays that capture
-;; execute-internal for later evaluation during argument resolution.
 (declare execute-internal)
 
 
 ;; === Graph Data Helpers ===
 
+(defn- resolve-base-fn
+  "Resolves a function to its base-fn by following parent chain.
+   Returns the base-fn record (fn with parent-id=nil).
+   Throws if base-fn not found or chain too deep."
+  [fns fn-id depth]
+  (when (> depth sp/*max-graph-iterations*)
+    (throw (ex-info "Parent chain exceeds maximum depth"
+                    {:type :execution-error/parent-chain-too-deep
+                     :fn-id fn-id
+                     :max-depth sp/*max-graph-iterations*})))
+  (let [fn-rec (get fns fn-id)]
+    (when-not fn-rec
+      (throw (ex-info "Function not found in execution graph"
+                      {:type :execution-error/fn-not-found
+                       :fn-id fn-id})))
+    (if-let [parent-id (:parent-id fn-rec)]
+      (recur fns parent-id (inc depth))
+      fn-rec)))
+
+
+(defn- get-fn-args-with-inheritance
+  "Gets args for a function, checking parent chain if fn has no own args.
+   This allows composed fns with 'free' args to be used in HOF."
+  [execution-graph fn-id depth]
+  (when (> depth sp/*max-graph-iterations*)
+    (throw (ex-info "Parent chain exceeds maximum depth while resolving args"
+                    {:type :execution-error/parent-chain-too-deep
+                     :fn-id fn-id
+                     :max-depth sp/*max-graph-iterations*})))
+  (let [args (sp/graph-get-args execution-graph fn-id)]
+    (if (seq args)
+      args
+      ;; If no args on this fn, check parent fn
+      (let [fn-rec (get (sp/get-graph-fns execution-graph) fn-id)]
+        (when-let [parent-id (:parent-id fn-rec)]
+          (recur execution-graph parent-id (inc depth)))))))
+
+
 (defn- get-fn-data-from-graph
   "Gets function data from the cached execution graph.
-   Returns {:fn fn-rec :fn-schema fn-schema-rec :arg-schemas {...} :arg-values {...}}"
+   Returns {:fn fn-rec :base-fn base-fn-rec :args [arg-records]}
+   For composed fns with no own args, inherits args from parent (for HOF support)."
   [execution-graph fn-id]
-  (let [{:keys [fns fn-schemas arg-schemas resolved-args]} execution-graph
+  (let [fns (:fns execution-graph)
         fn-rec (get fns fn-id)]
     (when-not fn-rec
       (throw (ex-info "Function not found in execution graph"
                       {:type :execution-error/fn-not-found
                        :fn-id fn-id
-                       :available-fn-ids (vec (keys fns))
-                       :hint "Check that fn-id is correct and included in the execution graph"})))
-    (let [fn-schema-id (:fn-schema-id fn-rec)
-          fn-schema (get fn-schemas fn-schema-id)]
-      (when-not fn-schema
-        (throw (ex-info "Function schema not found in execution graph"
-                        {:type :execution-error/fn-schema-not-found
-                         :fn-id fn-id
-                         :fn-schema-id fn-schema-id
-                         :available-schema-ids (vec (keys fn-schemas))
-                         :hint "Function references a schema that wasn't included in the graph"})))
-      ;; Filter arg-schemas to only those belonging to this fn-schema
-      (let [fn-arg-schemas (->> arg-schemas
-                                (filter (fn [[_ as]] (= (:fn-schema-id as) fn-schema-id)))
-                                (into {}))
-            arg-values (get resolved-args fn-id {})]
-        {:fn fn-rec
-         :fn-schema fn-schema
-         :arg-schemas fn-arg-schemas
-         :arg-values arg-values}))))
+                       :available-fn-ids (vec (keys fns))})))
+    (let [base-fn (resolve-base-fn fns fn-id 0)
+          args (or (get-fn-args-with-inheritance execution-graph fn-id 0) [])]
+      {:fn fn-rec
+       :base-fn base-fn
+       :args args})))
 
 
-(defn- get-required-arg-schemas
-  "Returns a sequence of required arg-schemas for a function.
-   Used by HOF helpers to find function's required arguments."
+(defn- get-required-args
+  "Returns a sequence of required args for a function.
+   For HOF: if fn has no args, checks parent fn's args (via parent-id).
+   This allows composed fns with 'free' args (no value/ref-id) to be used in HOF."
   [execution-graph fn-id]
-  (let [{:keys [arg-schemas]} (get-fn-data-from-graph execution-graph fn-id)]
-    (->> arg-schemas
-         vals
-         (filter #(:required % true)))))  ; default required=true
+  (let [args (sp/graph-get-args execution-graph fn-id)]
+    (if (seq args)
+      (filter #(:required % true) args)
+      ;; If no args on this fn, check parent fn
+      (let [fn-rec (get (sp/get-graph-fns execution-graph) fn-id)]
+        (when-let [parent-id (:parent-id fn-rec)]
+          (recur execution-graph parent-id))))))
 
 
 (defn get-single-required-arg
-  "Gets the single required arg-schema for a function.
+  "Gets the single required arg for a function.
    Used by HOF (map, filter, etc.) to find the target argument.
 
-   Returns {:id arg-schema-id :name arg-name :type arg-type}
+   Returns {:id arg-id :name arg-name :type arg-type}
 
    Throws if the function doesn't have exactly one required argument."
   [context fn-id]
-  (let [required-args (get-required-arg-schemas (:execution-graph context) fn-id)
+  (let [required-args (get-required-args (:execution-graph context) fn-id)
         count-required (count required-args)]
     (when (not= count-required 1)
       (throw (ex-info (str "HOF function requires exactly 1 required argument, got " count-required)
@@ -97,10 +131,10 @@
                        :fn-id fn-id
                        :required-arg-count count-required
                        :required-args (mapv #(select-keys % [:id :name :type]) required-args)})))
-    (let [arg-schema (first required-args)]
-      {:id (:id arg-schema)
-       :name (:name arg-schema)
-       :type (:type arg-schema)})))
+    (let [arg (first required-args)]
+      {:id (:id arg)
+       :name (:name arg)
+       :type (:type arg)})))
 
 
 (defn make-single-arg-callable
@@ -110,30 +144,20 @@
    Used by HOF (map, filter, etc.) to call user functions without requiring
    specific argument names.
 
-   Example:
-   ;; User function 'double' has one arg :x
-   ;; (callable 5) calls double with {:x-schema-id 5}
-
    Returns a function: value -> result"
   [context fn-id]
-  (let [arg-schema-id (:id (get-single-required-arg context fn-id))]
+  (let [arg-id (:id (get-single-required-arg context fn-id))]
     (fn [value]
-      (execute-internal context fn-id {arg-schema-id value}))))
+      (execute-internal context fn-id {arg-id value}))))
 
 
-;; === fn-usage Execution ===
+;; === Result Caching ===
 
-;; Use centralized limit from storage-protocol config
-(def ^:private cache-eviction-ratio
-  "Ratio of cache entries to evict when cache is full.
-   Uses centralized value from sp/cache-eviction-ratio."
-  sp/cache-eviction-ratio)
+(def ^:private cache-eviction-ratio sp/cache-eviction-ratio)
 
 
 (defn- evict-cache-entries!
-  "Evicts oldest entries from cache when limit is reached.
-   Uses insertion order (first entries added are evicted first).
-   Returns the number of entries evicted."
+  "Evicts oldest entries from cache when limit is reached."
   [result-cache target-size]
   (let [current @result-cache
         current-size (count current)
@@ -148,11 +172,8 @@
 
 
 (defn- check-cache-limit!
-  "Checks if result cache has reached its limit.
-   If at limit, evicts oldest entries (by insertion order) to make room.
-   This prevents OOM from unbounded execution graphs while allowing
-   execution to continue with reduced caching."
-  [context fn-usage-id]
+  "Checks if result cache has reached its limit."
+  [context fn-id]
   (let [result-cache (:result-cache context)
         current-size (count @result-cache)
         cache-max-size (:cache-max-size context)]
@@ -163,80 +184,36 @@
                   {:cache-max-size cache-max-size
                    :evicted-count evicted
                    :new-size (count @result-cache)
-                   :fn-usage-id fn-usage-id
-                   :hint "Large caches may indicate deep recursion or unbounded graphs"})))))
+                   :fn-id fn-id})))))
 
 
-(defn- get-fn-usage!
-  "Gets fn-usage from execution graph.
-   Throws if not found."
-  [context fn-usage-id]
-  (let [execution-graph (:execution-graph context)
-        fn-usages (:fn-usages execution-graph)
-        fu (get fn-usages fn-usage-id)]
-    (when-not fu
-      (throw (ex-info "fn-usage not found in execution graph"
-                      {:type :execution-error/fn-usage-not-found
-                       :fn-usage-id fn-usage-id})))
-    fu))
-
-
-(defn- execute-and-cache-result!
-  "Executes fn-usage and stores result in cache.
-   Logs warning once when cache reaches warning threshold.
-   Returns the computed result."
-  [context fn-usage-id fu]
+(defn- execute-ref-fn
+  "Executes a referenced function with caching.
+   Used when an arg has ref-id set (execute fn and use result)."
+  [context ref-fn-id]
   (let [result-cache (:result-cache context)
-        cache-max-size (:cache-max-size context)
-        cache-warning-threshold (:cache-warning-threshold context)]
-    (log/debug "fn-usage cache miss, executing"
-               {:fn-usage-id fn-usage-id
-                :fn-id (:fn-id fu)})
-    (let [fn-id (:fn-id fu)
-          result (execute-internal context fn-id nil)
-          new-size (count (swap! result-cache assoc fn-usage-id result))]
-      ;; Warn once when cache crosses threshold (check if we just crossed)
-      (when (= new-size cache-warning-threshold)
-        (log/warn "Result cache size reached warning threshold - consider limiting graph depth"
-                  {:cache-size new-size
-                   :threshold cache-warning-threshold
-                   :max-size cache-max-size
-                   :hint "Large caches may indicate unbounded execution graphs"}))
-      result)))
-
-
-(defn- execute-fn-usage
-  "Executes a fn-usage, using cache for memoization.
-   If the fn-usage-id is already in cache, returns cached value.
-   Otherwise executes the underlying fn, caches the result, and returns it.
-
-   Structure:
-   1. Check cache for existing result (fast path)
-   2. Check cache limit before adding new entry
-   3. Get fn-usage from graph
-   4. Execute and cache the result"
-  [context fn-usage-id]
-  (let [result-cache (:result-cache context)
-        cached (get @result-cache fn-usage-id)]
+        cached (get @result-cache ref-fn-id)]
     (if (some? cached)
-      ;; Fast path: cache hit
       (do
-        (log/debug "fn-usage cache hit"
-                   {:fn-usage-id fn-usage-id
-                    :cache-size (count @result-cache)})
+        (log/debug "ref-fn cache hit" {:ref-fn-id ref-fn-id})
         cached)
-      ;; Slow path: cache miss - check limits, execute, cache
       (do
-        (check-cache-limit! context fn-usage-id)
-        (let [fu (get-fn-usage! context fn-usage-id)]
-          (execute-and-cache-result! context fn-usage-id fu))))))
+        (check-cache-limit! context ref-fn-id)
+        (log/debug "ref-fn cache miss, executing" {:ref-fn-id ref-fn-id})
+        (let [result (execute-internal context ref-fn-id nil)
+              new-size (count (swap! result-cache assoc ref-fn-id result))
+              cache-warning-threshold (:cache-warning-threshold context)]
+          (when (= new-size cache-warning-threshold)
+            (log/warn "Result cache size reached warning threshold"
+                      {:cache-size new-size
+                       :threshold cache-warning-threshold}))
+          result)))))
 
 
 ;; === Execution ===
 
 (defn- check-depth-limit!
-  "Checks recursion depth limit. Throws if exceeded.
-   Logs warning when approaching limit (at 80% threshold, exactly once)."
+  "Checks recursion depth limit. Throws if exceeded."
   [context]
   (let [depth (:depth context)
         max-depth (:max-depth context)
@@ -244,8 +221,7 @@
     (when (= depth depth-threshold)
       (log/warn "Approaching max recursion depth"
                 {:depth depth
-                 :max-depth max-depth
-                 :threshold-ratio ctx/warning-threshold-ratio}))
+                 :max-depth max-depth}))
     (when (> depth max-depth)
       (throw (ex-info "Maximum recursion depth exceeded"
                       {:type :execution-error/max-depth-exceeded
@@ -254,16 +230,7 @@
 
 
 (defn- check-timeout-limit!
-  "Checks execution timeout. Throws if exceeded.
-   Logs warning when approaching timeout (within warning window after 80% threshold).
-
-   IMPORTANT: Timeout is checked at the START of each function call, not during
-   execution. This means a long-running base function will complete fully even
-   if it exceeds the timeout. The timeout is a best-effort limit, not a hard
-   guarantee. For precise timeout control, base functions should implement
-   their own timeout logic (e.g., using futures with deref timeout).
-
-   Uses the context's clock for time measurement, allowing deterministic testing."
+  "Checks execution timeout. Throws if exceeded."
   [context]
   (let [elapsed (- (ctx/current-time-ms context) (:start-time context))
         timeout-ms (:timeout-ms context)
@@ -273,15 +240,13 @@
       (log/warn "Approaching execution timeout"
                 {:elapsed-ms elapsed
                  :timeout-ms timeout-ms
-                 :threshold-ratio ctx/warning-threshold-ratio
                  :depth (:depth context)}))
     (when (> elapsed timeout-ms)
       (throw (ex-info "Execution timeout exceeded"
                       {:type :execution-error/timeout
                        :elapsed-ms elapsed
                        :timeout-ms timeout-ms
-                       :depth (:depth context)
-                       :hint "Consider increasing timeout-ms or optimizing the graph"})))))
+                       :depth (:depth context)})))))
 
 
 (defn- check-limits!
@@ -293,20 +258,16 @@
 
 (defn- execute-internal
   "Internal execution function with context tracking.
-   Uses the cached execution-graph and base-fns from context.
-
-   Arguments are passed to base functions as delays for lazy evaluation.
-   Base functions should use @ (deref) to get values."
+   Uses the cached execution-graph and base-fns from context."
   [context ^java.util.UUID fn-id ^clojure.lang.IPersistentMap provided-args]
   (check-limits! context)
   (let [execution-graph (:execution-graph context)
         fn-data (get-fn-data-from-graph execution-graph fn-id)
-        fn-schema (:fn-schema fn-data)
-        fn-name (keyword (:name fn-schema))
-        ;; Use base-fns from context
+        base-fn (:base-fn fn-data)
+        fn-name (keyword (:name base-fn))
         registry (:base-fns context)
-        base-fn (get registry fn-name)]
-    (when-not base-fn
+        base-fn-impl (get registry fn-name)]
+    (when-not base-fn-impl
       (log/error "Base function not found in registry"
                  {:fn-name fn-name
                   :fn-id fn-id
@@ -316,16 +277,15 @@
                        :fn-name fn-name
                        :registry-size (count registry)})))
     (let [new-context (update context :depth inc)
-          ;; Pass execute-fn-usage for resolving fn-usage references
           arg-delays (arg-res/build-arg-delays new-context fn-data provided-args
-                                               execute-fn-usage)]
-      (base-fn arg-delays new-context))))
+                                               execute-ref-fn)]
+      (base-fn-impl arg-delays new-context))))
 
 
 (defn execute
   "Public execution entry point.
    Fetches the complete execution graph once, then executes using cached data.
-   args must be nil or a map of {arg-schema-id -> value}."
+   args must be nil or a map of {arg-id -> value}."
   [context fn-id args]
   (when (and (some? args) (not (map? args)))
     (throw (ex-info "args must be nil or a map"
@@ -339,36 +299,29 @@
 
 
 (defn- resolve-named-args
-  "Converts a map of {arg-name-keyword -> value} to {arg-schema-id -> value}.
-   Used by execute-with-named-args for HOF functions that pass args by name."
+  "Converts a map of {arg-name-keyword -> value} to {arg-id -> value}.
+   Uses argument inheritance for composed fns with no own args."
   [execution-graph fn-id named-args]
-  (let [{:keys [arg-schemas]} (get-fn-data-from-graph execution-graph fn-id)
-        name->schema-id (reduce-kv
-                          (fn [acc schema-id schema]
-                            (assoc acc (keyword (:name schema)) schema-id))
-                          {}
-                          arg-schemas)]
+  (let [args (or (get-fn-args-with-inheritance execution-graph fn-id 0) [])
+        name->arg-id (into {}
+                           (map (fn [arg]
+                                  [(keyword (:name arg)) (:id arg)])
+                                args))]
     (reduce-kv
       (fn [acc arg-name value]
-        (if-let [schema-id (get name->schema-id arg-name)]
-          (assoc acc schema-id value)
+        (if-let [arg-id (get name->arg-id arg-name)]
+          (assoc acc arg-id value)
           (throw (ex-info (str "Unknown argument name: " arg-name)
                           {:type :execution-error/unknown-arg-name
                            :arg-name arg-name
                            :fn-id fn-id
-                           :available-args (keys name->schema-id)}))))
+                           :available-args (keys name->arg-id)}))))
       {}
       named-args)))
 
 
 (defn execute-with-named-args
-  "Executes a function with arguments passed by name instead of by schema-id.
-   Useful for HOF functions that need to call child functions with dynamic args.
-
-   Example:
-   (execute-with-named-args ctx fn-id {:item 42 :acc 0})
-
-   This resolves :item and :acc to their respective arg-schema-ids and calls execute."
+  "Executes a function with arguments passed by name instead of by id."
   [context fn-id named-args]
   (when (and (some? named-args) (not (map? named-args)))
     (throw (ex-info "named-args must be nil or a map"
@@ -385,20 +338,7 @@
 
 
 (defn execute-by-name
-  "Executes a function by its name (string).
-   Convenience function that looks up the fn entity by name and executes it.
-
-   Arguments:
-   - context: Execution context (created with create-context)
-   - fn-name: String name of the function to execute
-   - named-args: Map of {arg-name-keyword -> value} (optional, can be nil or {})
-
-   Returns the result of the function execution.
-
-   Throws:
-   - :execution-error/fn-not-found if no function with the given name exists
-   - :execution-error/invalid-fn-name if fn-name is not a string
-   - All errors from execute-with-named-args"
+  "Executes a function by its name (string)."
   [context fn-name named-args]
   (when-not (string? fn-name)
     (throw (ex-info "fn-name must be a string"
@@ -406,7 +346,6 @@
                      :fn-name fn-name
                      :fn-name-type (type fn-name)})))
   (let [storage (:storage context)
-        ;; NOTE: :fn entity has UNIQUE constraint on :name, so query returns 0 or 1 result
         fns (sp/query-entities storage :fn {:name fn-name})]
     (if (empty? fns)
       (throw (ex-info (str "Function '" fn-name "' not found")

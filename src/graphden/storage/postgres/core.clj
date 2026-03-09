@@ -249,14 +249,9 @@
 
   sp/GraphConstraints
 
-  (validate-arg-schema-belongs-to-fn!
-    [this fn-id arg-schema-id]
-    (gc/validate-arg-schema-belongs-to-fn! this fn-id arg-schema-id))
-
-
   (validate-no-dependency-cycle!
-    [this owner-fn-id value-fn-id]
-    (gc/validate-no-dependency-cycle! this owner-fn-id value-fn-id))
+    [this owner-fn-id ref-fn-id]
+    (gc/validate-no-dependency-cycle! this owner-fn-id ref-fn-id))
 
 
   sp/ExecutionGraph

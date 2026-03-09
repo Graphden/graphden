@@ -51,23 +51,23 @@
 
 ;; === Storage Sync ===
 
-(defn fn-schema-uuid
-  "Generates deterministic UUID for a base function's fn-schema.
+(defn fn-uuid
+  "Generates deterministic UUID for a base function.
    Uses UUID v5 (name-based) for reproducible IDs."
   [fn-name]
-  (core/fn-schema-uuid fn-name))
+  (core/fn-uuid fn-name))
 
 
-(defn arg-schema-uuid
-  "Generates deterministic UUID for a base function's arg-schema.
+(defn arg-uuid
+  "Generates deterministic UUID for a base function's arg.
    Uses UUID v5 (name-based) for reproducible IDs."
   [fn-name arg-name]
-  (core/arg-schema-uuid fn-name arg-name))
+  (core/arg-uuid fn-name arg-name))
 
 
 (defn sync-defs-to-storage!
   "Syncs function definitions to storage.
-   Creates fn-schema and arg-schema entries for each function.
+   Creates fn and arg entities for each base function.
    Uses deterministic UUIDs so syncing is idempotent.
 
    This should be called after storage is initialized with the graph schema.
@@ -77,8 +77,8 @@
    - defs: map of {fn-name -> fn-def} where fn-def has :args, :return-type
 
    Returns a map with counts:
-   {:fn-schemas {:created n :updated m}
-    :arg-schemas {:created n :updated m}}"
+   {:fns {:created n :updated m}
+    :args {:created n :updated m}}"
   [storage defs]
   (core/sync-defs-to-storage! storage defs))
 
@@ -100,16 +100,10 @@
    - storage: an initialized storage instance (memory, postgres, datomic, etc.)
 
    Returns the storage instance on success.
-   On error, closes the storage and re-throws the exception.
-
-   Example:
-     (-> (age/create-storage config)
-         (registry/initialize-with-base-fns!))"
+   On error, closes the storage and re-throws the exception."
   [storage]
   (try
-    ;; Register base functions in executor
     (register-base-fns! bf/all-defs)
-    ;; Sync base function schemas to storage
     (sync-defs-to-storage! storage bf/all-defs)
     storage
     (catch Exception e
@@ -122,19 +116,13 @@
 
    This function:
    1. Registers all base functions in the executor (for runtime lookup)
-   2. Syncs fn-schema and arg-schema to storage (for graph references)
+   2. Syncs fn and arg to storage (for graph references)
 
    Arguments:
    - storage: an initialized storage instance
    - def-sets: sequence of base-fn definition maps (each is {fn-name -> fn-def})
 
-   Returns the storage instance.
-
-   Example:
-     (initialize-all! storage
-       [bf/all-defs           ; arithmetic, strings
-        web-server/all-defs         ; http-kit, reitit
-        handlers/all-defs])         ; hello, health, router"
+   Returns the storage instance."
   [storage def-sets]
   (doseq [defs def-sets]
     (register-base-fns! defs)
@@ -149,14 +137,10 @@
    It wraps any storage creation function with base function initialization.
 
    Arguments:
-   - create-fn: a function that creates a storage instance (e.g., age/create-storage)
+   - create-fn: a function that creates a storage instance
    - args: arguments to pass to create-fn
 
-   Returns a storage instance with all base functions registered and synced.
-
-   Example:
-     (require '[graphden.storage.age.interface :as age])
-     (create-storage-with-base-fns age/create-storage {:jdbc-url \"...\"})"
+   Returns a storage instance with all base functions registered and synced."
   [create-fn & args]
   (-> (apply create-fn args)
       (initialize-with-base-fns!)))
@@ -165,9 +149,7 @@
 ;; === Macro Configuration ===
 
 (def ^:dynamic *custom-binding-forms*
-  "Set of additional binding forms to recognize in defbase macro.
-   Use this to register custom binding macros from libraries (e.g., core.async).
-   See graphden.executor.registry.macros/*custom-binding-forms* for details."
+  "Set of additional binding forms to recognize in defbase macro."
   macros/*custom-binding-forms*)
 
 

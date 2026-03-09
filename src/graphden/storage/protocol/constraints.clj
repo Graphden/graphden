@@ -39,7 +39,7 @@
 
    Arguments:
    - get-fn-dependencies-fn: function (fn [helpers fn-id] -> #{dep-fn-ids})
-     Returns immediate fn dependencies for a given fn-id.
+     Returns immediate fn dependencies for a given fn-id (via ref-id and parent-id).
    - helpers: ConstraintHelpers implementation
    - fn-id: starting fn UUID
 
@@ -69,48 +69,26 @@
 
 ;; === Shared constraint validation functions ===
 
-(defn validate-arg-schema-belongs-to-fn-impl
-  "Shared implementation of arg-schema-belongs-to-fn validation.
-
-   Arguments:
-   - get-fn-schema-id-for-fn-fn: function (fn [helpers fn-id] -> fn-schema-id)
-   - get-fn-schema-id-for-arg-schema-fn: function (fn [helpers arg-schema-id] -> fn-schema-id)
-   - helpers: ConstraintHelpers implementation
-   - fn-id: UUID of the fn that owns this arg-value
-   - arg-schema-id: UUID of the arg-schema"
-  [get-fn-schema-id-for-fn-fn get-fn-schema-id-for-arg-schema-fn helpers fn-id arg-schema-id]
-  (let [fn-schema-id (get-fn-schema-id-for-fn-fn helpers fn-id)
-        arg-fn-schema-id (get-fn-schema-id-for-arg-schema-fn helpers arg-schema-id)]
-    (when (and fn-schema-id arg-fn-schema-id
-               (not= fn-schema-id arg-fn-schema-id))
-      (throw (ex-info "Arg-schema does not belong to fn's schema"
-                      {:type :constraint-violation/arg-schema-mismatch
-                       :fn-id fn-id
-                       :arg-schema-id arg-schema-id
-                       :fn-schema-id fn-schema-id
-                       :arg-fn-schema-id arg-fn-schema-id})))))
-
-
 (defn validate-no-dependency-cycle-impl
   "Shared implementation of no-dependency-cycle validation.
 
    Arguments:
    - collect-dependency-chain-fn: function (fn [helpers fn-id] -> #{dep-fn-ids})
    - helpers: ConstraintHelpers implementation
-   - owner-fn-id: UUID of the fn that owns this arg-value
-   - value-fn-id: UUID of the fn being referenced as value"
-  [collect-dependency-chain-fn helpers owner-fn-id value-fn-id]
-  (when value-fn-id
+   - owner-fn-id: UUID of the fn that owns this arg
+   - ref-fn-id: UUID of the fn being referenced via ref-id"
+  [collect-dependency-chain-fn helpers owner-fn-id ref-fn-id]
+  (when ref-fn-id
     ;; Early check for self-reference (avoids expensive dependency chain query)
-    (when (= owner-fn-id value-fn-id)
+    (when (= owner-fn-id ref-fn-id)
       (throw (ex-info "Reference would create dependency cycle"
                       {:type :constraint-violation/dependency-cycle
                        :owner-fn-id owner-fn-id
-                       :value-fn-id value-fn-id})))
-    ;; Check if owner-fn-id is in the dependency chain of value-fn-id
-    (let [value-deps (collect-dependency-chain-fn helpers value-fn-id)]
-      (when (contains? value-deps owner-fn-id)
+                       :ref-fn-id ref-fn-id})))
+    ;; Check if owner-fn-id is in the dependency chain of ref-fn-id
+    (let [ref-deps (collect-dependency-chain-fn helpers ref-fn-id)]
+      (when (contains? ref-deps owner-fn-id)
         (throw (ex-info "Reference would create dependency cycle"
                         {:type :constraint-violation/dependency-cycle
                          :owner-fn-id owner-fn-id
-                         :value-fn-id value-fn-id}))))))
+                         :ref-fn-id ref-fn-id}))))))

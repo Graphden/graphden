@@ -5,6 +5,12 @@
    with any storage backend through the StorageCRUD protocol. Backends can
    keep optimized implementations as overrides.
 
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+
    Usage:
    ```clojure
    (require '[graphden.storage.protocol.generic-graph :as gg])
@@ -23,50 +29,11 @@
   (sp/read-entity storage :fn fn-id))
 
 
-(defn- load-fn-schema-record
-  "Loads a single fn-schema record by ID via StorageCRUD."
-  [storage fn-schema-id]
-  (sp/read-entity storage :fn-schema fn-schema-id))
-
-
-(defn- load-arg-schemas-for-fn-schema
-  "Loads all arg-schemas for a fn-schema via StorageCRUD.
-   Returns {arg-schema-id -> arg-schema-record}."
-  [storage fn-schema-id]
-  (let [arg-schemas (sp/query-entities storage :arg-schema {:fn-schema-id fn-schema-id})]
-    (into {} (map (juxt :id identity) arg-schemas))))
-
-
-(defn- load-arg-values-for-fn
-  "Loads all arg-values bound to a fn via fn-arg join.
-   Returns sequence of arg-value records."
+(defn- load-args-for-fn
+  "Loads all args for a fn via StorageCRUD.
+   Returns sequence of arg records."
   [storage fn-id]
-  (let [fn-args (sp/query-entities storage :fn-arg {:fn-id fn-id})
-        arg-value-ids (keep :arg-value-id fn-args)]
-    (if (empty? arg-value-ids)
-      []
-      (vals (sp/read-entities storage :arg-value (vec arg-value-ids))))))
-
-
-(defn- classify-uuid-refs
-  "Classifies UUIDs into fn-refs vs fn-usage-refs via StorageCRUD.
-   Returns {:fn-refs #{fn-ids} :fn-usages {fu-id -> fu-record}}.
-   fn-usage :fn-id values are also added to :fn-refs so the BFS
-   traverses through fn-usages to their target functions."
-  [storage uuid-refs]
-  (if (empty? uuid-refs)
-    {:fn-refs #{} :fn-usages {}}
-    (let [refs-vec (vec uuid-refs)
-          fn-results (sp/read-entities storage :fn refs-vec)
-          fn-ref-ids (set (keys fn-results))
-          remaining (remove fn-ref-ids refs-vec)
-          fn-usage-results (if (empty? remaining)
-                             {}
-                             (sp/read-entities storage :fn-usage (vec remaining)))
-          ;; Also visit the fn that each fn-usage points to
-          fn-usage-fn-ids (into #{} (keep :fn-id) (vals fn-usage-results))]
-      {:fn-refs (into fn-ref-ids fn-usage-fn-ids)
-       :fn-usages fn-usage-results})))
+  (sp/query-entities storage :arg {:fn-id fn-id}))
 
 
 (defn resolve-execution-graph
@@ -84,8 +51,5 @@
                      :fn-id fn-id})))
   (graph/resolve-execution-graph-bfs
     (partial load-fn-record storage)
-    (partial load-fn-schema-record storage)
-    (partial load-arg-schemas-for-fn-schema storage)
-    (partial load-arg-values-for-fn storage)
-    (partial classify-uuid-refs storage)
+    (partial load-args-for-fn storage)
     fn-id))

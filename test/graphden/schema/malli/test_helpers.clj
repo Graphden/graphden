@@ -1,5 +1,11 @@
 (ns graphden.schema.malli.test-helpers
-  "Test helpers and example schema for malli-data-schema tests."
+  "Test helpers and example schema for malli-data-schema tests.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]))
@@ -12,21 +18,20 @@
 
 
 (def example-schema
-  "Example schema representing a function definition system.
-   Based on the following structure:
+  "Example schema representing a function composition system.
+   Uses the 2-entity model:
 
-   Enum value_kind {null, bool, int, numeric, text, uuid, timestamptz, jsonb, bytes}
+   Enum value_kind {null, bool, int, numeric, text, uuid, timestamptz, jsonb, bytes, any, fn}
 
-   Table fn_schema {id, name, returned_type}
-   Table arg_schema {id, fn_schema_id, name, type}
-   Table fn {id, name, fn_schema_id}
-   Table arg_value {id, owner_fn_id, arg_schema_id, value}
+   Table fn {id, name, parent-id, return-type, impl-hash}
+   Table arg {id, fn-id, name, type, source-id, value, ref-id, is-fn, required}
 
-   The value field is a union type - it can be either a reference to another
-   function (for composition) or a literal value of any supported type."
+   - fn: parent-id=nil for base-fn, parent-id=ref to parent fn for composed fn
+   - arg: fn-id = owner fn, source-id = parent arg for inheritance,
+          value = literal, ref-id = fn reference, is-fn = HOF flag"
   (-> (mds/create-builder)
 
-      ;; Define the value_kind enum
+      ;; Define the value_kind enum (includes :any and :fn)
       (ds/add-enum :value-kind (uuid)
                    [{:uuid (uuid) :value :null}
                     {:uuid (uuid) :value :bool}
@@ -36,38 +41,27 @@
                     {:uuid (uuid) :value :uuid}
                     {:uuid (uuid) :value :timestamptz}
                     {:uuid (uuid) :value :jsonb}
-                    {:uuid (uuid) :value :bytes}])
+                    {:uuid (uuid) :value :bytes}
+                    {:uuid (uuid) :value :any}
+                    {:uuid (uuid) :value :fn}])
 
-      ;; fn_schema: defines function signatures
-      (ds/add-entity :fn-schema (uuid)
-                     {:name {:uuid (uuid) :type :text}
-                      :returned-type {:uuid (uuid) :type :enum :enum-name :value-kind}})
-      (ds/add-constraint :fn-schema {:type :unique :fields [:name]})
-
-      ;; arg_schema: defines function arguments
-      (ds/add-entity :arg-schema (uuid)
-                     {:fn-schema-id {:uuid (uuid) :type :ref :ref-entity :fn-schema}
-                      :name {:uuid (uuid) :type :text}
-                      :type {:uuid (uuid) :type :enum :enum-name :value-kind}})
-
-      ;; fn: actual function instances
+      ;; fn: function entity with parent-id for composition
       (ds/add-entity :fn (uuid)
                      {:name {:uuid (uuid) :type :text}
-                      :fn-schema-id {:uuid (uuid) :type :ref :ref-entity :fn-schema}})
+                      :parent-id {:uuid (uuid) :type :ref :ref-entity :fn :nullable? true}
+                      :return-type {:uuid (uuid) :type :enum :enum-name :value-kind :nullable? true}
+                      :impl-hash {:uuid (uuid) :type :text :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})
 
-      ;; fn-usage: tracks specific call sites of functions
-      (ds/add-entity :fn-usage (uuid)
+      ;; arg: argument entity with all data fields
+      (ds/add-entity :arg (uuid)
                      {:fn-id {:uuid (uuid) :type :ref :ref-entity :fn}
-                      :name {:uuid (uuid) :type :text}})
-
-      ;; arg_value: argument values for function instances
-      ;; Uses separate FK fields instead of union type:
-      ;; - value: nullable JSONB for literal values
-      ;; - fn-usage-id: nullable FK to fn-usage (behavior depends on arg-schema.first-class)
-      (ds/add-entity :arg-value (uuid)
-                     {:arg-schema-id {:uuid (uuid) :type :ref :ref-entity :arg-schema}
+                      :name {:uuid (uuid) :type :text}
+                      :type {:uuid (uuid) :type :enum :enum-name :value-kind :nullable? true}
+                      :source-id {:uuid (uuid) :type :ref :ref-entity :arg :nullable? true}
                       :value {:uuid (uuid) :type :jsonb :nullable? true}
-                      :fn-usage-id {:uuid (uuid) :type :ref :ref-entity :fn-usage :nullable? true}})
+                      :ref-id {:uuid (uuid) :type :ref :ref-entity :fn :nullable? true}
+                      :is-fn {:uuid (uuid) :type :bool :nullable? true}
+                      :required {:uuid (uuid) :type :bool :nullable? true}})
 
       (ds/build)))

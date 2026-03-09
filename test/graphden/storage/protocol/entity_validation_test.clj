@@ -11,8 +11,8 @@
 (deftest validate-entity-name-test
   (testing "valid entity names pass validation"
     (is (nil? (storage/validate-entity-name! :user "test")))
-    (is (nil? (storage/validate-entity-name! :fn-schema "test")))
-    (is (nil? (storage/validate-entity-name! :arg-value "test")))
+    (is (nil? (storage/validate-entity-name! :fn "test")))
+    (is (nil? (storage/validate-entity-name! :arg "test")))
     (is (nil? (storage/validate-entity-name! :my-entity-123 "test")))
     (is (nil? (storage/validate-entity-name! :a "test"))))
 

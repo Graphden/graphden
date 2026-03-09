@@ -4,7 +4,13 @@
    Covers:
    - execute-with-named-args tests
    - execute-by-name tests
-   - Fn-usage-args tests"
+   - Fn-usage-args tests
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -25,67 +31,95 @@
 (deftest execute-with-named-args-test
   (testing "executes with named args mapped to schema ids for free args"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec]} (setup/setup-add-function! storage)
-          ;; No arg-values in DB - both args are free
+          {:keys [fn]} (setup/setup-add-function! storage)
+          ;; Create composed fn with no args - both args are free
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
           ctx (exec/create-context {:storage storage})]
       ;; Provide both free args by name
-      (is (= 30 (exec/execute-with-named-args ctx (:id fn-rec) {:a 10 :b 20})))
+      (is (= 30 (exec/execute-with-named-args ctx (:id composed-fn) {:a 10 :b 20})))
       (sp/close storage)))
 
   (testing "executes with named args - partial free args"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a]} (setup/setup-add-function! storage)
-          ;; Only arg-a in DB, arg-b is free
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 100)
+          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
+          ;; Create composed fn with both args: :a bound, :b free
+          composed-fn (setup/create-composed-fn! storage "partial-add" (:id fn))
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 100})
+          ;; Create free arg :b (no value, will be provided via named-args)
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b)})
           ctx (exec/create-context {:storage storage})]
       ;; Provide free arg-b by name (arg-a from DB)
-      (is (= 102 (exec/execute-with-named-args ctx (:id fn-rec) {:b 2})))
+      (is (= 102 (exec/execute-with-named-args ctx (:id composed-fn) {:b 2})))
       (sp/close storage)))
 
   (testing "executes with nil named-args (uses defaults)"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 5)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 7)
+          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 5})
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b) :value 7})
           ctx (exec/create-context {:storage storage})]
-      (is (= 12 (exec/execute-with-named-args ctx (:id fn-rec) nil)))
+      (is (= 12 (exec/execute-with-named-args ctx (:id composed-fn) nil)))
       (sp/close storage)))
 
   (testing "executes with empty named-args map (uses defaults)"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 3)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 4)
+          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 3})
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b) :value 4})
           ctx (exec/create-context {:storage storage})]
-      (is (= 7 (exec/execute-with-named-args ctx (:id fn-rec) {})))
+      (is (= 7 (exec/execute-with-named-args ctx (:id composed-fn) {})))
       (sp/close storage)))
 
   (testing "throws on invalid named-args type"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
+          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 1})
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b) :value 2})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"named-args must be nil or a map"
-            (exec/execute-with-named-args ctx (:id fn-rec) "not a map")))
+            (exec/execute-with-named-args ctx (:id composed-fn) "not a map")))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"named-args must be nil or a map"
-            (exec/execute-with-named-args ctx (:id fn-rec) [:a :b])))
+            (exec/execute-with-named-args ctx (:id composed-fn) [:a :b])))
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"named-args must be nil or a map"
-            (exec/execute-with-named-args ctx (:id fn-rec) 123)))
+            (exec/execute-with-named-args ctx (:id composed-fn) 123)))
       (sp/close storage)))
 
   (testing "throws on unknown arg name"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 1)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 2)
+          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 1})
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b) :value 2})
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown argument name"
-            (exec/execute-with-named-args ctx (:id fn-rec) {:unknown-arg 42})))
+            (exec/execute-with-named-args ctx (:id composed-fn) {:unknown-arg 42})))
       (sp/close storage))))
 
 
@@ -94,19 +128,26 @@
 (deftest execute-by-name-test
   (testing "executes function by name"
     (let [storage (setup/create-test-storage)
-          {:keys [fn-rec arg-a arg-b]} (setup/setup-add-function! storage)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-a) 10)
-          _ (setup/create-arg-value-with-binding! storage (:id fn-rec) (:id arg-b) 20)
+          {:keys [fn arg-a arg-b]} (setup/setup-add-function! storage)
+          composed-fn (setup/create-composed-fn! storage "my-add" (:id fn))
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 10})
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b) :value 20})
           ctx (exec/create-context {:storage storage})]
-      ;; Note: the fn entity is named "my-add", not "add"
+      ;; Note: the fn entity is named "my-add"
       (is (= 30 (exec/execute-by-name ctx "my-add" nil)))
       (sp/close storage)))
 
   (testing "executes function by name with named args"
     (let [storage (setup/create-test-storage)
-          _ (setup/setup-add-function! storage)
+          {:keys [fn]} (setup/setup-add-function! storage)
+          ;; Create composed fn with no args (free args)
+          _ (setup/create-composed-fn! storage "my-add" (:id fn))
           ctx (exec/create-context {:storage storage})]
-      ;; Note: the fn entity is named "my-add", not "add"
+      ;; Note: the fn entity is named "my-add"
       (is (= 15 (exec/execute-by-name ctx "my-add" {:a 5 :b 10})))
       (sp/close storage)))
 
@@ -196,42 +237,28 @@
                 (let [v @item]
                   (swap! call-args conj v)
                   v)))
-          ;; Create my-map fn-schema
-          map-schema (sp/create-entity storage :fn-schema
-                                       {:name "my-map"
-                                        :returned-type :jsonb})
-          _map-arg-f (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id map-schema)
-                                        :name "f"
-                                        :type :fn  ; HOF!
-                                        :required true :first-class true})  ; first-class=true for HOF
-          map-arg-coll (sp/create-entity storage :arg-schema
-                                         {:fn-schema-id (:id map-schema)
-                                          :name "coll"
-                                          :type :jsonb
-                                          :required true :first-class false})
-          ;; Create recorder fn-schema with exactly 1 required arg
-          rec-schema (sp/create-entity storage :fn-schema
-                                       {:name "recorder"
-                                        :returned-type :int})
-          _rec-arg-item (sp/create-entity storage :arg-schema
-                                          {:fn-schema-id (:id rec-schema)
-                                           :name "item"
-                                           :type :int
-                                           :required true :first-class false})
-          ;; Create recorder fn instance
-          rec-fn (sp/create-entity storage :fn
-                                   {:name "rec-fn"
-                                    :fn-schema-id (:id rec-schema)})
+          ;; Create my-map base fn
+          map-base (setup/create-base-fn! storage "my-map" :jsonb)
+          map-arg-f (setup/create-arg! storage (:id map-base)
+                                       {:name "f" :type :fn :required true :is-fn true})
+          map-arg-coll (setup/create-arg! storage (:id map-base)
+                                          {:name "coll" :type :jsonb :required true :is-fn false})
+          ;; Create recorder base fn with exactly 1 required arg
+          rec-base (setup/create-base-fn! storage "recorder" :int)
+          _rec-arg-item (setup/create-arg! storage (:id rec-base)
+                                           {:name "item" :type :int :required true :is-fn false})
+          ;; Create recorder fn instance (no args - item is free for HOF)
+          rec-fn (setup/create-composed-fn! storage "rec-fn" (:id rec-base))
           ;; Create my-map fn instance
-          map-fn (sp/create-entity storage :fn
-                                   {:name "map-fn"
-                                    :fn-schema-id (:id map-schema)})
-          ;; map-fn's f -> rec-fn via fn-usage (first-class=true passes fn-id)
-          rec-fn-usage-id (setup/create-fn-usage! storage (:id rec-fn) "rec-fn-ref")
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id map-fn) (:id _map-arg-f) rec-fn-usage-id)
+          map-fn (setup/create-composed-fn! storage "map-fn" (:id map-base))
+          ;; map-fn's f -> rec-fn via ref-id (is-fn=true passes fn-id)
+          _ (setup/create-arg! storage (:id map-fn)
+                               {:name "f" :type :fn :required true :is-fn true
+                                :source-id (:id map-arg-f) :ref-id (:id rec-fn)})
           ;; map-fn's coll -> [1 2 3]
-          _ (setup/create-arg-value-with-binding! storage (:id map-fn) (:id map-arg-coll) [1 2 3])
+          _ (setup/create-arg! storage (:id map-fn)
+                               {:name "coll" :type :jsonb :required true :is-fn false
+                                :source-id (:id map-arg-coll) :value [1 2 3]})
           ctx (exec/create-context {:storage storage})]
       ;; Execute - should map recorder over [1 2 3]
       (is (= [1 2 3] (exec/execute ctx (:id map-fn) nil)))

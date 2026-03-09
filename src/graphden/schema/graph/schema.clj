@@ -1,45 +1,29 @@
 (ns graphden.schema.graph.schema
-  "Graph data schema definition.
+  "Graph data schema - minimal 2-entity model for function composition.
 
-   Defines the schema for a function composition graph:
-   - fn-schema: function signatures (name, return type)
-   - arg-schema: argument definitions for functions
-   - fn: actual function instances (with optional owner-fn-id for local scoping)
-   - arg-value: argument values (literals or references) - pure values, no owner
-   - fn-arg: binding from fn to arg-value
-   - fn-usage: usage of a function at a computation point"
+   Two entities:
+   - fn: function (base or composed)
+   - arg: argument (primary or inherited)
+
+   Design principles:
+   - fn without parent-id = base-fn (Clojure implementation)
+   - fn with parent-id = composed fn (inherits behavior)
+   - fn with name=nil = local fn (scoped, not globally visible)
+   - arg without source-id = primary argument (defines interface)
+   - arg with source-id = inherited/forwarded argument
+   - arg with value/ref-id both nil = exposed (part of fn interface)
+   - Inheritance: nil fields inherit from source/parent
+   - Strict wins: required=true, is-fn=true propagate up inheritance chain"
   (:require
     [graphden.schema.fields.types :as ft]
     [graphden.schema.protocol.protocol :as ds]))
 
-
-;; === Stable UUIDs for schema elements ===
-;;
-;; Each schema element (entity, field, enum, enum value) has a stable UUID that
-;; serves as its immutable identity. This enables:
-;;
-;; 1. RENAME DETECTION: When you rename :fn-schema to :function-schema, the storage
-;;    layer sees the same UUID with a different name -> triggers ALTER TABLE RENAME
-;;    instead of DROP + CREATE.
-;;
-;; 2. SAFE MIGRATIONS: Data is never lost during schema evolution because storage
-;;    tracks elements by UUID, not by name.
-;;
-;; 3. CROSS-STORAGE CONSISTENCY: All storage backends (memory, postgres, datomic)
-;;    use the same UUIDs, ensuring schema compatibility.
-;;
-;; Generation: Each UUID below was generated once using (random-uuid) and is now
-;; fixed forever in code. They are RFC 4122 v4 (random) UUIDs.
-;;
-;; IMPORTANT: Never change these UUIDs! Changing a UUID is equivalent to deleting
-;; the old element and creating a new one, which will cause data loss.
 
 ;; Enum UUIDs
 (def ^:private value-kind-enum-uuid
   #uuid "b79e6e8b-8aff-4188-862b-d8a85ef4fcdf")
 
 
-;; Enum value UUIDs for :value-kind
 (def ^:private value-kind-values
   {:null        #uuid "c703ffd9-6401-4c49-9ca3-a280f6aac8ba"
    :uuid        #uuid "3a83af1b-f15c-421d-a5f1-f13db07deb72"
@@ -55,135 +39,69 @@
 
 
 ;; Entity UUIDs
-(def ^:private fn-schema-entity-uuid
-  #uuid "dc2df695-6167-4add-9e75-022213c96537")
-
-
-(def ^:private arg-schema-entity-uuid
-  #uuid "946c1f9c-30ce-4fab-98ed-dd9a26f6676b")
-
-
 (def ^:private fn-entity-uuid
-  #uuid "986e8a2a-39ba-41ae-8449-d06c31515486")
+  #uuid "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d")
 
 
-(def ^:private arg-value-entity-uuid
-  #uuid "afb02fb7-0174-496b-9b21-a61063de0c04")
+(def ^:private arg-entity-uuid
+  #uuid "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e")
 
 
-(def ^:private fn-arg-entity-uuid
-  #uuid "f1a2b3c4-d5e6-7f8a-9b0c-1d2e3f4a5b6c")
-
-
-;; fn-usage - same UUID enables rename migration
-(def ^:private fn-usage-entity-uuid
-  #uuid "d4f8a2b1-7c3e-4d9f-a5b6-8e1c2f3d4a5b")
-
-
-;; Field UUIDs for :fn-schema entity
-(def ^:private fn-schema-name-field-uuid
-  #uuid "abe8475e-9130-4647-a2bf-be0cb07099b7")
-
-
-(def ^:private fn-schema-returned-type-field-uuid
-  #uuid "5ea6c13d-553c-4d85-8511-38ae88f7f9e5")
-
-
-(def ^:private fn-schema-base-fn-name-field-uuid
-  #uuid "8f3d2e1c-4a5b-6c7d-8e9f-0a1b2c3d4e5f")
-
-
-(def ^:private fn-schema-impl-hash-field-uuid
-  "Hash of base function implementation for version tracking.
-   Only set for base functions (when base-fn-name is non-nil)."
-  #uuid "e2f3a4b5-c6d7-8e9f-0a1b-2c3d4e5f6a7b")
-
-
-;; Field UUIDs for :arg-schema entity
-(def ^:private arg-schema-fn-schema-id-field-uuid
-  #uuid "c100ed37-f3d8-4a93-becc-17ae2b91f64a")
-
-
-(def ^:private arg-schema-name-field-uuid
-  #uuid "e68c993e-7840-4541-b55f-cf4b08ba3de7")
-
-
-(def ^:private arg-schema-type-field-uuid
-  #uuid "be65f37b-4758-49da-9091-37dee0e28ad1")
-
-
-(def ^:private arg-schema-required-field-uuid
-  #uuid "a1d4e8c2-5f67-4b3a-9c12-8e0f7d6b5a4c")
-
-
-(def ^:private arg-schema-first-class-field-uuid
-  "Indicates if arg is passed as first-class fn (HOF) vs computed value."
-  #uuid "b2e5f9d3-6a78-4c1b-9d23-9f1e8c7a6b5d")
-
-
-;; Field UUIDs for :fn entity
+;; Field UUIDs for :fn
 (def ^:private fn-name-field-uuid
-  #uuid "af336498-6d1e-4879-b2a5-b0d6c1994d12")
+  #uuid "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f")
 
 
-(def ^:private fn-fn-schema-id-field-uuid
-  #uuid "3a685253-07f7-4469-be8b-1a585ba3e7d4")
+(def ^:private fn-parent-id-field-uuid
+  #uuid "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a")
 
 
-(def ^:private fn-owner-fn-id-field-uuid
-  "Owner fn for local scoping. NULL = global fn, set = local fn."
-  #uuid "c3f6a0e4-7b89-4d2c-ae34-0a2b1c8d9e7f")
+(def ^:private fn-return-type-field-uuid
+  #uuid "e5f6a7b8-c9d0-4e1f-2a3b-4c5d6e7f8a9b")
 
 
-;; Field UUIDs for :arg-value entity (no owner - pure value)
-(def ^:private arg-value-arg-schema-id-field-uuid
-  #uuid "834336b1-b55c-4557-b580-a62799deb729")
+(def ^:private fn-impl-hash-field-uuid
+  #uuid "f6a7b8c9-d0e1-4f2a-3b4c-5d6e7f8a9b0c")
 
 
-(def ^:private arg-value-value-field-uuid
-  "Literal value (JSONB). Nullable - set when arg is a literal, NULL when it's a reference."
-  #uuid "b6780ba3-d050-4162-aba8-5f68ac17bcb8")
+;; Field UUIDs for :arg
+(def ^:private arg-fn-id-field-uuid
+  #uuid "a7b8c9d0-e1f2-4a3b-4c5d-6e7f8a9b0c1d")
 
 
-(def ^:private arg-value-fn-usage-id-field-uuid
-  "FK to fn-usage. Set when arg references a fn-usage.
-   Behavior depends on arg-schema.first-class flag:
-   - first-class=false: execute fn-usage and use result
-   - first-class=true: pass fn-id directly (for HOF)"
-  #uuid "c7891ca4-e161-5273-cba9-6f79bd28cdc9")
+(def ^:private arg-via-fn-id-field-uuid
+  #uuid "b8c9d0e1-f2a3-4b4c-5d6e-7f8a9b0c1d2e")
 
 
-;; Field UUIDs for :fn-arg entity (binding: fn → arg-value)
-(def ^:private fn-arg-fn-id-field-uuid
-  #uuid "e1f2a3b4-c5d6-7e8f-9a0b-1c2d3e4f5a6b")
+(def ^:private arg-source-id-field-uuid
+  #uuid "c9d0e1f2-a3b4-4c5d-6e7f-8a9b0c1d2e3f")
 
 
-(def ^:private fn-arg-arg-schema-id-field-uuid
-  #uuid "f2a3b4c5-d6e7-8f9a-0b1c-2d3e4f5a6b7c")
+(def ^:private arg-value-field-uuid
+  #uuid "d0e1f2a3-b4c5-4d6e-7f8a-9b0c1d2e3f4a")
 
 
-(def ^:private fn-arg-arg-value-id-field-uuid
-  #uuid "a3b4c5d6-e7f8-9a0b-1c2d-3e4f5a6b7c8d")
+(def ^:private arg-ref-id-field-uuid
+  #uuid "e1f2a3b4-c5d6-4e7f-8a9b-0c1d2e3f4a5b")
 
 
-;; Field UUIDs for :fn-usage entity
-;; Keeping same UUIDs enables field rename migration
-(def ^:private fn-usage-fn-id-field-uuid
-  #uuid "e5a9b3c2-8d4f-5e0a-b6c7-9f2d3e4a5b6c")
+(def ^:private arg-name-field-uuid
+  #uuid "f2a3b4c5-d6e7-4f8a-9b0c-1d2e3f4a5b6c")
 
 
-(def ^:private fn-usage-name-field-uuid
-  #uuid "da238d29-4cd4-4077-9a75-3ad3436b7466")
+(def ^:private arg-type-field-uuid
+  #uuid "a3b4c5d6-e7f8-4a9b-0c1d-2e3f4a5b6c7d")
 
 
-(def ^:private fn-usage-owner-fn-id-field-uuid
-  "Owner fn for local scoping. NULL = global usage, set = local usage."
-  #uuid "d4a7b1e5-8c90-4f3d-bf45-1b3c2d9e0f8a")
+(def ^:private arg-required-field-uuid
+  #uuid "b4c5d6e7-f8a9-4b0c-1d2e-3f4a5b6c7d8e")
+
+
+(def ^:private arg-is-fn-field-uuid
+  #uuid "c5d6e7f8-a9b0-4c1d-2e3f-4a5b6c7d8e9f")
 
 
 (defn- value-kind-enum-values
-  "Generates enum values for :value-kind.
-   Includes :null (void), :any, :fn plus all supported field types."
   []
   (into [{:uuid (get value-kind-values :null) :value :null}
          {:uuid (get value-kind-values :any) :value :any}
@@ -193,104 +111,75 @@
 
 
 (defn extend-builder
-  "Extends a builder with graph data schema entities without finalizing.
-   Returns the builder (not a built schema) for further extension.
-
-   Use this when you need to add more entities on top of graph schema,
-   e.g., for cache-data-schema."
+  "Extends a builder with graph schema entities."
   [builder]
   (-> builder
-      ;; Define the value_kind enum: null (void) + all supported types
       (ds/add-enum :value-kind value-kind-enum-uuid (value-kind-enum-values))
 
-      ;; fn_schema: defines function signatures
-      ;; base-fn-name links to Clojure impl (nil for user-defined composite fns)
-      ;; impl-hash is SHA-256 hash of implementation (for base fns only)
-      (ds/add-entity :fn-schema fn-schema-entity-uuid
-                     {:name {:uuid fn-schema-name-field-uuid :type :text}
-                      :returned-type {:uuid fn-schema-returned-type-field-uuid
-                                      :type :enum :enum-name :value-kind}
-                      :base-fn-name {:uuid fn-schema-base-fn-name-field-uuid
-                                     :type :text
-                                     :nullable? true}
-                      :impl-hash {:uuid fn-schema-impl-hash-field-uuid
+      ;; fn: function entity
+      ;; parent-id=nil → base-fn, has Clojure implementation
+      ;; parent-id set → composed fn, inherits from parent
+      ;; name=nil → local fn (scoped, not globally visible)
+      (ds/add-entity :fn fn-entity-uuid
+                     {:name {:uuid fn-name-field-uuid
+                             :type :text
+                             :nullable? true}
+                      :parent-id {:uuid fn-parent-id-field-uuid
+                                  :type :ref
+                                  :ref-entity :fn
+                                  :nullable? true}
+                      :return-type {:uuid fn-return-type-field-uuid
+                                    :type :enum
+                                    :enum-name :value-kind
+                                    :nullable? true}
+                      :impl-hash {:uuid fn-impl-hash-field-uuid
                                   :type :text
                                   :nullable? true}})
-      (ds/add-constraint :fn-schema {:type :unique :fields [:name]})
+      (ds/add-constraint :fn {:type :unique :fields [:name]})
 
-      ;; arg_schema: defines function arguments
-      ;; required defaults to true in business logic (not enforced at schema level)
-      ;; first-class: true = pass fn as value (HOF), false = execute and use result
-      (ds/add-entity :arg-schema arg-schema-entity-uuid
-                     {:fn-schema-id {:uuid arg-schema-fn-schema-id-field-uuid
-                                     :type :ref :ref-entity :fn-schema}
-                      :name {:uuid arg-schema-name-field-uuid :type :text}
-                      :type {:uuid arg-schema-type-field-uuid
-                             :type :enum :enum-name :value-kind}
-                      :required {:uuid arg-schema-required-field-uuid :type :bool}
-                      :first-class {:uuid arg-schema-first-class-field-uuid :type :bool}})
-      (ds/add-constraint :arg-schema {:type :unique :fields [:fn-schema-id :name]})
-
-      ;; fn: actual function instances
-      ;; owner-fn-id: NULL = global fn (shown in search), set = local fn (scoped to owner)
-      (ds/add-entity :fn fn-entity-uuid
-                     {:name {:uuid fn-name-field-uuid :type :text}
-                      :fn-schema-id {:uuid fn-fn-schema-id-field-uuid
-                                     :type :ref :ref-entity :fn-schema}
-                      :owner-fn-id {:uuid fn-owner-fn-id-field-uuid
-                                    :type :ref :ref-entity :fn
-                                    :nullable? true}})
-      (ds/add-constraint :fn {:type :unique :fields [:owner-fn-id :name]})
-
-      ;; fn_usage: usage of a function at a computation point
-      ;; Multiple arg-values can reference the same fn-usage to reuse computed value
-      ;; owner-fn-id: NULL = global usage, set = local usage (scoped to owner fn)
-      ;; NOTE: Must be defined BEFORE arg-value because arg-value references fn-usage
-      (ds/add-entity :fn-usage fn-usage-entity-uuid
-                     {:fn-id {:uuid fn-usage-fn-id-field-uuid
-                              :type :ref :ref-entity :fn}
-                      :name {:uuid fn-usage-name-field-uuid
-                             :type :text}
-                      :owner-fn-id {:uuid fn-usage-owner-fn-id-field-uuid
-                                    :type :ref :ref-entity :fn
-                                    :nullable? true}})
-      (ds/add-constraint :fn-usage {:type :unique :fields [:owner-fn-id :name]})
-
-      ;; arg_value: pure argument values (no owner)
-      ;; Exactly ONE of (value, fn-usage-id) must be set:
-      ;; - value: literal JSONB value
-      ;; - fn-usage-id: ref to fn-usage (behavior depends on arg-schema.first-class)
-      ;;   * first-class=false: execute fn-usage and use result
-      ;;   * first-class=true: pass fn-id directly (for HOF)
-      ;; XOR constraint enforced at DB level via CHECK constraint.
-      ;; Deduplication: query by the non-null field + arg-schema-id
-      (ds/add-entity :arg-value arg-value-entity-uuid
-                     {:arg-schema-id {:uuid arg-value-arg-schema-id-field-uuid
-                                      :type :ref :ref-entity :arg-schema}
-                      :value {:uuid arg-value-value-field-uuid
+      ;; arg: argument entity
+      ;; source-id=nil → primary argument (defines interface)
+      ;; source-id set → inherited/forwarded argument
+      ;; via-fn-id → through which nested fn (for forwarding from inner fns)
+      ;; value=nil AND ref-id=nil → exposed (part of fn interface)
+      (ds/add-entity :arg arg-entity-uuid
+                     {:fn-id {:uuid arg-fn-id-field-uuid
+                              :type :ref
+                              :ref-entity :fn}
+                      :via-fn-id {:uuid arg-via-fn-id-field-uuid
+                                  :type :ref
+                                  :ref-entity :fn
+                                  :nullable? true}
+                      :source-id {:uuid arg-source-id-field-uuid
+                                  :type :ref
+                                  :ref-entity :arg
+                                  :nullable? true}
+                      :value {:uuid arg-value-field-uuid
                               :type :jsonb
                               :nullable? true}
-                      :fn-usage-id {:uuid arg-value-fn-usage-id-field-uuid
-                                    :type :ref :ref-entity :fn-usage
-                                    :nullable? true}})
-      ;; Note: Full deduplication requires partial unique indexes in PostgreSQL.
-      ;; For now, application code handles deduplication by querying with the set field.
-
-      ;; fn_arg: binding from fn to arg-value
-      ;; arg-schema-id denormalized for UNIQUE constraint
-      (ds/add-entity :fn-arg fn-arg-entity-uuid
-                     {:fn-id {:uuid fn-arg-fn-id-field-uuid
-                              :type :ref :ref-entity :fn}
-                      :arg-schema-id {:uuid fn-arg-arg-schema-id-field-uuid
-                                      :type :ref :ref-entity :arg-schema}
-                      :arg-value-id {:uuid fn-arg-arg-value-id-field-uuid
-                                     :type :ref :ref-entity :arg-value}})
-      (ds/add-constraint :fn-arg {:type :unique :fields [:fn-id :arg-schema-id]})))
+                      :ref-id {:uuid arg-ref-id-field-uuid
+                               :type :ref
+                               :ref-entity :fn
+                               :nullable? true}
+                      :name {:uuid arg-name-field-uuid
+                             :type :text
+                             :nullable? true}
+                      :type {:uuid arg-type-field-uuid
+                             :type :enum
+                             :enum-name :value-kind
+                             :nullable? true}
+                      :required {:uuid arg-required-field-uuid
+                                 :type :bool
+                                 :nullable? true}
+                      :is-fn {:uuid arg-is-fn-field-uuid
+                              :type :bool
+                              :nullable? true}})
+      (ds/add-constraint :arg {:type :unique :fields [:fn-id :source-id]})
+      (ds/add-constraint :arg {:type :unique :fields [:fn-id :name]})))
 
 
 (defn build-schema
-  "Builds the graph data schema using the provided builder.
-   Returns a built DataSchema instance."
+  "Builds the graph data schema."
   [builder]
   (-> builder
       (extend-builder)

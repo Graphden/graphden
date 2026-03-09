@@ -1,5 +1,11 @@
 (ns ^:integration graphden.library.base-fns.core.storage-sync-test
-  "Tests for syncing base functions to storage."
+  "Tests for syncing base functions to storage.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -36,30 +42,29 @@
 
 
 (deftest sync-to-storage-test
-  (testing "sync-storage! creates fn-schemas and arg-schemas"
+  (testing "sync-storage! creates base fns (parent-id=nil) and their args"
     (let [storage (create-test-storage)]
       (try
         ;; First sync - should create all
         (let [result (h/sync-storage! storage)]
-          (is (pos? (:created (:fn-schemas result))))
-          (is (zero? (:updated (:fn-schemas result))))
-          (is (pos? (:created (:arg-schemas result))))
-          (is (zero? (:updated (:arg-schemas result)))))
+          (is (pos? (:created (:fns result))))
+          (is (zero? (:updated (:fns result))))
+          (is (pos? (:created (:args result))))
+          (is (zero? (:updated (:args result)))))
 
-        ;; Verify some fn-schemas exist
-        (let [all-schemas (sp/query-entities storage :fn-schema {})]
-          (is (pos? (count all-schemas)))
-          ;; Check :add fn-schema exists
-          (is (some #(= "add" (:name %)) all-schemas))
-          ;; Check it has base-fn-name set
-          (is (some #(= "add" (:base-fn-name %)) all-schemas)))
+        ;; Verify some base fns exist (parent-id=nil)
+        (let [all-fns (sp/query-entities storage :fn {})]
+          (is (pos? (count all-fns)))
+          ;; Check :add fn exists with parent-id=nil (base fn)
+          (is (some #(and (= "add" (:name %))
+                          (nil? (:parent-id %))) all-fns)))
 
-        ;; Verify arg-schemas exist
-        (let [all-args (sp/query-entities storage :arg-schema {})]
+        ;; Verify args exist for base fns
+        (let [all-args (sp/query-entities storage :arg {})]
           (is (pos? (count all-args)))
-          ;; Find :add's fn-schema
-          (let [add-schema (first (sp/query-entities storage :fn-schema {:name "add"}))
-                add-args (sp/query-entities storage :arg-schema {:fn-schema-id (:id add-schema)})]
+          ;; Find :add fn
+          (let [add-fn (first (sp/query-entities storage :fn {:name "add"}))
+                add-args (sp/query-entities storage :arg {:fn-id (:id add-fn)})]
             (is (= 1 (count add-args)))
             (is (= #{"nums"} (set (map :name add-args))))))
         (finally
@@ -70,16 +75,16 @@
       (try
         ;; First sync
         (h/sync-storage! storage)
-        (let [schemas-after-first (sp/query-entities storage :fn-schema {})]
+        (let [fns-after-first (sp/query-entities storage :fn {})]
           ;; Second sync - should update, not create
           (let [result (h/sync-storage! storage)]
-            (is (zero? (:created (:fn-schemas result))))
-            (is (pos? (:updated (:fn-schemas result))))
-            (is (zero? (:created (:arg-schemas result))))
-            (is (pos? (:updated (:arg-schemas result)))))
-          ;; Same count of schemas
-          (is (= (count schemas-after-first)
-                 (count (sp/query-entities storage :fn-schema {})))))
+            (is (zero? (:created (:fns result))))
+            (is (pos? (:updated (:fns result))))
+            (is (zero? (:created (:args result))))
+            (is (pos? (:updated (:args result)))))
+          ;; Same count of fns
+          (is (= (count fns-after-first)
+                 (count (sp/query-entities storage :fn {})))))
         (finally
           (sp/close storage)))))
 

@@ -11,8 +11,8 @@
    (require '[graphden.storage.protocol.generic-constraints :as gc])
 
    sp/GraphConstraints
-   (validate-arg-schema-belongs-to-fn! [this fn-id arg-schema-id]
-     (gc/validate-arg-schema-belongs-to-fn! this fn-id arg-schema-id))
+   (validate-no-dependency-cycle! [this owner-fn-id ref-fn-id]
+     (gc/validate-no-dependency-cycle! this owner-fn-id ref-fn-id))
    ```"
   (:require
     [graphden.storage.protocol.constraints :as constraints]
@@ -24,51 +24,38 @@
 
   sp/ConstraintHelpers
 
-  (get-fn-schema-id-for-fn
-    [_this fn-id]
-    (:fn-schema-id (sp/read-entity storage :fn fn-id)))
-
-
-  (get-fn-schema-id-for-arg-schema
-    [_this arg-schema-id]
-    (:fn-schema-id (sp/read-entity storage :arg-schema arg-schema-id)))
-
-
   (collect-dependency-chain
     [_this owner-fn-id]
     (constraints/collect-dependency-chain-impl
       (fn [_helpers current-id]
-        ;; Get arg-values for current fn via fn-arg join
-        (let [fn-args (sp/query-entities storage :fn-arg {:fn-id current-id})
-              arg-value-ids (keep :arg-value-id fn-args)]
-          (if (empty? arg-value-ids)
-            []
-            (let [arg-values (sp/read-entities storage :arg-value (vec arg-value-ids))
-                  ;; Extract UUID candidates from values
-                  uuid-candidates (->> (vals arg-values)
-                                       (map :value)
-                                       (keep sp/try-parse-uuid)
-                                       vec)]
-              (if (empty? uuid-candidates)
-                []
-                ;; Batch check: which UUIDs are actually fns
-                (let [fn-results (sp/read-entities storage :fn uuid-candidates)]
-                  (set (keys fn-results))))))))
+        ;; Get fn record to check parent-id
+        (let [fn-rec (sp/read-entity storage :fn current-id)
+              ;; Get args for current fn
+              args (sp/query-entities storage :arg {:fn-id current-id})
+              ;; Collect fn references from args
+              arg-refs (->> args
+                            (mapcat (fn [arg]
+                                      (cond-> []
+                                        (:ref-id arg) (conj (:ref-id arg))
+                                        (and (:value arg) (uuid? (:value arg))) (conj (:value arg)))))
+                            (remove nil?)
+                            set)
+              ;; Add parent-id if present
+              all-refs (if-let [parent-id (:parent-id fn-rec)]
+                         (conj arg-refs parent-id)
+                         arg-refs)]
+          ;; Verify these are actual fn-ids
+          (if (empty? all-refs)
+            #{}
+            (let [fn-results (sp/read-entities storage :fn (vec all-refs))]
+              (set (keys fn-results))))))
       nil  ; helpers arg (unused by our get-fn-dependencies-fn)
       owner-fn-id)))
 
 
-(defn validate-arg-schema-belongs-to-fn!
-  "Validates that arg-schema belongs to the fn-schema of this fn.
-   Uses StorageCRUD to fetch data — works with any backend."
-  [storage fn-id arg-schema-id]
-  (sp/validate-arg-schema-belongs-to-fn-impl
-    (->GenericConstraintHelpers storage) fn-id arg-schema-id))
-
-
 (defn validate-no-dependency-cycle!
-  "Validates that referencing value-fn does not create dependency cycle.
+  "Validates that referencing ref-fn does not create dependency cycle.
    Uses StorageCRUD to traverse dependency chain — works with any backend."
-  [storage owner-fn-id value-fn-id]
+  [storage owner-fn-id ref-fn-id]
   (sp/validate-no-dependency-cycle-impl
-    (->GenericConstraintHelpers storage) owner-fn-id value-fn-id))
+    (->GenericConstraintHelpers storage) owner-fn-id ref-fn-id))

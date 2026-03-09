@@ -22,18 +22,18 @@
 ;; Delegation Tests
 ;; =============================================================================
 
-(deftest fn-schema-uuid-delegation-test
-  (testing "delegates to core/fn-schema-uuid"
-    (let [result (registry/fn-schema-uuid :test-fn)]
+(deftest fn-uuid-delegation-test
+  (testing "delegates to core/fn-uuid"
+    (let [result (registry/fn-uuid :test-fn)]
       (is (uuid? result))
-      (is (= result (core/fn-schema-uuid :test-fn))))))
+      (is (= result (core/fn-uuid :test-fn))))))
 
 
-(deftest arg-schema-uuid-delegation-test
-  (testing "delegates to core/arg-schema-uuid"
-    (let [result (registry/arg-schema-uuid :test-fn :test-arg)]
+(deftest arg-uuid-delegation-test
+  (testing "delegates to core/arg-uuid"
+    (let [result (registry/arg-uuid :test-fn :test-arg)]
       (is (uuid? result))
-      (is (= result (core/arg-schema-uuid :test-fn :test-arg))))))
+      (is (= result (core/arg-uuid :test-fn :test-arg))))))
 
 
 (deftest register-base-fns!-delegation-test
@@ -53,7 +53,7 @@
                                 :impl (fn [_ _] nil)}}
           result (registry/sync-defs-to-storage! storage defs)]
       (is (map? result))
-      (is (= 1 (get-in result [:fn-schemas :created])))
+      (is (= 1 (get-in result [:fns :created])))
       (sp/close storage))))
 
 
@@ -67,11 +67,11 @@
           result (registry/initialize-with-base-fns! storage)]
       ;; Should return the storage
       (is (= storage result))
-      ;; Check that some base fn-schemas exist
-      (let [add-id (core/fn-schema-uuid :add)
-            add-schema (sp/read-entity storage :fn-schema add-id)]
-        (is (some? add-schema))
-        (is (= "add" (:name add-schema))))
+      ;; Check that some base fns exist
+      (let [add-id (core/fn-uuid :add)
+            add-fn (sp/read-entity storage :fn add-id)]
+        (is (some? add-fn))
+        (is (= "add" (:name add-fn))))
       (sp/close storage)))
 
   (testing "closes storage and re-throws on error"
@@ -121,11 +121,11 @@
           result (registry/initialize-all! storage [defs1 defs2])]
       ;; Should return the storage
       (is (= storage result))
-      ;; Check both fn-schemas exist
-      (let [fn1-id (core/fn-schema-uuid :init-all-fn1)
-            fn2-id (core/fn-schema-uuid :init-all-fn2)]
-        (is (some? (sp/read-entity storage :fn-schema fn1-id)))
-        (is (some? (sp/read-entity storage :fn-schema fn2-id))))
+      ;; Check both fns exist
+      (let [fn1-id (core/fn-uuid :init-all-fn1)
+            fn2-id (core/fn-uuid :init-all-fn2)]
+        (is (some? (sp/read-entity storage :fn fn1-id)))
+        (is (some? (sp/read-entity storage :fn fn2-id))))
       (sp/close storage)))
 
   (testing "handles empty def-sets"
@@ -146,9 +146,9 @@
       ;; Should return initialized storage
       (is (satisfies? sp/StorageCRUD storage))
       ;; Check that base functions were synced
-      (let [add-id (core/fn-schema-uuid :add)
-            add-schema (sp/read-entity storage :fn-schema add-id)]
-        (is (some? add-schema)))
+      (let [add-id (core/fn-uuid :add)
+            add-fn (sp/read-entity storage :fn add-id)]
+        (is (some? add-fn)))
       (sp/close storage))))
 
 

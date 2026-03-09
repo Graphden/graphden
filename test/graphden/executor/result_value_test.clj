@@ -2,13 +2,19 @@
   "Result value and registry tests for executor.
 
    Covers:
-   - fn-usage tests
+   - ref-id caching tests (same ref-id computed once)
    - Base function registry tests
    - execute-by-name error path tests
    - execute-with-named-args error path tests
    - register-type-hint! tests
    - get-single-required-arg tests
-   - with-clean-registry tests"
+   - with-clean-registry tests
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -24,174 +30,86 @@
   exec/with-clean-registry)
 
 
-;; === fn-usage Tests ===
+;; === ref-id Caching Tests ===
 
-(deftest fn-usage-basic-test
-  (testing "fn-usage is executed and cached"
+(deftest ref-id-same-ref-computed-once-test
+  (testing "same ref-id used twice is computed once (cached)"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)
-          ;; Register a function that tracks how many times it's called
+          ;; Register counter function
           _ (exec/register-base-fn!
               :counter
               (fn [_args _ctx]
                 (swap! call-count inc)))
-          ;; Create counter fn-schema
-          counter-schema (sp/create-entity storage :fn-schema
-                                           {:name "counter"
-                                            :returned-type :int})
-          ;; Create counter fn instance
-          counter-fn (sp/create-entity storage :fn
-                                       {:name "counter-fn"
-                                        :fn-schema-id (:id counter-schema)})
-          ;; Create fn-usage for counter-fn
-          counter-result (sp/create-entity storage :fn-usage
-                                           {:fn-id (:id counter-fn)
-                                            :name "counter-result"})
-          ;; Create add fn-schema that takes two int args
+          ;; Create counter base fn
+          counter-base (setup/create-base-fn! storage "counter" :int)
+          ;; Create counter composed fn
+          counter-fn (setup/create-composed-fn! storage "counter-fn" (:id counter-base))
+          ;; Create add function
           _ (exec/register-base-fn!
               :add
               (fn [{:keys [a b]} _ctx]
                 (+ @a @b)))
-          add-schema (sp/create-entity storage :fn-schema
-                                       {:name "add"
-                                        :returned-type :int})
-          add-arg-a (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id add-schema)
-                                       :name "a"
-                                       :type :int
-                                       :required true :first-class false})
-          add-arg-b (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id add-schema)
-                                       :name "b"
-                                       :type :int
-                                       :required true :first-class false})
-          ;; Create add fn that uses counter-result for BOTH args
-          add-fn (sp/create-entity storage :fn
-                                   {:name "add-fn"
-                                    :fn-schema-id (:id add-schema)})
-          ;; Both args reference the SAME fn-usage
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result))
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result))
+          add-base (setup/create-base-fn! storage "add" :int)
+          add-arg-a (setup/create-arg! storage (:id add-base)
+                                       {:name "a" :type :int :required true :is-fn false})
+          add-arg-b (setup/create-arg! storage (:id add-base)
+                                       {:name "b" :type :int :required true :is-fn false})
+          ;; Create add-fn - both args reference the SAME counter-fn via ref-id
+          add-fn (setup/create-composed-fn! storage "add-fn" (:id add-base))
+          _ (setup/create-arg! storage (:id add-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id add-arg-a) :ref-id (:id counter-fn)})
+          _ (setup/create-arg! storage (:id add-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id add-arg-b) :ref-id (:id counter-fn)})
           ctx (exec/create-context {:storage storage})]
       ;; Execute add-fn
       (exec/execute ctx (:id add-fn) nil)
-      ;; counter should be called only ONCE, even though it's used twice
-      (is (= 1 @call-count) "fn-usage should be cached and only executed once")
-      (sp/close storage)))
+      ;; counter should be called only ONCE due to caching
+      (is (= 1 @call-count) "Same ref-id should be cached and only executed once")
+      (sp/close storage))))
 
-  (testing "different fn-usages for same fn are computed separately"
+
+(deftest ref-id-different-refs-computed-separately-test
+  (testing "different ref-ids for same fn are computed separately"
     (let [storage (setup/create-test-storage)
           call-count (atom 0)
-          ;; Register a function that tracks calls and returns incremented count
+          ;; Register incrementer that tracks calls
           _ (exec/register-base-fn!
               :incrementer
               (fn [_args _ctx]
                 (swap! call-count inc)))
-          ;; Create incrementer fn-schema
-          inc-schema (sp/create-entity storage :fn-schema
-                                       {:name "incrementer"
-                                        :returned-type :int})
-          ;; Create incrementer fn instance
-          inc-fn (sp/create-entity storage :fn
-                                   {:name "inc-fn"
-                                    :fn-schema-id (:id inc-schema)})
-          ;; Create TWO different fn-usages for the same fn
-          result-1 (sp/create-entity storage :fn-usage
-                                     {:fn-id (:id inc-fn)
-                                      :name "result-1"})
-          result-2 (sp/create-entity storage :fn-usage
-                                     {:fn-id (:id inc-fn)
-                                      :name "result-2"})
-          ;; Create add fn that uses result-1 and result-2
+          ;; Create incrementer base fn
+          inc-base (setup/create-base-fn! storage "incrementer" :int)
+          ;; Create TWO different composed fns from same base
+          inc-fn-1 (setup/create-composed-fn! storage "inc-fn-1" (:id inc-base))
+          inc-fn-2 (setup/create-composed-fn! storage "inc-fn-2" (:id inc-base))
+          ;; Create add function
           _ (exec/register-base-fn!
               :add
               (fn [{:keys [a b]} _ctx]
                 (+ @a @b)))
-          add-schema (sp/create-entity storage :fn-schema
-                                       {:name "add"
-                                        :returned-type :int})
-          add-arg-a (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id add-schema)
-                                       :name "a"
-                                       :type :int
-                                       :required true :first-class false})
-          add-arg-b (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id add-schema)
-                                       :name "b"
-                                       :type :int
-                                       :required true :first-class false})
-          add-fn (sp/create-entity storage :fn
-                                   {:name "add-fn"
-                                    :fn-schema-id (:id add-schema)})
-          ;; a -> result-1, b -> result-2
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-a) (:id result-1))
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-b) (:id result-2))
+          add-base (setup/create-base-fn! storage "add" :int)
+          add-arg-a (setup/create-arg! storage (:id add-base)
+                                       {:name "a" :type :int :required true :is-fn false})
+          add-arg-b (setup/create-arg! storage (:id add-base)
+                                       {:name "b" :type :int :required true :is-fn false})
+          ;; Create add-fn - args reference DIFFERENT fns
+          add-fn (setup/create-composed-fn! storage "add-fn" (:id add-base))
+          _ (setup/create-arg! storage (:id add-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id add-arg-a) :ref-id (:id inc-fn-1)})
+          _ (setup/create-arg! storage (:id add-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id add-arg-b) :ref-id (:id inc-fn-2)})
           ctx (exec/create-context {:storage storage})
           result (exec/execute ctx (:id add-fn) nil)]
-      ;; incrementer should be called TWICE (once for each fn-usage)
-      (is (= 2 @call-count) "Different fn-usages should each execute separately")
+      ;; incrementer should be called TWICE (different ref-ids)
+      (is (= 2 @call-count) "Different ref-ids should each execute separately")
       ;; Result should be 1 + 2 = 3
       (is (= 3 result))
-      (sp/close storage)))
-
-  (testing "fn-usage executes fn, direct fn reference passes fn-id"
-    (let [storage (setup/create-test-storage)
-          call-count (atom 0)
-          ;; Register a function that tracks calls
-          _ (exec/register-base-fn!
-              :counter
-              (fn [_args _ctx]
-                (swap! call-count inc)))
-          ;; Create counter fn-schema
-          counter-schema (sp/create-entity storage :fn-schema
-                                           {:name "counter"
-                                            :returned-type :int})
-          counter-fn (sp/create-entity storage :fn
-                                       {:name "counter-fn"
-                                        :fn-schema-id (:id counter-schema)})
-          ;; Create TWO fn-usages pointing to same fn
-          counter-result-1 (sp/create-entity storage :fn-usage
-                                             {:fn-id (:id counter-fn)
-                                              :name "counter-result-1"})
-          counter-result-2 (sp/create-entity storage :fn-usage
-                                             {:fn-id (:id counter-fn)
-                                              :name "counter-result-2"})
-          ;; Create add fn
-          _ (exec/register-base-fn!
-              :add
-              (fn [{:keys [a b]} _ctx]
-                (+ @a @b)))
-          add-schema (sp/create-entity storage :fn-schema
-                                       {:name "add"
-                                        :returned-type :int})
-          add-arg-a (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id add-schema)
-                                       :name "a"
-                                       :type :int
-                                       :required true :first-class false})
-          add-arg-b (sp/create-entity storage :arg-schema
-                                      {:fn-schema-id (:id add-schema)
-                                       :name "b"
-                                       :type :int
-                                       :required true :first-class false})
-          add-fn (sp/create-entity storage :fn
-                                   {:name "add-fn"
-                                    :fn-schema-id (:id add-schema)})
-          ;; a -> fn-usage-1 (executes counter)
-          ;; b -> fn-usage-2 (executes counter again - different fn-usage)
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-a) (:id counter-result-1))
-          _ (setup/create-arg-value-with-fn-usage-binding! storage (:id add-fn) (:id add-arg-b) (:id counter-result-2))
-          ctx (exec/create-context {:storage storage})]
-      (exec/execute ctx (:id add-fn) nil)
-      ;; counter should be called TWICE - once for each fn-usage
-      (is (= 2 @call-count) "Different fn-usages should each execute the fn")
       (sp/close storage))))
-
-
-;; Note: get-single-required-arg and make-single-arg-callable are designed
-;; to be used INSIDE HOF base functions during execution (when the execution
-;; graph is populated). They are tested indirectly via lazy-fn-callable-test
-;; and other HOF tests that exercise the full execution flow.
 
 
 ;; === Base Function Registry Tests ===
@@ -232,11 +150,10 @@
   (testing "executes function by string name"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn! :const-42 (fn [_ _] 42))
-          schema (sp/create-entity storage :fn-schema
-                                   {:name "const-42" :returned-type :int})
-          _ (sp/create-entity storage :fn
-                              {:name "my-const-fn"
-                               :fn-schema-id (:id schema)})
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "const-42" :int)
+          ;; Create composed fn
+          _ (setup/create-composed-fn! storage "my-const-fn" (:id base-fn))
           ctx (exec/create-context {:storage storage})]
       (is (= 42 (exec/execute-by-name ctx "my-const-fn" nil)))
       (sp/close storage)))
@@ -267,21 +184,14 @@
   (testing "executes with named args"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn! :add-named (fn [{:keys [a b]} _] (+ @a @b)))
-          schema (sp/create-entity storage :fn-schema
-                                   {:name "add-named" :returned-type :int})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id schema)
-                               :name "a"
-                               :type :int
-                               :required true :first-class false})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id schema)
-                               :name "b"
-                               :type :int
-                               :required true :first-class false})
-          the-fn (sp/create-entity storage :fn
-                                   {:name "my-add-named"
-                                    :fn-schema-id (:id schema)})
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "add-named" :int)
+          _ (setup/create-arg! storage (:id base-fn)
+                               {:name "a" :type :int :required true :is-fn false})
+          _ (setup/create-arg! storage (:id base-fn)
+                               {:name "b" :type :int :required true :is-fn false})
+          ;; Create composed fn (free args - no values set)
+          the-fn (setup/create-composed-fn! storage "my-add-named" (:id base-fn))
           ctx (exec/create-context {:storage storage})]
       (is (= 7 (exec/execute-with-named-args ctx (:id the-fn) {:a 3 :b 4})))
       (sp/close storage)))
@@ -289,16 +199,12 @@
   (testing "throws for unknown arg name"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn! :single-arg (fn [{:keys [x]} _] @x))
-          schema (sp/create-entity storage :fn-schema
-                                   {:name "single-arg" :returned-type :int})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id schema)
-                               :name "x"
-                               :type :int
-                               :required true :first-class false})
-          the-fn (sp/create-entity storage :fn
-                                   {:name "my-single-arg"
-                                    :fn-schema-id (:id schema)})
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "single-arg" :int)
+          _ (setup/create-arg! storage (:id base-fn)
+                               {:name "x" :type :int :required true :is-fn false})
+          ;; Create composed fn
+          the-fn (setup/create-composed-fn! storage "my-single-arg" (:id base-fn))
           ctx (exec/create-context {:storage storage})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Unknown argument name"
@@ -328,46 +234,35 @@
 ;; === get-single-required-arg Tests ===
 
 (deftest get-single-required-arg-interface-test
-  (testing "returns single required arg-schema"
+  (testing "returns single required arg"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn! :identity-fn (fn [{:keys [x]} _] @x))
-          schema (sp/create-entity storage :fn-schema
-                                   {:name "identity-fn" :returned-type :int})
-          arg-schema (sp/create-entity storage :arg-schema
-                                       {:fn-schema-id (:id schema)
-                                        :name "x"
-                                        :type :int
-                                        :required true :first-class false})
-          the-fn (sp/create-entity storage :fn
-                                   {:name "my-identity"
-                                    :fn-schema-id (:id schema)})
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "identity-fn" :int)
+          arg-x (setup/create-arg! storage (:id base-fn)
+                                   {:name "x" :type :int :required true :is-fn false})
+          ;; Create composed fn
+          the-fn (setup/create-composed-fn! storage "my-identity" (:id base-fn))
           ctx (exec/create-context {:storage storage})
-          ;; Need to pre-resolve graph to have arg-schemas available
+          ;; Need to pre-resolve graph to have args available
           graph (sp/resolve-execution-graph storage (:id the-fn))
           ctx-with-graph (assoc ctx :execution-graph graph)]
       (let [result (exec/get-single-required-arg ctx-with-graph (:id the-fn))]
-        (is (= (:id arg-schema) (:id result)))
+        (is (= (:id arg-x) (:id result)))
         (is (= "x" (:name result))))
       (sp/close storage)))
 
   (testing "throws when HOF function has more than 1 required argument"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn! :multi-arg-fn (fn [{:keys [a b]} _] (+ @a @b)))
-          schema (sp/create-entity storage :fn-schema
-                                   {:name "multi-arg-fn" :returned-type :int})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id schema)
-                               :name "a"
-                               :type :int
-                               :required true :first-class false})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id schema)
-                               :name "b"
-                               :type :int
-                               :required true :first-class false})
-          the-fn (sp/create-entity storage :fn
-                                   {:name "my-multi"
-                                    :fn-schema-id (:id schema)})
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "multi-arg-fn" :int)
+          _ (setup/create-arg! storage (:id base-fn)
+                               {:name "a" :type :int :required true :is-fn false})
+          _ (setup/create-arg! storage (:id base-fn)
+                               {:name "b" :type :int :required true :is-fn false})
+          ;; Create composed fn
+          the-fn (setup/create-composed-fn! storage "my-multi" (:id base-fn))
           ctx (exec/create-context {:storage storage})
           graph (sp/resolve-execution-graph storage (:id the-fn))
           ctx-with-graph (assoc ctx :execution-graph graph)]
@@ -379,16 +274,12 @@
   (testing "throws when HOF function has 0 required arguments"
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn! :no-req-fn (fn [{:keys [x]} _] (or @x 0)))
-          schema (sp/create-entity storage :fn-schema
-                                   {:name "no-req-fn" :returned-type :int})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id schema)
-                               :name "x"
-                               :type :int
-                               :required false :first-class false})  ; optional, not required
-          the-fn (sp/create-entity storage :fn
-                                   {:name "my-optional"
-                                    :fn-schema-id (:id schema)})
+          ;; Create base fn
+          base-fn (setup/create-base-fn! storage "no-req-fn" :int)
+          _ (setup/create-arg! storage (:id base-fn)
+                               {:name "x" :type :int :required false :is-fn false})  ; optional
+          ;; Create composed fn
+          the-fn (setup/create-composed-fn! storage "my-optional" (:id base-fn))
           ctx (exec/create-context {:storage storage})
           graph (sp/resolve-execution-graph storage (:id the-fn))
           ctx-with-graph (assoc ctx :execution-graph graph)]

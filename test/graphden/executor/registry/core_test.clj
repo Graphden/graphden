@@ -235,48 +235,48 @@
 
 
 ;; =============================================================================
-;; fn-schema-uuid and arg-schema-uuid tests
+;; fn-uuid and arg-uuid tests (2-entity schema)
 ;; =============================================================================
 
-(deftest fn-schema-uuid-test
-  (testing "generates deterministic UUID for fn-schema"
-    (let [uuid1 (core/fn-schema-uuid :my-fn)
-          uuid2 (core/fn-schema-uuid :my-fn)]
+(deftest fn-uuid-test
+  (testing "generates deterministic UUID for fn"
+    (let [uuid1 (core/fn-uuid :my-fn)
+          uuid2 (core/fn-uuid :my-fn)]
       (is (uuid? uuid1))
       (is (= uuid1 uuid2))))
 
   (testing "different fn-names produce different UUIDs"
-    (let [uuid1 (core/fn-schema-uuid :fn-a)
-          uuid2 (core/fn-schema-uuid :fn-b)]
+    (let [uuid1 (core/fn-uuid :fn-a)
+          uuid2 (core/fn-uuid :fn-b)]
       (is (not= uuid1 uuid2))))
 
   (testing "throws for invalid fn-name"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"invalid characters"
-          (core/fn-schema-uuid :123invalid)))))
+          (core/fn-uuid :123invalid)))))
 
 
-(deftest arg-schema-uuid-test
-  (testing "generates deterministic UUID for arg-schema"
-    (let [uuid1 (core/arg-schema-uuid :my-fn :my-arg)
-          uuid2 (core/arg-schema-uuid :my-fn :my-arg)]
+(deftest arg-uuid-test
+  (testing "generates deterministic UUID for arg"
+    (let [uuid1 (core/arg-uuid :my-fn :my-arg)
+          uuid2 (core/arg-uuid :my-fn :my-arg)]
       (is (uuid? uuid1))
       (is (= uuid1 uuid2))))
 
   (testing "different arg-names produce different UUIDs"
-    (let [uuid1 (core/arg-schema-uuid :my-fn :arg-a)
-          uuid2 (core/arg-schema-uuid :my-fn :arg-b)]
+    (let [uuid1 (core/arg-uuid :my-fn :arg-a)
+          uuid2 (core/arg-uuid :my-fn :arg-b)]
       (is (not= uuid1 uuid2))))
 
   (testing "throws for invalid fn-name"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"invalid characters"
-          (core/arg-schema-uuid :123invalid :arg))))
+          (core/arg-uuid :123invalid :arg))))
 
   (testing "throws for invalid arg-name"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"invalid characters"
-          (core/arg-schema-uuid :my-fn :123invalid)))))
+          (core/arg-uuid :my-fn :123invalid)))))
 
 
 ;; =============================================================================
@@ -297,17 +297,17 @@
                            :impl (fn [_ _] nil)}}
           result (core/sync-defs-to-storage! storage defs)]
       (is (map? result))
-      (is (= 1 (get-in result [:fn-schemas :created])))
-      (is (= 2 (get-in result [:arg-schemas :created])))
+      (is (= 1 (get-in result [:fns :created])))
+      (is (= 2 (get-in result [:args :created])))
       (sp/close storage)))
 
-  (testing "updates existing schemas on re-sync"
+  (testing "updates existing fns on re-sync"
     (let [storage (setup/create-test-storage)
           defs {:test-fn {:args {:x :int} :return-type :int :impl (fn [_ _] nil)}}
           result1 (core/sync-defs-to-storage! storage defs)
           result2 (core/sync-defs-to-storage! storage defs)]
-      (is (= 1 (get-in result1 [:fn-schemas :created])))
-      (is (= 1 (get-in result2 [:fn-schemas :updated])))
+      (is (= 1 (get-in result1 [:fns :created])))
+      (is (= 1 (get-in result2 [:fns :updated])))
       (sp/close storage)))
 
   (testing "throws for batch too large"
@@ -325,8 +325,8 @@
     (let [storage (setup/create-test-storage)
           defs {:no-args-fn {:args {} :return-type :text :impl (fn [_ _] "hello")}}
           result (core/sync-defs-to-storage! storage defs)]
-      (is (= 1 (get-in result [:fn-schemas :created])))
-      (is (zero? (get-in result [:arg-schemas :created])))
+      (is (= 1 (get-in result [:fns :created])))
+      (is (zero? (get-in result [:args :created])))
       (sp/close storage)))
 
   (testing "handles optional args"
@@ -336,26 +336,26 @@
                               :return-type :int
                               :impl (fn [_ _] nil)}}
           result (core/sync-defs-to-storage! storage defs)]
-      (is (= 1 (get-in result [:fn-schemas :created])))
-      (is (= 2 (get-in result [:arg-schemas :created])))
+      (is (= 1 (get-in result [:fns :created])))
+      (is (= 2 (get-in result [:args :created])))
       ;; Verify optional arg has required=false
-      (let [arg-id (core/arg-schema-uuid :optional-fn :optional-arg)
-            arg-schema (sp/read-entity storage :arg-schema arg-id)]
-        (is (false? (:required arg-schema))))
+      (let [arg-id (core/arg-uuid :optional-fn :optional-arg)
+            arg (sp/read-entity storage :arg arg-id)]
+        (is (false? (:required arg))))
       (sp/close storage)))
 
-  (testing "sets first-class=true for :fn type args"
+  (testing "sets is-fn=true for :fn type args"
     (let [storage (setup/create-test-storage)
           defs {:hof-fn {:args {:f :fn :coll :jsonb}
                          :return-type :jsonb
                          :impl (fn [_ _] nil)}}
           _ (core/sync-defs-to-storage! storage defs)
-          f-arg-id (core/arg-schema-uuid :hof-fn :f)
-          coll-arg-id (core/arg-schema-uuid :hof-fn :coll)
-          f-arg (sp/read-entity storage :arg-schema f-arg-id)
-          coll-arg (sp/read-entity storage :arg-schema coll-arg-id)]
-      (is (true? (:first-class f-arg)) ":fn type should have first-class=true")
-      (is (false? (:first-class coll-arg)) ":jsonb type should have first-class=false")
+          f-arg-id (core/arg-uuid :hof-fn :f)
+          coll-arg-id (core/arg-uuid :hof-fn :coll)
+          f-arg (sp/read-entity storage :arg f-arg-id)
+          coll-arg (sp/read-entity storage :arg coll-arg-id)]
+      (is (true? (:is-fn f-arg)) ":fn type should have is-fn=true")
+      (is (false? (:is-fn coll-arg)) ":jsonb type should have is-fn=false")
       (sp/close storage))))
 
 
@@ -378,17 +378,17 @@
 ;; =============================================================================
 
 (deftest sync-with-impl-hash-test
-  (testing "stores impl-hash in fn-schema"
+  (testing "stores impl-hash in fn"
     (let [storage (setup/create-test-storage)
           defs {:hash-test-fn {:args {:a :int}
                                :return-type :int
                                :impl (fn [_ _] nil)
                                :impl-source '[(+ a 1)]}}
           _ (core/sync-defs-to-storage! storage defs)
-          fn-schema-id (core/fn-schema-uuid :hash-test-fn)
-          fn-schema (sp/read-entity storage :fn-schema fn-schema-id)]
-      (is (string? (:impl-hash fn-schema)))
-      (is (= 64 (count (:impl-hash fn-schema))))
+          fn-id (core/fn-uuid :hash-test-fn)
+          fn-entity (sp/read-entity storage :fn fn-id)]
+      (is (string? (:impl-hash fn-entity)))
+      (is (= 64 (count (:impl-hash fn-entity))))
       (sp/close storage)))
 
   (testing "updates impl-hash when implementation changes"
@@ -398,14 +398,14 @@
                                :impl (fn [_ _] nil)
                                :impl-source '[(+ a 1)]}}
           _ (core/sync-defs-to-storage! storage defs1)
-          fn-schema-id (core/fn-schema-uuid :changing-fn)
-          hash1 (:impl-hash (sp/read-entity storage :fn-schema fn-schema-id))
+          fn-id (core/fn-uuid :changing-fn)
+          hash1 (:impl-hash (sp/read-entity storage :fn fn-id))
           ;; Now sync with different impl-source
           defs2 {:changing-fn {:args {:a :int}
                                :return-type :int
                                :impl (fn [_ _] nil)
                                :impl-source '[(* a 2)]}}
           _ (core/sync-defs-to-storage! storage defs2)
-          hash2 (:impl-hash (sp/read-entity storage :fn-schema fn-schema-id))]
+          hash2 (:impl-hash (sp/read-entity storage :fn fn-id))]
       (is (not= hash1 hash2))
       (sp/close storage))))

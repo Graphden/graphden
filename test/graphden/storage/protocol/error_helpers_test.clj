@@ -1,5 +1,11 @@
 (ns graphden.storage.protocol.error-helpers-test
-  "Tests for error context and storage error helpers."
+  "Tests for error context and storage error helpers.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as storage]))
@@ -8,19 +14,9 @@
 ;; === Mock for constraint helpers ===
 
 (defrecord MockConstraintHelpers
-  [fn-schema-map arg-schema-fn-schema-map dependency-chain-map]
+  [dependency-chain-map]
 
   storage/ConstraintHelpers
-
-  (get-fn-schema-id-for-fn
-    [_ fn-id]
-    (get fn-schema-map fn-id))
-
-
-  (get-fn-schema-id-for-arg-schema
-    [_ arg-schema-id]
-    (get arg-schema-fn-schema-map arg-schema-id))
-
 
   (collect-dependency-chain
     [_ fn-id]
@@ -68,23 +64,22 @@
 
 
 (deftest validate-no-dependency-cycle-impl-test
-  (testing "nil value-fn-id doesn't throw"
-    ;; MockConstraintHelpers takes: fn-schema-map, arg-schema-fn-schema-map, dependency-chain-map
-    (let [helpers (->MockConstraintHelpers {} {} {})]
+  (testing "nil ref-fn-id doesn't throw"
+    (let [helpers (->MockConstraintHelpers {})]
       (is (nil? (storage/validate-no-dependency-cycle-impl helpers (random-uuid) nil)))))
 
   (testing "no cycle in dependencies doesn't throw"
     (let [fn-a (random-uuid)
           fn-b (random-uuid)
           ;; fn-b depends on nothing special, fn-a not in its chain
-          helpers (->MockConstraintHelpers {} {} {fn-b #{fn-b}})]
+          helpers (->MockConstraintHelpers {fn-b #{fn-b}})]
       (is (nil? (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)))))
 
   (testing "cycle in dependencies throws"
     (let [fn-a (random-uuid)
           fn-b (random-uuid)
           ;; fn-b already depends on fn-a
-          helpers (->MockConstraintHelpers {} {} {fn-b #{fn-a fn-b}})]
+          helpers (->MockConstraintHelpers {fn-b #{fn-a fn-b}})]
       (is (thrown-with-msg?
             clojure.lang.ExceptionInfo
             #"Reference would create dependency cycle"
@@ -93,10 +88,10 @@
   (testing "exception contains correct data"
     (let [fn-a (random-uuid)
           fn-b (random-uuid)
-          helpers (->MockConstraintHelpers {} {} {fn-b #{fn-a fn-b}})]
+          helpers (->MockConstraintHelpers {fn-b #{fn-a fn-b}})]
       (try
         (storage/validate-no-dependency-cycle-impl helpers fn-a fn-b)
         (catch clojure.lang.ExceptionInfo e
           (is (= :constraint-violation/dependency-cycle (:type (ex-data e))))
           (is (= fn-a (:owner-fn-id (ex-data e))))
-          (is (= fn-b (:value-fn-id (ex-data e)))))))))
+          (is (= fn-b (:ref-fn-id (ex-data e)))))))))

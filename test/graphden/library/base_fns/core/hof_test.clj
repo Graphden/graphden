@@ -1,5 +1,11 @@
 (ns ^:integration graphden.library.base-fns.core.hof-test
-  "Tests for higher-order function base functions."
+  "Tests for higher-order function base functions.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.composition.interface :as fn-composition]
@@ -52,58 +58,65 @@
     ;; Sync base function schemas to storage so HOF can be found
     (registry/sync-defs-to-storage! storage bf/all-defs)
 
-    ;; Create 'double' function: x -> x * 2 (single required arg)
-    (let [double-schema (sp/create-entity storage :fn-schema
-                                          {:name "double"
-                                           :returned-type :int})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id double-schema)
+    ;; Create 'double' function: x -> x * 2 (base fn + composed fn)
+    (let [double-base (sp/create-entity storage :fn
+                                        {:name "double"
+                                         :parent-id nil
+                                         :return-type :int})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id double-base)
                                :name "x"
                                :type :int
-                               :required true :first-class false})
+                               :required true
+                               :is-fn false})
           double-fn (sp/create-entity storage :fn
                                       {:name "my-double"
-                                       :fn-schema-id (:id double-schema)})
+                                       :parent-id (:id double-base)})
 
-          ;; Create 'gt2' predicate: x -> x > 2 (single required arg)
-          gt2-schema (sp/create-entity storage :fn-schema
-                                       {:name "gt2"
-                                        :returned-type :bool})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id gt2-schema)
+          ;; Create 'gt2' predicate: x -> x > 2
+          gt2-base (sp/create-entity storage :fn
+                                     {:name "gt2"
+                                      :parent-id nil
+                                      :return-type :bool})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id gt2-base)
                                :name "x"
                                :type :int
-                               :required true :first-class false})
+                               :required true
+                               :is-fn false})
           gt2-fn (sp/create-entity storage :fn
                                    {:name "my-gt2"
-                                    :fn-schema-id (:id gt2-schema)})
+                                    :parent-id (:id gt2-base)})
 
-          ;; Create 'add-reducer' function: pair -> pair[0] + pair[1] (single required arg)
-          ;; Takes [acc item] as single argument
-          add-schema (sp/create-entity storage :fn-schema
-                                       {:name "add-reducer"
-                                        :returned-type :int})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id add-schema)
+          ;; Create 'add-reducer' function: pair -> pair[0] + pair[1]
+          add-base (sp/create-entity storage :fn
+                                     {:name "add-reducer"
+                                      :parent-id nil
+                                      :return-type :int})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id add-base)
                                :name "pair"
                                :type :jsonb
-                               :required true :first-class false})
+                               :required true
+                               :is-fn false})
           add-fn (sp/create-entity storage :fn
                                    {:name "my-add-reducer"
-                                    :fn-schema-id (:id add-schema)})
+                                    :parent-id (:id add-base)})
 
-          ;; Create 'get-category' function: x -> :small/:large (single required arg)
-          cat-schema (sp/create-entity storage :fn-schema
-                                       {:name "get-category"
-                                        :returned-type :text})
-          _ (sp/create-entity storage :arg-schema
-                              {:fn-schema-id (:id cat-schema)
+          ;; Create 'get-category' function: x -> :small/:large
+          cat-base (sp/create-entity storage :fn
+                                     {:name "get-category"
+                                      :parent-id nil
+                                      :return-type :text})
+          _ (sp/create-entity storage :arg
+                              {:fn-id (:id cat-base)
                                :name "x"
                                :type :int
-                               :required true :first-class false})
+                               :required true
+                               :is-fn false})
           cat-fn (sp/create-entity storage :fn
                                    {:name "my-get-category"
-                                    :fn-schema-id (:id cat-schema)})]
+                                    :parent-id (:id cat-base)})]
 
       ;; Register base function implementations
       (exec/register-base-fn! :double
@@ -130,45 +143,50 @@
        :cat-fn-id (:id cat-fn)})))
 
 
-(defn- get-or-create-arg-value!
-  "Gets existing arg-value or creates new one.
-   Uses value field for all values (including UUIDs which will be literals)."
-  [storage arg-schema-id value]
-  (let [query-map {:arg-schema-id arg-schema-id :value value}
-        existing (sp/query-entities storage :arg-value query-map)]
-    (if (seq existing)
-      (first existing)
-      (sp/create-entity storage :arg-value query-map))))
+(defn- create-arg-with-value!
+  "Creates arg with literal value on fn."
+  [storage fn-id name type value]
+  (sp/create-entity storage :arg
+                    {:fn-id fn-id
+                     :name name
+                     :type type
+                     :value value}))
 
 
-(defn- create-arg-value-with-binding!
-  "Creates arg-value (or reuses existing) and fn-arg binding."
-  [storage fn-id arg-schema-id value]
-  (let [av (get-or-create-arg-value! storage arg-schema-id value)]
-    (sp/create-entity storage :fn-arg
-                      {:fn-id fn-id
-                       :arg-schema-id arg-schema-id
-                       :arg-value-id (:id av)})
-    av))
+(defn- create-arg-with-ref!
+  "Creates arg with ref-id (execute fn and use result)."
+  [storage fn-id name type ref-fn-id & {:keys [is-fn]}]
+  (sp/create-entity storage :arg
+                    (cond-> {:fn-id fn-id
+                             :name name
+                             :type type
+                             :ref-id ref-fn-id}
+                      (some? is-fn) (assoc :is-fn is-fn))))
 
 
 (defn- create-hof-caller
   "Creates a function that calls a HOF (map/filter/etc) with given fn-id and collection.
    Returns the result of executing the HOF."
   [storage hof-name f-arg-name fn-id coll]
-  (let [;; Get HOF fn-schema
-        hof-schema (first (sp/query-entities storage :fn-schema {:name hof-name}))
-        hof-arg-schemas (sp/query-entities storage :arg-schema {:fn-schema-id (:id hof-schema)})
-        f-arg (first (filter #(= f-arg-name (:name %)) hof-arg-schemas))
-        coll-arg (first (filter #(= "coll" (:name %)) hof-arg-schemas))
-        ;; Create HOF instance with unique name
+  (let [;; Get HOF base fn
+        hof-base (first (sp/query-entities storage :fn {:name hof-name}))
+        ;; Create composed fn instance
         hof-fn (sp/create-entity storage :fn
                                  {:name (str "test-" hof-name "-" (random-uuid))
-                                  :fn-schema-id (:id hof-schema)})
-        ;; Set :f/:pred/:key-fn arg to fn-id
-        _ (create-arg-value-with-binding! storage (:id hof-fn) (:id f-arg) fn-id)
+                                  :parent-id (:id hof-base)})
+        ;; Set :f/:pred/:key-fn arg to fn-id (is-fn=true means pass fn-id directly)
+        _ (sp/create-entity storage :arg
+                            {:fn-id (:id hof-fn)
+                             :name f-arg-name
+                             :type :fn
+                             :is-fn true
+                             :value fn-id})
         ;; Set :coll arg
-        _ (create-arg-value-with-binding! storage (:id hof-fn) (:id coll-arg) coll)
+        _ (sp/create-entity storage :arg
+                            {:fn-id (:id hof-fn)
+                             :name "coll"
+                             :type :jsonb
+                             :value coll})
         ctx (exec/create-context {:storage storage})]
     (exec/execute ctx (:id hof-fn) nil)))
 
@@ -176,17 +194,26 @@
 (defn- create-reduce-caller
   "Creates a function that calls reduce with given fn-id, init value and collection."
   [storage fn-id init coll]
-  (let [reduce-schema (first (sp/query-entities storage :fn-schema {:name "reduce"}))
-        reduce-arg-schemas (sp/query-entities storage :arg-schema {:fn-schema-id (:id reduce-schema)})
-        f-arg (first (filter #(= "f" (:name %)) reduce-arg-schemas))
-        init-arg (first (filter #(= "init" (:name %)) reduce-arg-schemas))
-        coll-arg (first (filter #(= "coll" (:name %)) reduce-arg-schemas))
+  (let [reduce-base (first (sp/query-entities storage :fn {:name "reduce"}))
         reduce-fn (sp/create-entity storage :fn
-                                    {:name (str "test-reduce-" (random-uuid))
-                                     :fn-schema-id (:id reduce-schema)})
-        _ (create-arg-value-with-binding! storage (:id reduce-fn) (:id f-arg) fn-id)
-        _ (create-arg-value-with-binding! storage (:id reduce-fn) (:id init-arg) init)
-        _ (create-arg-value-with-binding! storage (:id reduce-fn) (:id coll-arg) coll)
+                                     {:name (str "test-reduce-" (random-uuid))
+                                      :parent-id (:id reduce-base)})
+        _ (sp/create-entity storage :arg
+                            {:fn-id (:id reduce-fn)
+                             :name "f"
+                             :type :fn
+                             :is-fn true
+                             :value fn-id})
+        _ (sp/create-entity storage :arg
+                            {:fn-id (:id reduce-fn)
+                             :name "init"
+                             :type :jsonb
+                             :value init})
+        _ (sp/create-entity storage :arg
+                            {:fn-id (:id reduce-fn)
+                             :name "coll"
+                             :type :jsonb
+                             :value coll})
         ctx (exec/create-context {:storage storage})]
     (exec/execute ctx (:id reduce-fn) nil)))
 
@@ -194,15 +221,21 @@
 (defn- create-apply-caller
   "Creates a function that calls apply with given fn-id and args."
   [storage fn-id args]
-  (let [apply-schema (first (sp/query-entities storage :fn-schema {:name "apply"}))
-        apply-arg-schemas (sp/query-entities storage :arg-schema {:fn-schema-id (:id apply-schema)})
-        f-arg (first (filter #(= "f" (:name %)) apply-arg-schemas))
-        args-arg (first (filter #(= "args" (:name %)) apply-arg-schemas))
+  (let [apply-base (first (sp/query-entities storage :fn {:name "apply"}))
         apply-fn (sp/create-entity storage :fn
                                    {:name (str "test-apply-" (random-uuid))
-                                    :fn-schema-id (:id apply-schema)})
-        _ (create-arg-value-with-binding! storage (:id apply-fn) (:id f-arg) fn-id)
-        _ (create-arg-value-with-binding! storage (:id apply-fn) (:id args-arg) args)
+                                    :parent-id (:id apply-base)})
+        _ (sp/create-entity storage :arg
+                            {:fn-id (:id apply-fn)
+                             :name "f"
+                             :type :fn
+                             :is-fn true
+                             :value fn-id})
+        _ (sp/create-entity storage :arg
+                            {:fn-id (:id apply-fn)
+                             :name "args"
+                             :type :jsonb
+                             :value args})
         ctx (exec/create-context {:storage storage})]
     (exec/execute ctx (:id apply-fn) nil)))
 
@@ -352,10 +385,10 @@
 
 
 ;; === Transducer Integration Tests ===
-;; Tests that comp + transduce work correctly with fn-usage references
+;; Tests that comp + transduce work correctly with fn references
 
 (deftest transducer-comp-transduce-integration-test
-  (testing "comp + transduce pipeline works with fn-usage references"
+  (testing "comp + transduce pipeline works with fn references"
     (let [storage (create-base-storage)]
       (try
         ;; Register base functions
@@ -364,43 +397,46 @@
 
         ;; Setup: create helper predicate and transform functions
         ;; gt2: x -> x > 2
-        (let [gt2-schema (sp/create-entity storage :fn-schema
-                                           {:name "gt2"
-                                            :returned-type :bool})
-              _ (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id gt2-schema)
+        (let [gt2-base (sp/create-entity storage :fn
+                                         {:name "gt2"
+                                          :parent-id nil
+                                          :return-type :bool})
+              _ (sp/create-entity storage :arg
+                                  {:fn-id (:id gt2-base)
                                    :name "x"
                                    :type :int
-                                   :required true :first-class false})
+                                   :required true})
               gt2-fn (sp/create-entity storage :fn
                                        {:name "my-gt2"
-                                        :fn-schema-id (:id gt2-schema)})
+                                        :parent-id (:id gt2-base)})
 
               ;; double: x -> x * 2
-              double-schema (sp/create-entity storage :fn-schema
-                                              {:name "double"
-                                               :returned-type :int})
-              _ (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id double-schema)
+              double-base (sp/create-entity storage :fn
+                                            {:name "double"
+                                             :parent-id nil
+                                             :return-type :int})
+              _ (sp/create-entity storage :arg
+                                  {:fn-id (:id double-base)
                                    :name "x"
                                    :type :int
-                                   :required true :first-class false})
+                                   :required true})
               double-fn (sp/create-entity storage :fn
                                           {:name "my-double"
-                                           :fn-schema-id (:id double-schema)})
+                                           :parent-id (:id double-base)})
 
               ;; add-reducer: [acc item] -> acc + item
-              add-schema (sp/create-entity storage :fn-schema
-                                           {:name "add-reducer"
-                                            :returned-type :int})
-              _ (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id add-schema)
+              add-base (sp/create-entity storage :fn
+                                         {:name "add-reducer"
+                                          :parent-id nil
+                                          :return-type :int})
+              _ (sp/create-entity storage :arg
+                                  {:fn-id (:id add-base)
                                    :name "pair"
                                    :type :jsonb
-                                   :required true :first-class false})
+                                   :required true})
               add-fn (sp/create-entity storage :fn
                                        {:name "my-add-reducer"
-                                        :fn-schema-id (:id add-schema)})]
+                                        :parent-id (:id add-base)})]
 
           ;; Register implementations
           (exec/register-base-fn! :gt2
@@ -417,7 +453,6 @@
                                       (+ acc item))))
 
           ;; Create transducer-returning functions and compose them
-          ;; The key here is using fn-composition which creates fn-usages
           (fn-composition/sync-fns-to-storage! storage
                                                [;; filter-xf: (filter gt2) - returns transducer
                                                 {:name :filter-xf
@@ -435,7 +470,6 @@
                                                  :args {:a :filter-xf> :b :map-xf>}}
 
                                                 ;; composed-xf: (comp filter-xf map-xf)
-                                                ;; Uses pair to pass functions as vector
                                                 {:name :composed-xf
                                                  :parent :comp
                                                  :args {:fns :xf-pair>}}
@@ -466,41 +500,44 @@
         (registry/sync-defs-to-storage! storage bf/all-defs)
 
         ;; Create counting predicate and transform
-        (let [counting-pred-schema (sp/create-entity storage :fn-schema
-                                                     {:name "counting-pred"
-                                                      :returned-type :bool})
-              _ (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id counting-pred-schema)
+        (let [counting-pred-base (sp/create-entity storage :fn
+                                                   {:name "counting-pred"
+                                                    :parent-id nil
+                                                    :return-type :bool})
+              _ (sp/create-entity storage :arg
+                                  {:fn-id (:id counting-pred-base)
                                    :name "x"
                                    :type :int
-                                   :required true :first-class false})
+                                   :required true})
               counting-pred-fn (sp/create-entity storage :fn
                                                  {:name "my-counting-pred"
-                                                  :fn-schema-id (:id counting-pred-schema)})
+                                                  :parent-id (:id counting-pred-base)})
 
-              counting-map-schema (sp/create-entity storage :fn-schema
-                                                    {:name "counting-map"
-                                                     :returned-type :int})
-              _ (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id counting-map-schema)
+              counting-map-base (sp/create-entity storage :fn
+                                                  {:name "counting-map"
+                                                   :parent-id nil
+                                                   :return-type :int})
+              _ (sp/create-entity storage :arg
+                                  {:fn-id (:id counting-map-base)
                                    :name "x"
                                    :type :int
-                                   :required true :first-class false})
+                                   :required true})
               counting-map-fn (sp/create-entity storage :fn
                                                 {:name "my-counting-map"
-                                                 :fn-schema-id (:id counting-map-schema)})
+                                                 :parent-id (:id counting-map-base)})
 
-              add-schema (sp/create-entity storage :fn-schema
-                                           {:name "add-reducer2"
-                                            :returned-type :int})
-              _ (sp/create-entity storage :arg-schema
-                                  {:fn-schema-id (:id add-schema)
+              add-base (sp/create-entity storage :fn
+                                         {:name "add-reducer2"
+                                          :parent-id nil
+                                          :return-type :int})
+              _ (sp/create-entity storage :arg
+                                  {:fn-id (:id add-base)
                                    :name "pair"
                                    :type :jsonb
-                                   :required true :first-class false})
+                                   :required true})
               add-fn (sp/create-entity storage :fn
                                        {:name "my-add-reducer2"
-                                        :fn-schema-id (:id add-schema)})]
+                                        :parent-id (:id add-base)})]
 
           ;; Register implementations with counting
           (exec/register-base-fn! :counting-pred

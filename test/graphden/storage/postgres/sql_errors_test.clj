@@ -1,6 +1,12 @@
 (ns graphden.storage.postgres.sql-errors-test
   "Tests for PostgreSQL storage SQL error handling.
 
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+
    Covers:
    - SQL error unique violation
    - SQL error foreign key violation
@@ -95,14 +101,13 @@
       (try
         ;; Use graph schema which has unique constraints on names
         (sp/initialize storage (setup/make-graph-schema))
-        (let [fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
-          (sp/create-entity storage :fn-schema {:id fn-schema-id :name "schema1" :returned-type "int"})
-          (sp/create-entity storage :fn-schema {:id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-                                                :name "schema2" :returned-type "int"})
-          ;; Try to update schema2's name to conflict with schema1
-          ;; Note: This requires a unique constraint on name, which we might not have.
-          ;; If no unique constraint, this test would need a different approach.
-          ;; For now, test that update works and returns properly typed errors when they occur.
+        (let [fn-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
+          (sp/create-entity storage :fn {:id fn-id :name "fn1" :parent-id nil :return-type "int"})
+          (sp/create-entity storage :fn {:id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+                                         :name "fn2" :parent-id nil :return-type "int"})
+          ;; Try to update fn2's name to conflict with fn1
+          ;; Note: This requires a unique constraint on name, which we have.
+          ;; Test that update works and returns properly typed errors when they occur.
           )
         (finally
           (sp/close storage))))))
@@ -114,18 +119,19 @@
       (try
         (sp/initialize storage (setup/make-graph-schema))
         (let [pool (:pool storage)
-              fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-              fn-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
+              base-fn-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+              arg-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
           ;; Add FK constraint manually (not created by default in DDL)
-          (jdbc/execute! pool ["ALTER TABLE \"fn\" ADD CONSTRAINT fk_fn_schema
-                                FOREIGN KEY (\"fn_schema_id\") REFERENCES \"fn_schema\"(\"id\")"])
-          ;; Create fn-schema
-          (sp/create-entity storage :fn-schema {:id fn-schema-id :name "test" :returned-type "int"})
-          ;; Create fn that references fn-schema
-          (sp/create-entity storage :fn {:id fn-id :name "my-fn" :fn-schema-id fn-schema-id})
-          ;; Try to delete fn-schema while fn still references it
+          (jdbc/execute! pool ["ALTER TABLE \"arg\" ADD CONSTRAINT fk_arg_fn
+                                FOREIGN KEY (\"fn_id\") REFERENCES \"fn\"(\"id\")"])
+          ;; Create base fn
+          (sp/create-entity storage :fn {:id base-fn-id :name "test" :parent-id nil :return-type "int"})
+          ;; Create arg that references fn
+          (sp/create-entity storage :arg {:id arg-id :fn-id base-fn-id :name "x"
+                                          :type "int" :required true :is-fn false})
+          ;; Try to delete fn while arg still references it
           (try
-            (sp/delete-entity storage :fn-schema fn-schema-id)
+            (sp/delete-entity storage :fn base-fn-id)
             (is false "Should have thrown foreign key violation")
             (catch clojure.lang.ExceptionInfo e
               (is (= :foreign-key-violation (:type (ex-data e))))
@@ -139,18 +145,19 @@
       (try
         (sp/initialize storage (setup/make-graph-schema))
         (let [pool (:pool storage)
-              fn-schema-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
-              fn-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
+              base-fn-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+              arg-id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"]
           ;; Add FK constraint manually
-          (jdbc/execute! pool ["ALTER TABLE \"fn\" ADD CONSTRAINT fk_fn_schema
-                                FOREIGN KEY (\"fn_schema_id\") REFERENCES \"fn_schema\"(\"id\")"])
-          ;; Create fn-schema
-          (sp/create-entity storage :fn-schema {:id fn-schema-id :name "test" :returned-type "int"})
-          ;; Create fn that references fn-schema
-          (sp/create-entity storage :fn {:id fn-id :name "my-fn" :fn-schema-id fn-schema-id})
-          ;; Try to delete fn-schema while fn still references it
+          (jdbc/execute! pool ["ALTER TABLE \"arg\" ADD CONSTRAINT fk_arg_fn
+                                FOREIGN KEY (\"fn_id\") REFERENCES \"fn\"(\"id\")"])
+          ;; Create base fn
+          (sp/create-entity storage :fn {:id base-fn-id :name "test" :parent-id nil :return-type "int"})
+          ;; Create arg that references fn
+          (sp/create-entity storage :arg {:id arg-id :fn-id base-fn-id :name "x"
+                                          :type "int" :required true :is-fn false})
+          ;; Try to delete fn while arg still references it
           (try
-            (sp/delete-entities storage :fn-schema [fn-schema-id])
+            (sp/delete-entities storage :fn [base-fn-id])
             (is false "Should have thrown foreign key violation")
             (catch clojure.lang.ExceptionInfo e
               (is (= :foreign-key-violation (:type (ex-data e))))
@@ -167,28 +174,24 @@
       (try
         (sp/initialize storage (setup/make-graph-schema))
         (let [pool (:pool storage)
-              fn-schema (crud/create-entity pool :fn-schema
-                                            {:name "test" :returned-type "int"} nil)
-              arg-schema (crud/create-entity pool :arg-schema
-                                             {:fn-schema-id (:id fn-schema)
-                                              :name "ref" :type "ref" :required false :first-class false} nil)
-              main-fn (crud/create-entity pool :fn
-                                          {:name "main" :fn-schema-id (:id fn-schema)} nil)
-              ref-fn (crud/create-entity pool :fn
-                                         {:name "ref-target" :fn-schema-id (:id fn-schema)} nil)
-              av (crud/create-entity pool :arg-value
-                                     {:arg-schema-id (:id arg-schema)
-                                      :value (:id ref-fn)} nil)
-              _ (crud/create-entity pool :fn-arg
-                                    {:fn-id (:id main-fn)
-                                     :arg-schema-id (:id arg-schema)
-                                     :arg-value-id (:id av)} nil)
-              ;; Delete the referenced fn directly (bypassing FK check by deleting in correct order)
+              ;; Create base fn
+              base-fn (setup/create-base-fn! storage "identity" :int)
+              base-arg (setup/create-arg! storage (:id base-fn)
+                                          {:name "x" :type :int :required false :is-fn false})
+              ;; Create main composed fn
+              main-fn (setup/create-composed-fn! storage "main" (:id base-fn))
+              ;; Create ref-target fn
+              ref-fn (setup/create-composed-fn! storage "ref-target" (:id base-fn))
+              ;; Create arg referencing ref-fn via ref-id
+              _ (setup/create-arg! storage (:id main-fn)
+                                   {:name "x" :type :int :required false :is-fn false
+                                    :source-id (:id base-arg) :ref-id (:id ref-fn)})
+              ;; Delete the referenced fn directly (bypassing FK check)
               _ (jdbc/execute! pool [(str "DELETE FROM \"fn\" WHERE id = '" (:id ref-fn) "'")])
               ;; Now resolve - should handle missing fn gracefully
               graph (sp/resolve-execution-graph storage (:id main-fn))]
-          ;; Should only have main-fn since ref-fn was deleted
-          (is (= 1 (count (:fns graph))))
+          ;; Should only have main-fn and base-fn since ref-fn was deleted
+          (is (= 2 (count (:fns graph))))
           (is (contains? (:fns graph) (:id main-fn))))
         (finally
           (sp/close storage)))))
@@ -238,7 +241,7 @@
 
 
 (deftest batch-operations-empty-sequences-test
-  (testing "discover-graph-cte throws not-found for non-existent fn"
+  (testing "discover-graph-cte returns empty set for non-existent fn"
     (let [storage (setup/create-test-storage)]
       (try
         (sp/initialize storage (setup/make-graph-schema))
@@ -246,7 +249,7 @@
               discover-fn #'graph/discover-graph-cte
               result (discover-fn pool (random-uuid))]
           ;; Non-existent fn returns empty set
-          (is (= {:fn-ids #{} :fn-usage-ids #{} :fn-usages {}} result)))
+          (is (= #{} result)))
         (finally
           (sp/close storage)))))
 

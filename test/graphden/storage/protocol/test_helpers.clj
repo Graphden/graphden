@@ -8,7 +8,13 @@
    - make-schema / make-graph-schema: Create test schemas
    - create-test-storage: Create pre-initialized PostgreSQL storage
    - with-test-storage: Macro for test storage lifecycle
-   - Container management via postgres-test-helpers"
+   - Container management via postgres-test-helpers
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
@@ -52,72 +58,56 @@
 
 
 (defn make-graph-schema
-  "Creates a schema for graph testing with normalized entities:
-   fn-schema, arg-schema, fn, arg-value (pure value), fn-arg (binding).
-
-   Schema (normalized):
-   - arg-value: pure value (arg-schema-id, value) - no owner
-   - fn-arg: binding (fn-id, arg-schema-id, arg-value-id)
+  "Creates a schema for graph testing with 2-entity model:
+   - fn: with parent-id for composition
+   - arg: with source-id for inheritance, value/ref-id for data
 
    This is useful for testing ExecutionGraph resolution and related functionality."
   []
   (-> (mds/create-builder)
-      (ds/add-entity :fn-schema
+      ;; fn entity: parent-id=nil for base-fn, parent-id set for composed fn
+      (ds/add-entity :fn
                      #uuid "00000000-0000-0000-0000-000000000010"
                      {:name {:uuid #uuid "00000000-0000-0000-0000-000000000011"
                              :type :text}
-                      :returned-type {:uuid #uuid "00000000-0000-0000-0000-000000000012"
-                                      :type :text}})
-      (ds/add-entity :arg-schema
+                      :parent-id {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                  :type :ref
+                                  :ref-entity :fn
+                                  :nullable? true}
+                      :return-type {:uuid #uuid "00000000-0000-0000-0000-000000000013"
+                                    :type :text
+                                    :nullable? true}
+                      :impl-hash {:uuid #uuid "00000000-0000-0000-0000-000000000014"
+                                  :type :text
+                                  :nullable? true}})
+      ;; arg entity: fn-id (owner), source-id (inheritance), value/ref-id (data)
+      (ds/add-entity :arg
                      #uuid "00000000-0000-0000-0000-000000000020"
-                     {:fn-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000021"
-                                     :type :ref
-                                     :ref-entity :fn-schema}
+                     {:fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000021"
+                              :type :ref
+                              :ref-entity :fn}
                       :name {:uuid #uuid "00000000-0000-0000-0000-000000000022"
                              :type :text}
                       :type {:uuid #uuid "00000000-0000-0000-0000-000000000023"
-                             :type :text}
-                      :required {:uuid #uuid "00000000-0000-0000-0000-000000000024"
-                                 :type :bool}
-                      :first-class {:uuid #uuid "00000000-0000-0000-0000-000000000025"
-                                    :type :bool}})
-      (ds/add-entity :fn
-                     #uuid "00000000-0000-0000-0000-000000000030"
-                     {:name {:uuid #uuid "00000000-0000-0000-0000-000000000031"
-                             :type :text}
-                      :fn-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000032"
-                                     :type :ref
-                                     :ref-entity :fn-schema}
-                      :owner-fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000033"
-                                    :type :ref
-                                    :ref-entity :fn
-                                    :nullable? true}})
-      ;; arg-value: pure value (no owner-fn-id)
-      ;; Exactly ONE of (value, fn-usage-id) must be set.
-      (ds/add-entity :arg-value
-                     #uuid "00000000-0000-0000-0000-000000000040"
-                     {:arg-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000042"
-                                      :type :ref
-                                      :ref-entity :arg-schema}
-                      :value {:uuid #uuid "00000000-0000-0000-0000-000000000043"
+                             :type :text
+                             :nullable? true}
+                      :source-id {:uuid #uuid "00000000-0000-0000-0000-000000000024"
+                                  :type :ref
+                                  :ref-entity :arg
+                                  :nullable? true}
+                      :value {:uuid #uuid "00000000-0000-0000-0000-000000000025"
                               :type :jsonb
                               :nullable? true}
-                      :fn-usage-id {:uuid #uuid "00000000-0000-0000-0000-000000000044"
-                                    :type :ref
-                                    :ref-entity :fn-usage
-                                    :nullable? true}})
-      ;; fn-arg: binding (fn -> arg-value)
-      (ds/add-entity :fn-arg
-                     #uuid "00000000-0000-0000-0000-000000000050"
-                     {:fn-id {:uuid #uuid "00000000-0000-0000-0000-000000000051"
-                              :type :ref
-                              :ref-entity :fn}
-                      :arg-schema-id {:uuid #uuid "00000000-0000-0000-0000-000000000052"
-                                      :type :ref
-                                      :ref-entity :arg-schema}
-                      :arg-value-id {:uuid #uuid "00000000-0000-0000-0000-000000000053"
-                                     :type :ref
-                                     :ref-entity :arg-value}})
+                      :ref-id {:uuid #uuid "00000000-0000-0000-0000-000000000026"
+                               :type :ref
+                               :ref-entity :fn
+                               :nullable? true}
+                      :is-fn {:uuid #uuid "00000000-0000-0000-0000-000000000027"
+                              :type :bool
+                              :nullable? true}
+                      :required {:uuid #uuid "00000000-0000-0000-0000-000000000028"
+                                 :type :bool
+                                 :nullable? true}})
       ds/build))
 
 
@@ -184,26 +174,43 @@
          (sp/close ~sym)))))
 
 
-(defn create-arg-value-with-binding!
-  "Creates an arg-value and fn-arg binding in one operation.
-   This is the normalized way to bind an argument value to a function.
+(defn create-arg-with-value!
+  "Creates an arg with a literal value for the 2-entity schema.
 
    Arguments:
    - storage: initialized storage
    - fn-id: UUID of the owning function
-   - arg-schema-id: UUID of the arg-schema
+   - name: arg name
    - value: the argument value
 
-   Returns the created arg-value entity.
+   Returns the created arg entity.
 
    Example:
-     (create-arg-value-with-binding! storage fn-id arg-schema-id 42)"
-  [storage fn-id arg-schema-id value]
-  (let [arg-value (sp/create-entity storage :arg-value
-                                    {:arg-schema-id arg-schema-id
-                                     :value value})
-        _ (sp/create-entity storage :fn-arg
-                            {:fn-id fn-id
-                             :arg-schema-id arg-schema-id
-                             :arg-value-id (:id arg-value)})]
-    arg-value))
+     (create-arg-with-value! storage fn-id \"x\" 42)"
+  [storage fn-id name value]
+  (sp/create-entity storage :arg
+                    {:fn-id fn-id
+                     :name name
+                     :value value}))
+
+
+(defn create-arg-with-ref!
+  "Creates an arg with a function reference for the 2-entity schema.
+
+   Arguments:
+   - storage: initialized storage
+   - fn-id: UUID of the owning function
+   - name: arg name
+   - ref-id: UUID of the referenced function
+   - is-fn: true if passing fn as first-class value (HOF)
+
+   Returns the created arg entity.
+
+   Example:
+     (create-arg-with-ref! storage fn-id \"f\" other-fn-id true)"
+  [storage fn-id name ref-id is-fn]
+  (sp/create-entity storage :arg
+                    {:fn-id fn-id
+                     :name name
+                     :ref-id ref-id
+                     :is-fn is-fn}))

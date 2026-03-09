@@ -18,17 +18,17 @@
 
 (deftest uuid-generation-test
   (testing "fn-schema-uuid is deterministic"
-    (let [uuid1 (registry/fn-schema-uuid :test-fn)
-          uuid2 (registry/fn-schema-uuid :test-fn)
-          uuid3 (registry/fn-schema-uuid :other-fn)]
+    (let [uuid1 (registry/fn-uuid :test-fn)
+          uuid2 (registry/fn-uuid :test-fn)
+          uuid3 (registry/fn-uuid :other-fn)]
       (is (= uuid1 uuid2) "Same name should produce same UUID")
       (is (not= uuid1 uuid3) "Different names should produce different UUIDs")))
 
   (testing "arg-schema-uuid is deterministic"
-    (let [uuid1 (registry/arg-schema-uuid :test-fn :arg-a)
-          uuid2 (registry/arg-schema-uuid :test-fn :arg-a)
-          uuid3 (registry/arg-schema-uuid :test-fn :arg-b)
-          uuid4 (registry/arg-schema-uuid :other-fn :arg-a)]
+    (let [uuid1 (registry/arg-uuid :test-fn :arg-a)
+          uuid2 (registry/arg-uuid :test-fn :arg-a)
+          uuid3 (registry/arg-uuid :test-fn :arg-b)
+          uuid4 (registry/arg-uuid :other-fn :arg-a)]
       (is (= uuid1 uuid2) "Same fn+arg should produce same UUID")
       (is (not= uuid1 uuid3) "Different arg should produce different UUID")
       (is (not= uuid1 uuid4) "Different fn should produce different UUID"))))
@@ -153,23 +153,23 @@
 
 (deftest memoized-uuid-v5-test
   (testing "returns same UUID for same input"
-    (let [uuid1 (core/fn-schema-uuid :test-fn)
-          uuid2 (core/fn-schema-uuid :test-fn)]
+    (let [uuid1 (core/fn-uuid :test-fn)
+          uuid2 (core/fn-uuid :test-fn)]
       (is (= uuid1 uuid2))))
 
   (testing "returns different UUIDs for different inputs"
-    (let [uuid1 (core/fn-schema-uuid :fn-a)
-          uuid2 (core/fn-schema-uuid :fn-b)]
+    (let [uuid1 (core/fn-uuid :fn-a)
+          uuid2 (core/fn-uuid :fn-b)]
       (is (not= uuid1 uuid2))))
 
   (testing "arg-schema-uuid is different from fn-schema-uuid"
-    (let [fn-uuid (core/fn-schema-uuid :my-fn)
-          arg-uuid (core/arg-schema-uuid :my-fn :x)]
+    (let [fn-uuid (core/fn-uuid :my-fn)
+          arg-uuid (core/arg-uuid :my-fn :x)]
       (is (not= fn-uuid arg-uuid))))
 
   (testing "same arg-name on different functions produces different UUIDs"
-    (let [uuid1 (core/arg-schema-uuid :fn-a :x)
-          uuid2 (core/arg-schema-uuid :fn-b :x)]
+    (let [uuid1 (core/arg-uuid :fn-a :x)
+          uuid2 (core/arg-uuid :fn-b :x)]
       (is (not= uuid1 uuid2)))))
 
 

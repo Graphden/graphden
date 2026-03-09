@@ -2,12 +2,17 @@
   "Storage decorator that adds Git-like versioning with branch support.
 
    Wraps any storage implementation with branch-aware CRUD:
-   - Versioned entities (fn, fn-schema, arg-schema, fn-arg)
-     are intercepted: reads resolve versions on the current branch,
-     writes append version records
-   - Non-versioned entities (arg-value, fn-usage, branch, branch-merge,
-     all version tables) delegate directly to base storage
+   - Versioned entities (fn, arg) are intercepted: reads resolve versions
+     on the current branch, writes append version records
+   - Non-versioned entities (branch, branch-merge, all version tables)
+     delegate directly to base storage
    - ExecutionGraph resolution works transparently via CRUD interception
+
+   ## 2-Entity Schema
+
+   Only two entities are versioned:
+   - fn: function entity (parent-id for inheritance)
+   - arg: argument entity (source-id for inheritance, value/ref-id for data)
 
    ## Usage
 
@@ -15,7 +20,7 @@
    (def storage (vs/wrap-with-versioning base))
 
    ;; CRUD works like normal storage, but is branch-aware
-   (sp/create-entity storage :fn {:name \"foo\" :fn-schema-id id})
+   (sp/create-entity storage :fn {:name \"foo\" :parent-id id})
 
    ;; Create branch and switch
    (def branch (vs/create-branch! storage \"feature\"))
@@ -192,11 +197,6 @@
 
 
   sp/GraphConstraints
-
-  (validate-arg-schema-belongs-to-fn!
-    [this fn-id arg-schema-id]
-    (gc/validate-arg-schema-belongs-to-fn! this fn-id arg-schema-id))
-
 
   (validate-no-dependency-cycle!
     [this owner-fn-id value-fn-id]

@@ -1,5 +1,11 @@
 (ns graphden.storage.protocol.execution-graph-test
-  "Tests for ExecutionGraphResult validation and reader."
+  "Tests for ExecutionGraphResult validation and reader.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.storage.protocol.core :as storage]))
@@ -9,78 +15,51 @@
 
 (deftest execution-graph-validation-test
   (let [fn-id (random-uuid)
-        fn-schema-id (random-uuid)
-        arg-schema-id (random-uuid)
-        valid-fns {fn-id {:id fn-id :fn-schema-id fn-schema-id}}
-        valid-fn-schemas {fn-schema-id {:id fn-schema-id :name "test-fn"}}
-        valid-arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id}}]
+        parent-id (random-uuid)
+        arg-id (random-uuid)
+        valid-fns {fn-id {:id fn-id :name "test-fn" :parent-id parent-id}
+                   parent-id {:id parent-id :name "base-fn" :parent-id nil}}
+        valid-args [{:id arg-id :fn-id fn-id :name "x" :type "int" :required true :is-fn false}]]
 
     (testing "creates valid result with all required fields"
       (let [result (storage/->execution-graph
                      {:fns valid-fns
-                      :fn-schemas valid-fn-schemas
-                      :arg-schemas valid-arg-schemas
-                      :resolved-args {}})]
+                      :args valid-args})]
         (is (storage/execution-graph? result))
         (is (= valid-fns (:fns result)))
-        (is (= valid-fn-schemas (:fn-schemas result)))))
+        (is (= valid-args (:args result)))))
 
     (testing "throws when :fns is not a map"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :fns map"
             (storage/->execution-graph
               {:fns "not-a-map"
-               :fn-schemas valid-fn-schemas
-               :arg-schemas valid-arg-schemas
-               :resolved-args {}}))))
+               :args valid-args}))))
 
     (testing "throws when :fns is empty"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #":fns must contain at least"
             (storage/->execution-graph
               {:fns {}
-               :fn-schemas valid-fn-schemas
-               :arg-schemas valid-arg-schemas
-               :resolved-args {}}))))
+               :args valid-args}))))
 
-    (testing "throws when :fn-schemas is not a map"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :fn-schemas map"
+    (testing "throws when :args is not a sequence"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :args sequence"
             (storage/->execution-graph
               {:fns valid-fns
-               :fn-schemas []
-               :arg-schemas valid-arg-schemas
-               :resolved-args {}}))))
+               :args "invalid"}))))
 
-    (testing "throws when :fn-schemas is empty"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #":fn-schemas must contain at least"
-            (storage/->execution-graph
-              {:fns valid-fns
-               :fn-schemas {}
-               :arg-schemas valid-arg-schemas
-               :resolved-args {}}))))
-
-    (testing "throws when :arg-schemas is not a map"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :arg-schemas map"
-            (storage/->execution-graph
-              {:fns valid-fns
-               :fn-schemas valid-fn-schemas
-               :arg-schemas "invalid"
-               :resolved-args {}}))))
-
-    (testing "throws when :resolved-args is not a map"
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"requires :resolved-args map"
-            (storage/->execution-graph
-              {:fns valid-fns
-               :fn-schemas valid-fn-schemas
-               :arg-schemas valid-arg-schemas
-               :resolved-args []}))))))
+    (testing "allows empty :args sequence"
+      (let [result (storage/->execution-graph
+                     {:fns valid-fns
+                      :args []})]
+        (is (storage/execution-graph? result))
+        (is (= [] (:args result)))))))
 
 
 (deftest execution-graph?-test
   (testing "returns true for ExecutionGraphResult"
     (let [result (storage/->execution-graph
-                   {:fns {(random-uuid) {:id (random-uuid)}}
-                    :fn-schemas {(random-uuid) {:id (random-uuid)}}
-                    :arg-schemas {}
-                    :resolved-args {}})]
+                   {:fns {(random-uuid) {:id (random-uuid) :name "test"}}
+                    :args []})]
       (is (true? (storage/execution-graph? result)))))
 
   (testing "returns false for other types"
@@ -95,44 +74,62 @@
   (testing "ExecutionGraphReader protocol is defined"
     (is (some? storage/ExecutionGraphReader))
     (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-fn))
-    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-fn-schema))
-    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-arg-schemas))
-    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-resolved-args))
-    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-fn-usage)))
+    (is (contains? (:sigs storage/ExecutionGraphReader) :graph-get-args)))
 
   (testing "ExecutionGraphResult implements ExecutionGraphReader"
     (let [fn-id (random-uuid)
-          fn-schema-id (random-uuid)
-          arg-schema-id (random-uuid)
-          cs-id (random-uuid)
+          parent-id (random-uuid)
+          arg-1-id (random-uuid)
+          arg-2-id (random-uuid)
           graph (storage/->execution-graph
-                  {:fns {fn-id {:id fn-id :fn-schema-id fn-schema-id}}
-                   :fn-schemas {fn-schema-id {:id fn-schema-id :name "test-fn"}}
-                   :arg-schemas {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id}}
-                   :resolved-args {fn-id {arg-schema-id {:value 42}}}
-                   :fn-usages {cs-id {:id cs-id :value "result"}}})]
-      ;; Test protocol methods
-      (is (= {:id fn-id :fn-schema-id fn-schema-id}
+                  {:fns {fn-id {:id fn-id :name "test-fn" :parent-id parent-id}
+                         parent-id {:id parent-id :name "base-fn" :parent-id nil}}
+                   :args [{:id arg-1-id :fn-id fn-id :name "a" :type "int" :value 1}
+                          {:id arg-2-id :fn-id fn-id :name "b" :type "int" :value 2}]})]
+      ;; Test graph-get-fn
+      (is (= {:id fn-id :name "test-fn" :parent-id parent-id}
              (storage/graph-get-fn graph fn-id)))
-      (is (= {:id fn-schema-id :name "test-fn"}
-             (storage/graph-get-fn-schema graph fn-schema-id)))
-      ;; graph-get-arg-schemas returns a map of {arg-schema-id -> arg-schema-record}
-      (is (= {arg-schema-id {:id arg-schema-id :fn-schema-id fn-schema-id}}
-             (storage/graph-get-arg-schemas graph fn-schema-id)))
-      (is (= {arg-schema-id {:value 42}}
-             (storage/graph-get-resolved-args graph fn-id)))
-      (is (= {:id cs-id :value "result"}
-             (storage/graph-get-fn-usage graph cs-id)))))
+      (is (= {:id parent-id :name "base-fn" :parent-id nil}
+             (storage/graph-get-fn graph parent-id)))
+      ;; Test graph-get-args - returns vector of args for fn-id
+      (let [args (storage/graph-get-args graph fn-id)]
+        (is (= 2 (count args)))
+        (is (= #{"a" "b"} (set (map :name args)))))))
 
   (testing "ExecutionGraphReader returns nil/empty for missing keys"
     (let [graph (storage/->execution-graph
-                  {:fns {(random-uuid) {:id (random-uuid)}}
-                   :fn-schemas {(random-uuid) {:id (random-uuid)}}
-                   :arg-schemas {}
-                   :resolved-args {}})]
+                  {:fns {(random-uuid) {:id (random-uuid) :name "test"}}
+                   :args []})]
       (is (nil? (storage/graph-get-fn graph (random-uuid))))
-      (is (nil? (storage/graph-get-fn-schema graph (random-uuid))))
-      ;; Returns empty map for missing fn-schema-id (no matching arg-schemas)
-      (is (= {} (storage/graph-get-arg-schemas graph (random-uuid))))
-      (is (nil? (storage/graph-get-resolved-args graph (random-uuid))))
-      (is (nil? (storage/graph-get-fn-usage graph (random-uuid)))))))
+      ;; Returns empty vector for fn with no args
+      (is (= [] (storage/graph-get-args graph (random-uuid)))))))
+
+
+;; === Accessor functions tests ===
+
+(deftest graph-accessor-functions-test
+  (let [fn-1-id (random-uuid)
+        fn-2-id (random-uuid)
+        arg-id (random-uuid)
+        graph (storage/->execution-graph
+                {:fns {fn-1-id {:id fn-1-id :name "fn-1"}
+                       fn-2-id {:id fn-2-id :name "fn-2"}}
+                 :args [{:id arg-id :fn-id fn-1-id :name "x" :type "int"}]})]
+
+    (testing "get-graph-fns returns all fns"
+      (let [fns (storage/get-graph-fns graph)]
+        (is (= 2 (count fns)))
+        (is (contains? fns fn-1-id))
+        (is (contains? fns fn-2-id))))
+
+    (testing "get-graph-args returns all args"
+      (let [args (storage/get-graph-args graph)]
+        (is (= 1 (count args)))
+        (is (= arg-id (:id (first args))))))
+
+    (testing "get-graph-args-for-fn returns args for specific fn"
+      (let [fn-1-args (storage/get-graph-args-for-fn graph fn-1-id)
+            fn-2-args (storage/get-graph-args-for-fn graph fn-2-id)]
+        (is (= 1 (count fn-1-args)))
+        (is (= "x" (:name (first fn-1-args))))
+        (is (= [] fn-2-args))))))

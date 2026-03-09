@@ -1,9 +1,16 @@
 (ns graphden.executor.error-path-test
-  "Edge case tests for error paths in executor."
+  "Edge case tests for error paths in executor.
+
+   ## 2-Entity Schema
+
+   Uses simplified schema:
+   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.graph :as graph]))
 
 
 (use-fixtures :each exec/with-clean-registry)
@@ -19,78 +26,61 @@
       execution-graph)))
 
 
-(deftest fn-schema-not-found-in-graph-test
-  (testing "throws when fn-schema is missing from execution graph"
-    ;; This tests the error path at lines 203-207 of executor/core.clj
-    ;; where fn-schema is not found in the execution graph
+(deftest fn-not-found-in-graph-test
+  (testing "throws when fn is missing from execution graph"
     (let [fn-id (random-uuid)
-          fn-schema-id (random-uuid)
           _ (exec/register-base-fn! :dummy (fn [_ _] nil))
-          ;; Create mock storage that returns a graph with fn but missing fn-schema
+          ;; Create mock storage with empty :fns map - fn missing!
           mock-storage (create-mock-storage
-                         {:fns {fn-id {:id fn-id
-                                       :name "my-dummy"
-                                       :fn-schema-id fn-schema-id}}
-                          :fn-schemas {}  ; Empty - fn-schema is missing!
-                          :arg-schemas {}
-                          :resolved-args {}})
+                         (graph/->execution-graph
+                           {:fns {fn-id {:id fn-id
+                                         :name "dummy"
+                                         :parent-id nil}}
+                            :args []}))
           ctx (exec/create-context {:storage mock-storage})]
+      ;; Execute with wrong fn-id
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Function schema not found in execution graph"
-            (exec/execute ctx fn-id {}))))))
+                            #"Function not found in execution graph"
+            (exec/execute ctx (random-uuid) {}))))))
 
 
-(deftest arg-schema-missing-type-test
-  (testing "throws when arg-schema is missing :type field"
-    ;; This tests the error path at lines 106-109 of executor/core.clj
-    ;; where arg-schema is nil or missing :type
+(deftest arg-type-missing-test
+  (testing "throws when arg type is invalid for validation"
     (let [fn-id (random-uuid)
-          fn-schema-id (random-uuid)
-          bad-arg-schema-id (random-uuid)
+          arg-id (random-uuid)
           _ (exec/register-base-fn! :dummy (fn [_ _] nil))
-          ;; Create mock storage with arg-schema missing :type
+          ;; Create mock storage with arg missing :type field
           mock-storage (create-mock-storage
-                         {:fns {fn-id {:id fn-id
-                                       :name "my-dummy"
-                                       :fn-schema-id fn-schema-id}}
-                          :fn-schemas {fn-schema-id {:id fn-schema-id
-                                                     :name "dummy"
-                                                     :returned-type :int}}
-                          ;; arg-schema without :type field
-                          :arg-schemas {bad-arg-schema-id {:id bad-arg-schema-id
-                                                           :fn-schema-id fn-schema-id
-                                                           :name "x"
-                                                           :required true}}
-                          ;; No resolved-args - arg is free so provided-arg triggers validation
-                          :resolved-args {fn-id {}}})
+                         (graph/->execution-graph
+                           {:fns {fn-id {:id fn-id
+                                         :name "dummy"
+                                         :parent-id nil}}
+                            :args [{:id arg-id
+                                    :fn-id fn-id
+                                    :name "x"
+                                    ;; Missing :type field
+                                    :required true}]}))
           ctx (exec/create-context {:storage mock-storage})]
       ;; When we provide an arg, validation on malformed schema (no :type) should fail
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Invalid arg-schema: missing type"
-            (exec/execute ctx fn-id {bad-arg-schema-id 100}))))))
+                            #"Invalid arg.*missing type"
+            (exec/execute ctx fn-id {arg-id 100}))))))
 
 
 ;; === Cache Eviction Tests ===
 
 (deftest cache-eviction-test
   (testing "evicts oldest cache entries when cache limit is reached"
-    ;; This tests the evict-cache-entries! function at lines 133-147 of core.clj
-    ;; and check-cache-limit! at lines 150-167
     (let [fn-id (random-uuid)
-          fn-schema-id (random-uuid)
           call-count (atom 0)
           _ (exec/register-base-fn! :counting-fn (fn [_ _] (swap! call-count inc)))
-          ;; Create mock storage with fn and schema
+          ;; Create mock storage with fn (base fn with parent-id=nil)
           mock-storage (create-mock-storage
-                         {:fns {fn-id {:id fn-id
-                                       :name "counting-fn"
-                                       :fn-schema-id fn-schema-id}}
-                          :fn-schemas {fn-schema-id {:id fn-schema-id
-                                                     :name "counting-fn"
-                                                     :returned-type :int}}
-                          :arg-schemas {}
-                          :resolved-args {}
-                          :fn-usages {}})
+                         (graph/->execution-graph
+                           {:fns {fn-id {:id fn-id
+                                         :name "counting-fn"
+                                         :parent-id nil}}
+                            :args []}))
           ;; Create context with very small cache limit
           ctx (exec/create-context {:storage mock-storage
                                     :cache-max-size 5
@@ -110,23 +100,25 @@
 
 (deftest cache-warning-threshold-test
   (testing "warning is logged when cache reaches warning threshold"
-    ;; This tests the warning path at lines 199-204 of core.clj
-    ;; We can't easily verify logging, but we ensure no crash at threshold
     (let [fn-id (random-uuid)
-          fn-schema-id (random-uuid)
-          cs-id (random-uuid)
+          ref-fn-id (random-uuid)
+          arg-id (random-uuid)
           _ (exec/register-base-fn! :const-fn (fn [_ _] 42))
-          ;; Create mock with fn-usage to trigger cache storage
+          ;; Create mock with ref-id to trigger cache storage
           mock-storage (create-mock-storage
-                         {:fns {fn-id {:id fn-id
-                                       :name "const-fn"
-                                       :fn-schema-id fn-schema-id}}
-                          :fn-schemas {fn-schema-id {:id fn-schema-id
-                                                     :name "const-fn"
-                                                     :returned-type :int}}
-                          :arg-schemas {}
-                          :resolved-args {}
-                          :fn-usages {cs-id {:id cs-id :fn-id fn-id :name "result"}}})
+                         (graph/->execution-graph
+                           {:fns {fn-id {:id fn-id
+                                         :name "const-fn"
+                                         :parent-id nil}
+                                  ref-fn-id {:id ref-fn-id
+                                             :name "const-fn"
+                                             :parent-id nil}}
+                            :args [{:id arg-id
+                                    :fn-id fn-id
+                                    :name "x"
+                                    :type :int
+                                    :required true
+                                    :ref-id ref-fn-id}]}))
           ;; Create context with warning threshold = 2
           ctx (exec/create-context {:storage mock-storage
                                     :cache-warning-threshold 2
@@ -140,37 +132,27 @@
       (is (>= (count @result-cache) 1)))))
 
 
-(deftest fn-usage-not-found-in-graph-test
-  (testing "throws when fn-usage-id is missing from execution graph"
+(deftest ref-fn-not-found-in-graph-test
+  (testing "throws when ref-fn-id references missing fn"
     (let [fn-id (random-uuid)
-          fn-schema-id (random-uuid)
-          arg-schema-id (random-uuid)
-          missing-cs-id (random-uuid)
+          missing-fn-id (random-uuid)
+          arg-id (random-uuid)
           _ (exec/register-base-fn! :identity-fn (fn [{:keys [x]} _ctx] @x))
-          ;; Create mock with fn-usage UUID in resolved-args AND in fn-usages map
-          ;; to pass build-uuid-ref-delay check, but the fn-usage record has
-          ;; a fn-id that references a non-existent fn (will trigger error in execute)
+          ;; Create mock with arg referencing non-existent fn
           mock-storage (create-mock-storage
-                         (let [child-fn-id (random-uuid)]
+                         (graph/->execution-graph
                            {:fns {fn-id {:id fn-id
                                          :name "identity-fn"
-                                         :fn-schema-id fn-schema-id}}
-                            :fn-schemas {fn-schema-id {:id fn-schema-id
-                                                       :name "identity-fn"
-                                                       :returned-type :int}}
-                            :arg-schemas {arg-schema-id {:id arg-schema-id
-                                                         :fn-schema-id fn-schema-id
-                                                         :name "x"
-                                                         :type :int
-                                                         :required true}}
-                            ;; resolved-arg value is a fn-usage UUID (wrapped in arg-value record)
-                            :resolved-args {fn-id {arg-schema-id {:fn-usage-id missing-cs-id}}}
-                            ;; fn-usage exists but references a fn not in :fns
-                            :fn-usages {missing-cs-id {:id missing-cs-id
-                                                       :fn-id child-fn-id
-                                                       :name "result"}}}))
+                                         :parent-id nil}}
+                            ;; arg has ref-id pointing to missing fn
+                            :args [{:id arg-id
+                                    :fn-id fn-id
+                                    :name "x"
+                                    :type :int
+                                    :required true
+                                    :ref-id missing-fn-id}]}))
           ctx (exec/create-context {:storage mock-storage})]
-      ;; Should throw because child-fn-id is not in the execution graph's :fns
+      ;; Should throw because missing-fn-id is not in the execution graph's :fns
       (is (thrown? clojure.lang.ExceptionInfo
             (exec/execute ctx fn-id {}))))))
 
@@ -179,60 +161,32 @@
 
 (deftest depth-warning-at-threshold-test
   (testing "executes successfully and triggers depth warning at 80% threshold"
-    ;; With max-depth=10, threshold = 8. We build a chain of 9 fn-usages
+    ;; With max-depth=10, threshold = 8. We build a chain of 9 functions
     ;; so execution reaches depth 9 (above 8 threshold but below 10 limit).
-    (let [;; Create a chain: fn-0 -> cs-0 -> fn-1 -> cs-1 -> ... -> fn-9 (leaf)
-          num-fns 10
+    (let [num-fns 10
           fn-ids (vec (repeatedly num-fns random-uuid))
-          schema-id (random-uuid)
           _ (exec/register-base-fn! :chain-fn (fn [_ _] :leaf))
           _ (exec/register-base-fn! :chain-step (fn [{:keys [next-val]} _ctx] @next-val))
-          ;; Build graph: fns, schemas, fn-usages
+          ;; Build fns: first n-1 are chain-step (parent-id=nil base fns), last is chain-fn
           fns (into {} (map-indexed
                          (fn [i fid]
                            [fid {:id fid
                                  :name (if (= i (dec num-fns)) "chain-fn" "chain-step")
-                                 :fn-schema-id schema-id}])
+                                 :parent-id nil}])
                          fn-ids))
-          ;; Leaf fn has no args; step fns have one arg "next-val"
-          leaf-schema-id (random-uuid)
-          step-schema-id schema-id
-          arg-schema-id (random-uuid)
-          fn-schemas {step-schema-id {:id step-schema-id
-                                      :name "chain-step"
-                                      :returned-type :any}
-                      leaf-schema-id {:id leaf-schema-id
-                                      :name "chain-fn"
-                                      :returned-type :any}}
-          ;; Update leaf fn to use leaf-schema
-          fns (assoc-in fns [(last fn-ids) :fn-schema-id] leaf-schema-id)
-          ;; Create fn-usages: cs-i points to fn-(i+1)
-          cs-ids (vec (repeatedly (dec num-fns) random-uuid))
-          fn-usages (into {} (map-indexed
-                               (fn [i csid]
-                                 [csid {:id csid
-                                        :fn-id (get fn-ids (inc i))
-                                        :name (str "cs-" i)}])
-                               cs-ids))
-          ;; resolved-args: each step fn's next-val = fn-usage UUID
-          resolved-args (into {}
-                              (map-indexed
-                                (fn [i fid]
-                                  (if (< i (dec num-fns))
-                                    [fid {arg-schema-id {:fn-usage-id (get cs-ids i)}}]
-                                    [fid {}]))
-                                fn-ids))
-          arg-schemas {arg-schema-id {:id arg-schema-id
-                                      :fn-schema-id step-schema-id
-                                      :name "next-val"
-                                      :type :any
-                                      :required true}}
+          ;; Create args: chain-step fns have one arg "next-val" pointing to next fn
+          ;; Each fn[i] has arg with ref-id = fn[i+1]
+          args (vec
+                 (for [i (range (dec num-fns))]
+                   {:id (random-uuid)
+                    :fn-id (get fn-ids i)
+                    :name "next-val"
+                    :type :any
+                    :required true
+                    :ref-id (get fn-ids (inc i))}))
           mock-storage (create-mock-storage
-                         {:fns fns
-                          :fn-schemas fn-schemas
-                          :arg-schemas arg-schemas
-                          :resolved-args resolved-args
-                          :fn-usages fn-usages})
+                         (graph/->execution-graph
+                           {:fns fns :args args}))
           ctx (exec/create-context {:storage mock-storage
                                     :max-depth 10})]
       ;; Execution goes 10 levels deep (depth 1..10), threshold at 8
@@ -245,37 +199,25 @@
     ;; Build a chain of 12 fns with max-depth=10
     (let [num-fns 12
           fn-ids (vec (repeatedly num-fns random-uuid))
-          schema-id (random-uuid)
-          leaf-schema-id (random-uuid)
-          arg-schema-id (random-uuid)
           _ (exec/register-base-fn! :chain-fn (fn [_ _] :leaf))
           _ (exec/register-base-fn! :chain-step (fn [{:keys [next-val]} _ctx] @next-val))
           fns (into {} (map-indexed
                          (fn [i fid]
                            [fid {:id fid
                                  :name (if (= i (dec num-fns)) "chain-fn" "chain-step")
-                                 :fn-schema-id (if (= i (dec num-fns)) leaf-schema-id schema-id)}])
+                                 :parent-id nil}])
                          fn-ids))
-          fn-schemas {schema-id {:id schema-id :name "chain-step" :returned-type :any}
-                      leaf-schema-id {:id leaf-schema-id :name "chain-fn" :returned-type :any}}
-          cs-ids (vec (repeatedly (dec num-fns) random-uuid))
-          fn-usages (into {} (map-indexed
-                               (fn [i csid]
-                                 [csid {:id csid :fn-id (get fn-ids (inc i)) :name (str "cs-" i)}])
-                               cs-ids))
-          resolved-args (into {}
-                              (map-indexed
-                                (fn [i fid]
-                                  (if (< i (dec num-fns))
-                                    [fid {arg-schema-id {:fn-usage-id (get cs-ids i)}}]
-                                    [fid {}]))
-                                fn-ids))
-          arg-schemas {arg-schema-id {:id arg-schema-id
-                                      :fn-schema-id schema-id
-                                      :name "next-val" :type :any :required true}}
+          args (vec
+                 (for [i (range (dec num-fns))]
+                   {:id (random-uuid)
+                    :fn-id (get fn-ids i)
+                    :name "next-val"
+                    :type :any
+                    :required true
+                    :ref-id (get fn-ids (inc i))}))
           mock-storage (create-mock-storage
-                         {:fns fns :fn-schemas fn-schemas :arg-schemas arg-schemas
-                          :resolved-args resolved-args :fn-usages fn-usages})
+                         (graph/->execution-graph
+                           {:fns fns :args args}))
           ctx (exec/create-context {:storage mock-storage :max-depth 10})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Maximum recursion depth exceeded"
@@ -287,7 +229,6 @@
 (deftest timeout-warning-at-threshold-test
   (testing "executes with timeout approaching 80% threshold"
     (let [fn-id (random-uuid)
-          fn-schema-id (random-uuid)
           call-count (atom 0)
           ;; Custom clock: returns 0 at start, then 810ms (just past 80% of 1000ms)
           clock-time (atom 0)
@@ -298,13 +239,9 @@
                                       (reset! clock-time 810)
                                       42))
           mock-storage (create-mock-storage
-                         {:fns {fn-id {:id fn-id :name "timed-fn" :fn-schema-id fn-schema-id}}
-                          :fn-schemas {fn-schema-id {:id fn-schema-id
-                                                     :name "timed-fn"
-                                                     :returned-type :int}}
-                          :arg-schemas {}
-                          :resolved-args {}
-                          :fn-usages {}})
+                         (graph/->execution-graph
+                           {:fns {fn-id {:id fn-id :name "timed-fn" :parent-id nil}}
+                            :args []}))
           ctx (exec/create-context {:storage mock-storage
                                     :timeout-ms 1000
                                     :clock (fn [] @clock-time)})]
@@ -316,23 +253,19 @@
 (deftest timeout-exceeded-test
   (testing "throws when execution timeout is exceeded"
     (let [fn-id (random-uuid)
-          fn-schema-id (random-uuid)
-          arg-schema-id (random-uuid)
-          cs-id (random-uuid)
           child-fn-id (random-uuid)
+          arg-id (random-uuid)
           _ (exec/register-base-fn! :timeout-fn (fn [{:keys [x]} _ctx] @x))
           mock-storage (create-mock-storage
-                         {:fns {fn-id {:id fn-id :name "timeout-fn" :fn-schema-id fn-schema-id}
-                                child-fn-id {:id child-fn-id :name "timeout-fn" :fn-schema-id fn-schema-id}}
-                          :fn-schemas {fn-schema-id {:id fn-schema-id
-                                                     :name "timeout-fn"
-                                                     :returned-type :int}}
-                          :arg-schemas {arg-schema-id {:id arg-schema-id
-                                                       :fn-schema-id fn-schema-id
-                                                       :name "x" :type :int :required true}}
-                          :resolved-args {fn-id {arg-schema-id {:fn-usage-id cs-id}}
-                                          child-fn-id {}}
-                          :fn-usages {cs-id {:id cs-id :fn-id child-fn-id :name "r"}}})
+                         (graph/->execution-graph
+                           {:fns {fn-id {:id fn-id :name "timeout-fn" :parent-id nil}
+                                  child-fn-id {:id child-fn-id :name "timeout-fn" :parent-id nil}}
+                            :args [{:id arg-id
+                                    :fn-id fn-id
+                                    :name "x"
+                                    :type :int
+                                    :required true
+                                    :ref-id child-fn-id}]}))
           ;; Clock advances past timeout between calls
           clock-calls (atom 0)
           ctx (exec/create-context {:storage mock-storage

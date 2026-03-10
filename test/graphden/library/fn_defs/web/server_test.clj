@@ -7,18 +7,19 @@
 (deftest fn-defs-test
   (testing "fn-defs contains all expected definitions"
     (is (vector? web-server/fn-defs))
-    ;; 34 fns total:
-    ;; - Route building blocks: 4 (assoc-empty, assoc-handler, method-map, route)
-    ;; - HTTP method routes: 5 (get, post, put, delete, patch)
+    ;; 40 fns total:
+    ;; From common.clj (23 fn-defs):
+    ;; - Route building blocks: 9 (assoc-empty, assoc-handler, method-map, route, get/post/put/delete/patch-route)
     ;; - Response status hierarchy: 3 (ok-response, not-found-response, error-response)
-    ;; - Content-type responses: 6 (json-ok, html-ok, text-ok, text-not-found, text-error)
+    ;; - Content-type responses: 7 (json-ok, html-ok, text-ok, text-not-found, text-error, svg-ok, cached-svg-ok)
+    ;; - Health status composition: 4 (assoc-status, assoc-timestamp, health-status-base, health-status)
+    ;; From server-fn-defs (17 fn-defs):
     ;; - Hello: 4 (body, response-fn, handler-fn, route)
     ;; - Health: 4 (json-body, response, handler, route)
     ;; - Metrics: 4 (json-body, response, handler, route)
     ;; - Routes collection: 3 (routes-with-hello, routes-with-health, routes-fn)
-    ;; - Health status composition: 4 (assoc-status, assoc-timestamp, health-status-base, health-status)
     ;; - Router + Server: 2 (router-fn, web-server)
-    (is (= 38 (count web-server/fn-defs)))
+    (is (= 40 (count web-server/fn-defs)))
     (let [names (set (map :name web-server/fn-defs))]
       ;; Building blocks
       (is (contains? names :assoc-empty))

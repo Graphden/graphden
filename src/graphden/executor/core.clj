@@ -84,7 +84,7 @@
             own-arg-names (set (map :name own-args))
             ;; Keep parent args whose names are not overridden by own args
             filtered-parent-args (remove #(own-arg-names (:name %)) parent-args)]
-        (into (vec own-args) filtered-parent-args))
+        (vec (concat own-args filtered-parent-args)))
       ;; Base fn - just return own args
       own-args)))
 
@@ -167,7 +167,8 @@
         current-size (count current)
         entries-to-remove (- current-size target-size)]
     (when (pos? entries-to-remove)
-      (let [keys-to-remove (take entries-to-remove (keys current))]
+      ;; Realize keys-to-remove as vec to avoid lazy seq issues with apply
+      (let [keys-to-remove (vec (take entries-to-remove (keys current)))]
         (swap! result-cache #(apply dissoc % keys-to-remove))
         (log/debug "Evicted cache entries"
                    {:evicted-count entries-to-remove

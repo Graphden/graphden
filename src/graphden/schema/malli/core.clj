@@ -13,6 +13,18 @@
 (def malli-type-mapping types/malli-type-mapping)
 
 
+(defn- find-first-duplicate
+  "Returns first duplicate value in seq, or nil if none.
+   Uses transient set for O(n) single-pass detection with early exit."
+  [xs]
+  (reduce (fn [seen x]
+            (if (contains? seen x)
+              (reduced x)
+              (conj! seen x)))
+          (transient #{})
+          xs))
+
+
 ;; === MalliDataSchema record ===
 
 (defrecord MalliDataSchema
@@ -89,20 +101,18 @@
                       {:enum-name enum-name :values values})))
     ;; Validate each value entry
     (run! #(v/validate-single-enum-value known-uuids enum-name %) values)
-    ;; Check for duplicate values
-    (let [value-keywords (map :value values)
-          duplicates (for [[v freq] (frequencies value-keywords) :when (> freq 1)] v)]
-      (when (seq duplicates)
-        (throw (ex-info "Enum has duplicate values"
-                        {:enum-name enum-name
-                         :duplicates (vec duplicates)}))))
-    ;; Check for duplicate UUIDs within values
-    (let [value-uuids (map :uuid values)
-          duplicates (for [[u freq] (frequencies value-uuids) :when (> freq 1)] u)]
-      (when (seq duplicates)
-        (throw (ex-info "Enum has duplicate value UUIDs"
-                        {:enum-name enum-name
-                         :duplicates (vec duplicates)}))))
+    ;; Check for duplicate values (single-pass with early exit)
+    (when-let [dup (let [result (find-first-duplicate (map :value values))]
+                     (when (keyword? result) result))]
+      (throw (ex-info "Enum has duplicate values"
+                      {:enum-name enum-name
+                       :duplicates [dup]})))
+    ;; Check for duplicate UUIDs within values (single-pass with early exit)
+    (when-let [dup (let [result (find-first-duplicate (map :uuid values))]
+                     (when (uuid? result) result))]
+      (throw (ex-info "Enum has duplicate value UUIDs"
+                      {:enum-name enum-name
+                       :duplicates [dup]})))
     ;; Store as {:uuid enum-uuid :values {value-keyword value-uuid ...}}
     ;; Also add all UUIDs to known-uuids for O(1) future lookups
     (let [values-map (into {} (map (fn [{:keys [uuid value]}] [value uuid]) values))

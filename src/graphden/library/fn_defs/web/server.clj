@@ -4,26 +4,10 @@
    This component defines fn entities (NOT base-fns) that compose
    base functions from other components to create a working web server.
 
-   ## Route Hierarchy (Pass-Through Args Pattern)
-
-   This uses the pass-through args mechanism where nested fn args
-   are exposed to children through ref-id chains:
-
-   Base building blocks:
-   - assoc-empty: assoc-any with m={} (free: k, v)
-   - assoc-handler: assoc-empty with k=\"handler\" (free: v)
-
-   Route composition (using pass-through args):
-   - method-map: assoc-empty with v=:assoc-handler
-     Free args: k (from assoc-empty), v (from assoc-handler via pass-through)
-   - route: pair with b=:method-map
-     Free args: a (path), k (HTTP method), v (handler via pass-through)
-   - get-route: route with k=\"get\"
-     Free args: a (path), v (handler)
-   - hello-route: get-route with a=\"/\", v=:hello-handler-fn
-
-   This pattern reduces boilerplate: adding a new GET route requires only
-   2 fn-defs (handler-fn + entity-route) instead of 4.
+   Uses common building blocks from common.clj for:
+   - Route composition (get-route, post-route, etc.)
+   - Response hierarchy (ok-response, json-ok-response, etc.)
+   - Health status composition
 
    ## Endpoints
 
@@ -35,173 +19,22 @@
 
    Base-fns are wrappers around pure functions (Clojure core or libraries).
    All concrete values and function compositions are done via fn entities.
-   This component has NO base-fns - only fn-defs.")
+   This component has NO base-fns - only fn-defs."
+  (:require
+    [graphden.library.fn-defs.web.common :as common]))
 
 
-;; === Response Data ===
-;; NOTE: All response data is now defined as fn-defs using the composition pattern.
-;; See HELLO ROUTE section below.
+;; =============================================================================
+;; SERVER-SPECIFIC FN-DEFS
+;; =============================================================================
 
+(def server-fn-defs
+  "Server-specific fn-defs (endpoints, routes, router, server).
 
-;; === Fn Definitions ===
-
-
-
-(def fn-defs
-  "Fn definitions for creating web server.
-
-   ## Route Hierarchy (Pass-Through Args Pattern)
-
-   Building blocks:
-   - assoc-empty: assoc-any with m={} (free: k, v)
-   - assoc-handler: assoc-empty with k=\"handler\" (free: v)
-   - method-map: assoc-empty with v=:assoc-handler (free: k, v via pass-through)
-   - route: pair with b=:method-map (free: a, k, v)
-   - get-route/post-route: route with k preset (free: a, v)
-
-   To add a new route:
-   1. Create handler-fn (const for static, make-handler for dynamic)
-   2. Create entity-route inheriting from get-route/post-route with a (path) and v (handler)
-
-   Example (2 fn-defs total):
-   {:name :my-handler-fn :parent :const :args {:x {:status 200 :body \"ok\"}}}
-   {:name :my-route :parent :get-route :args {:a \"/my-path\" :v :my-handler-fn}}"
+   Uses building blocks from common.clj:
+   - get-route, json-ok-response, html-ok-response, health-status, etc."
   [;; ============================================================
-   ;; BUILDING BLOCKS (reusable abstractions)
-   ;; These create the route composition hierarchy
-   ;; ============================================================
-
-   ;; assoc-empty: assoc-any with m={}
-   ;; Free args: k, v
-   {:name :assoc-empty
-    :parent :assoc-any
-    :args {:m {}}}
-
-   ;; assoc-handler: assoc-empty with k="handler"
-   ;; Free args: v (the handler function)
-   {:name :assoc-handler
-    :parent :assoc-empty
-    :args {:k "handler"}}
-
-   ;; ============================================================
-   ;; HEALTH STATUS (fn-def composition, not base-fn)
-   ;; Replaces hardcoded health-status base-fn
-   ;; ============================================================
-
-   ;; assoc-status: assoc-empty with k="status" (free: v)
-   {:name :assoc-status
-    :parent :assoc-empty
-    :args {:k "status"}}
-
-   ;; assoc-timestamp: assoc with k="timestamp" (free: m, v)
-   {:name :assoc-timestamp
-    :parent :assoc
-    :args {:k "timestamp"}}
-
-   ;; health-status-base: {"status": "healthy"}
-   {:name :health-status-base
-    :parent :assoc-status
-    :args {:v "healthy"}}
-
-   ;; health-status: {"status": "healthy", "timestamp": <current-time-ms>}
-   ;; This fn-def replaces the hardcoded base-fn
-   {:name :health-status
-    :parent :assoc-timestamp
-    :args {:m :health-status-base
-           :v :current-time-ms}}
-
-   ;; method-map: assoc-empty with v=:assoc-handler
-   ;; The key insight: assoc-handler's free arg (v) is exposed via pass-through!
-   ;; Free args: k (HTTP method), v (handler via pass-through from assoc-handler)
-   {:name :method-map
-    :parent :assoc-empty
-    :args {:v :assoc-handler}}
-
-   ;; route: pair with b=:method-map
-   ;; Free args: a (path), k (HTTP method via pass-through), v (handler via pass-through)
-   {:name :route
-    :parent :pair
-    :args {:b :method-map}}
-
-   ;; ============================================================
-   ;; HTTP METHOD ROUTES
-   ;; These inherit from route and preset the HTTP method
-   ;; ============================================================
-
-   ;; GET route: route with k="get" (free: a, v)
-   {:name :get-route
-    :parent :route
-    :args {:k "get"}}
-
-   ;; POST route: route with k="post" (free: a, v)
-   {:name :post-route
-    :parent :route
-    :args {:k "post"}}
-
-   ;; PUT route: route with k="put" (free: a, v)
-   {:name :put-route
-    :parent :route
-    :args {:k "put"}}
-
-   ;; DELETE route: route with k="delete" (free: a, v)
-   {:name :delete-route
-    :parent :route
-    :args {:k "delete"}}
-
-   ;; PATCH route: route with k="patch" (free: a, v)
-   {:name :patch-route
-    :parent :route
-    :args {:k "patch"}}
-
-   ;; ============================================================
-   ;; RESPONSE STATUS HIERARCHY
-   ;; Each level sets one thing, enabling clean inheritance
-   ;; ============================================================
-
-   ;; Status codes (free: headers, body)
-   {:name :ok-response
-    :parent :ring-response
-    :args {:status 200}}
-
-   {:name :not-found-response
-    :parent :ring-response
-    :args {:status 404}}
-
-   {:name :error-response
-    :parent :ring-response
-    :args {:status 500}}
-
-   ;; ============================================================
-   ;; CONTENT-TYPE RESPONSE HIERARCHY
-   ;; Inherit from status, set content-type (free: body)
-   ;; ============================================================
-
-   ;; JSON responses
-   {:name :json-ok-response
-    :parent :ok-response
-    :args {:headers {"Content-Type" "application/json"}}}
-
-   ;; HTML responses
-   {:name :html-ok-response
-    :parent :ok-response
-    :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
-
-   ;; Plain text responses (for error messages)
-   {:name :text-ok-response
-    :parent :ok-response
-    :args {:headers {"Content-Type" "text/plain"}}}
-
-   {:name :text-not-found-response
-    :parent :not-found-response
-    :args {:headers {"Content-Type" "text/plain"}}}
-
-   {:name :text-error-response
-    :parent :error-response
-    :args {:headers {"Content-Type" "text/plain"}}}
-
-   ;; ============================================================
-   ;; HELLO ROUTE (Static HTML using composition)
-   ;; Uses html-ok-response hierarchy for proper inheritance
+   ;; HELLO ROUTE (Static HTML)
    ;; ============================================================
 
    ;; HTML body content (reusable const)
@@ -226,7 +59,6 @@
 
    ;; ============================================================
    ;; HEALTH ROUTE (Dynamic JSON)
-   ;; 4 fn-defs: json-body -> response -> handler + route
    ;; ============================================================
 
    ;; Compositional JSON handler: to-json-string -> ring-response -> make-handler
@@ -249,7 +81,6 @@
 
    ;; ============================================================
    ;; METRICS ROUTE (JVM Info)
-   ;; 4 fn-defs: json-body -> response -> handler + route
    ;; ============================================================
 
    ;; Compositional JSON handler: to-json-string -> ring-response -> make-handler
@@ -297,6 +128,21 @@
     :parent :http-server
     :args {:handler :router-fn
            :port 8080}}])
+
+
+;; =============================================================================
+;; COMBINED FN-DEFS
+;; =============================================================================
+
+(def fn-defs
+  "All fn-defs for web server.
+
+   Includes:
+   - Common building blocks (23 fn-defs from common.clj)
+   - Server-specific fn-defs (17 fn-defs)
+
+   Total: 40 fn-defs"
+  (into common/fn-defs server-fn-defs))
 
 
 (def startup-fn-name

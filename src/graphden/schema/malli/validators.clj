@@ -268,6 +268,18 @@
 
 ;; === Union variant validation ===
 
+(defn- find-first-duplicate
+  "Returns first duplicate in seq, or nil. Single-pass with early exit."
+  [xs]
+  (let [result (reduce (fn [seen x]
+                         (if (contains? seen x)
+                           (reduced x)
+                           (conj! seen x)))
+                       (transient #{})
+                       xs)]
+    (when (map? result) result)))  ; variant-identity returns maps
+
+
 (defn- variant-identity
   "Returns a normalized identity for a variant to detect duplicates.
    For :ref includes :ref-entity, for :enum includes :enum-name."
@@ -284,13 +296,12 @@
   (when (empty? variants)
     (throw (ex-info "Union variants cannot be empty"
                     {:entity entity-name :field field-name})))
-  (let [variant-ids (map variant-identity variants)
-        duplicates (for [[v freq] (frequencies variant-ids) :when (> freq 1)] v)]
-    (when (seq duplicates)
-      (throw (ex-info "Union has duplicate variants"
-                      {:entity entity-name
-                       :field field-name
-                       :duplicates (vec duplicates)})))))
+  ;; Single-pass duplicate detection with early exit
+  (when-let [dup (find-first-duplicate (map variant-identity variants))]
+    (throw (ex-info "Union has duplicate variants"
+                    {:entity entity-name
+                     :field field-name
+                     :duplicates [dup]}))))
 
 
 (defn- validate-entity-union-variants

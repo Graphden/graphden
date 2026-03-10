@@ -179,22 +179,22 @@
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name (keyword (util/kw->snake-case entity-name))
             ;; Prepare all records with IDs
-            records (vec (map (fn [data]
-                                (when fields
-                                  (sp/validate-required-fields! entity-name fields data))
-                                (let [id (or (:id data) (random-uuid))]
-                                  (assoc data :id id)))
-                              data-seq))
+            records (mapv (fn [data]
+                           (when fields
+                             (sp/validate-required-fields! entity-name fields data))
+                           (let [id (or (:id data) (random-uuid))]
+                             (assoc data :id id)))
+                         data-seq)
             batch-size (count records)
             batch-ids (mapv :id records)
-            ;; Convert to rows using codec
-            rows (map #(entity->row % fields) records)
+            ;; Convert to rows using codec (mapv to realize once)
+            rows (mapv #(entity->row % fields) records)
             ;; Get consistent column order from first row
             columns (vec (keys (first rows)))
             ;; Extract values in column order
-            values (vec (map (fn [row]
-                               (mapv #(get row %) columns))
-                             rows))
+            values (mapv (fn [row]
+                          (mapv #(get row %) columns))
+                        rows)
             query (sql/format {:insert-into table-name
                                :columns columns
                                :values values
@@ -237,10 +237,8 @@
                             {:quoted true})]
       (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
                                     (let [rows (jdbc/execute! ds query (util/query-opts))]
-                                      (->> rows
-                                           (map codec/row->entity)
-                                           (map (juxt :id identity))
-                                           (into {})))))))
+                                      ;; Single pass: decode + build map in one traversal
+                                      (into {} (map #(let [e (codec/row->entity %)] [(:id e) e])) rows))))))
 
 
 (defn update-entities
@@ -311,14 +309,14 @@
             records (vec data-seq)
             batch-size (count records)
             batch-ids (mapv :id records)
-            ;; Convert to rows using codec
-            rows (map #(entity->row % fields) records)
+            ;; Convert to rows using codec (mapv to realize once)
+            rows (mapv #(entity->row % fields) records)
             ;; Get consistent column order from first row
             columns (vec (keys (first rows)))
             ;; Extract values in column order
-            values (vec (map (fn [row]
-                               (mapv #(get row %) columns))
-                             rows))
+            values (mapv (fn [row]
+                          (mapv #(get row %) columns))
+                        rows)
             ;; Build ON CONFLICT DO UPDATE SET for all columns except :id
             ;; HoneySQL auto-generates SET col = EXCLUDED.col when given a vector
             update-columns (vec (remove #{:id} columns))

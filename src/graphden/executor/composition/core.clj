@@ -204,12 +204,12 @@
       ;; Free args are:
       ;; 1. Own free args
       ;; 2. Free args from fns referenced via ref-id (recursively)
-      (into (vec own-free-args)
-            (mapcat (fn [arg]
-                      (when-let [ref-fn-id (:ref-id arg)]
-                        (collect-free-args-from-fn fn-cache args-cache ref-fn-id visited' (inc depth))))
-                    ;; Only check args that HAVE ref-id (bound to other fn)
-                    (remove free-arg? fn-args))))))
+      (vec (concat own-free-args
+                   (mapcat (fn [arg]
+                             (when-let [ref-fn-id (:ref-id arg)]
+                               (collect-free-args-from-fn fn-cache args-cache ref-fn-id visited' (inc depth))))
+                           ;; Only check args that HAVE ref-id (bound to other fn)
+                           (remove free-arg? fn-args)))))))
 
 
 (defn- collect-parent-free-args
@@ -228,7 +228,7 @@
                                 (when-let [ref-fn-id (:ref-id arg)]
                                   (collect-free-args-from-fn fn-cache args-cache ref-fn-id #{} (inc depth))))
                               (remove free-arg? fn-args))]
-    (into (vec own-free-args) ref-free-args)))
+    (vec (concat own-free-args ref-free-args))))
 
 
 (defn- preload-existing-fns
@@ -274,9 +274,9 @@
                        :arg-name arg-name
                        :max-depth sp/*max-graph-iterations*})))
     (let [fn-args (get args-cache fn-id [])
-          matching (filter #(= (:name %) (name arg-name)) fn-args)]
-      (if (seq matching)
-        (first matching)
+          found (some #(when (= (:name %) (name arg-name)) %) fn-args)]
+      (if found
+        found
         ;; Not found on this fn, check parent
         (let [fn-entity (get fn-cache fn-id)]
           (if-let [next-parent-id (:parent-id fn-entity)]
@@ -310,12 +310,18 @@
                           nil))]
     (or direct-result
         ;; Not in parent chain - search in propagated free args from refs
+        ;; Single pass: find free-arg match first, else first any-match
         (let [parent-free-args (collect-parent-free-args fn-cache args-cache parent-fn-id 0)
-              matching (filter #(= (:name %) arg-name-str) parent-free-args)]
-          (if (seq matching)
-            ;; Prefer FREE args (no value, no ref-id) when there's collision
-            (or (first (filter free-arg? matching))
-                (first matching))
+              found (reduce (fn [first-match arg]
+                              (if (= (:name arg) arg-name-str)
+                                (if (free-arg? arg)
+                                  (reduced arg)           ; Free arg - best match, stop
+                                  (or first-match arg))   ; Keep first non-free as fallback
+                                first-match))
+                            nil
+                            parent-free-args)]
+          (if found
+            found
             (throw (ex-info (str "Argument not found in available args: " arg-name
                                  ". Checked parent chain and propagated free args.")
                             {:type :fn-composition/unresolved-arg
@@ -384,7 +390,7 @@
   (let [source-id (:id parent-arg)
         ;; Check if this propagated arg already exists for this fn
         fn-args (get args-cache fn-id [])
-        existing (first (filter #(= (:source-id %) source-id) fn-args))]
+        existing (some #(when (= (:source-id %) source-id) %) fn-args)]
     (when-not existing
       ;; Create new propagated arg (free, with no value or ref-id)
       {:new {:id (random-uuid)
@@ -411,7 +417,7 @@
         source-id (:id parent-arg)
         ;; Check if arg already exists for this fn
         fn-args (get args-cache fn-id [])
-        existing (first (filter #(= (:source-id %) source-id) fn-args))
+        existing (some #(when (= (:source-id %) source-id) %) fn-args)
         ;; Resolve arg value
         resolved (cond
                    (nil? arg-value)
@@ -522,7 +528,7 @@
             ;; Update caches with newly created fns
             fn-name-cache-final (merge fn-name-cache
                                        (into {}
-                                             (map (fn [[k v]] [(name k) {:id v :name (name k)}]))
+                                             (map (fn [[k v]] (let [n (name k)] [n {:id v :name n}])))
                                              created-fns))
             ;; Include full fn-entities with parent-id for parent chain lookup
             fn-id-cache-final (merge fn-id-cache created-fn-entities)
@@ -559,8 +565,8 @@
                       explicit-source-ids
                       (into #{}
                             (keep (fn [rec]
-                                    (or (get-in rec [:new :source-id])
-                                        (get-in rec [:update :source-id]))))
+                                    (or (:source-id (:new rec))
+                                        (:source-id (:update rec)))))
                             explicit-records)
 
                       ;; 3b: Propagated free args from parent chain and referenced fns
@@ -574,8 +580,8 @@
                         record)
 
                       ;; Collect all new args for this fn-def
-                      fn-new-args (concat (keep :new explicit-records)
-                                          (keep :new propagated-records))
+                      fn-new-args (vec (concat (keep :new explicit-records)
+                                               (keep :new propagated-records)))
                       fn-update-args (keep :update explicit-records)
 
                       ;; Update args-view with new args so next fn-def can see them

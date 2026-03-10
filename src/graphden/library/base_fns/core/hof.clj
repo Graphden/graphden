@@ -72,7 +72,7 @@
 (defbase find-first-fn
   {:args {:pred :fn, :coll :jsonb}
    :return-type :any}
-  (first (filter pred coll)))
+  (some #(when (pred %) %) coll))
 
 
 (defbase group-by-fn

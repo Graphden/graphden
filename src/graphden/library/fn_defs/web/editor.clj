@@ -21,7 +21,9 @@
 
    - GET /partials/entity-form/:type - Form for creating entity
    - GET /partials/entity-form/:type/:id - Form for editing entity
-   - GET /partials/entity-details/:type/:id - Entity details panel")
+   - GET /partials/entity-details/:type/:id - Entity details panel"
+  (:require
+    [graphden.library.fn-defs.web.common :as common]))
 
 
 ;; =============================================================================
@@ -549,148 +551,14 @@
 ;; Fn Definitions
 ;; =============================================================================
 
-(def fn-defs
-  "Fn definitions for the graph editor.
+(def editor-fn-defs
+  "Editor-specific fn-defs (pages, handlers, routes, router, server).
 
-   ## Multi-Level Inheritance
-
-   Building blocks are created via fn inheritance:
-   1. assoc-empty inherits from assoc-any, sets m={}
-   2. assoc-handler inherits from assoc-empty, sets k=\"handler\"
-   3. assoc-get/post/delete inherit from assoc-empty, set k=\"get\"/\"post\"/\"delete\"
-
-   Route definitions then inherit from these building blocks,
-   setting only the specific arg (v or path).
-
-   Composes base-fns to create the editor:
-   - html-page: Creates HTML structure with HTMX + Cytoscape
-   - html-handler: Wraps HTML as Ring handler
-   - router: Routes requests to handlers
-   - http-server: Serves HTTP on port"
+   Uses building blocks from common.clj:
+   - get-route, post-route, delete-route
+   - json-ok-response, cached-svg-ok-response
+   - health-status (compositional health check)"
   [;; ============================================================
-   ;; REUSABLE BUILDING BLOCKS (Pass-Through Args Pattern)
-   ;; Each child sets only what it needs, free args propagate up
-   ;; ============================================================
-
-   ;; Level 1: assoc with empty map preset (free: k, v)
-   {:name :assoc-empty
-    :parent :assoc-any
-    :args {:m {}}}
-
-   ;; Level 2: assoc-handler (free: v) - sets k="handler"
-   {:name :assoc-handler
-    :parent :assoc-empty
-    :args {:k "handler"}}
-
-   ;; ============================================================
-   ;; HEALTH STATUS (fn-def composition, not base-fn)
-   ;; Replaces hardcoded health-status base-fn
-   ;; ============================================================
-
-   ;; assoc-status: assoc-empty with k="status" (free: v)
-   {:name :assoc-status
-    :parent :assoc-empty
-    :args {:k "status"}}
-
-   ;; assoc-timestamp: assoc with k="timestamp" (free: m, v)
-   {:name :assoc-timestamp
-    :parent :assoc
-    :args {:k "timestamp"}}
-
-   ;; health-status-base: {"status": "healthy"}
-   {:name :health-status-base
-    :parent :assoc-status
-    :args {:v "healthy"}}
-
-   ;; health-status: {"status": "healthy", "timestamp": <current-time-ms>}
-   ;; This fn-def replaces the hardcoded base-fn
-   {:name :health-status
-    :parent :assoc-timestamp
-    :args {:m :health-status-base
-           :v :current-time-ms}}
-
-   ;; Level 2: method-map (free: k, v via pass-through)
-   ;; v from assoc-handler propagates through!
-   {:name :method-map
-    :parent :assoc-empty
-    :args {:v :assoc-handler}}
-
-   ;; Level 3: route = pair with b=method-map (free: a, k, v via pass-through)
-   {:name :route
-    :parent :pair
-    :args {:b :method-map}}
-
-   ;; Level 4: HTTP method routes (free: a, v)
-   {:name :get-route
-    :parent :route
-    :args {:k "get"}}
-
-   {:name :post-route
-    :parent :route
-    :args {:k "post"}}
-
-   {:name :delete-route
-    :parent :route
-    :args {:k "delete"}}
-
-   ;; ============================================================
-   ;; RESPONSE STATUS HIERARCHY
-   ;; Each level sets one thing, enabling clean inheritance
-   ;; ============================================================
-
-   ;; Status codes (free: headers, body)
-   {:name :ok-response
-    :parent :ring-response
-    :args {:status 200}}
-
-   {:name :not-found-response
-    :parent :ring-response
-    :args {:status 404}}
-
-   {:name :error-response
-    :parent :ring-response
-    :args {:status 500}}
-
-   ;; ============================================================
-   ;; CONTENT-TYPE RESPONSE HIERARCHY
-   ;; Inherit from status, set content-type (free: body)
-   ;; ============================================================
-
-   ;; JSON responses
-   {:name :json-ok-response
-    :parent :ok-response
-    :args {:headers {"Content-Type" "application/json"}}}
-
-   ;; HTML responses
-   {:name :html-ok-response
-    :parent :ok-response
-    :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
-
-   ;; Plain text responses
-   {:name :text-ok-response
-    :parent :ok-response
-    :args {:headers {"Content-Type" "text/plain"}}}
-
-   {:name :text-not-found-response
-    :parent :not-found-response
-    :args {:headers {"Content-Type" "text/plain"}}}
-
-   {:name :text-error-response
-    :parent :error-response
-    :args {:headers {"Content-Type" "text/plain"}}}
-
-   ;; SVG responses
-   {:name :svg-ok-response
-    :parent :ok-response
-    :args {:headers {"Content-Type" "image/svg+xml"}}}
-
-   ;; Cached SVG (for static assets like favicon)
-   {:name :cached-svg-ok-response
-    :parent :svg-ok-response
-    :args {:headers {"Content-Type" "image/svg+xml"
-                     "Cache-Control" "public, max-age=86400"}}}
-
-   ;; ============================================================
    ;; HTML PAGE
    ;; ============================================================
 
@@ -869,6 +737,21 @@
     :parent :http-server
     :args {:handler :editor-router
            :port 8080}}])
+
+
+;; =============================================================================
+;; COMBINED FN-DEFS
+;; =============================================================================
+
+(def fn-defs
+  "All fn-defs for graph editor.
+
+   Includes:
+   - Common building blocks (23 fn-defs from common.clj)
+   - Editor-specific fn-defs (29 fn-defs)
+
+   Total: 52 fn-defs"
+  (into common/fn-defs editor-fn-defs))
 
 
 (def startup-fn-name

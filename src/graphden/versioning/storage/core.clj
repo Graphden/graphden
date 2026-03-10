@@ -158,8 +158,8 @@
             versions (sp/query-entities base-storage version-entity
                                         {version-id-field id :branch-id branch-id})
             deleted (count versions)]
-        (doseq [v versions]
-          (sp/delete-entity base-storage version-entity (:id v)))
+        (when (pos? deleted)
+          (sp/delete-entities base-storage version-entity (mapv :id versions)))
         (pos? deleted))))
 
 
@@ -213,7 +213,9 @@
     [this entity-name ids]
     (if-not (res/versioned-entity? entity-name)
       (sp/delete-entities base-storage entity-name ids)
-      (count (filter true? (map #(sp/delete-entity this entity-name %) ids)))))
+      (reduce (fn [cnt id]
+                (if (sp/delete-entity this entity-name id) (inc cnt) cnt))
+              0 ids)))
 
 
   sp/GraphConstraints
@@ -396,16 +398,17 @@
                         {:type :constraint-violation
                          :branch-id branch-id
                          :child-branch-ids (mapv :id children)}))))
-    ;; Delete all version records on this branch
+    ;; Delete all version records on this branch (batch)
     (doseq [[_ {:keys [version-entity]}] res/entity-config]
-      (let [versions (sp/query-entities base version-entity {:branch-id branch-id})]
-        (doseq [v versions]
-          (sp/delete-entity base version-entity (:id v)))))
-    ;; Delete branch-merge records referencing this branch
-    (doseq [m (sp/query-entities base :branch-merge {:source-branch-id branch-id})]
-      (sp/delete-entity base :branch-merge (:id m)))
-    (doseq [m (sp/query-entities base :branch-merge {:target-branch-id branch-id})]
-      (sp/delete-entity base :branch-merge (:id m)))
+      (let [version-ids (mapv :id (sp/query-entities base version-entity {:branch-id branch-id}))]
+        (when (seq version-ids)
+          (sp/delete-entities base version-entity version-ids))))
+    ;; Delete branch-merge records referencing this branch (batch)
+    (let [source-ids (mapv :id (sp/query-entities base :branch-merge {:source-branch-id branch-id}))
+          target-ids (mapv :id (sp/query-entities base :branch-merge {:target-branch-id branch-id}))
+          all-merge-ids (vec (distinct (concat source-ids target-ids)))]
+      (when (seq all-merge-ids)
+        (sp/delete-entities base :branch-merge all-merge-ids)))
     ;; Delete the branch record
     (sp/delete-entity base :branch branch-id)
     true))

@@ -50,18 +50,21 @@
    Throws ExceptionInfo with :type :validation-error/duplicate-ids
    if duplicate IDs are found in the batch."
   [entity-name data-seq]
-  (let [explicit-ids (->> data-seq
-                          (map :id)
-                          (filter some?))
-        id-counts (frequencies explicit-ids)
-        duplicates (->> id-counts
-                        (filter (fn [[_ cnt]] (> cnt 1)))
-                        (map first))]
-    (when (seq duplicates)
-      (throw (ex-info (str "Duplicate IDs found in batch: " (pr-str duplicates))
-                      {:type :validation-error/duplicate-ids
-                       :entity entity-name
-                       :duplicate-ids (vec duplicates)})))))
+  ;; Single pass: collect all duplicate IDs using two sets
+  (loop [seen #{} duplicates #{} remaining data-seq]
+    (if-let [data (first remaining)]
+      (if-let [id (:id data)]
+        (if (contains? seen id)
+          (recur seen (conj duplicates id) (rest remaining))
+          (recur (conj seen id) duplicates (rest remaining)))
+        (recur seen duplicates (rest remaining)))
+      ;; End of sequence - throw if duplicates found
+      (when (seq duplicates)
+        (let [dup-vec (vec duplicates)]
+          (throw (ex-info (str "Duplicate IDs found in batch: " (pr-str dup-vec))
+                          {:type :validation-error/duplicate-ids
+                           :entity entity-name
+                           :duplicate-ids dup-vec})))))))
 
 
 (defn validate-data-is-map!

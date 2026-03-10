@@ -523,6 +523,7 @@
 
 ;; === Constraint limits re-exports ===
 (def default-max-dependency-chain-depth constraints/default-max-dependency-chain-depth)
+(def validate-no-arg-descendants-impl constraints/validate-no-arg-descendants-impl)
 
 
 ;; === Lock re-exports ===

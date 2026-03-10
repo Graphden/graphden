@@ -105,11 +105,24 @@
                            [_ _ _]
                            (throw (ex-info "Mock query error" {:type :test-error})))
 
+
                          sp/StorageBatchCRUD
+
+                         (create-entities
+                           [_ _ _]
+                           [])
 
                          (read-entities
                            [_ _ _]
                            {})
+
+                         (update-entities
+                           [_ _ _]
+                           [])
+
+                         (delete-entities
+                           [_ _ _]
+                           0)
 
                          (upsert-entities
                            [_ _ _]

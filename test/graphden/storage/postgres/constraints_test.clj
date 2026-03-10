@@ -86,6 +86,97 @@
           (sp/close storage))))))
 
 
+;; === Arg descendants constraint tests ===
+
+
+(deftest arg-descendants-update-test
+  ;; Note: Uses "integer" as type value to avoid codec bug where "int" gets
+  ;; converted to keyword :int during decode (matches known-value-kind-values)
+  ;; and then fails on re-encode during update.
+  (testing "allows updating arg with no descendants"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)
+          base-fn (setup/create-base-fn! storage "my-fn" :int)
+          arg (setup/create-arg! storage (:id base-fn)
+                                 {:name "x" :type :integer :required true :is-fn false
+                                  :value 42})]
+      (try
+        ;; Should succeed - no descendants
+        (let [updated (sp/update-entity storage :arg (:id arg) {:value 100})]
+          (is (= 100 (:value updated))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "rejects updating arg with descendants"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)
+          base-fn (setup/create-base-fn! storage "base" :int)
+          parent-arg (setup/create-arg! storage (:id base-fn)
+                                        {:name "x" :type :integer :required true :is-fn false
+                                         :value 10})
+          child-fn (setup/create-composed-fn! storage "child" (:id base-fn))
+          ;; Child arg has source-id pointing to parent-arg
+          _child-arg (setup/create-arg! storage (:id child-fn)
+                                        {:name "x" :type :integer :required true :is-fn false
+                                         :source-id (:id parent-arg) :value 20})]
+      (try
+        ;; Should fail - parent-arg has descendants
+        (let [ex (try
+                   (sp/update-entity storage :arg (:id parent-arg) {:value 999})
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex))
+          (is (= :constraint-violation/has-descendants (:type (ex-data ex))))
+          (is (= 1 (:descendant-count (ex-data ex)))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest arg-descendants-delete-test
+  ;; Note: Delete test doesn't trigger the codec bug since we don't re-encode,
+  ;; but we use :integer for consistency with the update test.
+  (testing "allows deleting arg with no descendants"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)
+          base-fn (setup/create-base-fn! storage "my-fn" :int)
+          arg (setup/create-arg! storage (:id base-fn)
+                                 {:name "x" :type :integer :required true :is-fn false
+                                  :value 42})]
+      (try
+        ;; Should succeed - no descendants
+        (is (true? (sp/delete-entity storage :arg (:id arg))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "rejects deleting arg with descendants"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)
+          base-fn (setup/create-base-fn! storage "base" :int)
+          parent-arg (setup/create-arg! storage (:id base-fn)
+                                        {:name "x" :type :integer :required true :is-fn false
+                                         :value 10})
+          child-fn (setup/create-composed-fn! storage "child" (:id base-fn))
+          ;; Child arg has source-id pointing to parent-arg
+          _child-arg (setup/create-arg! storage (:id child-fn)
+                                        {:name "x" :type :integer :required true :is-fn false
+                                         :source-id (:id parent-arg) :value 20})]
+      (try
+        ;; Should fail - parent-arg has descendants
+        (let [ex (try
+                   (sp/delete-entity storage :arg (:id parent-arg))
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex))
+          (is (= :constraint-violation/has-descendants (:type (ex-data ex))))
+          (is (= :delete (:operation (ex-data ex)))))
+        (finally
+          (sp/close storage))))))
+
+
 ;; === GraphConstraints contract tests ===
 
 (deftest graph-constraints-contract-test

@@ -8,7 +8,12 @@
 
    Uses simplified schema:
    - fn: parent-id=nil for base-fn, parent-id set for composed fn
-   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
+   - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
+
+   NOTE: This module has entity helpers that work with the PRODUCTION schema
+   (gds/build-schema). storage.postgres.test-setup has similar helpers but
+   they work with a simplified test schema (make-graph-schema) with text types
+   instead of enums. Cannot unify without schema alignment."
   (:require
     [graphden.executor.interface :as exec]
     [graphden.schema.graph.schema :as gds]
@@ -56,49 +61,51 @@
 
 
 ;; ============================================================================
-;; Test Helpers - 2-Entity Schema
+;; Test Helpers - 2-Entity Schema (PRODUCTION schema with enum types)
 ;; ============================================================================
 
-(defn create-arg!
-  "Creates an arg entity with the given properties.
-
-   For base-fn args (no inheritance): source-id should be nil
-   For composed fn args: source-id points to parent's arg
-
-   Options:
-   - :value - literal JSONB value
-   - :ref-id - FK to fn (execute and use result)
-   - :is-fn - pass fn-id directly (for HOF)"
-  [storage fn-id {:keys [required is-fn source-id value ref-id]
-                  arg-name :name
-                  arg-type :type
-                  :or {required true is-fn false}}]
-  (sp/create-entity storage :arg
-                    (cond-> {:fn-id fn-id
-                             :name arg-name
-                             :type arg-type
-                             :required required
-                             :is-fn is-fn}
-                      source-id (assoc :source-id source-id)
-                      (some? value) (assoc :value value)
-                      ref-id (assoc :ref-id ref-id))))
-
-
-(defn create-composed-fn!
-  "Creates a composed fn with parent-id set.
-   Returns the fn entity."
-  [storage entity-name parent-id]
-  (sp/create-entity storage :fn {:name entity-name :parent-id parent-id}))
-
-
 (defn create-base-fn!
-  "Creates a base fn (parent-id=nil).
-   The name field is used for registry lookup.
-   Returns the fn entity."
+  "Creates a base fn entity. Returns the fn record.
+   Base fns have parent-id=nil. Uses PRODUCTION schema with enum types."
   [storage entity-name return-type]
   (sp/create-entity storage :fn
                     {:name entity-name
+                     :parent-id nil
                      :return-type return-type}))
+
+
+(defn create-composed-fn!
+  "Creates a composed fn entity. Returns the fn record.
+   Composed fns have parent-id set to their base fn."
+  [storage entity-name parent-id]
+  (sp/create-entity storage :fn
+                    {:name entity-name
+                     :parent-id parent-id}))
+
+
+(defn create-arg!
+  "Creates an arg entity. Returns the arg record.
+
+   Required:
+   - fn-id: the fn this arg belongs to
+   - opts map with :name, :type, :required, :is-fn
+
+   Optional in opts:
+   - :source-id - parent arg this inherits from
+   - :value - literal value (mutually exclusive with ref-id)
+   - :ref-id - reference to another fn (mutually exclusive with value)"
+  [storage fn-id {:keys [required is-fn source-id value ref-id]
+                  arg-name :name
+                  arg-type :type}]
+  (sp/create-entity storage :arg
+                    {:fn-id fn-id
+                     :name arg-name
+                     :type arg-type
+                     :required required
+                     :is-fn is-fn
+                     :source-id source-id
+                     :value value
+                     :ref-id ref-id}))
 
 
 (defn setup-add-function!

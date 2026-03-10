@@ -6,6 +6,7 @@
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.errors :as errors]
     [graphden.storage.postgres.util :as util]
+    [graphden.storage.protocol.constraints :as constraints]
     [graphden.storage.protocol.core :as sp]
     [honey.sql :as sql]
     [next.jdbc :as jdbc]))
@@ -14,6 +15,28 @@
 (defn- entity->row
   [entity fields]
   (codec/encode-row entity fields))
+
+
+(defn- query-arg-descendants
+  "Queries for arg entities that have source-id pointing to the given arg-id.
+   Returns a sequence of descendant arg entities."
+  [ds arg-id]
+  (let [query (sql/format {:select [:id :fn_id :source_id :name]
+                           :from [:arg]
+                           :where [:= :source_id arg-id]}
+                          {:quoted true})]
+    (util/with-sql-error-handling "Database error" :query-arg-descendants {:arg-id arg-id}
+                                  (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                    (map codec/row->entity rows)))))
+
+
+(defn- validate-no-arg-descendants!
+  "Validates that an arg has no descendants before update/delete."
+  [ds arg-id operation]
+  (constraints/validate-no-arg-descendants-impl
+    (fn [id] (query-arg-descendants ds id))
+    arg-id
+    operation))
 
 
 (defn create-entity
@@ -58,6 +81,7 @@
   "Updates an entity by id. Returns the updated record.
    Throws :not-found if entity doesn't exist.
    Throws :unique-violation if update violates unique constraint.
+   Throws :constraint-violation/has-descendants if arg has descendants.
    Validates required fields if fields metadata is provided."
   [ds entity-name id data fields]
   (let [table-name (keyword (util/kw->snake-case entity-name))
@@ -67,6 +91,9 @@
                       {:type :not-found
                        :entity entity-name
                        :id id})))
+    ;; Validate arg has no descendants before update
+    (when (= entity-name :arg)
+      (validate-no-arg-descendants! ds id :update))
     (let [updated (merge existing data {:id id})]
       (when fields
         (sp/validate-required-fields! entity-name fields updated))
@@ -83,8 +110,12 @@
 
 (defn delete-entity
   "Deletes an entity by id. Returns true if entity existed and was deleted.
-   Throws :foreign-key-violation if entity is referenced by other records."
+   Throws :foreign-key-violation if entity is referenced by other records.
+   Throws :constraint-violation/has-descendants if arg has descendants."
   [ds entity-name id]
+  ;; Validate arg has no descendants before delete
+  (when (= entity-name :arg)
+    (validate-no-arg-descendants! ds id :delete))
   (let [table-name (keyword (util/kw->snake-case entity-name))
         query (sql/format {:delete-from table-name
                            :where [:= :id id]}
@@ -233,29 +264,25 @@
                                    :data (sp/redact-sensitive-map data)}))))
             records (vec data-seq)
             batch-size (count records)
-            ;; Convert to rows
-            rows (map #(entity->row % fields) records)
-            ;; Get consistent column order from first row
-            columns (vec (keys (first rows)))
             ;; Build individual UPDATE statements and execute in transaction
             results (try
                       (jdbc/with-transaction [tx ds]
-                        (doall
-                          (map (fn [record]
-                                 (let [row (entity->row (dissoc record :id) fields)
-                                       query (sql/format {:update table-name
-                                                          :set row
-                                                          :where [:= :id (:id record)]
-                                                          :returning [:*]}
-                                                         {:quoted true})
-                                       result (jdbc/execute-one! tx query (util/query-opts))]
-                                   (when-not result
-                                     (throw (ex-info "Entity not found"
-                                                     {:type :not-found
-                                                      :entity entity-name
-                                                      :id (:id record)})))
-                                   result))
-                               records)))
+                                             (doall
+                                               (map (fn [record]
+                                                      (let [row (entity->row (dissoc record :id) fields)
+                                                            query (sql/format {:update table-name
+                                                                               :set row
+                                                                               :where [:= :id (:id record)]
+                                                                               :returning [:*]}
+                                                                              {:quoted true})
+                                                            result (jdbc/execute-one! tx query (util/query-opts))]
+                                                        (when-not result
+                                                          (throw (ex-info "Entity not found"
+                                                                          {:type :not-found
+                                                                           :entity entity-name
+                                                                           :id (:id record)})))
+                                                        result))
+                                                    records)))
                       (catch java.sql.SQLException e
                         (let [wrapped (errors/wrap-sql-error e "Database error" :update-entities
                                                              {:entity-name entity-name})]

@@ -277,11 +277,24 @@
                       [_ entity-name where]
                       (sp/query-entities storage entity-name where))
 
+
                     sp/StorageBatchCRUD
+
+                    (create-entities
+                      [_ entity-name data-seq]
+                      (sp/create-entities storage entity-name data-seq))
 
                     (read-entities
                       [_ entity-name ids]
                       (sp/read-entities storage entity-name ids))
+
+                    (update-entities
+                      [_ entity-name data-seq]
+                      (sp/update-entities storage entity-name data-seq))
+
+                    (delete-entities
+                      [_ entity-name ids]
+                      (sp/delete-entities storage entity-name ids))
 
                     (upsert-entities
                       [_ entity-name data-seq]

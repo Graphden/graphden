@@ -634,26 +634,22 @@
 
    ;; API handler for graph entities (JSON)
    {:name :api-entities-handler
-    :parent :all-entities-json-handler
-    :args {}}
+    :parent :all-entities-json-handler}
 
    ;; HTMX partial handlers - use base-fns directly via references in route opts
 
    {:name :create-entity-handler
-    :parent :create-entity-api-handler
-    :args {}}
+    :parent :create-entity-api-handler}
 
    {:name :delete-entity-handler
-    :parent :delete-entity-api-handler
-    :args {}}
+    :parent :delete-entity-api-handler}
 
    ;; ============================================================
    ;; HEALTH CHECK
    ;; ============================================================
 
    {:name :health-data
-    :parent :health-status
-    :args {}}
+    :parent :health-status}
 
    {:name :health-json-body
     :parent :to-json-string
@@ -734,11 +730,9 @@
 
    ;; HTMX partial handlers - fn entities wrapping base-fns
    {:name :entity-details-handler-fn
-    :parent :entity-details-handler
-    :args {}}
+    :parent :entity-details-handler}
    {:name :entity-form-handler-fn
-    :parent :entity-form-handler
-    :args {}}
+    :parent :entity-form-handler}
 
    ;; Entity details partial route
    {:name :entity-details-handler-opts

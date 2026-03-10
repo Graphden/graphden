@@ -92,3 +92,29 @@
                         {:type :constraint-violation/dependency-cycle
                          :owner-fn-id owner-fn-id
                          :ref-fn-id ref-fn-id}))))))
+
+
+;; === Arg Descendant Constraints ===
+
+(defn validate-no-arg-descendants-impl
+  "Validates that an arg has no descendants before update/delete.
+   Descendants are args that have source-id pointing to this arg's id.
+
+   Arguments:
+   - query-descendants-fn: function (fn [arg-id] -> seq of descendant args)
+     Should query for args where source-id = arg-id
+   - arg-id: UUID of the arg being modified/deleted
+   - operation: :update or :delete (for error message)
+
+   Throws if arg has descendants."
+  [query-descendants-fn arg-id operation]
+  (let [desc-args (query-descendants-fn arg-id)]
+    (when (seq desc-args)
+      (throw (ex-info (str "Cannot " (name operation) " arg: it has "
+                           (count desc-args) " descendant(s). "
+                           "Delete descendants first.")
+                      {:type :constraint-violation/has-descendants
+                       :arg-id arg-id
+                       :operation operation
+                       :descendant-count (count desc-args)
+                       :descendant-ids (mapv :id desc-args)})))))

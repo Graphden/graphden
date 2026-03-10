@@ -186,7 +186,8 @@
   }
 
   // Select a function and show its dependency tree
-  function selectFn(fnId) {
+  // updateHistory: true = add to browser history (user click), false = don't add (back/forward)
+  function selectFn(fnId, updateHistory = true) {
     selectedFnId = fnId;
     document.querySelectorAll('.entity-item').forEach(el => el.classList.remove('selected'));
     const item = document.querySelector('[data-fn-id=\"' + fnId + '\"]');
@@ -194,18 +195,18 @@
 
     // Update URL hash for direct linking
     const fn = lookups.fnMap.get(fnId);
-    if (fn) {
-      window.history.replaceState(null, '', '#' + fn.name);
+    if (fn && updateHistory) {
+      window.history.pushState(null, '', '#' + fn.name);
     }
 
     renderGraph();
   }
 
   // Select fn by name (for URL hash navigation)
-  function selectFnByName(name) {
+  function selectFnByName(name, updateHistory = true) {
     const fn = (graphData.fns || []).find(f => f.name === name);
     if (fn) {
-      selectFn(fn.id);
+      selectFn(fn.id, updateHistory);
     }
   }
 
@@ -217,20 +218,20 @@
 
     updateEntityList(graphData);
 
-    // Check URL hash for pre-selected fn
+    // Check URL hash for pre-selected fn (don't add to history on initial load)
     const hash = window.location.hash.slice(1);
     if (hash) {
-      selectFnByName(decodeURIComponent(hash));
+      selectFnByName(decodeURIComponent(hash), false);
     } else {
       renderGraph();
     }
   }
 
-  // Handle hash changes (back/forward navigation)
-  window.addEventListener('hashchange', () => {
+  // Handle hash changes (back/forward navigation - don't add to history)
+  window.addEventListener('popstate', () => {
     const hash = window.location.hash.slice(1);
     if (hash && graphData) {
-      selectFnByName(decodeURIComponent(hash));
+      selectFnByName(decodeURIComponent(hash), false);
     }
   });
 

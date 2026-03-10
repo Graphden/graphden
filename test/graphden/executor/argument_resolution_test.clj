@@ -79,8 +79,10 @@
                :type :int
                :value 42}
           context {}
-          execute-ref-fn (fn [_ _] (throw (ex-info "Should not be called" {})))
-          result (#'arg-res/build-delay context arg execute-ref-fn)]
+          execute-ref-fn (fn [_ _ _ _] (throw (ex-info "Should not be called" {})))
+          caller-args []
+          arg-delays-atom (atom {})
+          result (#'arg-res/build-delay context arg execute-ref-fn caller-args arg-delays-atom)]
       (is (delay? result))
       (is (= 42 @result))))
 
@@ -92,8 +94,10 @@
                :ref-id ref-fn-id
                :is-fn true}
           context {}
-          execute-ref-fn (fn [_ _] (throw (ex-info "Should not be called" {})))
-          result (#'arg-res/build-delay context arg execute-ref-fn)]
+          execute-ref-fn (fn [_ _ _ _] (throw (ex-info "Should not be called" {})))
+          caller-args []
+          arg-delays-atom (atom {})
+          result (#'arg-res/build-delay context arg execute-ref-fn caller-args arg-delays-atom)]
       (is (delay? result))
       (is (= ref-fn-id @result))))
 
@@ -105,11 +109,13 @@
                :ref-id ref-fn-id
                :is-fn false}
           context {:test true}
-          execute-ref-fn (fn [ctx fn-id]
+          execute-ref-fn (fn [ctx fn-id _caller-args _arg-delays]
                            (is (= context ctx))
                            (is (= ref-fn-id fn-id))
                            100)
-          result (#'arg-res/build-delay context arg execute-ref-fn)]
+          caller-args []
+          arg-delays-atom (atom {})
+          result (#'arg-res/build-delay context arg execute-ref-fn caller-args arg-delays-atom)]
       (is (delay? result))
       (is (= 100 @result))))
 
@@ -118,8 +124,10 @@
                :name "optional"
                :type :text}
           context {}
-          execute-ref-fn (fn [_ _] (throw (ex-info "Should not be called" {})))
-          result (#'arg-res/build-delay context arg execute-ref-fn)]
+          execute-ref-fn (fn [_ _ _ _] (throw (ex-info "Should not be called" {})))
+          caller-args []
+          arg-delays-atom (atom {})
+          result (#'arg-res/build-delay context arg execute-ref-fn caller-args arg-delays-atom)]
       (is (delay? result))
       (is (nil? @result)))))
 

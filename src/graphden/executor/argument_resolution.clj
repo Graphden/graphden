@@ -101,12 +101,16 @@
 
    Resolution is based on arg.is-fn flag:
    - is-fn=true → pass fn-id directly (for HOF)
-   - is-fn=false → execute fn and use result (with caching)"
-  [context ref-fn-id arg-name is-fn? execute-ref-fn]
+   - is-fn=false → execute fn and use result (with caching)
+
+   Pass-through args: caller-args and arg-delays are passed to execute-ref-fn
+   so it can find and forward propagated args to the referenced fn."
+  [context ref-fn-id arg-name is-fn? execute-ref-fn caller-args arg-delays-atom]
   (if is-fn?
     (delay ref-fn-id)
     (wrap-delay-with-context arg-name :ref-fn
-                             #(execute-ref-fn context ref-fn-id))))
+                             #(execute-ref-fn context ref-fn-id
+                                              caller-args @arg-delays-atom))))
 
 
 (defn- build-value-delay
@@ -129,8 +133,11 @@
    Resolution:
    - ref-id set + is-fn=true: pass fn-id directly (for HOF)
    - ref-id set + is-fn=false: execute fn and use result (cached)
-   - value set: literal value"
-  ^clojure.lang.Delay [context arg execute-ref-fn]
+   - value set: literal value
+
+   Pass-through args: caller-args and arg-delays-atom are passed through
+   to enable propagating args to referenced fns."
+  ^clojure.lang.Delay [context arg execute-ref-fn caller-args arg-delays-atom]
   (let [arg-name (:name arg)
         is-fn? (:is-fn arg)
         ref-fn-id (:ref-id arg)
@@ -138,7 +145,8 @@
         arg-type (:type arg)]
     (cond
       (some? ref-fn-id)
-      (build-ref-delay context ref-fn-id arg-name is-fn? execute-ref-fn)
+      (build-ref-delay context ref-fn-id arg-name is-fn? execute-ref-fn
+                       caller-args arg-delays-atom)
 
       (some? value)
       (build-value-delay arg-name value arg-type)
@@ -157,13 +165,13 @@
 
 
 (defn handle-runtime-arg-with-db-value
-  "Handles case when runtime arg exists but DB value takes precedence."
-  [context arg arg-id arg-name source execute-ref-fn]
+  "Logs warning when runtime arg exists but DB value takes precedence.
+   Returns nil - the actual delay is built by caller using build-delay."
+  [arg-id arg-name source]
   (log/warn (str (name source) " ignored: argument already defined in DB")
             {:arg-id arg-id
              :arg-name arg-name
-             :source source})
-  (build-delay context arg execute-ref-fn))
+             :source source}))
 
 
 (defn throw-missing-required-arg!
@@ -193,37 +201,42 @@
    1. Stored value in arg (value or ref-id) - always takes precedence
    2. Provided value (from HOF callable calls) - only if no stored value
    3. Required arg with no value -> error
-   4. Optional arg with no value -> delay returning nil"
+   4. Optional arg with no value -> delay returning nil
+
+   ## Pass-Through Args
+
+   Uses an atom to store built delays so that ref-fn execution can access
+   all arg delays for pass-through propagation."
   [context fn-data provided-args execute-ref-fn]
   (let [args (:args fn-data)
         strict? (:strict-type-validation? context)
         max-unknown-types (:max-unknown-types context)
-        unknown-type-counter (:unknown-type-counter context)]
-    (reduce
-      (fn [acc arg]
-        (let [arg-id (:id arg)
-              arg-name (:name arg)
-              arg-name-kw (keyword arg-name)
-              provided-value (get provided-args arg-id)
-              has-stored-value? (arg-has-value? arg)]
-          (cond
-            has-stored-value?
-            (do
-              (when (some? provided-value)
-                (handle-runtime-arg-with-db-value context arg arg-id arg-name
-                                                  :provided-arg execute-ref-fn))
-              (assoc acc arg-name-kw (build-delay context arg execute-ref-fn)))
+        unknown-type-counter (:unknown-type-counter context)
+        ;; Use atom to allow delays to reference other delays for pass-through
+        arg-delays-atom (atom {})]
+    (doseq [arg args]
+      (let [arg-id (:id arg)
+            arg-name (:name arg)
+            arg-name-kw (keyword arg-name)
+            provided-value (get provided-args arg-id)
+            has-stored-value? (arg-has-value? arg)
+            delay-val (cond
+                        has-stored-value?
+                        (do
+                          (when (some? provided-value)
+                            (handle-runtime-arg-with-db-value arg-id arg-name :provided-arg))
+                          (build-delay context arg execute-ref-fn args arg-delays-atom))
 
-            (some? provided-value)
-            (assoc acc arg-name-kw (handle-validated-arg provided-value arg
-                                                         strict? max-unknown-types
-                                                         arg-name unknown-type-counter
-                                                         :provided-arg))
+                        (some? provided-value)
+                        (handle-validated-arg provided-value arg
+                                              strict? max-unknown-types
+                                              arg-name unknown-type-counter
+                                              :provided-arg)
 
-            (:required arg)
-            (throw-missing-required-arg! arg-id arg-name)
+                        (:required arg)
+                        (throw-missing-required-arg! arg-id arg-name)
 
-            :else
-            (assoc acc arg-name-kw (delay nil)))))
-      {}
-      args)))
+                        :else
+                        (delay nil))]
+        (swap! arg-delays-atom assoc arg-name-kw delay-val)))
+    @arg-delays-atom))

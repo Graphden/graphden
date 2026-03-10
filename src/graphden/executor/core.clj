@@ -160,9 +160,6 @@
 
 ;; === Result Caching ===
 
-(def ^:private cache-eviction-ratio sp/cache-eviction-ratio)
-
-
 (defn- evict-cache-entries!
   "Evicts oldest entries from cache when limit is reached."
   [result-cache target-size]
@@ -185,7 +182,7 @@
         current-size (count @result-cache)
         cache-max-size (:cache-max-size context)]
     (when (>= current-size cache-max-size)
-      (let [target-size (long (* cache-max-size (- 1.0 cache-eviction-ratio)))
+      (let [target-size (long (* cache-max-size (- 1.0 sp/cache-eviction-ratio)))
             evicted (evict-cache-entries! result-cache target-size)]
         (log/warn "Result cache reached limit, evicted entries"
                   {:cache-max-size cache-max-size
@@ -194,21 +191,119 @@
                    :fn-id fn-id})))))
 
 
+(defn- trace-source-to-fn
+  "Traces source-id chain from an arg to find the ultimate source arg-id in target fn.
+   Returns the target arg-id if the chain leads to target-fn-id, nil otherwise."
+  [execution-graph arg-id target-fn-id visited depth]
+  (when (> depth sp/*max-graph-iterations*)
+    nil)
+  (when-not (contains? visited arg-id)
+    (let [args-by-id (:args-by-id execution-graph)
+          arg (get args-by-id arg-id)]
+      (when arg
+        (let [arg-fn-id (:fn-id arg)]
+          (if (= arg-fn-id target-fn-id)
+            ;; Found! Return this arg-id
+            arg-id
+            ;; Keep tracing through source-id
+            (when-let [source-id (:source-id arg)]
+              (recur execution-graph source-id target-fn-id
+                     (conj visited arg-id) (inc depth)))))))))
+
+
+(defn- collect-propagated-args-for-ref
+  "Collects args from caller that should be passed to a referenced fn.
+   Returns a map of {target-arg-id -> caller-arg} for args that have
+   source-id chains leading into the ref-fn."
+  [execution-graph caller-args ref-fn-id]
+  (reduce
+    (fn [acc caller-arg]
+      (if-let [target-arg-id (trace-source-to-fn execution-graph
+                                                 (:source-id caller-arg)
+                                                 ref-fn-id
+                                                 #{} 0)]
+        (assoc acc target-arg-id caller-arg)
+        acc))
+    {}
+    caller-args))
+
+
+(defn- build-arg-delays-by-id
+  "Builds a map of {arg-id -> delay} from caller-args and arg-delays.
+   Used for propagation lookup by arg-id instead of arg-name."
+  [caller-args arg-delays]
+  (reduce
+    (fn [acc arg]
+      (let [arg-name (keyword (:name arg))
+            delay-val (get arg-delays arg-name)]
+        (if delay-val
+          (assoc acc (:id arg) delay-val)
+          acc)))
+    {}
+    caller-args))
+
+
 (defn- execute-ref-fn
-  "Executes a referenced function with caching.
-   Used when an arg has ref-id set (execute fn and use result)."
-  [context ref-fn-id]
+  "Executes a referenced function with caching and pass-through args.
+   Used when an arg has ref-id set (execute fn and use result).
+
+   Pass-through args mechanism: when caller has args with source-id chains
+   leading into ref-fn, their values are passed as provided-args.
+
+   Original caller-args and their delays (by arg-id) are stored in context
+   so they propagate through nested ref-fn executions
+   (e.g., health-route -> method-map -> assoc-handler)."
+  [context ref-fn-id caller-args arg-delays]
   (let [result-cache (:result-cache context)
-        cached (get @result-cache ref-fn-id)]
+        execution-graph (:execution-graph context)
+        ;; Build arg-delays-by-id for current caller
+        current-delays-by-id (build-arg-delays-by-id caller-args arg-delays)
+        ;; Merge with any original delays from parent ref-fn calls
+        ;; Key by arg-id to avoid name collisions between different fns
+        all-delays-by-id (merge (:propagated-delays-by-id context)
+                                current-delays-by-id)
+        ;; Merge caller-args with any original ones from parent ref-fn calls
+        all-caller-args (into (vec (:propagated-caller-args context))
+                              caller-args)
+        ;; Collect propagated args that should be passed to ref-fn
+        propagated-arg-map (collect-propagated-args-for-ref
+                             execution-graph all-caller-args ref-fn-id)
+        ;; Create cache key that includes ALL caller arg-ids (not just propagated)
+        ;; This ensures different callers (e.g., health-route vs editor-route) get
+        ;; separate cache entries, even when source-id chains don't fully connect
+        ;; (which happens when intermediate fns have non-free args)
+        caller-arg-ids (set (map :id all-caller-args))
+        cache-key (if (empty? caller-arg-ids)
+                    ref-fn-id
+                    [ref-fn-id caller-arg-ids])
+        cached (get @result-cache cache-key)]
     (if (some? cached)
       (do
-        (log/debug "ref-fn cache hit" {:ref-fn-id ref-fn-id})
+        (log/debug "ref-fn cache hit" {:ref-fn-id ref-fn-id :cache-key cache-key})
         cached)
       (do
         (check-cache-limit! context ref-fn-id)
-        (log/debug "ref-fn cache miss, executing" {:ref-fn-id ref-fn-id})
-        (let [result (execute-internal context ref-fn-id nil)
-              new-size (count (swap! result-cache assoc ref-fn-id result))
+        (log/debug "ref-fn cache miss, executing"
+                   {:ref-fn-id ref-fn-id
+                    :propagated-args-count (count propagated-arg-map)
+                    :all-caller-args-count (count all-caller-args)})
+        ;; Build provided-args by deref'ing caller's arg delays using arg-id
+        (let [provided-args (when (seq propagated-arg-map)
+                              (reduce-kv
+                                (fn [acc target-arg-id caller-arg]
+                                  (let [caller-arg-id (:id caller-arg)
+                                        delay-val (get all-delays-by-id caller-arg-id)]
+                                    (if delay-val
+                                      (assoc acc target-arg-id @delay-val)
+                                      acc)))
+                                {}
+                                propagated-arg-map))
+              ;; Store all-caller-args and all-delays-by-id in context for nested ref-fn calls
+              context-with-args (assoc context
+                                       :propagated-caller-args all-caller-args
+                                       :propagated-delays-by-id all-delays-by-id)
+              result (execute-internal context-with-args ref-fn-id provided-args)
+              new-size (count (swap! result-cache assoc cache-key result))
               cache-warning-threshold (:cache-warning-threshold context)]
           (when (= new-size cache-warning-threshold)
             (log/warn "Result cache size reached warning threshold"

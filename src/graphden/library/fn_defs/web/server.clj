@@ -4,22 +4,26 @@
    This component defines fn entities (NOT base-fns) that compose
    base functions from other components to create a working web server.
 
-   ## Architecture
+   ## Route Hierarchy (Pass-Through Args Pattern)
 
-   Routes are built compositionally using multi-level inheritance:
+   This uses the pass-through args mechanism where nested fn args
+   are exposed to children through ref-id chains:
 
-   Reusable building blocks (inherit from base-fns):
-   - assoc-empty = assoc-any with m={}
-   - assoc-handler = assoc-empty with k=\"handler\"
-   - assoc-get = assoc-empty with k=\"get\"
+   Base building blocks:
+   - assoc-empty: assoc-any with m={} (free: k, v)
+   - assoc-handler: assoc-empty with k=\"handler\" (free: v)
 
-   Route definition pattern:
-   - handler-map = assoc-handler with v=handler-fn
-   - method-map = assoc-get with v=handler-map
-   - route = pair path method-map
+   Route composition (using pass-through args):
+   - method-map: assoc-empty with v=:assoc-handler
+     Free args: k (from assoc-empty), v (from assoc-handler via pass-through)
+   - route: pair with b=:method-map
+     Free args: a (path), k (HTTP method), v (handler via pass-through)
+   - get-route: route with k=\"get\"
+     Free args: a (path), v (handler)
+   - hello-route: get-route with a=\"/\", v=:hello-handler-fn
 
-   This way, when viewing a route in the UI, only the arg that was
-   specifically set on that fn is shown (the inherited args are hidden).
+   This pattern reduces boilerplate: adding a new GET route requires only
+   2 fn-defs (handler-fn + entity-route) instead of 4.
 
    ## Endpoints
 
@@ -54,44 +58,85 @@
 (def fn-defs
   "Fn definitions for creating web server.
 
-   ## Multi-Level Inheritance
+   ## Route Hierarchy (Pass-Through Args Pattern)
 
-   Building blocks are created via fn inheritance:
-   1. assoc-empty inherits from assoc-any, sets m={}
-   2. assoc-handler inherits from assoc-empty, sets k=\"handler\"
-   3. assoc-get inherits from assoc-empty, sets k=\"get\"
+   Building blocks:
+   - assoc-empty: assoc-any with m={} (free: k, v)
+   - assoc-handler: assoc-empty with k=\"handler\" (free: v)
+   - method-map: assoc-empty with v=:assoc-handler (free: k, v via pass-through)
+   - route: pair with b=:method-map (free: a, k, v)
+   - get-route/post-route: route with k preset (free: a, v)
 
-   Route definitions then inherit from these building blocks,
-   setting only the specific arg (v or path).
+   To add a new route:
+   1. Create handler-fn (const for static, make-handler for dynamic)
+   2. Create entity-route inheriting from get-route/post-route with a (path) and v (handler)
 
-   Arg value syntax:
-   - :fn-name = reference to fn (stored in ref-id)
-   Behavior (execute vs pass fn-id) determined by is-fn on parent arg."
+   Example (2 fn-defs total):
+   {:name :my-handler-fn :parent :const :args {:x {:status 200 :body \"ok\"}}}
+   {:name :my-route :parent :get-route :args {:a \"/my-path\" :v :my-handler-fn}}"
   [;; ============================================================
-   ;; REUSABLE BUILDING BLOCKS
-   ;; These create a multi-level inheritance chain
+   ;; BUILDING BLOCKS (reusable abstractions)
+   ;; These create the route composition hierarchy
    ;; ============================================================
 
-   ;; Level 1: assoc with empty map preset
-   ;; assoc-empty shows only (k, v) in UI - m={} is inherited
+   ;; assoc-empty: assoc-any with m={}
+   ;; Free args: k, v
    {:name :assoc-empty
     :parent :assoc-any
     :args {:m {}}}
 
-   ;; Level 2: assoc with k="handler"
-   ;; assoc-handler shows only v in UI - m={}, k="handler" are inherited
+   ;; assoc-handler: assoc-empty with k="handler"
+   ;; Free args: v (the handler function)
    {:name :assoc-handler
     :parent :assoc-empty
     :args {:k "handler"}}
 
-   ;; Level 2: assoc with k="get"
-   ;; assoc-get shows only v in UI - m={}, k="get" are inherited
-   {:name :assoc-get
+   ;; method-map: assoc-empty with v=:assoc-handler
+   ;; The key insight: assoc-handler's free arg (v) is exposed via pass-through!
+   ;; Free args: k (HTTP method), v (handler via pass-through from assoc-handler)
+   {:name :method-map
     :parent :assoc-empty
-    :args {:k "get"}}
+    :args {:v :assoc-handler}}
+
+   ;; route: pair with b=:method-map
+   ;; Free args: a (path), k (HTTP method via pass-through), v (handler via pass-through)
+   {:name :route
+    :parent :pair
+    :args {:b :method-map}}
 
    ;; ============================================================
-   ;; HELLO ROUTE
+   ;; HTTP METHOD ROUTES
+   ;; These inherit from route and preset the HTTP method
+   ;; ============================================================
+
+   ;; GET route: route with k="get" (free: a, v)
+   {:name :get-route
+    :parent :route
+    :args {:k "get"}}
+
+   ;; POST route: route with k="post" (free: a, v)
+   {:name :post-route
+    :parent :route
+    :args {:k "post"}}
+
+   ;; PUT route: route with k="put" (free: a, v)
+   {:name :put-route
+    :parent :route
+    :args {:k "put"}}
+
+   ;; DELETE route: route with k="delete" (free: a, v)
+   {:name :delete-route
+    :parent :route
+    :args {:k "delete"}}
+
+   ;; PATCH route: route with k="patch" (free: a, v)
+   {:name :patch-route
+    :parent :route
+    :args {:k "patch"}}
+
+   ;; ============================================================
+   ;; HELLO ROUTE (Static HTML)
+   ;; Only 2 fn-defs: handler + route
    ;; ============================================================
 
    ;; Ring handler: (fn [_] hello-response)
@@ -99,26 +144,14 @@
     :parent :const
     :args {:x hello-response}}
 
-   ;; {"handler" <fn>} - inherits k="handler", m={} from assoc-handler
-   ;; In UI shows only: {:v :hello-handler-fn}
-   {:name :hello-handler-map
-    :parent :assoc-handler
-    :args {:v :hello-handler-fn}}
-
-   ;; {"get" {"handler" <fn>}} - inherits k="get", m={} from assoc-get
-   ;; In UI shows only: {:v :hello-handler-map}
-   {:name :hello-method-map
-    :parent :assoc-get
-    :args {:v :hello-handler-map}}
-
-   ;; ["/" {:get {:handler fn}}] - pair creates 2-element vector
-   ;; In UI shows only: {:a "/" :b :hello-method-map}
+   ;; GET / - uses pass-through args: a (path), v (handler)
    {:name :hello-route
-    :parent :pair
-    :args {:a "/" :b :hello-method-map}}
+    :parent :get-route
+    :args {:a "/" :v :hello-handler-fn}}
 
    ;; ============================================================
    ;; HEALTH ROUTE (Dynamic JSON)
+   ;; 4 fn-defs: json-body -> response -> handler + route
    ;; ============================================================
 
    ;; Compositional JSON handler: to-json-string -> ring-response -> make-handler
@@ -136,23 +169,14 @@
     :parent :make-handler
     :args {:response :health-response-fn}}
 
-   ;; {"handler" <fn>} - only shows {:v :health-handler-fn}
-   {:name :health-handler-map
-    :parent :assoc-handler
-    :args {:v :health-handler-fn}}
-
-   ;; {"get" ...} - only shows {:v :health-handler-map}
-   {:name :health-method-map
-    :parent :assoc-get
-    :args {:v :health-handler-map}}
-
-   ;; ["/health" ...] - only shows path and method-map
+   ;; GET /health - uses pass-through args
    {:name :health-route
-    :parent :pair
-    :args {:a "/health" :b :health-method-map}}
+    :parent :get-route
+    :args {:a "/health" :v :health-handler-fn}}
 
    ;; ============================================================
    ;; METRICS ROUTE (JVM Info)
+   ;; 4 fn-defs: json-body -> response -> handler + route
    ;; ============================================================
 
    ;; Compositional JSON handler: to-json-string -> ring-response -> make-handler
@@ -170,20 +194,10 @@
     :parent :make-handler
     :args {:response :metrics-response-fn}}
 
-   ;; {"handler" <fn>} - only shows {:v :metrics-handler-fn}
-   {:name :metrics-handler-map
-    :parent :assoc-handler
-    :args {:v :metrics-handler-fn}}
-
-   ;; {"get" ...} - only shows {:v :metrics-handler-map}
-   {:name :metrics-method-map
-    :parent :assoc-get
-    :args {:v :metrics-handler-map}}
-
-   ;; ["/metrics" ...] - only shows path and method-map
+   ;; GET /metrics - uses pass-through args
    {:name :metrics-route
-    :parent :pair
-    :args {:a "/metrics" :b :metrics-method-map}}
+    :parent :get-route
+    :args {:a "/metrics" :v :metrics-handler-fn}}
 
    ;; ============================================================
    ;; ROUTES COLLECTION & SERVER

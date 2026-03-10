@@ -8,18 +8,26 @@
   (testing "fn-defs contains all expected definitions"
     (is (vector? web-server/fn-defs))
     ;; 24 fns total:
-    ;; - Building blocks: 3 (assoc-empty, assoc-handler, assoc-get)
-    ;; - Hello: 4 (handler-fn, handler-map, method-map, route)
-    ;; - Health: 7 (json-body, response, handler, handler-map, method-map, route)
-    ;; - Metrics: 7 (same as health)
+    ;; - Building blocks: 4 (assoc-empty, assoc-handler, method-map, route)
+    ;; - HTTP method routes: 5 (get, post, put, delete, patch)
+    ;; - Hello: 2 (handler-fn, route)
+    ;; - Health: 4 (json-body, response, handler, route)
+    ;; - Metrics: 4 (json-body, response, handler, route)
     ;; - Routes collection: 3 (routes-with-hello, routes-with-health, routes-fn)
     ;; - Router + Server: 2 (router-fn, web-server)
     (is (= 24 (count web-server/fn-defs)))
     (let [names (set (map :name web-server/fn-defs))]
-      ;; Building blocks (multi-level inheritance)
+      ;; Building blocks
       (is (contains? names :assoc-empty))
       (is (contains? names :assoc-handler))
-      (is (contains? names :assoc-get))
+      (is (contains? names :method-map))
+      (is (contains? names :route))
+      ;; Layer 1: HTTP method routes (inherit from :route fn-def)
+      (is (contains? names :get-route))
+      (is (contains? names :post-route))
+      (is (contains? names :put-route))
+      (is (contains? names :delete-route))
+      (is (contains? names :patch-route))
       ;; Core fns
       (is (contains? names :web-server))
       (is (contains? names :router-fn))
@@ -28,7 +36,7 @@
       (is (contains? names :hello-handler-fn))
       (is (contains? names :health-handler-fn))
       (is (contains? names :metrics-handler-fn))
-      ;; Route definitions (using pair)
+      ;; Route definitions (using pass-through args pattern)
       (is (contains? names :hello-route))
       (is (contains? names :health-route))
       (is (contains? names :metrics-route))))
@@ -69,30 +77,54 @@
       (is (= :health-status (get-in health-json [:args :data])))
       (is (= :jvm-info (get-in metrics-json [:args :data])))))
 
-  (testing "building blocks create multi-level inheritance"
+  (testing "building blocks create route composition hierarchy"
     (let [assoc-empty (first (filter #(= :assoc-empty (:name %)) web-server/fn-defs))
           assoc-handler (first (filter #(= :assoc-handler (:name %)) web-server/fn-defs))
-          assoc-get (first (filter #(= :assoc-get (:name %)) web-server/fn-defs))]
-      ;; assoc-empty inherits from assoc-any with m={}
+          method-map (first (filter #(= :method-map (:name %)) web-server/fn-defs))
+          route-def (first (filter #(= :route (:name %)) web-server/fn-defs))]
+      ;; assoc-empty: assoc-any with m={}
       (is (= :assoc-any (:parent assoc-empty)))
       (is (= {} (get-in assoc-empty [:args :m])))
-      ;; assoc-handler inherits from assoc-empty with k="handler"
+      ;; assoc-handler: assoc-empty with k="handler"
       (is (= :assoc-empty (:parent assoc-handler)))
       (is (= "handler" (get-in assoc-handler [:args :k])))
-      ;; assoc-get inherits from assoc-empty with k="get"
-      (is (= :assoc-empty (:parent assoc-get)))
-      (is (= "get" (get-in assoc-get [:args :k])))))
+      ;; method-map: assoc-empty with v=:assoc-handler (pass-through!)
+      (is (= :assoc-empty (:parent method-map)))
+      (is (= :assoc-handler (get-in method-map [:args :v])))
+      ;; route: pair with b=:method-map (pass-through!)
+      (is (= :pair (:parent route-def)))
+      (is (= :method-map (get-in route-def [:args :b])))))
 
-  (testing "routes use pair for clean [path method-map] structure"
+  (testing "HTTP method routes inherit from route fn-def"
+    (let [get-route (first (filter #(= :get-route (:name %)) web-server/fn-defs))
+          post-route (first (filter #(= :post-route (:name %)) web-server/fn-defs))
+          delete-route (first (filter #(= :delete-route (:name %)) web-server/fn-defs))]
+      ;; All HTTP method routes inherit from :route fn-def (not base-fn!)
+      (is (= :route (:parent get-route)))
+      (is (= :route (:parent post-route)))
+      (is (= :route (:parent delete-route)))
+      ;; Each sets k arg (HTTP method) via pass-through
+      (is (= "get" (get-in get-route [:args :k])))
+      (is (= "post" (get-in post-route [:args :k])))
+      (is (= "delete" (get-in delete-route [:args :k])))))
+
+  (testing "entity routes use pass-through args pattern"
     (let [hello-route (first (filter #(= :hello-route (:name %)) web-server/fn-defs))
           health-route (first (filter #(= :health-route (:name %)) web-server/fn-defs))
           metrics-route (first (filter #(= :metrics-route (:name %)) web-server/fn-defs))]
-      (is (= :pair (:parent hello-route)))
+      ;; All entity routes inherit from :get-route
+      (is (= :get-route (:parent hello-route)))
+      (is (= :get-route (:parent health-route)))
+      (is (= :get-route (:parent metrics-route)))
+      ;; Each sets a (path) and v (handler) via pass-through args
+      ;; a is the path from pair
+      ;; v is the handler from assoc-handler (via method-map -> route -> get-route)
       (is (= "/" (get-in hello-route [:args :a])))
-      (is (= :pair (:parent health-route)))
+      (is (= :hello-handler-fn (get-in hello-route [:args :v])))
       (is (= "/health" (get-in health-route [:args :a])))
-      (is (= :pair (:parent metrics-route)))
-      (is (= "/metrics" (get-in metrics-route [:args :a]))))))
+      (is (= :health-handler-fn (get-in health-route [:args :v])))
+      (is (= "/metrics" (get-in metrics-route [:args :a])))
+      (is (= :metrics-handler-fn (get-in metrics-route [:args :v]))))))
 
 
 (deftest startup-fn-name-test

@@ -238,12 +238,13 @@
   (if (empty? fn-names)
     {}
     (let [name-strs (mapv name fn-names)
+          name-set (set name-strs)
           ;; Query all fns - we'll filter in memory
           ;; This is faster than N individual queries
           all-fns (sp/query-entities storage :fn {})]
       (into {}
             (comp
-              (filter #(contains? (set name-strs) (:name %)))
+              (filter #(contains? name-set (:name %)))
               (map (juxt :name identity)))
             all-fns))))
 
@@ -254,9 +255,10 @@
   [storage fn-ids]
   (if (empty? fn-ids)
     {}
-    (let [all-args (sp/query-entities storage :arg {})]
+    (let [fn-id-set (set fn-ids)
+          all-args (sp/query-entities storage :arg {})]
       (group-by :fn-id
-                (filter #(contains? (set fn-ids) (:fn-id %)) all-args)))))
+                (filter #(contains? fn-id-set (:fn-id %)) all-args)))))
 
 
 (defn- get-parent-arg-cached
@@ -284,6 +286,42 @@
                             {:type :fn-composition/unresolved-arg
                              :parent-fn-id parent-fn-id
                              :arg-name arg-name}))))))))
+
+
+(defn- find-available-arg
+  "Finds an arg by name from all available args (parent chain + propagated free args).
+
+   This is used for pass-through args: when child fn-def sets an arg that comes
+   from a nested fn (via ref-id chain), not directly from parent chain.
+
+   Search order:
+   1. Parent's own args (via parent-id chain)
+   2. Propagated free args from refs (via ref-id chains)
+
+   Returns the arg entity or throws if not found."
+  [fn-cache args-cache parent-fn-id arg-name]
+  (let [arg-name-str (name arg-name)
+        ;; First try direct parent chain lookup
+        direct-result (try
+                        (get-parent-arg-cached fn-cache args-cache parent-fn-id arg-name)
+                        (catch clojure.lang.ExceptionInfo e
+                          (when-not (= :fn-composition/unresolved-arg (:type (ex-data e)))
+                            (throw e))
+                          nil))]
+    (or direct-result
+        ;; Not in parent chain - search in propagated free args from refs
+        (let [parent-free-args (collect-parent-free-args fn-cache args-cache parent-fn-id 0)
+              matching (filter #(= (:name %) arg-name-str) parent-free-args)]
+          (if (seq matching)
+            ;; Prefer FREE args (no value, no ref-id) when there's collision
+            (or (first (filter free-arg? matching))
+                (first matching))
+            (throw (ex-info (str "Argument not found in available args: " arg-name
+                                 ". Checked parent chain and propagated free args.")
+                            {:type :fn-composition/unresolved-arg
+                             :parent-fn-id parent-fn-id
+                             :arg-name arg-name
+                             :available-args (mapv :name parent-free-args)})))))))
 
 
 (defn- resolve-parent-fn-id-cached
@@ -360,14 +398,16 @@
 
 
 (defn- prepare-arg-record
-  "Prepares an arg record for batch upsert."
+  "Prepares an arg record for batch upsert.
+   Uses find-available-arg to support pass-through args from nested refs."
   [fn-cache args-cache fn-name-cache created-fns fn-id parent-fn-id arg-name arg-value]
   (when-not fn-id
     (throw (ex-info "fn-id cannot be nil when preparing arg record"
                     {:type :fn-composition/internal-error
                      :arg-name arg-name
                      :parent-fn-id parent-fn-id})))
-  (let [parent-arg (get-parent-arg-cached fn-cache args-cache parent-fn-id arg-name)
+  (let [;; Use find-available-arg which searches both parent chain AND propagated free args
+        parent-arg (find-available-arg fn-cache args-cache parent-fn-id arg-name)
         source-id (:id parent-arg)
         ;; Check if arg already exists for this fn
         fn-args (get args-cache fn-id [])
@@ -487,59 +527,74 @@
             ;; Include full fn-entities with parent-id for parent chain lookup
             fn-id-cache-final (merge fn-id-cache created-fn-entities)
 
-            ;; Phase 3: Prepare and batch upsert args (explicit + propagated free args)
+            ;; Phase 3: Process each fn-def's args sequentially, updating cache as we go
+            ;; This allows later fn-defs to see propagated args from earlier ones
+            ;;
+            ;; We still collect all records for batch upsert at the end for efficiency.
+            {:keys [all-new-args all-update-args]}
+            (loop [remaining sorted-defs
+                   args-view args-cache  ; mutable view of args, updated after each fn-def
+                   new-args []
+                   update-args []]
+              (if (empty? remaining)
+                {:all-new-args new-args
+                 :all-update-args update-args}
+                (let [fn-def (first remaining)
+                      fn-name (:name fn-def)
+                      fn-id (get created-fns fn-name)
+                      parent (:parent fn-def)
+                      parent-fn-id (resolve-parent-fn-id-cached
+                                     fn-name-cache-final fn-id-cache-final created-fns parent)
 
-            ;; 3a: Explicit args from fn-def :args
-            explicit-arg-records
-            (for [fn-def sorted-defs
-                  :let [fn-name (:name fn-def)
-                        fn-id (get created-fns fn-name)
-                        parent (:parent fn-def)
-                        parent-fn-id (resolve-parent-fn-id-cached
-                                       fn-name-cache-final fn-id-cache-final created-fns parent)]
-                  [arg-name arg-value] (:args fn-def)
-                  :let [record (prepare-arg-record
-                                 fn-id-cache-final args-cache fn-name-cache-final
-                                 created-fns fn-id parent-fn-id arg-name arg-value)]
-                  :when record]
-              record)
+                      ;; 3a: Explicit args from fn-def :args
+                      explicit-records
+                      (for [[arg-name arg-value] (:args fn-def {})
+                            :let [record (prepare-arg-record
+                                           fn-id-cache-final args-view fn-name-cache-final
+                                           created-fns fn-id parent-fn-id arg-name arg-value)]
+                            :when record]
+                        record)
 
-            ;; Track which args were explicitly set (by source-id) to avoid duplicates
-            explicit-source-ids
-            (into #{}
-                  (keep (fn [rec]
-                          (or (get-in rec [:new :source-id])
-                              (get-in rec [:update :source-id]))))
-                  explicit-arg-records)
+                      ;; Track which args were explicitly set (by source-id)
+                      explicit-source-ids
+                      (into #{}
+                            (keep (fn [rec]
+                                    (or (get-in rec [:new :source-id])
+                                        (get-in rec [:update :source-id]))))
+                            explicit-records)
 
-            ;; 3b: Propagated free args from parent chain and referenced fns
-            propagated-arg-records
-            (for [fn-def sorted-defs
-                  :let [fn-name (:name fn-def)
-                        fn-id (get created-fns fn-name)
-                        parent (:parent fn-def)
-                        parent-fn-id (resolve-parent-fn-id-cached
-                                       fn-name-cache-final fn-id-cache-final created-fns parent)
-                        ;; Collect free args from parent
-                        parent-free-args (collect-parent-free-args
-                                           fn-id-cache-final args-cache parent-fn-id 0)]
-                  ;; For each free arg that wasn't explicitly set
-                  free-arg parent-free-args
-                  :when (not (contains? explicit-source-ids (:id free-arg)))
-                  :let [record (prepare-propagated-arg-record args-cache fn-id free-arg)]
-                  :when record]
-              record)
+                      ;; 3b: Propagated free args from parent chain and referenced fns
+                      parent-free-args (collect-parent-free-args
+                                         fn-id-cache-final args-view parent-fn-id 0)
+                      propagated-records
+                      (for [free-arg parent-free-args
+                            :when (not (contains? explicit-source-ids (:id free-arg)))
+                            :let [record (prepare-propagated-arg-record args-view fn-id free-arg)]
+                            :when record]
+                        record)
 
-            arg-records (concat explicit-arg-records propagated-arg-records)
-            new-args (keep :new arg-records)
-            update-args (keep :update arg-records)]
+                      ;; Collect all new args for this fn-def
+                      fn-new-args (concat (keep :new explicit-records)
+                                          (keep :new propagated-records))
+                      fn-update-args (keep :update explicit-records)
+
+                      ;; Update args-view with new args so next fn-def can see them
+                      args-view' (reduce (fn [cache arg]
+                                           (update cache (:fn-id arg)
+                                                   (fnil conj []) arg))
+                                         args-view
+                                         fn-new-args)]
+                  (recur (rest remaining)
+                         args-view'
+                         (into new-args fn-new-args)
+                         (into update-args fn-update-args)))))]
 
         ;; Batch upsert new args
-        (when (seq new-args)
-          (sp/upsert-entities storage :arg new-args))
+        (when (seq all-new-args)
+          (sp/upsert-entities storage :arg all-new-args))
 
         ;; Batch update existing args (if any changed)
-        (when (seq update-args)
-          (sp/upsert-entities storage :arg update-args))
+        (when (seq all-update-args)
+          (sp/upsert-entities storage :arg all-update-args))
 
         created-fns))))

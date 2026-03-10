@@ -176,7 +176,7 @@
 ;; === ExecutionGraphResult record ===
 
 (defrecord ExecutionGraphResult
-  [fns args args-by-fn])
+  [fns args args-by-fn args-by-id])
 
 
 (defn- build-args-by-fn-index
@@ -190,10 +190,17 @@
     args))
 
 
+(defn- build-args-by-id-index
+  "Builds index of arg-id -> arg.
+   Provides O(1) lookup by arg-id for pass-through args resolution."
+  [args]
+  (into {} (map (juxt :id identity) args)))
+
+
 (defn ->execution-graph
   "Creates an ExecutionGraphResult record from a map.
    Validates that all required keys are present and non-empty.
-   Builds args-by-fn index for O(1) lookup."
+   Builds indexes for O(1) lookup."
   [{:keys [fns args]
     :or {args []}}]
   (when-not (map? fns)
@@ -205,7 +212,7 @@
   (when-not (sequential? args)
     (throw (ex-info "ExecutionGraphResult requires :args sequence"
                     {:type :invalid-data :received (type args)})))
-  (->ExecutionGraphResult fns args (build-args-by-fn-index args)))
+  (->ExecutionGraphResult fns args (build-args-by-fn-index args) (build-args-by-id-index args)))
 
 
 (defn execution-graph?

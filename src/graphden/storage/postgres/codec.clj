@@ -34,12 +34,19 @@
 
 ;; === Low-level encoding/decoding ===
 
+(defn- ->pgobject
+  "Creates a PGobject with given type and value.
+   Common helper to reduce duplication."
+  [pg-type pg-value]
+  (doto (PGobject.)
+    (PGobject/.setType pg-type)
+    (PGobject/.setValue pg-value)))
+
+
 (defn- value->jsonb
   "Wraps a value as JSONB PGobject for PostgreSQL."
   [v]
-  (doto (PGobject.)
-    (PGobject/.setType "jsonb")
-    (PGobject/.setValue (json/generate-string v))))
+  (->pgobject "jsonb" (json/generate-string v)))
 
 
 (defn- parse-jsonb
@@ -62,9 +69,8 @@
 (defn- value->enum
   "Converts keyword to PostgreSQL enum PGobject."
   [v enum-name]
-  (doto (PGobject.)
-    (PGobject/.setType (util/kw->snake-case enum-name))
-    (PGobject/.setValue (util/enum-value->sql v))))
+  (->pgobject (util/kw->snake-case enum-name)
+              (util/enum-value->sql v)))
 
 
 (defn- instant->timestamp

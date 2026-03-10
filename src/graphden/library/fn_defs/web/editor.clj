@@ -582,6 +582,33 @@
     :parent :assoc-empty
     :args {:k "handler"}}
 
+   ;; ============================================================
+   ;; HEALTH STATUS (fn-def composition, not base-fn)
+   ;; Replaces hardcoded health-status base-fn
+   ;; ============================================================
+
+   ;; assoc-status: assoc-empty with k="status" (free: v)
+   {:name :assoc-status
+    :parent :assoc-empty
+    :args {:k "status"}}
+
+   ;; assoc-timestamp: assoc with k="timestamp" (free: m, v)
+   {:name :assoc-timestamp
+    :parent :assoc
+    :args {:k "timestamp"}}
+
+   ;; health-status-base: {"status": "healthy"}
+   {:name :health-status-base
+    :parent :assoc-status
+    :args {:v "healthy"}}
+
+   ;; health-status: {"status": "healthy", "timestamp": <current-time-ms>}
+   ;; This fn-def replaces the hardcoded base-fn
+   {:name :health-status
+    :parent :assoc-timestamp
+    :args {:m :health-status-base
+           :v :current-time-ms}}
+
    ;; Level 2: method-map (free: k, v via pass-through)
    ;; v from assoc-handler propagates through!
    {:name :method-map
@@ -605,6 +632,63 @@
    {:name :delete-route
     :parent :route
     :args {:k "delete"}}
+
+   ;; ============================================================
+   ;; RESPONSE STATUS HIERARCHY
+   ;; Each level sets one thing, enabling clean inheritance
+   ;; ============================================================
+
+   ;; Status codes (free: headers, body)
+   {:name :ok-response
+    :parent :ring-response
+    :args {:status 200}}
+
+   {:name :not-found-response
+    :parent :ring-response
+    :args {:status 404}}
+
+   {:name :error-response
+    :parent :ring-response
+    :args {:status 500}}
+
+   ;; ============================================================
+   ;; CONTENT-TYPE RESPONSE HIERARCHY
+   ;; Inherit from status, set content-type (free: body)
+   ;; ============================================================
+
+   ;; JSON responses
+   {:name :json-ok-response
+    :parent :ok-response
+    :args {:headers {"Content-Type" "application/json"}}}
+
+   ;; HTML responses
+   {:name :html-ok-response
+    :parent :ok-response
+    :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
+
+   ;; Plain text responses
+   {:name :text-ok-response
+    :parent :ok-response
+    :args {:headers {"Content-Type" "text/plain"}}}
+
+   {:name :text-not-found-response
+    :parent :not-found-response
+    :args {:headers {"Content-Type" "text/plain"}}}
+
+   {:name :text-error-response
+    :parent :error-response
+    :args {:headers {"Content-Type" "text/plain"}}}
+
+   ;; SVG responses
+   {:name :svg-ok-response
+    :parent :ok-response
+    :args {:headers {"Content-Type" "image/svg+xml"}}}
+
+   ;; Cached SVG (for static assets like favicon)
+   {:name :cached-svg-ok-response
+    :parent :svg-ok-response
+    :args {:headers {"Content-Type" "image/svg+xml"
+                     "Cache-Control" "public, max-age=86400"}}}
 
    ;; ============================================================
    ;; HTML PAGE
@@ -655,36 +739,36 @@
     :parent :delete-entity-api-handler}
 
    ;; ============================================================
-   ;; HEALTH CHECK
+   ;; HEALTH CHECK (using json-ok-response building block)
    ;; ============================================================
 
-   {:name :health-data
-    :parent :health-status}
-
+   ;; Convert health data to JSON string
    {:name :health-json-body
     :parent :to-json-string
-    :args {:data :health-data}}
+    :args {:data :health-status}}
 
+   ;; Response using json-ok-response (status=200, headers=JSON preset)
    {:name :health-response
-    :parent :ring-response
-    :args {:status 200
-           :headers {"Content-Type" "application/json"}
-           :body :health-json-body}}
+    :parent :json-ok-response
+    :args {:body :health-json-body}}
 
    {:name :health-handler
     :parent :make-handler
     :args {:response :health-response}}
 
    ;; ============================================================
-   ;; FAVICON
+   ;; FAVICON (inherits from cached-svg-ok-response, only sets body)
    ;; ============================================================
 
+   ;; Favicon SVG icon body (reusable const)
+   {:name :favicon-svg-body
+    :parent :const
+    :args {:x "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#fff\" rx=\"4\"/><rect x=\"1\" y=\"1\" width=\"30\" height=\"30\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" rx=\"4\"/><rect x=\"3\" y=\"12\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"4\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"20\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"14\" x2=\"19\" y2=\"8\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"18\" x2=\"19\" y2=\"24\" stroke=\"#000\" stroke-width=\"1.5\"/></svg>"}}
+
+   ;; Response inherits status=200, headers=svg+cache from cached-svg-ok-response
    {:name :favicon-response
-    :parent :ring-response
-    :args {:status 200
-           :headers {"Content-Type" "image/svg+xml"
-                     "Cache-Control" "public, max-age=86400"}
-           :body "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#fff\" rx=\"4\"/><rect x=\"1\" y=\"1\" width=\"30\" height=\"30\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" rx=\"4\"/><rect x=\"3\" y=\"12\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"4\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"20\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"14\" x2=\"19\" y2=\"8\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"18\" x2=\"19\" y2=\"24\" stroke=\"#000\" stroke-width=\"1.5\"/></svg>"}}
+    :parent :cached-svg-ok-response
+    :args {:body :favicon-svg-body}}
 
    {:name :favicon-handler
     :parent :make-handler

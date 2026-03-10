@@ -81,25 +81,6 @@
 
 
 ;; =============================================================================
-;; health-status tests
-;; =============================================================================
-
-(deftest health-status-test
-  (testing "returns health status map"
-    (let [status (call-impl sys/health-status {})]
-      (is (map? status))
-      (is (= "healthy" (:status status)))
-      (is (number? (:timestamp status)))))
-
-  (testing "timestamp is current"
-    (let [before (System/currentTimeMillis)
-          status (call-impl sys/health-status {})
-          after (System/currentTimeMillis)]
-      (is (>= (:timestamp status) before))
-      (is (<= (:timestamp status) after)))))
-
-
-;; =============================================================================
 ;; system-defs tests
 ;; =============================================================================
 
@@ -110,8 +91,7 @@
     (is (contains? sys/system-defs :make-handler))
     (is (contains? sys/system-defs :to-json-string))
     (is (contains? sys/system-defs :jvm-info))
-    (is (contains? sys/system-defs :current-time-ms))
-    (is (contains? sys/system-defs :health-status)))
+    (is (contains? sys/system-defs :current-time-ms)))
 
   (testing "all defs have correct structure"
     (doseq [[k v] sys/system-defs]
@@ -155,9 +135,3 @@
   (testing "has correct metadata"
     (is (= {} (:args sys/current-time-ms)))
     (is (= :int (:return-type sys/current-time-ms)))))
-
-
-(deftest health-status-metadata-test
-  (testing "has correct metadata"
-    (is (= {} (:args sys/health-status)))
-    (is (= :jsonb (:return-type sys/health-status)))))

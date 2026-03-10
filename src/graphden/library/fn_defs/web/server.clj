@@ -39,20 +39,12 @@
 
 
 ;; === Response Data ===
-
-(def hello-response
-  "Static hello response - returned for all requests to /"
-  {:status 200
-   :headers {"Content-Type" "text/html; charset=utf-8"}
-   :body "<html><body><h1>Graphden Executor v2</h1><p>PostgreSQL + Versioning + Cache + Metrics</p></body></html>"})
+;; NOTE: All response data is now defined as fn-defs using the composition pattern.
+;; See HELLO ROUTE section below.
 
 
 ;; === Fn Definitions ===
 
-;; JSON content type header for reuse
-(def json-headers
-  "Headers for JSON responses."
-  {"Content-Type" "application/json"})
 
 
 (def fn-defs
@@ -90,6 +82,33 @@
    {:name :assoc-handler
     :parent :assoc-empty
     :args {:k "handler"}}
+
+   ;; ============================================================
+   ;; HEALTH STATUS (fn-def composition, not base-fn)
+   ;; Replaces hardcoded health-status base-fn
+   ;; ============================================================
+
+   ;; assoc-status: assoc-empty with k="status" (free: v)
+   {:name :assoc-status
+    :parent :assoc-empty
+    :args {:k "status"}}
+
+   ;; assoc-timestamp: assoc with k="timestamp" (free: m, v)
+   {:name :assoc-timestamp
+    :parent :assoc
+    :args {:k "timestamp"}}
+
+   ;; health-status-base: {"status": "healthy"}
+   {:name :health-status-base
+    :parent :assoc-status
+    :args {:v "healthy"}}
+
+   ;; health-status: {"status": "healthy", "timestamp": <current-time-ms>}
+   ;; This fn-def replaces the hardcoded base-fn
+   {:name :health-status
+    :parent :assoc-timestamp
+    :args {:m :health-status-base
+           :v :current-time-ms}}
 
    ;; method-map: assoc-empty with v=:assoc-handler
    ;; The key insight: assoc-handler's free arg (v) is exposed via pass-through!
@@ -135,14 +154,70 @@
     :args {:k "patch"}}
 
    ;; ============================================================
-   ;; HELLO ROUTE (Static HTML)
-   ;; Only 2 fn-defs: handler + route
+   ;; RESPONSE STATUS HIERARCHY
+   ;; Each level sets one thing, enabling clean inheritance
    ;; ============================================================
 
-   ;; Ring handler: (fn [_] hello-response)
-   {:name :hello-handler-fn
+   ;; Status codes (free: headers, body)
+   {:name :ok-response
+    :parent :ring-response
+    :args {:status 200}}
+
+   {:name :not-found-response
+    :parent :ring-response
+    :args {:status 404}}
+
+   {:name :error-response
+    :parent :ring-response
+    :args {:status 500}}
+
+   ;; ============================================================
+   ;; CONTENT-TYPE RESPONSE HIERARCHY
+   ;; Inherit from status, set content-type (free: body)
+   ;; ============================================================
+
+   ;; JSON responses
+   {:name :json-ok-response
+    :parent :ok-response
+    :args {:headers {"Content-Type" "application/json"}}}
+
+   ;; HTML responses
+   {:name :html-ok-response
+    :parent :ok-response
+    :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
+
+   ;; Plain text responses (for error messages)
+   {:name :text-ok-response
+    :parent :ok-response
+    :args {:headers {"Content-Type" "text/plain"}}}
+
+   {:name :text-not-found-response
+    :parent :not-found-response
+    :args {:headers {"Content-Type" "text/plain"}}}
+
+   {:name :text-error-response
+    :parent :error-response
+    :args {:headers {"Content-Type" "text/plain"}}}
+
+   ;; ============================================================
+   ;; HELLO ROUTE (Static HTML using composition)
+   ;; Uses html-ok-response hierarchy for proper inheritance
+   ;; ============================================================
+
+   ;; HTML body content (reusable const)
+   {:name :hello-body
     :parent :const
-    :args {:x hello-response}}
+    :args {:x "<html><body><h1>Graphden Executor v2</h1><p>PostgreSQL + Versioning + Cache + Metrics</p></body></html>"}}
+
+   ;; Response inherits status=200, headers=html from html-ok-response
+   {:name :hello-response-fn
+    :parent :html-ok-response
+    :args {:body :hello-body}}
+
+   ;; Handler wraps response in Ring handler function
+   {:name :hello-handler-fn
+    :parent :make-handler
+    :args {:response :hello-response-fn}}
 
    ;; GET / - uses pass-through args: a (path), v (handler)
    {:name :hello-route
@@ -160,10 +235,8 @@
     :args {:data :health-status}}
 
    {:name :health-response-fn
-    :parent :ring-response
-    :args {:status 200
-           :headers json-headers
-           :body :health-json-body-fn}}
+    :parent :json-ok-response
+    :args {:body :health-json-body-fn}}
 
    {:name :health-handler-fn
     :parent :make-handler
@@ -185,10 +258,8 @@
     :args {:data :jvm-info}}
 
    {:name :metrics-response-fn
-    :parent :ring-response
-    :args {:status 200
-           :headers json-headers
-           :body :metrics-json-body-fn}}
+    :parent :json-ok-response
+    :args {:body :metrics-json-body-fn}}
 
    {:name :metrics-handler-fn
     :parent :make-handler

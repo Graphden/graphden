@@ -4,9 +4,9 @@
    Provides:
    - jvm-info: Returns JVM/system information map
    - current-time-ms: Returns current time in milliseconds
-   - health-status: Returns basic health status
-   - json-response: Wraps data in JSON Ring response
-   - json-handler: Creates Ring handler from data-producing fn"
+   - ring-response: Creates Ring response from status/headers/body
+   - make-handler: Creates Ring handler from response map
+   - to-json-string: Serializes data to JSON string"
   (:require
     [cheshire.core :as json]
     [graphden.executor.registry.macros :refer [defbase]])
@@ -117,15 +117,6 @@
   (System/currentTimeMillis))
 
 
-(defbase health-status
-  "Returns basic health status map.
-
-   Returns:
-   {:status \"healthy\", :timestamp <current-time-ms>}"
-  {:args {}
-   :return-type :jsonb}
-  {:status "healthy"
-   :timestamp (System/currentTimeMillis)})
 
 
 ;; =============================================================================
@@ -138,5 +129,4 @@
    :make-handler make-handler
    :to-json-string to-json-string
    :jvm-info jvm-info
-   :current-time-ms current-time-ms
-   :health-status health-status})
+   :current-time-ms current-time-ms})

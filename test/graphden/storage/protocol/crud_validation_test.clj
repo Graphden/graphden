@@ -688,3 +688,142 @@
             :user
             {:name {:type :text}}
             {:unknown1 "val" :unknown2 "val"})))))
+
+
+;; =============================================================================
+;; Boolean short-circuit branch coverage tests
+;; =============================================================================
+;; These tests ensure all branches of `and`/`or` expressions are executed,
+;; not just short-circuited. Cloverage counts unexpecuted branches as uncovered
+;; forms even when lines are covered.
+
+(deftest validate-where-clause-fields-short-circuit-coverage-test
+  (testing "non-map where skips body (second branch of and evaluated, returns false)"
+    ;; This tests: (and (some? where) (map? where))
+    ;; where = vector: (some? [1]) = true, (map? [1]) = false → body skipped
+    ;; Normally validate-where-clause! catches this first, but calling directly
+    (is (nil? (storage/validate-where-clause-fields!
+                :user
+                {:name {:type :text}}
+                [1 2 3])))  ; vector is some? but not map?
+
+    ;; Same for other non-map values
+    (is (nil? (storage/validate-where-clause-fields!
+                :user
+                {:name {:type :text}}
+                "string")))
+
+    (is (nil? (storage/validate-where-clause-fields!
+                :user
+                {:name {:type :text}}
+                123)))))
+
+
+(deftest validate-where-clause-types-short-circuit-coverage-test
+  (testing "non-map where skips body (second branch of and evaluated)"
+    ;; Tests: (when (and (some? where) (map? where)) ...)
+    ;; where = vector: some? true, map? false → body skipped, returns nil
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                [1 2 3])))
+
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                "string")))
+
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                42)))))
+
+
+(deftest validate-where-clause-types-field-spec-or-branch-test
+  (testing ":id field uses fallback when not in fields - covers (or X (when ...)) second branch"
+    ;; Tests: (or (get fields k) (when (= k :id) {:type :uuid}))
+    ;; k = :id, not in fields → first branch nil, second branch evaluated
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {}  ; no fields defined, not even :id
+                {:id (random-uuid)}))))
+
+  (testing "field not in fields and not :id - both or branches evaluated, nil result"
+    ;; k = :unknown, (get fields k) = nil, (= k :id) = false → when-let binds nil
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                {:unknown-field "value"})))))
+
+
+(deftest validate-required-fields-short-circuit-coverage-test
+  (testing "covers all branches of (and (not= :id) (not nullable?) (or missing nil))"
+    ;; Branch 1: field-name = :id → short-circuits
+    (is (nil? (storage/validate-required-fields!
+                :user
+                {:id {:type :uuid} :name {:type :text}}
+                {:name "John"})))
+
+    ;; Branch 2: nullable? = true → short-circuits after first and
+    (is (nil? (storage/validate-required-fields!
+                :user
+                {:email {:type :text :nullable? true}}
+                {})))
+
+    ;; Branch 3: (or (not contains) X) - first is true, X not evaluated
+    (is (thrown? clojure.lang.ExceptionInfo
+          (storage/validate-required-fields!
+            :user
+            {:name {:type :text}}
+            {})))  ; field missing entirely
+
+    ;; Branch 4: (or false (nil? X)) - first is false, second evaluated
+    (is (thrown? clojure.lang.ExceptionInfo
+          (storage/validate-required-fields!
+            :user
+            {:name {:type :text}}
+            {:name nil}))))  ; field present but nil
+
+  (testing "required field present and non-nil - all checks pass"
+    ;; This executes: (not= :id) = true, (not nullable?) = true,
+    ;; (or (not contains) (nil? v)) = (or false false) = false
+    ;; → when body not executed
+    (is (nil? (storage/validate-required-fields!
+                :user
+                {:name {:type :text}}
+                {:name "John"})))))
+
+
+(deftest check-type-match-short-circuit-test
+  (testing "nil value short-circuits - ft/valid-type? not called"
+    ;; Tests: (when (and (not= actual-type :nil) X) ...)
+    ;; value = nil → actual-type = :nil → (not= :nil :nil) = false → X not evaluated
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :text)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :int)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :uuid))))
+
+  (testing "non-nil value with valid type - both branches of and evaluated"
+    ;; (not= :text :nil) = true, (not (ft/valid-type? :text "x")) = false → nil
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match "hello" :text))))
+
+  (testing "non-nil value with invalid type - both branches of and evaluated, error returned"
+    ;; (not= :int :nil) = true, (not (ft/valid-type? :text 123)) = true → error
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match 123 :text)]
+      (is (map? result))
+      (is (= :text (:expected result))))))
+
+
+(deftest validate-where-clause-and-branches-test
+  (testing "nil where - short-circuits (some? nil) = false"
+    (is (nil? (storage/validate-where-clause! nil))))
+
+  (testing "map where - both branches evaluated: (some? {}) = true, (not (map? {})) = false"
+    (is (nil? (storage/validate-where-clause! {}))))
+
+  (testing "non-map where - both branches evaluated: (some? X) = true, (not (map? X)) = true"
+    (is (thrown? clojure.lang.ExceptionInfo
+          (storage/validate-where-clause! "string")))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (storage/validate-where-clause! 123)))
+    (is (thrown? clojure.lang.ExceptionInfo
+          (storage/validate-where-clause! [1 2 3])))))

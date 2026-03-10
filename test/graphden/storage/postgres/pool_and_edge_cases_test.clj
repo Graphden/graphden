@@ -66,6 +66,43 @@
 (deftest create-pool-validation-test
   (let [valid-opts (setup/get-container-config)]
 
+    (testing "jdbc-url is required"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"jdbc-url is required"
+            (pg/create-pool (dissoc valid-opts :jdbc-url)))))
+
+    (testing "jdbc-url must be a string"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"jdbc-url must be a string"
+            (pg/create-pool (assoc valid-opts :jdbc-url 12345)))))
+
+    (testing "jdbc-url must start with jdbc:postgresql://"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"jdbc-url must start with 'jdbc:postgresql://'"
+            (pg/create-pool (assoc valid-opts :jdbc-url "jdbc:mysql://localhost/db")))))
+
+    (testing "username is required and non-empty"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"username is required and cannot be empty"
+            (pg/create-pool (dissoc valid-opts :username))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"username is required and cannot be empty"
+            (pg/create-pool (assoc valid-opts :username ""))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"username is required and cannot be empty"
+            (pg/create-pool (assoc valid-opts :username "   ")))))
+
+    (testing "password is required and non-empty"
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"password is required and cannot be empty"
+            (pg/create-pool (dissoc valid-opts :password))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"password is required and cannot be empty"
+            (pg/create-pool (assoc valid-opts :password ""))))
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"password is required and cannot be empty"
+            (pg/create-pool (assoc valid-opts :password "   ")))))
+
     (testing "pool-size must be positive integer"
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"pool-size must be a positive integer"

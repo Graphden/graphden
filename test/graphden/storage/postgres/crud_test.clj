@@ -324,6 +324,185 @@
 
 ;; === Required field validation tests ===
 
+;; === update-entities batch tests ===
+
+(deftest batch-update-entities-test
+  (testing "update-entities updates multiple entities"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+          _ (sp/create-entity storage :user {:id id2 :name "Bob"})
+          results (sp/update-entities storage :user
+                                      [{:id id1 :name "Alice Updated"}
+                                       {:id id2 :name "Bob Updated"}])]
+      (try
+        (is (= 2 (count results)))
+        (is (= "Alice Updated" (:name (sp/read-entity storage :user id1))))
+        (is (= "Bob Updated" (:name (sp/read-entity storage :user id2))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entities with empty sequence returns empty"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          results (sp/update-entities storage :user [])]
+      (try
+        (is (empty? results))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entities throws for record without :id"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Each record must have :id"
+              (sp/update-entities storage :user [{:name "No ID"}])))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entities throws for non-existent entity"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Entity not found"
+              (sp/update-entities storage :user [{:id #uuid "11111111-1111-1111-1111-111111111111" :name "Test"}])))
+        (finally
+          (sp/close storage))))))
+
+
+;; === upsert-entities batch tests ===
+
+(deftest batch-upsert-entities-test
+  (testing "upsert-entities inserts new entities"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          results (sp/upsert-entities storage :user
+                                      [{:id id1 :name "Alice"}
+                                       {:id id2 :name "Bob"}])]
+      (try
+        (is (= 2 (count results)))
+        (is (= "Alice" (:name (sp/read-entity storage :user id1))))
+        (is (= "Bob" (:name (sp/read-entity storage :user id2))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "upsert-entities updates existing entities"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+          results (sp/upsert-entities storage :user [{:id id1 :name "Alice Updated"}])]
+      (try
+        (is (= 1 (count results)))
+        (is (= "Alice Updated" (:name (sp/read-entity storage :user id1))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "upsert-entities handles mix of inserts and updates"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+          results (sp/upsert-entities storage :user
+                                      [{:id id1 :name "Alice Updated"}
+                                       {:id id2 :name "Bob New"}])]
+      (try
+        (is (= 2 (count results)))
+        (is (= "Alice Updated" (:name (sp/read-entity storage :user id1))))
+        (is (= "Bob New" (:name (sp/read-entity storage :user id2))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "upsert-entities with empty sequence returns empty"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          results (sp/upsert-entities storage :user [])]
+      (try
+        (is (empty? results))
+        (finally
+          (sp/close storage)))))
+
+  (testing "upsert-entities throws for record without :id"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Each record must have :id"
+              (sp/upsert-entities storage :user [{:name "No ID"}])))
+        (finally
+          (sp/close storage)))))
+
+  (testing "upsert-entities throws for duplicate ids"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          dup-id #uuid "11111111-1111-1111-1111-111111111111"]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate IDs"
+              (sp/upsert-entities storage :user [{:id dup-id :name "First"}
+                                                 {:id dup-id :name "Second"}])))
+        (finally
+          (sp/close storage))))))
+
+
+;; === batch size validation tests ===
+
+(deftest batch-size-validation-test
+  (testing "create-entities throws for duplicate ids"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          dup-id #uuid "11111111-1111-1111-1111-111111111111"]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate IDs"
+              (sp/create-entities storage :user [{:id dup-id :name "First"}
+                                                 {:id dup-id :name "Second"}])))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entities throws for duplicate ids"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          dup-id #uuid "11111111-1111-1111-1111-111111111111"
+          _ (sp/create-entity storage :user {:id dup-id :name "Test"})]
+      (try
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate IDs"
+              (sp/update-entities storage :user [{:id dup-id :name "First"}
+                                                 {:id dup-id :name "Second"}])))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Required field validation tests ===
+
 (deftest crud-required-field-validation-test
   (testing "create-entity throws when required field is missing"
     (let [storage (setup/create-test-storage)

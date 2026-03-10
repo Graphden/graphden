@@ -718,6 +718,140 @@
 
 
 ;; =============================================================================
+;; Additional arg entity tests for is-fn flag and source-id
+;; =============================================================================
+
+(deftest entity-details-handler-arg-with-is-fn-test
+  (testing "renders arg with is-fn flag set to true"
+    (let [storage (create-mock-storage)
+          fn-id (random-uuid)
+          arg-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id fn-id :name "test-fn" :parent-id nil}]
+                   :arg [{:id arg-id
+                          :fn-id fn-id
+                          :name "callback"
+                          :type "fn"
+                          :required true
+                          :is-fn true}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "arg" :id (str arg-id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "Is Fn"))
+      (is (str/includes? (:body response) "Yes")))))
+
+
+(deftest entity-details-handler-arg-inherited-test
+  (testing "renders arg with source-id (inherited arg)"
+    (let [storage (create-mock-storage)
+          fn-id (random-uuid)
+          source-arg-id (random-uuid)
+          arg-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id fn-id :name "test-fn" :parent-id nil}]
+                   :arg [{:id source-arg-id
+                          :fn-id fn-id
+                          :name "x"
+                          :type "int"
+                          :required true
+                          :is-fn false}
+                         {:id arg-id
+                          :fn-id fn-id
+                          :name "x"
+                          :type "int"
+                          :source-id source-arg-id
+                          :required false
+                          :is-fn false}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-details-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "arg" :id (str arg-id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "Inherited"))
+      (is (str/includes? (:body response) "Source ID")))))
+
+
+;; =============================================================================
+;; Form handler with entity having values pre-selected
+;; =============================================================================
+
+(deftest entity-form-handler-fn-with-parent-test
+  (testing "renders fn form with parent-id pre-selected"
+    (let [storage (create-mock-storage)
+          base-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id base-fn-id :name "base-fn" :parent-id nil}
+                        {:id composed-fn-id :name "composed-fn" :parent-id base-fn-id}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-form-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "fn" :id (str composed-fn-id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "Edit"))
+      (is (str/includes? (:body response) "selected")))))
+
+
+(deftest entity-form-handler-arg-with-source-test
+  (testing "renders arg form with source-id pre-selected"
+    (let [storage (create-mock-storage)
+          fn-id (random-uuid)
+          source-arg-id (random-uuid)
+          arg-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id fn-id :name "test-fn" :parent-id nil}]
+                   :arg [{:id source-arg-id
+                          :fn-id fn-id
+                          :name "base-x"
+                          :type "int"}
+                         {:id arg-id
+                          :fn-id fn-id
+                          :name "x"
+                          :type "int"
+                          :source-id source-arg-id}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/entity-form-handler-impl) {} ctx)
+          response (handler-fn {:path-params {:type "arg" :id (str arg-id)}})]
+      (is (= 200 (:status response)))
+      (is (str/includes? (:body response) "Source Arg")))))
+
+
+;; =============================================================================
+;; Create API handler with parent-id for fn
+;; =============================================================================
+
+(deftest create-entity-api-handler-fn-with-parent-test
+  (testing "creates fn entity with parent-id"
+    (let [storage (create-mock-storage)
+          base-fn-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id base-fn-id :name "base-fn" :parent-id nil}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/create-entity-api-handler-impl) {} ctx)
+          body (str "name=composed-fn&parent-id=" base-fn-id)
+          response (handler-fn {:path-params {:type "fn"} :body body})]
+      (is (= 200 (:status response)))
+      ;; Verify the entity was created with parent-id
+      (let [fns (get @(:data storage) :fn)]
+        (is (= 2 (count fns)))
+        (is (some #(= base-fn-id (:parent-id %)) fns))))))
+
+
+(deftest create-entity-api-handler-arg-with-source-test
+  (testing "creates arg entity with source-id"
+    (let [storage (create-mock-storage)
+          fn-id (random-uuid)
+          source-arg-id (random-uuid)
+          _ (swap! (:data storage) assoc
+                   :fn [{:id fn-id :name "test-fn" :parent-id nil}]
+                   :arg [{:id source-arg-id :fn-id fn-id :name "base-x" :type "int"}])
+          ctx {:storage storage}
+          handler-fn ((:impl crud/create-entity-api-handler-impl) {} ctx)
+          body (str "fn-id=" fn-id "&name=x&type=int&source-id=" source-arg-id)
+          response (handler-fn {:path-params {:type "arg"} :body body})]
+      (is (= 200 (:status response))))))
+
+
+;; =============================================================================
 ;; Additional edge cases for impl functions
 ;; =============================================================================
 

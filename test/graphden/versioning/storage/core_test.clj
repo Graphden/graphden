@@ -454,7 +454,15 @@
   (testing "unwrap returns base storage"
     (let [storage (create-test-storage)
           base (vs/unwrap storage)]
-      (is (not (vs/versioned-storage? base))))))
+      (is (not (vs/versioned-storage? base)))))
+
+  (testing "unwrap returns non-versioned storage unchanged"
+    (th/clean-database-fast! *container*)
+    (let [schema (vds/build-schema (mds/create-builder))
+          base (-> (pg/create-storage (th/get-container-config *container*))
+                   (sp/initialize-with-cleanup! schema))]
+      (is (= base (vs/unwrap base)))
+      (sp/close base))))
 
 
 ;; === Merge Tests ===
@@ -605,6 +613,95 @@
       ;; Main sees both
       (is (= "fn-from-feat1" (:name (sp/read-entity storage :fn (:id fn1)))))
       (is (= "fn-from-feat2" (:name (sp/read-entity storage :fn (:id fn2))))))))
+
+
+;; === Merge with Previous Merge (Fork Point Uses Latest Merge) ===
+
+(deftest merge-after-previous-merge-test
+  (testing "fork point uses latest merge timestamp after previous merge"
+    (let [storage (create-test-storage)
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "original" :parent-id nil :return-type :int})
+          ;; Create feature branch
+          branch (vs/create-branch! storage "feature")
+          feature (vs/switch-branch storage (:id branch))]
+
+      ;; Feature branch modifies entity
+      (Thread/sleep 1)
+      (sp/update-entity feature :fn (:id fn-rec) {:name "feat-v1"})
+
+      ;; First merge - no conflict
+      (vs/merge-branch! storage (:id branch))
+
+      ;; After first merge, main sees feat-v1
+      (is (= "feat-v1" (:name (sp/read-entity storage :fn (:id fn-rec)))))
+
+      ;; Now modify on feature again (after the merge)
+      (Thread/sleep 1)
+      (sp/update-entity feature :fn (:id fn-rec) {:name "feat-v2"})
+
+      ;; Second merge - should succeed because only feature modified after fork point
+      ;; (fork point is now the first merge timestamp, not branch creation)
+      (vs/merge-branch! storage (:id branch))
+
+      ;; Main sees feat-v2
+      (is (= "feat-v2" (:name (sp/read-entity storage :fn (:id fn-rec))))))))
+
+
+;; === Arg Entity Conflict Detection ===
+
+(deftest merge-arg-conflict-detection-test
+  (testing "detect-conflicts detects arg entity conflicts"
+    (let [storage (create-test-storage)
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "test-fn" :parent-id nil :return-type :int})
+          arg-rec (sp/create-entity storage :arg
+                                    {:name "x"
+                                     :fn-id (:id fn-rec)
+                                     :type :int
+                                     :required true
+                                     :is-fn false})
+          ;; Create feature branch
+          branch (vs/create-branch! storage "feature")
+          feature (vs/switch-branch storage (:id branch))]
+
+      ;; Both branches modify the same arg
+      (Thread/sleep 1)
+      (sp/update-entity storage :arg (:id arg-rec) {:value 10})
+      (sp/update-entity feature :arg (:id arg-rec) {:value 20})
+
+      ;; Detect conflicts
+      (let [{:keys [conflicts]} (vs/detect-conflicts storage (:id branch))]
+        (is (= 1 (count conflicts)))
+        (let [c (first conflicts)]
+          (is (= :arg (:entity-name c)))
+          (is (= (:id arg-rec) (:entity-id c))))))))
+
+
+(deftest merge-arg-conflict-resolve-source-test
+  (testing "merge with :source resolution for arg keeps source version"
+    (let [storage (create-test-storage)
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "test-fn" :parent-id nil :return-type :int})
+          arg-rec (sp/create-entity storage :arg
+                                    {:name "x"
+                                     :fn-id (:id fn-rec)
+                                     :type :int
+                                     :required true
+                                     :is-fn false})
+          branch (vs/create-branch! storage "feature")
+          feature (vs/switch-branch storage (:id branch))]
+
+      (Thread/sleep 1)
+      (sp/update-entity storage :arg (:id arg-rec) {:value 10})
+      (sp/update-entity feature :arg (:id arg-rec) {:value 20})
+
+      ;; Resolve conflict: take source (feature) version
+      (vs/merge-branch! storage (:id branch)
+                        {:conflict-resolutions {[:arg (:id arg-rec)] :source}})
+
+      ;; Main should now see the feature version (value=20)
+      (is (= 20 (:value (sp/read-entity storage :arg (:id arg-rec))))))))
 
 
 ;; === Delete Branch Tests ===
@@ -769,9 +866,22 @@
         (let [enums (sp/current-enums storage)]
           (is (or (nil? enums) (set? enums) (sequential? enums)))))
 
+      (testing "current-enum-values returns values for an enum"
+        (let [enums (sp/current-enums storage)]
+          (when (seq enums)
+            (let [values (sp/current-enum-values storage (first enums))]
+              (is (or (nil? values) (set? values) (sequential? values)))))))
+
       (testing "schema-metadata returns metadata map"
         (let [metadata (sp/schema-metadata storage)]
           (is (map? metadata)))))))
+
+
+(deftest switch-branch-nonexistent-throws-test
+  (testing "switch-branch with non-existent branch-id throws"
+    (let [storage (create-test-storage)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Branch not found"
+            (vs/switch-branch storage (random-uuid)))))))
 
 
 ;; === Storage Lifecycle Delegation ===
@@ -784,7 +894,22 @@
                    (sp/initialize-with-cleanup! schema))
           storage (vs/wrap-with-versioning base)]
       ;; Close should not throw
-      (is (nil? (sp/close storage))))))
+      (is (nil? (sp/close storage)))))
+
+  (testing "VersionedStorage delegates initialize to base storage"
+    (th/clean-database-fast! *container*)
+    (let [schema (vds/build-schema (mds/create-builder))
+          base (pg/create-storage (th/get-container-config *container*))
+          ;; Initialize returns the storage itself
+          _ (sp/initialize base schema)
+          storage (vs/wrap-with-versioning base)]
+      ;; Should be able to use storage after initialize through wrapper
+      (is (vs/versioned-storage? storage))
+      ;; Create entity to verify storage is functional
+      (let [fn-rec (sp/create-entity storage :fn
+                                     {:name "test-fn" :parent-id nil :return-type :int})]
+        (is (some? (:id fn-rec))))
+      (sp/close storage))))
 
 
 ;; === GraphConstraints Delegation ===
@@ -824,3 +949,137 @@
       ;; Try to delete one existing and one non-existing
       ;; Only one should be counted as deleted
       (is (= 1 (sp/delete-entities storage :fn [(:id f1) missing-id]))))))
+
+
+;; === Batch Update Operations ===
+
+(deftest batch-update-versioned-test
+  (testing "update-entities works for versioned entities"
+    (let [storage (create-test-storage)
+          f1 (sp/create-entity storage :fn {:name "fn1" :parent-id nil :return-type :int})
+          f2 (sp/create-entity storage :fn {:name "fn2" :parent-id nil :return-type :int})
+          results (sp/update-entities storage :fn
+                                      [{:id (:id f1) :name "fn1-updated"}
+                                       {:id (:id f2) :name "fn2-updated"}])]
+      (is (= 2 (count results)))
+      (is (= "fn1-updated" (:name (sp/read-entity storage :fn (:id f1)))))
+      (is (= "fn2-updated" (:name (sp/read-entity storage :fn (:id f2)))))))
+
+  (testing "update-entities with empty sequence returns empty"
+    (let [storage (create-test-storage)
+          results (sp/update-entities storage :fn [])]
+      (is (empty? results)))))
+
+
+;; === Batch Upsert Operations ===
+
+(deftest batch-upsert-versioned-test
+  (testing "upsert-entities inserts new versioned entities"
+    (let [storage (create-test-storage)
+          id1 (random-uuid)
+          id2 (random-uuid)
+          results (sp/upsert-entities storage :fn
+                                      [{:id id1 :name "new-fn1" :parent-id nil :return-type :int}
+                                       {:id id2 :name "new-fn2" :parent-id nil :return-type :int}])]
+      (is (= 2 (count results)))
+      (is (= "new-fn1" (:name (sp/read-entity storage :fn id1))))
+      (is (= "new-fn2" (:name (sp/read-entity storage :fn id2))))))
+
+  (testing "upsert-entities updates existing versioned entities"
+    (let [storage (create-test-storage)
+          f1 (sp/create-entity storage :fn {:name "fn1" :parent-id nil :return-type :int})
+          results (sp/upsert-entities storage :fn
+                                      [{:id (:id f1) :name "fn1-upserted"}])]
+      (is (= 1 (count results)))
+      (is (= "fn1-upserted" (:name (sp/read-entity storage :fn (:id f1)))))))
+
+  (testing "upsert-entities handles mix of inserts and updates"
+    (let [storage (create-test-storage)
+          f1 (sp/create-entity storage :fn {:name "existing" :parent-id nil :return-type :int})
+          new-id (random-uuid)
+          results (sp/upsert-entities storage :fn
+                                      [{:id (:id f1) :name "updated"}
+                                       {:id new-id :name "new" :parent-id nil :return-type :int}])]
+      (is (= 2 (count results)))
+      (is (= "updated" (:name (sp/read-entity storage :fn (:id f1)))))
+      (is (= "new" (:name (sp/read-entity storage :fn new-id))))))
+
+  (testing "upsert-entities with empty sequence returns empty"
+    (let [storage (create-test-storage)
+          results (sp/upsert-entities storage :fn [])]
+      (is (empty? results)))))
+
+
+;; === Batch Operations for Non-Versioned Entities ===
+
+(deftest batch-operations-non-versioned-test
+  (testing "batch create works for non-versioned entities (branch)"
+    (let [storage (create-test-storage)
+          results (sp/create-entities storage :branch
+                                      [{:id (random-uuid) :name "b1" :created-at (java.time.Instant/now)}
+                                       {:id (random-uuid) :name "b2" :created-at (java.time.Instant/now)}])]
+      (is (= 2 (count results)))))
+
+  (testing "batch read works for non-versioned entities"
+    (let [storage (create-test-storage)
+          b1 (sp/create-entity storage :branch
+                               {:id (random-uuid) :name "b1" :created-at (java.time.Instant/now)})
+          b2 (sp/create-entity storage :branch
+                               {:id (random-uuid) :name "b2" :created-at (java.time.Instant/now)})
+          results (sp/read-entities storage :branch [(:id b1) (:id b2)])]
+      (is (= 2 (count results)))
+      (is (some? (get results (:id b1))))
+      (is (some? (get results (:id b2))))))
+
+  (testing "batch delete works for non-versioned entities"
+    (let [storage (create-test-storage)
+          b1 (sp/create-entity storage :branch
+                               {:id (random-uuid) :name "temp1" :created-at (java.time.Instant/now)})
+          b2 (sp/create-entity storage :branch
+                               {:id (random-uuid) :name "temp2" :created-at (java.time.Instant/now)})
+          deleted (sp/delete-entities storage :branch [(:id b1) (:id b2)])]
+      (is (= 2 deleted))
+      (is (nil? (sp/read-entity storage :branch (:id b1))))
+      (is (nil? (sp/read-entity storage :branch (:id b2))))))
+
+  (testing "batch update works for non-versioned entities"
+    (let [storage (create-test-storage)
+          b1 (sp/create-entity storage :branch
+                               {:id (random-uuid) :name "orig1" :created-at (java.time.Instant/now)})
+          results (sp/update-entities storage :branch
+                                      [{:id (:id b1) :name "updated1"}])]
+      (is (= 1 (count results)))
+      (is (= "updated1" (:name (sp/read-entity storage :branch (:id b1)))))))
+
+  (testing "batch upsert works for non-versioned entities"
+    (let [storage (create-test-storage)
+          now (java.time.Instant/now)
+          b1 (sp/create-entity storage :branch
+                               {:id (random-uuid) :name "existing" :created-at now})
+          new-id (random-uuid)
+          ;; Note: upsert requires all required fields since PostgreSQL INSERT needs them
+          results (sp/upsert-entities storage :branch
+                                      [{:id (:id b1) :name "upserted" :created-at now}
+                                       {:id new-id :name "new-branch" :created-at now}])]
+      (is (= 2 (count results)))
+      (is (= "upserted" (:name (sp/read-entity storage :branch (:id b1)))))
+      (is (= "new-branch" (:name (sp/read-entity storage :branch new-id)))))))
+
+
+;; === Branch Operations with Delete Merge Records ===
+
+(deftest delete-branch-cleans-merge-records-test
+  (testing "delete-branch removes merge records referencing the branch"
+    (let [storage (create-test-storage)
+          branch (vs/create-branch! storage "feature")
+          _feature (vs/switch-branch storage (:id branch))
+          ;; Merge feature into main
+          _merge-rec (vs/merge-branch! storage (:id branch))]
+      ;; Now delete the branch
+      (vs/delete-branch! storage (:id branch))
+      ;; Branch should be gone
+      (is (nil? (vs/get-branch storage (:id branch))))
+      ;; Merge records should also be cleaned up (querying directly)
+      (let [remaining-merges (sp/query-entities (:base-storage storage) :branch-merge
+                                                {:source-branch-id (:id branch)})]
+        (is (empty? remaining-merges))))))

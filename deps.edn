@@ -15,7 +15,7 @@
   cheshire/cheshire {:mvn/version "6.1.0"}
   ;; Web
   http-kit/http-kit {:mvn/version "2.8.1"}
-  metosin/reitit {:mvn/version "0.10.0"}
+  metosin/reitit {:mvn/version "0.10.1"}
   ;; HTML templating
   hiccup/hiccup {:mvn/version "2.0.0"}
   ;; System lifecycle

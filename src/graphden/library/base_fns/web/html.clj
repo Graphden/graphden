@@ -162,14 +162,14 @@
     (and (or (vector? head) (seq? head) (list? head))
          (seq head))
     ;; Recursively flatten all elements, then concat results
-    (vec (mapcat (fn [item]
-                   (cond
-                     (hiccup-element? item) [(normalize-hiccup-element item)]
-                     (and (or (vector? item) (seq? item) (list? item))
-                          (seq item))
-                     (flatten-head item)
-                     :else []))
-                 head))
+    (into [] (mapcat (fn [item]
+                       (cond
+                         (hiccup-element? item) [(normalize-hiccup-element item)]
+                         (and (or (vector? item) (seq? item) (list? item))
+                              (seq item))
+                         (flatten-head item)
+                         :else [])))
+          head)
     :else []))
 
 

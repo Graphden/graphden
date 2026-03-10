@@ -35,7 +35,7 @@
   [base-storage]
   (let [arg-traits (sp/query-entities base-storage :arg-trait
                                       {:trait-id vts/merge-protected-trait-uuid})]
-    (set (map :arg-id arg-traits))))
+    (into #{} (map :arg-id) arg-traits)))
 
 
 (defn- find-transferred-arg-ids
@@ -53,13 +53,13 @@
         ;; Get all arg-versions on target branch
         target-arg-versions (sp/query-entities base-storage :arg-version
                                                {:branch-id target-branch-id})
-        target-arg-ids (set (map :arg-id target-arg-versions))
+        target-arg-ids (into #{} (map :arg-id) target-arg-versions)
 
         ;; Versions that exist only on source (would be transferred)
         transferred-arg-versions (remove #(contains? target-arg-ids (:arg-id %))
                                          source-arg-versions)]
 
-    (set (map :arg-id transferred-arg-versions))))
+    (into #{} (map :arg-id) transferred-arg-versions)))
 
 
 (defn detect-protected-transfers

@@ -81,7 +81,7 @@
     (if parent-id
       ;; Merge with parent args - own args take precedence by name
       (let [parent-args (get-fn-args-with-inheritance execution-graph parent-id (inc depth))
-            own-arg-names (set (map :name own-args))
+            own-arg-names (into #{} (map :name) own-args)
             ;; Keep parent args whose names are not overridden by own args
             filtered-parent-args (remove #(own-arg-names (:name %)) parent-args)]
         (vec (concat own-args filtered-parent-args)))
@@ -273,7 +273,7 @@
         ;; This ensures different callers (e.g., health-route vs editor-route) get
         ;; separate cache entries, even when source-id chains don't fully connect
         ;; (which happens when intermediate fns have non-free args)
-        caller-arg-ids (set (map :id all-caller-args))
+        caller-arg-ids (into #{} (map :id) all-caller-args)
         cache-key (if (empty? caller-arg-ids)
                     ref-fn-id
                     [ref-fn-id caller-arg-ids])

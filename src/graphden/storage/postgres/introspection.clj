@@ -87,7 +87,7 @@
                                                    [:= :t.typtype "e"]]}
                                           {:quoted true})
                               (util/query-opts))]
-      (set (map :typname rows)))))
+      (into #{} (map :typname) rows))))
 
 
 (defn current-enum-values-pg
@@ -107,4 +107,4 @@
                                                    [:= :t.typname enum-name]]}
                                           {:quoted true})
                               (util/query-opts))]
-      (set (map (comp util/sql->enum-value :enumlabel) rows)))))
+      (into #{} (map (comp util/sql->enum-value :enumlabel)) rows))))

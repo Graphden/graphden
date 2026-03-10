@@ -184,7 +184,7 @@
 (defbase concat-fn
   {:args {:colls :jsonb}
    :return-type :jsonb}
-  (vec (apply concat colls)))
+  (into [] cat colls))
 
 
 (defbase flatten-fn

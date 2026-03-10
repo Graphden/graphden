@@ -303,10 +303,10 @@
                            (prepare-fn-record fn-name fn-def))
                          defs)
         ;; Prepare all arg records
-        arg-records (vec (mapcat (fn [[fn-name fn-def]]
-                                   (let [fn-id (fn-uuid fn-name)]
-                                     (prepare-arg-records fn-name fn-id (:args fn-def))))
-                                 defs))
+        arg-records (into [] (mapcat (fn [[fn-name fn-def]]
+                                       (let [fn-id (fn-uuid fn-name)]
+                                         (prepare-arg-records fn-name fn-id (:args fn-def)))))
+                          defs)
         ;; Count existing records (for created/updated stats)
         fn-ids (mapv :id fn-records)
         arg-ids (mapv :id arg-records)

@@ -178,39 +178,39 @@
   "Collects created fields info for changes report.
    Returns [{:entity e :field f} ...]"
   [schema]
-  (vec (mapcat (fn [e]
-                 (map (fn [[f _]] {:entity e :field f})
-                      (ds/entity-fields schema e)))
-               (ds/entities schema))))
+  (into [] (mapcat (fn [e]
+                     (map (fn [[f _]] {:entity e :field f})
+                          (ds/entity-fields schema e))))
+        (ds/entities schema)))
 
 
 (defn collect-created-enum-values
   "Collects created enum values info for changes report.
    Returns [{:enum enum-name :value v} ...]"
   [schema]
-  (vec (mapcat (fn [[enum-name {:keys [values]}]]
-                 (map (fn [[v _]] {:enum enum-name :value v})
-                      values))
-               (ds/enums schema))))
+  (into [] (mapcat (fn [[enum-name {:keys [values]}]]
+                     (map (fn [[v _]] {:enum enum-name :value v})
+                          values)))
+        (ds/enums schema)))
 
 
 (defn collect-field-uuids
   "Collects all field UUIDs from schema.
    Returns set of UUIDs."
   [schema]
-  (set (mapcat (fn [e]
-                 (map (fn [[_ spec]] (:uuid spec))
-                      (ds/entity-fields schema e)))
-               (ds/entities schema))))
+  (into #{} (mapcat (fn [e]
+                      (map (fn [[_ spec]] (:uuid spec))
+                           (ds/entity-fields schema e))))
+        (ds/entities schema)))
 
 
 (defn collect-enum-value-uuids
   "Collects all enum value UUIDs from schema.
    Returns set of UUIDs."
   [schema]
-  (set (mapcat (fn [[_ {:keys [values]}]]
-                 (map second values))
-               (ds/enums schema))))
+  (into #{} (mapcat (fn [[_ {:keys [values]}]]
+                      (map second values)))
+        (ds/enums schema)))
 
 
 (defn build-metadata-from-schema
@@ -253,7 +253,7 @@
   [old-metadata schema]
   ;; Check entities
   (let [old-entity-uuids (set (keys (:entities old-metadata)))
-        new-entity-uuids (set (map #(ds/entity-uuid schema %) (ds/entities schema)))]
+        new-entity-uuids (into #{} (map #(ds/entity-uuid schema %)) (ds/entities schema))]
     (check-removed! "entities" old-entity-uuids new-entity-uuids
                     #(get (:entities old-metadata) %)))
   ;; Check fields
@@ -263,7 +263,7 @@
                     #(get (:fields old-metadata) %)))
   ;; Check enums
   (let [old-enum-uuids (set (keys (:enums old-metadata)))
-        new-enum-uuids (set (map (fn [[_ {:keys [uuid]}]] uuid) (ds/enums schema)))]
+        new-enum-uuids (into #{} (map (fn [[_ {:keys [uuid]}]] uuid)) (ds/enums schema))]
     (check-removed! "enums" old-enum-uuids new-enum-uuids
                     #(get (:enums old-metadata) %)))
   ;; Check enum values

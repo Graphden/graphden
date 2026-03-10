@@ -101,10 +101,8 @@
                             {:quoted true})]
       (util/with-sql-error-handling "Database error" :load-entities-batch {:table table :count (count values)}
                                     (let [rows (jdbc/execute! ds query (util/query-opts))]
-                                      (->> rows
-                                           (map codec/row->entity)
-                                           (map (juxt :id identity))
-                                           (into {})))))))
+                                      ;; Single pass: decode + build map in one traversal
+                                      (into {} (map #(let [e (codec/row->entity %)] [(:id e) e])) rows))))))
 
 
 (defn- load-fns-batch

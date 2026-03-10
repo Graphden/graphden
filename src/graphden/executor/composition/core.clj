@@ -82,7 +82,7 @@
   "Builds dependency graph from fn-defs.
    Returns map of {fn-name -> #{dependency-names}}."
   [fn-defs]
-  (let [fn-names (set (map :name fn-defs))]
+  (let [fn-names (into #{} (map :name) fn-defs)]
     (into {}
           (map (fn [fd]
                  [(:name fd) (extract-dependencies fd fn-names)])
@@ -97,7 +97,7 @@
   (let [dep-graph (build-dependency-graph fn-defs)
         fn-def-map (into {} (map (juxt :name identity) fn-defs))]
     (loop [sorted []
-           remaining (set (map :name fn-defs))
+           remaining (into #{} (map :name) fn-defs)
            visited #{}]
       (if (empty? remaining)
         (mapv fn-def-map sorted)
@@ -275,17 +275,16 @@
                        :max-depth sp/*max-graph-iterations*})))
     (let [fn-args (get args-cache fn-id [])
           found (some #(when (= (:name %) (name arg-name)) %) fn-args)]
-      (if found
-        found
-        ;; Not found on this fn, check parent
-        (let [fn-entity (get fn-cache fn-id)]
-          (if-let [next-parent-id (:parent-id fn-entity)]
-            (recur next-parent-id (inc depth))
-            ;; No more parents - arg not found
-            (throw (ex-info (str "Argument not found in parent chain: " arg-name)
-                            {:type :fn-composition/unresolved-arg
-                             :parent-fn-id parent-fn-id
-                             :arg-name arg-name}))))))))
+      (or found
+          ;; Not found on this fn, check parent
+          (let [fn-entity (get fn-cache fn-id)]
+            (if-let [next-parent-id (:parent-id fn-entity)]
+              (recur next-parent-id (inc depth))
+              ;; No more parents - arg not found
+              (throw (ex-info (str "Argument not found in parent chain: " arg-name)
+                              {:type :fn-composition/unresolved-arg
+                               :parent-fn-id parent-fn-id
+                               :arg-name arg-name}))))))))
 
 
 (defn- find-available-arg
@@ -320,14 +319,13 @@
                                 first-match))
                             nil
                             parent-free-args)]
-          (if found
-            found
-            (throw (ex-info (str "Argument not found in available args: " arg-name
-                                 ". Checked parent chain and propagated free args.")
-                            {:type :fn-composition/unresolved-arg
-                             :parent-fn-id parent-fn-id
-                             :arg-name arg-name
-                             :available-args (mapv :name parent-free-args)})))))))
+          (or found
+              (throw (ex-info (str "Argument not found in available args: " arg-name
+                                   ". Checked parent chain and propagated free args.")
+                              {:type :fn-composition/unresolved-arg
+                               :parent-fn-id parent-fn-id
+                               :arg-name arg-name
+                               :available-args (mapv :name parent-free-args)})))))))
 
 
 (defn- resolve-parent-fn-id-cached
@@ -479,7 +477,7 @@
             _ (check-order-and-warn fn-defs sorted-defs)
 
             ;; Phase 1: Pre-load existing data
-            def-names (set (map :name sorted-defs))
+            def-names (into #{} (map :name) sorted-defs)
             existing-fns-by-name (preload-existing-fns storage def-names)
 
             ;; Also load all fns for parent resolution
@@ -489,7 +487,7 @@
                                 (map (juxt :name identity) all-fns))
 
             ;; Pre-load all args
-            all-fn-ids (set (map :id all-fns))
+            all-fn-ids (into #{} (map :id) all-fns)
             args-cache (preload-all-args storage all-fn-ids)
 
             ;; Phase 2: Prepare and create fns in topological order

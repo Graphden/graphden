@@ -180,11 +180,11 @@
       (let [table-name (keyword (util/kw->snake-case entity-name))
             ;; Prepare all records with IDs
             records (mapv (fn [data]
-                           (when fields
-                             (sp/validate-required-fields! entity-name fields data))
-                           (let [id (or (:id data) (random-uuid))]
-                             (assoc data :id id)))
-                         data-seq)
+                            (when fields
+                              (sp/validate-required-fields! entity-name fields data))
+                            (let [id (or (:id data) (random-uuid))]
+                              (assoc data :id id)))
+                          data-seq)
             batch-size (count records)
             batch-ids (mapv :id records)
             ;; Convert to rows using codec (mapv to realize once)
@@ -193,8 +193,8 @@
             columns (vec (keys (first rows)))
             ;; Extract values in column order
             values (mapv (fn [row]
-                          (mapv #(get row %) columns))
-                        rows)
+                           (mapv #(get row %) columns))
+                         rows)
             query (sql/format {:insert-into table-name
                                :columns columns
                                :values values
@@ -315,8 +315,8 @@
             columns (vec (keys (first rows)))
             ;; Extract values in column order
             values (mapv (fn [row]
-                          (mapv #(get row %) columns))
-                        rows)
+                           (mapv #(get row %) columns))
+                         rows)
             ;; Build ON CONFLICT DO UPDATE SET for all columns except :id
             ;; HoneySQL auto-generates SET col = EXCLUDED.col when given a vector
             update-columns (vec (remove #{:id} columns))

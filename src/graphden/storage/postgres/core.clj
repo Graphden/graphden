@@ -169,23 +169,21 @@
 
   (current-entities
     [_this]
-    (set (map util/snake->kw
-              (introspection/current-tables pool))))
+    (into #{} (map util/snake->kw) (introspection/current-tables pool)))
 
 
   (current-fields
     [_this entity-name]
     ;; O(1) lookup via pre-built :fields-by-entity index
     ;; Index already contains {field-name {:type t :nullable? n}} format
+    ;; get returns nil if entity doesn't exist - no redundant check needed
     (when-let [cached-metadata (get-cached-metadata pool metadata-cache rw-lock)]
-      (when (contains? (set (vals (:entities cached-metadata))) entity-name)
-        (get (:fields-by-entity cached-metadata) entity-name))))
+      (get (:fields-by-entity cached-metadata) entity-name)))
 
 
   (current-enums
     [_this]
-    (set (map util/snake->kw
-              (introspection/current-pg-enums pool))))
+    (into #{} (map util/snake->kw) (introspection/current-pg-enums pool)))
 
 
   (current-enum-values

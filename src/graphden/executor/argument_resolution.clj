@@ -23,7 +23,8 @@
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.types :as types]
-    [graphden.storage.protocol.config :as config]))
+    [graphden.storage.protocol.config :as config]
+    [graphden.storage.protocol.core :as sp]))
 
 
 ;; === Delay Building Infrastructure ===
@@ -183,6 +184,31 @@
                    :arg-name arg-name})))
 
 
+;; === Source Arg Resolution ===
+
+(defn- resolve-source-arg-name
+  "Resolves the name of the root source arg in the source-id chain.
+   This is the name the base-fn implementation expects.
+
+   For renamed args (via :as), we need to pass the value using the
+   original source arg name so the base-fn impl can find it.
+
+   Example: route.path (source-id=pair.first) -> returns 'first'"
+  [args-by-id arg depth]
+  (when (> depth sp/*max-graph-iterations*)
+    (throw (ex-info "Source-id chain exceeds maximum depth"
+                    {:type :execution-error/source-chain-too-deep
+                     :arg-id (:id arg)
+                     :max-depth sp/*max-graph-iterations*})))
+  (if-let [source-id (:source-id arg)]
+    (if-let [source-arg (get args-by-id source-id)]
+      (recur args-by-id source-arg (inc depth))
+      ;; Source not found - fall back to arg's own name
+      (:name arg))
+    ;; No source-id - this is a root arg, use its name
+    (:name arg)))
+
+
 ;; === Main Argument Resolution ===
 
 (defn- arg-has-value?
@@ -203,12 +229,21 @@
    3. Required arg with no value -> error
    4. Optional arg with no value -> delay returning nil
 
+   ## Key Naming
+
+   For inherited args (with source-id), the delay is keyed by the source arg's
+   name so the base-fn implementation can find it. This allows args to be
+   renamed at composition level (via :as syntax) while still working with
+   base-fn implementations that expect original arg names.
+
    ## Pass-Through Args
 
    Uses an atom to store built delays so that ref-fn execution can access
    all arg delays for pass-through propagation."
   [context fn-data provided-args execute-ref-fn]
   (let [args (:args fn-data)
+        execution-graph (:execution-graph context)
+        args-by-id (:args-by-id execution-graph)
         strict? (:strict-type-validation? context)
         max-unknown-types (:max-unknown-types context)
         unknown-type-counter (:unknown-type-counter context)
@@ -217,7 +252,10 @@
     (doseq [arg args]
       (let [arg-id (:id arg)
             arg-name (:name arg)
-            arg-name-kw (keyword arg-name)
+            ;; Key by source arg name so base-fn impl can find it
+            ;; For renamed args (via :as), this resolves to the original name
+            key-name (resolve-source-arg-name args-by-id arg 0)
+            key-name-kw (keyword key-name)
             provided-value (get provided-args arg-id)
             has-stored-value? (arg-has-value? arg)
             delay-val (cond
@@ -238,5 +276,5 @@
 
                         :else
                         (delay nil))]
-        (swap! arg-delays-atom assoc arg-name-kw delay-val)))
+        (swap! arg-delays-atom assoc key-name-kw delay-val)))
     @arg-delays-atom))

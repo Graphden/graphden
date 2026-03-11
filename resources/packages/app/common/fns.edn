@@ -11,22 +11,25 @@
   :parent :assoc-any
   :args {:map {}}}
 
- ;; Level 2: assoc-handler (free: value) - sets key="handler"
+ ;; Level 2: assoc-handler (free: handler) - sets key="handler", renames value->handler
  {:name :assoc-handler
   :parent :assoc-empty
-  :args {:key "handler"}}
+  :args {:key "handler"
+         :value {:as :handler}}}
 
- ;; Level 2: method-map (free: key, value via pass-through)
+ ;; Level 2: method-map (free: key, handler via pass-through from assoc-handler)
  {:name :method-map
   :parent :assoc-empty
   :args {:value :assoc-handler}}
 
- ;; Level 3: route = pair with second=method-map (free: first, key, value)
+ ;; Level 3: route = pair with second=method-map
+ ;; Rename first -> path (handler is already renamed in method-map)
  {:name :route
   :parent :pair
-  :args {:second :method-map}}
+  :args {:second :method-map
+         :first {:as :path}}}
 
- ;; Level 4: HTTP method routes (free: first, value)
+ ;; Level 4: HTTP method routes (free: path, handler)
  {:name :get-route
   :parent :route
   :args {:key "get"}}

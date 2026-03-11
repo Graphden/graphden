@@ -30,7 +30,7 @@
  ;; GET /health
  {:name :health-route
   :parent :get-route
-  :args {:first "/health" :value :health-handler-fn}}
+  :args {:path "/health" :handler :health-handler-fn}}
 
  ;; =============================================================================
  ;; METRICS ROUTE (JVM Info)
@@ -51,7 +51,7 @@
  ;; GET /metrics
  {:name :metrics-route
   :parent :get-route
-  :args {:first "/metrics" :value :metrics-handler-fn}}
+  :args {:path "/metrics" :handler :metrics-handler-fn}}
 
  ;; =============================================================================
  ;; ROUTES COLLECTION & SERVER

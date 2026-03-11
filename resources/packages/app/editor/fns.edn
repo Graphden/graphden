@@ -127,37 +127,37 @@
  ;; GET routes
  {:name :favicon-route
   :parent :get-route
-  :args {:first "/favicon.ico" :value :favicon-handler}}
+  :args {:path "/favicon.ico" :handler :favicon-handler}}
 
  {:name :editor-route
   :parent :get-route
-  :args {:first "/" :value :editor-handler}}
+  :args {:path "/" :handler :editor-handler}}
 
  {:name :api-entities-route
   :parent :get-route
-  :args {:first "/api/graph/entities" :value :api-entities-handler}}
+  :args {:path "/api/graph/entities" :handler :api-entities-handler}}
 
  {:name :entity-details-route
   :parent :get-route
-  :args {:first "/partials/entity-details/:type/:id" :value :entity-details-handler-fn}}
+  :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler-fn}}
 
  {:name :entity-form-create-route
   :parent :get-route
-  :args {:first "/partials/entity-form/:type" :value :entity-form-handler-fn}}
+  :args {:path "/partials/entity-form/:type" :handler :entity-form-handler-fn}}
 
  {:name :entity-form-edit-route
   :parent :get-route
-  :args {:first "/partials/entity-form/:type/:id" :value :entity-form-handler-fn}}
+  :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-handler-fn}}
 
  ;; POST route
  {:name :create-entity-route
   :parent :post-route
-  :args {:first "/api/entities/:type" :value :create-entity-handler}}
+  :args {:path "/api/entities/:type" :handler :create-entity-handler}}
 
  ;; DELETE route
  {:name :delete-entity-route
   :parent :delete-route
-  :args {:first "/api/entities/:type/:id" :value :delete-entity-handler}}
+  :args {:path "/api/entities/:type/:id" :handler :delete-entity-handler}}
 
  ;; =============================================================================
  ;; ROUTES COLLECTION (for server)

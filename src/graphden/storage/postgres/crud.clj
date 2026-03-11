@@ -197,8 +197,10 @@
             batch-ids (mapv :id records)
             ;; Convert to rows using codec (mapv to realize once)
             rows (mapv #(entity->row % fields) records)
-            ;; Get consistent column order from first row
-            columns (vec (keys (first rows)))
+            ;; Get ALL unique columns from ALL rows - different records may have different fields
+            ;; (e.g., some args have :name set, others don't). Using only first row's keys
+            ;; would silently drop fields present only in other rows.
+            columns (vec (reduce into #{} (map keys rows)))
             ;; Extract values in column order
             values (mapv (fn [row]
                            (mapv #(get row %) columns))
@@ -319,8 +321,10 @@
             batch-ids (mapv :id records)
             ;; Convert to rows using codec (mapv to realize once)
             rows (mapv #(entity->row % fields) records)
-            ;; Get consistent column order from first row
-            columns (vec (keys (first rows)))
+            ;; Get ALL unique columns from ALL rows - different records may have different fields
+            ;; (e.g., some args have :name set, others don't). Using only first row's keys
+            ;; would silently drop fields present only in other rows.
+            columns (vec (reduce into #{} (map keys rows)))
             ;; Extract values in column order
             values (mapv (fn [row]
                            (mapv #(get row %) columns))

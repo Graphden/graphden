@@ -139,6 +139,20 @@
     return { fnMap, argMap, argsByFn };
   }
 
+  // Resolve arg name by following source-id chain
+  // Inherited args may not have name, but their source arg does
+  function resolveArgName(arg) {
+    let current = arg;
+    const maxDepth = 100;
+    for (let i = 0; i < maxDepth; i++) {
+      if (current.name) return current.name;
+      if (!current['source-id']) return null;
+      current = lookups.argMap.get(current['source-id']);
+      if (!current) return null;
+    }
+    return null;
+  }
+
   // Update sidebar - show fn entities
   function updateEntityList(data) {
     const list = document.getElementById('entity-list');
@@ -367,7 +381,7 @@
       const args = lookups.argsByFn.get(fnId) || [];
 
       args.forEach(arg => {
-        const argName = arg.name;
+        const argName = resolveArgName(arg);
         const hasValue = arg.value !== null && arg.value !== undefined;
         const hasRef = !!arg['ref-id'];
 

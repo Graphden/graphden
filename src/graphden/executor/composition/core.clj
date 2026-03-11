@@ -182,6 +182,26 @@
        (nil? (:ref-id arg))))
 
 
+(defn- resolve-arg-name-cached
+  "Resolves arg name by following source-id chain using cache.
+   If arg has :name, returns it. Otherwise follows source-id to find name.
+   Returns string name or nil if not resolvable."
+  [args-cache arg depth]
+  (when (> depth sp/*max-graph-iterations*)
+    (throw (ex-info "Source-id chain too deep while resolving arg name"
+                    {:type :fn-composition/source-chain-too-deep
+                     :arg-id (:id arg)
+                     :max-depth sp/*max-graph-iterations*})))
+  (if-let [arg-name (:name arg)]
+    arg-name
+    (when-let [source-id (:source-id arg)]
+      ;; Find source arg in any fn's args
+      (when-let [source-arg (some (fn [[_fn-id fn-args]]
+                                    (some #(when (= (:id %) source-id) %) fn-args))
+                                  args-cache)]
+        (recur args-cache source-arg (inc depth))))))
+
+
 (defn- collect-free-args-from-fn
   "Collects all free args from a fn by following parent chain and ref-id chain.
    Returns a vector of {:arg arg-entity :path [fn-id ...]} tuples.
@@ -245,6 +265,7 @@
 (defn- get-parent-arg-cached
   "Gets the parent's arg entity for an arg name using cache.
    Follows inheritance chain (via parent-id) to find the arg.
+   Resolves arg names via source-id chain if arg.name is nil.
    Returns the arg entity or throws if not found."
   [fn-cache args-cache parent-fn-id arg-name]
   (loop [fn-id parent-fn-id
@@ -255,7 +276,10 @@
                        :arg-name arg-name
                        :max-depth sp/*max-graph-iterations*})))
     (let [fn-args (get args-cache fn-id [])
-          found (some #(when (= (:name %) (name arg-name)) %) fn-args)]
+          arg-name-str (name arg-name)
+          ;; Match by resolved name (handles nil :name fields)
+          found (some #(when (= (resolve-arg-name-cached args-cache % 0) arg-name-str) %)
+                      fn-args)]
       (or found
           ;; Not found on this fn, check parent
           (let [fn-entity (get fn-cache fn-id)]
@@ -278,6 +302,7 @@
    1. Parent's own args (via parent-id chain)
    2. Propagated free args from refs (via ref-id chains)
 
+   Resolves arg names via source-id chain if arg.name is nil.
    Returns the arg entity or throws if not found."
   [fn-cache args-cache parent-fn-id arg-name]
   (let [arg-name-str (name arg-name)
@@ -291,13 +316,15 @@
     (or direct-result
         ;; Not in parent chain - search in propagated free args from refs
         ;; Single pass: find free-arg match first, else first any-match
+        ;; Use resolved names for matching
         (let [parent-free-args (collect-parent-free-args fn-cache args-cache parent-fn-id 0)
               found (reduce (fn [first-match arg]
-                              (if (= (:name arg) arg-name-str)
-                                (if (free-arg? arg)
-                                  (reduced arg)           ; Free arg - best match, stop
-                                  (or first-match arg))   ; Keep first non-free as fallback
-                                first-match))
+                              (let [resolved-name (resolve-arg-name-cached args-cache arg 0)]
+                                (if (= resolved-name arg-name-str)
+                                  (if (free-arg? arg)
+                                    (reduced arg)           ; Free arg - best match, stop
+                                    (or first-match arg))   ; Keep first non-free as fallback
+                                  first-match)))
                             nil
                             parent-free-args)]
           (or found
@@ -306,7 +333,8 @@
                               {:type :fn-composition/unresolved-arg
                                :parent-fn-id parent-fn-id
                                :arg-name arg-name
-                               :available-args (mapv :name parent-free-args)})))))))
+                               :available-args (mapv #(resolve-arg-name-cached args-cache % 0)
+                                                     parent-free-args)})))))))
 
 
 (defn- resolve-parent-fn-id-cached
@@ -364,7 +392,8 @@
 (defn- prepare-propagated-arg-record
   "Prepares an arg record for a propagated free arg.
    Used for free args that 'bubble up' from parent or referenced fns.
-   Creates a new arg with source-id pointing to the original free arg."
+   Creates a new arg with source-id pointing to the original free arg.
+   Name is nil - inherited via source-id chain."
   [args-cache fn-id parent-arg]
   (let [source-id (:id parent-arg)
         ;; Check if this propagated arg already exists for this fn
@@ -372,26 +401,63 @@
         existing (some #(when (= (:source-id %) source-id) %) fn-args)]
     (when-not existing
       ;; Create new propagated arg (free, with no value or ref-id)
+      ;; name is nil - will be resolved via source-id chain
       {:new {:id (random-uuid)
              :fn-id fn-id
              :source-id source-id
-             :name (:name parent-arg)
+             ;; name is nil - inherited via source-id chain
              :type (:type parent-arg)
              :is-fn (:is-fn parent-arg)
              :value nil
              :ref-id nil}})))
 
 
+(defn- parse-arg-value-spec
+  "Parses arg value specification.
+   Supports:
+   - Simple values: 123, \"str\", :keyword, :fn-ref
+   - Map with options: {:as :new-name} or {:as :new-name :value 123} or {:as :new-name :ref :fn-name}
+
+   Returns {:rename nil-or-keyword :value-spec original-or-extracted}"
+  [arg-value]
+  (if (and (map? arg-value) (contains? arg-value :as))
+    ;; Map with :as - extract rename and value
+    (let [rename (:as arg-value)
+          has-value? (contains? arg-value :value)
+          has-ref? (contains? arg-value :ref)]
+      (when-not (keyword? rename)
+        (throw (ex-info ":as must be a keyword"
+                        {:type :fn-composition/invalid-arg-spec
+                         :arg-value arg-value})))
+      (cond
+        has-value? {:rename rename :value-spec (:value arg-value)}
+        has-ref? {:rename rename :value-spec (:ref arg-value)}
+        :else {:rename rename :value-spec nil}))
+    ;; Simple value - no rename
+    {:rename nil :value-spec arg-value}))
+
+
 (defn- prepare-arg-record
   "Prepares an arg record for batch upsert.
-   Uses find-available-arg to support pass-through args from nested refs."
+   Uses find-available-arg to support pass-through args from nested refs.
+
+   Supports arg value as:
+   - Simple value: literal or :fn-ref
+   - Map with :as: {:as :new-name} to rename, optionally with :value or :ref"
   [fn-cache args-cache fn-name-cache created-fns fn-id parent-fn-id arg-name arg-value]
   (when-not fn-id
     (throw (ex-info "fn-id cannot be nil when preparing arg record"
                     {:type :fn-composition/internal-error
                      :arg-name arg-name
                      :parent-fn-id parent-fn-id})))
-  (let [;; Use find-available-arg which searches both parent chain AND propagated free args
+  (let [;; Parse arg value spec (supports {:as :new-name ...})
+        {:keys [rename value-spec] :as parsed} (parse-arg-value-spec arg-value)
+        _ (when rename
+            (log/info "prepare-arg-record: arg-name=" arg-name
+                      "arg-value=" arg-value
+                      "parsed=" parsed
+                      "rename=" rename))
+        ;; Use find-available-arg which searches both parent chain AND propagated free args
         parent-arg (find-available-arg fn-cache args-cache parent-fn-id arg-name)
         source-id (:id parent-arg)
         ;; Check if arg already exists for this fn
@@ -399,34 +465,46 @@
         existing (some #(when (= (:source-id %) source-id) %) fn-args)
         ;; Resolve arg value
         resolved (cond
-                   (nil? arg-value)
+                   (nil? value-spec)
                    {:value nil :ref-id nil}
 
-                   (uuid? arg-value)
-                   {:value nil :ref-id arg-value}
+                   (uuid? value-spec)
+                   {:value nil :ref-id value-spec}
 
-                   (keyword? arg-value)
-                   (if-let [ref-fn-name (parse-fn-ref arg-value)]
+                   (keyword? value-spec)
+                   (if-let [ref-fn-name (parse-fn-ref value-spec)]
                      (let [ref-fn-id (resolve-fn-id-cached fn-name-cache created-fns ref-fn-name)]
                        {:value nil :ref-id ref-fn-id})
-                     {:value arg-value :ref-id nil})
+                     {:value value-spec :ref-id nil})
 
                    :else
-                   {:value arg-value :ref-id nil})]
+                   {:value value-spec :ref-id nil})
+        ;; Add name override if specified
+        resolved-with-name (if rename
+                             (assoc resolved :name (name rename))
+                             resolved)]
     (if existing
-      ;; Check if update needed
-      (when (or (not= (:value existing) (:value resolved))
-                (not= (:ref-id existing) (:ref-id resolved)))
+      ;; Check if update needed (including name change)
+      (when (or (not= (:value existing) (:value resolved-with-name))
+                (not= (:ref-id existing) (:ref-id resolved-with-name))
+                (and rename (not= (:name existing) (name rename))))
         ;; Merge full existing record with resolved to preserve all required fields
-        {:update (merge existing resolved)})
-      ;; Create new
-      {:new (merge {:id (random-uuid)
-                    :fn-id fn-id
-                    :source-id source-id
-                    :name (:name parent-arg)
-                    :type (:type parent-arg)
-                    :is-fn (:is-fn parent-arg)}
-                   resolved)})))
+        {:update (merge existing resolved-with-name)})
+      ;; Create new - name is nil unless explicitly renamed via :as
+      (let [new-arg (merge {:id (random-uuid)
+                            :fn-id fn-id
+                            :source-id source-id
+                            ;; name is nil by default - will be resolved via source-id chain
+                            ;; unless explicitly set via :as
+                            :type (:type parent-arg)
+                            :is-fn (:is-fn parent-arg)}
+                           resolved-with-name)]
+        (when rename
+          (log/info "prepare-arg-record: creating new arg"
+                    "name=" (pr-str (:name new-arg))
+                    "name-type=" (type (:name new-arg))
+                    "full new-arg=" (pr-str new-arg)))
+        {:new new-arg}))))
 
 
 (defn sync-fns-to-storage!

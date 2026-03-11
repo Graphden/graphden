@@ -44,6 +44,20 @@
     storage))
 
 
+(defn- resolve-arg-name
+  "Resolves arg name by following source-id chain.
+   Returns the name from the first arg in chain that has a non-nil name."
+  [storage arg]
+  (if-let [arg-name (:name arg)]
+    arg-name
+    (when-let [source-id (:source-id arg)]
+      ;; Use query-entities instead of read-entities for versioned storage compatibility
+      (let [source-args (sp/query-entities storage :arg {:id source-id})
+            source-arg (first source-args)]
+        (when source-arg
+          (recur storage source-arg))))))
+
+
 (deftest sync-fns-to-storage!-test
   (testing "syncs fn definitions to storage"
     (let [storage (create-test-storage)
@@ -458,9 +472,10 @@
           fn-id (:partial-fn result)
           args (sp/query-entities storage :arg {:fn-id fn-id})]
       ;; Should have 2 args: :a with value 10, and :b as free arg (propagated)
+      ;; Names are resolved via source-id chain (not stored directly on composed fn args)
       (is (= 2 (count args)))
-      (let [a-arg (first (filter #(= "a" (:name %)) args))
-            b-arg (first (filter #(= "b" (:name %)) args))]
+      (let [a-arg (first (filter #(= "a" (resolve-arg-name storage %)) args))
+            b-arg (first (filter #(= "b" (resolve-arg-name storage %)) args))]
         (is (= 10 (:value a-arg)))
         (is (nil? (:value b-arg)))
         (is (nil? (:ref-id b-arg)) "free arg should have no ref-id")))))
@@ -512,9 +527,9 @@
           add-10-id (:add-10 result)
           call-add-10-id (:call-add-10 result)]
 
-      ;; Verify add-10 has free arg :b
+      ;; Verify add-10 has free arg :b (name resolved via source-id chain)
       (let [add-10-args (sp/query-entities storage :arg {:fn-id add-10-id})
-            b-arg (first (filter #(= "b" (:name %)) add-10-args))]
+            b-arg (first (filter #(= "b" (resolve-arg-name storage %)) add-10-args))]
         (is (some? b-arg) "add-10 should have :b arg")
         (is (nil? (:value b-arg)) ":b should be free (no value)")
         (is (nil? (:ref-id b-arg)) ":b should be free (no ref-id)"))
@@ -581,3 +596,77 @@
         ;; Should have ref-id pointing to cached-fn
         (is (uuid? (:ref-id ref-arg)))
         (is (= (registry/fn-uuid :cached-fn) (:ref-id ref-arg)))))))
+
+
+;; =============================================================================
+;; Arg rename (:as) syntax tests
+;; =============================================================================
+
+(deftest arg-rename-with-as-syntax-test
+  (testing "renames arg using {:as :new-name}"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:two-arg-fn {:args {:a :int :b :int}
+                                                     :return-type :int
+                                                     :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+          ;; Rename :a to :first and :b to :second without binding values
+          result (fn-composition/sync-fns-to-storage! storage
+                                                      [{:name :renamed-fn
+                                                        :parent :two-arg-fn
+                                                        :args {:a {:as :first}
+                                                               :b {:as :second}}}])
+          fn-id (:renamed-fn result)
+          args (sp/query-entities storage :arg {:fn-id fn-id})]
+      ;; Should have 2 args with the new names
+      (is (= 2 (count args)))
+      (let [arg-names (set (map :name args))]
+        (is (contains? arg-names "first") "Should have arg named 'first'")
+        (is (contains? arg-names "second") "Should have arg named 'second'")
+        (is (not (contains? arg-names "a")) "Should NOT have arg named 'a'")
+        (is (not (contains? arg-names "b")) "Should NOT have arg named 'b'"))
+      ;; All args should be free (no value or ref-id)
+      (doseq [arg args]
+        (is (nil? (:value arg)) "Renamed arg should have no value")
+        (is (nil? (:ref-id arg)) "Renamed arg should have no ref-id"))))
+
+  (testing "renames arg and binds value with {:as :new-name :value x}"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:two-arg-fn {:args {:a :int :b :int}
+                                                     :return-type :int
+                                                     :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+          ;; Rename :a to :first and bind value 42
+          result (fn-composition/sync-fns-to-storage! storage
+                                                      [{:name :renamed-with-value
+                                                        :parent :two-arg-fn
+                                                        :args {:a {:as :first :value 42}
+                                                               :b {:as :second}}}])
+          fn-id (:renamed-with-value result)
+          args (sp/query-entities storage :arg {:fn-id fn-id})
+          first-arg (first (filter #(= "first" (:name %)) args))]
+      (is (some? first-arg) "Should have arg named 'first'")
+      (is (= 42 (:value first-arg)) "First arg should have value 42")))
+
+  (testing "renames arg and binds ref with {:as :new-name :ref :fn-name}"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:const {:args {:x :any}
+                                                :return-type :any
+                                                :impl (fn [_ _] nil)}}
+                                       {:ref-fn {:args {:f :fn}
+                                                 :return-type :any
+                                                 :impl (fn [_ _] nil)}}])
+          ;; Create a target fn, then create fn with renamed ref
+          result (fn-composition/sync-fns-to-storage! storage
+                                                      [{:name :target-fn
+                                                        :parent :const
+                                                        :args {:x 100}}
+                                                       {:name :ref-with-rename
+                                                        :parent :ref-fn
+                                                        :args {:f {:as :handler :ref :target-fn}}}])
+          fn-id (:ref-with-rename result)
+          target-fn-id (:target-fn result)
+          args (sp/query-entities storage :arg {:fn-id fn-id})
+          handler-arg (first (filter #(= "handler" (:name %)) args))]
+      (is (some? handler-arg) "Should have arg named 'handler'")
+      (is (= target-fn-id (:ref-id handler-arg)) "Handler arg should ref target-fn"))))

@@ -127,14 +127,12 @@
 
 (defn- render-fn-details
   [entity]
-  (let [is-base? (nil? (:parent-id entity))]
-    [:div
-     (render-field-row "ID" (:id entity))
-     (render-field-row "Name" (when (:name entity) (name (:name entity))))
-     (render-field-row "Type" (if is-base? "Base Function" "Composed Function"))
-     (render-field-row "Parent ID" (:parent-id entity))
-     (render-field-row "Return Type" (when (:return-type entity) (name (:return-type entity))))
-     (render-field-row "Impl Hash" (:impl-hash entity))]))
+  [:div
+   (render-field-row "ID" (:id entity))
+   (render-field-row "Name" (when (:name entity) (name (:name entity))))
+   (render-field-row "Parent ID" (:parent-id entity))
+   (render-field-row "Return Type" (when (:return-type entity) (name (:return-type entity))))
+   (render-field-row "Impl Hash" (:impl-hash entity))])
 
 
 (defn- render-arg-details
@@ -226,9 +224,9 @@
       [:input {:type "text" :name "name" :id "name" :required true
                :value (when entity (name (:name entity)))}]]
      [:div {:class "form-group"}
-      [:label {:for "parent-id"} "Parent (optional - leave empty for base fn)"]
+      [:label {:for "parent-id"} "Parent (optional)"]
       [:select {:name "parent-id" :id "parent-id"}
-       [:option {:value ""} "None (Base Function)"]
+       [:option {:value ""} "None"]
        (for [[id label] parent-options]
          [:option {:value (str id)
                    :selected (and entity (= id (:parent-id entity)))}

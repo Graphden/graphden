@@ -1,6 +1,6 @@
 {:name "app"
  :version "1.0.0"
- :description "Application server: common building blocks and server fn-defs"
+ :description "Application server: common building blocks, editor UI, and server fn-defs"
  :dependencies ["core" "web"]
- :modules ["common" "server"]
+ :modules ["common" "editor" "server"]
  :startup-fn :web-server}

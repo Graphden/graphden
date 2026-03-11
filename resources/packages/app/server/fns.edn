@@ -1,31 +1,17 @@
-;; Web server fn-defs - minimal API server setup
-;; Endpoints: GET / (HTML), GET /health (JSON), GET /metrics (JSON)
+;; Web server fn-defs - combines editor UI with health/metrics endpoints
+;; Endpoints:
+;;   GET / (Editor HTML)
+;;   GET /favicon.ico (SVG)
+;;   GET /health (JSON)
+;;   GET /metrics (JSON)
+;;   GET /api/graph/entities (JSON)
+;;   GET /partials/entity-details/:type/:id (HTML partial)
+;;   GET /partials/entity-form/:type (HTML partial)
+;;   GET /partials/entity-form/:type/:id (HTML partial)
+;;   POST /api/entities/:type (JSON)
+;;   DELETE /api/entities/:type/:id (JSON)
 
 [;; =============================================================================
- ;; HELLO ROUTE (Static HTML)
- ;; =============================================================================
-
- ;; HTML body content
- {:name :hello-body
-  :parent :const
-  :args {:x "<html><body><h1>Graphden Executor v2</h1><p>PostgreSQL + Versioning + Cache + Metrics</p></body></html>"}}
-
- ;; Response inherits status=200, headers=html from html-ok-response
- {:name :hello-response-fn
-  :parent :html-ok-response
-  :args {:body :hello-body}}
-
- ;; Handler wraps response in Ring handler function
- {:name :hello-handler-fn
-  :parent :make-handler
-  :args {:response :hello-response-fn}}
-
- ;; GET /
- {:name :hello-route
-  :parent :get-route
-  :args {:a "/" :v :hello-handler-fn}}
-
- ;; =============================================================================
  ;; HEALTH ROUTE (Dynamic JSON)
  ;; =============================================================================
 
@@ -69,20 +55,18 @@
 
  ;; =============================================================================
  ;; ROUTES COLLECTION & SERVER
+ ;; Merge editor routes with health/metrics
  ;; =============================================================================
 
- ;; Build routes vector incrementally
- {:name :routes-with-hello
-  :parent :conj-any
-  :args {:coll [], :x :hello-route}}
-
+ ;; Start with editor routes (defined in editor/fns.edn)
+ ;; Add health and metrics routes
  {:name :routes-with-health
   :parent :conj-any
-  :args {:coll :routes-with-hello, :x :health-route}}
+  :args {:coll :editor-routes :x :health-route}}
 
  {:name :routes-fn
   :parent :conj-any
-  :args {:coll :routes-with-health, :x :metrics-route}}
+  :args {:coll :routes-with-health :x :metrics-route}}
 
  ;; Router receives routes vector
  {:name :router-fn

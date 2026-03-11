@@ -1,0 +1,197 @@
+;; Graph Editor base functions and fn-defs
+;; Base functions return CSS, JS, and body content
+;; Fn-defs compose them into pages, handlers, routes
+
+[;; =============================================================================
+ ;; BASE FUNCTIONS (implementations in impls.clj)
+ ;; =============================================================================
+
+ {:name :editor-styles
+  :args {}
+  :return-type :text}
+
+ {:name :editor-script
+  :args {}
+  :return-type :text}
+
+ {:name :editor-body
+  :args {}
+  :return-type :jsonb}
+
+ ;; Pre-wrapped elements for direct use (avoids keyword composition issues)
+ {:name :editor-style-element
+  :args {}
+  :return-type :jsonb}
+
+ {:name :editor-script-element
+  :args {}
+  :return-type :jsonb}
+
+ ;; =============================================================================
+ ;; PAGE COMPOSITION (fn-defs)
+ ;; =============================================================================
+
+ ;; Build head elements list for cytoscape
+ {:name :editor-head-elements-0
+  :parent :conj-any
+  :args {:coll [] :x :editor-style-element}}
+
+ ;; Head elements for Cytoscape (adds cytoscape scripts)
+ {:name :editor-cytoscape-head
+  :parent :with-cytoscape
+  :args {:head :editor-head-elements-0}}
+
+ ;; Head elements with HTMX (adds htmx script)
+ {:name :editor-head
+  :parent :with-htmx
+  :args {:head :editor-cytoscape-head}}
+
+ ;; External scripts (dagre layout)
+ {:name :dagre-script
+  :parent :const
+  :args {:x [:script {:src "https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"}]}}
+
+ {:name :cytoscape-dagre-script
+  :parent :const
+  :args {:x [:script {:src "https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"}]}}
+
+ ;; Scripts collection
+ {:name :editor-scripts-0
+  :parent :conj-any
+  :args {:coll [] :x :dagre-script}}
+
+ {:name :editor-scripts-1
+  :parent :conj-any
+  :args {:coll :editor-scripts-0 :x :cytoscape-dagre-script}}
+
+ {:name :editor-scripts
+  :parent :conj-any
+  :args {:coll :editor-scripts-1 :x :editor-script-element}}
+
+ ;; Complete HTML page
+ {:name :editor-page
+  :parent :html-page
+  :args {:title "Graphden - Graph Editor"
+         :head :editor-head
+         :body :editor-body
+         :scripts :editor-scripts}}
+
+ ;; Handler returns Ring response with HTML
+ {:name :editor-response
+  :parent :html-response
+  :args {:body :editor-page}}
+
+ {:name :editor-handler
+  :parent :make-handler
+  :args {:response :editor-response}}
+
+ ;; =============================================================================
+ ;; API HANDLERS (use existing base functions from web/crud)
+ ;; =============================================================================
+
+ {:name :api-entities-handler
+  :parent :all-entities-json-handler}
+
+ {:name :create-entity-handler
+  :parent :create-entity-api-handler}
+
+ {:name :delete-entity-handler
+  :parent :delete-entity-api-handler}
+
+ {:name :entity-details-handler-fn
+  :parent :entity-details-handler}
+
+ {:name :entity-form-handler-fn
+  :parent :entity-form-handler}
+
+ ;; =============================================================================
+ ;; FAVICON (SVG icon with caching)
+ ;; =============================================================================
+
+ {:name :favicon-svg-body
+  :parent :const
+  :args {:x "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#fff\" rx=\"4\"/><rect x=\"1\" y=\"1\" width=\"30\" height=\"30\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" rx=\"4\"/><rect x=\"3\" y=\"12\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"4\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"20\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"14\" x2=\"19\" y2=\"8\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"18\" x2=\"19\" y2=\"24\" stroke=\"#000\" stroke-width=\"1.5\"/></svg>"}}
+
+ {:name :favicon-response
+  :parent :cached-svg-ok-response
+  :args {:body :favicon-svg-body}}
+
+ {:name :favicon-handler
+  :parent :make-handler
+  :args {:response :favicon-response}}
+
+ ;; =============================================================================
+ ;; ROUTES
+ ;; =============================================================================
+
+ ;; GET routes
+ {:name :favicon-route
+  :parent :get-route
+  :args {:a "/favicon.ico" :v :favicon-handler}}
+
+ {:name :editor-route
+  :parent :get-route
+  :args {:a "/" :v :editor-handler}}
+
+ {:name :api-entities-route
+  :parent :get-route
+  :args {:a "/api/graph/entities" :v :api-entities-handler}}
+
+ {:name :entity-details-route
+  :parent :get-route
+  :args {:a "/partials/entity-details/:type/:id" :v :entity-details-handler-fn}}
+
+ {:name :entity-form-create-route
+  :parent :get-route
+  :args {:a "/partials/entity-form/:type" :v :entity-form-handler-fn}}
+
+ {:name :entity-form-edit-route
+  :parent :get-route
+  :args {:a "/partials/entity-form/:type/:id" :v :entity-form-handler-fn}}
+
+ ;; POST route
+ {:name :create-entity-route
+  :parent :post-route
+  :args {:a "/api/entities/:type" :v :create-entity-handler}}
+
+ ;; DELETE route
+ {:name :delete-entity-route
+  :parent :delete-route
+  :args {:a "/api/entities/:type/:id" :v :delete-entity-handler}}
+
+ ;; =============================================================================
+ ;; ROUTES COLLECTION (for server)
+ ;; These are exported for use by server/fns.edn
+ ;; =============================================================================
+
+ {:name :editor-routes-0
+  :parent :conj-any
+  :args {:coll [] :x :favicon-route}}
+
+ {:name :editor-routes-1
+  :parent :conj-any
+  :args {:coll :editor-routes-0 :x :editor-route}}
+
+ {:name :editor-routes-2
+  :parent :conj-any
+  :args {:coll :editor-routes-1 :x :api-entities-route}}
+
+ {:name :editor-routes-3
+  :parent :conj-any
+  :args {:coll :editor-routes-2 :x :entity-details-route}}
+
+ {:name :editor-routes-4
+  :parent :conj-any
+  :args {:coll :editor-routes-3 :x :entity-form-create-route}}
+
+ {:name :editor-routes-5
+  :parent :conj-any
+  :args {:coll :editor-routes-4 :x :entity-form-edit-route}}
+
+ {:name :editor-routes-6
+  :parent :conj-any
+  :args {:coll :editor-routes-5 :x :create-entity-route}}
+
+ {:name :editor-routes
+  :parent :conj-any
+  :args {:coll :editor-routes-6 :x :delete-entity-route}}]

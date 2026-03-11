@@ -367,4 +367,31 @@
                     (current-enum-values [_ _] #{}))
           schema {}
           result (tpl/run-basic-contract-tests storage schema)]
-      (is (>= (count (:errors result)) 1)))))
+      (is (>= (count (:errors result)) 1))))
+
+  (testing "fails when schema-metadata returns nil"
+    ;; This tests the branch where initialize succeeds but schema-metadata is nil
+    (let [storage (reify
+                    sp/Storage
+                    (initialize [this _] this)  ; succeed initialization
+
+                    (close [_] nil)
+
+
+                    sp/StorageIntrospection
+
+                    (schema-metadata [_] nil)  ; return nil - triggers failure branch
+
+                    (current-entities [_] #{})
+
+                    (current-fields [_ _] {})
+
+                    (current-enums [_] #{})
+
+                    (current-enum-values [_ _] #{}))
+          schema {}
+          result (tpl/run-basic-contract-tests storage schema)]
+      ;; Should have 1 pass (for initialize) and 1 fail (for schema-metadata check)
+      (is (= 1 (:passed result)))
+      (is (= 1 (:failed result)))
+      (is (zero? (count (:errors result)))))))

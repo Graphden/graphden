@@ -375,3 +375,106 @@
         ;; arg should be the same
         (is (= (:id (first args-before)) (:id (first args-after))))
         (is (= 42 (:value (first args-after))))))))
+
+
+;; =============================================================================
+;; Additional edge case tests for uncovered branches
+;; =============================================================================
+
+(deftest valid-identifier-edge-cases-test
+  (testing "returns falsy for empty string"
+    (is (not (#'core/valid-identifier? ""))))
+
+  (testing "returns falsy for string with whitespace"
+    (is (not (#'core/valid-identifier? "hello world"))))
+
+  (testing "returns falsy for non-string input"
+    (is (not (#'core/valid-identifier? nil)))
+    (is (not (#'core/valid-identifier? 123))))
+
+  (testing "returns truthy for valid identifiers"
+    (is (#'core/valid-identifier? "hello"))
+    (is (#'core/valid-identifier? "my-fn"))
+    (is (#'core/valid-identifier? "_private"))
+    (is (#'core/valid-identifier? "fn123"))))
+
+
+(deftest extract-dependencies-with-parent-dep-test
+  (testing "extracts parent as dependency when parent is in fn-names set"
+    (let [fn-def {:name :child-fn
+                  :parent :parent-fn  ; parent is another fn-def
+                  :args {:a 1}}
+          fn-names #{:parent-fn :child-fn}
+          deps (#'core/extract-dependencies fn-def fn-names)]
+      (is (contains? deps :parent-fn)))))
+
+
+(deftest arg-with-nil-value-test
+  (testing "handles nil arg value correctly"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:nullable-fn {:args {:x {:type :any :required false}}
+                                                      :return-type :any
+                                                      :impl (fn [_ _] nil)}}])
+          result (fn-composition/sync-fns-to-storage! storage
+                                                      [{:name :my-fn :parent :nullable-fn :args {:x nil}}])
+          fn-id (:my-fn result)
+          args (sp/query-entities storage :arg {:fn-id fn-id})]
+      (is (= 1 (count args)))
+      (is (nil? (:value (first args))))
+      (is (nil? (:ref-id (first args)))))))
+
+
+(deftest arg-with-uuid-value-test
+  (testing "handles UUID arg value as ref-id"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:ref-fn {:args {:ref :fn}
+                                                 :return-type :any
+                                                 :impl (fn [_ _] nil)}}])
+          ;; Create a target fn to reference
+          target-fn-id (random-uuid)
+          _ (sp/create-entity storage :fn {:id target-fn-id :name "target-fn" :parent-id (registry/fn-uuid :ref-fn)})
+          ;; Sync with UUID directly
+          result (fn-composition/sync-fns-to-storage! storage
+                                                      [{:name :wrapper :parent :ref-fn :args {:ref target-fn-id}}])
+          fn-id (:wrapper result)
+          args (sp/query-entities storage :arg {:fn-id fn-id})]
+      (is (= 1 (count args)))
+      (is (nil? (:value (first args))))
+      (is (= target-fn-id (:ref-id (first args)))))))
+
+
+(deftest free-arg-propagation-test
+  (testing "propagates free args from parent to child"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:two-arg-fn {:args {:a :int :b :int}
+                                                     :return-type :int
+                                                     :impl (fn [{:keys [a b]} _ctx] (+ @a @b))}}])
+          ;; Sync partial-fn that only binds :a, leaving :b free
+          result (fn-composition/sync-fns-to-storage! storage
+                                                      [{:name :partial-fn :parent :two-arg-fn :args {:a 10}}])
+          fn-id (:partial-fn result)
+          args (sp/query-entities storage :arg {:fn-id fn-id})]
+      ;; Should have 2 args: :a with value 10, and :b as free arg (propagated)
+      (is (= 2 (count args)))
+      (let [a-arg (first (filter #(= "a" (:name %)) args))
+            b-arg (first (filter #(= "b" (:name %)) args))]
+        (is (= 10 (:value a-arg)))
+        (is (nil? (:value b-arg)))
+        (is (nil? (:ref-id b-arg)) "free arg should have no ref-id")))))
+
+
+(deftest unresolved-arg-error-test
+  (testing "throws on unresolved arg name"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:one-arg-fn {:args {:x :int}
+                                                     :return-type :int
+                                                     :impl (fn [_ _] 1)}}])]
+      ;; Try to bind non-existent arg :y
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"not found"
+            (fn-composition/sync-fns-to-storage! storage
+                                                 [{:name :bad-fn :parent :one-arg-fn :args {:y 42}}]))))))

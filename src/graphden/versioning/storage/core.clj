@@ -37,7 +37,7 @@
   (:require
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.generic-constraints :as gc]
-    [graphden.storage.protocol.generic-graph :as gg]
+    [graphden.storage.protocol.graph :as graph]
     [graphden.versioning.storage.merge :as mrg]
     [graphden.versioning.storage.resolution :as res])
   (:import
@@ -228,8 +228,15 @@
   sp/ExecutionGraph
 
   (resolve-execution-graph
-    [this fn-id]
-    (gg/resolve-execution-graph this fn-id)))
+    [_ fn-id]
+    ;; Use batch resolution: loads all data in 4 queries, then BFS in memory
+    ;; This avoids the N+1 query problem (~400 queries → 4 queries)
+    (let [result (res/resolve-execution-graph-batch base-storage fn-id branch-id)]
+      (when (empty? (:fns result))
+        (throw (ex-info "Function not found"
+                        {:type :not-found
+                         :fn-id fn-id})))
+      (graph/->execution-graph result))))
 
 
 ;; === Branch Operations ===

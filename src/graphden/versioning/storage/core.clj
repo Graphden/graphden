@@ -117,12 +117,19 @@
       (sp/create-entity base-storage entity-name data)
       ;; Versioned: create full record in base table + version record
       (let [id (or (:id data) (random-uuid))
-            full-data (assoc data :id id)]
+            full-data (assoc data :id id)
+            existing (sp/read-entity base-storage entity-name id)]
         ;; Create base record if it doesn't exist (idempotent for deterministic UUIDs)
-        (when-not (sp/read-entity base-storage entity-name id)
+        (when-not existing
           (sp/create-entity base-storage entity-name full-data))
-        ;; Create version record on current branch
-        (create-version-record! base-storage entity-name id branch-id data)
+        ;; Only create version if no current version or data changed
+        (let [current-version (when existing
+                                (res/resolve-entity base-storage entity-name id branch-id))
+              {:keys [version-data-fields]} (get res/entity-config entity-name)
+              current-data (when current-version (select-keys current-version version-data-fields))
+              new-data (select-keys full-data version-data-fields)]
+          (when (or (nil? current-version) (not= current-data new-data))
+            (create-version-record! base-storage entity-name id branch-id data)))
         full-data)))
 
 
@@ -137,15 +144,21 @@
     [_ entity-name id data]
     (if-not (res/versioned-entity? entity-name)
       (sp/update-entity base-storage entity-name id data)
-      ;; Versioned: append new version with merged data
+      ;; Versioned: append new version with merged data (if changed)
       (let [current (res/resolve-entity base-storage entity-name id branch-id)]
         (when-not current
           (throw (ex-info "Entity not found"
                           {:type :not-found
                            :entity-name entity-name
                            :id id})))
-        (let [merged (merge current data)]
-          (create-version-record! base-storage entity-name id branch-id merged)
+        (let [merged (merge current data)
+              ;; Only compare version-controlled fields, not :id
+              {:keys [version-data-fields]} (get res/entity-config entity-name)
+              current-data (select-keys current version-data-fields)
+              merged-data (select-keys merged version-data-fields)]
+          ;; Skip creating new version if data unchanged
+          (when (not= current-data merged-data)
+            (create-version-record! base-storage entity-name id branch-id merged))
           merged))))
 
 
@@ -167,7 +180,9 @@
     [_ entity-name where]
     (if-not (res/versioned-entity? entity-name)
       (sp/query-entities base-storage entity-name where)
-      (res/resolve-all-entities base-storage entity-name branch-id where)))
+      ;; Use branch-chain cache to avoid N+1 queries for branch hierarchy
+      (binding [res/*branch-chain-cache* (atom {})]
+        (res/resolve-all-entities base-storage entity-name branch-id where))))
 
 
   sp/StorageBatchCRUD
@@ -261,12 +276,14 @@
     [_ fn-id]
     ;; Use batch resolution: loads all data in 4 queries, then BFS in memory
     ;; This avoids the N+1 query problem (~400 queries → 4 queries)
-    (let [result (res/resolve-execution-graph-batch base-storage fn-id branch-id)]
-      (when (empty? (:fns result))
-        (throw (ex-info "Function not found"
-                        {:type :not-found
-                         :fn-id fn-id})))
-      (graph/->execution-graph result))))
+    ;; Use branch-chain cache to avoid repeated branch hierarchy lookups
+    (binding [res/*branch-chain-cache* (atom {})]
+      (let [result (res/resolve-execution-graph-batch base-storage fn-id branch-id)]
+        (when (empty? (:fns result))
+          (throw (ex-info "Function not found"
+                          {:type :not-found
+                           :fn-id fn-id})))
+        (graph/->execution-graph result)))))
 
 
 ;; === Branch Operations ===
@@ -451,3 +468,16 @@
     ;; Delete the branch record
     (sp/delete-entity base :branch branch-id)
     true))
+
+
+(defn query-all-graph-entities
+  "Loads all fns and args in a single operation with shared branch-chain cache.
+   More efficient than calling query-entities twice.
+
+   Returns {:fns [...] :args [...]}"
+  [versioned-storage]
+  (let [{:keys [base-storage branch-id]} versioned-storage]
+    ;; Share branch-chain cache across both entity type queries
+    (binding [res/*branch-chain-cache* (atom {})]
+      {:fns (vec (res/resolve-all-entities base-storage :fn branch-id {}))
+       :args (vec (res/resolve-all-entities base-storage :arg branch-id {}))})))

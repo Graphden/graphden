@@ -325,11 +325,11 @@
               feature-branch (vs/create-branch! storage "feature")
               feature-storage (vs/switch-branch storage (:id feature-branch))]
 
-          ;; Modify on feature branch
-          (sp/update-entity feature-storage :fn (:id shared-fn) {:name "shared-value"})
+          ;; Modify on feature branch (different value)
+          (sp/update-entity feature-storage :fn (:id shared-fn) {:name "shared-value-feature"})
 
-          ;; Modify on main branch (creating conflict)
-          (sp/update-entity storage :fn (:id shared-fn) {:name "shared-value"})
+          ;; Modify on main branch (different value, creating conflict)
+          (sp/update-entity storage :fn (:id shared-fn) {:name "shared-value-main"})
 
           ;; Detect conflicts
           (let [conflicts (vs/detect-conflicts storage (:id feature-branch))]

@@ -7,7 +7,11 @@
     [cheshire.core :as json]
     [clojure.string :as str]
     [graphden.storage.protocol.core :as sp]
-    [hiccup2.core]))
+    [graphden.versioning.storage.core :as vs]
+    [hiccup2.core])
+  (:import
+    (graphden.versioning.storage.core
+      VersionedStorage)))
 
 
 ;; === Context-aware Query Functions ===
@@ -73,8 +77,11 @@
 (defn list-all-graph-entities
   [_args ctx]
   (if-let [storage (:storage ctx)]
-    {:fns (vec (sp/query-entities storage :fn {}))
-     :args (vec (sp/query-entities storage :arg {}))}
+    ;; Use optimized batch query for VersionedStorage
+    (if (instance? VersionedStorage storage)
+      (vs/query-all-graph-entities storage)
+      {:fns (vec (sp/query-entities storage :fn {}))
+       :args (vec (sp/query-entities storage :arg {}))})
     (throw (ex-info "Storage not available in context"
                     {:type :execution-error/missing-storage}))))
 
@@ -87,8 +94,11 @@
     (fn [_request]
       (if storage
         (try
-          (let [result {:fns (vec (sp/query-entities storage :fn {}))
-                        :args (vec (sp/query-entities storage :arg {}))}]
+          ;; Use optimized batch query for VersionedStorage
+          (let [result (if (instance? VersionedStorage storage)
+                         (vs/query-all-graph-entities storage)
+                         {:fns (vec (sp/query-entities storage :fn {}))
+                          :args (vec (sp/query-entities storage :arg {}))})]
             {:status 200
              :headers {"Content-Type" "application/json"}
              :body (json/generate-string result)})

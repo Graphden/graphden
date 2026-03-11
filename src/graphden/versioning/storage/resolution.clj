@@ -18,6 +18,15 @@
     [graphden.storage.protocol.core :as sp]))
 
 
+;; === Branch Chain Cache ===
+;; Thread-local cache for branch chains within a request.
+;; Prevents N+1 queries when resolving multiple entity types.
+
+(def ^:dynamic *branch-chain-cache*
+  "Thread-local cache: {branch-id -> [branch-chain]}"
+  nil)
+
+
 ;; Forward declarations for batch resolution functions used by resolve-all-entities
 (declare resolve-entities-batch)
 (declare collect-branch-chain)
@@ -189,8 +198,8 @@
 ;; Optimized batch resolution: instead of N+1 queries (one per entity),
 ;; we load all versions in a single query and resolve in memory.
 
-(defn- collect-branch-chain
-  "Returns vector of branch-ids from current to root (for inheritance lookup)."
+(defn- collect-branch-chain-impl
+  "Internal: fetches branch chain from storage."
   [base-storage branch-id]
   (loop [chain [branch-id]
          current-id branch-id]
@@ -199,6 +208,21 @@
         (recur (conj chain parent-id) parent-id)
         chain)
       chain)))
+
+
+(defn- collect-branch-chain
+  "Returns vector of branch-ids from current to root (for inheritance lookup).
+   Uses thread-local cache when *branch-chain-cache* is bound."
+  [base-storage branch-id]
+  (if *branch-chain-cache*
+    ;; Use cached value if available
+    (if-let [cached (get @*branch-chain-cache* branch-id)]
+      cached
+      (let [chain (collect-branch-chain-impl base-storage branch-id)]
+        (swap! *branch-chain-cache* assoc branch-id chain)
+        chain))
+    ;; No cache - compute directly
+    (collect-branch-chain-impl base-storage branch-id)))
 
 
 (defn- load-all-versions-for-ids

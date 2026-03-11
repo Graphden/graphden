@@ -962,11 +962,10 @@
             composed-arg (setup/create-arg! storage (:id composed)
                                             {:name "x" :type :int :required true :is-fn false
                                              :source-id (:id id-arg)})
-            ctx (exec/create-context {:storage storage})]
-
-        ;; Execute - this exercises the trace-arg-source-id path where
-        ;; the arg belongs directly to the target fn
-        (let [result (exec/execute ctx (:id composed) {(:id composed-arg) 42})]
-          (is (= 42 result))))
+            ctx (exec/create-context {:storage storage})
+            ;; Execute - this exercises the trace-arg-source-id path where
+            ;; the arg belongs directly to the target fn
+            result (exec/execute ctx (:id composed) {(:id composed-arg) 42})]
+        (is (= 42 result)))
 
       (sp/close storage))))

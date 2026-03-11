@@ -503,12 +503,12 @@
           ;; - call-add-10: calls add-10 passing :x as :b
           ;; The free arg :b from add-10 should propagate through the ref chain
           result (fn-composition/sync-fns-to-storage! storage
-                                                       [{:name :add-10
-                                                         :parent :adder
-                                                         :args {:a 10}}
-                                                        {:name :call-add-10
-                                                         :parent :caller
-                                                         :args {:f :add-10 :x 5}}])
+                                                      [{:name :add-10
+                                                        :parent :adder
+                                                        :args {:a 10}}
+                                                       {:name :call-add-10
+                                                        :parent :caller
+                                                        :args {:f :add-10 :x 5}}])
           add-10-id (:add-10 result)
           call-add-10-id (:call-add-10 result)]
 
@@ -534,28 +534,27 @@
                                       [{:three-arg {:args {:a :int :b :int :c :int}
                                                     :return-type :int
                                                     :impl (fn [{:keys [a b c]} _] (+ @a @b @c))}}
-                                       {:ref-holder {:args {:ref :fn}
+                                       {:ref-holder {:args {:fn-ref :fn}
                                                      :return-type :any
-                                                     :impl (fn [{:keys [ref]} _] ref)}}])
+                                                     :impl (fn [{:keys [fn-ref]} _] fn-ref)}}])
           ;; inner: binds :a, leaves :b and :c free
           ;; middle: wraps inner via ref-holder
           ;; outer: wraps middle via ref-holder
           result (fn-composition/sync-fns-to-storage! storage
-                                                       [{:name :inner
-                                                         :parent :three-arg
-                                                         :args {:a 1}}
-                                                        {:name :middle
-                                                         :parent :ref-holder
-                                                         :args {:ref :inner}}
-                                                        {:name :outer
-                                                         :parent :ref-holder
-                                                         :args {:ref :middle}}])
-          inner-id (:inner result)]
-
-      ;; inner should have 3 args: :a (bound), :b (free), :c (free)
-      (let [inner-args (sp/query-entities storage :arg {:fn-id inner-id})
-            free-args (filter #(and (nil? (:value %)) (nil? (:ref-id %))) inner-args)]
-        (is (= 2 (count free-args)) "inner should have 2 free args (:b and :c)")))))
+                                                      [{:name :inner
+                                                        :parent :three-arg
+                                                        :args {:a 1}}
+                                                       {:name :middle
+                                                        :parent :ref-holder
+                                                        :args {:fn-ref :inner}}
+                                                       {:name :outer
+                                                        :parent :ref-holder
+                                                        :args {:fn-ref :middle}}])
+          inner-id (:inner result)
+          ;; inner should have 3 args: :a (bound), :b (free), :c (free)
+          inner-args (sp/query-entities storage :arg {:fn-id inner-id})
+          free-args (filter #(and (nil? (:value %)) (nil? (:ref-id %))) inner-args)]
+      (is (= 2 (count free-args)) "inner should have 2 free args (:b and :c)"))))
 
 
 (deftest fn-name-cache-lookup-test
@@ -571,9 +570,9 @@
           ;; Sync fn that references a base fn by name
           ;; This exercises the fn-name-cache lookup path
           result (fn-composition/sync-fns-to-storage! storage
-                                                       [{:name :user-of-cached
-                                                         :parent :ref-base
-                                                         :args {:ref :cached-fn}}])
+                                                      [{:name :user-of-cached
+                                                        :parent :ref-base
+                                                        :args {:ref :cached-fn}}])
           user-id (:user-of-cached result)
           args (sp/query-entities storage :arg {:fn-id user-id})]
 

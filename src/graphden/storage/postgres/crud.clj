@@ -144,8 +144,16 @@
                                     (let [col (keyword (util/kw->snake-case k))
                                           field-spec (get fields k)
                                           encoded-v (codec/encode-value v field-spec)]
-                                      (if (nil? encoded-v)
+                                      (cond
+                                        (nil? encoded-v)
                                         [:is col nil]
+
+                                        ;; Collection = IN clause (for batch lookups)
+                                        (and (or (vector? v) (set? v) (seq? v))
+                                             (not (map? v)))
+                                        [:in col (vec (map #(codec/encode-value % field-spec) v))]
+
+                                        :else
                                         [:= col encoded-v])))
                                   where)))
         query (sql/format (cond-> {:select [:*]

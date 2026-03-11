@@ -145,17 +145,31 @@
     :else :unknown))
 
 
+(defn- valid-in-clause-collection?
+  "Returns true if value is a non-empty collection where all elements match field-type.
+   Used for IN-clause queries like {:fn-id [uuid1 uuid2]}."
+  [value field-type]
+  (and (or (vector? value) (set? value) (seq? value))
+       (seq value)
+       (contains? #{:uuid :ref :fn :int :text} field-type)
+       (every? #(ft/valid-type? field-type %) value)))
+
+
 (defn- check-type-match
   "Checks if a value matches the expected field type.
    Returns nil if valid, or error-map {:expected ... :actual ...} if invalid.
 
    Uses field-types validators for consistent type checking across the codebase.
-   Exotic types pass through to allow backend-specific handling."
+   Exotic types pass through to allow backend-specific handling.
+
+   Special case: For IN-clause queries, a collection of values is valid if all
+   elements match the expected type (e.g., vector of UUIDs for :ref/:uuid field)."
   [value field-type]
   (let [actual-type (infer-actual-type value)]
-    ;; nil is valid for any nullable field - caller handles nullability
-    (when (and (not= actual-type :nil)
-               (not (ft/valid-type? field-type value)))
+    ;; Valid if: nil, direct type match, or valid IN-clause collection
+    (when-not (or (= actual-type :nil)
+                  (ft/valid-type? field-type value)
+                  (valid-in-clause-collection? value field-type))
       {:expected field-type :actual actual-type})))
 
 

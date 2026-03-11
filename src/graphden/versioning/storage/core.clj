@@ -173,10 +173,32 @@
   sp/StorageBatchCRUD
 
   (create-entities
-    [this entity-name data-seq]
+    [_ entity-name data-seq]
     (if-not (res/versioned-entity? entity-name)
       (sp/create-entities base-storage entity-name data-seq)
-      (mapv #(sp/create-entity this entity-name %) data-seq)))
+      ;; Versioned: batch create base records + batch create version records
+      (let [data-with-ids (mapv (fn [data]
+                                  (if (:id data) data (assoc data :id (random-uuid))))
+                                data-seq)
+            ids (mapv :id data-with-ids)
+            ;; Find which base records don't exist yet
+            existing-ids (set (keys (sp/read-entities base-storage entity-name ids)))
+            new-base-records (filterv #(not (contains? existing-ids (:id %))) data-with-ids)
+            ;; Batch create base records
+            _ (when (seq new-base-records)
+                (sp/create-entities base-storage entity-name new-base-records))
+            ;; Prepare and batch create version records
+            {:keys [version-entity version-id-field version-data-fields]}
+            (get res/entity-config entity-name)
+            version-records (mapv (fn [data]
+                                    (-> (select-keys data version-data-fields)
+                                        (assoc :id (random-uuid)
+                                               version-id-field (:id data)
+                                               :branch-id branch-id
+                                               :created-at (now))))
+                                  data-with-ids)]
+        (sp/create-entities base-storage version-entity version-records)
+        data-with-ids)))
 
 
   (read-entities
@@ -410,12 +432,15 @@
       (let [version-ids (mapv :id (sp/query-entities base version-entity {:branch-id branch-id}))]
         (when (seq version-ids)
           (sp/delete-entities base version-entity version-ids))))
-    ;; Delete branch-merge records referencing this branch (batch)
-    (let [source-ids (mapv :id (sp/query-entities base :branch-merge {:source-branch-id branch-id}))
-          target-ids (mapv :id (sp/query-entities base :branch-merge {:target-branch-id branch-id}))
-          all-merge-ids (vec (distinct (concat source-ids target-ids)))]
-      (when (seq all-merge-ids)
-        (sp/delete-entities base :branch-merge all-merge-ids)))
+    ;; Delete branch-merge records referencing this branch (single query)
+    ;; Query all branch-merge records and filter in memory (smaller table, avoids 2 queries)
+    (let [all-merges (sp/query-entities base :branch-merge {})
+          merge-ids (->> all-merges
+                         (filter #(or (= (:source-branch-id %) branch-id)
+                                      (= (:target-branch-id %) branch-id)))
+                         (mapv :id))]
+      (when (seq merge-ids)
+        (sp/delete-entities base :branch-merge merge-ids)))
     ;; Delete the branch record
     (sp/delete-entity base :branch branch-id)
     true))

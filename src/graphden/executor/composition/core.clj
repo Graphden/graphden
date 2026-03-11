@@ -231,34 +231,15 @@
     (vec (concat own-free-args ref-free-args))))
 
 
-(defn- preload-existing-fns
-  "Loads all existing fn entities by names in one query.
-   Returns map of {fn-name-str -> fn-entity}."
-  [storage fn-names]
-  (if (empty? fn-names)
-    {}
-    (let [name-strs (mapv name fn-names)
-          name-set (set name-strs)
-          ;; Query all fns - we'll filter in memory
-          ;; This is faster than N individual queries
-          all-fns (sp/query-entities storage :fn {})]
-      (into {}
-            (comp
-              (filter #(contains? name-set (:name %)))
-              (map (juxt :name identity)))
-            all-fns))))
-
-
 (defn- preload-all-args
-  "Loads all arg entities for given fn-ids in one query.
+  "Loads arg entities for given fn-ids using WHERE IN clause.
    Returns map of {fn-id -> [args]}."
   [storage fn-ids]
   (if (empty? fn-ids)
     {}
-    (let [fn-id-set (set fn-ids)
-          all-args (sp/query-entities storage :arg {})]
-      (group-by :fn-id
-                (filter #(contains? fn-id-set (:fn-id %)) all-args)))))
+    ;; Use WHERE IN clause instead of full table scan + filter
+    (let [matching-args (sp/query-entities storage :arg {:fn-id (vec fn-ids)})]
+      (group-by :fn-id matching-args))))
 
 
 (defn- get-parent-arg-cached
@@ -476,18 +457,22 @@
       (let [sorted-defs (topological-sort fn-defs)
             _ (check-order-and-warn fn-defs sorted-defs)
 
-            ;; Phase 1: Pre-load existing data
-            def-names (into #{} (map :name) sorted-defs)
-            existing-fns-by-name (preload-existing-fns storage def-names)
-
-            ;; Also load all fns for parent resolution
+            ;; Phase 1: Pre-load existing data (single pass over all-fns)
             all-fns (sp/query-entities storage :fn {})
-            fn-id-cache (into {} (map (juxt :id identity) all-fns))
-            fn-name-cache (into existing-fns-by-name
-                                (map (juxt :name identity) all-fns))
 
-            ;; Pre-load all args
-            all-fn-ids (into #{} (map :id) all-fns)
+            ;; Build both caches in a single pass
+            {:keys [fn-id-cache fn-name-cache all-fn-ids]}
+            (reduce (fn [acc fn-entity]
+                      (-> acc
+                          (assoc-in [:fn-id-cache (:id fn-entity)] fn-entity)
+                          (assoc-in [:fn-name-cache (:name fn-entity)] fn-entity)
+                          (update :all-fn-ids conj (:id fn-entity))))
+                    {:fn-id-cache {}
+                     :fn-name-cache {}
+                     :all-fn-ids []}
+                    all-fns)
+
+            ;; Pre-load all args using WHERE IN
             args-cache (preload-all-args storage all-fn-ids)
 
             ;; Phase 2: Prepare and create fns in topological order

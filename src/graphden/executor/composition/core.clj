@@ -536,36 +536,41 @@
                                      fn-name-cache-final fn-id-cache-final created-fns parent)
 
                       ;; 3a: Explicit args from fn-def :args
-                      explicit-records
-                      (for [[arg-name arg-value] (:args fn-def {})
-                            :let [record (prepare-arg-record
-                                           fn-id-cache-final args-view fn-name-cache-final
-                                           created-fns fn-id parent-fn-id arg-name arg-value)]
-                            :when record]
-                        record)
-
-                      ;; Track which args were explicitly set (by source-id)
-                      explicit-source-ids
-                      (into #{}
-                            (keep (fn [rec]
-                                    (or (:source-id (:new rec))
-                                        (:source-id (:update rec)))))
-                            explicit-records)
+                      ;; Single pass: collect source-ids, new args, and update args together
+                      {:keys [explicit-source-ids explicit-new-args explicit-update-args]}
+                      (reduce (fn [acc [arg-name arg-value]]
+                                (if-let [record (prepare-arg-record
+                                                  fn-id-cache-final args-view fn-name-cache-final
+                                                  created-fns fn-id parent-fn-id arg-name arg-value)]
+                                  (let [source-id (or (:source-id (:new record))
+                                                      (:source-id (:update record)))]
+                                    (cond-> acc
+                                      source-id
+                                      (update :explicit-source-ids conj source-id)
+                                      (:new record)
+                                      (update :explicit-new-args conj (:new record))
+                                      (:update record)
+                                      (update :explicit-update-args conj (:update record))))
+                                  acc))
+                              {:explicit-source-ids #{}
+                               :explicit-new-args []
+                               :explicit-update-args []}
+                              (:args fn-def {}))
 
                       ;; 3b: Propagated free args from parent chain and referenced fns
                       parent-free-args (collect-parent-free-args
                                          fn-id-cache-final args-view parent-fn-id 0)
-                      propagated-records
-                      (for [free-arg parent-free-args
-                            :when (not (contains? explicit-source-ids (:id free-arg)))
-                            :let [record (prepare-propagated-arg-record args-view fn-id free-arg)]
-                            :when record]
-                        record)
+                      propagated-new-args
+                      (into []
+                            (comp
+                              (remove #(contains? explicit-source-ids (:id %)))
+                              (keep #(when-let [rec (prepare-propagated-arg-record args-view fn-id %)]
+                                       (:new rec))))
+                            parent-free-args)
 
-                      ;; Collect all new args for this fn-def
-                      fn-new-args (vec (concat (keep :new explicit-records)
-                                               (keep :new propagated-records)))
-                      fn-update-args (keep :update explicit-records)
+                      ;; Combine explicit and propagated new args
+                      fn-new-args (into explicit-new-args propagated-new-args)
+                      fn-update-args explicit-update-args
 
                       ;; Update args-view with new args so next fn-def can see them
                       args-view' (reduce (fn [cache arg]

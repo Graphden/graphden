@@ -301,8 +301,8 @@
 
         results (mapv load-single-package ordered)
 
-        combined {:base-fn-defs (apply merge (map :base-fn-defs results))
-                  :fn-defs (vec (mapcat :fn-defs results))
+        combined {:base-fn-defs (reduce merge {} (map :base-fn-defs results))
+                  :fn-defs (into [] (mapcat :fn-defs) results)
                   :packages (mapv :meta results)
                   :startup-fn (some #(get-in % [:meta :startup-fn]) (reverse results))}]
 

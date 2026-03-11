@@ -83,6 +83,7 @@ fn: add-10
 |----------|---------|--------------|
 | [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles, rationale, module mapping | Before making architectural decisions |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical details, execution model, examples | When implementing features |
+| [docs/PACKAGES.md](docs/PACKAGES.md) | Package system, module structure, loading | When adding base-fns or fn-defs |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |
 | [docs/EXTENDING.md](docs/EXTENDING.md) | Adding new storage backends | When implementing new backend |
@@ -279,13 +280,8 @@ docs/                                  # Documentation
 
 ```
 src/graphden/
-├── library/            # Base function definitions (separated from executor)
-│   ├── interface.clj   # Public API (get-all-defs)
-│   ├── base_fns/
-│   │   ├── core/       # Core primitives (arithmetic, logic, HOF, etc.)
-│   │   └── web/        # Web-related base-fns (http, reitit, html)
-│   └── fn_defs/
-│       └── web/        # Web fn compositions (editor, etc.)
+├── packages/           # Package loader for resources/packages/
+│   └── loader.clj      # load-packages, load-module-fns, load-module-impls
 ├── executor/           # Executor, registry, composition
 │   ├── interface.clj
 │   ├── registry/
@@ -303,14 +299,6 @@ src/graphden/
 ├── versioning/         # Storage decorator, merge protection
 │   ├── storage/
 │   └── merge/
-├── web/                # HTTP-kit, reitit, server, editor UI
-│   ├── http_kit/       # HTTP server base functions
-│   ├── reitit/         # Router base functions
-│   ├── server/         # Server fn-defs
-│   ├── editor/         # Graph editor UI
-│   ├── graph/          # Graph API handlers
-│   ├── crud/           # CRUD API handlers
-│   └── html/           # HTML rendering utilities
 ├── logging/            # Structured logging with MDC
 │   └── interface.clj
 ├── system/             # Integrant lifecycle management
@@ -319,7 +307,217 @@ src/graphden/
 │   └── core.clj        # ig/init-key implementations
 └── executor_runtime/   # Main entry point
     └── core.clj        # -main, shutdown hooks
+
+resources/packages/     # Package definitions (EDN + Clojure impls)
+├── core/               # Core primitives (arithmetic, logic, HOF, etc.)
+│   ├── package.edn     # Package metadata + dependencies
+│   ├── arithmetic/     # {fns.edn, impls.clj}
+│   ├── logic/
+│   ├── hof/
+│   ├── collections/
+│   ├── strings/
+│   └── system/
+├── web/                # Web primitives (http, routing, html)
+│   ├── package.edn
+│   ├── http/
+│   ├── reitit/
+│   ├── html/
+│   ├── crud/
+│   └── graph/
+└── app/                # Application server (editor, routes)
+    ├── package.edn     # Has startup-fn: :web-server
+    ├── common/         # Shared fn-defs (routes, responses)
+    ├── editor/         # Editor UI fn-defs + impls
+    └── server/         # Server composition fn-defs
 ```
+
+## Packages System
+
+Base functions and fn-defs are organized in packages under `resources/packages/`. Each package contains modules with `fns.edn` (definitions) and `impls.clj` (Clojure implementations).
+
+### Package Structure
+
+```
+resources/packages/{package-name}/
+├── package.edn                    # Package metadata
+└── {module-name}/
+    ├── fns.edn                    # Function definitions (base-fns + fn-defs)
+    └── impls.clj                  # Clojure implementations for base-fns
+```
+
+### package.edn Format
+
+```edn
+{:name "web"
+ :version "1.0.0"
+ :description "Web primitives: HTTP, routing, HTML"
+ :dependencies ["core"]           ; Packages to load first
+ :modules ["http" "reitit" "html"]
+ :startup-fn :web-server}         ; Optional: fn to execute on start
+```
+
+### fns.edn Format
+
+```edn
+[;; Base function (has implementation in impls.clj)
+ {:name :add
+  :args {:nums :jsonb}
+  :return-type :numeric}
+
+ ;; Fn-def (composition, no implementation)
+ {:name :add-10
+  :parent :add
+  :args {:nums [10]}}]
+```
+
+### Loading Packages
+
+```clojure
+(require '[graphden.packages.loader :as pkg])
+
+;; Load packages in dependency order
+(def packages (pkg/load-packages ["core" "web" "app"]))
+;; => {:base-fn-defs {...}, :fn-defs [...], :packages [...], :startup-fn :web-server}
+```
+
+## Best Practices (CRITICAL)
+
+### 1. Use Inheritance to Avoid Duplication (DRY)
+
+When multiple fn-defs share the same ancestor AND one or more bound arguments, extract a common parent:
+
+**Before (duplication):**
+```edn
+{:name :health-route
+ :parent :get-route
+ :args {:a "/health" :v :health-handler-fn}}
+
+{:name :metrics-route
+ :parent :get-route
+ :args {:a "/metrics" :v :metrics-handler-fn}}
+
+;; Both bind to :get-route with same structure
+```
+
+This is acceptable if paths and handlers differ. But if structure repeats:
+
+**Extract common ancestor when same structure repeats:**
+```edn
+;; Common building block
+{:name :json-ok-response
+ :parent :ok-response
+ :args {:headers {"Content-Type" "application/json"}}}
+
+;; Reuse in multiple places
+{:name :health-response-fn
+ :parent :json-ok-response
+ :args {:body :health-json-body-fn}}
+
+{:name :metrics-response-fn
+ :parent :json-ok-response
+ :args {:body :metrics-json-body-fn}}
+```
+
+**Key indicators for extraction:**
+- Same ancestor (not necessarily immediate parent)
+- Same bound arguments
+- Repeated structural pattern
+- Meaningful name can be given to the extracted fn-def
+
+### 2. Free Arguments Pattern (Argument Propagation)
+
+When a fn-def references another fn-def with unbound arguments, those arguments become "free" (exposed) in the parent. This enables building composable hierarchies:
+
+```edn
+;; assoc-any has args: {m, k, v}
+{:name :assoc-empty
+ :parent :assoc-any
+ :args {:m {}}}           ; binds m={}, exposes k and v
+
+;; assoc-handler has free arg: v (k is bound)
+{:name :assoc-handler
+ :parent :assoc-empty
+ :args {:k "handler"}}    ; binds k="handler", exposes v
+
+;; method-map references :assoc-handler, its free arg v propagates
+{:name :method-map
+ :parent :assoc-empty
+ :args {:v :assoc-handler}}  ; v is fn with free arg, that arg propagates
+
+;; route exposes: a (path), k (method), v (handler)
+{:name :route
+ :parent :pair
+ :args {:b :method-map}}
+
+;; get-route fixes method, exposes: a (path), v (handler)
+{:name :get-route
+ :parent :route
+ :args {:k "get"}}
+
+;; Usage: only need to provide path and handler
+{:name :health-route
+ :parent :get-route
+ :args {:a "/health" :v :health-handler-fn}}
+```
+
+**Key insight:** Free arguments of referenced functions become part of the interface. This allows building reusable route/response/handler templates.
+
+### 3. Named vs Anonymous Functions
+
+**Use named fn-def when:**
+- Function is reused in multiple places
+- Function has clear semantic meaning
+- Function could be tested independently
+- Function represents a domain concept
+
+```edn
+;; Good: reusable building block
+{:name :json-ok-response
+ :parent :ok-response
+ :args {:headers {"Content-Type" "application/json"}}}
+```
+
+**Use inline/one-off composition when:**
+- Combination is used exactly once
+- No semantic meaning beyond "connect A to B"
+- No foreseeable reuse scenario
+
+```edn
+;; One-off: specific route with specific handler
+;; Don't create :health-route-with-specific-path-and-handler fn-def
+{:name :health-route
+ :parent :get-route
+ :args {:a "/health" :v :health-handler-fn}}
+```
+
+**Rule of thumb:** If you can't give it a meaningful name that describes WHAT it does (not HOW it connects things), it's probably a one-off composition.
+
+### 4. Hierarchy Depth Guidelines
+
+- **2-3 levels**: Normal for response types (`:ring-response` → `:ok-response` → `:json-ok-response`)
+- **4-5 levels**: Acceptable for complex composition (route building blocks)
+- **6+ levels**: Review if intermediate levels have independent semantic meaning
+
+Each level should:
+1. Have a meaningful name
+2. Be potentially reusable
+3. Represent a cohesive concept
+
+### 5. Base Function vs Fn-def Decision
+
+| Characteristic | Base Function | Fn-def |
+|----------------|---------------|--------|
+| Has Clojure code | Yes (impls.clj) | No |
+| Wraps library/runtime | Yes | No |
+| Contains hardcoded values | No (except defaults) | Yes |
+| Can be expressed as composition | No | Yes |
+| Lines of implementation | 1-20 | N/A |
+
+**Examples:**
+- `http-server`: Base function (wraps http-kit)
+- `web-server`: Fn-def (composes http-server with router and port)
+- `router`: Base function (wraps reitit)
+- `editor-router`: Fn-def (composes router with specific routes)
 
 ## CI Workflow
 

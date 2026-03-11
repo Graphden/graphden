@@ -1,9 +1,10 @@
 # Graphden Philosophy
 
-> **Last updated:** 2026-03-09
+> **Last updated:** 2026-03-11
 >
 > This document describes the core principles and philosophy behind graphden.
 > For technical architecture, see [ARCHITECTURE.md](ARCHITECTURE.md).
+> For packages system, see [PACKAGES.md](PACKAGES.md).
 > For implementation status, see [ROADMAP.md](ROADMAP.md).
 
 ## Table of Contents
@@ -203,45 +204,43 @@ They should be:
 
 ...it should be a **fn-def** (graph composition), not a base-fn.
 
-**The graph editor UI should be built entirely as fn-defs:**
-```clojure
-;; CORRECT: fn-defs composing base functions
-{:name :editor-styles
- :parent :const
- :args {:x "* { box-sizing: border-box; ... }"}}
+**The graph editor UI is built entirely as fn-defs in `resources/packages/app/`:**
 
-{:name :editor-page-body
- :parent :const
- :args {:x [:div {:class "layout"} ...]}}
+```edn
+;; In app/common/fns.edn — reusable route building blocks
+{:name :json-ok-response
+ :parent :ok-response
+ :args {:headers {"Content-Type" "application/json"}}}
 
+{:name :get-route
+ :parent :route
+ :args {:k "get"}}
+
+;; In app/editor/fns.edn — editor UI composition
 {:name :editor-page
  :parent :html-page
- :args {:title "Graph Editor"
+ :args {:title "Graphden - Graph Editor"
         :head :editor-head
-        :body :editor-page-body
+        :body :editor-body
         :scripts :editor-scripts}}
 
-{:name :editor-handler
- :parent :html-handler
- :args {:body :editor-page}}
+;; In app/server/fns.edn — server composition
+{:name :health-route
+ :parent :get-route
+ :args {:a "/health" :v :health-handler-fn}}
 
-{:name :editor-router
- :parent :router
- :args {:routes [["/" {"get" {"handler" :editor-handler}}]
-                 ["/health" {"get" {"handler" :health-handler}}]
-                 ["/api/entities/all" {"get" {"handler" :all-entities-handler}}]]}}
-
-{:name :graph-editor-server
+{:name :web-server
  :parent :http-server
- :args {:handler :editor-router
+ :args {:handler :router-fn
         :port 8080}}
 ```
 
 This approach:
 - Makes UI structure visible in the graph
 - Allows modification without Clojure knowledge
-- Follows DRY (shared components can be reused)
+- Follows DRY (shared components like `:json-ok-response` are reused)
 - Enables visual editing of the UI structure
+- Separates base primitives (packages/core, web) from application composition (packages/app)
 
 ### Means of Abstraction
 

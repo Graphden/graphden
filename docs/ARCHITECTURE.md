@@ -1,8 +1,9 @@
 # Graphden: Visual Functional Programming System
 
-> **Last updated:** 2026-03-09
+> **Last updated:** 2026-03-11
 >
 > This document describes the technical architecture of graphden.
+> For packages system, see [PACKAGES.md](PACKAGES.md).
 > For implementation status and roadmap, see [ROADMAP.md](ROADMAP.md).
 
 ## Table of Contents
@@ -897,11 +898,6 @@ Two storage backends are available:
                              │
                              v
                    ┌──────────────────┐
-                   │ storage/age      │
-                   └────────┬─────────┘
-                            │
-                            v
-                   ┌──────────────────┐
                    │   executor       │
                    └────────┬─────────┘
                             │
@@ -909,9 +905,15 @@ Two storage backends are available:
               │             │             │
               v             v             v
      ┌──────────────┐ ┌──────────────┐ ┌──────────────┐
-     │ executor/    │ │ executor/    │ │ versioning/  │
-     │ base-fns     │ │ registry     │ │ storage      │
+     │  packages/   │ │ executor/    │ │ versioning/  │
+     │  loader      │ │ registry     │ │ storage      │
      └──────────────┘ └──────────────┘ └──────────────┘
+            │
+            v
+     ┌────────────────────────────┐
+     │  resources/packages/       │
+     │  (core, web, app modules)  │
+     └────────────────────────────┘
 ```
 
 ---

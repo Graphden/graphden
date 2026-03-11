@@ -680,33 +680,51 @@
 (deftest cache-eviction-test
   (testing "evicts oldest entries when cache limit reached"
     (let [storage (setup/create-test-storage)
+          ;; Register identity function that takes a ref
+          _ (exec/register-base-fn!
+              :ref-fn
+              (fn [{:keys [x]} _ctx]
+                @x))
           ;; Register const function
           _ (exec/register-base-fn!
               :const
               (fn [{:keys [value]} _ctx]
                 @value))
+          ;; Create ref-fn base
+          ref-base (setup/create-base-fn! storage "ref-fn" :int)
+          ref-arg (setup/create-arg! storage (:id ref-base)
+                                     {:name "x" :type :int :required true :is-fn false})
           ;; Create const base fn
           const-base (setup/create-base-fn! storage "const" :int)
           const-arg (setup/create-arg! storage (:id const-base)
                                        {:name "value" :type :int :required true :is-fn false})
-          ;; Create 10 const functions
-          fns (doall
-                (for [i (range 10)]
-                  (let [composed-fn (setup/create-composed-fn! storage (str "const-" i) (:id const-base))]
-                    (setup/create-arg! storage (:id composed-fn)
-                                       {:name "value" :type :int :required true :is-fn false
-                                        :source-id (:id const-arg) :value i})
-                    composed-fn)))
-          ;; Create context with very small cache (2 entries)
+          ;; Create 5 const functions (these will be ref'd)
+          const-fns (doall
+                      (for [i (range 5)]
+                        (let [composed-fn (setup/create-composed-fn! storage (str "const-" i) (:id const-base))]
+                          (setup/create-arg! storage (:id composed-fn)
+                                             {:name "value" :type :int :required true :is-fn false
+                                              :source-id (:id const-arg) :value i})
+                          composed-fn)))
+          ;; Create ref functions that reference const functions via ref-id
+          ;; This triggers execute-ref-fn which uses the cache
+          ref-fns (doall
+                    (for [[i const-fn] (map-indexed vector const-fns)]
+                      (let [ref-fn (setup/create-composed-fn! storage (str "ref-" i) (:id ref-base))]
+                        (setup/create-arg! storage (:id ref-fn)
+                                           {:name "x" :type :int :required true :is-fn false
+                                            :source-id (:id ref-arg) :ref-id (:id const-fn)})
+                        ref-fn)))
+          ;; Create context with very small cache (2 entries) to trigger eviction
           ctx (exec/create-context {:storage storage
-                                    :cache-max-size 3
-                                    :cache-warning-threshold 2})]
+                                    :cache-max-size 2
+                                    :cache-warning-threshold 1})]
       (try
-        ;; Execute all 10 functions
-        (doseq [fn-rec fns]
+        ;; Execute all ref functions - each triggers execute-ref-fn which caches
+        (doseq [fn-rec ref-fns]
           (exec/execute ctx (:id fn-rec) nil))
         ;; Cache should not exceed max size due to eviction
-        (is (<= (count @(:result-cache ctx)) 3))
+        (is (<= (count @(:result-cache ctx)) 2))
         (finally
           (sp/close storage))))))
 
@@ -750,6 +768,70 @@
       ;; Should use DB values (10 + 20) NOT provided values
       (is (= 30 result))
       (sp/close storage))))
+
+
+;; === resolve-base-fn error tests ===
+
+(deftest resolve-base-fn-missing-parent-test
+  (testing "throws when parent-id points to non-existent fn in graph"
+    (let [storage (setup/create-test-storage)]
+      (try
+        ;; Register base fn
+        (exec/register-base-fn!
+          :identity
+          (fn [{:keys [x]} _ctx] @x))
+
+        ;; Create base fn
+        (let [base-fn (setup/create-base-fn! storage "identity" :int)
+              _ (setup/create-arg! storage (:id base-fn)
+                                   {:name "x" :type :int :required true :is-fn false})
+              ;; Create composed fn with invalid parent-id (points to non-existent UUID)
+              ;; We'll manually insert this to bypass normal validation
+              invalid-parent-id (random-uuid)
+              composed-fn {:id (random-uuid)
+                           :name "bad-composed"
+                           :parent-id invalid-parent-id  ; points to nothing!
+                           :return-type :int}
+              _ (sp/create-entity storage :fn composed-fn)
+              ctx (exec/create-context {:storage storage})]
+          ;; When we execute, resolve-base-fn will fail when following parent chain
+          (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                #"Function not found in execution graph"
+                (exec/execute ctx (:id composed-fn) {}))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest args-inheritance-depth-exceeded-test
+  (testing "throws when parent chain exceeds max depth during arg resolution"
+    (let [storage (setup/create-test-storage)]
+      (try
+        ;; Register base fn
+        (exec/register-base-fn!
+          :identity
+          (fn [{:keys [x]} _ctx] @x))
+
+        ;; Create base fn
+        (let [base-fn (setup/create-base-fn! storage "identity" :int)
+              base-arg (setup/create-arg! storage (:id base-fn)
+                                          {:name "x" :type :int :required true :is-fn false})
+              ;; Create deep chain: c4 -> c3 -> c2 -> c1 -> base
+              c1 (setup/create-composed-fn! storage "c1" (:id base-fn))
+              _ (setup/create-arg! storage (:id c1)
+                                   {:name "x" :type :int :required true
+                                    :source-id (:id base-arg) :value 42})
+              c2 (setup/create-composed-fn! storage "c2" (:id c1))
+              c3 (setup/create-composed-fn! storage "c3" (:id c2))
+              c4 (setup/create-composed-fn! storage "c4" (:id c3))]
+
+          ;; Execute with very low max-graph-iterations to trigger args depth error
+          (binding [sp/*max-graph-iterations* 2]
+            (let [ctx (exec/create-context {:storage storage})]
+              (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                    #"Parent chain exceeds maximum depth"
+                    (exec/execute ctx (:id c4) {}))))))
+        (finally
+          (sp/close storage))))))
 
 
 ;; === Parent chain depth tests ===

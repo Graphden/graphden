@@ -141,3 +141,32 @@
 
   (testing "returns false when neither is set"
     (is (false? (#'arg-res/arg-has-value? {:name "x"})))))
+
+
+;; === build-value-delay tests for fn-type with string UUID ===
+
+(deftest build-value-delay-fn-type-test
+  (testing "converts string UUID to UUID for :fn type arg"
+    (let [uuid (random-uuid)
+          uuid-str (str uuid)
+          result (#'arg-res/build-value-delay "f" uuid-str :fn)]
+      (is (delay? result))
+      (is (uuid? @result))
+      (is (= uuid @result))))
+
+  (testing "passes through invalid UUID string for :fn type arg"
+    (let [result (#'arg-res/build-value-delay "f" "not-a-uuid" :fn)]
+      (is (delay? result))
+      (is (= "not-a-uuid" @result))))
+
+  (testing "passes through non-string value for :fn type arg"
+    (let [uuid (random-uuid)
+          result (#'arg-res/build-value-delay "f" uuid :fn)]
+      (is (delay? result))
+      (is (= uuid @result))))
+
+  (testing "passes through value unchanged for non-fn type"
+    (let [uuid-str (str (random-uuid))
+          result (#'arg-res/build-value-delay "x" uuid-str :text)]
+      (is (delay? result))
+      (is (= uuid-str @result)))))

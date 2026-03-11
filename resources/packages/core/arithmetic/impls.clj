@@ -69,13 +69,13 @@
 
 
 (defn neg
-  [{:keys [n]}]
-  (- n))
+  [{:keys [number]}]
+  (- number))
 
 
 (defn abs-fn
-  [{:keys [n]}]
-  (abs n))
+  [{:keys [number]}]
+  (abs number))
 
 
 ;; === Comparison ===

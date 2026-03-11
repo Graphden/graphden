@@ -23,11 +23,11 @@
   :return-type :numeric}
 
  {:name :neg
-  :args {:n :numeric}
+  :args {:number :numeric}
   :return-type :numeric}
 
  {:name :abs
-  :args {:n :numeric}
+  :args {:number :numeric}
   :return-type :numeric}
 
  ;; === Comparison ===

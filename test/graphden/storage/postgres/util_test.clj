@@ -347,3 +347,32 @@
   (testing "extra options override defaults"
     (let [opts (util/query-opts {:timeout 999})]
       (is (= 999 (:timeout opts))))))
+
+
+;; === Type Mapping Extension Tests ===
+
+(deftest register-type-mapping-test
+  (testing "registers new type mapping"
+    ;; First reset to known state
+    (util/reset-type-mappings!)
+    ;; Register a custom type
+    (util/register-type-mapping! :my-custom-type "MY_CUSTOM_TYPE")
+    ;; Verify it's registered
+    (is (= "MY_CUSTOM_TYPE" (util/field-type->pg {:type :my-custom-type})))
+    ;; Reset to restore defaults
+    (util/reset-type-mappings!)))
+
+
+(deftest reset-type-mappings-test
+  (testing "restores default type mappings"
+    ;; Register a custom type
+    (util/register-type-mapping! :custom-test "CUSTOM_TEST")
+    ;; Verify it's there
+    (is (= "CUSTOM_TEST" (util/field-type->pg {:type :custom-test})))
+    ;; Reset
+    (util/reset-type-mappings!)
+    ;; Custom type should now fall back to TEXT (unknown)
+    (is (= "TEXT" (util/field-type->pg {:type :custom-test})))
+    ;; Standard types should still work
+    (is (= "UUID" (util/field-type->pg {:type :uuid})))
+    (is (= "TEXT" (util/field-type->pg {:type :text})))))

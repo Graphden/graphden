@@ -1083,3 +1083,28 @@
       (let [remaining-merges (sp/query-entities (:base-storage storage) :branch-merge
                                                 {:source-branch-id (:id branch)})]
         (is (empty? remaining-merges))))))
+
+
+;; === resolve-execution-graph error cases ===
+
+(deftest resolve-execution-graph-not-found-test
+  (testing "throws when fn-id doesn't exist"
+    (let [storage (create-test-storage)
+          fake-fn-id (random-uuid)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Function not found"
+            (sp/resolve-execution-graph storage fake-fn-id))))))
+
+
+;; === update-entity for non-versioned entities ===
+
+(deftest update-non-versioned-entity-test
+  (testing "update-entity passes through for non-versioned entities"
+    (let [storage (create-test-storage)
+          ;; branch is a non-versioned entity
+          branch (vs/create-branch! storage "test-branch")
+          branch-id (:id branch)]
+      ;; Update the branch entity (non-versioned)
+      (sp/update-entity storage :branch branch-id {:name "renamed-branch"})
+      ;; Verify the update worked
+      (let [updated (vs/get-branch storage branch-id)]
+        (is (= "renamed-branch" (:name updated)))))))

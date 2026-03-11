@@ -508,7 +508,32 @@
           :user
           [{:id dup1} {:id dup1} {:id dup2} {:id dup2}])
         (catch clojure.lang.ExceptionInfo e
-          (is (= 2 (count (:duplicate-ids (ex-data e))))))))))
+          (is (= 2 (count (:duplicate-ids (ex-data e)))))))))
+
+  (testing "passes for empty sequence"
+    (is (nil? (storage/validate-no-duplicate-ids! :user []))))
+
+  (testing "passes for single record with ID"
+    (is (nil? (storage/validate-no-duplicate-ids! :user [{:id (random-uuid)}]))))
+
+  (testing "passes for single record without ID"
+    (is (nil? (storage/validate-no-duplicate-ids! :user [{:name "A"}]))))
+
+  (testing "duplicate at end of sequence after unique IDs"
+    (let [dup-id (random-uuid)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Duplicate IDs"
+            (storage/validate-no-duplicate-ids!
+              :user
+              [{:id (random-uuid)} {:id (random-uuid)} {:id dup-id} {:id dup-id}])))))
+
+  (testing "duplicate with nil-id records interspersed"
+    (let [dup-id (random-uuid)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Duplicate IDs"
+            (storage/validate-no-duplicate-ids!
+              :user
+              [{:id dup-id} {:name "no-id"} {:id dup-id}]))))))
 
 
 ;; === validate-data-is-map! tests ===

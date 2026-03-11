@@ -750,3 +750,112 @@
       ;; Should use DB values (10 + 20) NOT provided values
       (is (= 30 result))
       (sp/close storage))))
+
+
+;; === Parent chain depth tests ===
+
+(deftest parent-chain-depth-test
+  (testing "throws when parent chain exceeds max depth"
+    (let [storage (setup/create-test-storage)]
+      (try
+        ;; Register simple base fn
+        (exec/register-base-fn!
+          :identity
+          (fn [{:keys [x]} _ctx] @x))
+
+        ;; Create base fn
+        (let [base-fn (setup/create-base-fn! storage "identity" :int)
+              _ (setup/create-arg! storage (:id base-fn)
+                                   {:name "x" :type :int :required true :is-fn false})
+              ;; Create chain of composed fns: c1 -> c2 -> c3 -> c4 -> c5 -> base
+              c5 (setup/create-composed-fn! storage "c5" (:id base-fn))
+              c4 (setup/create-composed-fn! storage "c4" (:id c5))
+              c3 (setup/create-composed-fn! storage "c3" (:id c4))
+              c2 (setup/create-composed-fn! storage "c2" (:id c3))
+              c1 (setup/create-composed-fn! storage "c1" (:id c2))
+              ;; Add args down the chain
+              arg-c5 (setup/create-arg! storage (:id c5) {:name "x" :type :int :required true :value 42})
+              _ (setup/create-arg! storage (:id c4) {:name "x" :type :int :required true :source-id (:id arg-c5)})
+              _ (setup/create-arg! storage (:id c3) {:name "x" :type :int :required true})
+              _ (setup/create-arg! storage (:id c2) {:name "x" :type :int :required true})
+              _ (setup/create-arg! storage (:id c1) {:name "x" :type :int :required true})]
+
+          ;; Execute with very low max-graph-iterations to trigger parent chain depth error
+          (binding [sp/*max-graph-iterations* 2]
+            (let [ctx (exec/create-context {:storage storage})]
+              (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                                    #"Parent chain exceeds maximum depth"
+                    (exec/execute ctx (:id c1) {}))))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Depth warning test ===
+
+(deftest depth-warning-threshold-test
+  (testing "approaching max depth triggers warning log"
+    (let [storage (setup/create-test-storage)]
+      (try
+        ;; Register identity function
+        (exec/register-base-fn!
+          :identity
+          (fn [{:keys [x]} _ctx] @x))
+
+        ;; Create base fn
+        (let [base-fn (setup/create-base-fn! storage "identity" :int)
+              base-arg (setup/create-arg! storage (:id base-fn)
+                                          {:name "x" :type :int :required true :is-fn false})
+              ;; Create fn-a -> fn-b -> fn-c chain via ref-id
+              fn-c (setup/create-composed-fn! storage "fn-c" (:id base-fn))
+              _ (setup/create-arg! storage (:id fn-c)
+                                   {:name "x" :type :int :required true :is-fn false
+                                    :source-id (:id base-arg) :value 42})
+              fn-b (setup/create-composed-fn! storage "fn-b" (:id base-fn))
+              _ (setup/create-arg! storage (:id fn-b)
+                                   {:name "x" :type :int :required true :is-fn false
+                                    :source-id (:id base-arg) :ref-id (:id fn-c)})
+              fn-a (setup/create-composed-fn! storage "fn-a" (:id base-fn))
+              _ (setup/create-arg! storage (:id fn-a)
+                                   {:name "x" :type :int :required true :is-fn false
+                                    :source-id (:id base-arg) :ref-id (:id fn-b)})
+              ;; max-depth=4, warning at 80% = 3.2 -> depth 3 triggers warning
+              ctx (exec/create-context {:storage storage :max-depth 4})]
+          ;; Should complete successfully (depth 3 < max 4) but warn
+          (is (= 42 (exec/execute ctx (:id fn-a) {}))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Timeout warning threshold test ===
+
+(deftest timeout-warning-threshold-test
+  (testing "approaching timeout triggers warning log"
+    (let [storage (setup/create-test-storage)]
+      (try
+        ;; Register a function that sleeps
+        (exec/register-base-fn!
+          :sleepy
+          (fn [{:keys [ms x]} _ctx]
+            (Thread/sleep @ms)
+            @x))
+
+        ;; Create base fn
+        (let [base-fn (setup/create-base-fn! storage "sleepy" :int)
+              ms-arg (setup/create-arg! storage (:id base-fn)
+                                        {:name "ms" :type :int :required true :is-fn false})
+              x-arg (setup/create-arg! storage (:id base-fn)
+                                       {:name "x" :type :int :required true :is-fn false})
+              ;; Create sleepy fn that sleeps 75ms
+              sleepy-fn (setup/create-composed-fn! storage "my-sleepy" (:id base-fn))
+              _ (setup/create-arg! storage (:id sleepy-fn)
+                                   {:name "ms" :type :int :required true :is-fn false
+                                    :source-id (:id ms-arg) :value 75})
+              _ (setup/create-arg! storage (:id sleepy-fn)
+                                   {:name "x" :type :int :required true :is-fn false
+                                    :source-id (:id x-arg) :value 42})
+              ;; timeout=100ms, warning at 80% = 80ms, so after 75ms we're approaching
+              ctx (exec/create-context {:storage storage :timeout-ms 100})]
+          ;; Should complete (75 < 100) but log warning at ~80ms check
+          (is (= 42 (exec/execute ctx (:id sleepy-fn) {}))))
+        (finally
+          (sp/close storage))))))

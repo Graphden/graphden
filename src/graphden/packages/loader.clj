@@ -298,14 +298,17 @@
   [package-names]
   (let [ordered (resolve-dependencies package-names)
         _ (log/info "Loading packages in order:" ordered)
-
         results (mapv load-single-package ordered)
-
-        combined {:base-fn-defs (reduce merge {} (map :base-fn-defs results))
-                  :fn-defs (into [] (mapcat :fn-defs) results)
-                  :packages (mapv :meta results)
-                  :startup-fn (some #(get-in % [:meta :startup-fn]) (reverse results))}]
-
+        ;; Single pass over results to build all aggregations
+        combined (reduce (fn [acc result]
+                           (-> acc
+                               (update :base-fn-defs merge (:base-fn-defs result))
+                               (update :fn-defs into (:fn-defs result))
+                               (update :packages conj (:meta result))
+                               (cond-> (get-in result [:meta :startup-fn])
+                                 (assoc :startup-fn (get-in result [:meta :startup-fn])))))
+                         {:base-fn-defs {} :fn-defs [] :packages [] :startup-fn nil}
+                         results)]
     (log/info "Loaded" (count (:base-fn-defs combined)) "base functions,"
               (count (:fn-defs combined)) "fn-defs")
     combined))
@@ -333,6 +336,9 @@
   (when-let [packages-url (io/resource "packages/")]
     (let [file (io/file packages-url)]
       (when (java.io.File/.isDirectory file)
-        (vec (sort (map java.io.File/.getName
-                        (filter java.io.File/.isDirectory
-                                (java.io.File/.listFiles file)))))))))
+        (when-let [children (java.io.File/.listFiles file)]
+          (->> children
+               (filter #(java.io.File/.isDirectory ^java.io.File %))
+               (map #(java.io.File/.getName ^java.io.File %))
+               sort
+               vec))))))

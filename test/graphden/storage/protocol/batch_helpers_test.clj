@@ -78,3 +78,156 @@
                            nil
                            (fn [item _idx] (:x item))))]
       (is (= [1 2] results)))))
+
+
+;; =============================================================================
+;; needs-special-encoding? tests
+;; =============================================================================
+
+(deftest needs-special-encoding?-test
+  (testing "returns true for jsonb"
+    (is (true? (storage/needs-special-encoding? :jsonb))))
+
+  (testing "returns true for union"
+    (is (true? (storage/needs-special-encoding? :union))))
+
+  (testing "returns true for enum"
+    (is (true? (storage/needs-special-encoding? :enum))))
+
+  (testing "returns false for basic types"
+    (is (false? (storage/needs-special-encoding? :text)))
+    (is (false? (storage/needs-special-encoding? :int)))
+    (is (false? (storage/needs-special-encoding? :uuid)))
+    (is (false? (storage/needs-special-encoding? :bool)))
+    (is (false? (storage/needs-special-encoding? :timestamptz)))))
+
+
+;; =============================================================================
+;; with-max-graph-iterations tests
+;; =============================================================================
+
+(deftest with-max-graph-iterations-test
+  (testing "binds *max-graph-iterations* for duration of function"
+    (let [outer-val storage/*max-graph-iterations*
+          captured-val (atom nil)]
+      (storage/with-max-graph-iterations 500
+                                         (fn []
+                                           (reset! captured-val storage/*max-graph-iterations*)))
+      (is (= 500 @captured-val))
+      (is (= outer-val storage/*max-graph-iterations*))))
+
+  (testing "restores original value after function completes"
+    (let [original storage/*max-graph-iterations*]
+      (storage/with-max-graph-iterations 100 (fn [] :noop))
+      (is (= original storage/*max-graph-iterations*))))
+
+  (testing "restores original value even on exception"
+    (let [original storage/*max-graph-iterations*]
+      (try
+        (storage/with-max-graph-iterations 50
+                                           (fn [] (throw (ex-info "test error" {}))))
+        (catch Exception _e nil))
+      (is (= original storage/*max-graph-iterations*)))))
+
+
+;; =============================================================================
+;; with-query-timeout tests
+;; =============================================================================
+
+(deftest with-query-timeout-test
+  (testing "binds *query-timeout-ms* for duration of function"
+    (let [captured-val (atom nil)]
+      (storage/with-query-timeout 5000
+                                  (fn []
+                                    (reset! captured-val storage/*query-timeout-ms*)))
+      (is (= 5000 @captured-val))))
+
+  (testing "validates timeout before executing"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"at least"
+          (storage/with-query-timeout 50
+                                      (fn [] :noop)))))
+
+  (testing "restores original value after function completes"
+    (let [original storage/*query-timeout-ms*]
+      (storage/with-query-timeout 10000 (fn [] :noop))
+      (is (= original storage/*query-timeout-ms*)))))
+
+
+;; =============================================================================
+;; with-regex-limits tests
+;; =============================================================================
+
+(deftest with-regex-limits-test
+  (testing "binds regex limit vars for duration of function"
+    (let [captured (atom {})]
+      (storage/with-regex-limits
+        {:max-pattern-length 50
+         :max-input-length 5000
+         :compile-timeout-ms 200}
+        (fn []
+          (reset! captured {:pattern storage/*max-regex-length*
+                            :input storage/*max-regex-input-length*
+                            :timeout storage/*regex-compile-timeout-ms*})))
+      (is (= 50 (:pattern @captured)))
+      (is (= 5000 (:input @captured)))
+      (is (= 200 (:timeout @captured)))))
+
+  (testing "uses defaults for missing keys"
+    (let [original-pattern storage/*max-regex-length*
+          captured (atom nil)]
+      (storage/with-regex-limits
+        {:max-input-length 999}
+        (fn []
+          (reset! captured {:pattern storage/*max-regex-length*
+                            :input storage/*max-regex-input-length*})))
+      (is (= original-pattern (:pattern @captured)))
+      (is (= 999 (:input @captured)))))
+
+  (testing "restores original values after function"
+    (let [original storage/*max-regex-length*]
+      (storage/with-regex-limits {:max-pattern-length 10} (fn [] :noop))
+      (is (= original storage/*max-regex-length*)))))
+
+
+;; =============================================================================
+;; initialize-with-cleanup! tests
+;; =============================================================================
+
+(defrecord MockStorage
+  [init-called close-called should-fail]
+
+  storage/Storage
+
+  (initialize
+    [this _schema]
+    (reset! (:init-called this) true)
+    (when @(:should-fail this)
+      (throw (ex-info "Init failed" {:type :test-error})))
+    this)
+
+
+  (close
+    [this]
+    (reset! (:close-called this) true)))
+
+
+(deftest initialize-with-cleanup!-test
+  (testing "returns storage on successful init"
+    (let [init-called (atom false)
+          close-called (atom false)
+          mock (->MockStorage init-called close-called (atom false))
+          result (storage/initialize-with-cleanup! mock {})]
+      (is (= mock result))
+      (is @init-called)
+      (is (not @close-called))))
+
+  (testing "closes storage and rethrows on init failure"
+    (let [init-called (atom false)
+          close-called (atom false)
+          mock (->MockStorage init-called close-called (atom true))]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Init failed"
+            (storage/initialize-with-cleanup! mock {})))
+      (is @init-called)
+      (is @close-called "Storage should be closed on init failure"))))

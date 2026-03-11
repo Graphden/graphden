@@ -36,7 +36,8 @@
     [clojure.tools.logging :as log]
     [graphden.executor.argument-resolution :as arg-res]
     [graphden.executor.context :as ctx]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.core :as sp]
+    [graphden.storage.protocol.graph :as graph]))
 
 
 (declare execute-internal)
@@ -64,49 +65,11 @@
       fn-rec)))
 
 
-(defn- resolve-arg-name
-  "Resolves the name of an arg by following source-id chain.
-   If arg has :name set, returns it. Otherwise follows source-id to find name.
-   Returns the resolved name string or throws if not found."
-  [execution-graph arg depth]
-  (when (> depth sp/*max-graph-iterations*)
-    (throw (ex-info "Source-id chain exceeds maximum depth while resolving arg name"
-                    {:type :execution-error/source-chain-too-deep
-                     :arg-id (:id arg)
-                     :max-depth sp/*max-graph-iterations*})))
-  (if-let [arg-name (:name arg)]
-    arg-name
-    ;; No name - follow source-id chain
-    (if-let [source-id (:source-id arg)]
-      (let [args-by-id (:args-by-id execution-graph)
-            source-arg (get args-by-id source-id)]
-        (if source-arg
-          (recur execution-graph source-arg (inc depth))
-          (throw (ex-info "Source arg not found while resolving name"
-                          {:type :execution-error/source-arg-not-found
-                           :arg-id (:id arg)
-                           :source-id source-id}))))
-      (throw (ex-info "Arg has no name and no source-id"
-                      {:type :execution-error/arg-missing-name
-                       :arg-id (:id arg)})))))
-
-
-(defn- resolve-arg-names
-  "Resolves names for all args, following source-id chain where needed.
-   Returns args with :name field populated."
-  [execution-graph args]
-  (mapv (fn [arg]
-          (if (:name arg)
-            arg
-            (assoc arg :name (resolve-arg-name execution-graph arg 0))))
-        args))
-
-
 (defn- get-fn-args-with-inheritance
   "Collects args from entire parent chain, merging by source-id.
    Child args override parent args they inherit from (via source-id).
-   Resolves arg names via source-id chain for args with nil names.
-   Returns vector of all args needed to execute the base-fn."
+   Returns vector of all args needed to execute the base-fn.
+   Note: arg names are resolved via arg-roots index at usage time, not here."
   [execution-graph fn-id depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain exceeds maximum depth while resolving args"
@@ -116,8 +79,6 @@
   (let [fns (sp/get-graph-fns execution-graph)
         fn-rec (get fns fn-id)
         own-args (sp/graph-get-args execution-graph fn-id)
-        ;; Resolve names for own args (may have nil names that need source-id lookup)
-        own-args-resolved (resolve-arg-names execution-graph own-args)
         parent-id (:parent-id fn-rec)]
     (if parent-id
       ;; Merge with parent args - own args override args they inherit from (via source-id)
@@ -127,9 +88,9 @@
             own-source-ids (into #{} (keep :source-id) own-args)
             ;; Keep parent args that are NOT the source of any own arg
             filtered-parent-args (remove #(own-source-ids (:id %)) parent-args)]
-        (vec (concat own-args-resolved filtered-parent-args)))
-      ;; Base fn - just return own args (already resolved)
-      own-args-resolved)))
+        (vec (concat own-args filtered-parent-args)))
+      ;; Base fn - just return own args
+      (vec own-args))))
 
 
 (defn- get-fn-data-from-graph
@@ -272,41 +233,24 @@
     caller-args))
 
 
-(defn- resolve-source-arg-name
-  "Resolves the name of the root source arg in the source-id chain.
-   Mirrors the logic in argument_resolution.clj."
-  [args-by-id arg depth]
-  (when (> depth sp/*max-graph-iterations*)
-    (throw (ex-info "Source-id chain exceeds maximum depth"
-                    {:type :execution-error/source-chain-too-deep
-                     :arg-id (:id arg)
-                     :max-depth sp/*max-graph-iterations*})))
-  (if-let [source-id (:source-id arg)]
-    (if-let [source-arg (get args-by-id source-id)]
-      (recur args-by-id source-arg (inc depth))
-      (:name arg))
-    (:name arg)))
-
-
 (defn- build-arg-delays-by-id
   "Builds a map of {arg-id -> delay} from caller-args and arg-delays.
    Used for propagation lookup by arg-id instead of arg-name.
 
-   Uses source arg name resolution to match how arg-delays are keyed.
-   This ensures renamed args (via :as) are properly matched."
+   Uses pre-built arg-roots index for O(1) root name lookup.
+   This ensures inherited args (via source-id) are properly matched."
   [execution-graph caller-args arg-delays]
-  (let [args-by-id (:args-by-id execution-graph)]
-    (reduce
-      (fn [acc arg]
-        ;; Use source arg name to match arg-delays keying
-        (let [source-name (resolve-source-arg-name args-by-id arg 0)
-              arg-name (keyword source-name)
-              delay-val (get arg-delays arg-name)]
-          (if delay-val
-            (assoc acc (:id arg) delay-val)
-            acc)))
-      {}
-      caller-args)))
+  (reduce
+    (fn [acc arg]
+      ;; Use root arg name to match arg-delays keying (O(1) via index)
+      (let [root-name (graph/get-root-arg-name execution-graph arg)
+            arg-name-kw (keyword root-name)
+            delay-val (get arg-delays arg-name-kw)]
+        (if delay-val
+          (assoc acc (:id arg) delay-val)
+          acc)))
+    {}
+    caller-args))
 
 
 (defn- execute-ref-fn

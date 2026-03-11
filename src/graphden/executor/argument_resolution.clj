@@ -24,7 +24,7 @@
     [clojure.tools.logging :as log]
     [graphden.executor.types :as types]
     [graphden.storage.protocol.config :as config]
-    [graphden.storage.protocol.core :as sp]))
+    [graphden.storage.protocol.graph :as graph]))
 
 
 ;; === Delay Building Infrastructure ===
@@ -184,31 +184,6 @@
                    :arg-name arg-name})))
 
 
-;; === Source Arg Resolution ===
-
-(defn- resolve-source-arg-name
-  "Resolves the name of the root source arg in the source-id chain.
-   This is the name the base-fn implementation expects.
-
-   For renamed args (via :as), we need to pass the value using the
-   original source arg name so the base-fn impl can find it.
-
-   Example: route.path (source-id=pair.first) -> returns 'first'"
-  [args-by-id arg depth]
-  (when (> depth sp/*max-graph-iterations*)
-    (throw (ex-info "Source-id chain exceeds maximum depth"
-                    {:type :execution-error/source-chain-too-deep
-                     :arg-id (:id arg)
-                     :max-depth sp/*max-graph-iterations*})))
-  (if-let [source-id (:source-id arg)]
-    (if-let [source-arg (get args-by-id source-id)]
-      (recur args-by-id source-arg (inc depth))
-      ;; Source not found - fall back to arg's own name
-      (:name arg))
-    ;; No source-id - this is a root arg, use its name
-    (:name arg)))
-
-
 ;; === Main Argument Resolution ===
 
 (defn- arg-has-value?
@@ -243,7 +218,6 @@
   [context fn-data provided-args execute-ref-fn]
   (let [args (:args fn-data)
         execution-graph (:execution-graph context)
-        args-by-id (:args-by-id execution-graph)
         strict? (:strict-type-validation? context)
         max-unknown-types (:max-unknown-types context)
         unknown-type-counter (:unknown-type-counter context)
@@ -252,9 +226,9 @@
     (doseq [arg args]
       (let [arg-id (:id arg)
             arg-name (:name arg)
-            ;; Key by source arg name so base-fn impl can find it
-            ;; For renamed args (via :as), this resolves to the original name
-            key-name (resolve-source-arg-name args-by-id arg 0)
+            ;; Key by root arg name so base-fn impl can find it (O(1) lookup)
+            ;; For inherited args, this is the base-fn arg name
+            key-name (graph/get-root-arg-name execution-graph arg)
             key-name-kw (keyword key-name)
             provided-value (get provided-args arg-id)
             has-stored-value? (arg-has-value? arg)

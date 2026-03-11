@@ -176,7 +176,7 @@
 ;; === ExecutionGraphResult record ===
 
 (defrecord ExecutionGraphResult
-  [fns args args-by-fn args-by-id])
+  [fns args args-by-fn args-by-id arg-roots])
 
 
 (defn- build-args-by-fn-index
@@ -197,6 +197,36 @@
   (into {} (map (juxt :id identity) args)))
 
 
+(defn- find-root-arg-id
+  "Follows source-id chain to find the root arg (the one with name).
+   Returns the root arg's id. Uses args-by-id for O(1) lookups."
+  [args-by-id arg-id max-depth]
+  (loop [current-id arg-id
+         depth 0]
+    (when (> depth max-depth)
+      (throw (ex-info "Source-id chain exceeds maximum depth"
+                      {:type :graph-error/source-chain-too-deep
+                       :arg-id arg-id
+                       :max-depth max-depth})))
+    (let [arg (get args-by-id current-id)]
+      (if-let [source-id (:source-id arg)]
+        (recur source-id (inc depth))
+        current-id))))
+
+
+(defn- build-arg-roots-index
+  "Builds index of arg-id -> root-arg-id.
+   Root arg is the one at the end of source-id chain (has :name, no :source-id).
+   Provides O(1) lookup for resolving arg names at runtime."
+  [args-by-id]
+  (let [max-depth 100]
+    (reduce-kv
+      (fn [acc arg-id _arg]
+        (assoc acc arg-id (find-root-arg-id args-by-id arg-id max-depth)))
+      {}
+      args-by-id)))
+
+
 (defn ->execution-graph
   "Creates an ExecutionGraphResult record from a map.
    Validates that all required keys are present and non-empty.
@@ -212,7 +242,9 @@
   (when-not (sequential? args)
     (throw (ex-info "ExecutionGraphResult requires :args sequence"
                     {:type :invalid-data :received (type args)})))
-  (->ExecutionGraphResult fns args (build-args-by-fn-index args) (build-args-by-id-index args)))
+  (let [args-by-id (build-args-by-id-index args)
+        arg-roots (build-arg-roots-index args-by-id)]
+    (->ExecutionGraphResult fns args (build-args-by-fn-index args) args-by-id arg-roots)))
 
 
 (defn execution-graph?
@@ -245,6 +277,17 @@
    Uses pre-built index for O(1) lookup."
   [graph fn-id]
   (get (:args-by-fn graph) fn-id []))
+
+
+(defn get-root-arg-name
+  "Returns the name of the root arg for a given arg.
+   Uses pre-built arg-roots index for O(1) lookup.
+   Root arg is at the end of source-id chain (base-fn arg with :name)."
+  [graph arg]
+  (let [arg-id (:id arg)
+        root-id (get (:arg-roots graph) arg-id arg-id)
+        root-arg (get (:args-by-id graph) root-id)]
+    (:name root-arg)))
 
 
 ;; === Graph Resolution BFS Algorithm ===

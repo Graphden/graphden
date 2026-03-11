@@ -171,9 +171,10 @@
         current-size (count current)
         entries-to-remove (- current-size target-size)]
     (when (pos? entries-to-remove)
-      ;; Realize keys-to-remove as vec to avoid lazy seq issues with apply
-      (let [keys-to-remove (vec (take entries-to-remove (keys current)))]
-        (swap! result-cache #(apply dissoc % keys-to-remove))
+      ;; Use reduce for O(k) dissoc instead of apply dissoc
+      (let [keys-to-remove (take entries-to-remove (keys current))]
+        (swap! result-cache (fn [m]
+                              (reduce dissoc m keys-to-remove)))
         (log/debug "Evicted cache entries"
                    {:evicted-count entries-to-remove
                     :new-size (count @result-cache)})
@@ -418,13 +419,16 @@
 
 (defn- resolve-named-args
   "Converts a map of {arg-name-keyword -> value} to {arg-id -> value}.
-   Uses argument inheritance for composed fns with no own args."
+   Uses argument inheritance for composed fns with no own args.
+   Uses pre-built arg-roots index for O(1) name resolution."
   [execution-graph fn-id named-args]
   (let [args (or (get-fn-args-with-inheritance execution-graph fn-id 0) [])
+        ;; Build name->arg-id map using root name for correct inheritance
         name->arg-id (into {}
                            (map (fn [arg]
-                                  [(keyword (:name arg)) (:id arg)])
-                                args))]
+                                  (let [root-name (graph/get-root-arg-name execution-graph arg)]
+                                    [(keyword root-name) (:id arg)])))
+                           args)]
     (reduce-kv
       (fn [acc arg-name value]
         (if-let [arg-id (get name->arg-id arg-name)]

@@ -34,6 +34,7 @@
    1. fn from this definition set (by name)
    2. fn already in storage (by name)"
   (:require
+    [clojure.set :as set]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.executor.registry.interface :as registry]
@@ -92,27 +93,62 @@
 (defn- topological-sort
   "Topologically sorts fn-defs by dependencies.
    Returns sorted vector of fn-defs.
-   Throws on cycles."
+   Throws on cycles.
+
+   Uses Kahn's algorithm with O(V+E) complexity:
+   - Tracks in-degree (unvisited deps count) for each node
+   - Maintains ready-set of nodes with zero in-degree
+   - Each node enters/exits ready-set exactly once"
   [fn-defs]
   (let [dep-graph (build-dependency-graph fn-defs)
-        fn-def-map (into {} (map (juxt :name identity) fn-defs))]
+        fn-def-map (into {} (map (juxt :name identity) fn-defs))
+        all-names (into #{} (map :name) fn-defs)
+        ;; Build reverse dependency map: {fn-name -> #{fns-that-depend-on-it}}
+        reverse-deps (reduce-kv
+                       (fn [acc fn-name deps]
+                         (reduce (fn [m dep]
+                                   (update m dep (fnil conj #{}) fn-name))
+                                 acc deps))
+                       {}
+                       dep-graph)
+        ;; Initial in-degree: count of unvisited dependencies
+        ;; Only count deps that are in our set (external deps are pre-satisfied)
+        initial-in-degree (into {}
+                                (map (fn [fn-name]
+                                       [fn-name (count (set/intersection
+                                                         (get dep-graph fn-name #{})
+                                                         all-names))]))
+                                all-names)
+        ;; Initial ready-set: nodes with no dependencies within the set
+        initial-ready (into #{} (filter #(zero? (get initial-in-degree % 0))) all-names)]
     (loop [sorted []
-           remaining (into #{} (map :name) fn-defs)
-           visited #{}]
-      (if (empty? remaining)
-        (mapv fn-def-map sorted)
-        (if-let [ready (->> remaining
-                            (filter (fn [fn-name]
-                                      (let [deps (get dep-graph fn-name #{})]
-                                        (every? #(contains? visited %) deps))))
-                            first)]
-          (recur (conj sorted ready)
-                 (disj remaining ready)
-                 (conj visited ready))
-          (throw (ex-info "Circular dependency detected in fn definitions"
-                          {:type :fn-composition/circular-dependency
-                           :remaining remaining
-                           :dep-graph (select-keys dep-graph remaining)})))))))
+           ready-set initial-ready
+           in-degree initial-in-degree]
+      (if (empty? ready-set)
+        (if (= (count sorted) (count fn-defs))
+          (mapv fn-def-map sorted)
+          ;; Not all processed - cycle detected
+          (let [remaining (set/difference all-names (set sorted))]
+            (throw (ex-info "Circular dependency detected in fn definitions"
+                            {:type :fn-composition/circular-dependency
+                             :remaining remaining
+                             :dep-graph (select-keys dep-graph remaining)}))))
+        ;; Pick any ready node (first for determinism)
+        (let [current (first ready-set)
+              rest-ready (disj ready-set current)
+              ;; Update in-degree for all dependents
+              dependents (get reverse-deps current #{})
+              {:keys [new-ready new-in-degree]}
+              (reduce (fn [{:keys [new-ready new-in-degree]} dependent]
+                        (let [old-deg (get new-in-degree dependent)
+                              new-deg (dec old-deg)]
+                          {:new-in-degree (assoc new-in-degree dependent new-deg)
+                           :new-ready (if (zero? new-deg)
+                                        (conj new-ready dependent)
+                                        new-ready)}))
+                      {:new-ready rest-ready :new-in-degree in-degree}
+                      dependents)]
+          (recur (conj sorted current) new-ready new-in-degree))))))
 
 
 (defn- check-order-and-warn
@@ -183,10 +219,12 @@
 
 
 (defn- resolve-arg-name-cached
-  "Resolves arg name by following source-id chain using cache.
+  "Resolves arg name by following source-id chain using args-by-id index.
    If arg has :name, returns it. Otherwise follows source-id to find name.
-   Returns string name or nil if not resolvable."
-  [args-cache arg depth]
+   Returns string name or nil if not resolvable.
+
+   Uses O(1) lookup via args-by-id index instead of O(F×A) scan."
+  [args-by-id arg depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Source-id chain too deep while resolving arg name"
                     {:type :fn-composition/source-chain-too-deep
@@ -195,11 +233,9 @@
   (if-let [arg-name (:name arg)]
     arg-name
     (when-let [source-id (:source-id arg)]
-      ;; Find source arg in any fn's args
-      (when-let [source-arg (some (fn [[_fn-id fn-args]]
-                                    (some #(when (= (:id %) source-id) %) fn-args))
-                                  args-cache)]
-        (recur args-cache source-arg (inc depth))))))
+      ;; O(1) lookup by arg-id
+      (when-let [source-arg (get args-by-id source-id)]
+        (recur args-by-id source-arg (inc depth))))))
 
 
 (defn- collect-free-args-from-fn
@@ -208,8 +244,10 @@
 
    Free args come from:
    1. Parent fn's free args (via parent-id)
-   2. Free args from fns referenced in arg values (via ref-id)"
-  [fn-cache args-cache fn-id visited-fns depth]
+   2. Free args from fns referenced in arg values (via ref-id)
+
+   args-data contains :by-fn and :by-id indexes."
+  [fn-cache args-data fn-id visited-fns depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Free arg collection chain too deep"
                     {:type :fn-composition/chain-too-deep
@@ -219,77 +257,98 @@
     ;; Cycle detected, return empty to avoid infinite loop
     []
     (let [visited' (conj visited-fns fn-id)
-          fn-args (get args-cache fn-id [])
-          own-free-args (filter free-arg? fn-args)]
+          fn-args (get (:by-fn args-data) fn-id [])
+          ;; Single pass: partition into free and bound args
+          {:keys [free-args bound-args]}
+          (reduce (fn [acc arg]
+                    (if (free-arg? arg)
+                      (update acc :free-args conj arg)
+                      (update acc :bound-args conj arg)))
+                  {:free-args [] :bound-args []}
+                  fn-args)]
       ;; Free args are:
       ;; 1. Own free args
       ;; 2. Free args from fns referenced via ref-id (recursively)
-      (vec (concat own-free-args
-                   (mapcat (fn [arg]
-                             (when-let [ref-fn-id (:ref-id arg)]
-                               (collect-free-args-from-fn fn-cache args-cache ref-fn-id visited' (inc depth))))
-                           ;; Only check args that HAVE ref-id (bound to other fn)
-                           (remove free-arg? fn-args)))))))
+      (into free-args
+            (mapcat (fn [arg]
+                      (when-let [ref-fn-id (:ref-id arg)]
+                        (collect-free-args-from-fn fn-cache args-data ref-fn-id visited' (inc depth)))))
+            bound-args))))
 
 
 (defn- collect-parent-free-args
   "Collects free args from the parent fn chain.
-   Returns vector of arg entities that are free in the parent chain."
-  [fn-cache args-cache parent-fn-id depth]
+   Returns vector of arg entities that are free in the parent chain.
+
+   args-data contains :by-fn and :by-id indexes."
+  [fn-cache args-data parent-fn-id depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain too deep while collecting free args"
                     {:type :fn-composition/parent-chain-too-deep
                      :parent-fn-id parent-fn-id
                      :max-depth sp/*max-graph-iterations*})))
-  (let [fn-args (get args-cache parent-fn-id [])
-        own-free-args (filter free-arg? fn-args)
-        ;; Also collect free args from referenced fns
+  (let [fn-args (get (:by-fn args-data) parent-fn-id [])
+        ;; Single pass: partition into free and bound args
+        {:keys [free-args bound-args]}
+        (reduce (fn [acc arg]
+                  (if (free-arg? arg)
+                    (update acc :free-args conj arg)
+                    (update acc :bound-args conj arg)))
+                {:free-args [] :bound-args []}
+                fn-args)
+        ;; Collect free args from referenced fns (only bound args have ref-id)
         ref-free-args (mapcat (fn [arg]
                                 (when-let [ref-fn-id (:ref-id arg)]
-                                  (collect-free-args-from-fn fn-cache args-cache ref-fn-id #{} (inc depth))))
-                              (remove free-arg? fn-args))]
-    (vec (concat own-free-args ref-free-args))))
+                                  (collect-free-args-from-fn fn-cache args-data ref-fn-id #{} (inc depth))))
+                              bound-args)]
+    (into free-args ref-free-args)))
 
 
 (defn- preload-all-args
   "Loads arg entities for given fn-ids using WHERE IN clause.
-   Returns map of {fn-id -> [args]}."
+   Returns map with two indexes:
+   - :by-fn {fn-id -> [args]} for fn-based lookup
+   - :by-id {arg-id -> arg} for O(1) arg lookup by id"
   [storage fn-ids]
   (if (empty? fn-ids)
-    {}
+    {:by-fn {} :by-id {}}
     ;; Use WHERE IN clause instead of full table scan + filter
     (let [matching-args (sp/query-entities storage :arg {:fn-id (vec fn-ids)})]
-      (group-by :fn-id matching-args))))
+      {:by-fn (group-by :fn-id matching-args)
+       :by-id (into {} (map (juxt :id identity)) matching-args)})))
 
 
 (defn- get-parent-arg-cached
   "Gets the parent's arg entity for an arg name using cache.
    Follows inheritance chain (via parent-id) to find the arg.
    Resolves arg names via source-id chain if arg.name is nil.
-   Returns the arg entity or throws if not found."
-  [fn-cache args-cache parent-fn-id arg-name]
-  (loop [fn-id parent-fn-id
-         depth 0]
-    (when (> depth sp/*max-graph-iterations*)
-      (throw (ex-info "Parent chain too deep while resolving arg"
-                      {:type :fn-composition/parent-chain-too-deep
-                       :arg-name arg-name
-                       :max-depth sp/*max-graph-iterations*})))
-    (let [fn-args (get args-cache fn-id [])
-          arg-name-str (name arg-name)
-          ;; Match by resolved name (handles nil :name fields)
-          found (some #(when (= (resolve-arg-name-cached args-cache % 0) arg-name-str) %)
-                      fn-args)]
-      (or found
-          ;; Not found on this fn, check parent
-          (let [fn-entity (get fn-cache fn-id)]
-            (if-let [next-parent-id (:parent-id fn-entity)]
-              (recur next-parent-id (inc depth))
-              ;; No more parents - arg not found
-              (throw (ex-info (str "Argument not found in parent chain: " arg-name)
-                              {:type :fn-composition/unresolved-arg
-                               :parent-fn-id parent-fn-id
-                               :arg-name arg-name}))))))))
+   Returns the arg entity or throws if not found.
+
+   args-data contains :by-fn and :by-id indexes."
+  [fn-cache args-data parent-fn-id arg-name]
+  (let [args-by-id (:by-id args-data)]
+    (loop [fn-id parent-fn-id
+           depth 0]
+      (when (> depth sp/*max-graph-iterations*)
+        (throw (ex-info "Parent chain too deep while resolving arg"
+                        {:type :fn-composition/parent-chain-too-deep
+                         :arg-name arg-name
+                         :max-depth sp/*max-graph-iterations*})))
+      (let [fn-args (get (:by-fn args-data) fn-id [])
+            arg-name-str (name arg-name)
+            ;; Match by resolved name using O(1) by-id lookup
+            found (some #(when (= (resolve-arg-name-cached args-by-id % 0) arg-name-str) %)
+                        fn-args)]
+        (or found
+            ;; Not found on this fn, check parent
+            (let [fn-entity (get fn-cache fn-id)]
+              (if-let [next-parent-id (:parent-id fn-entity)]
+                (recur next-parent-id (inc depth))
+                ;; No more parents - arg not found
+                (throw (ex-info (str "Argument not found in parent chain: " arg-name)
+                                {:type :fn-composition/unresolved-arg
+                                 :parent-fn-id parent-fn-id
+                                 :arg-name arg-name})))))))))
 
 
 (defn- find-available-arg
@@ -303,12 +362,14 @@
    2. Propagated free args from refs (via ref-id chains)
 
    Resolves arg names via source-id chain if arg.name is nil.
+   args-data contains :by-fn and :by-id indexes.
    Returns the arg entity or throws if not found."
-  [fn-cache args-cache parent-fn-id arg-name]
+  [fn-cache args-data parent-fn-id arg-name]
   (let [arg-name-str (name arg-name)
+        args-by-id (:by-id args-data)
         ;; First try direct parent chain lookup
         direct-result (try
-                        (get-parent-arg-cached fn-cache args-cache parent-fn-id arg-name)
+                        (get-parent-arg-cached fn-cache args-data parent-fn-id arg-name)
                         (catch clojure.lang.ExceptionInfo e
                           (when-not (= :fn-composition/unresolved-arg (:type (ex-data e)))
                             (throw e))
@@ -316,10 +377,10 @@
     (or direct-result
         ;; Not in parent chain - search in propagated free args from refs
         ;; Single pass: find free-arg match first, else first any-match
-        ;; Use resolved names for matching
-        (let [parent-free-args (collect-parent-free-args fn-cache args-cache parent-fn-id 0)
+        ;; Use resolved names for matching with O(1) by-id lookup
+        (let [parent-free-args (collect-parent-free-args fn-cache args-data parent-fn-id 0)
               found (reduce (fn [first-match arg]
-                              (let [resolved-name (resolve-arg-name-cached args-cache arg 0)]
+                              (let [resolved-name (resolve-arg-name-cached args-by-id arg 0)]
                                 (if (= resolved-name arg-name-str)
                                   (if (free-arg? arg)
                                     (reduced arg)           ; Free arg - best match, stop
@@ -333,7 +394,7 @@
                               {:type :fn-composition/unresolved-arg
                                :parent-fn-id parent-fn-id
                                :arg-name arg-name
-                               :available-args (mapv #(resolve-arg-name-cached args-cache % 0)
+                               :available-args (mapv #(resolve-arg-name-cached args-by-id % 0)
                                                      parent-free-args)})))))))
 
 
@@ -393,11 +454,13 @@
   "Prepares an arg record for a propagated free arg.
    Used for free args that 'bubble up' from parent or referenced fns.
    Creates a new arg with source-id pointing to the original free arg.
-   Name is nil - inherited via source-id chain."
-  [args-cache fn-id parent-arg]
+   Name is nil - inherited via source-id chain.
+
+   args-data contains :by-fn and :by-id indexes."
+  [args-data fn-id parent-arg]
   (let [source-id (:id parent-arg)
         ;; Check if this propagated arg already exists for this fn
-        fn-args (get args-cache fn-id [])
+        fn-args (get (:by-fn args-data) fn-id [])
         existing (some #(when (= (:source-id %) source-id) %) fn-args)]
     (when-not existing
       ;; Create new propagated arg (free, with no value or ref-id)
@@ -443,8 +506,10 @@
 
    Supports arg value as:
    - Simple value: literal or :fn-ref
-   - Map with :as: {:as :new-name} to rename, optionally with :value or :ref"
-  [fn-cache args-cache fn-name-cache created-fns fn-id parent-fn-id arg-name arg-value]
+   - Map with :as: {:as :new-name} to rename, optionally with :value or :ref
+
+   args-data contains :by-fn and :by-id indexes."
+  [fn-cache args-data fn-name-cache created-fns fn-id parent-fn-id arg-name arg-value]
   (when-not fn-id
     (throw (ex-info "fn-id cannot be nil when preparing arg record"
                     {:type :fn-composition/internal-error
@@ -458,10 +523,10 @@
                       "parsed=" parsed
                       "rename=" rename))
         ;; Use find-available-arg which searches both parent chain AND propagated free args
-        parent-arg (find-available-arg fn-cache args-cache parent-fn-id arg-name)
+        parent-arg (find-available-arg fn-cache args-data parent-fn-id arg-name)
         source-id (:id parent-arg)
         ;; Check if arg already exists for this fn
-        fn-args (get args-cache fn-id [])
+        fn-args (get (:by-fn args-data) fn-id [])
         existing (some #(when (= (:source-id %) source-id) %) fn-args)
         ;; Resolve arg value
         resolved (cond
@@ -598,9 +663,10 @@
             ;; This allows later fn-defs to see propagated args from earlier ones
             ;;
             ;; We still collect all records for batch upsert at the end for efficiency.
+            ;; args-data contains {:by-fn {fn-id -> [args]}, :by-id {arg-id -> arg}}
             {:keys [all-new-args all-update-args]}
             (loop [remaining sorted-defs
-                   args-view args-cache  ; mutable view of args, updated after each fn-def
+                   args-data args-cache  ; mutable view of args, updated after each fn-def
                    new-args []
                    update-args []]
               (if (empty? remaining)
@@ -618,7 +684,7 @@
                       {:keys [explicit-source-ids explicit-new-args explicit-update-args]}
                       (reduce (fn [acc [arg-name arg-value]]
                                 (if-let [record (prepare-arg-record
-                                                  fn-id-cache-final args-view fn-name-cache-final
+                                                  fn-id-cache-final args-data fn-name-cache-final
                                                   created-fns fn-id parent-fn-id arg-name arg-value)]
                                   (let [source-id (or (:source-id (:new record))
                                                       (:source-id (:update record)))]
@@ -637,12 +703,12 @@
 
                       ;; 3b: Propagated free args from parent chain and referenced fns
                       parent-free-args (collect-parent-free-args
-                                         fn-id-cache-final args-view parent-fn-id 0)
+                                         fn-id-cache-final args-data parent-fn-id 0)
                       propagated-new-args
                       (into []
                             (comp
                               (remove #(contains? explicit-source-ids (:id %)))
-                              (keep #(when-let [rec (prepare-propagated-arg-record args-view fn-id %)]
+                              (keep #(when-let [rec (prepare-propagated-arg-record args-data fn-id %)]
                                        (:new rec))))
                             parent-free-args)
 
@@ -650,14 +716,17 @@
                       fn-new-args (into explicit-new-args propagated-new-args)
                       fn-update-args explicit-update-args
 
-                      ;; Update args-view with new args so next fn-def can see them
-                      args-view' (reduce (fn [cache arg]
-                                           (update cache (:fn-id arg)
-                                                   (fnil conj []) arg))
-                                         args-view
+                      ;; Update args-data with new args so next fn-def can see them
+                      ;; Update both :by-fn and :by-id indexes
+                      args-data' (reduce (fn [data arg]
+                                           (-> data
+                                               (update-in [:by-fn (:fn-id arg)]
+                                                          (fnil conj []) arg)
+                                               (assoc-in [:by-id (:id arg)] arg)))
+                                         args-data
                                          fn-new-args)]
                   (recur (rest remaining)
-                         args-view'
+                         args-data'
                          (into new-args fn-new-args)
                          (into update-args fn-update-args)))))]
 

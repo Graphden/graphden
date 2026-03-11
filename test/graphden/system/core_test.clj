@@ -3,9 +3,11 @@
 
    Covers:
    - :http/server halt-key!, suspend-key!, resume-key
+   - :exec/fn-entities init-key
    - Basic lifecycle testing with mocks"
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [integrant.core :as ig]))
 
@@ -77,3 +79,37 @@
         ;; Calling the stop function should not throw
         (when (fn? result)
           (result))))))
+
+
+;; =============================================================================
+;; :exec/fn-entities Tests (using mock)
+;; =============================================================================
+
+(defn- mock-sync-fns
+  "Mock for sync-fns-to-storage! that returns a map of fns."
+  [_storage fn-defs]
+  ;; Return a map of fn-name -> fn-entity for each fn-def
+  (into {}
+        (map (fn [fn-def]
+               [(:name fn-def) {:id (random-uuid) :name (name (:name fn-def))}])
+             fn-defs)))
+
+
+(deftest fn-entities-init-test
+  (testing "init-key creates fn entities from packages"
+    (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns]
+      (let [mock-storage :mock-storage
+            mock-packages {:fn-defs [{:name :test-fn :parent :const}
+                                     {:name :another-fn :parent :add}]}
+            opts {:storage mock-storage :packages mock-packages}
+            result (ig/init-key :exec/fn-entities opts)]
+        (is (map? result) "Should return a map of fn entities")
+        (is (contains? result :test-fn) "Should contain test-fn")
+        (is (contains? result :another-fn) "Should contain another-fn"))))
+
+  (testing "init-key handles empty fn-defs"
+    (with-redefs [fn-composition/sync-fns-to-storage! mock-sync-fns]
+      (let [opts {:storage :mock :packages {:fn-defs []}}
+            result (ig/init-key :exec/fn-entities opts)]
+        (is (map? result))
+        (is (empty? result))))))

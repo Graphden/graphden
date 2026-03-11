@@ -204,3 +204,21 @@
           encoded (codec/encode-row original fields)
           decoded (codec/decode-row encoded fields)]
       (is (= original decoded)))))
+
+
+;; === encode-value fallback tests ===
+
+(deftest encode-value-fallback-test
+  (testing "auto-detects map as jsonb when no field-spec"
+    (let [result (codec/encode-value {:key "value"} nil)]
+      (is (instance? PGobject result))
+      (is (= "jsonb" (PGobject/.getType result)))))
+
+  (testing "auto-detects Instant as timestamptz when no field-spec"
+    (let [now (java.time.Instant/now)
+          result (codec/encode-value now nil)]
+      (is (instance? java.sql.Timestamp result))))
+
+  (testing "returns primitive unchanged when no field-spec"
+    (is (= 42 (codec/encode-value 42 nil)))
+    (is (= "hello" (codec/encode-value "hello" nil)))))

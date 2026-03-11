@@ -202,13 +202,12 @@
 
 
   (read-entities
-    [this entity-name ids]
+    [_ entity-name ids]
     (if-not (res/versioned-entity? entity-name)
       (sp/read-entities base-storage entity-name ids)
-      (into {} (keep (fn [id]
-                       (when-let [rec (sp/read-entity this entity-name id)]
-                         [id rec]))
-                     ids))))
+      ;; Batch resolve: load identity records, then batch resolve versions
+      (let [identity-records (vals (sp/read-entities base-storage entity-name ids))]
+        (res/resolve-entities-batch base-storage entity-name identity-records branch-id))))
 
 
   (update-entities
@@ -222,13 +221,22 @@
     [this entity-name data-seq]
     (if-not (res/versioned-entity? entity-name)
       (sp/upsert-entities base-storage entity-name data-seq)
-      ;; For versioned: check existence and create/update accordingly
-      (mapv (fn [data]
-              (let [id (:id data)]
-                (if (sp/read-entity this entity-name id)
-                  (sp/update-entity this entity-name id (dissoc data :id))
-                  (sp/create-entity this entity-name data))))
-            data-seq)))
+      ;; For versioned: batch check existence, then create/update accordingly
+      (let [ids (keep :id data-seq)
+            ;; Single batch query to check which IDs exist
+            existing-ids (if (seq ids)
+                           (set (keys (sp/read-entities this entity-name (vec ids))))
+                           #{})
+            {to-update true to-create false}
+            (group-by #(contains? existing-ids (:id %)) data-seq)]
+        ;; Batch create new records
+        (when (seq to-create)
+          (sp/create-entities this entity-name to-create))
+        ;; Batch update existing records
+        (when (seq to-update)
+          (sp/update-entities this entity-name to-update))
+        ;; Return all records
+        (vec data-seq))))
 
 
   (delete-entities

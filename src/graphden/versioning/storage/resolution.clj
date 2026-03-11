@@ -181,27 +181,27 @@
   (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)]
     (if (empty? entity-ids)
       {}
-      ;; Load all versions for these entity-ids on any branch in chain
-      (let [all-versions (sp/query-entities base-storage version-entity {})
-            entity-ids-set (set entity-ids)
-            branch-set (set branch-chain)
-            relevant (filter (fn [v]
-                               (and (contains? entity-ids-set (get v version-id-field))
-                                    (contains? branch-set (:branch-id v))))
-                             all-versions)]
-        (group-by version-id-field relevant)))))
+      ;; Load versions using WHERE IN for entity-ids and branch-ids
+      (let [versions (sp/query-entities base-storage version-entity
+                                        {version-id-field (vec entity-ids)
+                                         :branch-id (vec branch-chain)})]
+        (group-by version-id-field versions)))))
 
 
 (defn- resolve-version-from-cache
   "Resolves version for an entity from pre-loaded versions map.
-   Uses simplified algorithm (no merge support - just branch chain priority)."
+   Uses simplified algorithm (no merge support - just branch chain priority).
+
+   Optimization: Index versions by branch-id for O(1) lookup per branch instead of O(n) filter."
   [versions-by-id entity-id branch-chain]
-  ;; Find the version on the most specific branch (first in chain)
-  (some (fn [bid]
-          (let [versions (get versions-by-id entity-id)
-                on-branch (filter #(= (:branch-id %) bid) versions)]
-            (latest-by-created-at on-branch)))
-        branch-chain))
+  (let [versions (get versions-by-id entity-id)]
+    (when (seq versions)
+      ;; Index by branch-id once, then O(1) lookup per branch in chain
+      (let [by-branch (group-by :branch-id versions)]
+        (some (fn [bid]
+                (when-let [on-branch (get by-branch bid)]
+                  (latest-by-created-at on-branch)))
+              branch-chain)))))
 
 
 (defn resolve-entities-batch

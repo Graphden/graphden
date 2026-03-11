@@ -827,3 +827,143 @@
           (storage/validate-where-clause! 123)))
     (is (thrown? clojure.lang.ExceptionInfo
           (storage/validate-where-clause! [1 2 3])))))
+
+
+;; =============================================================================
+;; valid-in-clause-collection? tests
+;; =============================================================================
+
+(deftest valid-in-clause-collection-test
+  (testing "returns true for vector of UUIDs with :uuid field type"
+    (let [uuids [(random-uuid) (random-uuid)]]
+      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+                  uuids :uuid)))))
+
+  (testing "returns true for vector of UUIDs with :ref field type"
+    (let [uuids [(random-uuid) (random-uuid)]]
+      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+                  uuids :ref)))))
+
+  (testing "returns true for vector of UUIDs with :fn field type"
+    (let [uuids [(random-uuid) (random-uuid)]]
+      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+                  uuids :fn)))))
+
+  (testing "returns true for vector of ints with :int field type"
+    (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+                [1 2 3] :int))))
+
+  (testing "returns true for vector of strings with :text field type"
+    (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+                ["a" "b" "c"] :text))))
+
+  (testing "returns true for set of UUIDs"
+    (let [uuids (hash-set (random-uuid) (random-uuid))]
+      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+                  uuids :uuid)))))
+
+  (testing "returns true for lazy seq of UUIDs"
+    (let [uuids (map (fn [_] (random-uuid)) (range 3))]
+      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+                  uuids :uuid)))))
+
+  (testing "returns falsy for empty collection"
+    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+              [] :uuid))))
+
+  (testing "returns falsy for unsupported field type"
+    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+              ["a" "b"] :jsonb))))
+
+  (testing "returns falsy for unsupported field type :bool"
+    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+              [true false] :bool))))
+
+  (testing "returns falsy for unsupported field type :numeric"
+    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+              [1.0 2.0] :numeric))))
+
+  (testing "returns falsy for non-collection"
+    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+              "not-a-collection" :text))))
+
+  (testing "returns falsy for map (not valid collection type)"
+    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+              {:a 1} :jsonb))))
+
+  (testing "returns falsy when elements don't match type"
+    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+              ["string" "values"] :uuid))))
+
+  (testing "returns falsy when some elements don't match type"
+    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
+              [(random-uuid) "not-uuid"] :uuid)))))
+
+
+(deftest check-type-match-with-in-clause-test
+  (testing "vector of UUIDs passes for :uuid field"
+    (let [uuids [(random-uuid) (random-uuid)]]
+      (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
+                 uuids :uuid)))))
+
+  (testing "vector of UUIDs passes for :ref field"
+    (let [uuids [(random-uuid) (random-uuid)]]
+      (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
+                 uuids :ref)))))
+
+  (testing "vector of ints passes for :int field"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
+               [1 2 3] :int))))
+
+  (testing "vector of strings passes for :text field"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
+               ["a" "b" "c"] :text))))
+
+  (testing "empty vector fails (not valid IN clause)"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match [] :uuid)]
+      (is (map? result))
+      (is (= :uuid (:expected result)))))
+
+  (testing "vector of wrong type fails"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match
+                  ["string"] :uuid)]
+      (is (map? result))
+      (is (= :uuid (:expected result))))))
+
+
+(deftest validate-where-clause-types-in-clause-test
+  (testing "vector of UUIDs passes for :uuid field in where"
+    (let [uuids [(random-uuid) (random-uuid)]]
+      (is (nil? (storage/validate-where-clause-types!
+                  :entity
+                  {:ref-id {:type :uuid}}
+                  {:ref-id uuids})))))
+
+  (testing "vector of UUIDs passes for :ref field in where"
+    (let [uuids [(random-uuid) (random-uuid)]]
+      (is (nil? (storage/validate-where-clause-types!
+                  :entity
+                  {:parent-id {:type :ref}}
+                  {:parent-id uuids})))))
+
+  (testing "vector of ints passes for :int field in where"
+    (is (nil? (storage/validate-where-clause-types!
+                :entity
+                {:count {:type :int}}
+                {:count [1 2 3]}))))
+
+  (testing "vector of wrong type throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :entity
+            {:ref-id {:type :uuid}}
+            {:ref-id ["not-uuid" "also-not"]}))))
+
+  (testing "empty vector throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :entity
+            {:ref-id {:type :uuid}}
+            {:ref-id []})))))

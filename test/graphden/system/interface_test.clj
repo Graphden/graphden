@@ -4,7 +4,9 @@
    Tests configuration loading and lifecycle functions.
    Full integration tests use test-helpers.clj fixtures."
   (:require
+    [aero.core :as aero]
     [clojure.test :refer [deftest is testing]]
+    [graphden.system.config]
     [graphden.system.interface :as sys]
     [integrant.core :as ig]))
 
@@ -113,3 +115,29 @@
         (is @init-called? "ig/init should be called")
         (is (nil? @init-keys-passed)
             "No component keys should be passed for full system start")))))
+
+
+;; =============================================================================
+;; Aero reader tag tests (for system.config coverage)
+;; =============================================================================
+
+(deftest aero-reader-ig-ref-test
+  (testing "#ig/ref reader tag resolves to Integrant ref"
+    (let [edn-str "{:key #ig/ref :db/postgres}"
+          parsed (aero/read-config (java.io.StringReader. edn-str))]
+      (is (= (ig/ref :db/postgres) (:key parsed))))))
+
+
+(deftest aero-reader-ig-refset-test
+  (testing "#ig/refset reader tag resolves to Integrant refset"
+    (let [edn-str "{:key #ig/refset [:db/postgres :db/schema]}"
+          parsed (aero/read-config (java.io.StringReader. edn-str))]
+      (is (= (ig/refset [:db/postgres :db/schema]) (:key parsed))))))
+
+
+(deftest aero-reader-var-test
+  (testing "#var reader tag resolves var to its value"
+    ;; Test with a var from our own codebase
+    (let [edn-str "{:key #var graphden.storage.protocol.core/*max-batch-size*}"
+          parsed (aero/read-config (java.io.StringReader. edn-str))]
+      (is (number? (:key parsed))))))

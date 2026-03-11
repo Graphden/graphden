@@ -941,3 +941,32 @@
           (is (= 42 (exec/execute ctx (:id sleepy-fn) {}))))
         (finally
           (sp/close storage))))))
+
+
+;; =============================================================================
+;; Direct arg match tests (trace-arg-source-id)
+;; =============================================================================
+
+(deftest trace-arg-source-id-test
+  (testing "finds arg that belongs directly to target fn"
+    (let [storage (setup/create-test-storage)]
+      ;; Simple setup where arg belongs directly to target fn
+      (exec/register-base-fn!
+        :identity (fn [{:keys [x]} _ctx] @x))
+
+      (let [id-base (setup/create-base-fn! storage "identity" :int)
+            id-arg (setup/create-arg! storage (:id id-base)
+                                      {:name "x" :type :int :required true :is-fn false})
+            ;; Create composed fn with its own arg
+            composed (setup/create-composed-fn! storage "my-id" (:id id-base))
+            composed-arg (setup/create-arg! storage (:id composed)
+                                            {:name "x" :type :int :required true :is-fn false
+                                             :source-id (:id id-arg)})
+            ctx (exec/create-context {:storage storage})]
+
+        ;; Execute - this exercises the trace-arg-source-id path where
+        ;; the arg belongs directly to the target fn
+        (let [result (exec/execute ctx (:id composed) {(:id composed-arg) 42})]
+          (is (= 42 result))))
+
+      (sp/close storage))))

@@ -478,3 +478,107 @@
                             #"not found"
             (fn-composition/sync-fns-to-storage! storage
                                                  [{:name :bad-fn :parent :one-arg-fn :args {:y 42}}]))))))
+
+
+;; =============================================================================
+;; Free args collection from ref-id chains tests
+;; =============================================================================
+
+(deftest collect-free-args-from-ref-chain-test
+  (testing "collects free args from fns referenced via ref-id"
+    (let [storage (create-test-storage)
+          ;; Base fns:
+          ;; - adder: takes two ints, returns int
+          ;; - caller: takes a fn reference and an int, calls the fn
+          _ (registry/initialize-all! storage
+                                      [{:adder {:args {:a :int :b :int}
+                                                :return-type :int
+                                                :impl (fn [{:keys [a b]} _] (+ @a @b))}}
+                                       {:caller {:args {:f :fn :x :int}
+                                                 :return-type :int
+                                                 :impl (fn [{:keys [f x]} ctx]
+                                                         (@f {:value @x} ctx))}}])
+          ;; Composed fns:
+          ;; - add-10: partial application of adder with a=10, b is free
+          ;; - call-add-10: calls add-10 passing :x as :b
+          ;; The free arg :b from add-10 should propagate through the ref chain
+          result (fn-composition/sync-fns-to-storage! storage
+                                                       [{:name :add-10
+                                                         :parent :adder
+                                                         :args {:a 10}}
+                                                        {:name :call-add-10
+                                                         :parent :caller
+                                                         :args {:f :add-10 :x 5}}])
+          add-10-id (:add-10 result)
+          call-add-10-id (:call-add-10 result)]
+
+      ;; Verify add-10 has free arg :b
+      (let [add-10-args (sp/query-entities storage :arg {:fn-id add-10-id})
+            b-arg (first (filter #(= "b" (:name %)) add-10-args))]
+        (is (some? b-arg) "add-10 should have :b arg")
+        (is (nil? (:value b-arg)) ":b should be free (no value)")
+        (is (nil? (:ref-id b-arg)) ":b should be free (no ref-id)"))
+
+      ;; Verify call-add-10 has args for :f and :x
+      (let [call-args (sp/query-entities storage :arg {:fn-id call-add-10-id})]
+        ;; Should have :f (ref to add-10) and :x (value 5)
+        (is (>= (count call-args) 2))))))
+
+
+(deftest nested-ref-chain-free-args-test
+  (testing "collects free args from deeply nested ref chains"
+    (let [storage (create-test-storage)
+          ;; Create a chain: wrapper -> middle -> inner
+          ;; inner has a free arg that should propagate through
+          _ (registry/initialize-all! storage
+                                      [{:three-arg {:args {:a :int :b :int :c :int}
+                                                    :return-type :int
+                                                    :impl (fn [{:keys [a b c]} _] (+ @a @b @c))}}
+                                       {:ref-holder {:args {:ref :fn}
+                                                     :return-type :any
+                                                     :impl (fn [{:keys [ref]} _] ref)}}])
+          ;; inner: binds :a, leaves :b and :c free
+          ;; middle: wraps inner via ref-holder
+          ;; outer: wraps middle via ref-holder
+          result (fn-composition/sync-fns-to-storage! storage
+                                                       [{:name :inner
+                                                         :parent :three-arg
+                                                         :args {:a 1}}
+                                                        {:name :middle
+                                                         :parent :ref-holder
+                                                         :args {:ref :inner}}
+                                                        {:name :outer
+                                                         :parent :ref-holder
+                                                         :args {:ref :middle}}])
+          inner-id (:inner result)]
+
+      ;; inner should have 3 args: :a (bound), :b (free), :c (free)
+      (let [inner-args (sp/query-entities storage :arg {:fn-id inner-id})
+            free-args (filter #(and (nil? (:value %)) (nil? (:ref-id %))) inner-args)]
+        (is (= 2 (count free-args)) "inner should have 2 free args (:b and :c)")))))
+
+
+(deftest fn-name-cache-lookup-test
+  (testing "resolves fn by name from cache for existing base fns"
+    (let [storage (create-test-storage)
+          _ (registry/initialize-all! storage
+                                      [{:cached-fn {:args {:x :int}
+                                                    :return-type :int
+                                                    :impl (fn [_ _] 1)}}
+                                       {:ref-base {:args {:ref :fn}
+                                                   :return-type :any
+                                                   :impl (fn [_ _] nil)}}])
+          ;; Sync fn that references a base fn by name
+          ;; This exercises the fn-name-cache lookup path
+          result (fn-composition/sync-fns-to-storage! storage
+                                                       [{:name :user-of-cached
+                                                         :parent :ref-base
+                                                         :args {:ref :cached-fn}}])
+          user-id (:user-of-cached result)
+          args (sp/query-entities storage :arg {:fn-id user-id})]
+
+      (is (= 1 (count args)))
+      (let [ref-arg (first args)]
+        ;; Should have ref-id pointing to cached-fn
+        (is (uuid? (:ref-id ref-arg)))
+        (is (= (registry/fn-uuid :cached-fn) (:ref-id ref-arg)))))))

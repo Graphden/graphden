@@ -150,10 +150,7 @@
       if (fn.id === selectedFnId) li.className += ' selected';
       li.dataset.fnId = fn.id;
 
-      const isBase = !fn['parent-id'];
-      const badge = isBase ? '[base]' : '[composed]';
-
-      li.innerHTML = '<div class=\"name\">' + fn.name + ' <span style=\"color:#888;font-size:10px\">' + badge + '</span></div>';
+      li.innerHTML = '<div class=\"name\">' + fn.name + '</div>';
       li.onclick = () => selectFn(fn.id);
       list.appendChild(li);
     });

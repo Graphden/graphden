@@ -1,0 +1,11 @@
+;; HTTP server base functions using http-kit
+;; http-server, http-stop
+
+[{:name :http-server
+  :args {:handler :any
+         :port :int}
+  :return-type :any}
+
+ {:name :http-stop
+  :args {:server :any}
+  :return-type :any}]

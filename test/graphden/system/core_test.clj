@@ -55,7 +55,8 @@
   (testing "resume-key calls init-key with same config"
     (with-redefs [exec/execute-by-name mock-execute-by-name]
       (let [mock-context {:storage :mock :registry :mock}
-            opts {:context mock-context :startup-fn-name :test-server :port 8888}
+            mock-packages {:startup-fn :test-server}
+            opts {:context mock-context :packages mock-packages :port 8888}
             config {:http/server opts}
             ;; Simulate a previous server
             old-server (fn [] nil)
@@ -68,7 +69,8 @@
   (testing "init-key returns a server stop function"
     (with-redefs [exec/execute-by-name mock-execute-by-name]
       (let [mock-context {:storage :mock :registry :mock}
-            opts {:context mock-context :startup-fn-name :test-server :port 9999}
+            mock-packages {:startup-fn :test-server}
+            opts {:context mock-context :packages mock-packages :port 9999}
             ;; Init should return a function (the stop function)
             result (ig/init-key :http/server opts)]
         (is (fn? result) "init-key should return a function")

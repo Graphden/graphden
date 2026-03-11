@@ -5,21 +5,17 @@
    :db/schema        → (pure function, no deps)
    :db/postgres      → [:db/schema]
    :db/versioned     → [:db/postgres]
-   :exec/base-fns    → [:db/versioned]
-   :exec/fn-entities → [:db/versioned, :exec/base-fns]
+   :app/packages     → (pure, loads package definitions)
+   :exec/base-fns    → [:db/versioned, :app/packages]
+   :exec/fn-entities → [:db/versioned, :exec/base-fns, :app/packages]
    :exec/context     → [:db/versioned]
-   :http/server      → [:exec/context, :exec/fn-entities]"
+   :http/server      → [:exec/context, :exec/fn-entities, :app/packages]"
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
-    [graphden.library.base-fns.core :as bf]
-    [graphden.library.base-fns.web.crud :as crud-fns]
-    [graphden.library.base-fns.web.graph :as graph-fns]
-    [graphden.library.base-fns.web.html :as html-fns]
-    [graphden.library.base-fns.web.http-kit :as http-kit-fns]
-    [graphden.library.base-fns.web.reitit :as reitit-fns]
+    [graphden.packages.loader :as pkg]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.protocol.protocol :as ds]
@@ -93,20 +89,29 @@
 
 
 ;; =============================================================================
+;; Package Loading
+;; =============================================================================
+
+(defmethod ig/init-key :app/packages [_ {:keys [package-names]}]
+  (log/info "Loading packages:" package-names)
+  (let [packages (pkg/load-packages package-names)]
+    (log/info "Packages loaded:" (count (:packages packages)) "packages,"
+              (count (:base-fn-defs packages)) "base-fns,"
+              (count (:fn-defs packages)) "fn-defs")
+    packages))
+
+
+;; =============================================================================
 ;; Base Functions Registry
 ;; =============================================================================
 
-(defmethod ig/init-key :exec/base-fns [_ {:keys [storage]}]
+(defmethod ig/init-key :exec/base-fns [_ {:keys [storage packages]}]
   (log/info "Registering base functions...")
-  (registry/initialize-all! storage
-                            [bf/all-defs
-                             http-kit-fns/all-defs
-                             reitit-fns/all-defs
-                             html-fns/all-defs
-                             graph-fns/all-defs
-                             crud-fns/all-defs])
-  (log/info "Base functions registered")
-  :registered)
+  (let [base-fn-defs (:base-fn-defs packages)]
+    (registry/register-base-fns! base-fn-defs)
+    (registry/sync-defs-to-storage! storage base-fn-defs)
+    (log/info "Base functions registered:" (count base-fn-defs))
+    :registered))
 
 
 ;; No halt needed - registry is global state
@@ -116,9 +121,10 @@
 ;; Fn Entities
 ;; =============================================================================
 
-(defmethod ig/init-key :exec/fn-entities [_ {:keys [storage fn-defs]}]
+(defmethod ig/init-key :exec/fn-entities [_ {:keys [storage packages]}]
   (log/info "Creating fn entities...")
-  (let [fns (fn-composition/sync-fns-to-storage! storage fn-defs)]
+  (let [fn-defs (:fn-defs packages)
+        fns (fn-composition/sync-fns-to-storage! storage fn-defs)]
     (log/info "Fn entities created:" (count fns))
     fns))
 
@@ -138,11 +144,12 @@
 ;; HTTP Server (executed via graph)
 ;; =============================================================================
 
-(defmethod ig/init-key :http/server [_ {:keys [context startup-fn-name port]}]
-  (log/info "Starting HTTP server via" startup-fn-name "on port" port "...")
-  (let [server (exec/execute-by-name context (name startup-fn-name) nil)]
-    (log/info "HTTP server started on port" port)
-    server))
+(defmethod ig/init-key :http/server [_ {:keys [context packages port]}]
+  (let [startup-fn-name (:startup-fn packages)]
+    (log/info "Starting HTTP server via" startup-fn-name "on port" port "...")
+    (let [server (exec/execute-by-name context (name startup-fn-name) nil)]
+      (log/info "HTTP server started on port" port)
+      server)))
 
 
 (defmethod ig/halt-key! :http/server [_ server]
@@ -161,12 +168,3 @@
 (defmethod ig/resume-key :http/server [k opts _ _]
   ;; Restart server with new context
   (ig/init-key k opts))
-
-
-;; =============================================================================
-;; Fn Definitions (loaded from var)
-;; =============================================================================
-
-(defmethod ig/init-key :app/fn-defs [_ fn-defs]
-  ;; fn-defs is already resolved from #var by Aero
-  fn-defs)

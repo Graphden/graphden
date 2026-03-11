@@ -1,0 +1,56 @@
+;; HTML templating base functions using Hiccup
+;; render-hiccup, html-response, html-page, with-htmx, with-cytoscape,
+;; cytoscape-container, form-input, form-select, button
+
+[{:name :render-hiccup
+  :args {:hiccup :jsonb}
+  :return-type :text}
+
+ {:name :html-response
+  :args {:body :any
+         :status {:type :int :required false}}
+  :return-type :jsonb}
+
+ {:name :html-page
+  :args {:title :text
+         :head {:type :jsonb :required false}
+         :body :jsonb
+         :scripts {:type :jsonb :required false}}
+  :return-type :jsonb}
+
+ {:name :with-htmx
+  :args {:head {:type :jsonb :required false}
+         :version {:type :text :required false}}
+  :return-type :jsonb}
+
+ {:name :with-cytoscape
+  :args {:head {:type :jsonb :required false}
+         :version {:type :text :required false}}
+  :return-type :jsonb}
+
+ {:name :cytoscape-container
+  :args {:id :text
+         :style {:type :jsonb :required false}}
+  :return-type :jsonb}
+
+ {:name :form-input
+  :args {:field-name :text
+         :label-text :text
+         :input-type {:type :text :required false}
+         :field-value {:type :any :required false}
+         :extra-attrs {:type :jsonb :required false}}
+  :return-type :jsonb}
+
+ {:name :form-select
+  :args {:field-name :text
+         :label-text :text
+         :options :jsonb
+         :selected-value {:type :any :required false}
+         :extra-attrs {:type :jsonb :required false}}
+  :return-type :jsonb}
+
+ {:name :button
+  :args {:btn-text :text
+         :btn-type {:type :text :required false}
+         :extra-attrs {:type :jsonb :required false}}
+  :return-type :jsonb}]

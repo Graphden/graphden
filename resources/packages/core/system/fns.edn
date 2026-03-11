@@ -1,0 +1,24 @@
+;; System information and Ring response primitives
+;; ring-response, make-handler, to-json-string, jvm-info, current-time-ms
+
+[{:name :ring-response
+  :args {:status :int
+         :headers :jsonb
+         :body :text}
+  :return-type :jsonb}
+
+ {:name :make-handler
+  :args {:response :jsonb}
+  :return-type :fn}
+
+ {:name :to-json-string
+  :args {:data :any}
+  :return-type :text}
+
+ {:name :jvm-info
+  :args {}
+  :return-type :jsonb}
+
+ {:name :current-time-ms
+  :args {}
+  :return-type :int}]

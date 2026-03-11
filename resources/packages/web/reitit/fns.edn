@@ -1,0 +1,9 @@
+;; Reitit routing base functions
+;; router
+
+[{:name :router
+  :args {:routes :any
+         :not-found-response {:type :jsonb :required false}
+         :method-not-allowed-response {:type :jsonb :required false}
+         :error-response {:type :jsonb :required false}}
+  :return-type :fn}]

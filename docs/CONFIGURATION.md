@@ -82,12 +82,12 @@ Reference another component:
 :schema #ig/ref :db/schema
 ```
 
-### `#var` - Var Reference
+### Package Names
 
-Resolve a Clojure var at config load time:
+Packages are loaded from `resources/packages/` directory. Configure which packages to load:
 
 ```clojure
-:fn-defs #var graphden.library.fn-defs.web.server/fn-defs
+:app/packages {:package-names ["core" "web" "app"]}
 ```
 
 ## Component Configuration

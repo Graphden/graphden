@@ -1,0 +1,5 @@
+{:name "web"
+ :version "1.0.0"
+ :description "Web primitives: HTTP, routing, HTML, CRUD, graph visualization"
+ :dependencies ["core"]
+ :modules ["http" "reitit" "html" "crud" "graph"]}

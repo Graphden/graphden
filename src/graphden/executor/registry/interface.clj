@@ -21,12 +21,12 @@
 
    See `graphden.executor.registry.macros` for full documentation.
 
-   Base function implementations (arithmetic, strings, etc.) are in the
-   base-functions component which uses this infrastructure."
+   Base function implementations are defined in packages (resources/packages/).
+   See graphden.packages.loader for the package loading API."
   (:require
     [graphden.executor.registry.core :as core]
     [graphden.executor.registry.macros :as macros]
-    [graphden.library.base-fns.core :as bf]
+    [graphden.packages.loader :as pkg]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -86,29 +86,35 @@
 ;; === Storage Initialization Helper ===
 
 (defn initialize-with-base-fns!
-  "Initializes a storage with base function definitions.
+  "Initializes a storage with base function definitions from packages.
 
    This is a convenience function that:
-   1. Registers all base functions in the executor
-   2. Syncs base function schemas to storage
-   3. Handles errors by closing storage and re-throwing
+   1. Loads all default packages (core, web, app)
+   2. Registers all base functions in the executor
+   3. Syncs base function schemas to storage
+   4. Handles errors by closing storage and re-throwing
 
    Takes an already-created storage instance (from any backend) and
    prepares it for graph operations with all base functions available.
 
    Arguments:
    - storage: an initialized storage instance (memory, postgres, datomic, etc.)
+   - package-names: (optional) sequence of package names, defaults to core+web+app
 
    Returns the storage instance on success.
    On error, closes the storage and re-throws the exception."
-  [storage]
-  (try
-    (register-base-fns! bf/all-defs)
-    (sync-defs-to-storage! storage bf/all-defs)
-    storage
-    (catch Exception e
-      (sp/close storage)
-      (throw e))))
+  ([storage]
+   (initialize-with-base-fns! storage ["core" "web" "app"]))
+  ([storage package-names]
+   (try
+     (let [packages (pkg/load-packages package-names)
+           base-fn-defs (:base-fn-defs packages)]
+       (register-base-fns! base-fn-defs)
+       (sync-defs-to-storage! storage base-fn-defs)
+       storage)
+     (catch Exception e
+       (sp/close storage)
+       (throw e)))))
 
 
 (defn initialize-all!

@@ -1,0 +1,89 @@
+;; Storage CRUD base functions for web UI
+;; Context-aware functions (marked with :ctx true) require storage in execution context
+
+[;; Query functions (context-aware)
+ {:name :list-entities
+  :args {:entity-type :text
+         :where {:type :jsonb :required false}}
+  :return-type :jsonb
+  :ctx true}
+
+ {:name :get-entity
+  :args {:entity-type :text
+         :id :uuid}
+  :return-type :jsonb
+  :ctx true}
+
+ {:name :create-entity
+  :args {:entity-type :text
+         :data :jsonb}
+  :return-type :jsonb
+  :ctx true}
+
+ {:name :update-entity
+  :args {:entity-type :text
+         :id :uuid
+         :data :jsonb}
+  :return-type :jsonb
+  :ctx true}
+
+ {:name :delete-entity
+  :args {:entity-type :text
+         :id :uuid}
+  :return-type :bool
+  :ctx true}
+
+ {:name :list-all-graph-entities
+  :args {}
+  :return-type :jsonb
+  :ctx true}
+
+ ;; Handler generators (context-aware, return functions)
+ {:name :all-entities-json-handler
+  :args {}
+  :return-type :fn
+  :ctx true}
+
+ {:name :entity-details-handler
+  :args {}
+  :return-type :fn
+  :ctx true}
+
+ {:name :entity-form-handler
+  :args {}
+  :return-type :fn
+  :ctx true}
+
+ {:name :create-entity-api-handler
+  :args {}
+  :return-type :fn
+  :ctx true}
+
+ {:name :delete-entity-api-handler
+  :args {}
+  :return-type :fn
+  :ctx true}
+
+ ;; Request parameter helpers (pure functions)
+ {:name :get-path-param
+  :args {:request :jsonb
+         :param :text}
+  :return-type :any}
+
+ {:name :get-query-param
+  :args {:request :jsonb
+         :param :text
+         :default {:type :any :required false}}
+  :return-type :any}
+
+ {:name :parse-form-body
+  :args {:request :jsonb}
+  :return-type :jsonb}
+
+ {:name :parse-json-body
+  :args {:request :jsonb}
+  :return-type :jsonb}
+
+ {:name :str-to-uuid
+  :args {:s :text}
+  :return-type :uuid}]

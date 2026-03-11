@@ -1,0 +1,5 @@
+{:name "core"
+ :version "1.0.0"
+ :description "Core primitives: arithmetic, comparison, logic, HOF, collections, strings, system"
+ :dependencies []
+ :modules ["arithmetic" "logic" "hof" "collections" "strings" "system"]}

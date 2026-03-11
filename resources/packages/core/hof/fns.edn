@@ -1,0 +1,56 @@
+;; Higher-order functions
+;; Functions with :fn type args require special handling by loader
+
+[{:name :map
+  :args {:f :fn
+         :coll {:type :jsonb :required false}}
+  :return-type :any}
+
+ {:name :filter
+  :args {:pred :fn
+         :coll {:type :jsonb :required false}}
+  :return-type :any}
+
+ {:name :reduce
+  :args {:f :fn, :init :any, :coll :jsonb}
+  :return-type :any}
+
+ {:name :some
+  :args {:pred :fn, :coll :jsonb}
+  :return-type :any}
+
+ {:name :every?
+  :args {:pred :fn, :coll :jsonb}
+  :return-type :bool}
+
+ {:name :find-first
+  :args {:pred :fn, :coll :jsonb}
+  :return-type :any}
+
+ {:name :group-by
+  :args {:key-fn :fn, :coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :sort-by
+  :args {:key-fn :fn, :coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :apply
+  :args {:f :fn, :args :jsonb}
+  :return-type :any}
+
+ {:name :constantly
+  :args {:x :any
+         :_item {:type :any :required false}}
+  :return-type :any}
+
+ {:name :comp
+  :args {:fns :jsonb}
+  :return-type :any}
+
+ {:name :transduce
+  :args {:xf :any
+         :rf :fn
+         :init :any
+         :coll :jsonb}
+  :return-type :any}]

@@ -342,16 +342,19 @@
 
 
 ;; =============================================================================
-;; App Fn Defs Test
+;; App Packages Test
 ;; =============================================================================
 
-(deftest app-fn-defs-init-test
-  (testing ":app/fn-defs returns fn-defs passthrough"
-    (let [fn-defs {:my-fn {:name :my-fn :parent :identity :args {}}}
-          config {:app/fn-defs fn-defs}
-          system (ig/init config [:app/fn-defs])]
+(deftest app-packages-init-test
+  (testing ":app/packages loads packages from resources"
+    (let [config {:app/packages {:package-names ["core"]}}
+          system (ig/init config [:app/packages])]
       (try
-        (is (= fn-defs (:app/fn-defs system)))
+        (let [packages (:app/packages system)]
+          (is (map? packages))
+          (is (contains? packages :base-fn-defs))
+          (is (contains? packages :fn-defs))
+          (is (contains? packages :packages)))
         (finally
           (ig/halt! system))))))
 

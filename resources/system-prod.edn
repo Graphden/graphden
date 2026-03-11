@@ -13,12 +13,17 @@
  :db/versioned
  {:base-storage #ig/ref :db/postgres}
 
+ ;; Load packages from resources/packages/
+ :app/packages
+ {:package-names ["core" "web" "app"]}
+
  :exec/base-fns
- {:storage #ig/ref :db/versioned}
+ {:storage #ig/ref :db/versioned
+  :packages #ig/ref :app/packages}
 
  :exec/fn-entities
  {:storage #ig/ref :db/versioned
-  :fn-defs #ig/ref :app/fn-defs}
+  :packages #ig/ref :app/packages}
 
  :exec/context
  {:storage #ig/ref :db/versioned
@@ -27,8 +32,5 @@
 
  :http/server
  {:context #ig/ref :exec/context
-  :startup-fn-name :web-server
-  :port #long #or [#env PORT "8080"]}
-
- ;; Fn definitions are loaded from the graph editor module
- :app/fn-defs #var graphden.library.fn-defs.web.editor/fn-defs}
+  :packages #ig/ref :app/packages
+  :port #long #or [#env PORT "8080"]}}

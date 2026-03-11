@@ -1,0 +1,120 @@
+;; Collection manipulation base functions
+;; first, rest, cons, conj, get, assoc, dissoc, count, empty?,
+;; contains?, keys, vals, merge, into, range, repeat, take, drop,
+;; reverse, sort, concat, flatten, distinct, pair, triple
+
+[{:name :first
+  :args {:coll :jsonb}
+  :return-type :any}
+
+ {:name :rest
+  :args {:coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :cons
+  :args {:x :any, :coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :conj
+  :args {:coll :jsonb, :x :any}
+  :return-type :jsonb}
+
+ {:name :conj-any
+  :args {:coll :any, :x :any}
+  :return-type :any}
+
+ {:name :get
+  :args {:coll :jsonb, :k :any, :default :any}
+  :return-type :any}
+
+ {:name :get-in
+  :args {:m :jsonb
+         :path :jsonb
+         :default {:type :any :required false}}
+  :return-type :any}
+
+ {:name :assoc
+  :args {:m :jsonb, :k :any, :v :any}
+  :return-type :jsonb}
+
+ {:name :assoc-any
+  :args {:m :any, :k :any, :v :any}
+  :return-type :any}
+
+ {:name :dissoc
+  :args {:m :jsonb, :k :any}
+  :return-type :jsonb}
+
+ {:name :count
+  :args {:coll :jsonb}
+  :return-type :int}
+
+ {:name :empty?
+  :args {:coll :jsonb}
+  :return-type :bool}
+
+ {:name :contains?
+  :args {:coll :jsonb, :k :any}
+  :return-type :bool}
+
+ {:name :keys
+  :args {:m :jsonb}
+  :return-type :jsonb}
+
+ {:name :vals
+  :args {:m :jsonb}
+  :return-type :jsonb}
+
+ {:name :merge
+  :args {:maps :jsonb}
+  :return-type :jsonb}
+
+ {:name :into
+  :args {:to :jsonb, :from :jsonb}
+  :return-type :jsonb}
+
+ {:name :range
+  :args {:start {:type :int :required false}
+         :end :int
+         :step {:type :int :required false}}
+  :return-type :jsonb}
+
+ {:name :repeat
+  :args {:n :int, :x :any}
+  :return-type :jsonb}
+
+ {:name :take
+  :args {:n :int, :coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :drop
+  :args {:n :int, :coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :reverse
+  :args {:coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :sort
+  :args {:coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :concat
+  :args {:colls :jsonb}
+  :return-type :jsonb}
+
+ {:name :flatten
+  :args {:coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :distinct
+  :args {:coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :pair
+  :args {:a :any, :b :any}
+  :return-type :any}
+
+ {:name :triple
+  :args {:a :any, :b :any, :c :any}
+  :return-type :any}]

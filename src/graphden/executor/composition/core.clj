@@ -218,6 +218,18 @@
        (nil? (:ref-id arg))))
 
 
+(defn- partition-args-by-freedom
+  "Partitions args into {:free-args [...] :bound-args [...]} in single pass.
+   Free args have no value and no ref-id; bound args have either."
+  [args]
+  (reduce (fn [acc arg]
+            (if (free-arg? arg)
+              (update acc :free-args conj arg)
+              (update acc :bound-args conj arg)))
+          {:free-args [] :bound-args []}
+          args))
+
+
 (defn- resolve-arg-name-cached
   "Resolves arg name by following source-id chain using args-by-id index.
    If arg has :name, returns it. Otherwise follows source-id to find name.
@@ -258,14 +270,7 @@
     []
     (let [visited' (conj visited-fns fn-id)
           fn-args (get (:by-fn args-data) fn-id [])
-          ;; Single pass: partition into free and bound args
-          {:keys [free-args bound-args]}
-          (reduce (fn [acc arg]
-                    (if (free-arg? arg)
-                      (update acc :free-args conj arg)
-                      (update acc :bound-args conj arg)))
-                  {:free-args [] :bound-args []}
-                  fn-args)]
+          {:keys [free-args bound-args]} (partition-args-by-freedom fn-args)]
       ;; Free args are:
       ;; 1. Own free args
       ;; 2. Free args from fns referenced via ref-id (recursively)
@@ -288,14 +293,7 @@
                      :parent-fn-id parent-fn-id
                      :max-depth sp/*max-graph-iterations*})))
   (let [fn-args (get (:by-fn args-data) parent-fn-id [])
-        ;; Single pass: partition into free and bound args
-        {:keys [free-args bound-args]}
-        (reduce (fn [acc arg]
-                  (if (free-arg? arg)
-                    (update acc :free-args conj arg)
-                    (update acc :bound-args conj arg)))
-                {:free-args [] :bound-args []}
-                fn-args)
+        {:keys [free-args bound-args]} (partition-args-by-freedom fn-args)
         ;; Collect free args from referenced fns (only bound args have ref-id)
         ref-free-args (mapcat (fn [arg]
                                 (when-let [ref-fn-id (:ref-id arg)]

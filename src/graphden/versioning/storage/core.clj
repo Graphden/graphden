@@ -226,21 +226,68 @@
 
 
   (update-entities
-    [this entity-name data-seq]
+    [_ entity-name data-seq]
     (if-not (res/versioned-entity? entity-name)
       (sp/update-entities base-storage entity-name data-seq)
-      (mapv #(sp/update-entity this entity-name (:id %) (dissoc % :id)) data-seq)))
+      ;; Batch update: resolve all current versions, compute diffs, batch create versions
+      (let [ids (mapv :id data-seq)
+            ;; Batch resolve current versions using efficient batch resolution
+            identity-records (vals (sp/read-entities base-storage entity-name ids))
+            current-versions (res/resolve-entities-batch base-storage entity-name
+                                                         identity-records branch-id)
+            current-by-id (into {} (map (juxt :id identity)) (vals current-versions))
+            ;; Check all entities exist
+            missing-ids (remove #(contains? current-by-id %) ids)]
+        (when (seq missing-ids)
+          (throw (ex-info "Entities not found"
+                          {:type :not-found
+                           :entity-name entity-name
+                           :missing-ids (vec missing-ids)})))
+        ;; Compute merged versions and filter to only changed ones
+        (let [{:keys [version-entity version-id-field version-data-fields]}
+              (get res/entity-config entity-name)
+              timestamp (now)
+              ;; Build version records only for changed entities
+              version-records
+              (into []
+                    (comp
+                      (map (fn [data]
+                             (let [id (:id data)
+                                   current (get current-by-id id)
+                                   merged (merge current data)
+                                   current-data (select-keys current version-data-fields)
+                                   merged-data (select-keys merged version-data-fields)]
+                               (when (not= current-data merged-data)
+                                 {:version-record
+                                  (-> merged-data
+                                      (assoc :id (random-uuid)
+                                             version-id-field id
+                                             :branch-id branch-id
+                                             :created-at timestamp))
+                                  :merged merged}))))
+                      (keep identity))
+                    data-seq)]
+          ;; Batch create all version records
+          (when (seq version-records)
+            (sp/create-entities base-storage version-entity
+                                (mapv :version-record version-records)))
+          ;; Return merged data for all records (including unchanged)
+          (mapv (fn [data]
+                  (merge (get current-by-id (:id data)) data))
+                data-seq)))))
 
 
   (upsert-entities
     [this entity-name data-seq]
     (if-not (res/versioned-entity? entity-name)
       (sp/upsert-entities base-storage entity-name data-seq)
-      ;; For versioned: batch check existence, then create/update accordingly
+      ;; For versioned: batch check existence in BASE storage (no version resolution),
+      ;; then create/update accordingly
       (let [ids (keep :id data-seq)
-            ;; Single batch query to check which IDs exist
+            ;; Check existence in base-storage directly - O(n) not O(n × versions)
+            ;; We only need to know if identity record exists, not resolve versions
             existing-ids (if (seq ids)
-                           (set (keys (sp/read-entities this entity-name (vec ids))))
+                           (set (keys (sp/read-entities base-storage entity-name (vec ids))))
                            #{})
             {to-update true to-create false}
             (group-by #(contains? existing-ids (:id %)) data-seq)]
@@ -255,12 +302,21 @@
 
 
   (delete-entities
-    [this entity-name ids]
+    [_ entity-name ids]
     (if-not (res/versioned-entity? entity-name)
       (sp/delete-entities base-storage entity-name ids)
-      (reduce (fn [cnt id]
-                (if (sp/delete-entity this entity-name id) (inc cnt) cnt))
-              0 ids)))
+      ;; Batch delete: single query to find all versions, single batch delete
+      (let [{:keys [version-entity version-id-field]} (get res/entity-config entity-name)
+            ;; Single WHERE IN query for all entity versions on this branch
+            all-versions (sp/query-entities base-storage version-entity
+                                            {version-id-field (vec ids)
+                                             :branch-id branch-id})
+            version-ids (mapv :id all-versions)
+            ;; Count unique entity-ids that had versions (for return value)
+            deleted-entity-ids (into #{} (map version-id-field) all-versions)]
+        (when (seq version-ids)
+          (sp/delete-entities base-storage version-entity version-ids))
+        (count deleted-entity-ids))))
 
 
   sp/GraphConstraints

@@ -83,7 +83,7 @@
    Algorithm:
    1. Find latest own version on this branch
    2. Find merges into this branch (branch-merge with target-branch-id = branch-id)
-   3. For each merge after our own version, find latest source version
+   3. Batch load versions from all source branches, filter by timestamp
    4. Pick candidate with greatest effective timestamp
    5. If nothing found, recurse to parent branch
 
@@ -100,23 +100,29 @@
         merges (sp/query-entities base-storage :branch-merge
                                   {:target-branch-id branch-id})
 
-        ;; Step 3: For each merge, check source branch for versions
+        ;; Step 3: Batch load versions from ALL source branches in single query
         merge-candidates
-        (for [m merges
-              :let [src-versions (sp/query-entities base-storage version-entity
+        (when (seq merges)
+          (let [source-branch-ids (mapv :source-branch-id merges)
+                ;; Single batch query for all source branches
+                all-src-versions (sp/query-entities base-storage version-entity
                                                     {version-id-field entity-id
-                                                     :branch-id (:source-branch-id m)})
-                    ;; Only versions created at or before source-timestamp
-                    eligible (filter #(not (pos? (compare (:created-at %)
-                                                          (:source-timestamp m))))
-                                     src-versions)
-                    best (latest-by-created-at eligible)]
-              :when best
-              ;; Only consider merge if it happened after our own latest version
-              :when (or (nil? own-latest)
-                        (pos? (compare (:target-timestamp m)
-                                       (:created-at own-latest))))]
-          {:version best :effective-ts (:target-timestamp m)})
+                                                     :branch-id source-branch-ids})
+                ;; Index by branch-id for O(1) lookup
+                src-versions-by-branch (group-by :branch-id all-src-versions)]
+            (for [m merges
+                  :let [branch-versions (get src-versions-by-branch (:source-branch-id m) [])
+                        ;; Only versions created at or before source-timestamp
+                        eligible (filter #(not (pos? (compare (:created-at %)
+                                                              (:source-timestamp m))))
+                                         branch-versions)
+                        best (latest-by-created-at eligible)]
+                  :when best
+                  ;; Only consider merge if it happened after our own latest version
+                  :when (or (nil? own-latest)
+                            (pos? (compare (:target-timestamp m)
+                                           (:created-at own-latest))))]
+              {:version best :effective-ts (:target-timestamp m)})))
 
         ;; Step 4: Pick best candidate overall
         all-candidates (cond-> []

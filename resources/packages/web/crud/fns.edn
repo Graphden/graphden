@@ -67,12 +67,12 @@
  ;; Request parameter helpers (pure functions)
  {:name :get-path-param
   :args {:request :jsonb
-         :param :text}
+         :param-name :text}
   :return-type :any}
 
  {:name :get-query-param
   :args {:request :jsonb
-         :param :text
+         :param-name :text
          :default {:type :any :required false}}
   :return-type :any}
 
@@ -85,5 +85,5 @@
   :return-type :jsonb}
 
  {:name :str-to-uuid
-  :args {:s :text}
+  :args {:string :text}
   :return-type :uuid}]

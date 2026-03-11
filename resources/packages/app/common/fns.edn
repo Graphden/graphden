@@ -6,46 +6,46 @@
  ;; Pass-Through Args Pattern: each level sets one arg, free args propagate up
  ;; =============================================================================
 
- ;; Level 1: assoc with empty map preset (free: k, v)
+ ;; Level 1: assoc with empty map preset (free: key, value)
  {:name :assoc-empty
   :parent :assoc-any
-  :args {:m {}}}
+  :args {:map {}}}
 
- ;; Level 2: assoc-handler (free: v) - sets k="handler"
+ ;; Level 2: assoc-handler (free: value) - sets key="handler"
  {:name :assoc-handler
   :parent :assoc-empty
-  :args {:k "handler"}}
+  :args {:key "handler"}}
 
- ;; Level 2: method-map (free: k, v via pass-through)
+ ;; Level 2: method-map (free: key, value via pass-through)
  {:name :method-map
   :parent :assoc-empty
-  :args {:v :assoc-handler}}
+  :args {:value :assoc-handler}}
 
- ;; Level 3: route = pair with b=method-map (free: a, k, v)
+ ;; Level 3: route = pair with second=method-map (free: first, key, value)
  {:name :route
   :parent :pair
-  :args {:b :method-map}}
+  :args {:second :method-map}}
 
- ;; Level 4: HTTP method routes (free: a, v)
+ ;; Level 4: HTTP method routes (free: first, value)
  {:name :get-route
   :parent :route
-  :args {:k "get"}}
+  :args {:key "get"}}
 
  {:name :post-route
   :parent :route
-  :args {:k "post"}}
+  :args {:key "post"}}
 
  {:name :put-route
   :parent :route
-  :args {:k "put"}}
+  :args {:key "put"}}
 
  {:name :delete-route
   :parent :route
-  :args {:k "delete"}}
+  :args {:key "delete"}}
 
  {:name :patch-route
   :parent :route
-  :args {:k "patch"}}
+  :args {:key "patch"}}
 
  ;; =============================================================================
  ;; RESPONSE STATUS HIERARCHY
@@ -107,17 +107,17 @@
 
  {:name :assoc-status
   :parent :assoc-empty
-  :args {:k "status"}}
+  :args {:key "status"}}
 
  {:name :assoc-timestamp
   :parent :assoc
-  :args {:k "timestamp"}}
+  :args {:key "timestamp"}}
 
  {:name :health-status-base
   :parent :assoc-status
-  :args {:v "healthy"}}
+  :args {:value "healthy"}}
 
  {:name :health-status
   :parent :assoc-timestamp
-  :args {:m :health-status-base
-         :v :current-time-ms}}]
+  :args {:map :health-status-base
+         :value :current-time-ms}}]

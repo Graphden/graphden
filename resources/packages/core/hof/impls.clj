@@ -6,10 +6,10 @@
 
 
 (defn map-fn
-  [{:keys [f coll]}]
+  [{:keys [func coll]}]
   (if coll
-    (map f coll)
-    (map f)))
+    (map func coll)
+    (map func)))
 
 
 (defn filter-fn
@@ -20,9 +20,9 @@
 
 
 (defn reduce-fn
-  [{:keys [f init coll]}]
+  [{:keys [func init coll]}]
   ;; reduce passes [acc item] as single vector to the function
-  (reduce (fn [acc item] (f [acc item])) init coll))
+  (reduce (fn [acc item] (func [acc item])) init coll))
 
 
 (defn some-fn
@@ -54,26 +54,26 @@
 
 
 (defn apply-fn
-  [{:keys [f args]}]
-  (f args))
+  [{:keys [func args]}]
+  (func args))
 
 
 (defn constantly-fn
-  [{:keys [x]}]
-  x)
+  [{:keys [value]}]
+  value)
 
 
 (defn comp-fn
-  [{:keys [fns]}]
-  (apply comp fns))
+  [{:keys [functions]}]
+  (apply comp functions))
 
 
 (defn transduce-fn
-  [{:keys [xf rf init coll]}]
-  (transduce xf
+  [{:keys [transducer reducer init coll]}]
+  (transduce transducer
              (fn
                ([acc] acc)
-               ([acc item] (rf [acc item])))
+               ([acc item] (reducer [acc item])))
              init coll))
 
 

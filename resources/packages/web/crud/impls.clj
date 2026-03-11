@@ -401,13 +401,13 @@
 ;; === Pure Functions ===
 
 (defn get-path-param
-  [{:keys [request param]}]
-  (let [param-key (keyword param)]
+  [{:keys [request param-name]}]
+  (let [param-key (keyword param-name)]
     (get-in request [:path-params param-key])))
 
 
 (defn get-query-param
-  [{:keys [request param default]}]
+  [{:keys [request param-name default]}]
   (let [query-string (:query-string request)
         params (when query-string
                  (into {}
@@ -415,7 +415,7 @@
                              :let [[k v] (str/split pair #"=" 2)]
                              :when k]
                          [k (or v "")])))]
-    (get params param default)))
+    (get params param-name default)))
 
 
 (defn parse-form-body
@@ -440,9 +440,9 @@
 
 
 (defn str-to-uuid
-  [{:keys [s]}]
+  [{:keys [string]}]
   (try
-    (java.util.UUID/fromString s)
+    (java.util.UUID/fromString string)
     (catch Exception _
       nil)))
 

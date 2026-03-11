@@ -12,37 +12,37 @@
   :return-type :jsonb}
 
  {:name :cons
-  :args {:x :any, :coll :jsonb}
+  :args {:item :any, :coll :jsonb}
   :return-type :jsonb}
 
  {:name :conj
-  :args {:coll :jsonb, :x :any}
+  :args {:coll :jsonb, :item :any}
   :return-type :jsonb}
 
  {:name :conj-any
-  :args {:coll :any, :x :any}
+  :args {:coll :any, :item :any}
   :return-type :any}
 
  {:name :get
-  :args {:coll :jsonb, :k :any, :default :any}
+  :args {:coll :jsonb, :key :any, :default :any}
   :return-type :any}
 
  {:name :get-in
-  :args {:m :jsonb
+  :args {:map :jsonb
          :path :jsonb
          :default {:type :any :required false}}
   :return-type :any}
 
  {:name :assoc
-  :args {:m :jsonb, :k :any, :v :any}
+  :args {:map :jsonb, :key :any, :value :any}
   :return-type :jsonb}
 
  {:name :assoc-any
-  :args {:m :any, :k :any, :v :any}
+  :args {:map :any, :key :any, :value :any}
   :return-type :any}
 
  {:name :dissoc
-  :args {:m :jsonb, :k :any}
+  :args {:map :jsonb, :key :any}
   :return-type :jsonb}
 
  {:name :count
@@ -54,15 +54,15 @@
   :return-type :bool}
 
  {:name :contains?
-  :args {:coll :jsonb, :k :any}
+  :args {:coll :jsonb, :key :any}
   :return-type :bool}
 
  {:name :keys
-  :args {:m :jsonb}
+  :args {:map :jsonb}
   :return-type :jsonb}
 
  {:name :vals
-  :args {:m :jsonb}
+  :args {:map :jsonb}
   :return-type :jsonb}
 
  {:name :merge
@@ -80,15 +80,15 @@
   :return-type :jsonb}
 
  {:name :repeat
-  :args {:n :int, :x :any}
+  :args {:count :int, :item :any}
   :return-type :jsonb}
 
  {:name :take
-  :args {:n :int, :coll :jsonb}
+  :args {:count :int, :coll :jsonb}
   :return-type :jsonb}
 
  {:name :drop
-  :args {:n :int, :coll :jsonb}
+  :args {:count :int, :coll :jsonb}
   :return-type :jsonb}
 
  {:name :reverse
@@ -112,9 +112,30 @@
   :return-type :jsonb}
 
  {:name :pair
-  :args {:a :any, :b :any}
+  :args {:first :any, :second :any}
   :return-type :any}
 
  {:name :triple
-  :args {:a :any, :b :any, :c :any}
+  :args {:first :any, :second :any, :third :any}
+  :return-type :any}
+
+ ;; List builders for 4-8 elements (avoids long conj chains)
+ {:name :list4
+  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any}
+  :return-type :any}
+
+ {:name :list5
+  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any, :item5 :any}
+  :return-type :any}
+
+ {:name :list6
+  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any, :item5 :any, :item6 :any}
+  :return-type :any}
+
+ {:name :list7
+  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any, :item5 :any, :item6 :any, :item7 :any}
+  :return-type :any}
+
+ {:name :list8
+  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any, :item5 :any, :item6 :any, :item7 :any, :item8 :any}
   :return-type :any}]

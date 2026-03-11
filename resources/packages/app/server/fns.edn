@@ -30,7 +30,7 @@
  ;; GET /health
  {:name :health-route
   :parent :get-route
-  :args {:a "/health" :v :health-handler-fn}}
+  :args {:first "/health" :value :health-handler-fn}}
 
  ;; =============================================================================
  ;; METRICS ROUTE (JVM Info)
@@ -51,7 +51,7 @@
  ;; GET /metrics
  {:name :metrics-route
   :parent :get-route
-  :args {:a "/metrics" :v :metrics-handler-fn}}
+  :args {:first "/metrics" :value :metrics-handler-fn}}
 
  ;; =============================================================================
  ;; ROUTES COLLECTION & SERVER
@@ -62,11 +62,11 @@
  ;; Add health and metrics routes
  {:name :routes-with-health
   :parent :conj-any
-  :args {:coll :editor-routes :x :health-route}}
+  :args {:coll :editor-routes :item :health-route}}
 
  {:name :routes-fn
   :parent :conj-any
-  :args {:coll :routes-with-health :x :metrics-route}}
+  :args {:coll :routes-with-health :item :metrics-route}}
 
  ;; Router receives routes vector
  {:name :router-fn

@@ -18,8 +18,8 @@
 
 
 (defn not-fn
-  [{:keys [x]}]
-  (not x))
+  [{:keys [value]}]
+  (not value))
 
 
 ;; === Conditionals ===
@@ -44,13 +44,13 @@
 ;; === Constants ===
 
 (defn const
-  [{:keys [x]}]
-  x)
+  [{:keys [value]}]
+  value)
 
 
 (defn identity-fn
-  [{:keys [x]}]
-  x)
+  [{:keys [value]}]
+  value)
 
 
 ;; === Registry ===

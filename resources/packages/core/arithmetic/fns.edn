@@ -19,7 +19,7 @@
   :return-type :numeric}
 
  {:name :mod
-  :args {:a :numeric, :b :numeric}
+  :args {:dividend :numeric, :divisor :numeric}
   :return-type :numeric}
 
  {:name :neg

@@ -60,12 +60,12 @@
 
 
 (defn mod-fn
-  [{:keys [a b]}]
-  (when (zero? b)
+  [{:keys [dividend divisor]}]
+  (when (zero? divisor)
     (throw (ex-info "Modulo by zero"
                     {:type :execution-error/modulo-by-zero
-                     :a a :b b})))
-  (mod a b))
+                     :dividend dividend :divisor divisor})))
+  (mod dividend divisor))
 
 
 (defn neg

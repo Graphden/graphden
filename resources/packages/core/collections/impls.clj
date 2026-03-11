@@ -49,43 +49,43 @@
 
 
 (defn cons-fn
-  [{:keys [x coll]}]
-  (cons x coll))
+  [{:keys [item coll]}]
+  (cons item coll))
 
 
 (defn conj-fn
-  [{:keys [coll x]}]
-  (conj coll x))
+  [{:keys [coll item]}]
+  (conj coll item))
 
 
 (defn conj-any-fn
-  [{:keys [coll x]}]
-  (conj coll x))
+  [{:keys [coll item]}]
+  (conj coll item))
 
 
 (defn get-fn
-  [{:keys [coll k default]}]
-  (get coll k default))
+  [{:keys [coll key default]}]
+  (get coll key default))
 
 
 (defn get-in-fn
-  [{:keys [m path default]}]
-  (get-in m path default))
+  [{:keys [map path default]}]
+  (get-in map path default))
 
 
 (defn assoc-fn
-  [{:keys [m k v]}]
-  (assoc m k v))
+  [{:keys [map key value]}]
+  (assoc map key value))
 
 
 (defn assoc-any-fn
-  [{:keys [m k v]}]
-  (assoc (or m {}) k v))
+  [{:keys [map key value]}]
+  (assoc (or map {}) key value))
 
 
 (defn dissoc-fn
-  [{:keys [m k]}]
-  (dissoc m k))
+  [{:keys [map key]}]
+  (dissoc map key))
 
 
 (defn count-fn
@@ -99,18 +99,18 @@
 
 
 (defn contains?-fn
-  [{:keys [coll k]}]
-  (contains? coll k))
+  [{:keys [coll key]}]
+  (contains? coll key))
 
 
 (defn keys-fn
-  [{:keys [m]}]
-  (keys m))
+  [{:keys [map]}]
+  (keys map))
 
 
 (defn vals-fn
-  [{:keys [m]}]
-  (vals m))
+  [{:keys [map]}]
+  (vals map))
 
 
 (defn merge-fn
@@ -142,22 +142,22 @@
 
 
 (defn repeat-fn
-  [{:keys [n x]}]
+  [{:keys [count item]}]
   (let [max-size sp/*max-repeat-size*]
-    (validate-non-negative-count! n :n "repeat count cannot be negative")
-    (validate-collection-size! n max-size :execution-error/repeat-too-large {:n n}
-                               (str "repeat count " n " exceeds max allowed " max-size))
-    (vec (repeat n x))))
+    (validate-non-negative-count! count :count "repeat count cannot be negative")
+    (validate-collection-size! count max-size :execution-error/repeat-too-large {:count count}
+                               (str "repeat count " count " exceeds max allowed " max-size))
+    (vec (repeat count item))))
 
 
 (defn take-fn
-  [{:keys [n coll]}]
-  (vec (take n coll)))
+  [{:keys [count coll]}]
+  (vec (take count coll)))
 
 
 (defn drop-fn
-  [{:keys [n coll]}]
-  (vec (drop n coll)))
+  [{:keys [count coll]}]
+  (vec (drop count coll)))
 
 
 (defn reverse-fn
@@ -186,13 +186,38 @@
 
 
 (defn pair-fn
-  [{:keys [a b]}]
-  [a b])
+  [{:keys [first second]}]
+  [first second])
 
 
 (defn triple-fn
-  [{:keys [a b c]}]
-  [a b c])
+  [{:keys [first second third]}]
+  [first second third])
+
+
+(defn list4-fn
+  [{:keys [item1 item2 item3 item4]}]
+  [item1 item2 item3 item4])
+
+
+(defn list5-fn
+  [{:keys [item1 item2 item3 item4 item5]}]
+  [item1 item2 item3 item4 item5])
+
+
+(defn list6-fn
+  [{:keys [item1 item2 item3 item4 item5 item6]}]
+  [item1 item2 item3 item4 item5 item6])
+
+
+(defn list7-fn
+  [{:keys [item1 item2 item3 item4 item5 item6 item7]}]
+  [item1 item2 item3 item4 item5 item6 item7])
+
+
+(defn list8-fn
+  [{:keys [item1 item2 item3 item4 item5 item6 item7 item8]}]
+  [item1 item2 item3 item4 item5 item6 item7 item8])
 
 
 ;; === Registry ===
@@ -225,4 +250,9 @@
    :flatten flatten-fn
    :distinct distinct-fn
    :pair pair-fn
-   :triple triple-fn})
+   :triple triple-fn
+   :list4 list4-fn
+   :list5 list5-fn
+   :list6 list6-fn
+   :list7 list7-fn
+   :list8 list8-fn})

@@ -3,44 +3,44 @@
 ;; str-to-keyword, keyword-to-str
 
 [{:name :str
-  :args {:args :jsonb}
+  :args {:parts :jsonb}
   :return-type :text}
 
  {:name :subs
-  :args {:s :text
+  :args {:string :text
          :start :int
          :end {:type :int :required false}}
   :return-type :text}
 
  {:name :str-len
-  :args {:s :text}
+  :args {:string :text}
   :return-type :int}
 
  {:name :str-upper
-  :args {:s :text}
+  :args {:string :text}
   :return-type :text}
 
  {:name :str-lower
-  :args {:s :text}
+  :args {:string :text}
   :return-type :text}
 
  {:name :str-trim
-  :args {:s :text}
+  :args {:string :text}
   :return-type :text}
 
  {:name :str-split
-  :args {:s :text, :sep :text}
+  :args {:string :text, :separator :text}
   :return-type :jsonb}
 
  {:name :str-join
   :args {:coll :jsonb
-         :sep {:type :text :required false}}
+         :separator {:type :text :required false}}
   :return-type :text}
 
  {:name :str-to-keyword
-  :args {:s :text}
+  :args {:string :text}
   :return-type :any}
 
  {:name :keyword-to-str
-  :args {:k :any}
+  :args {:keyword :any}
   :return-type :text}]

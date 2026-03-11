@@ -11,7 +11,7 @@
   :return-type :bool}
 
  {:name :not
-  :args {:x :any}
+  :args {:value :any}
   :return-type :bool}
 
  ;; === Conditionals ===
@@ -27,9 +27,9 @@
 
  ;; === Constants ===
  {:name :const
-  :args {:x :any}
+  :args {:value :any}
   :return-type :any}
 
  {:name :identity
-  :args {:x :any}
+  :args {:value :any}
   :return-type :any}]

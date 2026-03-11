@@ -78,74 +78,74 @@
 ;; === Implementations ===
 
 (defn str-fn
-  [{:keys [args]}]
-  (str/join args))
+  [{:keys [parts]}]
+  (str/join parts))
 
 
 (defn subs-fn
-  [{:keys [s start end]}]
-  (let [len (count s)]
+  [{:keys [string start end]}]
+  (let [len (count string)]
     (validate-string-index! start len :start)
     (if end
       (do
         (validate-start-end-order! start end)
         (validate-string-index! end len :end)
-        (subs s start end))
-      (subs s start))))
+        (subs string start end))
+      (subs string start))))
 
 
 (defn str-len-fn
-  [{:keys [s]}]
-  (count s))
+  [{:keys [string]}]
+  (count string))
 
 
 (defn str-upper-fn
-  [{:keys [s]}]
-  (str/upper-case s))
+  [{:keys [string]}]
+  (str/upper-case string))
 
 
 (defn str-lower-fn
-  [{:keys [s]}]
-  (str/lower-case s))
+  [{:keys [string]}]
+  (str/lower-case string))
 
 
 (defn str-trim-fn
-  [{:keys [s]}]
-  (str/trim s))
+  [{:keys [string]}]
+  (str/trim string))
 
 
 (defn str-split-fn
-  [{:keys [s sep]}]
-  (when (empty? sep)
+  [{:keys [string separator]}]
+  (when (empty? separator)
     (throw (ex-info "separator cannot be empty"
                     {:type :execution-error/invalid-separator
-                     :separator sep})))
+                     :separator separator})))
   (let [max-input-len sp/*max-regex-input-length*]
-    (when (> (count s) max-input-len)
+    (when (> (count string) max-input-len)
       (throw (ex-info "Input string too long for regex split"
                       {:type :execution-error/input-too-large
-                       :input-length (count s)
+                       :input-length (count string)
                        :max-length max-input-len
                        :hint "Use streaming or chunked processing for large inputs"})))
-    (let [pattern (safe-compile-regex sep)]
-      (vec (str/split s pattern)))))
+    (let [pattern (safe-compile-regex separator)]
+      (vec (str/split string pattern)))))
 
 
 (defn str-join-fn
-  [{:keys [coll sep]}]
-  (str/join (or sep "") coll))
+  [{:keys [coll separator]}]
+  (str/join (or separator "") coll))
 
 
 (defn str-to-keyword-fn
-  [{:keys [s]}]
-  (keyword s))
+  [{:keys [string]}]
+  (keyword string))
 
 
 (defn keyword-to-str-fn
-  [{:keys [k]}]
-  (if (keyword? k)
-    (name k)
-    (str k)))
+  [{:keys [keyword]}]
+  (if (keyword? keyword)
+    (name keyword)
+    (str keyword)))
 
 
 ;; === Registry ===

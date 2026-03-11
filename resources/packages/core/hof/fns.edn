@@ -2,7 +2,7 @@
 ;; Functions with :fn type args require special handling by loader
 
 [{:name :map
-  :args {:f :fn
+  :args {:func :fn
          :coll {:type :jsonb :required false}}
   :return-type :any}
 
@@ -12,7 +12,7 @@
   :return-type :any}
 
  {:name :reduce
-  :args {:f :fn, :init :any, :coll :jsonb}
+  :args {:func :fn, :init :any, :coll :jsonb}
   :return-type :any}
 
  {:name :some
@@ -36,21 +36,21 @@
   :return-type :jsonb}
 
  {:name :apply
-  :args {:f :fn, :args :jsonb}
+  :args {:func :fn, :args :jsonb}
   :return-type :any}
 
  {:name :constantly
-  :args {:x :any
+  :args {:value :any
          :_item {:type :any :required false}}
   :return-type :any}
 
  {:name :comp
-  :args {:fns :jsonb}
+  :args {:functions :jsonb}
   :return-type :any}
 
  {:name :transduce
-  :args {:xf :any
-         :rf :fn
+  :args {:transducer :any
+         :reducer :fn
          :init :any
          :coll :jsonb}
   :return-type :any}]

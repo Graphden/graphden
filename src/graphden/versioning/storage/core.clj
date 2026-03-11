@@ -440,13 +440,12 @@
       (let [version-ids (mapv :id (sp/query-entities base version-entity {:branch-id branch-id}))]
         (when (seq version-ids)
           (sp/delete-entities base version-entity version-ids))))
-    ;; Delete branch-merge records referencing this branch (single query)
-    ;; Query all branch-merge records and filter in memory (smaller table, avoids 2 queries)
-    (let [all-merges (sp/query-entities base :branch-merge {})
-          merge-ids (->> all-merges
-                         (filter #(or (= (:source-branch-id %) branch-id)
-                                      (= (:target-branch-id %) branch-id)))
-                         (mapv :id))]
+    ;; Delete branch-merge records referencing this branch
+    ;; Two targeted queries are more efficient than full table scan + memory filter
+    (let [source-merges (sp/query-entities base :branch-merge {:source-branch-id branch-id})
+          target-merges (sp/query-entities base :branch-merge {:target-branch-id branch-id})
+          merge-ids (into [] (comp (map :id) (distinct))
+                          (concat source-merges target-merges))]
       (when (seq merge-ids)
         (sp/delete-entities base :branch-merge merge-ids)))
     ;; Delete the branch record

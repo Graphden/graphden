@@ -18,6 +18,12 @@
     [graphden.storage.protocol.core :as sp]))
 
 
+;; Forward declarations for batch resolution functions used by resolve-all-entities
+(declare resolve-entities-batch)
+(declare collect-branch-chain)
+(declare resolve-version-from-cache)
+
+
 ;; === Entity Configuration ===
 ;;
 ;; Maps each versioned base entity to its version table metadata.
@@ -140,20 +146,41 @@
 (defn resolve-all-entities
   "Resolves all entities of a type visible on the current branch.
    Filters by where clause after resolution.
-   Returns sequence of merged entity records."
+   Returns sequence of merged entity records.
+
+   Only returns entities that have at least one version visible on the branch chain.
+   This is different from resolve-entities-batch which returns all entities.
+
+   Optimized: uses batch version loading instead of N+1 queries."
   [base-storage entity-name branch-id where]
-  (let [{:keys [version-id-field]} (get entity-config entity-name)
-        all-identities (sp/query-entities base-storage entity-name {})
-        resolved (keep (fn [identity-rec]
-                         (when-let [version (resolve-version base-storage entity-name
-                                                             (:id identity-rec) branch-id)]
-                           (merge identity-rec
-                                  (extract-version-data version version-id-field))))
-                       all-identities)]
+  (let [{:keys [version-entity version-id-field]} (get entity-config entity-name)
+        branch-chain (collect-branch-chain base-storage branch-id)
+        ;; Load versions on branch chain first - this tells us which entities are visible
+        all-versions (sp/query-entities base-storage version-entity
+                                        {:branch-id (vec branch-chain)})
+        ;; Get unique entity IDs that have versions on this branch chain
+        entity-ids-with-versions (into #{} (map version-id-field) all-versions)
+        ;; Load only the identity records for entities that have versions
+        identities-map (if (empty? entity-ids-with-versions)
+                         {}
+                         (sp/read-entities base-storage entity-name
+                                           (vec entity-ids-with-versions)))
+        ;; Group versions by entity-id for resolution
+        versions-by-id (group-by version-id-field all-versions)
+        ;; Resolve each entity
+        resolved (for [[eid identity-rec] identities-map
+                       :let [version (resolve-version-from-cache versions-by-id eid branch-chain)]
+                       :when version]
+                   (merge identity-rec (extract-version-data version version-id-field)))]
     (if (empty? where)
       resolved
       (filter (fn [record]
-                (every? (fn [[k v]] (= (get record k) v)) where))
+                (every? (fn [[k v]]
+                          (let [rv (get record k)]
+                            (if (and (coll? v) (not (map? v)))
+                              (contains? (set v) rv)  ; Support IN-style filtering
+                              (= rv v))))
+                        where))
               resolved))))
 
 
@@ -245,16 +272,17 @@
 
 (defn- load-all-resolved-fns
   "Loads all fn records and resolves versions in memory.
-   Returns map {fn-id -> resolved-fn-record}."
+   Returns map {fn-id -> resolved-fn-record}.
+
+   Optimized: uses WHERE IN for branch-chain instead of full scan + filter."
   [base-storage branch-id]
   (let [all-identities (sp/query-entities base-storage :fn {})
         branch-chain (collect-branch-chain base-storage branch-id)
         {:keys [version-id-field]} (get entity-config :fn)
-        all-versions (sp/query-entities base-storage :fn-version {})
-        branch-set (set branch-chain)
-        versions-by-id (group-by :fn-id
-                                 (filter #(contains? branch-set (:branch-id %))
-                                         all-versions))]
+        ;; Use WHERE IN for branch-chain instead of full table scan
+        relevant-versions (sp/query-entities base-storage :fn-version
+                                             {:branch-id (vec branch-chain)})
+        versions-by-id (group-by :fn-id relevant-versions)]
     (into {}
           (map (fn [identity-rec]
                  (let [eid (:id identity-rec)]
@@ -267,16 +295,17 @@
 
 (defn- load-all-resolved-args
   "Loads all arg records and resolves versions in memory.
-   Returns map {arg-id -> resolved-arg-record}."
+   Returns map {arg-id -> resolved-arg-record}.
+
+   Optimized: uses WHERE IN for branch-chain instead of full scan + filter."
   [base-storage branch-id]
   (let [all-identities (sp/query-entities base-storage :arg {})
         branch-chain (collect-branch-chain base-storage branch-id)
         {:keys [version-id-field]} (get entity-config :arg)
-        all-versions (sp/query-entities base-storage :arg-version {})
-        branch-set (set branch-chain)
-        versions-by-id (group-by :arg-id
-                                 (filter #(contains? branch-set (:branch-id %))
-                                         all-versions))]
+        ;; Use WHERE IN for branch-chain instead of full table scan
+        relevant-versions (sp/query-entities base-storage :arg-version
+                                             {:branch-id (vec branch-chain)})
+        versions-by-id (group-by :arg-id relevant-versions)]
     (into {}
           (map (fn [identity-rec]
                  (let [eid (:id identity-rec)]

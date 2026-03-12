@@ -87,31 +87,8 @@
 
 
 ;; === Handler Generators (Context-aware) ===
-
-(defn all-entities-json-handler
-  [_args ctx]
-  (let [storage (:storage ctx)]
-    (fn [_request]
-      (if storage
-        (try
-          ;; Use optimized batch query for VersionedStorage
-          (let [result (if (instance? VersionedStorage storage)
-                         (vs/query-all-graph-entities storage)
-                         {:fns (vec (sp/query-entities storage :fn {}))
-                          :args (vec (sp/query-entities storage :arg {}))})]
-            {:status 200
-             :headers {"Content-Type" "application/json"}
-             :body (json/generate-string result)})
-          (catch Exception e
-            {:status 500
-             :headers {"Content-Type" "application/json"}
-             :body (json/generate-string
-                     {:error (ex-message e)
-                      :type (str (:type (ex-data e)))})}))
-        {:status 500
-         :headers {"Content-Type" "application/json"}
-         :body (json/generate-string
-                 {:error "Storage not available"})}))))
+;; Note: all-entities-json-handler is now a fn-def in fns.edn
+;; using :make-json-response-handler composition
 
 
 (defn- entity-type-from-string
@@ -174,49 +151,38 @@
     [:p "Unknown entity type"]))
 
 
-(defn entity-details-handler
-  [_args ctx]
-  (let [storage (:storage ctx)]
-    (fn [request]
-      (let [entity-type-str (get-in request [:path-params :type])
-            entity-id-str (get-in request [:path-params :id])
-            entity-type (entity-type-from-string entity-type-str)]
-        (if (and storage entity-type entity-id-str)
-          (try
-            (let [entity-id (java.util.UUID/fromString entity-id-str)
-                  entity (sp/read-entity storage entity-type entity-id)]
-              (if entity
-                {:status 200
-                 :headers {"Content-Type" "text/html; charset=utf-8"}
-                 :body (str
-                         (hiccup2.core/html
-                           [:div
-                            [:div {:style "margin-bottom: 12px;"}
-                             (render-entity-badge entity-type-str)]
-                            (render-entity-details entity-type-str entity)
-                            [:div {:style "margin-top: 16px; display: flex; gap: 8px;"}
-                             [:button {:class "btn btn-primary"
-                                       :hx-get (str "/partials/entity-form/" entity-type-str "/" entity-id-str)
-                                       :hx-target "#details-content"
-                                       :hx-swap "innerHTML"}
-                              "Edit"]
-                             [:button {:class "btn btn-danger"
-                                       :hx-delete (str "/api/entities/" entity-type-str "/" entity-id-str)
-                                       :hx-confirm "Are you sure you want to delete this entity?"
-                                       :hx-target "#details-panel"
-                                       :hx-swap "outerHTML"
-                                       :_ "on htmx:afterRequest trigger entityDeleted on body"}
-                              "Delete"]]]))}
-                {:status 404
-                 :headers {"Content-Type" "text/html; charset=utf-8"}
-                 :body "<p class=\"error\">Entity not found</p>"}))
-            (catch Exception e
-              {:status 500
-               :headers {"Content-Type" "text/html; charset=utf-8"}
-               :body (str "<p class=\"error\">Error: " (ex-message e) "</p>")}))
-          {:status 400
-           :headers {"Content-Type" "text/html; charset=utf-8"}
-           :body "<p class=\"error\">Invalid request</p>"})))))
+(defn render-entity-details-view
+  "Renders entity details view as hiccup.
+   Extracts entity type and id from request path params, fetches entity from storage.
+   Returns hiccup structure that will be rendered to HTML by make-html-response-handler."
+  [{:keys [request]} ctx]
+  (let [storage (:storage ctx)
+        entity-type-str (get-in request [:path-params :type])
+        entity-id-str (get-in request [:path-params :id])
+        entity-type (entity-type-from-string entity-type-str)]
+    (if (and storage entity-type entity-id-str)
+      (let [entity-id (java.util.UUID/fromString entity-id-str)
+            entity (sp/read-entity storage entity-type entity-id)]
+        (if entity
+          [:div
+           [:div {:style "margin-bottom: 12px;"}
+            (render-entity-badge entity-type-str)]
+           (render-entity-details entity-type-str entity)
+           [:div {:style "margin-top: 16px; display: flex; gap: 8px;"}
+            [:button {:class "btn btn-primary"
+                      :hx-get (str "/partials/entity-form/" entity-type-str "/" entity-id-str)
+                      :hx-target "#details-content"
+                      :hx-swap "innerHTML"}
+             "Edit"]
+            [:button {:class "btn btn-danger"
+                      :hx-delete (str "/api/entities/" entity-type-str "/" entity-id-str)
+                      :hx-confirm "Are you sure you want to delete this entity?"
+                      :hx-target "#details-panel"
+                      :hx-swap "outerHTML"
+                      :_ "on htmx:afterRequest trigger entityDeleted on body"}
+             "Delete"]]]
+          [:p {:class "error"} "Entity not found"]))
+      [:p {:class "error"} "Invalid request"])))
 
 
 (defn- render-fn-form
@@ -293,109 +259,88 @@
       [:button {:type "submit" :class "btn btn-primary"} (if editing? "Save" "Create")]]]))
 
 
-(defn entity-form-handler
-  [_args ctx]
-  (let [storage (:storage ctx)]
-    (fn [request]
-      (let [entity-type-str (get-in request [:path-params :type])
-            entity-id-str (get-in request [:path-params :id])
-            entity-type (entity-type-from-string entity-type-str)]
-        (if (and storage entity-type)
-          (try
-            (let [entity (when entity-id-str
-                           (sp/read-entity storage entity-type
-                                           (java.util.UUID/fromString entity-id-str)))
-                  all-fns (vec (sp/query-entities storage :fn {}))
-                  all-args (vec (sp/query-entities storage :arg {}))
-                  form-html (case entity-type-str
-                              "fn" (render-fn-form entity all-fns)
-                              "arg" (render-arg-form entity all-fns all-args)
-                              [:p "Forms for " entity-type-str " not yet implemented"])]
-              {:status 200
-               :headers {"Content-Type" "text/html; charset=utf-8"}
-               :body (str (hiccup2.core/html
-                            [:div
-                             [:h4 (if entity
-                                    (str "Edit " entity-type-str)
-                                    (str "Create " entity-type-str))]
-                             form-html]))})
-            (catch Exception e
-              {:status 500
-               :headers {"Content-Type" "text/html; charset=utf-8"}
-               :body (str "<p class=\"error\">Error: " (ex-message e) "</p>")}))
+(defn render-entity-form-view
+  "Renders entity form view as hiccup.
+   Extracts entity type and optional id from request path params.
+   Returns hiccup structure that will be rendered to HTML by make-html-response-handler."
+  [{:keys [request]} ctx]
+  (let [storage (:storage ctx)
+        entity-type-str (get-in request [:path-params :type])
+        entity-id-str (get-in request [:path-params :id])
+        entity-type (entity-type-from-string entity-type-str)]
+    (if (and storage entity-type)
+      (let [entity (when entity-id-str
+                     (sp/read-entity storage entity-type
+                                     (java.util.UUID/fromString entity-id-str)))
+            all-fns (vec (sp/query-entities storage :fn {}))
+            all-args (vec (sp/query-entities storage :arg {}))
+            form-html (case entity-type-str
+                        "fn" (render-fn-form entity all-fns)
+                        "arg" (render-arg-form entity all-fns all-args)
+                        [:p "Forms for " entity-type-str " not yet implemented"])]
+        [:div
+         [:h4 (if entity
+                (str "Edit " entity-type-str)
+                (str "Create " entity-type-str))]
+         form-html])
+      [:p {:class "error"} "Invalid entity type"])))
+
+
+(defn process-create-entity
+  "Processes create entity request.
+   Returns {:success bool :body \"html\" :trigger \"eventName\"} for make-html-action-handler."
+  [{:keys [request]} ctx]
+  (let [storage (:storage ctx)
+        entity-type-str (get-in request [:path-params :type])
+        entity-type (entity-type-from-string entity-type-str)
+        body (:body request)
+        form-data (when body
+                    (into {}
+                          (for [pair (str/split body #"&")
+                                :let [[k v] (str/split pair #"=" 2)]
+                                :when k]
+                            [(keyword k) (java.net.URLDecoder/decode (or v "") "UTF-8")])))]
+    (if (and storage entity-type form-data)
+      (let [entity-data (case entity-type-str
+                          "fn" (cond-> {:name (keyword (:name form-data))}
+                                 (not (str/blank? (:parent-id form-data)))
+                                 (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data))))
+                          "arg" (cond-> {:name (keyword (:name form-data))
+                                         :fn-id (java.util.UUID/fromString (:fn-id form-data))
+                                         :type (keyword (:type form-data))}
+                                  (not (str/blank? (:source-id form-data)))
+                                  (assoc :source-id (java.util.UUID/fromString (:source-id form-data)))
+                                  (not (str/blank? (:value form-data)))
+                                  (assoc :value (json/parse-string (:value form-data) true)))
+                          nil)
+            created (when entity-data
+                      (sp/create-entity storage entity-type entity-data))]
+        (if created
+          {:status 200
+           :headers {"HX-Trigger" "entityCreated"}
+           :body "<p>Entity created successfully</p>"}
           {:status 400
-           :headers {"Content-Type" "text/html; charset=utf-8"}
-           :body "<p class=\"error\">Invalid entity type</p>"})))))
+           :body "<p class=\"error\">Failed to create entity</p>"}))
+      {:status 400
+       :body "<p class=\"error\">Invalid request</p>"})))
 
 
-(defn create-entity-api-handler
-  [_args ctx]
-  (let [storage (:storage ctx)]
-    (fn [request]
-      (let [entity-type-str (get-in request [:path-params :type])
-            entity-type (entity-type-from-string entity-type-str)
-            body (:body request)
-            form-data (when body
-                        (into {}
-                              (for [pair (str/split body #"&")
-                                    :let [[k v] (str/split pair #"=" 2)]
-                                    :when k]
-                                [(keyword k) (java.net.URLDecoder/decode (or v "") "UTF-8")])))]
-        (if (and storage entity-type form-data)
-          (try
-            (let [entity-data (case entity-type-str
-                                "fn" (cond-> {:name (keyword (:name form-data))}
-                                       (not (str/blank? (:parent-id form-data)))
-                                       (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data))))
-                                "arg" (cond-> {:name (keyword (:name form-data))
-                                               :fn-id (java.util.UUID/fromString (:fn-id form-data))
-                                               :type (keyword (:type form-data))}
-                                        (not (str/blank? (:source-id form-data)))
-                                        (assoc :source-id (java.util.UUID/fromString (:source-id form-data)))
-                                        (not (str/blank? (:value form-data)))
-                                        (assoc :value (json/parse-string (:value form-data) true)))
-                                nil)
-                  created (when entity-data
-                            (sp/create-entity storage entity-type entity-data))]
-              (if created
-                {:status 200
-                 :headers {"Content-Type" "text/html; charset=utf-8"
-                           "HX-Trigger" "entityCreated"}
-                 :body "<p>Entity created successfully</p>"}
-                {:status 400
-                 :headers {"Content-Type" "text/html; charset=utf-8"}
-                 :body "<p class=\"error\">Failed to create entity</p>"}))
-            (catch Exception e
-              {:status 500
-               :headers {"Content-Type" "text/html; charset=utf-8"}
-               :body (str "<p class=\"error\">Error: " (ex-message e) "</p>")}))
-          {:status 400
-           :headers {"Content-Type" "text/html; charset=utf-8"}
-           :body "<p class=\"error\">Invalid request</p>"})))))
-
-
-(defn delete-entity-api-handler
-  [_args ctx]
-  (let [storage (:storage ctx)]
-    (fn [request]
-      (let [entity-type-str (get-in request [:path-params :type])
-            entity-id-str (get-in request [:path-params :id])
-            entity-type (entity-type-from-string entity-type-str)]
-        (if (and storage entity-type entity-id-str)
-          (try
-            (let [entity-id (java.util.UUID/fromString entity-id-str)]
-              (sp/delete-entity storage entity-type entity-id)
-              {:status 200
-               :headers {"Content-Type" "text/html; charset=utf-8"
-                         "HX-Trigger" "entityDeleted"}
-               :body ""})
-            (catch Exception e
-              {:status 500
-               :headers {"Content-Type" "text/html; charset=utf-8"}
-               :body (str "<p class=\"error\">Error: " (ex-message e) "</p>")}))
-          {:status 400
-           :headers {"Content-Type" "text/html; charset=utf-8"}
-           :body "<p class=\"error\">Invalid request</p>"})))))
+(defn process-delete-entity
+  "Processes delete entity request.
+   Returns {:status :headers :body} for make-html-action-handler with dynamic-response."
+  [{:keys [request]} ctx]
+  (let [storage (:storage ctx)
+        entity-type-str (get-in request [:path-params :type])
+        entity-id-str (get-in request [:path-params :id])
+        entity-type (entity-type-from-string entity-type-str)]
+    (if (and storage entity-type entity-id-str)
+      (let [entity-id (java.util.UUID/fromString entity-id-str)]
+        (sp/delete-entity storage entity-type entity-id)
+        {:status 200
+         :headers {"HX-Trigger" "entityDeleted"}
+         :body ""})
+      {:status 400
+       :body "<p class=\"error\">Invalid request</p>"})))
 
 
 ;; === Pure Functions ===
@@ -457,11 +402,12 @@
    :update-entity (with-meta update-entity {:ctx true})
    :delete-entity (with-meta delete-entity {:ctx true})
    :list-all-graph-entities (with-meta list-all-graph-entities {:ctx true})
-   :all-entities-json-handler (with-meta all-entities-json-handler {:ctx true})
-   :entity-details-handler (with-meta entity-details-handler {:ctx true})
-   :entity-form-handler (with-meta entity-form-handler {:ctx true})
-   :create-entity-api-handler (with-meta create-entity-api-handler {:ctx true})
-   :delete-entity-api-handler (with-meta delete-entity-api-handler {:ctx true})
+   ;; Render/action functions for fn-def handlers
+   :render-entity-details-view (with-meta render-entity-details-view {:ctx true})
+   :render-entity-form-view (with-meta render-entity-form-view {:ctx true})
+   :process-create-entity (with-meta process-create-entity {:ctx true})
+   :process-delete-entity (with-meta process-delete-entity {:ctx true})
+   ;; Pure helper functions
    :get-path-param get-path-param
    :get-query-param get-query-param
    :parse-form-body parse-form-body

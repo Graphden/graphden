@@ -38,30 +38,16 @@
   :return-type :jsonb
   :ctx true}
 
- ;; Handler generators (context-aware, return functions)
- {:name :all-entities-json-handler
-  :args {}
-  :return-type :fn
+ ;; Action functions (context-aware, return {:status :headers :body} response map)
+ ;; These perform actions and return result for make-html-action-handler (dynamic-response)
+ {:name :process-create-entity
+  :args {:request :jsonb}
+  :return-type :jsonb
   :ctx true}
 
- {:name :entity-details-handler
-  :args {}
-  :return-type :fn
-  :ctx true}
-
- {:name :entity-form-handler
-  :args {}
-  :return-type :fn
-  :ctx true}
-
- {:name :create-entity-api-handler
-  :args {}
-  :return-type :fn
-  :ctx true}
-
- {:name :delete-entity-api-handler
-  :args {}
-  :return-type :fn
+ {:name :process-delete-entity
+  :args {:request :jsonb}
+  :return-type :jsonb
   :ctx true}
 
  ;; Request parameter helpers (pure functions)
@@ -86,4 +72,50 @@
 
  {:name :str-to-uuid
   :args {:string :text}
-  :return-type :uuid}]
+  :return-type :uuid}
+
+ ;; Render functions (context-aware, return hiccup)
+ ;; These extract data from request and render to hiccup
+ {:name :render-entity-details-view
+  :args {:request :jsonb}
+  :return-type :jsonb
+  :ctx true}
+
+ {:name :render-entity-form-view
+  :args {:request :jsonb}
+  :return-type :jsonb
+  :ctx true}
+
+ ;; =============================================================================
+ ;; FN-DEFS: Response handlers composed from base functions
+ ;; =============================================================================
+
+ ;; all-entities-json-handler using fn-def composition
+ ;; Uses :make-json-response-handler to wrap :list-all-graph-entities
+ {:name :all-entities-json-handler
+  :parent :make-json-response-handler
+  :args {:data-fn :list-all-graph-entities}}
+
+ ;; entity-details-handler using fn-def composition
+ ;; Uses :make-html-response-handler to wrap :render-entity-details-view
+ {:name :entity-details-handler
+  :parent :make-html-response-handler
+  :args {:render-fn :render-entity-details-view}}
+
+ ;; entity-form-handler using fn-def composition
+ ;; Uses :make-html-response-handler to wrap :render-entity-form-view
+ {:name :entity-form-handler
+  :parent :make-html-response-handler
+  :args {:render-fn :render-entity-form-view}}
+
+ ;; create-entity-api-handler using fn-def composition
+ ;; Uses :make-html-action-handler to wrap :process-create-entity
+ {:name :create-entity-api-handler
+  :parent :make-html-action-handler
+  :args {:action-fn :process-create-entity}}
+
+ ;; delete-entity-api-handler using fn-def composition
+ ;; Uses :make-html-action-handler to wrap :process-delete-entity
+ {:name :delete-entity-api-handler
+  :parent :make-html-action-handler
+  :args {:action-fn :process-delete-entity}}]

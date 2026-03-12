@@ -189,6 +189,23 @@
     [:button final-attrs btn-text]))
 
 
+(defn field-row
+  "Renders a label-value field row."
+  [{:keys [label value]}]
+  [:div {:class "field-row"}
+   [:span {:class "field-label"} label]
+   [:span {:class "field-value"} (if (nil? value) "-" (str value))]])
+
+
+(defn badge
+  "Renders a badge with optional type for styling."
+  [{:keys [badge-text badge-type]}]
+  (let [type-class (if badge-type
+                     (str "badge badge-" badge-type)
+                     "badge")]
+    [:span {:class type-class} badge-text]))
+
+
 ;; === Registry ===
 
 (def impls
@@ -200,4 +217,6 @@
    :cytoscape-container cytoscape-container
    :form-input form-input
    :form-select form-select
-   :button button})
+   :button button
+   :field-row field-row
+   :badge badge})

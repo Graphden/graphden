@@ -53,4 +53,15 @@
   :args {:btn-text :text
          :btn-type {:type :text :required false}
          :extra-attrs {:type :jsonb :required false}}
+  :return-type :jsonb}
+
+ ;; Field display helpers
+ {:name :field-row
+  :args {:label :text
+         :value :any}
+  :return-type :jsonb}
+
+ {:name :badge
+  :args {:badge-text :text
+         :badge-type {:type :text :required false}}
   :return-type :jsonb}]

@@ -336,6 +336,25 @@
   (core/make-single-arg-callable context fn-id))
 
 
+(defn make-optional-arg-callable
+  "Creates a callable for a function with 0 or 1 required arguments.
+   - 0 args: callable ignores input, calls fn with no args
+   - 1 arg: callable passes input to the single required arg
+
+   Used by response handlers where inner-fn may or may not need request.
+
+   Arguments:
+   - context: Execution context with execution-graph populated
+   - fn-id: UUID of the function (must have 0 or 1 required args)
+
+   Returns a function: value -> result
+
+   Throws :execution-error/invalid-handler-function if the function has
+   more than one required argument."
+  [context fn-id]
+  (core/make-optional-arg-callable context fn-id))
+
+
 ;; === Context Utilities ===
 
 (defn clear-result-cache!

@@ -93,6 +93,33 @@
   :parent :error-response
   :args {:headers {"Content-Type" "text/plain"}}}
 
+ ;; JSON error/not-found responses
+ {:name :json-error-response
+  :parent :error-response
+  :args {:headers {"Content-Type" "application/json"}}}
+
+ {:name :json-not-found-response
+  :parent :not-found-response
+  :args {:headers {"Content-Type" "application/json"}}}
+
+ ;; HTML error/not-found responses
+ {:name :html-error-response
+  :parent :error-response
+  :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
+
+ {:name :html-not-found-response
+  :parent :not-found-response
+  :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
+
+ ;; HTML with bad request status
+ {:name :bad-request-response
+  :parent :ring-response
+  :args {:status 400}}
+
+ {:name :html-bad-request-response
+  :parent :bad-request-response
+  :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
+
  ;; SVG responses
  {:name :svg-ok-response
   :parent :ok-response

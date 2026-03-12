@@ -84,15 +84,4 @@
 
  {:name :current-time-ms
   :args {}
-  :return-type :int}
-
- ;; Response handler factory - unified handler creation
- {:name :make-response-handler
-  :args {:data-fn :fn
-         :body-fn {:type :fn :required false}
-         :headers {:type :jsonb :required false}
-         :success-status {:type :int :required false}
-         :error-status {:type :int :required false}}
-  :return-type :fn
-  :ctx true
-  :lazy #{:data-fn :body-fn}}]
+  :return-type :int}]

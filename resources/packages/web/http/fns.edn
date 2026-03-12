@@ -2,7 +2,7 @@
 ;; http-server, http-stop
 
 [{:name :http-server
-  :args {:handler :any
+  :args {:handler :fn
          :port :int}
   :return-type :any}
 

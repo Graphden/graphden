@@ -159,18 +159,17 @@
   [context fn-id]
   (let [arg-id (:id (get-single-required-arg context fn-id))]
     (fn [value]
-      (execute-internal context fn-id {arg-id value}))))
+      ;; Reset start-time for each invocation (handlers are long-lived)
+      (let [fresh-ctx (assoc context :start-time (ctx/current-time-ms context))]
+        (execute-internal fresh-ctx fn-id {arg-id value})))))
 
 
 (defn make-optional-arg-callable
   "Creates a callable for a function with 0 or 1 required arguments.
    - 0 args: callable ignores input, calls fn with no args
-   - 1 arg: callable passes input to that argument
+   - 1 arg: callable passes input to the single required arg
 
-   Used by response handlers where data-fn may or may not need request.
-
-   IMPORTANT: Resets start-time on each call to prevent timeout issues
-   when callable is invoked long after handler creation (e.g., HTTP requests).
+   Used by response handlers where inner-fn may or may not need request.
 
    Returns a function: value -> result"
   [context fn-id]
@@ -178,18 +177,20 @@
         count-required (count required-args)]
     (case count-required
       0 (fn [_value]
-          ;; Reset start-time to current time for fresh timeout window
+          ;; Reset start-time for each invocation (handlers are long-lived)
           (let [fresh-ctx (assoc context :start-time (ctx/current-time-ms context))]
             (execute-internal fresh-ctx fn-id {})))
+
       1 (let [arg-id (:id (first required-args))]
           (fn [value]
-            ;; Reset start-time to current time for fresh timeout window
+            ;; Reset start-time for each invocation (handlers are long-lived)
             (let [fresh-ctx (assoc context :start-time (ctx/current-time-ms context))]
               (execute-internal fresh-ctx fn-id {arg-id value}))))
-      (throw (ex-info (str "Function requires 0 or 1 required arguments, got " count-required)
-                      {:type :execution-error/invalid-callable-function
+
+      (throw (ex-info (str "Function requires 0 or 1 arguments, got " count-required)
+                      {:type :execution-error/invalid-handler-function
                        :fn-id fn-id
-                       :required-arg-count count-required}))))))
+                       :required-arg-count count-required})))))
 
 
 ;; === Result Caching ===

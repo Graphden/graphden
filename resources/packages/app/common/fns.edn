@@ -15,7 +15,7 @@
  {:name :assoc-handler
   :parent :assoc-empty
   :args {:key "handler"
-         :value {:as :handler}}}
+         :value {:as :handler :type :fn}}}
 
  ;; Level 2: method-map (free: key, handler via pass-through from assoc-handler)
  {:name :method-map
@@ -150,32 +150,4 @@
  {:name :health-status
   :parent :assoc-timestamp
   :args {:map :health-status-base
-         :value :current-time-ms}}
-
- ;; =============================================================================
- ;; RESPONSE HANDLER HIERARCHY
- ;; Unified handler creation - compose from make-response-handler
- ;; =============================================================================
-
- ;; JSON response handler: data-fn -> JSON body
- {:name :make-json-response-handler
-  :parent :make-response-handler
-  :args {:body-fn :to-json-string
-         :headers {"Content-Type" "application/json"}
-         :success-status 200
-         :error-status 500}}
-
- ;; HTML response handler: data-fn returns full response with body
- {:name :make-html-response-handler
-  :parent :make-response-handler
-  :args {:headers {"Content-Type" "text/html; charset=utf-8"}
-         :success-status 200
-         :error-status 500}}
-
- ;; HTML action handler: like HTML but with HX-Trigger
- {:name :make-html-action-handler
-  :parent :make-response-handler
-  :args {:headers {"Content-Type" "text/html; charset=utf-8"
-                   "HX-Trigger" "entityUpdated"}
-         :success-status 200
-         :error-status 500}}]
+         :value :current-time-ms}}]

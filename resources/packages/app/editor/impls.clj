@@ -153,6 +153,20 @@
     return null;
   }
 
+  // Check if arg is HOF by following source-id chain
+  // is-fn flag is set on base fn arg, inherited args don't have it directly
+  function isArgHof(arg) {
+    let current = arg;
+    const maxDepth = 100;
+    for (let i = 0; i < maxDepth; i++) {
+      if (current['is-fn']) return true;
+      if (!current['source-id']) return false;
+      current = lookups.argMap.get(current['source-id']);
+      if (!current) return false;
+    }
+    return false;
+  }
+
   // Update sidebar - show fn entities
   function updateEntityList(data) {
     const list = document.getElementById('entity-list');
@@ -269,7 +283,7 @@
           'font-size': '10px',
           'font-family': 'SF Mono, Monaco, monospace',
           'width': 'label',
-          'height': 28,
+          'height': 'label',
           'padding': '8px',
           'shape': 'rectangle',
           'background-color': '#f5f5f5',
@@ -277,7 +291,7 @@
           'border-color': '#000',
           'color': '#000'
         }},
-        // Edges - simple lines
+        // Edges - simple black lines
         { selector: 'edge', style: {
           'width': 2,
           'line-color': '#000',
@@ -300,6 +314,33 @@
         { selector: 'edge[type=\"arg-unset\"]', style: {
           'line-style': 'dashed',
           'line-color': '#999'
+        }},
+        // HOF nodes - different shades based on nesting depth (cycles every 4)
+        // hofDepthMod = ((hofDepth - 1) % 4) + 1, so 1->1, 2->2, 3->3, 4->4, 5->1, etc.
+        { selector: 'node[hofDepthMod = 1]', style: {
+          'border-color': '#555'
+        }},
+        { selector: 'node[hofDepthMod = 2]', style: {
+          'border-color': '#888'
+        }},
+        { selector: 'node[hofDepthMod = 3]', style: {
+          'border-color': '#aaa'
+        }},
+        { selector: 'node[hofDepthMod = 4]', style: {
+          'border-color': '#ccc'
+        }},
+        // All edges inside HOF subgraph - color based on hofDepth (cycles every 4)
+        { selector: 'edge[hofDepthMod = 1]', style: {
+          'line-color': '#555'
+        }},
+        { selector: 'edge[hofDepthMod = 2]', style: {
+          'line-color': '#888'
+        }},
+        { selector: 'edge[hofDepthMod = 3]', style: {
+          'line-color': '#aaa'
+        }},
+        { selector: 'edge[hofDepthMod = 4]', style: {
+          'line-color': '#ccc'
         }}
       ],
       layout: {
@@ -336,9 +377,41 @@
     const nodes = [];
     const edges = [];
     const addedFns = new Set();
+    const hofDepth = new Map(); // Track HOF nesting depth for each fn
 
     if (!rootFnId || !lookups.fnMap.has(rootFnId)) {
       return { nodes: [], edges: [] };
+    }
+
+    // Calculate HOF depth for each fn
+    // hofDepth = 0 means not in HOF, 1 = first HOF level, 2 = nested HOF, etc.
+    // All nodes inside a HOF subgraph inherit the HOF depth
+    function calculateHofDepth(fnId, currentHofDepth, visited) {
+      // Allow revisiting if we have a higher depth to propagate
+      const existingDepth = hofDepth.get(fnId) || 0;
+      if (visited.has(fnId) && currentHofDepth <= existingDepth) return;
+      visited.add(fnId);
+
+      // Store max HOF depth for this fn
+      if (currentHofDepth > existingDepth) {
+        hofDepth.set(fnId, currentHofDepth);
+      }
+
+      const args = lookups.argsByFn.get(fnId) || [];
+      args.forEach(arg => {
+        if (arg['ref-id']) {
+          // If this arg is HOF, increase depth; otherwise keep current depth
+          // This ensures all children of HOF node also get the HOF depth
+          const nextDepth = isArgHof(arg) ? currentHofDepth + 1 : currentHofDepth;
+          calculateHofDepth(arg['ref-id'], nextDepth, visited);
+        }
+      });
+    }
+    calculateHofDepth(rootFnId, 0, new Set());
+
+    // Helper to compute cyclic depth mod (1-4 repeating)
+    function hofDepthMod(d) {
+      return d > 0 ? ((d - 1) % 4) + 1 : 0;
     }
 
     // Recursively collect fn and its dependencies
@@ -351,6 +424,7 @@
 
       const isBase = !fn['parent-id'];
       const isComposed = !!fn['parent-id'];
+      const fnHofDepth = hofDepth.get(fnId) || 0;
 
       // Build label
       let label = fn.name;
@@ -373,6 +447,8 @@
           isBase: isBase,
           isComposed: isComposed,
           isRoot: isRoot,
+          hofDepth: fnHofDepth,
+          hofDepthMod: hofDepthMod(fnHofDepth),
           parentId: fn['parent-id']
         }
       });
@@ -384,6 +460,9 @@
         const argName = resolveArgName(arg);
         const hasValue = arg.value !== null && arg.value !== undefined;
         const hasRef = !!arg['ref-id'];
+        const isHofArg = isArgHof(arg);
+        // HOF edge depth = depth of the target fn
+        const targetHofDepth = hasRef ? (hofDepth.get(arg['ref-id']) || 0) : 0;
 
         if (hasRef) {
           // Reference to another fn - edge to that fn
@@ -393,8 +472,10 @@
               id: 'e-' + arg.id,
               source: fnId,
               target: refFnId,
-              type: 'arg-ref',
-              argName: argName
+              type: isHofArg ? 'arg-hof' : 'arg-ref',
+              argName: argName,
+              hofDepth: targetHofDepth,
+              hofDepthMod: hofDepthMod(targetHofDepth)
             }
           });
           // Recurse into dependency
@@ -469,7 +550,8 @@
   }
 
   function hideNodeDetails() {
-    document.getElementById('details-panel').classList.add('hidden');
+    const panel = document.getElementById('details-panel');
+    if (panel) panel.classList.add('hidden');
   }
 
   function showCreateModal(entityType) {

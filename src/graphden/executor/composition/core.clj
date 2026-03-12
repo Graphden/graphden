@@ -486,24 +486,26 @@
    Supports:
    - Simple values: 123, \"str\", :keyword, :fn-ref
    - Map with options: {:as :new-name} or {:as :new-name :value 123} or {:as :new-name :ref :fn-name}
+   - Map with :type :fn to mark as HOF argument
 
-   Returns {:rename nil-or-keyword :value-spec original-or-extracted}"
+   Returns {:rename nil-or-keyword :value-spec original-or-extracted :is-fn bool-or-nil}"
   [arg-value]
   (if (and (map? arg-value) (contains? arg-value :as))
     ;; Map with :as - extract rename and value
     (let [rename (:as arg-value)
           has-value? (contains? arg-value :value)
-          has-ref? (contains? arg-value :ref)]
+          has-ref? (contains? arg-value :ref)
+          is-fn? (= :fn (:type arg-value))]
       (when-not (keyword? rename)
         (throw (ex-info ":as must be a keyword"
                         {:type :fn-composition/invalid-arg-spec
                          :arg-value arg-value})))
       (cond
-        has-value? {:rename rename :value-spec (:value arg-value)}
-        has-ref? {:rename rename :value-spec (:ref arg-value)}
-        :else {:rename rename :value-spec nil}))
+        has-value? {:rename rename :value-spec (:value arg-value) :is-fn is-fn?}
+        has-ref? {:rename rename :value-spec (:ref arg-value) :is-fn is-fn?}
+        :else {:rename rename :value-spec nil :is-fn is-fn?}))
     ;; Simple value - no rename
-    {:rename nil :value-spec arg-value}))
+    {:rename nil :value-spec arg-value :is-fn nil}))
 
 
 (defn- prepare-arg-record
@@ -522,7 +524,7 @@
                      :arg-name arg-name
                      :parent-fn-id parent-fn-id})))
   (let [;; Parse arg value spec (supports {:as :new-name ...})
-        {:keys [rename value-spec] :as parsed} (parse-arg-value-spec arg-value)
+        {:keys [rename value-spec is-fn] :as parsed} (parse-arg-value-spec arg-value)
         _ (when rename
             (log/info "prepare-arg-record: arg-name=" arg-name
                       "arg-value=" arg-value
@@ -552,14 +554,17 @@
         ;; Add name override if specified
         resolved-with-name (if rename
                              (assoc resolved :name (name rename))
-                             resolved)]
+                             resolved)
+        ;; Determine is-fn: explicit :type :fn in arg-value overrides parent
+        effective-is-fn (if is-fn true (:is-fn parent-arg))]
     (if existing
-      ;; Check if update needed (including name change)
+      ;; Check if update needed (including name change, is-fn change)
       (when (or (not= (:value existing) (:value resolved-with-name))
                 (not= (:ref-id existing) (:ref-id resolved-with-name))
-                (and rename (not= (:name existing) (name rename))))
+                (and rename (not= (:name existing) (name rename)))
+                (and is-fn (not (:is-fn existing))))
         ;; Merge full existing record with resolved to preserve all required fields
-        {:update (merge existing resolved-with-name)})
+        {:update (merge existing resolved-with-name {:is-fn effective-is-fn})})
       ;; Create new - name is nil unless explicitly renamed via :as
       (let [new-arg (merge {:id (random-uuid)
                             :fn-id fn-id
@@ -567,7 +572,7 @@
                             ;; name is nil by default - will be resolved via source-id chain
                             ;; unless explicitly set via :as
                             :type (:type parent-arg)
-                            :is-fn (:is-fn parent-arg)}
+                            :is-fn effective-is-fn}
                            resolved-with-name)]
         (when rename
           (log/info "prepare-arg-record: creating new arg"

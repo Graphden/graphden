@@ -4,8 +4,8 @@
    Provides system information and Ring response primitives."
   (:require
     [cheshire.core :as json]
-    [clojure.tools.logging :as log]
-    [graphden.executor.interface :as exec])
+    [graphden.executor.interface :as exec]
+    [hiccup2.core :as h])
   (:import
     (java.lang.management
       ManagementFactory
@@ -39,6 +39,64 @@
   (let [callable (exec/make-single-arg-callable ctx response-fn)]
     (fn [request]
       (callable request))))
+
+
+(defn make-response-handler
+  "Generic response handler factory.
+   - inner-fn: called with request (0 or 1 required args), returns data
+   - body-fn: transforms data to body string (optional, uses str if nil)
+   - headers: response headers map (default {})
+   - success-status: status on success (default 200)
+   - error-status: status on error (default 500)
+   - error-body-fn: transforms {:message :type} to body string (optional)
+   - dynamic-response: if true, inner-fn returns full {:status :headers :body} map"
+  [{:keys [inner-fn body-fn headers success-status error-status error-body-fn dynamic-response]} ctx]
+  (let [inner-callable (exec/make-optional-arg-callable ctx inner-fn)
+        body-callable (when body-fn (exec/make-single-arg-callable ctx body-fn))
+        error-body-callable (when error-body-fn (exec/make-single-arg-callable ctx error-body-fn))
+        base-headers (or headers {})
+        ok-status (or success-status 200)
+        err-status (or error-status 500)]
+    (fn [request]
+      (try
+        (let [result (inner-callable request)]
+          (if dynamic-response
+            ;; inner-fn returns full response map with :status :headers :body
+            (let [resp-status (or (:status result) ok-status)
+                  resp-headers (merge base-headers (or (:headers result) {}))
+                  resp-body (or (:body result) "")]
+              {:status resp-status
+               :headers resp-headers
+               :body resp-body})
+            ;; standard flow: transform result to body
+            (let [body (if body-callable
+                         (body-callable result)
+                         (str result))]
+              {:status ok-status
+               :headers base-headers
+               :body body})))
+        (catch Exception e
+          (let [error-data {:message (ex-message e)
+                            :type (str (:type (ex-data e)))}
+                error-body (if error-body-callable
+                             (error-body-callable error-data)
+                             (str "Error: " (ex-message e)))]
+            {:status err-status
+             :headers base-headers
+             :body error-body}))))))
+
+
+(defn json-error-body
+  "Formats error as JSON string."
+  [{:keys [error]}]
+  (json/generate-string {:error (:message error)
+                         :type (:type error)}))
+
+
+(defn html-error-body
+  "Formats error as HTML string."
+  [{:keys [error]}]
+  (str "<p class=\"error\">Error: " (:message error) "</p>"))
 
 
 (defn to-json-string
@@ -76,64 +134,6 @@
   (System/currentTimeMillis))
 
 
-;; === Response Handler Factory ===
-
-(defn make-response-handler
-  "Creates a Ring handler that processes requests through data-fn and formats response.
-
-   Args:
-   - data-fn: fn-id (delay) to call with request, returns data
-   - body-fn: optional fn-id (delay) to transform data to body string
-   - headers: response headers map
-   - success-status: HTTP status for success (default 200)
-   - error-status: HTTP status for errors (default 500)
-
-   If body-fn is nil, data is converted to string directly.
-   If data-fn returns a map with :status/:headers/:body, those override defaults.
-
-   data-fn can have 0 or 1 required args:
-   - 0 args: request is ignored (e.g., list-all-entities)
-   - 1 arg: request is passed to it (e.g., get-entity-details)"
-  [{:keys [data-fn body-fn headers success-status error-status]} ctx]
-  (log/info "make-response-handler called" {:data-fn data-fn :body-fn body-fn})
-  (let [ok-status (or success-status 200)
-        err-status (or error-status 500)
-        base-headers (or headers {})
-        ;; Deref fn-ids once at handler creation time
-        data-fn-id (when data-fn @data-fn)
-        body-fn-id (when body-fn @body-fn)]
-    (log/info "make-response-handler fn-ids" {:data-fn-id data-fn-id :body-fn-id body-fn-id})
-    (fn [request]
-      (try
-        (log/debug "make-response-handler handling request")
-        (let [;; Call data-fn with request (handles 0 or 1 args)
-              data-callable (exec/make-optional-arg-callable ctx data-fn-id)
-              _ (log/debug "data-callable created")
-              result (data-callable request)
-              _ (log/debug "data-callable returned" {:result-type (type result)})]
-          ;; Check if result is already a full response
-          (if (and (map? result) (:body result))
-            ;; Result is a response - merge with defaults
-            {:status (or (:status result) ok-status)
-             :headers (merge base-headers (or (:headers result) {}))
-             :body (:body result)}
-            ;; Result is data - transform to body
-            (let [body (if body-fn-id
-                         (let [_ (log/debug "creating body-callable")
-                               body-callable (exec/make-optional-arg-callable ctx body-fn-id)
-                               _ (log/debug "body-callable created, calling with result")]
-                           (body-callable result))
-                         (str result))]
-              {:status ok-status
-               :headers base-headers
-               :body body})))
-        (catch Exception e
-          (log/error e "make-response-handler error")
-          {:status err-status
-           :headers base-headers
-           :body (str "Error: " (ex-message e))})))))
-
-
 ;; === Registry ===
 
 (def impls
@@ -141,6 +141,8 @@
    :make-handler make-handler
    :make-request-handler (with-meta make-request-handler {:ctx true})
    :make-response-handler (with-meta make-response-handler {:ctx true})
+   :json-error-body json-error-body
+   :html-error-body html-error-body
    :to-json-string to-json-string
    :jvm-info jvm-info
    :current-time-ms current-time-ms})

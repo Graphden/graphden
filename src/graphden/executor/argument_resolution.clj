@@ -115,10 +115,10 @@
 
 
 (defn- build-value-delay
-  "Builds a delay for a literal value."
-  [arg-name value arg-type]
-  (let [resolved-value (if (and (= :fn arg-type)
-                                (string? value))
+  "Builds a delay for a literal value.
+   If is-fn=true and value is a UUID string, parse it to UUID."
+  [arg-name value is-fn?]
+  (let [resolved-value (if (and is-fn? (string? value))
                          (try
                            (java.util.UUID/fromString value)
                            (catch IllegalArgumentException _
@@ -142,15 +142,14 @@
   (let [arg-name (:name arg)
         is-fn? (:is-fn arg)
         ref-fn-id (:ref-id arg)
-        value (:value arg)
-        arg-type (:type arg)]
+        value (:value arg)]
     (cond
       (some? ref-fn-id)
       (build-ref-delay context ref-fn-id arg-name is-fn? execute-ref-fn
                        caller-args arg-delays-atom)
 
       (some? value)
-      (build-value-delay arg-name value arg-type)
+      (build-value-delay arg-name value is-fn?)
 
       :else
       (delay nil))))

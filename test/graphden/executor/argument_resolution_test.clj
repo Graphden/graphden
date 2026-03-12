@@ -143,30 +143,30 @@
     (is (false? (#'arg-res/arg-has-value? {:name "x"})))))
 
 
-;; === build-value-delay tests for fn-type with string UUID ===
+;; === build-value-delay tests for is-fn with string UUID ===
 
 (deftest build-value-delay-fn-type-test
-  (testing "converts string UUID to UUID for :fn type arg"
+  (testing "converts string UUID to UUID when is-fn=true"
     (let [uuid (random-uuid)
           uuid-str (str uuid)
-          result (#'arg-res/build-value-delay "f" uuid-str :fn)]
+          result (#'arg-res/build-value-delay "f" uuid-str true)]
       (is (delay? result))
       (is (uuid? @result))
       (is (= uuid @result))))
 
-  (testing "passes through invalid UUID string for :fn type arg"
-    (let [result (#'arg-res/build-value-delay "f" "not-a-uuid" :fn)]
+  (testing "passes through invalid UUID string when is-fn=true"
+    (let [result (#'arg-res/build-value-delay "f" "not-a-uuid" true)]
       (is (delay? result))
       (is (= "not-a-uuid" @result))))
 
-  (testing "passes through non-string value for :fn type arg"
+  (testing "passes through non-string value when is-fn=true"
     (let [uuid (random-uuid)
-          result (#'arg-res/build-value-delay "f" uuid :fn)]
+          result (#'arg-res/build-value-delay "f" uuid true)]
       (is (delay? result))
       (is (= uuid @result))))
 
-  (testing "passes through value unchanged for non-fn type"
+  (testing "passes through value unchanged when is-fn=false"
     (let [uuid-str (str (random-uuid))
-          result (#'arg-res/build-value-delay "x" uuid-str :text)]
+          result (#'arg-res/build-value-delay "x" uuid-str false)]
       (is (delay? result))
       (is (= uuid-str @result)))))

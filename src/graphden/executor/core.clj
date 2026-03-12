@@ -165,29 +165,31 @@
 (defn make-optional-arg-callable
   "Creates a callable for a function with 0 or 1 required arguments.
    - 0 args: callable ignores input, calls fn with no args
-   - 1 arg: callable passes input to the single required arg
+   - 1 arg: callable passes input to that argument
 
-   Used by response handlers where inner-fn may or may not need request.
+   Used by response handlers where data-fn may or may not need request.
+
+   IMPORTANT: Resets start-time on each call to prevent timeout issues
+   when callable is invoked long after handler creation (e.g., HTTP requests).
 
    Returns a function: value -> result"
   [context fn-id]
   (let [required-args (get-required-args (:execution-graph context) fn-id)
         count-required (count required-args)]
-    (cond
-      (= count-required 0)
-      (fn [_value]
-        (execute-internal context fn-id {}))
-
-      (= count-required 1)
-      (let [arg-id (:id (first required-args))]
-        (fn [value]
-          (execute-internal context fn-id {arg-id value})))
-
-      :else
-      (throw (ex-info (str "Function requires 0 or 1 arguments, got " count-required)
-                      {:type :execution-error/invalid-handler-function
+    (case count-required
+      0 (fn [_value]
+          ;; Reset start-time to current time for fresh timeout window
+          (let [fresh-ctx (assoc context :start-time (ctx/current-time-ms context))]
+            (execute-internal fresh-ctx fn-id {})))
+      1 (let [arg-id (:id (first required-args))]
+          (fn [value]
+            ;; Reset start-time to current time for fresh timeout window
+            (let [fresh-ctx (assoc context :start-time (ctx/current-time-ms context))]
+              (execute-internal fresh-ctx fn-id {arg-id value}))))
+      (throw (ex-info (str "Function requires 0 or 1 required arguments, got " count-required)
+                      {:type :execution-error/invalid-callable-function
                        :fn-id fn-id
-                       :required-arg-count count-required})))))
+                       :required-arg-count count-required}))))))
 
 
 ;; === Result Caching ===

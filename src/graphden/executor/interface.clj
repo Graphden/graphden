@@ -339,18 +339,22 @@
 (defn make-optional-arg-callable
   "Creates a callable for a function with 0 or 1 required arguments.
    - 0 args: callable ignores input, calls fn with no args
-   - 1 arg: callable passes input to the single required arg
+   - 1 arg: callable passes input to that argument
 
-   Used by response handlers where inner-fn may or may not need request.
-
-   Arguments:
-   - context: Execution context with execution-graph populated
-   - fn-id: UUID of the function (must have 0 or 1 required args)
+   Used by response handlers where data-fn may or may not need request.
 
    Returns a function: value -> result
 
-   Throws :execution-error/invalid-handler-function if the function has
-   more than one required argument."
+   Example:
+   ;; For a function with 0 required args (like list-all-entities)
+   (let [callable (make-optional-arg-callable ctx fn-id)]
+     (callable request))  ; request is ignored, returns all entities
+
+   ;; For a function with 1 required arg (like get-entity-details)
+   (let [callable (make-optional-arg-callable ctx fn-id)]
+     (callable request))  ; request is passed to the required arg
+
+   Throws if the function has more than 1 required argument."
   [context fn-id]
   (core/make-optional-arg-callable context fn-id))
 

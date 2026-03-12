@@ -86,11 +86,13 @@
   :args {:response :editor-response}}
 
  ;; =============================================================================
- ;; API HANDLERS (use existing base functions from web/crud)
+ ;; API HANDLERS
  ;; =============================================================================
 
+ ;; JSON API: list all graph entities
  {:name :api-entities-handler
-  :parent :all-entities-json-handler}
+  :parent :make-json-response-handler
+  :args {:data-fn :list-all-graph-entities}}
 
  {:name :create-entity-handler
   :parent :create-entity-api-handler}

@@ -35,68 +35,38 @@
    response-fn must be a fn-id (UUID) of a function with one required argument.
    The function will be called with the request object for each incoming request."
   [{:keys [response-fn]} ctx]
-  ;; response-fn is a fn-id (UUID), convert to callable
   (let [callable (exec/make-single-arg-callable ctx response-fn)]
     (fn [request]
       (callable request))))
 
 
-(defn make-response-handler
-  "Generic response handler factory.
-   - inner-fn: called with request (0 or 1 required args), returns data
-   - body-fn: transforms data to body string (optional, uses str if nil)
-   - headers: response headers map (default {})
-   - success-status: status on success (default 200)
-   - error-status: status on error (default 500)
-   - error-body-fn: transforms {:message :type} to body string (optional)
-   - dynamic-response: if true, inner-fn returns full {:status :headers :body} map"
-  [{:keys [inner-fn body-fn headers success-status error-status error-body-fn dynamic-response]} ctx]
-  (let [inner-callable (exec/make-optional-arg-callable ctx inner-fn)
-        body-callable (when body-fn (exec/make-single-arg-callable ctx body-fn))
-        error-body-callable (when error-body-fn (exec/make-single-arg-callable ctx error-body-fn))
-        base-headers (or headers {})
-        ok-status (or success-status 200)
-        err-status (or error-status 500)]
+(defn make-data-handler
+  "Data handler factory: data-fn(request) -> data, body-fn(data) -> body string.
+   Returns Ring handler function."
+  [{:keys [data-fn body-fn status headers]} ctx]
+  (let [data-callable (exec/make-optional-arg-callable ctx data-fn)
+        body-callable (exec/make-single-arg-callable ctx body-fn)]
     (fn [request]
-      (try
-        (let [result (inner-callable request)]
-          (if dynamic-response
-            ;; inner-fn returns full response map with :status :headers :body
-            (let [resp-status (or (:status result) ok-status)
-                  resp-headers (merge base-headers (or (:headers result) {}))
-                  resp-body (or (:body result) "")]
-              {:status resp-status
-               :headers resp-headers
-               :body resp-body})
-            ;; standard flow: transform result to body
-            (let [body (if body-callable
-                         (body-callable result)
-                         (str result))]
-              {:status ok-status
-               :headers base-headers
-               :body body})))
-        (catch Exception e
-          (let [error-data {:message (ex-message e)
-                            :type (str (:type (ex-data e)))}
-                error-body (if error-body-callable
-                             (error-body-callable error-data)
-                             (str "Error: " (ex-message e)))]
-            {:status err-status
-             :headers base-headers
-             :body error-body}))))))
+      (let [data (data-callable request)
+            body (body-callable data)]
+        {:status status
+         :headers headers
+         :body body}))))
 
 
-(defn json-error-body
-  "Formats error as JSON string."
-  [{:keys [error]}]
-  (json/generate-string {:error (:message error)
-                         :type (:type error)}))
-
-
-(defn html-error-body
-  "Formats error as HTML string."
-  [{:keys [error]}]
-  (str "<p class=\"error\">Error: " (:message error) "</p>"))
+(defn make-action-handler
+  "Action handler factory: action-fn(request) -> {:status :headers :body}.
+   Merges base-headers with headers from action-fn result."
+  [{:keys [action-fn base-headers]} ctx]
+  (let [action-callable (exec/make-optional-arg-callable ctx action-fn)]
+    (fn [request]
+      (let [result (action-callable request)
+            resp-status (or (:status result) 200)
+            resp-headers (merge base-headers (or (:headers result) {}))
+            resp-body (or (:body result) "")]
+        {:status resp-status
+         :headers resp-headers
+         :body resp-body}))))
 
 
 (defn to-json-string
@@ -140,9 +110,8 @@
   {:ring-response ring-response
    :make-handler make-handler
    :make-request-handler (with-meta make-request-handler {:ctx true})
-   :make-response-handler (with-meta make-response-handler {:ctx true})
-   :json-error-body json-error-body
-   :html-error-body html-error-body
+   :make-data-handler (with-meta make-data-handler {:ctx true})
+   :make-action-handler (with-meta make-action-handler {:ctx true})
    :to-json-string to-json-string
    :jvm-info jvm-info
    :current-time-ms current-time-ms})

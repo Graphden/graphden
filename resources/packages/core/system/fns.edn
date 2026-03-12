@@ -18,61 +18,51 @@
   :return-type :fn
   :ctx true}
 
- ;; Generic response handler factory - single base-fn for all handlers
- ;; inner-fn: called with request, returns data
- ;; body-fn: transforms data to body string (optional - if nil, uses str)
- ;; headers: response headers map
- ;; success-status: status on success (default 200)
- ;; error-status: status on error (default 500)
- ;; error-body-fn: transforms {:message :type} to body string (optional)
- ;; dynamic-response: if true, inner-fn returns full {:status :headers :body} map
- {:name :make-response-handler
-  :args {:inner-fn :fn
-         :body-fn {:type :fn :required false}
-         :headers {:type :jsonb :required false}
-         :success-status {:type :int :required false}
-         :error-status {:type :int :required false}
-         :error-body-fn {:type :fn :required false}
-         :dynamic-response {:type :bool :required false}}
+ ;; =============================================================================
+ ;; HANDLER FACTORIES (base-fns)
+ ;; =============================================================================
+
+ ;; Data handler: data-fn(request) -> data, body-fn(data) -> body string
+ {:name :make-data-handler
+  :args {:data-fn :fn
+         :body-fn :fn
+         :status :int
+         :headers :jsonb}
   :return-type :fn
   :ctx true}
 
- ;; Error body formatters
- {:name :json-error-body
-  :args {:error :jsonb}
-  :return-type :text}
-
- {:name :html-error-body
-  :args {:error :jsonb}
-  :return-type :text}
+ ;; Action handler: action-fn(request) -> {:status :headers :body}
+ {:name :make-action-handler
+  :args {:action-fn :fn
+         :base-headers :jsonb}
+  :return-type :fn
+  :ctx true}
 
  ;; =============================================================================
- ;; FN-DEFS: Specialized response handlers composed from make-response-handler
+ ;; FN-DEFS: Specialized handlers via inheritance
  ;; =============================================================================
 
- ;; JSON response handler - caller provides :data-fn, body transformed to JSON
+ ;; JSON data handler - data-fn returns data, serialized to JSON
  {:name :make-json-response-handler
-  :parent :make-response-handler
-  :args {:inner-fn {:as :data-fn}
-         :body-fn :to-json-string
+  :parent :make-data-handler
+  :args {:body-fn :to-json-string
+         :status 200
          :headers {"Content-Type" "application/json"}
-         :error-body-fn :json-error-body}}
+         :data-fn {:as :data-fn}}}
 
- ;; HTML response handler - caller provides :render-fn, body rendered from hiccup
+ ;; HTML data handler - data-fn returns hiccup, rendered to HTML
  {:name :make-html-response-handler
-  :parent :make-response-handler
-  :args {:inner-fn {:as :render-fn}
-         :body-fn :render-hiccup
+  :parent :make-data-handler
+  :args {:body-fn :render-hiccup
+         :status 200
          :headers {"Content-Type" "text/html; charset=utf-8"}
-         :error-body-fn :html-error-body}}
+         :data-fn {:as :render-fn}}}
 
- ;; HTML action handler - caller provides :action-fn which returns full response map
+ ;; HTML action handler - action-fn returns full response map
  {:name :make-html-action-handler
-  :parent :make-response-handler
-  :args {:inner-fn {:as :action-fn}
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :error-body-fn :html-error-body
-         :dynamic-response true}}
+  :parent :make-action-handler
+  :args {:base-headers {"Content-Type" "text/html; charset=utf-8"}
+         :action-fn {:as :action-fn}}}
 
  {:name :to-json-string
   :args {:data :any}

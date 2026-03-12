@@ -25,6 +25,12 @@
   :args {:clauses :jsonb}
   :return-type :any}
 
+ ;; === Defaults ===
+ {:name :coalesce
+  :args {:value :any
+         :default :any}
+  :return-type :any}
+
  ;; === Constants ===
  {:name :const
   :args {:value :any}

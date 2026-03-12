@@ -12,10 +12,11 @@
   :args {:map {}}}
 
  ;; Level 2: assoc-handler (free: handler) - sets key="handler", renames value->handler
+ ;; handler is executed and result (Clojure fn) is stored in map
  {:name :assoc-handler
   :parent :assoc-empty
   :args {:key "handler"
-         :value {:as :handler :type :fn}}}
+         :value {:as :handler}}}
 
  ;; Level 2: method-map (free: key, handler via pass-through from assoc-handler)
  {:name :method-map

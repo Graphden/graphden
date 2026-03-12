@@ -55,18 +55,12 @@
   :parent :const
   :args {:value [:script {:src "https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"}]}}
 
- ;; Scripts collection
- {:name :editor-scripts-0
-  :parent :conj-any
-  :args {:coll [] :item :dagre-script}}
-
- {:name :editor-scripts-1
-  :parent :conj-any
-  :args {:coll :editor-scripts-0 :item :cytoscape-dagre-script}}
-
+ ;; Scripts collection (3 items)
  {:name :editor-scripts
-  :parent :conj-any
-  :args {:coll :editor-scripts-1 :item :editor-script-element}}
+  :parent :triple
+  :args {:first :dagre-script
+         :second :cytoscape-dagre-script
+         :third :editor-script-element}}
 
  ;; Complete HTML page
  {:name :editor-page
@@ -84,25 +78,6 @@
  {:name :editor-handler
   :parent :make-handler
   :args {:response :editor-response}}
-
- ;; =============================================================================
- ;; API HANDLERS (use existing base functions from web/crud)
- ;; =============================================================================
-
- {:name :api-entities-handler
-  :parent :all-entities-json-handler}
-
- {:name :create-entity-handler
-  :parent :create-entity-api-handler}
-
- {:name :delete-entity-handler
-  :parent :delete-entity-api-handler}
-
- {:name :entity-details-handler-fn
-  :parent :entity-details-handler}
-
- {:name :entity-form-handler-fn
-  :parent :entity-form-handler}
 
  ;; =============================================================================
  ;; FAVICON (SVG icon with caching)
@@ -135,63 +110,42 @@
 
  {:name :api-entities-route
   :parent :get-route
-  :args {:path "/api/graph/entities" :handler :api-entities-handler}}
+  :args {:path "/api/graph/entities" :handler :all-entities-json-handler}}
 
  {:name :entity-details-route
   :parent :get-route
-  :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler-fn}}
+  :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler}}
 
  {:name :entity-form-create-route
   :parent :get-route
-  :args {:path "/partials/entity-form/:type" :handler :entity-form-handler-fn}}
+  :args {:path "/partials/entity-form/:type" :handler :entity-form-handler}}
 
  {:name :entity-form-edit-route
   :parent :get-route
-  :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-handler-fn}}
+  :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-handler}}
 
  ;; POST route
  {:name :create-entity-route
   :parent :post-route
-  :args {:path "/api/entities/:type" :handler :create-entity-handler}}
+  :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
 
  ;; DELETE route
  {:name :delete-entity-route
   :parent :delete-route
-  :args {:path "/api/entities/:type/:id" :handler :delete-entity-handler}}
+  :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
 
  ;; =============================================================================
  ;; ROUTES COLLECTION (for server)
  ;; These are exported for use by server/fns.edn
  ;; =============================================================================
 
- {:name :editor-routes-0
-  :parent :conj-any
-  :args {:coll [] :item :favicon-route}}
-
- {:name :editor-routes-1
-  :parent :conj-any
-  :args {:coll :editor-routes-0 :item :editor-route}}
-
- {:name :editor-routes-2
-  :parent :conj-any
-  :args {:coll :editor-routes-1 :item :api-entities-route}}
-
- {:name :editor-routes-3
-  :parent :conj-any
-  :args {:coll :editor-routes-2 :item :entity-details-route}}
-
- {:name :editor-routes-4
-  :parent :conj-any
-  :args {:coll :editor-routes-3 :item :entity-form-create-route}}
-
- {:name :editor-routes-5
-  :parent :conj-any
-  :args {:coll :editor-routes-4 :item :entity-form-edit-route}}
-
- {:name :editor-routes-6
-  :parent :conj-any
-  :args {:coll :editor-routes-5 :item :create-entity-route}}
-
  {:name :editor-routes
-  :parent :conj-any
-  :args {:coll :editor-routes-6 :item :delete-entity-route}}]
+  :parent :list8
+  :args {:item1 :favicon-route
+         :item2 :editor-route
+         :item3 :api-entities-route
+         :item4 :entity-details-route
+         :item5 :entity-form-create-route
+         :item6 :entity-form-edit-route
+         :item7 :create-entity-route
+         :item8 :delete-entity-route}}]

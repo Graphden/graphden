@@ -2,7 +2,7 @@
 ;; http-server, http-stop
 
 [{:name :http-server
-  :args {:handler :fn
+  :args {:handler :any  ; Receives Clojure fn from router
          :port :int}
   :return-type :any}
 

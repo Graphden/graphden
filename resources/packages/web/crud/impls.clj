@@ -6,6 +6,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
+    [graphden.packages.web.html.impls :as html]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs]
     [hiccup2.core])
@@ -99,17 +100,15 @@
     nil))
 
 
+;; Use html impls for rendering primitives
 (defn- render-field-row
   [label value]
-  [:div {:class "field-row"}
-   [:span {:class "field-label"} label]
-   [:span {:class "field-value"} (if (nil? value) "-" (str value))]])
+  (html/field-row {:label label :value value}))
 
 
 (defn- render-entity-badge
   [entity-type-str]
-  (let [badge-class (str "badge badge-" entity-type-str)]
-    [:span {:class badge-class} entity-type-str]))
+  (html/badge {:badge-text entity-type-str :badge-type entity-type-str}))
 
 
 (defn- render-fn-details

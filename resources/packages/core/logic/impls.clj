@@ -41,6 +41,13 @@
           (recur (rest remaining)))))))
 
 
+;; === Defaults ===
+
+(defn coalesce
+  [{:keys [value default]}]
+  (or value default))
+
+
 ;; === Constants ===
 
 (defn const
@@ -62,5 +69,6 @@
    :not not-fn
    :if if-fn
    :cond cond-fn
+   :coalesce coalesce
    :const const
    :identity identity-fn})

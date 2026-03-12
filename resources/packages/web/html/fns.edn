@@ -64,4 +64,11 @@
  {:name :badge
   :args {:badge-text :text
          :badge-type {:type :text :required false}}
+  :return-type :jsonb}
+
+ ;; Entity field rows - renders multiple field-rows from entity using field-specs
+ ;; field-specs: [[label key] ...] or [[label key transform-fn] ...]
+ {:name :entity-field-rows
+  :args {:entity :jsonb
+         :field-specs :jsonb}
   :return-type :jsonb}]

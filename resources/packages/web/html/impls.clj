@@ -206,6 +206,21 @@
     [:span {:class type-class} badge-text]))
 
 
+(defn entity-field-rows
+  "Renders multiple field rows from entity using field-specs.
+   field-specs: [[label key] ...] - key is a keyword to get from entity
+   Returns a div containing all field-rows."
+  [{:keys [entity field-specs]}]
+  (into [:div]
+        (for [[label key-path] field-specs]
+          (let [value (if (vector? key-path)
+                        (get-in entity key-path)
+                        (get entity key-path))]
+            [:div {:class "field-row"}
+             [:span {:class "field-label"} label]
+             [:span {:class "field-value"} (if (nil? value) "-" (str value))]]))))
+
+
 ;; === Registry ===
 
 (def impls
@@ -219,4 +234,5 @@
    :form-select form-select
    :button button
    :field-row field-row
-   :badge badge})
+   :badge badge
+   :entity-field-rows entity-field-rows})

@@ -201,7 +201,7 @@
             ;; Get ALL unique columns from ALL rows - different records may have different fields
             ;; (e.g., some args have :name set, others don't). Using only first row's keys
             ;; would silently drop fields present only in other rows.
-            columns (vec (reduce into #{} (map keys rows)))
+            columns (vec (into #{} (mapcat keys) rows))
             ;; Extract values in column order
             values (mapv (fn [row]
                            (mapv #(get row %) columns))
@@ -277,7 +277,7 @@
               ;; Convert to rows using codec
               rows (mapv #(entity->row % fields) records)
               ;; Get ALL unique columns from ALL rows (including :id for matching)
-              columns (vec (reduce into #{} (map keys rows)))
+              columns (vec (into #{} (mapcat keys) rows))
               update-columns (vec (remove #{:id} columns))]
           ;; If no columns to update (only :id provided), just verify existence and return
           (if (empty? update-columns)
@@ -391,7 +391,7 @@
             ;; Get ALL unique columns from ALL rows - different records may have different fields
             ;; (e.g., some args have :name set, others don't). Using only first row's keys
             ;; would silently drop fields present only in other rows.
-            columns (vec (reduce into #{} (map keys rows)))
+            columns (vec (into #{} (mapcat keys) rows))
             ;; Extract values in column order
             values (mapv (fn [row]
                            (mapv #(get row %) columns))

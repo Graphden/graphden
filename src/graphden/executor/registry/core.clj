@@ -109,8 +109,10 @@
         hash-bytes (MessageDigest/.digest digest)]
     (aset hash-bytes 6 (unchecked-byte (bit-or (bit-and (aget hash-bytes 6) 0x0f) 0x50)))
     (aset hash-bytes 8 (unchecked-byte (bit-or (bit-and (aget hash-bytes 8) 0x3f) 0x80)))
-    (let [result-buf (java.nio.ByteBuffer/wrap hash-bytes 0 16)]
-      (UUID. (java.nio.ByteBuffer/.getLong result-buf) (java.nio.ByteBuffer/.getLong result-buf)))))
+    (let [result-buf (java.nio.ByteBuffer/wrap hash-bytes 0 16)
+          msb (java.nio.ByteBuffer/.getLong result-buf)
+          lsb (java.nio.ByteBuffer/.getLong result-buf)]
+      (UUID. msb lsb))))
 
 
 (def ^:private memoized-uuid-v5

@@ -235,7 +235,7 @@
             identity-records (vals (sp/read-entities base-storage entity-name ids))
             current-versions (res/resolve-entities-batch base-storage entity-name
                                                          identity-records branch-id)
-            current-by-id (into {} (map (juxt :id identity)) (vals current-versions))
+            current-by-id (into {} (map (fn [e] [(:id e) e])) (vals current-versions))
             ;; Check all entities exist
             missing-ids (remove #(contains? current-by-id %) ids)]
         (when (seq missing-ids)

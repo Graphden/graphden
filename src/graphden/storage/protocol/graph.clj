@@ -194,7 +194,7 @@
   "Builds index of arg-id -> arg.
    Provides O(1) lookup by arg-id for pass-through args resolution."
   [args]
-  (into {} (map (juxt :id identity) args)))
+  (into {} (map (fn [a] [(:id a) a])) args))
 
 
 (defn- find-root-arg-id

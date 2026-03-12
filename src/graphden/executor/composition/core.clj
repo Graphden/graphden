@@ -308,16 +308,21 @@
 
 (defn- preload-all-args
   "Loads arg entities for given fn-ids using WHERE IN clause.
-   Returns map with two indexes:
+   Returns map with three indexes:
    - :by-fn {fn-id -> [args]} for fn-based lookup
-   - :by-id {arg-id -> arg} for O(1) arg lookup by id"
+   - :by-id {arg-id -> arg} for O(1) arg lookup by id
+   - :by-fn-source {[fn-id source-id] -> arg} for O(1) lookup by fn+source"
   [storage fn-ids]
   (if (empty? fn-ids)
-    {:by-fn {} :by-id {}}
+    {:by-fn {} :by-id {} :by-fn-source {}}
     ;; Use WHERE IN clause instead of full table scan + filter
     (let [matching-args (sp/query-entities storage :arg {:fn-id (vec fn-ids)})]
       {:by-fn (group-by :fn-id matching-args)
-       :by-id (into {} (map (juxt :id identity)) matching-args)})))
+       :by-id (into {} (map (fn [a] [(:id a) a])) matching-args)
+       :by-fn-source (into {} (keep (fn [a]
+                                      (when-let [sid (:source-id a)]
+                                        [[(:fn-id a) sid] a])))
+                           matching-args)})))
 
 
 (defn- get-parent-arg-cached
@@ -458,12 +463,11 @@
    Creates a new arg with source-id pointing to the original free arg.
    Name is nil - inherited via source-id chain.
 
-   args-data contains :by-fn and :by-id indexes."
+   args-data contains :by-fn, :by-id, and :by-fn-source indexes."
   [args-data fn-id parent-arg]
   (let [source-id (:id parent-arg)
-        ;; Check if this propagated arg already exists for this fn
-        fn-args (get (:by-fn args-data) fn-id [])
-        existing (some #(when (= (:source-id %) source-id) %) fn-args)]
+        ;; O(1) lookup via :by-fn-source index
+        existing (get (:by-fn-source args-data) [fn-id source-id])]
     (when-not existing
       ;; Create new propagated arg (free, with no value or ref-id)
       ;; name is nil - will be resolved via source-id chain
@@ -510,7 +514,7 @@
    - Simple value: literal or :fn-ref
    - Map with :as: {:as :new-name} to rename, optionally with :value or :ref
 
-   args-data contains :by-fn and :by-id indexes."
+   args-data contains :by-fn, :by-id, and :by-fn-source indexes."
   [fn-cache args-data fn-name-cache created-fns fn-id parent-fn-id arg-name arg-value]
   (when-not fn-id
     (throw (ex-info "fn-id cannot be nil when preparing arg record"
@@ -527,9 +531,8 @@
         ;; Use find-available-arg which searches both parent chain AND propagated free args
         parent-arg (find-available-arg fn-cache args-data parent-fn-id arg-name)
         source-id (:id parent-arg)
-        ;; Check if arg already exists for this fn
-        fn-args (get (:by-fn args-data) fn-id [])
-        existing (some #(when (= (:source-id %) source-id) %) fn-args)
+        ;; O(1) lookup via :by-fn-source index
+        existing (get (:by-fn-source args-data) [fn-id source-id])
         ;; Resolve arg value
         resolved (cond
                    (nil? value-spec)

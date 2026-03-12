@@ -289,7 +289,7 @@
           branch-chain (collect-branch-chain base-storage branch-id)
           versions-by-id (load-all-versions-for-ids base-storage entity-name
                                                     entity-ids branch-chain)
-          identity-by-id (into {} (map (juxt :id identity)) identity-records)]
+          identity-by-id (into {} (map (fn [r] [(:id r) r])) identity-records)]
       (into {}
             (map (fn [eid]
                    (let [identity-rec (get identity-by-id eid)]

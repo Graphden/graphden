@@ -189,14 +189,21 @@
                    (merge identity-rec (extract-version-data version version-id-field)))]
     (if (empty? where)
       resolved
-      (filter (fn [record]
-                (every? (fn [[k v]]
-                          (let [rv (get record k)]
-                            (if (and (coll? v) (not (map? v)))
-                              (contains? (set v) rv)  ; Support IN-style filtering
-                              (= rv v))))
-                        where))
-              resolved))))
+      ;; Pre-convert collection values to sets once, not per-record
+      (let [where-prepared (into {}
+                                 (map (fn [[k v]]
+                                        [k (if (and (coll? v) (not (map? v)))
+                                             (set v)
+                                             v)]))
+                                 where)]
+        (filter (fn [record]
+                  (every? (fn [[k prepared-v]]
+                            (let [rv (get record k)]
+                              (if (set? prepared-v)
+                                (contains? prepared-v rv)
+                                (= rv prepared-v))))
+                          where-prepared))
+                resolved)))))
 
 
 ;; === Batch Resolution for ExecutionGraph ===

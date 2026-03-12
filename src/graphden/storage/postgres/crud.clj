@@ -2,6 +2,7 @@
   "CRUD operations for PostgreSQL storage.
    Generic entity operations for create, read, update, delete, query."
   (:require
+    [clojure.string :as str]
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.errors :as errors]
@@ -254,7 +255,7 @@
 (defn update-entities
   "Updates multiple entity records in a single batch.
    Each record must have :id. Returns seq of updated records.
-   Uses PostgreSQL UPDATE ... FROM VALUES for efficient batch update.
+   Uses PostgreSQL UPDATE ... FROM (VALUES ...) for efficient batch update.
    Throws :not-found if any entity doesn't exist."
   [ds entity-name data-seq fields]
   (if (empty? data-seq)
@@ -262,40 +263,106 @@
     (do
       (sp/validate-batch-size! (count data-seq) :update-entities {:entity-name entity-name})
       (sp/validate-no-duplicate-ids! entity-name data-seq)
-      (let [table-name (keyword (util/kw->snake-case entity-name))
+      (let [table-name-str (util/kw->snake-case entity-name)
             ;; Validate all records have :id
-            _ (doseq [data data-seq]
-                (when-not (:id data)
-                  (throw (ex-info "Each record must have :id for batch update"
-                                  {:type :invalid-data
+            missing-ids (filterv #(not (:id %)) data-seq)]
+        (when (seq missing-ids)
+          (throw (ex-info "Each record must have :id for batch update"
+                          {:type :invalid-data
+                           :entity-name entity-name
+                           :count (count missing-ids)})))
+        (let [records (vec data-seq)
+              batch-size (count records)
+              batch-ids (mapv :id records)
+              ;; Convert to rows using codec
+              rows (mapv #(entity->row % fields) records)
+              ;; Get ALL unique columns from ALL rows (including :id for matching)
+              columns (vec (reduce into #{} (map keys rows)))
+              update-columns (vec (remove #{:id} columns))]
+          ;; If no columns to update (only :id provided), just verify existence and return
+          (if (empty? update-columns)
+            (let [existing (read-entities ds entity-name batch-ids)
+                  missing (filterv #(not (contains? existing %)) batch-ids)]
+              (when (seq missing)
+                (throw (ex-info "Entity not found"
+                                {:type :not-found
+                                 :entity-name entity-name
+                                 :missing-ids missing})))
+              (map #(get existing (:id %)) records))
+            ;; Normal case: have columns to update
+            (let [;; Extract values in column order
+                  values (mapv (fn [row]
+                                 (mapv #(get row %) columns))
+                               rows)
+                  ;; Build column type casts for VALUES clause
+                  ;; PostgreSQL needs explicit type casts for UUID and other types
+                  column-types (mapv (fn [col]
+                                       (cond
+                                         (= col :id) "uuid"
+                                         ;; Check first non-nil value for type inference
+                                         :else (let [sample (some #(get % col) rows)]
+                                                 (cond
+                                                   (uuid? sample) "uuid"
+                                                   (boolean? sample) "boolean"
+                                                   (int? sample) "bigint"
+                                                   (instance? java.time.Instant sample) "timestamptz"
+                                                   :else nil))))
+                                     columns)
+                  ;; Build VALUES clause with type casts using ? placeholders
+                  ;; JDBC uses ? placeholders, not PostgreSQL's $N
+                  values-sql (str "VALUES "
+                                  (str/join
+                                    ", "
+                                    (map (fn [row-vals]
+                                           (str "("
+                                                (str/join
+                                                  ", "
+                                                  (map-indexed
+                                                    (fn [col-idx _v]
+                                                      (if-let [type-cast (get column-types col-idx)]
+                                                        (str "?::" type-cast)
+                                                        "?"))
+                                                    row-vals))
+                                                ")"))
+                                         values)))
+                  ;; Column aliases for the VALUES subquery
+                  col-aliases (str/join ", " (map #(str "\"" (name %) "\"") columns))
+                  ;; SET clause: col = v.col for each update column
+                  set-clause (str/join
+                               ", "
+                               (map #(let [col-str (str "\"" (name %) "\"")]
+                                       (str col-str " = v." col-str))
+                                    update-columns))
+                  ;; Build full UPDATE ... FROM (VALUES ...) AS v(...) WHERE t.id = v.id
+                  sql (str "UPDATE \"" table-name-str "\" AS t SET "
+                           set-clause
+                           " FROM (" values-sql ") AS v(" col-aliases ")"
+                           " WHERE t.\"id\" = v.\"id\""
+                           " RETURNING t.*")
+                  ;; Flatten values for parameters
+                  params (vec (mapcat identity values))
+                  query (into [sql] params)
+                  result-rows (try
+                                (jdbc/execute! ds query (util/query-opts))
+                                (catch java.sql.SQLException e
+                                  (let [wrapped (errors/wrap-sql-error e "Database error" :update-entities
+                                                                       {:entity-name entity-name
+                                                                        :batch-ids batch-ids})]
+                                    (throw (sp/wrap-batch-error wrapped -1 batch-size nil))))
+                                (catch Exception e
+                                  (throw (sp/wrap-batch-error e -1 batch-size nil))))
+                  actual-count (count result-rows)]
+              ;; Validate that all records were updated
+              (when (not= batch-size actual-count)
+                (let [updated-ids (set (map :id result-rows))
+                      missing (filterv #(not (contains? updated-ids %)) batch-ids)]
+                  (throw (ex-info "Entity not found"
+                                  {:type :not-found
                                    :entity-name entity-name
-                                   :data (sp/redact-sensitive-map data)}))))
-            records (vec data-seq)
-            batch-size (count records)
-            ;; Build individual UPDATE statements and execute in transaction
-            results (try
-                      (jdbc/with-transaction [tx ds]
-                                             (doall
-                                               (map (fn [record]
-                                                      (let [row (entity->row (dissoc record :id) fields)
-                                                            query (sql/format {:update table-name
-                                                                               :set row
-                                                                               :where [:= :id (:id record)]
-                                                                               :returning [:*]}
-                                                                              {:quoted true})
-                                                            result (jdbc/execute-one! tx query (util/query-opts))]
-                                                        (when-not result
-                                                          (throw (ex-info "Entity not found"
-                                                                          {:type :not-found
-                                                                           :entity entity-name
-                                                                           :id (:id record)})))
-                                                        result))
-                                                    records)))
-                      (catch java.sql.SQLException e
-                        (let [wrapped (errors/wrap-sql-error e "Database error" :update-entities
-                                                             {:entity-name entity-name})]
-                          (throw (sp/wrap-batch-error wrapped -1 batch-size nil)))))]
-        (map codec/row->entity results)))))
+                                   :missing-ids missing
+                                   :expected-count batch-size
+                                   :actual-count actual-count}))))
+              (map codec/row->entity result-rows))))))))
 
 
 (defn upsert-entities

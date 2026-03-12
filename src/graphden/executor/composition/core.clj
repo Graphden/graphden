@@ -194,15 +194,19 @@
     (throw (ex-info "fn-defs must be a vector/list"
                     {:type :fn-composition/invalid-defs
                      :fn-defs-type (type fn-defs)})))
-  (let [names (map :name fn-defs)
-        duplicates (->> names
-                        frequencies
-                        (filter #(> (val %) 1))
-                        keys)]
+  ;; Single-pass duplicate detection with early termination capability
+  (let [duplicates (loop [remaining (map :name fn-defs)
+                          seen #{}
+                          dups #{}]
+                     (if-let [n (first remaining)]
+                       (if (contains? seen n)
+                         (recur (rest remaining) seen (conj dups n))
+                         (recur (rest remaining) (conj seen n) dups))
+                       dups))]
     (when (seq duplicates)
       (throw (ex-info "Duplicate fn names in definitions"
                       {:type :fn-composition/duplicate-names
-                       :duplicates duplicates}))))
+                       :duplicates (vec duplicates)}))))
   (doseq [fn-def fn-defs]
     (validate-fn-def! fn-def)))
 

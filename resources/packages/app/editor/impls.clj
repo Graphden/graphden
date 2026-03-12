@@ -257,14 +257,23 @@
           'text-wrap': 'wrap',
           'font-size': '11px',
           'font-family': 'SF Mono, Monaco, monospace',
-          'width': 'label',
-          'height': 'label',
-          'padding': '10px',
           'shape': 'round-rectangle',
           'background-color': '#fff',
           'border-width': 2,
           'border-color': '#000',
-          'color': '#000'
+          'color': '#000',
+          'padding': '10px',
+          'width': function(node) {
+            var label = node.data('label') || '';
+            var lines = label.split('\\n');
+            var maxLen = Math.max(...lines.map(l => l.length));
+            return Math.max(60, maxLen * 7 + 20);
+          },
+          'height': function(node) {
+            var label = node.data('label') || '';
+            var lines = label.split('\\n').length;
+            return Math.max(30, lines * 14 + 20);
+          }
         }},
         // Selected root fn - thicker border
         { selector: 'node[isRoot]', style: {
@@ -282,14 +291,17 @@
           'text-halign': 'center',
           'font-size': '10px',
           'font-family': 'SF Mono, Monaco, monospace',
-          'width': 'label',
-          'height': 'label',
-          'padding': '8px',
           'shape': 'rectangle',
           'background-color': '#f5f5f5',
           'border-width': 1,
           'border-color': '#000',
-          'color': '#000'
+          'color': '#000',
+          'padding': '8px',
+          'width': function(node) {
+            var label = node.data('label') || '';
+            return Math.max(40, label.length * 6 + 16);
+          },
+          'height': 28
         }},
         // Edges - simple black lines
         { selector: 'edge', style: {

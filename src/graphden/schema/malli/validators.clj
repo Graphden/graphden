@@ -1,6 +1,7 @@
 (ns graphden.schema.malli.validators
   "Validation functions for malli-data-schema."
   (:require
+    [clojure.set :as set]
     [graphden.schema.fields.types :as ft]
     [graphden.schema.malli.types :as types]))
 
@@ -87,7 +88,7 @@
 (defn- check-extra-keys!
   "Throws if field-spec contains keys not in allowed-keys set."
   [entity-name field-name field-type field-spec allowed-keys]
-  (let [extra-keys (apply disj (set (keys field-spec)) allowed-keys)]
+  (let [extra-keys (set/difference (set (keys field-spec)) allowed-keys)]
     (when (seq extra-keys)
       (throw (ex-info (str "Field type " field-type " has unsupported attributes")
                       {:entity entity-name

@@ -1,6 +1,7 @@
 (ns graphden.schema.malli.core
   "Malli-based implementation of DataSchema protocol."
   (:require
+    [clojure.set :as set]
     [graphden.schema.malli.schema :as schema]
     [graphden.schema.malli.types :as types]
     [graphden.schema.malli.validators :as v]
@@ -115,11 +116,15 @@
                        :duplicates [dup]})))
     ;; Store as {:uuid enum-uuid :values {value-keyword value-uuid ...}}
     ;; Also add all UUIDs to known-uuids for O(1) future lookups
-    (let [values-map (into {} (map (fn [{:keys [uuid value]}] [value uuid]) values))
-          new-known-uuids (reduce (fn [acc {:keys [uuid value]}]
-                                    (assoc acc uuid (str "enum value " enum-name "/" value)))
-                                  (assoc known-uuids enum-uuid (str "enum " enum-name))
-                                  values)]
+    ;; Single-pass: build both maps simultaneously
+    (let [{:keys [values-map new-known-uuids]}
+          (reduce (fn [acc {:keys [uuid value]}]
+                    (-> acc
+                        (assoc-in [:values-map value] uuid)
+                        (assoc-in [:new-known-uuids uuid] (str "enum value " enum-name "/" value))))
+                  {:values-map {}
+                   :new-known-uuids (assoc known-uuids enum-uuid (str "enum " enum-name))}
+                  values)]
       (-> this
           (assoc-in [:enums-map enum-name] {:uuid enum-uuid :values values-map})
           (assoc :known-uuids new-known-uuids))))
@@ -138,41 +143,38 @@
     (v/validate-uuid {:context "entity" :entity-name entity-name} entity-uuid)
     ;; Check entity UUID uniqueness against existing UUIDs
     (v/check-uuid-uniqueness known-uuids entity-uuid (str "entity " entity-name))
-    ;; Validate each field has :uuid and check for duplicates using reduce
-    ;; The reduce accumulator tracks seen UUIDs within this entity for duplicate detection
-    (reduce
-      (fn [seen [field-name field-spec]]
-        (when-not (contains? field-spec :uuid)
-          (throw (ex-info "Field missing :uuid"
-                          {:entity entity-name :field field-name :spec field-spec})))
-        (let [field-uuid (:uuid field-spec)]
-          (v/validate-uuid {:context "field" :entity entity-name :field field-name}
-                           field-uuid)
-          ;; Check field UUID against entity UUID
-          (when (= field-uuid entity-uuid)
-            (throw (ex-info "Duplicate UUID"
-                            {:uuid field-uuid
-                             :new-location (str "field " entity-name "/" field-name)
-                             :existing-location (str "entity " entity-name)})))
-          ;; Check field UUID against other fields in this entity
-          (when (contains? seen field-uuid)
-            (throw (ex-info "Duplicate UUID within entity"
-                            {:entity entity-name
-                             :field field-name
-                             :uuid field-uuid})))
-          ;; Check field UUID uniqueness against existing UUIDs in builder
-          (v/check-uuid-uniqueness known-uuids field-uuid
-                                   (str "field " entity-name "/" field-name))
-          (conj seen field-uuid)))
-      #{}
-      fields)
-    ;; Build new known-uuids map with entity and all field UUIDs
-    (let [new-known-uuids (reduce
-                            (fn [acc [field-name field-spec]]
-                              (assoc acc (:uuid field-spec)
-                                     (str "field " entity-name "/" field-name)))
-                            (assoc known-uuids entity-uuid (str "entity " entity-name))
-                            fields)]
+    ;; Validate each field and build known-uuids in single pass
+    ;; The reduce accumulator tracks: seen UUIDs for duplicate detection + new-known-uuids map
+    (let [new-known-uuids
+          (:new-known-uuids
+            (reduce
+              (fn [{:keys [seen new-known-uuids]} [field-name field-spec]]
+                (when-not (contains? field-spec :uuid)
+                  (throw (ex-info "Field missing :uuid"
+                                  {:entity entity-name :field field-name :spec field-spec})))
+                (let [field-uuid (:uuid field-spec)
+                      field-location (str "field " entity-name "/" field-name)]
+                  (v/validate-uuid {:context "field" :entity entity-name :field field-name}
+                                   field-uuid)
+                  ;; Check field UUID against entity UUID
+                  (when (= field-uuid entity-uuid)
+                    (throw (ex-info "Duplicate UUID"
+                                    {:uuid field-uuid
+                                     :new-location field-location
+                                     :existing-location (str "entity " entity-name)})))
+                  ;; Check field UUID against other fields in this entity
+                  (when (contains? seen field-uuid)
+                    (throw (ex-info "Duplicate UUID within entity"
+                                    {:entity entity-name
+                                     :field field-name
+                                     :uuid field-uuid})))
+                  ;; Check field UUID uniqueness against existing UUIDs in builder
+                  (v/check-uuid-uniqueness known-uuids field-uuid field-location)
+                  {:seen (conj seen field-uuid)
+                   :new-known-uuids (assoc new-known-uuids field-uuid field-location)}))
+              {:seen #{}
+               :new-known-uuids (assoc known-uuids entity-uuid (str "entity " entity-name))}
+              fields))]
       (-> this
           (assoc-in [:entities-map entity-name] fields)
           (assoc-in [:entity-uuids-map entity-name] entity-uuid)
@@ -206,7 +208,7 @@
                            :constraint constraint
                            :invalid-fields (vec non-keywords)}))))
       ;; Reject extra attributes
-      (let [extra-keys (disj (set (keys constraint)) :type :fields)]
+      (let [extra-keys (set/difference (set (keys constraint)) #{:type :fields})]
         (when (seq extra-keys)
           (throw (ex-info "Constraint has unsupported attributes"
                           {:entity entity-name

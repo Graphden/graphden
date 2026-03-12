@@ -303,13 +303,13 @@
    1. ref-id: direct fn reference (execute and use result)
    2. value with UUID: fn-id passed as value (for HOF)"
   [args]
-  (->> args
-       (mapcat (fn [arg]
-                 (cond-> []
-                   (some? (:ref-id arg)) (conj (:ref-id arg))
-                   (and (some? (:value arg)) (uuid? (:value arg))) (conj (:value arg)))))
-       (remove nil?)
-       (set)))
+  ;; cond-> only adds non-nil values, so no need for (remove nil?)
+  (into #{}
+        (mapcat (fn [arg]
+                  (cond-> []
+                    (some? (:ref-id arg)) (conj (:ref-id arg))
+                    (and (some? (:value arg)) (uuid? (:value arg))) (conj (:value arg)))))
+        args))
 
 
 (defn process-fn-node

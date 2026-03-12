@@ -103,17 +103,17 @@
     ;; Validate each value entry
     (run! #(v/validate-single-enum-value known-uuids enum-name %) values)
     ;; Check for duplicate values (single-pass with early exit)
-    (when-let [dup (let [result (find-first-duplicate (map :value values))]
-                     (when (keyword? result) result))]
-      (throw (ex-info "Enum has duplicate values"
-                      {:enum-name enum-name
-                       :duplicates [dup]})))
+    (when-let [dup (find-first-duplicate (map :value values))]
+      (when (keyword? dup)
+        (throw (ex-info "Enum has duplicate values"
+                        {:enum-name enum-name
+                         :duplicates [dup]}))))
     ;; Check for duplicate UUIDs within values (single-pass with early exit)
-    (when-let [dup (let [result (find-first-duplicate (map :uuid values))]
-                     (when (uuid? result) result))]
-      (throw (ex-info "Enum has duplicate value UUIDs"
-                      {:enum-name enum-name
-                       :duplicates [dup]})))
+    (when-let [dup (find-first-duplicate (map :uuid values))]
+      (when (uuid? dup)
+        (throw (ex-info "Enum has duplicate value UUIDs"
+                        {:enum-name enum-name
+                         :duplicates [dup]}))))
     ;; Store as {:uuid enum-uuid :values {value-keyword value-uuid ...}}
     ;; Also add all UUIDs to known-uuids for O(1) future lookups
     ;; Single-pass: build both maps simultaneously

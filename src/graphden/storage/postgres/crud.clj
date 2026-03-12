@@ -265,7 +265,7 @@
       (sp/validate-no-duplicate-ids! entity-name data-seq)
       (let [table-name-str (util/kw->snake-case entity-name)
             ;; Validate all records have :id
-            missing-ids (filterv #(not (:id %)) data-seq)]
+            missing-ids (vec (remove :id data-seq))]
         (when (seq missing-ids)
           (throw (ex-info "Each record must have :id for batch update"
                           {:type :invalid-data
@@ -282,7 +282,7 @@
           ;; If no columns to update (only :id provided), just verify existence and return
           (if (empty? update-columns)
             (let [existing (read-entities ds entity-name batch-ids)
-                  missing (filterv #(not (contains? existing %)) batch-ids)]
+                  missing (vec (remove #(contains? existing %) batch-ids))]
               (when (seq missing)
                 (throw (ex-info "Entity not found"
                                 {:type :not-found
@@ -355,7 +355,7 @@
               ;; Validate that all records were updated
               (when (not= batch-size actual-count)
                 (let [updated-ids (set (map :id result-rows))
-                      missing (filterv #(not (contains? updated-ids %)) batch-ids)]
+                      missing (vec (remove updated-ids batch-ids))]
                   (throw (ex-info "Entity not found"
                                   {:type :not-found
                                    :entity-name entity-name

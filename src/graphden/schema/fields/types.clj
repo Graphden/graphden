@@ -106,8 +106,10 @@
 (defn types-equivalent?
   "Returns true if two types are equivalent (stored the same way)."
   [type-a type-b]
-  (some #(and (contains? % type-a) (contains? % type-b))
-        type-equivalents))
+  ;; Fast path: same type is always equivalent
+  (or (= type-a type-b)
+      (some #(and (contains? % type-a) (contains? % type-b))
+            type-equivalents)))
 
 
 ;; === Runtime Type Validators ===

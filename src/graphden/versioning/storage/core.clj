@@ -198,7 +198,7 @@
             ids (mapv :id data-with-ids)
             ;; Find which base records don't exist yet
             existing-ids (set (keys (sp/read-entities base-storage entity-name ids)))
-            new-base-records (filterv #(not (contains? existing-ids (:id %))) data-with-ids)
+            new-base-records (vec (remove #(contains? existing-ids (:id %)) data-with-ids))
             ;; Batch create base records
             _ (when (seq new-base-records)
                 (sp/create-entities base-storage entity-name new-base-records))

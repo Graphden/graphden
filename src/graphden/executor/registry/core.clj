@@ -53,8 +53,11 @@
                                   (mapv sort-maps-recursively impl-source))}
         s (pr-str canonical)
         md (MessageDigest/getInstance "SHA-256")
-        hash-bytes (MessageDigest/.digest md (String/.getBytes s StandardCharsets/UTF_8))]
-    (str/join (map #(format "%02x" %) hash-bytes))))
+        hash-bytes (MessageDigest/.digest md (String/.getBytes s StandardCharsets/UTF_8))
+        sb (StringBuilder.)]
+    (doseq [b hash-bytes]
+      (StringBuilder/.append sb (format "%02x" b)))
+    (StringBuilder/.toString sb)))
 
 
 (defn register-base-fns!

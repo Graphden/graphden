@@ -648,6 +648,43 @@
       (is (= "feat-v2" (:name (sp/read-entity storage :fn (:id fn-rec))))))))
 
 
+(deftest merge-bidirectional-fork-point-test
+  (testing "fork point considers merges in both directions"
+    (let [storage (create-test-storage)
+          fn-rec (sp/create-entity storage :fn
+                                   {:name "original" :parent-id nil :return-type :int})
+          ;; Create feature branch
+          branch (vs/create-branch! storage "feature")
+          feature (vs/switch-branch storage (:id branch))]
+
+      ;; First: feature modifies and we merge feature -> main
+      (Thread/sleep 1)
+      (sp/update-entity feature :fn (:id fn-rec) {:name "feat-v1"})
+      (vs/merge-branch! storage (:id branch))
+
+      ;; After first merge, main sees feat-v1
+      (is (= "feat-v1" (:name (sp/read-entity storage :fn (:id fn-rec)))))
+
+      ;; Second: main modifies and we merge main -> feature (bidirectional)
+      (Thread/sleep 1)
+      (sp/update-entity storage :fn (:id fn-rec) {:name "main-v1"})
+      (vs/merge-branch! feature (vs/current-branch-id storage))
+
+      ;; After second merge, feature sees main-v1
+      (is (= "main-v1" (:name (sp/read-entity feature :fn (:id fn-rec)))))
+
+      ;; Third: feature modifies again after the bidirectional merge
+      (Thread/sleep 1)
+      (sp/update-entity feature :fn (:id fn-rec) {:name "feat-v2"})
+
+      ;; Third merge feature -> main should work because fork point is now
+      ;; the second merge timestamp (most recent of all merges in either direction)
+      (vs/merge-branch! storage (:id branch))
+
+      ;; Main sees feat-v2
+      (is (= "feat-v2" (:name (sp/read-entity storage :fn (:id fn-rec))))))))
+
+
 ;; === Arg Entity Conflict Detection ===
 
 (deftest merge-arg-conflict-detection-test

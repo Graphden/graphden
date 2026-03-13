@@ -1,5 +1,18 @@
 // Graph editor JavaScript - 2-entity schema visualization
 // Interactive expand/collapse via ancestor list in nodes
+
+// Suppress cytoscape warnings about overlapping nodes during animation
+(function() {
+  var originalWarn = console.warn;
+  console.warn = function() {
+    if (arguments[0] && typeof arguments[0] === 'string' &&
+        arguments[0].indexOf('has invalid endpoints') !== -1) {
+      return; // Suppress this specific warning
+    }
+    originalWarn.apply(console, arguments);
+  };
+})();
+
 let cy = null;
 let selectedFnId = null;
 let graphData = null;
@@ -454,7 +467,9 @@ function createCytoscape(elements, shouldFit) {
           var minTurn = 30;
           var charWidth = 7;
           return Math.max(minTurn, label.length * charWidth + 20) + 'px';
-        }
+        },
+        'taxi-turn-min-distance': '10px',
+        'edge-distances': 'intersection'
       }},
       // Edge with label - position near target on final horizontal segment
       { selector: 'edge[argName]', style: {

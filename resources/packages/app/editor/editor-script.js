@@ -61,6 +61,56 @@ function resolveArgName(arg) {
   return null;
 }
 
+// Check if a function sets any arguments (has value or ref-id)
+function fnSetsArgs(fnId) {
+  const args = lookups.argsByFn.get(fnId) || [];
+  return args.some(arg => {
+    const hasValue = arg.value !== null && arg.value !== undefined;
+    const hasRef = !!arg['ref-id'];
+    return hasValue || hasRef;
+  });
+}
+
+// Build grouped ancestor list for display
+// Returns array of items, where each item is:
+// { idx: number, name: string, fnId: string, groupLevel: number, isAlias: boolean }
+// groupLevel is the level to use for hover/click (the first fn in the group that sets args)
+function buildAncestorItems(chain) {
+  const items = [];
+  let currentGroupLevel = 0;
+
+  for (let i = 0; i < chain.length; i++) {
+    const fnId = chain[i];
+    const fn = lookups.fnMap.get(fnId);
+    if (!fn) continue;
+
+    const setsArgs = fnSetsArgs(fnId);
+
+    if (setsArgs) {
+      // This fn sets args - it starts a new group
+      currentGroupLevel = i;
+      items.push({
+        idx: i,
+        name: fn.name,
+        fnId: fnId,
+        groupLevel: i,
+        isAlias: false
+      });
+    } else {
+      // This fn doesn't set args - it's an alias, belongs to previous group
+      items.push({
+        idx: i,
+        name: '(' + fn.name + ')',
+        fnId: fnId,
+        groupLevel: currentGroupLevel,
+        isAlias: true
+      });
+    }
+  }
+
+  return items;
+}
+
 // Update sidebar
 function updateEntityList(data) {
   const list = document.getElementById('entity-list');
@@ -374,28 +424,33 @@ function createNodeOverlays() {
     const currentLevel = previewLevel.get(data.originalFnId) ?? expansionLevel.get(data.originalFnId) ?? 0;
     const ancestors = data.ancestorList || [];
 
-    // Show at most MAX_VISIBLE_ANCESTORS + 1 ancestors (including self)
-    const visibleAncestors = ancestors.slice(0, MAX_VISIBLE_ANCESTORS + 1);
-    const hasMore = ancestors.length > MAX_VISIBLE_ANCESTORS + 1;
+    // Build items with grouping info
+    const items = buildAncestorItems(ancestors);
 
-    visibleAncestors.forEach((ancestorId, idx) => {
-      const fn = lookups.fnMap.get(ancestorId);
-      if (!fn) return;
+    // Limit visible items
+    const visibleItems = items.slice(0, MAX_VISIBLE_ANCESTORS + 1);
+    const hasMore = items.length > MAX_VISIBLE_ANCESTORS + 1;
 
+    // Check if there are multiple distinct groups (for interactivity)
+    const distinctGroups = new Set(items.map(item => item.groupLevel));
+    const hasMultipleGroups = distinctGroups.size > 1;
+
+    visibleItems.forEach((item) => {
       const line = document.createElement('div');
       line.className = 'ancestor-line';
-      line.textContent = fn.name;
-      line.dataset.level = idx;
+      line.textContent = item.name;
+      line.dataset.level = item.idx;
+      line.dataset.groupLevel = item.groupLevel;
       line.style.fontFamily = 'SF Mono, Monaco, monospace';
       line.style.padding = (2 * zoom) + 'px ' + (4 * zoom) + 'px';
       line.style.whiteSpace = 'nowrap';
 
-      // If this node has ancestors, make it interactive
-      if (ancestors.length > 1) {
+      // If there are multiple groups, make it interactive
+      if (hasMultipleGroups) {
         line.style.cursor = 'pointer';
 
-        // Color: black if <= currentLevel, gray otherwise
-        if (idx <= currentLevel) {
+        // Color: black if this item's groupLevel <= currentLevel, gray otherwise
+        if (item.groupLevel <= currentLevel) {
           line.style.color = '#000000';
           line.style.fontWeight = '500';
         } else {
@@ -403,22 +458,22 @@ function createNodeOverlays() {
           line.style.fontWeight = 'normal';
         }
 
-        // Hover: preview expansion
+        // Hover: preview expansion to this item's groupLevel
         line.addEventListener('mouseenter', () => {
-          setPreviewLevel(data.originalFnId, idx);
+          setPreviewLevel(data.originalFnId, item.groupLevel);
         });
 
         line.addEventListener('mouseleave', () => {
           setPreviewLevel(data.originalFnId, null);
         });
 
-        // Click: set expansion level
+        // Click: set expansion level to this item's groupLevel
         line.addEventListener('click', (e) => {
           e.stopPropagation();
-          setExpansionLevel(data.originalFnId, idx);
+          setExpansionLevel(data.originalFnId, item.groupLevel);
         });
       } else {
-        // Single node without ancestors - just show name
+        // Single group - just show name
         line.style.color = '#000000';
         line.style.fontWeight = '500';
       }
@@ -426,14 +481,13 @@ function createNodeOverlays() {
       overlay.appendChild(line);
     });
 
-    // Show ellipsis if there are more ancestors
+    // Show ellipsis if there are more items
     if (hasMore) {
       const ellipsis = document.createElement('div');
       ellipsis.className = 'ancestor-line';
       ellipsis.textContent = '...';
-      ellipsis.style.fontSize = '11px';
       ellipsis.style.fontFamily = 'SF Mono, Monaco, monospace';
-      ellipsis.style.padding = '2px 4px';
+      ellipsis.style.padding = (2 * zoom) + 'px ' + (4 * zoom) + 'px';
       ellipsis.style.color = '#999999';
       overlay.appendChild(ellipsis);
     }
@@ -525,18 +579,13 @@ function buildGraphElements() {
     const chain = getInheritanceChain(originalFnId);
     const level = getEffectiveLevel(originalFnId);
 
-    // Build label: list of ancestor names
-    // Active ones (up to level) are shown, we mark them in data
-    const visibleChain = chain.slice(0, Math.min(chain.length, MAX_VISIBLE_ANCESTORS + 1));
-    const labelLines = visibleChain.map((fnId, idx) => {
-      const fn = lookups.fnMap.get(fnId);
-      const name = fn ? fn.name : '?';
-      // We can't do colors in cytoscape label, so just show names
-      // The overlay will handle coloring
-      return name;
-    });
+    // Build items for display
+    const items = buildAncestorItems(chain);
+    const visibleItems = items.slice(0, MAX_VISIBLE_ANCESTORS + 1);
 
-    if (chain.length > MAX_VISIBLE_ANCESTORS + 1) {
+    // Build label from items (for sizing)
+    const labelLines = visibleItems.map(item => item.name);
+    if (items.length > MAX_VISIBLE_ANCESTORS + 1) {
       labelLines.push('...');
     }
 

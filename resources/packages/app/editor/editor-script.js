@@ -573,7 +573,14 @@ function createCytoscape(elements, shouldFit) {
           }
           return label;
         },
-        'target-text-offset': '40px',
+        'target-text-offset': function(edge) {
+          // Offset based on label length so it doesn't overlap with target node
+          var label = edge.data('argName') || '';
+          var effectiveLen = Math.min(label.length, 28);
+          var charWidth = 6;
+          // Half the label width + some padding
+          return (effectiveLen * charWidth / 2 + 15) + 'px';
+        },
         'target-text-margin-y': -10,
         'font-size': '10px',
         'font-family': 'SF Mono, Monaco, monospace',

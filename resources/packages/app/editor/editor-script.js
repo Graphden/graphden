@@ -33,6 +33,9 @@ let rebuildingOverlays = false;
 // Flag to disable ancestor selection during drag
 let isDragging = false;
 
+// Flag to disable hover on all nodes when any node is being grabbed
+let isGrabbing = false;
+
 const MAX_VISIBLE_ANCESTORS = 4; // Show at most N ancestors before scrolling
 
 // Track if we need to update overlays
@@ -500,18 +503,41 @@ function createCytoscape(elements, shouldFit) {
     if (evt.target === cy) hideNodeDetails();
   });
 
-  // When drag starts, clear any preview state and disable ancestor selection
+  // Track actual dragging (not just grab/free)
+  // isGrabbing: blocks hover on ALL nodes immediately when any node is grabbed
+  // isDragging: blocks clicks, set only after actual movement (3+ pixels)
+  let dragStartPos = null;
+
   cy.on('grab', function(evt) {
-    isDragging = true;
+    var node = evt.target;
+    dragStartPos = node.position();
+    isGrabbing = true;  // Block hover on all nodes immediately
     clearPreviewState();
+  });
+
+  cy.on('drag', function(evt) {
+    // Only set isDragging if node actually moved (for click blocking)
+    if (dragStartPos && !isDragging) {
+      var node = evt.target;
+      var pos = node.position();
+      var dx = Math.abs(pos.x - dragStartPos.x);
+      var dy = Math.abs(pos.y - dragStartPos.y);
+      if (dx > 3 || dy > 3) {
+        isDragging = true;
+      }
+    }
   });
 
   // When drag ends, re-enable ancestor selection
   cy.on('free', function(evt) {
-    // Small delay to prevent immediate re-triggering
-    setTimeout(() => {
-      isDragging = false;
-    }, 50);
+    dragStartPos = null;
+    isGrabbing = false;  // Re-enable hover
+    // Small delay to prevent immediate click after actual drag
+    if (isDragging) {
+      setTimeout(() => {
+        isDragging = false;
+      }, 50);
+    }
   });
 
   // When pan starts, also clear preview
@@ -651,18 +677,23 @@ function createNodeOverlays() {
         }
 
         // Hover: preview expansion to this item's groupLevel
+        // Only preview if hovering on a level ABOVE current expansion
         line.addEventListener('mouseenter', () => {
-          if (isDragging) return;  // Ignore during drag
+          if (isGrabbing) return;  // Ignore when any node is being dragged
           linesHovered++;
-          setPreviewLevel(data.originalFnId, item.groupLevel);
+          const currentExpansion = expansionLevel.get(data.originalFnId) || 0;
+          // Only set preview for levels above current expansion
+          if (item.groupLevel > currentExpansion) {
+            setPreviewLevel(data.originalFnId, item.groupLevel);
+          }
         });
 
         line.addEventListener('mouseleave', () => {
-          if (isDragging) return;  // Ignore during drag
+          if (isGrabbing) return;  // Ignore when any node is being dragged
           linesHovered--;
           // Reset preview only if no lines are hovered and not rebuilding
           setTimeout(() => {
-            if (linesHovered <= 0 && !rebuildingOverlays && !isDragging) {
+            if (linesHovered <= 0 && !rebuildingOverlays && !isGrabbing) {
               setPreviewLevel(data.originalFnId, null);
             }
           }, 10);
@@ -672,6 +703,7 @@ function createNodeOverlays() {
         line.addEventListener('click', (e) => {
           if (isDragging) return;  // Ignore during drag
           e.stopPropagation();
+          e.preventDefault();
           setExpansionLevel(data.originalFnId, item.groupLevel);
         });
       } else {

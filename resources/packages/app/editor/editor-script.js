@@ -364,30 +364,30 @@ function renderGraph(shouldFit = true) {
       }
     }
 
-    // Run layout with animation
+    // Run layout without animation
     const layout = cy.layout({
       name: 'dagre',
       rankDir: 'LR',
       nodeSep: 60,
       edgeSep: 20,
       rankSep: 120,
-      align: 'UL',  // Align nodes to upper-left within their rank
+      align: 'UL',
       fit: false,
-      animate: false  // Don't animate layout, we'll animate after alignment
+      animate: false
     });
 
     layout.run();
 
-    // Align nodes by left edge within each column (rank)
+    // Align nodes by left edge within each column
     alignNodesByLeftEdge();
 
-    // Now animate to final positions
+    // Save final positions after alignment
     const finalPositions = new Map();
     cy.nodes().forEach(node => {
       finalPositions.set(node.id(), { ...node.position() });
     });
 
-    // Reset to old positions for animation
+    // Reset existing nodes to old positions for animation
     cy.nodes().forEach(node => {
       const oldPos = currentPositions.get(node.id());
       if (oldPos) {
@@ -395,19 +395,21 @@ function renderGraph(shouldFit = true) {
       }
     });
 
-    // Animate to aligned positions
+    // Animate all nodes to final positions
+    const animationPromises = [];
     cy.nodes().forEach(node => {
       const targetPos = finalPositions.get(node.id());
       if (targetPos) {
-        node.animate({
+        const anim = node.animation({
           position: targetPos,
           duration: ANIM_DURATION,
           easing: 'ease-out'
         });
+        animationPromises.push(anim.play().promise());
       }
     });
 
-    // Update overlays during animation
+    // Update overlays continuously during animation
     let animating = true;
     function updateLoop() {
       if (animating) {
@@ -416,15 +418,15 @@ function renderGraph(shouldFit = true) {
       }
     }
 
-    // Recreate overlays for new state (prevent mouseleave during rebuild)
+    // Recreate overlays for new state
     rebuildingOverlays = true;
     createNodeOverlays();
     rebuildingOverlays = false;
     requestAnimationFrame(updateLoop);
 
-    setTimeout(() => {
+    // When all animations complete
+    Promise.all(animationPromises).then(() => {
       animating = false;
-      // Unlock the node that was locked for this layout
       if (lockedNodeId) {
         const lockedNode = cy.getElementById(lockedNodeId);
         if (lockedNode.length > 0) {
@@ -432,11 +434,7 @@ function renderGraph(shouldFit = true) {
         }
       }
       updateOverlayPositions();
-      if (shouldFit) {
-        cy.fit(50);
-        updateOverlayPositions();
-      }
-    }, ANIM_DURATION);
+    });
   }
 
   // If there are nodes to remove, animate them first

@@ -168,7 +168,7 @@ function renderGraph(shouldFit = true) {
     style: [
       // fn node - hide label, overlay will show it
       { selector: 'node[type="fn"]', style: {
-        'label': '',
+        'label': 'data(label)',
         'text-valign': 'center',
         'text-halign': 'center',
         'text-wrap': 'wrap',
@@ -195,6 +195,10 @@ function renderGraph(shouldFit = true) {
       // Root node
       { selector: 'node[?isRoot]', style: {
         'border-width': 4
+      }},
+      // Non-placeholder fn nodes - hide label, overlay will show it
+      { selector: 'node[type="fn"][!isPlaceholder]', style: {
+        'label': ''
       }},
       // Placeholder (unset arg)
       { selector: 'node[?isPlaceholder]', style: {

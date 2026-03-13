@@ -9,8 +9,8 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 /* ID-based layout (matches editor-body hiccup structure) */
 #app { height: 100vh; }
 #main-container { display: flex; height: 100%; }
-#side-menu { width: 280px; background: #fafafa; border-right: 2px solid #000; overflow-y: auto; }
-#graph-container { flex: 1; display: flex; flex-direction: column; position: relative; }
+#side-menu { width: 280px; background: #fafafa; border-right: 2px solid #000; overflow-y: auto; position: relative; z-index: 200; }
+#graph-container { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 #graph-toolbar { position: absolute; top: 8px; left: 8px; z-index: 50; }
 #graph-toolbar button { padding: 6px 12px; border: 1px solid #000; background: #fff; cursor: pointer;
   font-family: inherit; font-size: 11px; transition: all 0.1s; }

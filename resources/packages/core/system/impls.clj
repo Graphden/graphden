@@ -104,6 +104,16 @@
   (System/currentTimeMillis))
 
 
+(defn read-resource
+  "Read a resource file from classpath and return its contents as string."
+  [{:keys [path]}]
+  (if-let [resource (clojure.java.io/resource path)]
+    (slurp resource)
+    (throw (ex-info (str "Resource not found: " path)
+                    {:type :execution-error/resource-not-found
+                     :path path}))))
+
+
 ;; === Registry ===
 
 (def impls
@@ -114,4 +124,5 @@
    :make-action-handler (with-meta make-action-handler {:ctx true})
    :to-json-string to-json-string
    :jvm-info jvm-info
-   :current-time-ms current-time-ms})
+   :current-time-ms current-time-ms
+   :read-resource read-resource})

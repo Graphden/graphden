@@ -14,6 +14,14 @@
   :args {:value :any}
   :return-type :bool}
 
+ {:name :some?
+  :args {:value :any}
+  :return-type :bool}
+
+ {:name :nil?
+  :args {:value :any}
+  :return-type :bool}
+
  ;; === Conditionals ===
  {:name :if
   :args {:test :any
@@ -23,6 +31,12 @@
 
  {:name :cond
   :args {:clauses :jsonb}
+  :return-type :any}
+
+ {:name :case
+  :args {:value :any
+         :clauses :jsonb
+         :default {:type :any :required false}}
   :return-type :any}
 
  ;; === Defaults ===

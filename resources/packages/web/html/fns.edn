@@ -71,4 +71,26 @@
  {:name :entity-field-rows
   :args {:entity :jsonb
          :field-specs :jsonb}
+  :return-type :jsonb}
+
+ ;; Wrap content in HTML elements
+ {:name :wrap-style
+  :args {:content :text}
+  :return-type :jsonb}
+
+ {:name :wrap-script
+  :args {:content :text}
+  :return-type :jsonb}
+
+ ;; Generic hiccup element constructor
+ {:name :hiccup
+  :args {:tag :text
+         :attrs {:type :jsonb :required false}
+         :children {:type :jsonb :required false}}
+  :return-type :jsonb}
+
+ ;; Horizontal flex container for buttons
+ {:name :button-row
+  :args {:buttons :jsonb
+         :style {:type :jsonb :required false}}
   :return-type :jsonb}]

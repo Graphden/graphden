@@ -43,4 +43,12 @@
 
  {:name :keyword-to-str
   :args {:keyword :any}
+  :return-type :text}
+
+ {:name :pr-str
+  :args {:value :any}
+  :return-type :text}
+
+ {:name :to-str
+  :args {:value :any}
   :return-type :text}]

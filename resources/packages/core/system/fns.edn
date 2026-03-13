@@ -74,4 +74,9 @@
 
  {:name :current-time-ms
   :args {}
-  :return-type :int}]
+  :return-type :int}
+
+ ;; Read file from classpath resources
+ {:name :read-resource
+  :args {:path :text}
+  :return-type :text}]

@@ -87,6 +87,60 @@
   :ctx true}
 
  ;; =============================================================================
+ ;; FN-DEFS: Pure render functions composed from entity-field-rows
+ ;; =============================================================================
+
+ ;; Field specs for fn entity details
+ {:name :fn-field-specs
+  :parent :const
+  :args {:value [["ID" :id]
+                 ["Name" :name :keyword-to-str]
+                 ["Parent ID" :parent-id]
+                 ["Return Type" :return-type :keyword-to-str]
+                 ["Impl Hash" :impl-hash]]}}
+
+ ;; Render fn details using entity-field-rows
+ {:name :render-fn-details
+  :parent :entity-field-rows
+  :args {:field-specs :fn-field-specs
+         :entity {:as :entity}}}
+
+ ;; Field specs for arg entity details (basic fields always shown)
+ {:name :arg-field-specs
+  :parent :const
+  :args {:value [["ID" :id]
+                 ["Name" :name :keyword-to-str]
+                 ["Fn ID" :fn-id]
+                 ["Type" :type :keyword-to-str]
+                 ["Required" :required :bool-to-yesno]
+                 ["Is Fn" :is-fn :bool-to-yesno]
+                 ["Source ID" :source-id]
+                 ["Value" :value :pr-str]
+                 ["Ref ID" :ref-id]]}}
+
+ ;; Render arg details using entity-field-rows
+ {:name :render-arg-details
+  :parent :entity-field-rows
+  :args {:field-specs :arg-field-specs
+         :entity {:as :entity}}}
+
+ ;; Renders action buttons (Edit/Delete) for entity - still a base-fn
+ ;; because it generates dynamic URLs and htmx attributes
+ {:name :render-entity-actions
+  :args {:entity-type :text
+         :entity-id :text}
+  :return-type :jsonb}
+
+ ;; Form data parsing helpers
+ {:name :parse-fn-from-form
+  :args {:form-data :jsonb}
+  :return-type :jsonb}
+
+ {:name :parse-arg-from-form
+  :args {:form-data :jsonb}
+  :return-type :jsonb}
+
+ ;; =============================================================================
  ;; FN-DEFS: Response handlers composed from base functions
  ;; =============================================================================
 

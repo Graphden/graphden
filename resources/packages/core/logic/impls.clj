@@ -22,6 +22,16 @@
   (not value))
 
 
+(defn some?-fn
+  [{:keys [value]}]
+  (some? value))
+
+
+(defn nil?-fn
+  [{:keys [value]}]
+  (nil? value))
+
+
 ;; === Conditionals ===
 
 (defn if-fn
@@ -39,6 +49,13 @@
         (if test
           result
           (recur (rest remaining)))))))
+
+
+(defn case-fn
+  "Dispatches on value. Clauses is a map {match-value result ...}.
+   Returns result for matching value, or default if no match."
+  [{:keys [value clauses default]}]
+  (get clauses value default))
 
 
 ;; === Defaults ===
@@ -67,8 +84,11 @@
   {:and and-fn
    :or or-fn
    :not not-fn
+   :some? some?-fn
+   :nil? nil?-fn
    :if if-fn
    :cond cond-fn
+   :case case-fn
    :coalesce coalesce
    :const const
    :identity identity-fn})

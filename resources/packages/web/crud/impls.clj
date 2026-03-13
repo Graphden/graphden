@@ -100,54 +100,57 @@
     nil))
 
 
-;; Use html impls for rendering primitives
-(defn- render-field-row
-  [label value]
-  (html/field-row {:label label :value value}))
-
-
 (defn- render-entity-badge
   [entity-type-str]
   (html/badge {:badge-text entity-type-str :badge-type entity-type-str}))
 
 
-(defn- render-fn-details
-  [entity]
-  [:div
-   (render-field-row "ID" (:id entity))
-   (render-field-row "Name" (when (:name entity) (name (:name entity))))
-   (render-field-row "Parent ID" (:parent-id entity))
-   (render-field-row "Return Type" (when (:return-type entity) (name (:return-type entity))))
-   (render-field-row "Impl Hash" (:impl-hash entity))])
+;; Field specs for rendering - matches fn-defs in fns.edn
+(def ^:private fn-field-specs
+  [["ID" :id]
+   ["Name" :name :keyword-to-str]
+   ["Parent ID" :parent-id]
+   ["Return Type" :return-type :keyword-to-str]
+   ["Impl Hash" :impl-hash]])
 
 
-(defn- render-arg-details
-  [entity]
-  (let [has-value? (or (some? (:value entity)) (some? (:ref-id entity)))
-        is-inherited? (some? (:source-id entity))]
-    [:div
-     (render-field-row "ID" (:id entity))
-     (render-field-row "Name" (when (:name entity) (name (:name entity))))
-     (render-field-row "Fn ID" (:fn-id entity))
-     (render-field-row "Type" (when (:type entity) (name (:type entity))))
-     (render-field-row "Required" (if (:required entity) "Yes" "No"))
-     (render-field-row "Is Fn" (if (:is-fn entity) "Yes" "No"))
-     (render-field-row "Inherited" (if is-inherited? "Yes" "No"))
-     (when is-inherited?
-       (render-field-row "Source ID" (:source-id entity)))
-     (render-field-row "Has Value" (if has-value? "Yes" "No"))
-     (when has-value?
-       [:div
-        (render-field-row "Value" (when (:value entity) (pr-str (:value entity))))
-        (render-field-row "Ref ID" (:ref-id entity))])]))
+(def ^:private arg-field-specs
+  [["ID" :id]
+   ["Name" :name :keyword-to-str]
+   ["Fn ID" :fn-id]
+   ["Type" :type :keyword-to-str]
+   ["Required" :required :bool-to-yesno]
+   ["Is Fn" :is-fn :bool-to-yesno]
+   ["Source ID" :source-id]
+   ["Value" :value :pr-str]
+   ["Ref ID" :ref-id]])
 
 
 (defn- render-entity-details
+  "Renders entity details using entity-field-rows with field specs."
   [entity-type-str entity]
   (case entity-type-str
-    "fn" (render-fn-details entity)
-    "arg" (render-arg-details entity)
+    "fn" (html/entity-field-rows {:entity entity :field-specs fn-field-specs})
+    "arg" (html/entity-field-rows {:entity entity :field-specs arg-field-specs})
     [:p "Unknown entity type"]))
+
+
+(defn render-entity-actions
+  "Renders action buttons (Edit/Delete) for entity as hiccup."
+  [{:keys [entity-type entity-id]}]
+  [:div {:style "margin-top: 16px; display: flex; gap: 8px;"}
+   [:button {:class "btn btn-primary"
+             :hx-get (str "/partials/entity-form/" entity-type "/" entity-id)
+             :hx-target "#details-content"
+             :hx-swap "innerHTML"}
+    "Edit"]
+   [:button {:class "btn btn-danger"
+             :hx-delete (str "/api/entities/" entity-type "/" entity-id)
+             :hx-confirm "Are you sure you want to delete this entity?"
+             :hx-target "#details-panel"
+             :hx-swap "outerHTML"
+             :_ "on htmx:afterRequest trigger entityDeleted on body"}
+    "Delete"]])
 
 
 (defn render-entity-details-view
@@ -167,19 +170,7 @@
            [:div {:style "margin-bottom: 12px;"}
             (render-entity-badge entity-type-str)]
            (render-entity-details entity-type-str entity)
-           [:div {:style "margin-top: 16px; display: flex; gap: 8px;"}
-            [:button {:class "btn btn-primary"
-                      :hx-get (str "/partials/entity-form/" entity-type-str "/" entity-id-str)
-                      :hx-target "#details-content"
-                      :hx-swap "innerHTML"}
-             "Edit"]
-            [:button {:class "btn btn-danger"
-                      :hx-delete (str "/api/entities/" entity-type-str "/" entity-id-str)
-                      :hx-confirm "Are you sure you want to delete this entity?"
-                      :hx-target "#details-panel"
-                      :hx-swap "outerHTML"
-                      :_ "on htmx:afterRequest trigger entityDeleted on body"}
-             "Delete"]]]
+           (render-entity-actions {:entity-type entity-type-str :entity-id entity-id-str})]
           [:p {:class "error"} "Entity not found"]))
       [:p {:class "error"} "Invalid request"])))
 
@@ -285,9 +276,38 @@
       [:p {:class "error"} "Invalid entity type"])))
 
 
+(defn parse-fn-from-form
+  "Parses fn entity data from form submission."
+  [{:keys [form-data]}]
+  (cond-> {:name (keyword (:name form-data))}
+    (not (str/blank? (:parent-id form-data)))
+    (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data)))))
+
+
+(defn parse-arg-from-form
+  "Parses arg entity data from form submission."
+  [{:keys [form-data]}]
+  (cond-> {:name (keyword (:name form-data))
+           :fn-id (java.util.UUID/fromString (:fn-id form-data))
+           :type (keyword (:type form-data))}
+    (not (str/blank? (:source-id form-data)))
+    (assoc :source-id (java.util.UUID/fromString (:source-id form-data)))
+    (not (str/blank? (:value form-data)))
+    (assoc :value (json/parse-string (:value form-data) true))))
+
+
+(defn- parse-entity-from-form
+  "Dispatches to appropriate parser based on entity type."
+  [entity-type-str form-data]
+  (case entity-type-str
+    "fn" (parse-fn-from-form {:form-data form-data})
+    "arg" (parse-arg-from-form {:form-data form-data})
+    nil))
+
+
 (defn process-create-entity
   "Processes create entity request.
-   Returns {:success bool :body \"html\" :trigger \"eventName\"} for make-html-action-handler."
+   Returns {:status :headers :body} for make-html-action-handler."
   [{:keys [request]} ctx]
   (let [storage (:storage ctx)
         entity-type-str (get-in request [:path-params :type])
@@ -300,18 +320,7 @@
                                 :when k]
                             [(keyword k) (java.net.URLDecoder/decode (or v "") "UTF-8")])))]
     (if (and storage entity-type form-data)
-      (let [entity-data (case entity-type-str
-                          "fn" (cond-> {:name (keyword (:name form-data))}
-                                 (not (str/blank? (:parent-id form-data)))
-                                 (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data))))
-                          "arg" (cond-> {:name (keyword (:name form-data))
-                                         :fn-id (java.util.UUID/fromString (:fn-id form-data))
-                                         :type (keyword (:type form-data))}
-                                  (not (str/blank? (:source-id form-data)))
-                                  (assoc :source-id (java.util.UUID/fromString (:source-id form-data)))
-                                  (not (str/blank? (:value form-data)))
-                                  (assoc :value (json/parse-string (:value form-data) true)))
-                          nil)
+      (let [entity-data (parse-entity-from-form entity-type-str form-data)
             created (when entity-data
                       (sp/create-entity storage entity-type entity-data))]
         (if created
@@ -406,6 +415,11 @@
    :render-entity-form-view (with-meta render-entity-form-view {:ctx true})
    :process-create-entity (with-meta process-create-entity {:ctx true})
    :process-delete-entity (with-meta process-delete-entity {:ctx true})
+   ;; Pure render function (render-fn-details and render-arg-details are now fn-defs)
+   :render-entity-actions render-entity-actions
+   ;; Form parsing functions
+   :parse-fn-from-form parse-fn-from-form
+   :parse-arg-from-form parse-arg-from-form
    ;; Pure helper functions
    :get-path-param get-path-param
    :get-query-param get-query-param

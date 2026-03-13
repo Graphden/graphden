@@ -1,9 +1,9 @@
-;; Graph Editor base functions and fn-defs
-;; Base functions return CSS, JS, and body content
+;; Graph Editor fn-defs
+;; Base functions load CSS/JS from files, body is defined inline
 ;; Fn-defs compose them into pages, handlers, routes
 
 [;; =============================================================================
- ;; BASE FUNCTIONS (implementations in impls.clj)
+ ;; BASE FUNCTIONS (implementations in impls.clj load from resource files)
  ;; =============================================================================
 
  {:name :editor-styles
@@ -18,7 +18,7 @@
   :args {}
   :return-type :jsonb}
 
- ;; Pre-wrapped elements for direct use (avoids keyword composition issues)
+ ;; Pre-wrapped elements
  {:name :editor-style-element
   :args {}
   :return-type :jsonb}

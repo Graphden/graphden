@@ -206,19 +206,69 @@
     [:span {:class type-class} badge-text]))
 
 
+(defn- apply-transform
+  "Applies transformation to value based on transform spec.
+   Supports: :keyword-to-str, :pr-str, :bool-to-yesno, or nil (no transform)."
+  [value transform]
+  (case transform
+    :keyword-to-str (when value (if (keyword? value) (name value) (str value)))
+    :pr-str (when value (pr-str value))
+    :bool-to-yesno (if value "Yes" "No")
+    ;; default: no transform
+    value))
+
+
 (defn entity-field-rows
   "Renders multiple field rows from entity using field-specs.
-   field-specs: [[label key] ...] - key is a keyword to get from entity
+   field-specs: [[label key] ...] or [[label key transform] ...]
+   - key is a keyword or vector path to get from entity
+   - transform is optional: :keyword-to-str, :pr-str, :bool-to-yesno
    Returns a div containing all field-rows."
   [{:keys [entity field-specs]}]
   (into [:div]
-        (for [[label key-path] field-specs]
-          (let [value (if (vector? key-path)
-                        (get-in entity key-path)
-                        (get entity key-path))]
+        (for [spec field-specs]
+          (let [[label key-path transform] (if (= 3 (count spec))
+                                             spec
+                                             [(first spec) (second spec) nil])
+                raw-value (if (vector? key-path)
+                            (get-in entity key-path)
+                            (get entity key-path))
+                value (apply-transform raw-value transform)]
             [:div {:class "field-row"}
              [:span {:class "field-label"} label]
              [:span {:class "field-value"} (if (nil? value) "-" (str value))]]))))
+
+
+(defn wrap-style
+  "Wraps content in a style element."
+  [{:keys [content]}]
+  [:style content])
+
+
+(defn wrap-script
+  "Wraps content in a script element."
+  [{:keys [content]}]
+  [:script content])
+
+
+(defn hiccup-element
+  "Creates a hiccup element from tag, attrs, and children."
+  [{:keys [tag attrs children]}]
+  (let [tag-kw (if (keyword? tag) tag (keyword tag))
+        base (if attrs
+               [tag-kw attrs]
+               [tag-kw])]
+    (if children
+      (into base children)
+      base)))
+
+
+(defn button-row
+  "Creates a horizontal flex container for buttons."
+  [{:keys [buttons style]}]
+  (let [default-style {:margin-top "16px" :display "flex" :gap "8px"}
+        merged-style (merge default-style (or style {}))]
+    (into [:div {:style merged-style}] buttons)))
 
 
 ;; === Registry ===
@@ -235,4 +285,8 @@
    :button button
    :field-row field-row
    :badge badge
-   :entity-field-rows entity-field-rows})
+   :entity-field-rows entity-field-rows
+   :wrap-style wrap-style
+   :wrap-script wrap-script
+   :hiccup hiccup-element
+   :button-row button-row})

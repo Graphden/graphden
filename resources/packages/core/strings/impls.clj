@@ -148,6 +148,18 @@
     (str keyword)))
 
 
+(defn pr-str-fn
+  "Returns a string representation of value for debugging/display."
+  [{:keys [value]}]
+  (pr-str value))
+
+
+(defn to-str-fn
+  "Converts any value to string using str."
+  [{:keys [value]}]
+  (str value))
+
+
 ;; === Registry ===
 
 (def impls
@@ -160,4 +172,6 @@
    :str-split str-split-fn
    :str-join str-join-fn
    :str-to-keyword str-to-keyword-fn
-   :keyword-to-str keyword-to-str-fn})
+   :keyword-to-str keyword-to-str-fn
+   :pr-str pr-str-fn
+   :to-str to-str-fn})

@@ -237,6 +237,60 @@ window.addEventListener('popstate', () => {
 // Animation duration constant
 const ANIM_DURATION = 200;
 
+// Align nodes by left edge within each column (rank)
+// Groups nodes by their approximate X position, then aligns left edges
+function alignNodesByLeftEdge() {
+  if (!cy) return;
+
+  const nodes = cy.nodes();
+  if (nodes.length === 0) return;
+
+  // Group nodes by column (approximate X center position)
+  const columns = new Map();  // rounded X -> [nodes]
+  const tolerance = 50;  // Nodes within this X range are in same column
+
+  nodes.forEach(node => {
+    const x = node.position('x');
+    const width = node.outerWidth();
+    const leftEdge = x - width / 2;
+
+    // Find or create column
+    let foundColumn = null;
+    for (const [colX, colNodes] of columns) {
+      if (Math.abs(x - colX) < tolerance) {
+        foundColumn = colX;
+        break;
+      }
+    }
+
+    if (foundColumn !== null) {
+      columns.get(foundColumn).push({ node, leftEdge, width });
+    } else {
+      columns.set(x, [{ node, leftEdge, width }]);
+    }
+  });
+
+  // For each column, find the minimum left edge and shift nodes
+  columns.forEach((colNodes) => {
+    if (colNodes.length <= 1) return;  // No alignment needed for single node
+
+    // Find the leftmost left edge in this column
+    const minLeftEdge = Math.min(...colNodes.map(n => n.leftEdge));
+
+    // Shift each node so its left edge aligns with minLeftEdge
+    colNodes.forEach(({ node, leftEdge, width }) => {
+      const currentX = node.position('x');
+      const targetLeftEdge = minLeftEdge;
+      const targetX = targetLeftEdge + width / 2;
+      const shift = targetX - currentX;
+
+      if (Math.abs(shift) > 1) {
+        node.position('x', targetX);
+      }
+    });
+  });
+}
+
 function renderGraph(shouldFit = true) {
   const elements = buildGraphElements();
 
@@ -317,10 +371,40 @@ function renderGraph(shouldFit = true) {
       nodeSep: 60,
       edgeSep: 20,
       rankSep: 120,
+      align: 'UL',  // Align nodes to upper-left within their rank
       fit: false,
-      animate: true,
-      animationDuration: ANIM_DURATION,
-      animationEasing: 'ease-out'
+      animate: false  // Don't animate layout, we'll animate after alignment
+    });
+
+    layout.run();
+
+    // Align nodes by left edge within each column (rank)
+    alignNodesByLeftEdge();
+
+    // Now animate to final positions
+    const finalPositions = new Map();
+    cy.nodes().forEach(node => {
+      finalPositions.set(node.id(), { ...node.position() });
+    });
+
+    // Reset to old positions for animation
+    cy.nodes().forEach(node => {
+      const oldPos = currentPositions.get(node.id());
+      if (oldPos) {
+        node.position(oldPos);
+      }
+    });
+
+    // Animate to aligned positions
+    cy.nodes().forEach(node => {
+      const targetPos = finalPositions.get(node.id());
+      if (targetPos) {
+        node.animate({
+          position: targetPos,
+          duration: ANIM_DURATION,
+          easing: 'ease-out'
+        });
+      }
     });
 
     // Update overlays during animation
@@ -338,7 +422,7 @@ function renderGraph(shouldFit = true) {
     rebuildingOverlays = false;
     requestAnimationFrame(updateLoop);
 
-    layout.one('layoutstop', () => {
+    setTimeout(() => {
       animating = false;
       // Unlock the node that was locked for this layout
       if (lockedNodeId) {
@@ -352,9 +436,7 @@ function renderGraph(shouldFit = true) {
         cy.fit(50);
         updateOverlayPositions();
       }
-    });
-
-    layout.run();
+    }, ANIM_DURATION);
   }
 
   // If there are nodes to remove, animate them first
@@ -415,7 +497,11 @@ function createCytoscape(elements, shouldFit) {
         'width': function(node) {
           var label = node.data('label') || '';
           var lines = label.split('\n');
-          var maxLen = Math.max(...lines.map(l => l.replace(/[^\x20-\x7E]/g, '').length));
+          var maxLineLen = 30;  // Max chars per line for sizing
+          var maxLen = Math.max(...lines.map(function(l) {
+            var cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
+            return Math.min(cleanLen, maxLineLen);
+          }));
           return Math.max(80, maxLen * 7 + 24);
         },
         'height': function(node) {
@@ -440,7 +526,14 @@ function createCytoscape(elements, shouldFit) {
       }},
       // Arg value node
       { selector: 'node[type="arg"]', style: {
-        'label': 'data(label)',
+        'label': function(node) {
+          var label = node.data('label') || '';
+          var maxLen = 30;
+          if (label.length > maxLen) {
+            return label.substring(0, maxLen - 1) + '…';
+          }
+          return label;
+        },
         'text-valign': 'center',
         'text-halign': 'center',
         'font-size': '10px',
@@ -453,7 +546,9 @@ function createCytoscape(elements, shouldFit) {
         'padding': '8px',
         'width': function(node) {
           var label = node.data('label') || '';
-          return Math.max(40, label.length * 6 + 16);
+          var maxLen = 30;
+          var effectiveLen = Math.min(label.length, maxLen);
+          return Math.max(40, effectiveLen * 6 + 16);
         },
         'height': 28
       }},
@@ -464,19 +559,20 @@ function createCytoscape(elements, shouldFit) {
         'line-style': 'solid',
         'curve-style': 'taxi',
         'taxi-direction': 'rightward',
-        'taxi-turn': function(edge) {
-          // Calculate turn distance based on label length
-          var label = edge.data('argName') || '';
-          var minTurn = 30;
-          var charWidth = 7;
-          return Math.max(minTurn, label.length * charWidth + 20) + 'px';
-        },
-        'taxi-turn-min-distance': '10px',
+        'taxi-turn': '50%',  // Turn at midpoint between nodes
+        'taxi-turn-min-distance': '20px',
         'edge-distances': 'intersection'
       }},
       // Edge with label - position near target on final horizontal segment
       { selector: 'edge[argName]', style: {
-        'target-label': 'data(argName)',
+        'target-label': function(edge) {
+          var label = edge.data('argName') || '';
+          var maxLen = 28;
+          if (label.length > maxLen) {
+            return label.substring(0, maxLen - 1) + '…';
+          }
+          return label;
+        },
         'target-text-offset': '40px',
         'target-text-margin-y': -10,
         'font-size': '10px',
@@ -564,9 +660,12 @@ function createCytoscape(elements, shouldFit) {
       nodeSep: 60,
       edgeSep: 20,
       rankSep: 120,
-      fit: true,
+      align: 'UL',  // Align nodes to upper-left within their rank
+      fit: false,
       animate: false
     }).run();
+    alignNodesByLeftEdge();
+    cy.fit(50);
     createNodeOverlays();
   }
 }
@@ -619,7 +718,7 @@ function createNodeOverlays() {
     overlay.style.top = (bb.y1) + 'px';
     overlay.style.width = (bb.x2 - bb.x1) + 'px';
     overlay.style.height = (bb.y2 - bb.y1) + 'px';
-    overlay.style.pointerEvents = 'none';  // Let clicks pass through to cytoscape for dragging
+    overlay.style.pointerEvents = 'none';  // Overlay itself doesn't capture
     overlay.style.display = 'flex';
     overlay.style.flexDirection = 'column';
     overlay.style.justifyContent = 'center';
@@ -628,6 +727,19 @@ function createNodeOverlays() {
     overlay.dataset.originalFnId = data.originalFnId;
     // Scale text with zoom
     overlay.style.fontSize = (11 * zoom) + 'px';
+
+    // Text container - captures mouse events to prevent cytoscape grab
+    const textContainer = document.createElement('div');
+    textContainer.style.pointerEvents = 'auto';  // Block events from reaching cytoscape
+    textContainer.style.display = 'flex';
+    textContainer.style.flexDirection = 'column';
+    textContainer.style.justifyContent = 'center';
+    textContainer.style.alignItems = 'center';
+    textContainer.style.padding = (4 * zoom) + 'px';
+    // Prevent mousedown from propagating to cytoscape
+    textContainer.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+    });
 
     const currentLevel = previewLevel.get(data.originalFnId) ?? expansionLevel.get(data.originalFnId) ?? 0;
     const ancestors = data.ancestorList || [];
@@ -661,7 +773,6 @@ function createNodeOverlays() {
       line.style.width = '100%';
       line.style.textAlign = 'center';
       line.style.boxSizing = 'border-box';
-      line.style.pointerEvents = 'auto';  // Lines capture hover/click
 
       // If there are multiple groups, make it interactive
       if (hasMultipleGroups) {
@@ -712,7 +823,7 @@ function createNodeOverlays() {
         line.style.fontWeight = '500';
       }
 
-      overlay.appendChild(line);
+      textContainer.appendChild(line);
     });
 
     // Show ellipsis if there are more items
@@ -727,9 +838,10 @@ function createNodeOverlays() {
       ellipsis.style.color = '#999999';
       ellipsis.style.width = '100%';
       ellipsis.style.textAlign = 'center';
-      overlay.appendChild(ellipsis);
+      textContainer.appendChild(ellipsis);
     }
 
+    overlay.appendChild(textContainer);
     container.appendChild(overlay);
   });
 }

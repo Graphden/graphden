@@ -1,10 +1,20 @@
 // Graph editor JavaScript - 2-entity schema visualization
-// Interactive expand/collapse for inheritance drill-down
+// Interactive expand/collapse via ancestor list in nodes
 let cy = null;
 let selectedFnId = null;
 let graphData = null;
 let lookups = null;
-let expandedNodes = new Set(); // fnId -> expanded (showing parent instead)
+
+// Map: originalFnId -> number of ancestors to show (0 = just self, 1 = self + parent, etc.)
+let expansionLevel = new Map();
+
+// For hover preview: originalFnId -> preview level (null if no preview)
+let previewLevel = new Map();
+
+const MAX_VISIBLE_ANCESTORS = 4; // Show at most N ancestors before scrolling
+
+// Track if we need to update overlays
+let overlayUpdatePending = false;
 
 // Build lookup maps
 function buildLookups(data) {
@@ -23,6 +33,20 @@ function buildLookups(data) {
   });
 
   return { fnMap, argMap, argsByFn };
+}
+
+// Get inheritance chain: [fnId, parentId, grandparentId, ...]
+function getInheritanceChain(fnId) {
+  const chain = [];
+  let current = fnId;
+  const visited = new Set();
+  while (current && !visited.has(current)) {
+    visited.add(current);
+    chain.push(current);
+    const fn = lookups.fnMap.get(current);
+    current = fn ? fn['parent-id'] : null;
+  }
+  return chain;
 }
 
 // Resolve arg name
@@ -60,7 +84,9 @@ function updateEntityList(data) {
 // Select a function
 function selectFn(fnId, updateHistory = true) {
   selectedFnId = fnId;
-  expandedNodes.clear();
+  expansionLevel.clear();
+  previewLevel.clear();
+
   document.querySelectorAll('.entity-item').forEach(el => el.classList.remove('selected'));
   const item = document.querySelector('[data-fn-id="' + fnId + '"]');
   if (item) item.classList.add('selected');
@@ -73,18 +99,29 @@ function selectFn(fnId, updateHistory = true) {
   renderGraph(true);
 }
 
-// Expand node - add to expanded set
-function expandNode(fnId) {
-  const fn = lookups.fnMap.get(fnId);
-  if (!fn || !fn['parent-id']) return;
-  expandedNodes.add(fnId);
+// Set expansion level for a node
+function setExpansionLevel(originalFnId, level) {
+  if (level === 0) {
+    expansionLevel.delete(originalFnId);
+  } else {
+    expansionLevel.set(originalFnId, level);
+  }
+  previewLevel.delete(originalFnId);
   renderGraph(false);
 }
 
-// Collapse node - remove from expanded set
-function collapseNode(fnId) {
-  expandedNodes.delete(fnId);
-  renderGraph(false);
+// Set preview level (hover) - rebuild graph to show/hide args
+function setPreviewLevel(originalFnId, level) {
+  const oldLevel = previewLevel.get(originalFnId);
+  if (level === null) {
+    previewLevel.delete(originalFnId);
+  } else {
+    previewLevel.set(originalFnId, level);
+  }
+  // Only rebuild if level actually changed
+  if (oldLevel !== level) {
+    renderGraph(false);
+  }
 }
 
 function selectFnByName(name, updateHistory = true) {
@@ -114,7 +151,6 @@ window.addEventListener('popstate', () => {
 function renderGraph(shouldFit = true) {
   const elements = buildGraphElements();
 
-  // Save positions of existing nodes
   const savedPositions = new Map();
   let savedZoom, savedPan;
   if (cy) {
@@ -130,9 +166,9 @@ function renderGraph(shouldFit = true) {
     container: document.getElementById('cy'),
     elements: elements,
     style: [
-      // fn node
+      // fn node - hide label, overlay will show it
       { selector: 'node[type="fn"]', style: {
-        'label': 'data(label)',
+        'label': '',
         'text-valign': 'center',
         'text-halign': 'center',
         'text-wrap': 'wrap',
@@ -147,13 +183,13 @@ function renderGraph(shouldFit = true) {
         'width': function(node) {
           var label = node.data('label') || '';
           var lines = label.split('\n');
-          var maxLen = Math.max(...lines.map(l => l.length));
-          return Math.max(60, maxLen * 7 + 20);
+          var maxLen = Math.max(...lines.map(l => l.replace(/[^\x20-\x7E]/g, '').length));
+          return Math.max(80, maxLen * 7 + 24);
         },
         'height': function(node) {
           var label = node.data('label') || '';
           var lines = label.split('\n').length;
-          return Math.max(30, lines * 14 + 20);
+          return Math.max(30, lines * 16 + 16);
         }
       }},
       // Root node
@@ -209,69 +245,200 @@ function renderGraph(shouldFit = true) {
         'line-color': '#999999'
       }}
     ],
-    layout: { name: 'preset' }, // We'll position manually first
+    layout: { name: 'preset' },
     userZoomingEnabled: true,
     userPanningEnabled: true,
     minZoom: 0.2,
     maxZoom: 3
   });
 
-  // Restore positions for existing nodes
-  const hasPositions = savedPositions.size > 0;
+  // Restore positions or run layout
+  const existingNodes = [];
   const newNodes = [];
+  const isFirstRender = savedPositions.size === 0;
 
   cy.nodes().forEach(node => {
     const saved = savedPositions.get(node.id());
-    if (saved && hasPositions) {
+    if (saved && !isFirstRender) {
       node.position(saved);
+      node.lock();
+      existingNodes.push(node);
     } else {
       newNodes.push(node);
     }
   });
 
-  // Run dagre layout
   cy.layout({
     name: 'dagre',
     rankDir: 'LR',
-    nodeSep: 50,
-    edgeSep: 15,
-    rankSep: 100,
+    nodeSep: 60,
+    edgeSep: 20,
+    rankSep: 120,
     fit: false,
     animate: false
   }).run();
 
-  // Click handler
+  existingNodes.forEach(node => node.unlock());
+
+  // Click handler - delegate to overlay click handler via data
   cy.on('tap', 'node[type="fn"]', function(evt) {
-    const data = evt.target.data();
-    if (data.isPlaceholder) return;
-
-    // Check if this node can be collapsed (is expanded showing parent)
-    if (data.canCollapse && data.originalFnId) {
-      collapseNode(data.originalFnId);
-      return;
-    }
-
-    // Check if can expand (has parent)
-    if (data.canExpand && data.originalFnId) {
-      expandNode(data.originalFnId);
-    }
+    // Node taps are handled by the HTML overlay
   });
 
   cy.on('tap', function(evt) {
     if (evt.target === cy) hideNodeDetails();
   });
 
-  // Restore or fit viewport
+  // Update overlays on pan/zoom
+  cy.on('pan zoom resize', function() {
+    if (!overlayUpdatePending) {
+      overlayUpdatePending = true;
+      requestAnimationFrame(() => {
+        updateOverlayPositions();
+        overlayUpdatePending = false;
+      });
+    }
+  });
+
   if (!shouldFit && savedZoom && savedPan) {
     cy.viewport({ zoom: savedZoom, pan: savedPan });
   } else {
     cy.fit(50);
   }
+
+  // Create HTML overlays for interactive ancestor lists
+  createNodeOverlays();
+}
+
+// Update positions of existing overlays without recreating them
+function updateOverlayPositions() {
+  const overlays = document.querySelectorAll('.node-overlay');
+  const zoom = cy.zoom();
+
+  overlays.forEach(overlay => {
+    const originalFnId = overlay.dataset.originalFnId;
+    const nodeId = 'fn-' + originalFnId;
+    const node = cy.getElementById(nodeId);
+    if (node.length === 0) return;
+
+    const bb = node.renderedBoundingBox();
+    overlay.style.left = (bb.x1) + 'px';
+    overlay.style.top = (bb.y1) + 'px';
+    overlay.style.width = (bb.x2 - bb.x1) + 'px';
+    overlay.style.height = (bb.y2 - bb.y1) + 'px';
+    // Scale text with zoom
+    overlay.style.fontSize = (11 * zoom) + 'px';
+
+    // Update padding on ancestor lines
+    overlay.querySelectorAll('.ancestor-line').forEach(line => {
+      line.style.padding = (2 * zoom) + 'px ' + (4 * zoom) + 'px';
+    });
+  });
+}
+
+// Create HTML overlays on top of cytoscape nodes for interactive ancestor selection
+function createNodeOverlays() {
+  // Remove existing overlays
+  document.querySelectorAll('.node-overlay').forEach(el => el.remove());
+
+  const container = document.getElementById('cy');
+  const zoom = cy.zoom();
+
+  cy.nodes('[type="fn"]').forEach(node => {
+    const data = node.data();
+    if (data.isPlaceholder) return;
+
+    const bb = node.renderedBoundingBox();
+
+    const overlay = document.createElement('div');
+    overlay.className = 'node-overlay';
+    overlay.style.position = 'absolute';
+    overlay.style.left = (bb.x1) + 'px';
+    overlay.style.top = (bb.y1) + 'px';
+    overlay.style.width = (bb.x2 - bb.x1) + 'px';
+    overlay.style.height = (bb.y2 - bb.y1) + 'px';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.display = 'flex';
+    overlay.style.flexDirection = 'column';
+    overlay.style.justifyContent = 'center';
+    overlay.style.alignItems = 'center';
+    overlay.style.overflow = 'hidden';
+    overlay.dataset.originalFnId = data.originalFnId;
+    // Scale text with zoom
+    overlay.style.fontSize = (11 * zoom) + 'px';
+
+    const currentLevel = previewLevel.get(data.originalFnId) ?? expansionLevel.get(data.originalFnId) ?? 0;
+    const ancestors = data.ancestorList || [];
+
+    // Show at most MAX_VISIBLE_ANCESTORS + 1 ancestors (including self)
+    const visibleAncestors = ancestors.slice(0, MAX_VISIBLE_ANCESTORS + 1);
+    const hasMore = ancestors.length > MAX_VISIBLE_ANCESTORS + 1;
+
+    visibleAncestors.forEach((ancestorId, idx) => {
+      const fn = lookups.fnMap.get(ancestorId);
+      if (!fn) return;
+
+      const line = document.createElement('div');
+      line.className = 'ancestor-line';
+      line.textContent = fn.name;
+      line.dataset.level = idx;
+      line.style.fontFamily = 'SF Mono, Monaco, monospace';
+      line.style.padding = (2 * zoom) + 'px ' + (4 * zoom) + 'px';
+      line.style.whiteSpace = 'nowrap';
+
+      // If this node has ancestors, make it interactive
+      if (ancestors.length > 1) {
+        line.style.cursor = 'pointer';
+
+        // Color: black if <= currentLevel, gray otherwise
+        if (idx <= currentLevel) {
+          line.style.color = '#000000';
+          line.style.fontWeight = '500';
+        } else {
+          line.style.color = '#999999';
+          line.style.fontWeight = 'normal';
+        }
+
+        // Hover: preview expansion
+        line.addEventListener('mouseenter', () => {
+          setPreviewLevel(data.originalFnId, idx);
+        });
+
+        line.addEventListener('mouseleave', () => {
+          setPreviewLevel(data.originalFnId, null);
+        });
+
+        // Click: set expansion level
+        line.addEventListener('click', (e) => {
+          e.stopPropagation();
+          setExpansionLevel(data.originalFnId, idx);
+        });
+      } else {
+        // Single node without ancestors - just show name
+        line.style.color = '#000000';
+        line.style.fontWeight = '500';
+      }
+
+      overlay.appendChild(line);
+    });
+
+    // Show ellipsis if there are more ancestors
+    if (hasMore) {
+      const ellipsis = document.createElement('div');
+      ellipsis.className = 'ancestor-line';
+      ellipsis.textContent = '...';
+      ellipsis.style.fontSize = '11px';
+      ellipsis.style.fontFamily = 'SF Mono, Monaco, monospace';
+      ellipsis.style.padding = '2px 4px';
+      ellipsis.style.color = '#999999';
+      overlay.appendChild(ellipsis);
+    }
+
+    container.appendChild(overlay);
+  });
 }
 
 // Build graph elements
-// Key: when a fn is "expanded", we show its PARENT instead of it
-// The node shows "◀ childName" prefix in label to indicate collapse
 function buildGraphElements() {
   const nodes = [];
   const edges = [];
@@ -281,33 +448,22 @@ function buildGraphElements() {
     return { nodes: [], edges: [] };
   }
 
-  // Get display info for a fn
-  // Returns { displayFnId, chain, isExpanded }
-  // chain = [originalFn, parent, grandparent, ...displayFn]
-  function getDisplayInfo(fnId) {
-    const chain = [];
-    let current = fnId;
-    while (true) {
-      chain.push(current);
-      if (!expandedNodes.has(current)) break;
-      const fn = lookups.fnMap.get(current);
-      if (fn && fn['parent-id']) {
-        current = fn['parent-id'];
-      } else {
-        break;
-      }
+  // Get effective expansion level (considering preview)
+  function getEffectiveLevel(originalFnId) {
+    if (previewLevel.has(originalFnId)) {
+      return previewLevel.get(originalFnId);
     }
-    return {
-      displayFnId: chain[chain.length - 1],
-      chain: chain,
-      isExpanded: chain.length > 1
-    };
+    return expansionLevel.get(originalFnId) || 0;
   }
 
-  // Collect set args from chain
-  function collectSetArgs(chain) {
+  // Collect set args from expansion chain up to level
+  function collectSetArgs(originalFnId) {
+    const chain = getInheritanceChain(originalFnId);
+    const level = getEffectiveLevel(originalFnId);
+    const activeFns = chain.slice(0, level + 1); // fns whose args are shown
+
     const setArgs = new Map();
-    for (const fnId of chain) {
+    for (const fnId of activeFns) {
       const args = lookups.argsByFn.get(fnId) || [];
       args.forEach(arg => {
         const hasValue = arg.value !== null && arg.value !== undefined;
@@ -331,11 +487,15 @@ function buildGraphElements() {
         }
       });
     }
-    return setArgs;
+    return { setArgs, activeFns };
   }
 
-  // Get unset args
-  function getUnsetArgs(displayFnId, setArgs) {
+  // Get unset args from the most expanded fn
+  function getUnsetArgs(originalFnId, setArgs) {
+    const chain = getInheritanceChain(originalFnId);
+    const level = getEffectiveLevel(originalFnId);
+    const displayFnId = chain[Math.min(level, chain.length - 1)];
+
     const args = lookups.argsByFn.get(displayFnId) || [];
     return args.filter(arg => {
       const hasValue = arg.value !== null && arg.value !== undefined;
@@ -353,43 +513,30 @@ function buildGraphElements() {
   }
 
   // Add fn node
-  // originalFnId = the fn we're conceptually showing (may be expanded to show parent)
-  // displayFnId = the actual fn being displayed
-  // isExpanded = true if we're showing parent instead of original
   function addFnNode(originalFnId, isRoot) {
-    const { displayFnId, chain, isExpanded } = getDisplayInfo(originalFnId);
-
-    // Use a stable ID based on original fn so positions are preserved
     const nodeId = 'fn-' + originalFnId;
     if (addedNodeIds.has(nodeId)) return nodeId;
     addedNodeIds.add(nodeId);
 
-    const displayFn = lookups.fnMap.get(displayFnId);
-    if (!displayFn) return nodeId;
+    const chain = getInheritanceChain(originalFnId);
+    const level = getEffectiveLevel(originalFnId);
 
-    const originalFn = lookups.fnMap.get(originalFnId);
-    const hasParent = !!displayFn['parent-id'];
+    // Build label: list of ancestor names
+    // Active ones (up to level) are shown, we mark them in data
+    const visibleChain = chain.slice(0, Math.min(chain.length, MAX_VISIBLE_ANCESTORS + 1));
+    const labelLines = visibleChain.map((fnId, idx) => {
+      const fn = lookups.fnMap.get(fnId);
+      const name = fn ? fn.name : '?';
+      // We can't do colors in cytoscape label, so just show names
+      // The overlay will handle coloring
+      return name;
+    });
 
-    // Build label
-    let label = displayFn.name;
-
-    if (isExpanded) {
-      // Show collapse indicator: "◀ originalName" on first line
-      label = '\u25C0 ' + originalFn.name + '\n' + '\u2500'.repeat(Math.max(originalFn.name.length + 2, displayFn.name.length)) + '\n' + displayFn.name;
-      if (hasParent) {
-        const parent = lookups.fnMap.get(displayFn['parent-id']);
-        if (parent) {
-          label += '\n' + '\u2500'.repeat(Math.max(displayFn.name.length, parent.name.length)) + '\n' + parent.name;
-        }
-      }
-    } else if (hasParent) {
-      // Not expanded, show parent below
-      const parent = lookups.fnMap.get(displayFn['parent-id']);
-      if (parent && parent.name !== displayFn.name) {
-        const maxLen = Math.max(displayFn.name.length, parent.name.length);
-        label = displayFn.name + '\n' + '\u2500'.repeat(maxLen) + '\n' + parent.name;
-      }
+    if (chain.length > MAX_VISIBLE_ANCESTORS + 1) {
+      labelLines.push('...');
     }
+
+    const label = labelLines.join('\n');
 
     nodes.push({
       data: {
@@ -397,10 +544,9 @@ function buildGraphElements() {
         label: label,
         type: 'fn',
         isRoot: isRoot,
-        canExpand: hasParent && !isExpanded,
-        canCollapse: isExpanded,
         originalFnId: originalFnId,
-        displayFnId: displayFnId
+        ancestorList: chain, // Full chain for overlay
+        currentLevel: level
       }
     });
 
@@ -472,10 +618,8 @@ function buildGraphElements() {
   function processRefArg(argInfo, sourceNodeId) {
     const { argName, refId, argId } = argInfo;
 
-    // Add target fn node
     const targetNodeId = addFnNode(refId, false);
 
-    // Add edge
     edges.push({
       data: {
         id: 'e-ref-' + argId,
@@ -486,10 +630,9 @@ function buildGraphElements() {
     });
 
     // Process target's args
-    const { displayFnId, chain } = getDisplayInfo(refId);
-    const targetSetArgs = collectSetArgs(chain);
+    const { setArgs } = collectSetArgs(refId);
 
-    targetSetArgs.forEach((info) => {
+    setArgs.forEach((info) => {
       if (info.refId) {
         processRefArg(info, targetNodeId);
       } else if (info.value !== null && info.value !== undefined) {
@@ -497,14 +640,13 @@ function buildGraphElements() {
       }
     });
 
-    const targetUnsetArgs = getUnsetArgs(displayFnId, targetSetArgs);
-    targetUnsetArgs.forEach(arg => addUnsetArg(arg, targetNodeId));
+    const unsetArgs = getUnsetArgs(refId, setArgs);
+    unsetArgs.forEach(arg => addUnsetArg(arg, targetNodeId));
   }
 
   // Main: process selected fn
   const rootNodeId = addFnNode(selectedFnId, true);
-  const { displayFnId, chain } = getDisplayInfo(selectedFnId);
-  const setArgs = collectSetArgs(chain);
+  const { setArgs } = collectSetArgs(selectedFnId);
 
   setArgs.forEach((argInfo) => {
     if (argInfo.refId) {
@@ -514,10 +656,38 @@ function buildGraphElements() {
     }
   });
 
-  const unsetArgs = getUnsetArgs(displayFnId, setArgs);
+  const unsetArgs = getUnsetArgs(selectedFnId, setArgs);
   unsetArgs.forEach(arg => addUnsetArg(arg, rootNodeId));
 
-  return { nodes, edges };
+  // Sort nodes by BFS order
+  const sortedNodes = [];
+  const nodeMap = new Map(nodes.map(n => [n.data.id, n]));
+  const visited = new Set();
+  const queue = [rootNodeId];
+
+  while (queue.length > 0) {
+    const nodeId = queue.shift();
+    if (visited.has(nodeId)) continue;
+    visited.add(nodeId);
+
+    const node = nodeMap.get(nodeId);
+    if (node) sortedNodes.push(node);
+
+    edges.filter(e => e.data.source === nodeId)
+      .forEach(e => {
+        if (!visited.has(e.data.target)) {
+          queue.push(e.data.target);
+        }
+      });
+  }
+
+  nodes.forEach(n => {
+    if (!visited.has(n.data.id)) {
+      sortedNodes.push(n);
+    }
+  });
+
+  return { nodes: sortedNodes, edges };
 }
 
 function showFnDetails(fnId) {
@@ -536,7 +706,8 @@ function closeDetailsPanel() {
 }
 
 function collapseAll() {
-  expandedNodes.clear();
+  expansionLevel.clear();
+  previewLevel.clear();
   renderGraph(false);
 }
 

@@ -128,3 +128,7 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 .fn-arg .arg-value { font-weight: 500; max-width: 120px; overflow: hidden; text-overflow: ellipsis;
   white-space: nowrap; }
 .fn-arg.unset .arg-name { color: #999; font-style: italic; }
+
+/* Node overlay for interactive ancestor list */
+.node-overlay { pointer-events: auto; z-index: 10; }
+.node-overlay .ancestor-line { transition: color 0.1s, font-weight 0.1s; }

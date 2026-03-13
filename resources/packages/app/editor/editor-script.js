@@ -11,6 +11,15 @@ let expansionLevel = new Map();
 // For hover preview: originalFnId -> preview level (null if no preview)
 let previewLevel = new Map();
 
+// Track which node is being hovered (to lock its position)
+let hoveredNodeId = null;
+
+// Flag to prevent mouseleave from triggering during overlay rebuild
+let rebuildingOverlays = false;
+
+// Flag to disable ancestor selection during drag
+let isDragging = false;
+
 const MAX_VISIBLE_ANCESTORS = 4; // Show at most N ancestors before scrolling
 
 // Track if we need to update overlays
@@ -165,11 +174,22 @@ function setPreviewLevel(originalFnId, level) {
   const oldLevel = previewLevel.get(originalFnId);
   if (level === null) {
     previewLevel.delete(originalFnId);
+    hoveredNodeId = null;
   } else {
     previewLevel.set(originalFnId, level);
+    hoveredNodeId = 'fn-' + originalFnId;  // Lock this node's position
   }
   // Only rebuild if level actually changed
   if (oldLevel !== level) {
+    renderGraph(false);
+  }
+}
+
+// Clear all preview state (called when user starts dragging/panning)
+function clearPreviewState() {
+  if (previewLevel.size > 0) {
+    previewLevel.clear();
+    hoveredNodeId = null;
     renderGraph(false);
   }
 }
@@ -198,20 +218,166 @@ window.addEventListener('popstate', () => {
   if (hash && graphData) selectFnByName(decodeURIComponent(hash), false);
 });
 
+// Animation duration constant
+const ANIM_DURATION = 200;
+
 function renderGraph(shouldFit = true) {
   const elements = buildGraphElements();
 
-  const savedPositions = new Map();
-  let savedZoom, savedPan;
-  if (cy) {
-    cy.nodes().forEach(node => {
-      savedPositions.set(node.id(), { x: node.position('x'), y: node.position('y') });
-    });
-    savedZoom = cy.zoom();
-    savedPan = cy.pan();
-    cy.destroy();
+  // First render - just create cytoscape
+  if (!cy) {
+    createCytoscape(elements, shouldFit);
+    return;
   }
 
+  // Build maps for quick lookup
+  const newNodeMap = new Map(elements.nodes.map(n => [n.data.id, n]));
+  const newEdgeMap = new Map(elements.edges.map(e => [e.data.id, e]));
+  const newNodeIds = new Set(newNodeMap.keys());
+  const newEdgeIds = new Set(newEdgeMap.keys());
+
+  // Get current positions
+  const currentPositions = new Map();
+  cy.nodes().forEach(node => {
+    currentPositions.set(node.id(), { x: node.position('x'), y: node.position('y') });
+  });
+
+  // Find nodes/edges to remove and add
+  const nodesToRemove = cy.nodes().filter(node => !newNodeIds.has(node.id()));
+  const edgesToRemove = cy.edges().filter(edge => !newEdgeIds.has(edge.id()));
+  const nodesToAdd = elements.nodes.filter(n => !cy.getElementById(n.data.id).length);
+  const edgesToAdd = elements.edges.filter(e => !cy.getElementById(e.data.id).length);
+
+  // Update existing node data (like label)
+  cy.nodes().forEach(node => {
+    const newData = newNodeMap.get(node.id());
+    if (newData) {
+      node.data(newData.data);
+    }
+  });
+
+  // Function to complete the update
+  function completeUpdate() {
+    // Remove old elements
+    nodesToRemove.forEach(node => {
+      const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + node.data('originalFnId') + '"]');
+      if (overlay) overlay.remove();
+    });
+    cy.remove(nodesToRemove);
+    cy.remove(edgesToRemove);
+
+    // Add new elements
+    if (nodesToAdd.length > 0 || edgesToAdd.length > 0) {
+      cy.add(nodesToAdd);
+      cy.add(edgesToAdd);
+
+      // Position new nodes at their parent's position
+      nodesToAdd.forEach(nodeData => {
+        const node = cy.getElementById(nodeData.data.id);
+        const edges = cy.edges().filter(e => e.data('target') === nodeData.data.id);
+        if (edges.length > 0) {
+          const parentId = edges[0].data('source');
+          const parentPos = currentPositions.get(parentId);
+          if (parentPos) {
+            node.position(parentPos);
+          }
+        }
+      });
+    }
+
+    // Lock hovered node position so it doesn't move during layout
+    const lockedNodeId = hoveredNodeId;  // Capture current value
+    if (lockedNodeId) {
+      const hoveredNode = cy.getElementById(lockedNodeId);
+      if (hoveredNode.length > 0) {
+        hoveredNode.lock();
+      }
+    }
+
+    // Run layout with animation
+    const layout = cy.layout({
+      name: 'dagre',
+      rankDir: 'LR',
+      nodeSep: 60,
+      edgeSep: 20,
+      rankSep: 120,
+      fit: false,
+      animate: true,
+      animationDuration: ANIM_DURATION,
+      animationEasing: 'ease-out'
+    });
+
+    // Update overlays during animation
+    let animating = true;
+    function updateLoop() {
+      if (animating) {
+        updateOverlayPositions();
+        requestAnimationFrame(updateLoop);
+      }
+    }
+
+    // Recreate overlays for new state (prevent mouseleave during rebuild)
+    rebuildingOverlays = true;
+    createNodeOverlays();
+    rebuildingOverlays = false;
+    requestAnimationFrame(updateLoop);
+
+    layout.one('layoutstop', () => {
+      animating = false;
+      // Unlock the node that was locked for this layout
+      if (lockedNodeId) {
+        const lockedNode = cy.getElementById(lockedNodeId);
+        if (lockedNode.length > 0) {
+          lockedNode.unlock();
+        }
+      }
+      updateOverlayPositions();
+      if (shouldFit) {
+        cy.fit(50);
+        updateOverlayPositions();
+      }
+    });
+
+    layout.run();
+  }
+
+  // If there are nodes to remove, animate them first
+  if (nodesToRemove.length > 0) {
+    const animations = [];
+    nodesToRemove.forEach(node => {
+      // Remove overlay immediately
+      const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + node.data('originalFnId') + '"]');
+      if (overlay) overlay.remove();
+
+      // Find parent to animate towards
+      const edges = cy.edges().filter(e => e.data('target') === node.id());
+      if (edges.length > 0) {
+        const parentId = edges[0].data('source');
+        const parentNode = cy.getElementById(parentId);
+        if (parentNode.length > 0) {
+          animations.push(
+            node.animation({
+              position: parentNode.position(),
+              style: { opacity: 0 },
+              duration: ANIM_DURATION,
+              easing: 'ease-in'
+            }).play().promise()
+          );
+        }
+      }
+    });
+
+    if (animations.length > 0) {
+      Promise.all(animations).then(completeUpdate);
+    } else {
+      completeUpdate();
+    }
+  } else {
+    completeUpdate();
+  }
+}
+
+function createCytoscape(elements, shouldFit) {
   cy = cytoscape({
     container: document.getElementById('cy'),
     elements: elements,
@@ -264,7 +430,7 @@ function renderGraph(shouldFit = true) {
         'font-size': '10px',
         'font-family': 'SF Mono, Monaco, monospace',
         'shape': 'rectangle',
-        'background-color': '#f5f5f5',
+        'background-color': '#ffffff',
         'border-width': 1,
         'border-color': '#000000',
         'color': '#000000',
@@ -275,20 +441,28 @@ function renderGraph(shouldFit = true) {
         },
         'height': 28
       }},
-      // Edge
+      // Edge - taxi style with rightward direction
       { selector: 'edge', style: {
         'width': 2,
         'line-color': '#000000',
         'line-style': 'solid',
-        'curve-style': 'bezier'
+        'curve-style': 'taxi',
+        'taxi-direction': 'rightward',
+        'taxi-turn': function(edge) {
+          // Calculate turn distance based on label length
+          var label = edge.data('argName') || '';
+          var minTurn = 30;
+          var charWidth = 7;
+          return Math.max(minTurn, label.length * charWidth + 20) + 'px';
+        }
       }},
-      // Edge with label
+      // Edge with label - position near target on final horizontal segment
       { selector: 'edge[argName]', style: {
-        'label': 'data(argName)',
+        'target-label': 'data(argName)',
+        'target-text-offset': '40px',
+        'target-text-margin-y': -10,
         'font-size': '10px',
         'font-family': 'SF Mono, Monaco, monospace',
-        'text-rotation': 'autorotate',
-        'text-margin-y': -10,
         'text-background-color': '#ffffff',
         'text-background-opacity': 1,
         'text-background-padding': '2px'
@@ -306,45 +480,32 @@ function renderGraph(shouldFit = true) {
     maxZoom: 3
   });
 
-  // Restore positions or run layout
-  const existingNodes = [];
-  const newNodes = [];
-  const isFirstRender = savedPositions.size === 0;
-
-  cy.nodes().forEach(node => {
-    const saved = savedPositions.get(node.id());
-    if (saved && !isFirstRender) {
-      node.position(saved);
-      node.lock();
-      existingNodes.push(node);
-    } else {
-      newNodes.push(node);
-    }
-  });
-
-  cy.layout({
-    name: 'dagre',
-    rankDir: 'LR',
-    nodeSep: 60,
-    edgeSep: 20,
-    rankSep: 120,
-    fit: false,
-    animate: false
-  }).run();
-
-  existingNodes.forEach(node => node.unlock());
-
-  // Click handler - delegate to overlay click handler via data
-  cy.on('tap', 'node[type="fn"]', function(evt) {
-    // Node taps are handled by the HTML overlay
-  });
-
+  // Click handler
   cy.on('tap', function(evt) {
     if (evt.target === cy) hideNodeDetails();
   });
 
-  // Update overlays on pan/zoom
-  cy.on('pan zoom resize', function() {
+  // When drag starts, clear any preview state and disable ancestor selection
+  cy.on('grab', function(evt) {
+    isDragging = true;
+    clearPreviewState();
+  });
+
+  // When drag ends, re-enable ancestor selection
+  cy.on('free', function(evt) {
+    // Small delay to prevent immediate re-triggering
+    setTimeout(() => {
+      isDragging = false;
+    }, 50);
+  });
+
+  // When pan starts, also clear preview
+  cy.on('viewport', function(evt) {
+    clearPreviewState();
+  });
+
+  // Update overlays on pan/zoom/drag
+  cy.on('pan zoom resize drag', function() {
     if (!overlayUpdatePending) {
       overlayUpdatePending = true;
       requestAnimationFrame(() => {
@@ -354,14 +515,19 @@ function renderGraph(shouldFit = true) {
     }
   });
 
-  if (!shouldFit && savedZoom && savedPan) {
-    cy.viewport({ zoom: savedZoom, pan: savedPan });
-  } else {
-    cy.fit(50);
+  // Initial layout and fit
+  if (shouldFit) {
+    cy.layout({
+      name: 'dagre',
+      rankDir: 'LR',
+      nodeSep: 60,
+      edgeSep: 20,
+      rankSep: 120,
+      fit: true,
+      animate: false
+    }).run();
+    createNodeOverlays();
   }
-
-  // Create HTML overlays for interactive ancestor lists
-  createNodeOverlays();
 }
 
 // Update positions of existing overlays without recreating them
@@ -385,7 +551,8 @@ function updateOverlayPositions() {
 
     // Update padding on ancestor lines
     overlay.querySelectorAll('.ancestor-line').forEach(line => {
-      line.style.padding = (2 * zoom) + 'px ' + (4 * zoom) + 'px';
+      line.style.paddingLeft = (4 * zoom) + 'px';
+      line.style.paddingRight = (4 * zoom) + 'px';
     });
   });
 }
@@ -411,7 +578,7 @@ function createNodeOverlays() {
     overlay.style.top = (bb.y1) + 'px';
     overlay.style.width = (bb.x2 - bb.x1) + 'px';
     overlay.style.height = (bb.y2 - bb.y1) + 'px';
-    overlay.style.pointerEvents = 'auto';
+    overlay.style.pointerEvents = 'none';  // Let clicks pass through to cytoscape for dragging
     overlay.style.display = 'flex';
     overlay.style.flexDirection = 'column';
     overlay.style.justifyContent = 'center';
@@ -435,6 +602,9 @@ function createNodeOverlays() {
     const distinctGroups = new Set(items.map(item => item.groupLevel));
     const hasMultipleGroups = distinctGroups.size > 1;
 
+    // Track if mouse is on any line of this overlay
+    let linesHovered = 0;
+
     visibleItems.forEach((item) => {
       const line = document.createElement('div');
       line.className = 'ancestor-line';
@@ -442,8 +612,15 @@ function createNodeOverlays() {
       line.dataset.level = item.idx;
       line.dataset.groupLevel = item.groupLevel;
       line.style.fontFamily = 'SF Mono, Monaco, monospace';
-      line.style.padding = (2 * zoom) + 'px ' + (4 * zoom) + 'px';
+      // Use lineHeight instead of padding to avoid gaps between lines
+      line.style.lineHeight = '1.6';
+      line.style.paddingLeft = (4 * zoom) + 'px';
+      line.style.paddingRight = (4 * zoom) + 'px';
       line.style.whiteSpace = 'nowrap';
+      line.style.width = '100%';
+      line.style.textAlign = 'center';
+      line.style.boxSizing = 'border-box';
+      line.style.pointerEvents = 'auto';  // Lines capture hover/click
 
       // If there are multiple groups, make it interactive
       if (hasMultipleGroups) {
@@ -460,15 +637,25 @@ function createNodeOverlays() {
 
         // Hover: preview expansion to this item's groupLevel
         line.addEventListener('mouseenter', () => {
+          if (isDragging) return;  // Ignore during drag
+          linesHovered++;
           setPreviewLevel(data.originalFnId, item.groupLevel);
         });
 
         line.addEventListener('mouseleave', () => {
-          setPreviewLevel(data.originalFnId, null);
+          if (isDragging) return;  // Ignore during drag
+          linesHovered--;
+          // Reset preview only if no lines are hovered and not rebuilding
+          setTimeout(() => {
+            if (linesHovered <= 0 && !rebuildingOverlays && !isDragging) {
+              setPreviewLevel(data.originalFnId, null);
+            }
+          }, 10);
         });
 
         // Click: set expansion level to this item's groupLevel
         line.addEventListener('click', (e) => {
+          if (isDragging) return;  // Ignore during drag
           e.stopPropagation();
           setExpansionLevel(data.originalFnId, item.groupLevel);
         });
@@ -487,8 +674,12 @@ function createNodeOverlays() {
       ellipsis.className = 'ancestor-line';
       ellipsis.textContent = '...';
       ellipsis.style.fontFamily = 'SF Mono, Monaco, monospace';
-      ellipsis.style.padding = (2 * zoom) + 'px ' + (4 * zoom) + 'px';
+      ellipsis.style.lineHeight = '1.6';
+      ellipsis.style.paddingLeft = (4 * zoom) + 'px';
+      ellipsis.style.paddingRight = (4 * zoom) + 'px';
       ellipsis.style.color = '#999999';
+      ellipsis.style.width = '100%';
+      ellipsis.style.textAlign = 'center';
       overlay.appendChild(ellipsis);
     }
 
@@ -514,6 +705,18 @@ function buildGraphElements() {
     return expansionLevel.get(originalFnId) || 0;
   }
 
+  // Get root source id for an arg (follow source-id chain to the top)
+  function getRootSourceId(arg) {
+    let sourceId = arg.id;
+    let cur = arg;
+    while (cur['source-id']) {
+      sourceId = cur['source-id'];
+      cur = lookups.argMap.get(cur['source-id']);
+      if (!cur) break;
+    }
+    return sourceId;
+  }
+
   // Collect set args from expansion chain up to level
   function collectSetArgs(originalFnId) {
     const chain = getInheritanceChain(originalFnId);
@@ -527,19 +730,14 @@ function buildGraphElements() {
         const hasValue = arg.value !== null && arg.value !== undefined;
         const hasRef = !!arg['ref-id'];
         if (hasValue || hasRef) {
-          let sourceId = arg.id;
-          let cur = arg;
-          while (cur['source-id']) {
-            sourceId = cur['source-id'];
-            cur = lookups.argMap.get(cur['source-id']);
-            if (!cur) break;
-          }
+          const sourceId = getRootSourceId(arg);
           if (!setArgs.has(sourceId)) {
             setArgs.set(sourceId, {
               argName: resolveArgName(arg),
               value: arg.value,
               refId: arg['ref-id'],
-              argId: arg.id
+              argId: arg.id,
+              sourceId: sourceId  // Store root source id for stable node ids
             });
           }
         }
@@ -559,15 +757,12 @@ function buildGraphElements() {
       const hasValue = arg.value !== null && arg.value !== undefined;
       const hasRef = !!arg['ref-id'];
       if (hasValue || hasRef) return false;
-      let sourceId = arg.id;
-      let cur = arg;
-      while (cur['source-id']) {
-        sourceId = cur['source-id'];
-        cur = lookups.argMap.get(cur['source-id']);
-        if (!cur) break;
-      }
+      const sourceId = getRootSourceId(arg);
       return !setArgs.has(sourceId);
-    });
+    }).map(arg => ({
+      ...arg,
+      sourceId: getRootSourceId(arg)  // Add sourceId for stable node ids
+    }));
   }
 
   // Add fn node
@@ -606,10 +801,10 @@ function buildGraphElements() {
     return nodeId;
   }
 
-  // Add arg value node
+  // Add arg value node - use sourceId for stable identity across expansion levels
   function addArgValueNode(argInfo, sourceNodeId) {
-    const { argName, value, argId } = argInfo;
-    const nodeId = 'arg-' + argId;
+    const { argName, value, sourceId } = argInfo;
+    const nodeId = 'arg-' + sourceId;  // Use sourceId for stable id
 
     if (addedNodeIds.has(nodeId)) return nodeId;
     addedNodeIds.add(nodeId);
@@ -629,7 +824,7 @@ function buildGraphElements() {
 
     edges.push({
       data: {
-        id: 'e-val-' + argId,
+        id: 'e-val-' + sourceId,  // Use sourceId for stable edge id
         source: sourceNodeId,
         target: nodeId,
         argName: argName
@@ -639,10 +834,11 @@ function buildGraphElements() {
     return nodeId;
   }
 
-  // Add unset arg placeholder
+  // Add unset arg placeholder - use sourceId for stable identity
   function addUnsetArg(arg, sourceNodeId) {
     const argName = resolveArgName(arg);
-    const nodeId = 'unset-' + arg.id;
+    const sourceId = arg.sourceId || arg.id;  // Use sourceId if available
+    const nodeId = 'unset-' + sourceId;
 
     if (addedNodeIds.has(nodeId)) return;
     addedNodeIds.add(nodeId);
@@ -658,7 +854,7 @@ function buildGraphElements() {
 
     edges.push({
       data: {
-        id: 'e-unset-' + arg.id,
+        id: 'e-unset-' + sourceId,
         source: sourceNodeId,
         target: nodeId,
         argName: argName,
@@ -669,13 +865,17 @@ function buildGraphElements() {
 
   // Process ref arg
   function processRefArg(argInfo, sourceNodeId) {
-    const { argName, refId, argId } = argInfo;
+    const { argName, refId, sourceId } = argInfo;
 
     const targetNodeId = addFnNode(refId, false);
 
+    // Use combination of source node and target fn for edge id
+    // This ensures stable edges when expansion level changes
+    const edgeId = 'e-ref-' + sourceNodeId + '-' + refId;
+
     edges.push({
       data: {
-        id: 'e-ref-' + argId,
+        id: edgeId,
         source: sourceNodeId,
         target: targetNodeId,
         argName: argName

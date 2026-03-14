@@ -1,6 +1,18 @@
 // Graph editor JavaScript - 2-entity schema visualization
 // Grid-based layout with interactive expand/collapse
 
+// Suppress Cytoscape edge overlap warnings only during user drag
+let suppressEdgeWarnings = false;
+(function() {
+  const originalWarn = console.warn;
+  console.warn = function(...args) {
+    if (suppressEdgeWarnings && args[0] && typeof args[0] === 'string' && args[0].includes('invalid endpoints')) {
+      return; // Suppress this specific warning during drag
+    }
+    originalWarn.apply(console, args);
+  };
+})();
+
 let cy = null;
 let selectedFnId = null;
 let graphData = null;
@@ -301,34 +313,197 @@ function buildGridLayout(elements) {
     sizes.set(n.data.id, calculateNodeSize(n));
   });
 
-  // Assign grid positions using DFS
-  // Each node goes to column = depth from root
-  // Parent is always on the same row as its first child (horizontal edge)
-  const gridPos = new Map();  // nodeId -> {row, col}
-  let nextRow = 0;
+  // === MATRIX SYSTEM ===
+  // nodeGrid[row][col] = nodeId | null
+  // hEdge[row][col] = true means horizontal edge from (row,col) to (row,col+1)
+  // vEdge[row][col] = true means vertical edge from (row,col) to (row+1,col)
+  const nodeGrid = [];
+  const hEdge = [];
+  const vEdge = [];
 
-  function assignPositions(nodeId, col) {
-    const nodeChildren = children.get(nodeId) || [];
+  function ensureSize(row, col) {
+    while (nodeGrid.length <= row) nodeGrid.push([]);
+    while (hEdge.length <= row) hEdge.push([]);
+    while (vEdge.length <= row) vEdge.push([]);
+    for (let r = 0; r <= row; r++) {
+      while (nodeGrid[r].length <= col) nodeGrid[r].push(null);
+      while (hEdge[r].length <= col) hEdge[r].push(false);
+      while (vEdge[r].length <= col) vEdge[r].push(false);
+    }
+  }
 
-    if (nodeChildren.length === 0) {
-      // Leaf node - place at current row and advance
-      gridPos.set(nodeId, { row: nextRow, col });
-      nextRow++;
-    } else {
-      // Process first child first to get its row
-      assignPositions(nodeChildren[0], col + 1);
-      // Parent gets same row as first child
-      const firstChildRow = gridPos.get(nodeChildren[0]).row;
-      gridPos.set(nodeId, { row: firstChildRow, col });
+  function getNode(row, col) {
+    if (row < 0 || col < 0) return null;
+    if (row >= nodeGrid.length) return null;
+    if (col >= nodeGrid[row].length) return null;
+    return nodeGrid[row][col];
+  }
 
-      // Process remaining children
-      for (let i = 1; i < nodeChildren.length; i++) {
-        assignPositions(nodeChildren[i], col + 1);
+  function hasHEdge(row, col) {
+    if (row < 0 || col < 0) return false;
+    if (row >= hEdge.length) return false;
+    if (col >= hEdge[row].length) return false;
+    return hEdge[row][col];
+  }
+
+  function hasVEdge(row, col) {
+    if (row < 0 || col < 0) return false;
+    if (row >= vEdge.length) return false;
+    if (col >= vEdge[row].length) return false;
+    return vEdge[row][col];
+  }
+
+  function placeNode(nodeId, row, col) {
+    ensureSize(row, col);
+    if (nodeGrid[row][col] !== null) {
+      console.error('NODE COLLISION at', row, col, 'existing:', nodeGrid[row][col], 'new:', nodeId);
+    }
+    nodeGrid[row][col] = nodeId;
+  }
+
+  function placeHEdge(row, col) {
+    ensureSize(row, col + 1);
+    hEdge[row][col] = true;
+  }
+
+  function placeVEdge(row, col) {
+    ensureSize(row + 1, col);
+    vEdge[row][col] = true;
+  }
+
+  // Check if we can place horizontal edge from (row, fromCol) to (row, toCol)
+  // Must not cross any vertical edges
+  function canPlaceHEdgePath(row, fromCol, toCol) {
+    const minCol = Math.min(fromCol, toCol);
+    const maxCol = Math.max(fromCol, toCol);
+    for (let c = minCol; c < maxCol; c++) {
+      // Check if vertical edge crosses this horizontal segment
+      // A vertical edge at (r, c) goes from row r to row r+1
+      // It crosses horizontal edge at row if it spans that row
+      // Check row-1 (edge coming down into this row) - would cross
+      if (hasVEdge(row - 1, c + 1)) return false;
+      // Also check if there's a node in the way (except endpoints)
+      if (c > minCol && c < maxCol && getNode(row, c) !== null) return false;
+    }
+    return true;
+  }
+
+  // Check if we can place vertical edge from (fromRow, col) to (toRow, col)
+  // Must not cross any horizontal edges
+  function canPlaceVEdgePath(fromRow, toRow, col) {
+    const minRow = Math.min(fromRow, toRow);
+    const maxRow = Math.max(fromRow, toRow);
+    for (let r = minRow; r < maxRow; r++) {
+      // Check if horizontal edge crosses this vertical segment
+      // H edge at (r, c) goes from col c to col c+1
+      // Crosses vertical at col if col is between c and c+1
+      if (hasHEdge(r, col - 1)) return false;
+      if (hasHEdge(r, col)) return false;
+      // Check if there's a node in the way (except endpoints)
+      if (r > minRow && r < maxRow && getNode(r, col) !== null) return false;
+    }
+    return true;
+  }
+
+  // Shift all nodes and edges from startRow down by delta rows
+  function shiftDown(startRow, delta) {
+    if (delta <= 0) return;
+
+    // Work from bottom up to avoid overwriting
+    const maxRow = nodeGrid.length - 1;
+
+    // Extend grids
+    ensureSize(maxRow + delta, 0);
+
+    for (let r = maxRow; r >= startRow; r--) {
+      for (let c = 0; c < nodeGrid[r].length; c++) {
+        // Move node
+        if (nodeGrid[r][c] !== null) {
+          ensureSize(r + delta, c);
+          nodeGrid[r + delta][c] = nodeGrid[r][c];
+          nodeGrid[r][c] = null;
+        }
+        // Move horizontal edge
+        if (hEdge[r] && hEdge[r][c]) {
+          ensureSize(r + delta, c);
+          hEdge[r + delta][c] = true;
+          hEdge[r][c] = false;
+        }
+        // Move vertical edge
+        if (vEdge[r] && vEdge[r][c]) {
+          ensureSize(r + delta, c);
+          vEdge[r + delta][c] = true;
+          vEdge[r][c] = false;
+        }
       }
     }
   }
 
-  assignPositions(rootNode.data.id, 0);
+  // === LAYOUT ALGORITHM ===
+  const gridPos = new Map();  // nodeId -> {row, col}
+
+  function assignPositions(nodeId, col, minRow) {
+    const nodeChildren = children.get(nodeId) || [];
+
+    if (nodeChildren.length === 0) {
+      // Leaf node - find first free row >= minRow
+      let row = minRow;
+      while (getNode(row, col) !== null) {
+        row++;
+      }
+      gridPos.set(nodeId, { row, col });
+      placeNode(nodeId, row, col);
+      return { minRow: row, maxRow: row };
+    }
+
+    // === Process first child to determine parent's row ===
+    const firstChildResult = assignPositions(nodeChildren[0], col + 1, minRow);
+    const parentRow = firstChildResult.minRow;  // Parent on same row as first child
+
+    // Check if parent's cell is free
+    if (getNode(parentRow, col) !== null) {
+      // Need to shift everything down
+      const existing = getNode(parentRow, col);
+      console.log('Need to shift for parent at', parentRow, col, 'blocked by', existing);
+      // This shouldn't happen with correct DFS order, but safety check
+    }
+
+    // Place parent
+    gridPos.set(nodeId, { row: parentRow, col });
+    placeNode(nodeId, parentRow, col);
+
+    // Place horizontal edge from parent to first child
+    placeHEdge(parentRow, col);
+
+    let subtreeMaxRow = firstChildResult.maxRow;
+
+    // === Process remaining children ===
+    for (let i = 1; i < nodeChildren.length; i++) {
+      const childMinRow = subtreeMaxRow + 1;
+      const childResult = assignPositions(nodeChildren[i], col + 1, childMinRow);
+
+      // Place vertical edges from parent down to this child
+      for (let r = parentRow; r < childResult.minRow; r++) {
+        placeVEdge(r, col + 1);
+      }
+
+      subtreeMaxRow = Math.max(subtreeMaxRow, childResult.maxRow);
+    }
+
+    return { minRow: parentRow, maxRow: subtreeMaxRow };
+  }
+
+  assignPositions(rootNode.data.id, 0, 0);
+
+  // Build gridPos from nodeGrid for compatibility
+  for (let r = 0; r < nodeGrid.length; r++) {
+    for (let c = 0; c < nodeGrid[r].length; c++) {
+      const nodeId = nodeGrid[r][c];
+      if (nodeId) {
+        gridPos.set(nodeId, { row: r, col: c });
+      }
+    }
+  }
 
   // Calculate column widths (max width in each column)
   const colWidths = new Map();
@@ -517,13 +692,9 @@ function renderGraph(shouldFit = true) {
         const parentNode = cy.getElementById(parentId);
         if (parentNode.length > 0) {
           const parentPos = parentNode.position();
-          const nodePos = node.position();
-          // Animate towards parent but stop 80% of the way to avoid overlap
-          const targetX = nodePos.x + (parentPos.x - nodePos.x) * 0.8;
-          const targetY = nodePos.y + (parentPos.y - nodePos.y) * 0.8;
           removeAnims.push(
             node.animation({
-              position: { x: targetX, y: targetY },
+              position: { x: parentPos.x, y: parentPos.y },
               style: { opacity: 0 },
               duration: ANIM_DURATION,
               easing: 'ease-in'
@@ -534,7 +705,12 @@ function renderGraph(shouldFit = true) {
     });
 
     if (removeAnims.length > 0) {
-      Promise.all(removeAnims).then(completeUpdate);
+      // Suppress edge warnings during collapse animation
+      suppressEdgeWarnings = true;
+      Promise.all(removeAnims).then(() => {
+        suppressEdgeWarnings = false;
+        completeUpdate();
+      });
     } else {
       completeUpdate();
     }
@@ -689,11 +865,13 @@ function createCytoscape(elements, shouldFit) {
   // Event handlers
   cy.on('grab', 'node', function() {
     isGrabbing = true;
+    suppressEdgeWarnings = true;
     clearPreviewState();
   });
 
   cy.on('free', 'node', function() {
     isGrabbing = false;
+    suppressEdgeWarnings = false;
   });
 
   cy.on('tap', 'node[type="fn"]', function(evt) {
@@ -705,6 +883,10 @@ function createCytoscape(elements, shouldFit) {
   });
 
   cy.on('pan zoom', function() {
+    updateOverlayPositions();
+  });
+
+  cy.on('drag', 'node', function() {
     updateOverlayPositions();
   });
 

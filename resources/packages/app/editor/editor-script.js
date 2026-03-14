@@ -276,19 +276,23 @@ function buildGridLayout(elements) {
   const { nodes, edges } = elements;
   if (nodes.length === 0) return new Map();
 
-  // Build adjacency: parent -> [children]
+  // Build adjacency: parent -> [children] (no duplicates)
   const children = new Map();
-  const parent = new Map();
+  const parentOf = new Map();
+  const edgeSet = new Set();  // Track unique edges
   edges.forEach(e => {
     const src = e.data.source;
     const tgt = e.data.target;
+    const edgeKey = src + '->' + tgt;
+    if (edgeSet.has(edgeKey)) return;  // Skip duplicate edges
+    edgeSet.add(edgeKey);
     if (!children.has(src)) children.set(src, []);
     children.get(src).push(tgt);
-    parent.set(tgt, src);
+    parentOf.set(tgt, src);
   });
 
   // Find root (node with no parent)
-  const rootNode = nodes.find(n => !parent.has(n.data.id));
+  const rootNode = nodes.find(n => !parentOf.has(n.data.id));
   if (!rootNode) return new Map();
 
   // Calculate sizes for all nodes
@@ -299,27 +303,28 @@ function buildGridLayout(elements) {
 
   // Assign grid positions using DFS
   // Each node goes to column = depth from root
-  // Rows are assigned to keep children together
+  // Parent is always on the same row as its first child (horizontal edge)
   const gridPos = new Map();  // nodeId -> {row, col}
   let nextRow = 0;
 
   function assignPositions(nodeId, col) {
     const nodeChildren = children.get(nodeId) || [];
 
-    // Parent is placed at the current row
-    const parentRow = nextRow;
-    gridPos.set(nodeId, { row: parentRow, col });
-
     if (nodeChildren.length === 0) {
-      // Leaf node - advance to next row for siblings
+      // Leaf node - place at current row and advance
+      gridPos.set(nodeId, { row: nextRow, col });
       nextRow++;
     } else {
-      // Process children - first child on same row, others below
-      nodeChildren.forEach((childId, idx) => {
-        // First child starts at same row as parent (nextRow not incremented yet for first)
-        // Subsequent children start at whatever nextRow is after processing previous siblings
-        assignPositions(childId, col + 1);
-      });
+      // Process first child first to get its row
+      assignPositions(nodeChildren[0], col + 1);
+      // Parent gets same row as first child
+      const firstChildRow = gridPos.get(nodeChildren[0]).row;
+      gridPos.set(nodeId, { row: firstChildRow, col });
+
+      // Process remaining children
+      for (let i = 1; i < nodeChildren.length; i++) {
+        assignPositions(nodeChildren[i], col + 1);
+      }
     }
   }
 
@@ -857,26 +862,64 @@ function buildGraphElements() {
     const activeFns = chain.slice(0, level + 1);
 
     const setArgs = new Map();
+    // Collect args grouped by level, each level has: refArgs, valueArgs
+    const argsByLevel = [];
+
     for (const fnId of activeFns) {
       const args = lookups.argsByFn.get(fnId) || [];
+      const levelRefArgs = [];
+      const levelValueArgs = [];
+
       args.forEach(arg => {
         const hasValue = arg.value !== null && arg.value !== undefined;
         const hasRef = !!arg['ref-id'];
         if (hasValue || hasRef) {
           const sourceId = getRootSourceId(arg);
           if (!setArgs.has(sourceId)) {
-            setArgs.set(sourceId, {
+            const argInfo = {
               argName: resolveArgName(arg),
               value: arg.value,
               refId: arg['ref-id'],
               argId: arg.id,
               sourceId: sourceId
-            });
+            };
+            setArgs.set(sourceId, argInfo);
+            if (hasRef) {
+              levelRefArgs.push(argInfo);
+            } else {
+              levelValueArgs.push(argInfo);
+            }
           }
         }
       });
+
+      argsByLevel.push({ refArgs: levelRefArgs, valueArgs: levelValueArgs });
     }
-    return { setArgs, activeFns };
+
+    // Build ordered list: for each level, refs first, then values
+    // Within refs, sort by children to group nodes with shared children together
+    const orderedArgs = [];
+    argsByLevel.forEach(level => {
+      // Sort refArgs by their children (so nodes with same children are adjacent)
+      const sortedRefArgs = level.refArgs.slice().sort((a, b) => {
+        // Get children of each ref target
+        const aChildren = (lookups.argsByFn.get(a.refId) || [])
+          .filter(arg => arg['ref-id'] || arg.value !== null && arg.value !== undefined)
+          .map(arg => arg['ref-id'] || 'val-' + arg.id)
+          .sort()
+          .join(',');
+        const bChildren = (lookups.argsByFn.get(b.refId) || [])
+          .filter(arg => arg['ref-id'] || arg.value !== null && arg.value !== undefined)
+          .map(arg => arg['ref-id'] || 'val-' + arg.id)
+          .sort()
+          .join(',');
+        return aChildren.localeCompare(bChildren);
+      });
+      sortedRefArgs.forEach(a => orderedArgs.push(a));
+      level.valueArgs.forEach(a => orderedArgs.push(a));
+    });
+
+    return { setArgs, activeFns, orderedArgs };
   }
 
   function getUnsetArgs(originalFnId, setArgs) {
@@ -1006,9 +1049,10 @@ function buildGraphElements() {
       }
     });
 
-    const { setArgs } = collectSetArgs(refId);
+    const { setArgs, orderedArgs } = collectSetArgs(refId);
 
-    setArgs.forEach((info) => {
+    // Process in order: refs first, then values (per level)
+    orderedArgs.forEach((info) => {
       if (info.refId) {
         processRefArg(info, targetNodeId);
       } else if (info.value !== null && info.value !== undefined) {
@@ -1022,9 +1066,10 @@ function buildGraphElements() {
 
   // Main: process selected fn
   const rootNodeId = addFnNode(selectedFnId, true);
-  const { setArgs } = collectSetArgs(selectedFnId);
+  const { setArgs, orderedArgs } = collectSetArgs(selectedFnId);
 
-  setArgs.forEach((argInfo) => {
+  // Process in order: refs first, then values (per level)
+  orderedArgs.forEach((argInfo) => {
     if (argInfo.refId) {
       processRefArg(argInfo, rootNodeId);
     } else if (argInfo.value !== null && argInfo.value !== undefined) {

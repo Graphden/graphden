@@ -442,55 +442,105 @@ function buildGridLayout(elements) {
   // === LAYOUT ALGORITHM ===
   const gridPos = new Map();  // nodeId -> {row, col}
 
+  // Collect horizontal branch: follow first children until leaf
+  // Returns array of nodeIds from start to leaf
+  function collectHorizontalBranch(nodeId) {
+    const branch = [];
+    let current = nodeId;
+    while (current) {
+      branch.push(current);
+      const currentChildren = children.get(current) || [];
+      current = currentChildren.length > 0 ? currentChildren[0] : null;
+    }
+    return branch;
+  }
+
+  // Check if row is free for entire branch starting at col
+  function canPlaceBranch(branch, row, startCol) {
+    for (let i = 0; i < branch.length; i++) {
+      if (getNode(row, startCol + i) !== null) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  // Find minimum row where branch fits
+  // Branch must be placed BELOW all existing nodes in its columns
+  function findRowForBranch(branch, startCol, minRow) {
+    let row = minRow;
+
+    // For each column the branch will occupy, find the lowest existing node
+    for (let i = 0; i < branch.length; i++) {
+      const col = startCol + i;
+      // Find the lowest occupied row in this column
+      for (let r = 0; r < nodeGrid.length; r++) {
+        if (getNode(r, col) !== null) {
+          // Branch must be below this node
+          row = Math.max(row, r + 1);
+        }
+      }
+    }
+
+    return row;
+  }
+
+  // Place entire horizontal branch at given row
+  function placeBranch(branch, row, startCol) {
+    for (let i = 0; i < branch.length; i++) {
+      const nodeId = branch[i];
+      gridPos.set(nodeId, { row, col: startCol + i });
+      placeNode(nodeId, row, startCol + i);
+
+      // Place horizontal edge (except after last node)
+      if (i < branch.length - 1) {
+        placeHEdge(row, startCol + i);
+      }
+    }
+  }
+
+  // Main recursive function
+  // Places nodeId and all its descendants, returns { minRow, maxRow }
   function assignPositions(nodeId, col, minRow) {
-    const nodeChildren = children.get(nodeId) || [];
+    // 1. Collect horizontal branch
+    const branch = collectHorizontalBranch(nodeId);
 
-    if (nodeChildren.length === 0) {
-      // Leaf node - find first free row >= minRow
-      let row = minRow;
-      while (getNode(row, col) !== null) {
-        row++;
+    // 2. Find row where entire branch fits
+    const row = findRowForBranch(branch, col, minRow);
+
+    // 3. Place the branch
+    placeBranch(branch, row, col);
+
+    let subtreeMaxRow = row;
+
+    // 4. Process side branches (non-first children) from END to START
+    //    This ensures deeper nodes are processed first
+    for (let branchIdx = branch.length - 1; branchIdx >= 0; branchIdx--) {
+      const branchNode = branch[branchIdx];
+      const branchCol = col + branchIdx;
+      const branchChildren = children.get(branchNode) || [];
+
+      // Process non-first children (first child is already in the horizontal branch)
+      for (let childIdx = 1; childIdx < branchChildren.length; childIdx++) {
+        const childId = branchChildren[childIdx];
+        const childCol = branchCol + 1;
+
+        // Child must be below the branch row
+        const childMinRow = row + 1;
+
+        // Find where this child's subtree can fit
+        const childResult = assignPositions(childId, childCol, childMinRow);
+
+        // Place vertical edges from branch down to child
+        for (let r = row; r < childResult.minRow; r++) {
+          placeVEdge(r, childCol);
+        }
+
+        subtreeMaxRow = Math.max(subtreeMaxRow, childResult.maxRow);
       }
-      gridPos.set(nodeId, { row, col });
-      placeNode(nodeId, row, col);
-      return { minRow: row, maxRow: row };
     }
 
-    // === Process first child to determine parent's row ===
-    const firstChildResult = assignPositions(nodeChildren[0], col + 1, minRow);
-    const parentRow = firstChildResult.minRow;  // Parent on same row as first child
-
-    // Check if parent's cell is free
-    if (getNode(parentRow, col) !== null) {
-      // Need to shift everything down
-      const existing = getNode(parentRow, col);
-      console.log('Need to shift for parent at', parentRow, col, 'blocked by', existing);
-      // This shouldn't happen with correct DFS order, but safety check
-    }
-
-    // Place parent
-    gridPos.set(nodeId, { row: parentRow, col });
-    placeNode(nodeId, parentRow, col);
-
-    // Place horizontal edge from parent to first child
-    placeHEdge(parentRow, col);
-
-    let subtreeMaxRow = firstChildResult.maxRow;
-
-    // === Process remaining children ===
-    for (let i = 1; i < nodeChildren.length; i++) {
-      const childMinRow = subtreeMaxRow + 1;
-      const childResult = assignPositions(nodeChildren[i], col + 1, childMinRow);
-
-      // Place vertical edges from parent down to this child
-      for (let r = parentRow; r < childResult.minRow; r++) {
-        placeVEdge(r, col + 1);
-      }
-
-      subtreeMaxRow = Math.max(subtreeMaxRow, childResult.maxRow);
-    }
-
-    return { minRow: parentRow, maxRow: subtreeMaxRow };
+    return { minRow: row, maxRow: subtreeMaxRow };
   }
 
   assignPositions(rootNode.data.id, 0, 0);

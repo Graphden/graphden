@@ -41,6 +41,10 @@ const MAX_VISIBLE_ANCESTORS = 4; // Show at most N ancestors before scrolling
 // Track if we need to update overlays
 let overlayUpdatePending = false;
 
+// Track target positions for nodes (persists across renderGraph calls)
+// This is needed because nodes may be animating when the next renderGraph is called
+let targetPositions = new Map();
+
 // Build lookup maps
 function buildLookups(data) {
   const fnMap = new Map();
@@ -185,19 +189,36 @@ function setExpansionLevel(originalFnId, level) {
   renderGraph(false);
 }
 
+// Debounce timer for preview level changes
+let previewDebounceTimer = null;
+const PREVIEW_DEBOUNCE_MS = 100;  // Wait 100ms before applying preview
+
 // Set preview level (hover) - rebuild graph to show/hide args
 function setPreviewLevel(originalFnId, level) {
   const oldLevel = previewLevel.get(originalFnId);
+
+  // Clear any pending debounce
+  if (previewDebounceTimer) {
+    clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = null;
+  }
+
   if (level === null) {
     previewLevel.delete(originalFnId);
     hoveredNodeId = null;
+    // Immediate update when removing preview
+    if (oldLevel !== level) {
+      renderGraph(false);
+    }
   } else {
-    previewLevel.set(originalFnId, level);
-    hoveredNodeId = 'fn-' + originalFnId;  // Lock this node's position
-  }
-  // Only rebuild if level actually changed
-  if (oldLevel !== level) {
-    renderGraph(false);
+    // Debounce when setting preview to avoid rapid changes
+    previewDebounceTimer = setTimeout(() => {
+      previewLevel.set(originalFnId, level);
+      hoveredNodeId = 'fn-' + originalFnId;
+      if (oldLevel !== level) {
+        renderGraph(false);
+      }
+    }, PREVIEW_DEBOUNCE_MS);
   }
 }
 
@@ -247,7 +268,7 @@ function alignNodesByLeftEdge() {
 
   // Group nodes by column (approximate X center position)
   const columns = new Map();  // rounded X -> [nodes]
-  const tolerance = 50;  // Nodes within this X range are in same column
+  const tolerance = 100;  // Nodes within this X range are in same column
 
   nodes.forEach(node => {
     const x = node.position('x');
@@ -270,17 +291,18 @@ function alignNodesByLeftEdge() {
     }
   });
 
-  // For each column, find the minimum left edge and shift nodes
+  // For each column, find the reference left edge and shift nodes
+  // Use the left edge of the WIDEST node (most established position)
   columns.forEach((colNodes) => {
     if (colNodes.length <= 1) return;  // No alignment needed for single node
 
-    // Find the leftmost left edge in this column
-    const minLeftEdge = Math.min(...colNodes.map(n => n.leftEdge));
+    // Find the node with maximum width - this is the "anchor"
+    const anchorNode = colNodes.reduce((max, n) => n.width > max.width ? n : max, colNodes[0]);
+    const targetLeftEdge = anchorNode.leftEdge;
 
-    // Shift each node so its left edge aligns with minLeftEdge
+    // Shift each node so its left edge aligns with anchor's left edge
     colNodes.forEach(({ node, leftEdge, width }) => {
       const currentX = node.position('x');
-      const targetLeftEdge = minLeftEdge;
       const targetX = targetLeftEdge + width / 2;
       const shift = targetX - currentX;
 
@@ -306,10 +328,16 @@ function renderGraph(shouldFit = true) {
   const newNodeIds = new Set(newNodeMap.keys());
   const newEdgeIds = new Set(newEdgeMap.keys());
 
-  // Get current positions
+  // Get current positions - use targetPositions if available (node may be animating)
+  // otherwise use actual current position
   const currentPositions = new Map();
   cy.nodes().forEach(node => {
-    currentPositions.set(node.id(), { x: node.position('x'), y: node.position('y') });
+    const target = targetPositions.get(node.id());
+    if (target) {
+      currentPositions.set(node.id(), { ...target });
+    } else {
+      currentPositions.set(node.id(), { x: node.position('x'), y: node.position('y') });
+    }
   });
 
   // Find nodes/edges to remove and add
@@ -332,6 +360,7 @@ function renderGraph(shouldFit = true) {
     nodesToRemove.forEach(node => {
       const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + node.data('originalFnId') + '"]');
       if (overlay) overlay.remove();
+      targetPositions.delete(node.id());
     });
     cy.remove(nodesToRemove);
     cy.remove(edgesToRemove);
@@ -340,58 +369,361 @@ function renderGraph(shouldFit = true) {
     if (nodesToAdd.length > 0 || edgesToAdd.length > 0) {
       cy.add(nodesToAdd);
       cy.add(edgesToAdd);
+    }
 
-      // Position new nodes at their parent's position
-      nodesToAdd.forEach(nodeData => {
-        const node = cy.getElementById(nodeData.data.id);
-        const edges = cy.edges().filter(e => e.data('target') === nodeData.data.id);
-        if (edges.length > 0) {
-          const parentId = edges[0].data('source');
-          const parentPos = currentPositions.get(parentId);
-          if (parentPos) {
-            node.position(parentPos);
+    // Calculate final positions manually
+    const finalPositions = new Map();
+    // nodeSep in dagre is edge-to-edge distance, not center-to-center
+    // For nodes with height ~30-40px, center-to-center = nodeSep + avgHeight
+    // dagre uses nodeSep=60, so center-to-center is roughly 60 + 35 = 95
+    // We'll measure from existing nodes to be precise, but use this as fallback
+    const defaultNodeSep = 95;  // center-to-center distance (dagre nodeSep=60 + ~35px height)
+    const rankSep = 120;
+
+    // Start with current positions for existing nodes
+    cy.nodes().forEach(node => {
+      const pos = currentPositions.get(node.id());
+      if (pos) {
+        finalPositions.set(node.id(), { ...pos });
+      }
+    });
+
+    if (nodesToAdd.length > 0) {
+      // Find the hovered/source node - this is the node we're expanding
+      const hoveredNode = hoveredNodeId ? cy.getElementById(hoveredNodeId) : null;
+      const sourcePos = hoveredNode && hoveredNode.length ?
+        (currentPositions.get(hoveredNodeId) || { x: hoveredNode.position('x'), y: hoveredNode.position('y') }) :
+        null;
+
+      console.log('=== Adding nodes ===');
+      console.log('hoveredNodeId:', hoveredNodeId);
+      console.log('sourcePos:', sourcePos);
+      console.log('nodesToAdd:', nodesToAdd.map(n => n.data.id));
+
+      if (sourcePos) {
+        // First, find the approximate X range of the children column
+        // by looking at direct children of hovered node
+        let columnCenterX = null;
+        let lowestChildY = sourcePos.y;
+        let childYPositions = [];  // To calculate actual spacing
+
+        // Get edges from hovered node to find column position and lowest child
+        cy.edges().forEach(edge => {
+          if (edge.data('source') !== hoveredNodeId) return;
+          const targetId = edge.data('target');
+          if (nodesToAdd.some(n => n.data.id === targetId)) return;
+
+          const pos = currentPositions.get(targetId);
+          if (!pos) return;
+
+          if (columnCenterX === null) {
+            columnCenterX = pos.x;
           }
+          if (pos.y > lowestChildY) {
+            lowestChildY = pos.y;
+          }
+        });
+
+        // If no existing children, calculate column center from source
+        if (columnCenterX === null) {
+          const sourceWidth = hoveredNode.outerWidth() || 100;
+          columnCenterX = sourcePos.x + sourceWidth / 2 + rankSep + 30;
+        }
+
+        // Now find the LEFT EDGE of ALL nodes in this column (within tolerance)
+        // Also collect Y positions to calculate actual spacing
+        const columnTolerance = 100;
+        let childrenLeftEdge = null;
+        let columnYPositions = [];
+
+        cy.nodes().forEach(node => {
+          if (nodesToAdd.some(n => n.data.id === node.id())) return;
+          const pos = currentPositions.get(node.id());
+          if (!pos) return;
+
+          // Check if this node is in the same column
+          if (Math.abs(pos.x - columnCenterX) < columnTolerance) {
+            const nodeWidth = node.outerWidth() || 60;
+            const leftEdge = pos.x - nodeWidth / 2;
+
+            if (childrenLeftEdge === null || leftEdge < childrenLeftEdge) {
+              childrenLeftEdge = leftEdge;
+            }
+            columnYPositions.push(pos.y);
+          }
+        });
+
+        // Calculate actual vertical spacing between nodes in this column
+        let actualNodeSep = defaultNodeSep;
+        if (columnYPositions.length >= 2) {
+          columnYPositions.sort((a, b) => a - b);
+          let totalGap = 0;
+          let gapCount = 0;
+          for (let i = 1; i < columnYPositions.length; i++) {
+            const gap = columnYPositions[i] - columnYPositions[i-1];
+            if (gap > 10 && gap < 200) {  // Ignore outliers
+              totalGap += gap;
+              gapCount++;
+            }
+          }
+          if (gapCount > 0) {
+            actualNodeSep = totalGap / gapCount;
+          }
+        }
+
+        // Fallback if no nodes found in column
+        if (childrenLeftEdge === null) {
+          childrenLeftEdge = columnCenterX - 30;
+        }
+
+        console.log('columnCenterX:', columnCenterX, 'childrenLeftEdge:', childrenLeftEdge, 'lowestChildY:', lowestChildY, 'actualNodeSep:', actualNodeSep);
+
+        // Insert point is below the lowest existing child of THIS node
+        const insertY = lowestChildY;
+        const shiftAmount = nodesToAdd.length * actualNodeSep;
+
+        console.log('insertY:', insertY, 'shiftAmount:', shiftAmount, 'actualNodeSep:', actualNodeSep);
+
+        // Smart shift: only shift nodes in the same column AND nodes connected via horizontal edges
+        // This prevents "steps" in horizontal chains
+        const nodesToShift = new Set();
+        const yTolerance = 20;  // Nodes within this Y range are considered "horizontal"
+
+        // Step 1: Find nodes in the same column that are below insertY
+        cy.nodes().forEach(node => {
+          if (nodesToAdd.some(n => n.data.id === node.id())) return;
+          const pos = currentPositions.get(node.id());
+          if (!pos) return;
+
+          // Check if in same column (within tolerance) and below insert point
+          if (Math.abs(pos.x - columnCenterX) < columnTolerance && pos.y > insertY + 5) {
+            nodesToShift.add(node.id());
+          }
+        });
+
+        // Step 2: Recursively find connected nodes:
+        // - Horizontal edges (same Y level) propagate shift sideways
+        // - Children (args) of shifted nodes also shift
+        let changed = true;
+        while (changed) {
+          changed = false;
+          cy.edges().forEach(edge => {
+            const sourceId = edge.data('source');
+            const targetId = edge.data('target');
+            const sourcePos = currentPositions.get(sourceId);
+            const targetPos = currentPositions.get(targetId);
+
+            if (!sourcePos || !targetPos) return;
+
+            // Check if this is a horizontal edge (same Y level)
+            const isHorizontal = Math.abs(sourcePos.y - targetPos.y) < yTolerance;
+
+            // If source is being shifted, check if target should also shift
+            if (nodesToShift.has(sourceId) && !nodesToShift.has(targetId)) {
+              // Horizontal edge: propagate shift to connected node
+              if (isHorizontal && targetPos.y > insertY + 5) {
+                nodesToShift.add(targetId);
+                changed = true;
+              }
+              // Child node (target is to the right of source = child): always shift with parent
+              else if (targetPos.x > sourcePos.x + 50) {
+                nodesToShift.add(targetId);
+                changed = true;
+              }
+            }
+            // If target is being shifted, check if source should also shift
+            else if (nodesToShift.has(targetId) && !nodesToShift.has(sourceId)) {
+              // Horizontal edge: propagate shift to connected node
+              if (isHorizontal && sourcePos.y > insertY + 5) {
+                nodesToShift.add(sourceId);
+                changed = true;
+              }
+              // Note: we don't propagate backwards to parents
+            }
+          });
+        }
+
+        // Apply shift to selected nodes
+        nodesToShift.forEach(nodeId => {
+          const pos = currentPositions.get(nodeId);
+          if (pos) {
+            finalPositions.set(nodeId, {
+              x: pos.x,
+              y: pos.y + shiftAmount
+            });
+          }
+        });
+        console.log('Shifted', nodesToShift.size, 'nodes down (smart shift)');
+
+        // Position new nodes below the lowest child
+        // Calculate X from left edge + half of estimated node width
+        const newNodeWidth = 60; // approximate width for arg nodes
+        const newNodeX = childrenLeftEdge + newNodeWidth / 2;
+
+        // Use actual spacing from existing nodes
+        let currentY = insertY + actualNodeSep;
+        nodesToAdd.forEach(nodeData => {
+          console.log('New node', nodeData.data.id, 'at x:', newNodeX, 'y:', currentY, 'leftEdge:', childrenLeftEdge, 'spacing:', actualNodeSep);
+          finalPositions.set(nodeData.data.id, {
+            x: newNodeX,
+            y: currentY
+          });
+          currentY += actualNodeSep;
+        });
+
+        // Set start positions for new nodes (at source for fly-out animation)
+        nodesToAdd.forEach(nodeData => {
+          const node = cy.getElementById(nodeData.data.id);
+          node.position(sourcePos);
+        });
+      }
+    } else if (nodesToRemove.length > 0) {
+      // For removal: shift nodes back up
+      // First, find the Y of removed nodes and their column X
+      let removeY = Infinity;
+      let columnX = null;
+      nodesToRemove.forEach(node => {
+        const pos = currentPositions.get(node.id());
+        if (pos) {
+          if (pos.y < removeY) {
+            removeY = pos.y;
+          }
+          if (columnX === null) {
+            columnX = pos.x;
+          }
+        }
+      });
+
+      // Calculate actual spacing from remaining nodes in same column
+      let actualNodeSep = defaultNodeSep;
+      if (columnX !== null) {
+        const columnTolerance = 100;
+        const columnYPositions = [];
+        cy.nodes().forEach(node => {
+          if (nodesToRemove.some(n => n.id() === node.id())) return;
+          const pos = currentPositions.get(node.id());
+          if (!pos) return;
+          if (Math.abs(pos.x - columnX) < columnTolerance) {
+            columnYPositions.push(pos.y);
+          }
+        });
+        if (columnYPositions.length >= 2) {
+          columnYPositions.sort((a, b) => a - b);
+          let totalGap = 0;
+          let gapCount = 0;
+          for (let i = 1; i < columnYPositions.length; i++) {
+            const gap = columnYPositions[i] - columnYPositions[i-1];
+            if (gap > 10 && gap < 200) {
+              totalGap += gap;
+              gapCount++;
+            }
+          }
+          if (gapCount > 0) {
+            actualNodeSep = totalGap / gapCount;
+          }
+        }
+      }
+
+      const shiftAmount = nodesToRemove.length * actualNodeSep;
+      const columnTolerance = 100;
+      const yTolerance = 20;
+
+      // Smart shift: only shift nodes in the same column AND nodes connected via horizontal edges
+      const nodesToShift = new Set();
+
+      // Step 1: Find nodes in the same column that are below removeY
+      cy.nodes().forEach(node => {
+        if (nodesToRemove.some(n => n.id() === node.id())) return;
+        const pos = currentPositions.get(node.id());
+        if (!pos) return;
+
+        if (Math.abs(pos.x - columnX) < columnTolerance && pos.y > removeY + 5) {
+          nodesToShift.add(node.id());
+        }
+      });
+
+      // Step 2: Recursively find connected nodes:
+      // - Horizontal edges propagate shift sideways
+      // - Children of shifted nodes also shift
+      let changed = true;
+      while (changed) {
+        changed = false;
+        cy.edges().forEach(edge => {
+          const sourceId = edge.data('source');
+          const targetId = edge.data('target');
+          const sourcePos = currentPositions.get(sourceId);
+          const targetPos = currentPositions.get(targetId);
+
+          if (!sourcePos || !targetPos) return;
+
+          const isHorizontal = Math.abs(sourcePos.y - targetPos.y) < yTolerance;
+
+          if (nodesToShift.has(sourceId) && !nodesToShift.has(targetId)) {
+            // Horizontal edge: propagate shift
+            if (isHorizontal && targetPos.y > removeY + 5) {
+              nodesToShift.add(targetId);
+              changed = true;
+            }
+            // Child node: always shift with parent
+            else if (targetPos.x > sourcePos.x + 50) {
+              nodesToShift.add(targetId);
+              changed = true;
+            }
+          } else if (nodesToShift.has(targetId) && !nodesToShift.has(sourceId)) {
+            // Horizontal edge: propagate shift
+            if (isHorizontal && sourcePos.y > removeY + 5) {
+              nodesToShift.add(sourceId);
+              changed = true;
+            }
+          }
+        });
+      }
+
+      // Apply shift to selected nodes
+      nodesToShift.forEach(nodeId => {
+        const pos = currentPositions.get(nodeId);
+        if (pos) {
+          finalPositions.set(nodeId, {
+            x: pos.x,
+            y: pos.y - shiftAmount
+          });
         }
       });
     }
 
-    // Lock hovered node position so it doesn't move during layout
-    const lockedNodeId = hoveredNodeId;  // Capture current value
-    if (lockedNodeId) {
-      const hoveredNode = cy.getElementById(lockedNodeId);
-      if (hoveredNode.length > 0) {
-        hoveredNode.lock();
-      }
-    }
-
-    // Run layout without animation
-    const layout = cy.layout({
-      name: 'dagre',
-      rankDir: 'LR',
-      nodeSep: 60,
-      edgeSep: 20,
-      rankSep: 120,
-      align: 'UL',
-      fit: false,
-      animate: false
+    // Save original positions BEFORE any manipulation (for animation start)
+    const originalPositions = new Map();
+    cy.nodes().forEach(node => {
+      originalPositions.set(node.id(), { x: node.position('x'), y: node.position('y') });
     });
 
-    layout.run();
+    // Apply positions temporarily to calculate alignment
+    cy.nodes().forEach(node => {
+      const pos = finalPositions.get(node.id());
+      if (pos) {
+        node.position(pos);
+      }
+    });
 
-    // Align nodes by left edge within each column
+    // Align by left edge
     alignNodesByLeftEdge();
 
-    // Save final positions after alignment
-    const finalPositions = new Map();
+    // Capture aligned positions as final
     cy.nodes().forEach(node => {
-      finalPositions.set(node.id(), { ...node.position() });
+      finalPositions.set(node.id(), { x: node.position('x'), y: node.position('y') });
     });
 
-    // Reset existing nodes to old positions for animation
+    // Save to targetPositions
+    finalPositions.forEach((pos, id) => {
+      targetPositions.set(id, { ...pos });
+    });
+
+    // Reset existing nodes to their ORIGINAL positions before animation
+    // (not currentPositions which may have targetPositions mixed in)
     cy.nodes().forEach(node => {
-      const oldPos = currentPositions.get(node.id());
-      if (oldPos) {
-        node.position(oldPos);
+      const origPos = originalPositions.get(node.id());
+      if (origPos) {
+        node.position(origPos);
       }
     });
 
@@ -400,12 +732,19 @@ function renderGraph(shouldFit = true) {
     cy.nodes().forEach(node => {
       const targetPos = finalPositions.get(node.id());
       if (targetPos) {
-        const anim = node.animation({
-          position: targetPos,
-          duration: ANIM_DURATION,
-          easing: 'ease-out'
-        });
-        animationPromises.push(anim.play().promise());
+        const currentPos = node.position();
+        // Only animate if position actually changes
+        if (Math.abs(currentPos.x - targetPos.x) > 1 || Math.abs(currentPos.y - targetPos.y) > 1) {
+          const anim = node.animation({
+            position: targetPos,
+            duration: ANIM_DURATION,
+            easing: 'ease-out'
+          });
+          animationPromises.push(anim.play().promise());
+        } else {
+          // Just set position directly if no animation needed
+          node.position(targetPos);
+        }
       }
     });
 
@@ -427,12 +766,12 @@ function renderGraph(shouldFit = true) {
     // When all animations complete
     Promise.all(animationPromises).then(() => {
       animating = false;
-      if (lockedNodeId) {
-        const lockedNode = cy.getElementById(lockedNodeId);
-        if (lockedNode.length > 0) {
-          lockedNode.unlock();
-        }
-      }
+      // Align all nodes by left edge after animation
+      alignNodesByLeftEdge();
+      // Update targetPositions with final aligned positions
+      cy.nodes().forEach(node => {
+        targetPositions.set(node.id(), { x: node.position('x'), y: node.position('y') });
+      });
       updateOverlayPositions();
     });
   }
@@ -670,6 +1009,13 @@ function createCytoscape(elements, shouldFit) {
       animate: false
     }).run();
     alignNodesByLeftEdge();
+
+    // Initialize targetPositions with positions after layout
+    targetPositions.clear();
+    cy.nodes().forEach(node => {
+      targetPositions.set(node.id(), { x: node.position('x'), y: node.position('y') });
+    });
+
     cy.fit(50);
     createNodeOverlays();
   }

@@ -48,6 +48,14 @@ const ANIM_DURATION = 200;
 const GRID_GAP_X = 80;  // Horizontal gap between columns (space for edge routing)
 const GRID_GAP_Y = 30;  // Vertical gap between rows
 
+// Truncate label to maxLen with ellipsis
+function truncateLabel(label, maxLen) {
+  if (label.length > maxLen) {
+    return label.substring(0, maxLen - 1) + '…';
+  }
+  return label;
+}
+
 // Build lookup maps
 function buildLookups(data) {
   const fnMap = new Map();
@@ -314,9 +322,15 @@ function buildGridLayout(elements) {
   });
 
   // === MATRIX SYSTEM ===
-  // nodeGrid[row][col] = nodeId | null
+  // nodeGrid[row][col] = nodeId | null - tracks node positions
   // hEdge[row][col] = true means horizontal edge from (row,col) to (row,col+1)
   // vEdge[row][col] = true means vertical edge from (row,col) to (row+1,col)
+  //
+  // NOTE: Edge matrices (hEdge, vEdge) are currently filled but not used for layout.
+  // They can be used in the future for:
+  // - Detecting edge crossings to warn about "ugly" graphs
+  // - Validating layout correctness
+  // - Debugging visualization issues
   const nodeGrid = [];
   const hEdge = [];
   const vEdge = [];
@@ -339,20 +353,6 @@ function buildGridLayout(elements) {
     return nodeGrid[row][col];
   }
 
-  function hasHEdge(row, col) {
-    if (row < 0 || col < 0) return false;
-    if (row >= hEdge.length) return false;
-    if (col >= hEdge[row].length) return false;
-    return hEdge[row][col];
-  }
-
-  function hasVEdge(row, col) {
-    if (row < 0 || col < 0) return false;
-    if (row >= vEdge.length) return false;
-    if (col >= vEdge[row].length) return false;
-    return vEdge[row][col];
-  }
-
   function placeNode(nodeId, row, col) {
     ensureSize(row, col);
     if (nodeGrid[row][col] !== null) {
@@ -371,73 +371,11 @@ function buildGridLayout(elements) {
     vEdge[row][col] = true;
   }
 
-  // Check if we can place horizontal edge from (row, fromCol) to (row, toCol)
-  // Must not cross any vertical edges
-  function canPlaceHEdgePath(row, fromCol, toCol) {
-    const minCol = Math.min(fromCol, toCol);
-    const maxCol = Math.max(fromCol, toCol);
-    for (let c = minCol; c < maxCol; c++) {
-      // Check if vertical edge crosses this horizontal segment
-      // A vertical edge at (r, c) goes from row r to row r+1
-      // It crosses horizontal edge at row if it spans that row
-      // Check row-1 (edge coming down into this row) - would cross
-      if (hasVEdge(row - 1, c + 1)) return false;
-      // Also check if there's a node in the way (except endpoints)
-      if (c > minCol && c < maxCol && getNode(row, c) !== null) return false;
-    }
-    return true;
-  }
-
-  // Check if we can place vertical edge from (fromRow, col) to (toRow, col)
-  // Must not cross any horizontal edges
-  function canPlaceVEdgePath(fromRow, toRow, col) {
-    const minRow = Math.min(fromRow, toRow);
-    const maxRow = Math.max(fromRow, toRow);
-    for (let r = minRow; r < maxRow; r++) {
-      // Check if horizontal edge crosses this vertical segment
-      // H edge at (r, c) goes from col c to col c+1
-      // Crosses vertical at col if col is between c and c+1
-      if (hasHEdge(r, col - 1)) return false;
-      if (hasHEdge(r, col)) return false;
-      // Check if there's a node in the way (except endpoints)
-      if (r > minRow && r < maxRow && getNode(r, col) !== null) return false;
-    }
-    return true;
-  }
-
-  // Shift all nodes and edges from startRow down by delta rows
-  function shiftDown(startRow, delta) {
-    if (delta <= 0) return;
-
-    // Work from bottom up to avoid overwriting
-    const maxRow = nodeGrid.length - 1;
-
-    // Extend grids
-    ensureSize(maxRow + delta, 0);
-
-    for (let r = maxRow; r >= startRow; r--) {
-      for (let c = 0; c < nodeGrid[r].length; c++) {
-        // Move node
-        if (nodeGrid[r][c] !== null) {
-          ensureSize(r + delta, c);
-          nodeGrid[r + delta][c] = nodeGrid[r][c];
-          nodeGrid[r][c] = null;
-        }
-        // Move horizontal edge
-        if (hEdge[r] && hEdge[r][c]) {
-          ensureSize(r + delta, c);
-          hEdge[r + delta][c] = true;
-          hEdge[r][c] = false;
-        }
-        // Move vertical edge
-        if (vEdge[r] && vEdge[r][c]) {
-          ensureSize(r + delta, c);
-          vEdge[r + delta][c] = true;
-          vEdge[r][c] = false;
-        }
-      }
-    }
-  }
+  // --- Edge analysis utilities (not currently used, for future debugging) ---
+  // function hasHEdge(row, col) - check if horizontal edge exists
+  // function hasVEdge(row, col) - check if vertical edge exists
+  // function canPlaceHEdgePath(row, fromCol, toCol) - check for edge crossings
+  // function canPlaceVEdgePath(fromRow, toRow, col) - check for edge crossings
 
   // === LAYOUT ALGORITHM ===
   const gridPos = new Map();  // nodeId -> {row, col}
@@ -453,16 +391,6 @@ function buildGridLayout(elements) {
       current = currentChildren.length > 0 ? currentChildren[0] : null;
     }
     return branch;
-  }
-
-  // Check if row is free for entire branch starting at col
-  function canPlaceBranch(branch, row, startCol) {
-    for (let i = 0; i < branch.length; i++) {
-      if (getNode(row, startCol + i) !== null) {
-        return false;
-      }
-    }
-    return true;
   }
 
   // Find minimum row where branch fits
@@ -544,16 +472,6 @@ function buildGridLayout(elements) {
   }
 
   assignPositions(rootNode.data.id, 0, 0);
-
-  // Build gridPos from nodeGrid for compatibility
-  for (let r = 0; r < nodeGrid.length; r++) {
-    for (let c = 0; c < nodeGrid[r].length; c++) {
-      const nodeId = nodeGrid[r][c];
-      if (nodeId) {
-        gridPos.set(nodeId, { row: r, col: c });
-      }
-    }
-  }
 
   // Calculate column widths (max width in each column)
   const colWidths = new Map();
@@ -825,12 +743,7 @@ function createCytoscape(elements, shouldFit) {
       // Arg value node
       { selector: 'node[type="arg"]', style: {
         'label': function(node) {
-          var label = node.data('label') || '';
-          var maxLen = 30;
-          if (label.length > maxLen) {
-            return label.substring(0, maxLen - 1) + '…';
-          }
-          return label;
+          return truncateLabel(node.data('label') || '', 30);
         },
         'text-valign': 'center',
         'text-halign': 'center',
@@ -865,12 +778,7 @@ function createCytoscape(elements, shouldFit) {
       // Edge with label
       { selector: 'edge[argName]', style: {
         'target-label': function(edge) {
-          var label = edge.data('argName') || '';
-          var maxLen = 28;
-          if (label.length > maxLen) {
-            return label.substring(0, maxLen - 1) + '…';
-          }
-          return label;
+          return truncateLabel(edge.data('argName') || '', 28);
         },
         'target-text-offset': function(edge) {
           var label = edge.data('argName') || '';
@@ -1216,10 +1124,7 @@ function buildGraphElements() {
     if (addedNodeIds.has(nodeId)) return nodeId;
     addedNodeIds.add(nodeId);
 
-    let displayValue = JSON.stringify(value);
-    if (displayValue.length > 20) {
-      displayValue = displayValue.substring(0, 17) + '...';
-    }
+    const displayValue = truncateLabel(JSON.stringify(value), 20);
 
     nodes.push({
       data: {

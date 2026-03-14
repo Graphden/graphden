@@ -435,9 +435,19 @@ function renderGraph(shouldFit = true) {
     cy.remove(nodesToRemove);
     cy.remove(edgesToRemove);
 
-    // Add new elements
-    if (nodesToAdd.length > 0 || edgesToAdd.length > 0) {
+    // Add new nodes with initial position (to avoid zero-length edges)
+    if (nodesToAdd.length > 0) {
+      nodesToAdd.forEach(n => {
+        const pos = layout.get(n.data.id);
+        if (pos) {
+          n.position = { x: pos.x, y: pos.y };
+        }
+      });
       cy.add(nodesToAdd);
+    }
+
+    // Add edges after nodes are positioned
+    if (edgesToAdd.length > 0) {
       cy.add(edgesToAdd);
     }
 
@@ -456,28 +466,17 @@ function renderGraph(shouldFit = true) {
       const targetPos = { x: pos.x, y: pos.y };
       const currentPos = node.position();
 
-      // For new nodes, start from parent position
-      if (nodesToAdd.some(n => n.data.id === nodeId)) {
-        // Find parent
-        const parentEdge = cy.edges().filter(e => e.data('target') === nodeId);
-        if (parentEdge.length > 0) {
-          const parentId = parentEdge[0].data('source');
-          const parentNode = cy.getElementById(parentId);
-          if (parentNode.length > 0) {
-            node.position(parentNode.position());
-          }
-        }
-      }
-
-      // Animate to target
-      if (Math.abs(currentPos.x - targetPos.x) > 1 || Math.abs(currentPos.y - targetPos.y) > 1) {
+      // New nodes are already at target position (set during add)
+      // Only animate existing nodes that need to move
+      const isNewNode = nodesToAdd.some(n => n.data.id === nodeId);
+      if (!isNewNode && (Math.abs(currentPos.x - targetPos.x) > 1 || Math.abs(currentPos.y - targetPos.y) > 1)) {
         const anim = node.animation({
           position: targetPos,
           duration: ANIM_DURATION,
           easing: 'ease-out'
         });
         animPromises.push(anim.play().promise());
-      } else {
+      } else if (!isNewNode) {
         node.position(targetPos);
       }
     });
@@ -517,9 +516,14 @@ function renderGraph(shouldFit = true) {
         const parentId = parentEdge[0].data('source');
         const parentNode = cy.getElementById(parentId);
         if (parentNode.length > 0) {
+          const parentPos = parentNode.position();
+          const nodePos = node.position();
+          // Animate towards parent but stop 80% of the way to avoid overlap
+          const targetX = nodePos.x + (parentPos.x - nodePos.x) * 0.8;
+          const targetY = nodePos.y + (parentPos.y - nodePos.y) * 0.8;
           removeAnims.push(
             node.animation({
-              position: parentNode.position(),
+              position: { x: targetX, y: targetY },
               style: { opacity: 0 },
               duration: ANIM_DURATION,
               easing: 'ease-in'

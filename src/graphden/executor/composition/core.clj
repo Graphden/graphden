@@ -532,6 +532,24 @@
                       "rename=" rename))
         ;; Use find-available-arg which searches both parent chain AND propagated free args
         parent-arg (find-available-arg fn-cache args-data parent-fn-id arg-name)
+        ;; Validate: cannot override already-bound argument
+        parent-has-value (or (some? (:value parent-arg))
+                             (some? (:ref-id parent-arg)))
+        child-sets-value (or (some? value-spec)
+                             (and (map? arg-value)
+                                  (or (contains? arg-value :value)
+                                      (contains? arg-value :ref))))
+        _ (when (and parent-has-value child-sets-value)
+            (let [args-by-id (:by-id args-data)
+                  parent-arg-name (resolve-arg-name-cached args-by-id parent-arg 0)]
+              (throw (ex-info (str "Cannot override already-bound argument: " parent-arg-name
+                                   ". Parent already sets value=" (:value parent-arg)
+                                   " ref-id=" (:ref-id parent-arg))
+                              {:type :fn-composition/arg-override-forbidden
+                               :arg-name arg-name
+                               :parent-value (:value parent-arg)
+                               :parent-ref-id (:ref-id parent-arg)
+                               :child-value-spec value-spec}))))
         source-id (:id parent-arg)
         ;; O(1) lookup via :by-fn-source index
         existing (get (:by-fn-source args-data) [fn-id source-id])

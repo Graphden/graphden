@@ -127,8 +127,9 @@
   :args {:headers {"Content-Type" "image/svg+xml"}}}
 
  ;; Cached SVG (for static assets like favicon)
+ ;; Inherits from ok-response directly to avoid header override
  {:name :cached-svg-ok-response
-  :parent :svg-ok-response
+  :parent :ok-response
   :args {:headers {"Content-Type" "image/svg+xml"
                    "Cache-Control" "public, max-age=86400"}}}
 

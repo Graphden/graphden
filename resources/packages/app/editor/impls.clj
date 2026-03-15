@@ -36,26 +36,15 @@
   "Return the editor HTML body as Hiccup."
   [_args]
   [:div {:id "app"}
-   ;; Main layout
    [:div {:id "main-container"}
     ;; Side menu
     [:div {:id "side-menu"}
      [:div {:class "menu-header"}
-      [:h2 "Entities"]
-      [:button {:id "refresh-btn" :title "Refresh"} "↻"]]
+      [:h2 "Graphden"]]
      [:div {:id "entity-list"}]]
-
     ;; Graph container
     [:div {:id "graph-container"}
-     [:div {:id "cy"}]]
-
-    ;; Details panel (hidden by default)
-    [:div {:id "details-panel" :class "hidden"}
-     [:div {:class "panel-header"}
-      [:h3 "Details"]
-      [:button {:class "close-btn" :onclick "closeDetailsPanel()"} "×"]]
-     [:div {:id "details-content"}
-      [:p {:class "placeholder"} "Select an entity to view details"]]]]])
+     [:div {:id "cy"}]]]])
 
 
 (defn editor-style-element

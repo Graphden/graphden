@@ -726,19 +726,13 @@ function createCytoscape(elements, shouldFit) {
           return Math.max(30, lines * 16 + 16);
         }
       }},
-      // Root node
-      { selector: 'node[?isRoot]', style: {
-        'border-width': 4
-      }},
       // Non-placeholder fn nodes - hide label for overlay
       { selector: 'node[type="fn"][!isPlaceholder]', style: {
         'label': ''
       }},
-      // Placeholder (unset arg)
+      // Placeholder (unset arg) - dashed border, same black color
       { selector: 'node[?isPlaceholder]', style: {
-        'border-style': 'dashed',
-        'border-color': '#999999',
-        'background-color': '#ffffff'
+        'border-style': 'dashed'
       }},
       // Arg value node
       { selector: 'node[type="arg"]', style: {
@@ -791,10 +785,9 @@ function createCytoscape(elements, shouldFit) {
         'text-background-opacity': 0.9,
         'text-background-padding': '2px'
       }},
-      // Unset edge
+      // Unset edge - dashed, same black color
       { selector: 'edge[?isUnset]', style: {
-        'line-style': 'dashed',
-        'line-color': '#999999'
+        'line-style': 'dashed'
       }}
     ],
     layout: { name: 'preset' },
@@ -832,13 +825,6 @@ function createCytoscape(elements, shouldFit) {
     suppressEdgeWarnings = false;
   });
 
-  cy.on('tap', 'node[type="fn"]', function(evt) {
-    const node = evt.target;
-    if (!node.data('isPlaceholder')) {
-      const fnId = node.data('originalFnId');
-      if (fnId) showFnDetails(fnId);
-    }
-  });
 
   cy.on('pan zoom', function() {
     updateOverlayPositions();
@@ -878,7 +864,7 @@ function createNodeOverlays() {
     overlay.style.pointerEvents = 'auto';
     overlay.style.zIndex = '10';
     overlay.style.background = 'white';
-    overlay.style.border = node.data('isRoot') ? '4px solid black' : '2px solid black';
+    overlay.style.border = '2px solid black';
     overlay.style.borderRadius = '8px';
     overlay.style.overflow = 'hidden';
     overlay.style.fontFamily = 'SF Mono, Monaco, monospace';
@@ -895,7 +881,10 @@ function createNodeOverlays() {
       line.className = 'ancestor-line';
       line.dataset.level = item.groupLevel;
       line.style.padding = '4px 8px';
-      line.style.borderBottom = idx < visibleItems.length - 1 ? '1px solid #eee' : 'none';
+      // Only show separator between different groups
+      const nextItem = visibleItems[idx + 1];
+      const showSeparator = nextItem && nextItem.groupLevel !== item.groupLevel;
+      line.style.borderBottom = showSeparator ? '1px solid #eee' : 'none';
       line.textContent = item.name;
 
       if (item.groupLevel <= currentLevel) {
@@ -1224,58 +1213,4 @@ function buildGraphElements() {
   return { nodes, edges };
 }
 
-// ============================================================================
-// UI FUNCTIONS
-// ============================================================================
-
-function showFnDetails(fnId) {
-  const panel = document.getElementById('details-panel');
-  panel.classList.remove('hidden');
-  htmx.ajax('GET', '/partials/entity-details/fn/' + fnId, '#details-content');
-}
-
-function hideNodeDetails() {
-  const panel = document.getElementById('details-panel');
-  if (panel) panel.classList.add('hidden');
-}
-
-function closeDetailsPanel() {
-  hideNodeDetails();
-}
-
-function collapseAll() {
-  expansionLevel.clear();
-  previewLevel.clear();
-  renderGraph(false);
-}
-
-function resetLayout() {
-  userMovedNodes.clear();
-  renderGraph(false);
-}
-
-function showCreateModal(entityType) {
-  document.getElementById('modal-overlay').classList.remove('hidden');
-  htmx.ajax('GET', '/partials/entity-form/' + entityType, '#modal-content');
-}
-
-function hideModal() {
-  document.getElementById('modal-overlay').classList.add('hidden');
-}
-
-async function refreshGraph() {
-  const response = await fetch('/api/graph/entities');
-  graphData = await response.json();
-  lookups = buildLookups(graphData);
-  updateEntityList(graphData);
-  renderGraph(true);
-}
-
-function fitGraph() {
-  if (cy) cy.fit(50);
-}
-
 document.addEventListener('DOMContentLoaded', initGraph);
-document.body.addEventListener('entityCreated', refreshGraph);
-document.body.addEventListener('entityUpdated', refreshGraph);
-document.body.addEventListener('entityDeleted', refreshGraph);

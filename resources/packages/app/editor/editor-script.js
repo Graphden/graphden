@@ -24,14 +24,8 @@ let expansionLevel = new Map();
 // For hover preview: originalFnId -> preview level (null if no preview)
 let previewLevel = new Map();
 
-// Track which node is being hovered
-let hoveredNodeId = null;
-
 // Flag to prevent mouseleave from triggering during overlay rebuild
 let rebuildingOverlays = false;
-
-// Flag to disable ancestor selection during drag
-let isDragging = false;
 
 // Flag to disable hover on all nodes when any node is being grabbed
 let isGrabbing = false;
@@ -211,14 +205,12 @@ function setPreviewLevel(originalFnId, level) {
 
   if (level === null) {
     previewLevel.delete(originalFnId);
-    hoveredNodeId = null;
     if (oldLevel !== level) {
       renderGraph(false);
     }
   } else {
     previewDebounceTimer = setTimeout(() => {
       previewLevel.set(originalFnId, level);
-      hoveredNodeId = 'fn-' + originalFnId;
       if (oldLevel !== level) {
         renderGraph(false);
       }
@@ -230,7 +222,6 @@ function setPreviewLevel(originalFnId, level) {
 function clearPreviewState() {
   if (previewLevel.size > 0) {
     previewLevel.clear();
-    hoveredNodeId = null;
     renderGraph(false);
   }
 }
@@ -323,17 +314,20 @@ function buildGridLayout(elements) {
 
   // === MATRIX SYSTEM ===
   // nodeGrid[row][col] = nodeId | null - tracks node positions
-  // hEdge[row][col] = true means horizontal edge from (row,col) to (row,col+1)
-  // vEdge[row][col] = true means vertical edge from (row,col) to (row+1,col)
-  //
-  // NOTE: Edge matrices (hEdge, vEdge) are currently filled but not used for layout.
-  // They can be used in the future for:
-  // - Detecting edge crossings to warn about "ugly" graphs
-  // - Validating layout correctness
-  // - Debugging visualization issues
+  // hEdge[row][col] = argName | null - horizontal edge with arg name
+  // vEdge[row][col] = true/false - vertical edge exists
   const nodeGrid = [];
   const hEdge = [];
   const vEdge = [];
+
+  // Build edge name lookup from edges data
+  const edgeArgNames = new Map();  // "source->target" -> argName
+  edges.forEach(e => {
+    const key = e.data.source + '->' + e.data.target;
+    if (e.data.argName) {
+      edgeArgNames.set(key, e.data.argName);
+    }
+  });
 
   function ensureSize(row, col) {
     while (nodeGrid.length <= row) nodeGrid.push([]);
@@ -341,7 +335,7 @@ function buildGridLayout(elements) {
     while (vEdge.length <= row) vEdge.push([]);
     for (let r = 0; r <= row; r++) {
       while (nodeGrid[r].length <= col) nodeGrid[r].push(null);
-      while (hEdge[r].length <= col) hEdge[r].push(false);
+      while (hEdge[r].length <= col) hEdge[r].push(null);
       while (vEdge[r].length <= col) vEdge[r].push(false);
     }
   }
@@ -361,21 +355,15 @@ function buildGridLayout(elements) {
     nodeGrid[row][col] = nodeId;
   }
 
-  function placeHEdge(row, col) {
+  function placeHEdge(row, col, argName) {
     ensureSize(row, col + 1);
-    hEdge[row][col] = true;
+    hEdge[row][col] = argName || '';
   }
 
   function placeVEdge(row, col) {
     ensureSize(row + 1, col);
     vEdge[row][col] = true;
   }
-
-  // --- Edge analysis utilities (not currently used, for future debugging) ---
-  // function hasHEdge(row, col) - check if horizontal edge exists
-  // function hasVEdge(row, col) - check if vertical edge exists
-  // function canPlaceHEdgePath(row, fromCol, toCol) - check for edge crossings
-  // function canPlaceVEdgePath(fromRow, toRow, col) - check for edge crossings
 
   // === LAYOUT ALGORITHM ===
   const gridPos = new Map();  // nodeId -> {row, col}
@@ -422,7 +410,10 @@ function buildGridLayout(elements) {
 
       // Place horizontal edge (except after last node)
       if (i < branch.length - 1) {
-        placeHEdge(row, startCol + i);
+        const nextNodeId = branch[i + 1];
+        const edgeKey = nodeId + '->' + nextNodeId;
+        const argName = edgeArgNames.get(edgeKey) || '';
+        placeHEdge(row, startCol + i, argName);
       }
     }
   }
@@ -489,12 +480,31 @@ function buildGridLayout(elements) {
     rowHeights.set(pos.row, Math.max(currentMax, size.height));
   });
 
+  // Calculate extra gap needed before each column based on edge label lengths
+  // hEdge[row][col] contains argName of edge from col to col+1
+  // So edge entering column c has label from hEdge[*][c-1]
+  const colExtraGap = new Map();
+  for (let c = 1; c <= Math.max(...Array.from(colWidths.keys()), 0); c++) {
+    let maxLabelLen = 0;
+    for (let r = 0; r < hEdge.length; r++) {
+      const argName = hEdge[r] && hEdge[r][c - 1];
+      if (argName && typeof argName === 'string') {
+        maxLabelLen = Math.max(maxLabelLen, argName.length);
+      }
+    }
+    // Add extra gap: ~7px per character for the label
+    colExtraGap.set(c, maxLabelLen > 0 ? maxLabelLen * 7 : 0);
+  }
+
   // Calculate X positions for left edge of each column
   // Nodes will be left-aligned within their column
   const colLeftX = new Map();
   let currentX = 0;
   const maxCol = Math.max(...Array.from(colWidths.keys()));
   for (let c = 0; c <= maxCol; c++) {
+    // Add extra gap for edge labels entering this column
+    const extraGap = colExtraGap.get(c) || 0;
+    currentX += extraGap;
     colLeftX.set(c, currentX);
     const width = colWidths.get(c) || 80;
     currentX += width + GRID_GAP_X;
@@ -769,7 +779,7 @@ function createCytoscape(elements, shouldFit) {
         'source-endpoint': 'outside-to-node',
         'target-endpoint': 'outside-to-node'
       }},
-      // Edge with label
+      // Edge labels
       { selector: 'edge[argName]', style: {
         'target-label': function(edge) {
           return truncateLabel(edge.data('argName') || '', 28);
@@ -782,8 +792,8 @@ function createCytoscape(elements, shouldFit) {
         'font-family': 'SF Mono, Monaco, monospace',
         'color': '#666666',
         'text-background-color': '#ffffff',
-        'text-background-opacity': 0.9,
-        'text-background-padding': '2px'
+        'text-background-opacity': 1,
+        'text-background-padding': '3px'
       }},
       // Unset edge - dashed, same black color
       { selector: 'edge[?isUnset]', style: {
@@ -824,7 +834,6 @@ function createCytoscape(elements, shouldFit) {
     isGrabbing = false;
     suppressEdgeWarnings = false;
   });
-
 
   cy.on('pan zoom', function() {
     updateOverlayPositions();
@@ -893,7 +902,7 @@ function createNodeOverlays() {
       }
 
       line.addEventListener('mouseenter', () => {
-        if (!isGrabbing && !isDragging) {
+        if (!isGrabbing) {
           setPreviewLevel(originalFnId, item.groupLevel);
         }
       });
@@ -1079,8 +1088,6 @@ function buildGraphElements() {
     addedNodeIds.add(nodeId);
 
     const chain = getInheritanceChain(originalFnId);
-    const level = getEffectiveLevel(originalFnId);
-
     const items = buildAncestorItems(chain);
     const visibleItems = items.slice(0, MAX_VISIBLE_ANCESTORS + 1);
 
@@ -1097,9 +1104,7 @@ function buildGraphElements() {
         label: label,
         type: 'fn',
         isRoot: isRoot,
-        originalFnId: originalFnId,
-        ancestorList: chain,
-        currentLevel: level
+        originalFnId: originalFnId
       }
     });
 

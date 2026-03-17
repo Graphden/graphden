@@ -1016,16 +1016,17 @@ function buildGraphElements() {
         const hasValue = arg.value !== null && arg.value !== undefined;
         const hasRef = !!arg['ref-id'];
         if (hasValue || hasRef) {
-          const sourceId = getRootSourceId(arg);
-          if (!setArgs.has(sourceId)) {
+          const argId = arg.id;
+          // Use arg.id for uniqueness, not rootSourceId
+          if (!setArgs.has(argId)) {
             const argInfo = {
               argName: resolveArgName(arg),
               value: arg.value,
               refId: arg['ref-id'],
-              argId: arg.id,
-              sourceId: sourceId
+              argId: argId,
+              sourceId: arg['source-id']
             };
-            setArgs.set(sourceId, argInfo);
+            setArgs.set(argId, argInfo);
             if (hasRef) {
               levelRefArgs.push(argInfo);
             } else {
@@ -1074,11 +1075,11 @@ function buildGraphElements() {
       const hasValue = arg.value !== null && arg.value !== undefined;
       const hasRef = !!arg['ref-id'];
       if (hasValue || hasRef) return false;
-      const sourceId = getRootSourceId(arg);
-      return !setArgs.has(sourceId);
+      // Check if this arg.id is in setArgs
+      return !setArgs.has(arg.id);
     }).map(arg => ({
       ...arg,
-      sourceId: getRootSourceId(arg)
+      sourceId: arg['source-id']
     }));
   }
 

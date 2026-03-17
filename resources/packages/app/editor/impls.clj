@@ -27,9 +27,11 @@
 
 
 (defn editor-script
-  "Load JavaScript from external file."
+  "Load JavaScript from external files (layout-core + editor-script)."
   [_args]
-  (load-resource "packages/app/editor/editor-script.js"))
+  (str (load-resource "packages/app/editor/layout-core.js")
+       "\n\n"
+       (load-resource "packages/app/editor/editor-script.js")))
 
 
 (defn editor-body
@@ -56,7 +58,9 @@
 (defn editor-script-element
   "Wrap JavaScript in a script element."
   [_args]
-  [:script (load-resource "packages/app/editor/editor-script.js")])
+  [:script (str (load-resource "packages/app/editor/layout-core.js")
+                "\n\n"
+                (load-resource "packages/app/editor/editor-script.js"))])
 
 
 ;; === Registry ===

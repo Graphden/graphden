@@ -282,29 +282,23 @@ function calculateNodeSize(nodeData) {
 }
 
 // Build grid layout from graph elements
-// Returns: Map<nodeId, {row, col, width, height}>
+// Returns: Map<nodeId, {row, col, width, height, x, y}>
+// Uses layoutGraph from layout-core.js for matrix building
 function buildGridLayout(elements) {
   const { nodes, edges } = elements;
   if (nodes.length === 0) return new Map();
 
-  // Build adjacency: parent -> [children] (no duplicates)
-  const children = new Map();
-  const parentOf = new Map();
-  const edgeSet = new Set();  // Track unique edges
-  edges.forEach(e => {
-    const src = e.data.source;
-    const tgt = e.data.target;
-    const edgeKey = src + '->' + tgt;
-    if (edgeSet.has(edgeKey)) return;  // Skip duplicate edges
-    edgeSet.add(edgeKey);
-    if (!children.has(src)) children.set(src, []);
-    children.get(src).push(tgt);
-    parentOf.set(tgt, src);
-  });
+  // Use layout-core.js for matrix building
+  const result = layoutGraph(elements);
+  const { matrix, gridPos, collisions, validation } = result;
 
-  // Find root (node with no parent)
-  const rootNode = nodes.find(n => !parentOf.has(n.data.id));
-  if (!rootNode) return new Map();
+  // Log any issues for debugging
+  if (collisions.length > 0) {
+    console.error('Layout collisions:', collisions);
+  }
+  if (!validation.valid) {
+    console.error('Layout validation issues:', validation.issues);
+  }
 
   // Calculate sizes for all nodes
   const sizes = new Map();
@@ -312,179 +306,31 @@ function buildGridLayout(elements) {
     sizes.set(n.data.id, calculateNodeSize(n));
   });
 
-  // === MATRIX SYSTEM ===
-  // nodeGrid[row][col] = nodeId | null - tracks node positions
-  // hEdge[row][col] = argName | null - horizontal edge with arg name
-  // vEdge[row][col] = true/false - vertical edge exists
-  const nodeGrid = [];
-  const hEdge = [];
-  const vEdge = [];
-
-  // Build edge name lookup from edges data
-  const edgeArgNames = new Map();  // "source->target" -> argName
-  edges.forEach(e => {
-    const key = e.data.source + '->' + e.data.target;
-    if (e.data.argName) {
-      edgeArgNames.set(key, e.data.argName);
-    }
-  });
-
-  function ensureSize(row, col) {
-    while (nodeGrid.length <= row) nodeGrid.push([]);
-    while (hEdge.length <= row) hEdge.push([]);
-    while (vEdge.length <= row) vEdge.push([]);
-    for (let r = 0; r <= row; r++) {
-      while (nodeGrid[r].length <= col) nodeGrid[r].push(null);
-      while (hEdge[r].length <= col) hEdge[r].push(null);
-      while (vEdge[r].length <= col) vEdge[r].push(false);
-    }
-  }
-
-  function getNode(row, col) {
-    if (row < 0 || col < 0) return null;
-    if (row >= nodeGrid.length) return null;
-    if (col >= nodeGrid[row].length) return null;
-    return nodeGrid[row][col];
-  }
-
-  function placeNode(nodeId, row, col) {
-    ensureSize(row, col);
-    if (nodeGrid[row][col] !== null) {
-      console.error('NODE COLLISION at', row, col, 'existing:', nodeGrid[row][col], 'new:', nodeId);
-    }
-    nodeGrid[row][col] = nodeId;
-  }
-
-  function placeHEdge(row, col, argName) {
-    ensureSize(row, col + 1);
-    hEdge[row][col] = argName || '';
-  }
-
-  function placeVEdge(row, col) {
-    ensureSize(row + 1, col);
-    vEdge[row][col] = true;
-  }
-
-  // === LAYOUT ALGORITHM ===
-  const gridPos = new Map();  // nodeId -> {row, col}
-
-  // Collect horizontal branch: follow first children until leaf
-  // Returns array of nodeIds from start to leaf
-  function collectHorizontalBranch(nodeId) {
-    const branch = [];
-    let current = nodeId;
-    while (current) {
-      branch.push(current);
-      const currentChildren = children.get(current) || [];
-      current = currentChildren.length > 0 ? currentChildren[0] : null;
-    }
-    return branch;
-  }
-
-  // Find minimum row where branch fits
-  // Branch must be placed BELOW all existing nodes in its columns
-  function findRowForBranch(branch, startCol, minRow) {
-    let row = minRow;
-
-    // For each column the branch will occupy, find the lowest existing node
-    for (let i = 0; i < branch.length; i++) {
-      const col = startCol + i;
-      // Find the lowest occupied row in this column
-      for (let r = 0; r < nodeGrid.length; r++) {
-        if (getNode(r, col) !== null) {
-          // Branch must be below this node
-          row = Math.max(row, r + 1);
-        }
-      }
-    }
-
-    return row;
-  }
-
-  // Place entire horizontal branch at given row
-  function placeBranch(branch, row, startCol) {
-    for (let i = 0; i < branch.length; i++) {
-      const nodeId = branch[i];
-      gridPos.set(nodeId, { row, col: startCol + i });
-      placeNode(nodeId, row, startCol + i);
-
-      // Place horizontal edge (except after last node)
-      if (i < branch.length - 1) {
-        const nextNodeId = branch[i + 1];
-        const edgeKey = nodeId + '->' + nextNodeId;
-        const argName = edgeArgNames.get(edgeKey) || '';
-        placeHEdge(row, startCol + i, argName);
-      }
-    }
-  }
-
-  // Main recursive function
-  // Places nodeId and all its descendants, returns { minRow, maxRow }
-  function assignPositions(nodeId, col, minRow) {
-    // 1. Collect horizontal branch
-    const branch = collectHorizontalBranch(nodeId);
-
-    // 2. Find row where entire branch fits
-    const row = findRowForBranch(branch, col, minRow);
-
-    // 3. Place the branch
-    placeBranch(branch, row, col);
-
-    let subtreeMaxRow = row;
-
-    // 4. Process side branches (non-first children) from END to START
-    //    This ensures deeper nodes are processed first
-    for (let branchIdx = branch.length - 1; branchIdx >= 0; branchIdx--) {
-      const branchNode = branch[branchIdx];
-      const branchCol = col + branchIdx;
-      const branchChildren = children.get(branchNode) || [];
-
-      // Process non-first children (first child is already in the horizontal branch)
-      for (let childIdx = 1; childIdx < branchChildren.length; childIdx++) {
-        const childId = branchChildren[childIdx];
-        const childCol = branchCol + 1;
-
-        // Child must be below the branch row
-        const childMinRow = row + 1;
-
-        // Find where this child's subtree can fit
-        const childResult = assignPositions(childId, childCol, childMinRow);
-
-        // Place vertical edges from branch down to child
-        for (let r = row; r < childResult.minRow; r++) {
-          placeVEdge(r, childCol);
-        }
-
-        subtreeMaxRow = Math.max(subtreeMaxRow, childResult.maxRow);
-      }
-    }
-
-    return { minRow: row, maxRow: subtreeMaxRow };
-  }
-
-  assignPositions(rootNode.data.id, 0, 0);
-
   // Calculate column widths (max width in each column)
   const colWidths = new Map();
   gridPos.forEach((pos, nodeId) => {
     const size = sizes.get(nodeId);
-    const currentMax = colWidths.get(pos.col) || 0;
-    colWidths.set(pos.col, Math.max(currentMax, size.width));
+    if (size) {
+      const currentMax = colWidths.get(pos.col) || 0;
+      colWidths.set(pos.col, Math.max(currentMax, size.width));
+    }
   });
 
   // Calculate row heights (max height in each row)
   const rowHeights = new Map();
   gridPos.forEach((pos, nodeId) => {
     const size = sizes.get(nodeId);
-    const currentMax = rowHeights.get(pos.row) || 0;
-    rowHeights.set(pos.row, Math.max(currentMax, size.height));
+    if (size) {
+      const currentMax = rowHeights.get(pos.row) || 0;
+      rowHeights.set(pos.row, Math.max(currentMax, size.height));
+    }
   });
 
   // Calculate extra gap needed before each column based on edge label lengths
-  // hEdge[row][col] contains argName of edge from col to col+1
-  // So edge entering column c has label from hEdge[*][c-1]
+  const { hEdge } = matrix;
   const colExtraGap = new Map();
-  for (let c = 1; c <= Math.max(...Array.from(colWidths.keys()), 0); c++) {
+  const maxColKey = Math.max(...Array.from(colWidths.keys()), 0);
+  for (let c = 1; c <= maxColKey; c++) {
     let maxLabelLen = 0;
     for (let r = 0; r < hEdge.length; r++) {
       const argName = hEdge[r] && hEdge[r][c - 1];
@@ -492,17 +338,13 @@ function buildGridLayout(elements) {
         maxLabelLen = Math.max(maxLabelLen, argName.length);
       }
     }
-    // Add extra gap: ~7px per character for the label
     colExtraGap.set(c, maxLabelLen > 0 ? maxLabelLen * 7 : 0);
   }
 
   // Calculate X positions for left edge of each column
-  // Nodes will be left-aligned within their column
   const colLeftX = new Map();
   let currentX = 0;
-  const maxCol = Math.max(...Array.from(colWidths.keys()));
-  for (let c = 0; c <= maxCol; c++) {
-    // Add extra gap for edge labels entering this column
+  for (let c = 0; c <= maxColKey; c++) {
     const extraGap = colExtraGap.get(c) || 0;
     currentX += extraGap;
     colLeftX.set(c, currentX);
@@ -511,31 +353,30 @@ function buildGridLayout(elements) {
   }
 
   // Calculate Y positions for center of each row
-  // Nodes will be vertically centered within their row (keeps horizontal edges straight)
   const rowCenterY = new Map();
   let currentY = 0;
-  const maxRow = Math.max(...Array.from(rowHeights.keys()));
-  for (let r = 0; r <= maxRow; r++) {
+  const maxRowKey = Math.max(...Array.from(rowHeights.keys()), 0);
+  for (let r = 0; r <= maxRowKey; r++) {
     const height = rowHeights.get(r) || 30;
-    rowCenterY.set(r, currentY + height / 2);  // Center of row
+    rowCenterY.set(r, currentY + height / 2);
     currentY += height + GRID_GAP_Y;
   }
 
-  // Build final layout: nodeId -> {x, y, width, height}
-  // X: left-aligned (left edge + half node width)
-  // Y: vertically centered in row (row center)
+  // Build final layout: nodeId -> {x, y, width, height, row, col}
   const layout = new Map();
   gridPos.forEach((pos, nodeId) => {
     const size = sizes.get(nodeId);
-    const leftX = colLeftX.get(pos.col);
-    layout.set(nodeId, {
-      x: leftX + size.width / 2,  // Left-aligned: left edge + half width
-      y: rowCenterY.get(pos.row), // Vertically centered in row
-      width: size.width,
-      height: size.height,
-      row: pos.row,
-      col: pos.col
-    });
+    if (size) {
+      const leftX = colLeftX.get(pos.col);
+      layout.set(nodeId, {
+        x: leftX + size.width / 2,
+        y: rowCenterY.get(pos.row),
+        width: size.width,
+        height: size.height,
+        row: pos.row,
+        col: pos.col
+      });
+    }
   });
 
   return layout;
@@ -987,101 +828,119 @@ function buildGraphElements() {
     return expansionLevel.get(originalFnId) || 0;
   }
 
-  function getRootSourceId(arg) {
-    let sourceId = arg.id;
-    let cur = arg;
-    while (cur['source-id']) {
-      sourceId = cur['source-id'];
-      cur = lookups.argMap.get(cur['source-id']);
-      if (!cur) break;
+  // Get the full source chain for an arg: [arg.id, source-id, source-id's source-id, ...]
+  function getSourceChain(argId) {
+    const chain = [argId];
+    let current = lookups.argMap.get(argId);
+    while (current && current['source-id']) {
+      chain.push(current['source-id']);
+      current = lookups.argMap.get(current['source-id']);
     }
-    return sourceId;
+    return chain;
   }
 
-  function collectSetArgs(originalFnId) {
+  // Build bindings map: source-id -> binding info
+  // Bindings come from fns between originalFnId and displayFnId
+  function buildBindings(originalFnId, displayLevel) {
     const chain = getInheritanceChain(originalFnId);
-    const level = getEffectiveLevel(originalFnId);
-    const activeFns = chain.slice(0, level + 1);
+    const childFns = chain.slice(0, displayLevel); // fns that provide bindings
 
-    const setArgs = new Map();
-    // Collect args grouped by level, each level has: refArgs, valueArgs
-    const argsByLevel = [];
+    const bindings = new Map(); // any source-id in chain -> {value, refId, argName, argId}
 
-    for (const fnId of activeFns) {
+    for (const fnId of childFns) {
       const args = lookups.argsByFn.get(fnId) || [];
-      const levelRefArgs = [];
-      const levelValueArgs = [];
-
       args.forEach(arg => {
         const hasValue = arg.value !== null && arg.value !== undefined;
         const hasRef = !!arg['ref-id'];
-        if (hasValue || hasRef) {
-          const argId = arg.id;
-          // Use arg.id for uniqueness, not rootSourceId
-          if (!setArgs.has(argId)) {
-            const argInfo = {
-              argName: resolveArgName(arg),
-              value: arg.value,
-              refId: arg['ref-id'],
-              argId: argId,
-              sourceId: arg['source-id']
-            };
-            setArgs.set(argId, argInfo);
-            if (hasRef) {
-              levelRefArgs.push(argInfo);
-            } else {
-              levelValueArgs.push(argInfo);
+        if ((hasValue || hasRef) && arg['source-id']) {
+          const sourceChain = getSourceChain(arg.id);
+          const bindingInfo = {
+            value: arg.value,
+            refId: arg['ref-id'],
+            argName: resolveArgName(arg),
+            argId: arg.id
+          };
+          // Mark all ancestors in source chain as bound
+          sourceChain.forEach(srcId => {
+            if (!bindings.has(srcId)) {
+              bindings.set(srcId, bindingInfo);
             }
-          }
+          });
         }
       });
-
-      argsByLevel.push({ refArgs: levelRefArgs, valueArgs: levelValueArgs });
     }
-
-    // Build ordered list: for each level, refs first, then values
-    // Within refs, sort by children to group nodes with shared children together
-    const orderedArgs = [];
-    argsByLevel.forEach(level => {
-      // Sort refArgs by their children (so nodes with same children are adjacent)
-      const sortedRefArgs = level.refArgs.slice().sort((a, b) => {
-        // Get children of each ref target
-        const aChildren = (lookups.argsByFn.get(a.refId) || [])
-          .filter(arg => arg['ref-id'] || arg.value !== null && arg.value !== undefined)
-          .map(arg => arg['ref-id'] || 'val-' + arg.id)
-          .sort()
-          .join(',');
-        const bChildren = (lookups.argsByFn.get(b.refId) || [])
-          .filter(arg => arg['ref-id'] || arg.value !== null && arg.value !== undefined)
-          .map(arg => arg['ref-id'] || 'val-' + arg.id)
-          .sort()
-          .join(',');
-        return aChildren.localeCompare(bChildren);
-      });
-      sortedRefArgs.forEach(a => orderedArgs.push(a));
-      level.valueArgs.forEach(a => orderedArgs.push(a));
-    });
-
-    return { setArgs, activeFns, orderedArgs };
+    return bindings;
   }
 
-  function getUnsetArgs(originalFnId, setArgs) {
-    const chain = getInheritanceChain(originalFnId);
-    const level = getEffectiveLevel(originalFnId);
-    const displayFnId = chain[Math.min(level, chain.length - 1)];
+  // Build bindings map: source-arg-id -> bound value/ref from originalFn
+  // This maps each free arg in parent fn's structure to its bound value
+  function buildArgBindings(originalFnId) {
+    const bindings = new Map(); // source-arg-id -> {argName, value, refId}
+    const args = lookups.argsByFn.get(originalFnId) || [];
 
-    const args = lookups.argsByFn.get(displayFnId) || [];
-    return args.filter(arg => {
+    args.forEach(arg => {
       const hasValue = arg.value !== null && arg.value !== undefined;
       const hasRef = !!arg['ref-id'];
-      if (hasValue || hasRef) return false;
-      // Check if this arg.id is in setArgs
-      return !setArgs.has(arg.id);
-    }).map(arg => ({
-      ...arg,
-      sourceId: arg['source-id']
-    }));
+
+      if ((hasValue || hasRef) && arg['source-id']) {
+        // This arg binds a value to source-id
+        // Follow the source chain to find all source args this binds
+        let sourceId = arg['source-id'];
+        while (sourceId) {
+          bindings.set(sourceId, {
+            argName: resolveArgName(arg),
+            value: arg.value,
+            refId: arg['ref-id'],
+            argId: arg.id
+          });
+          const sourceArg = lookups.argMap.get(sourceId);
+          sourceId = sourceArg ? sourceArg['source-id'] : null;
+        }
+      }
+    });
+
+    return bindings;
   }
+
+  // Collect args for a fn, applying bindings from child fn
+  // Returns args split into: refs (to other fns), values (literals), unset (free)
+  function collectFnArgs(fnId, bindings) {
+    const args = lookups.argsByFn.get(fnId) || [];
+    const refs = [];
+    const values = [];
+    const unset = [];
+
+    args.forEach(arg => {
+      const argName = resolveArgName(arg);
+      const hasValue = arg.value !== null && arg.value !== undefined;
+      const hasRef = !!arg['ref-id'];
+
+      // Check if this arg is bound by child
+      const binding = bindings.get(arg.id);
+
+      if (binding) {
+        // Arg is bound by child - use bound value
+        if (binding.refId) {
+          refs.push({ argName: binding.argName, refId: binding.refId, argId: binding.argId });
+        } else if (binding.value !== null && binding.value !== undefined) {
+          values.push({ argName: binding.argName, value: binding.value, argId: binding.argId });
+        }
+      } else if (hasRef) {
+        // Arg has ref in this fn
+        refs.push({ argName, refId: arg['ref-id'], argId: arg.id });
+      } else if (hasValue) {
+        // Arg has value in this fn
+        values.push({ argName, value: arg.value, argId: arg.id });
+      } else {
+        // Free arg (unset)
+        unset.push({ argName, type: arg.type || 'any', argId: arg.id });
+      }
+    });
+
+    // Sort: refs first, then values, then unset
+    return { refs, values, unset };
+  }
+
 
   function addFnNode(originalFnId, isRoot) {
     const nodeId = 'fn-' + originalFnId;
@@ -1112,9 +971,8 @@ function buildGraphElements() {
     return nodeId;
   }
 
-  function addArgValueNode(argInfo, sourceNodeId) {
-    const { argName, value, sourceId } = argInfo;
-    const nodeId = 'arg-' + sourceId;
+  function addArgValueNode(argName, value, argId, sourceNodeId) {
+    const nodeId = 'arg-' + argId;
 
     if (addedNodeIds.has(nodeId)) return nodeId;
     addedNodeIds.add(nodeId);
@@ -1131,7 +989,7 @@ function buildGraphElements() {
 
     edges.push({
       data: {
-        id: 'e-val-' + sourceId,
+        id: 'e-val-' + argId,
         source: sourceNodeId,
         target: nodeId,
         argName: argName
@@ -1141,10 +999,7 @@ function buildGraphElements() {
     return nodeId;
   }
 
-  function addUnsetArg(arg, sourceNodeId) {
-    const argName = resolveArgName(arg);
-    // Use arg.id for nodeId (unique per arg instance), not sourceId (shared across inheritance)
-    const argId = arg.id;
+  function addUnsetArgNode(argName, argType, argId, sourceNodeId) {
     const nodeId = 'unset-' + argId;
 
     if (addedNodeIds.has(nodeId)) return;
@@ -1153,7 +1008,7 @@ function buildGraphElements() {
     nodes.push({
       data: {
         id: nodeId,
-        label: arg.type || 'any',
+        label: argType || 'any',
         type: 'fn',
         isPlaceholder: true
       }
@@ -1170,52 +1025,76 @@ function buildGraphElements() {
     });
   }
 
-  function processRefArg(argInfo, sourceNodeId) {
-    const { argName, refId } = argInfo;
+  // Process a fn and its args, with bindings from parent
+  // bindings: Map of source-arg-id -> {argName, value, refId} from the calling fn
+  function processFn(fnId, bindings, sourceNodeId, edgeArgName, isRoot) {
+    const nodeId = addFnNode(fnId, isRoot);
 
-    const targetNodeId = addFnNode(refId, false);
-
-    const edgeId = 'e-ref-' + sourceNodeId + '-' + refId;
-
-    edges.push({
-      data: {
-        id: edgeId,
-        source: sourceNodeId,
-        target: targetNodeId,
-        argName: argName
+    // Add edge from source if not root
+    if (sourceNodeId && edgeArgName !== null) {
+      const edgeId = 'e-ref-' + sourceNodeId + '-' + fnId;
+      if (!addedNodeIds.has(edgeId)) {
+        addedNodeIds.add(edgeId);
+        edges.push({
+          data: {
+            id: edgeId,
+            source: sourceNodeId,
+            target: nodeId,
+            argName: edgeArgName
+          }
+        });
       }
+    }
+
+    // Get this fn's args and apply bindings
+    const { refs, values, unset } = collectFnArgs(fnId, bindings);
+
+    // Process ref args (children fns)
+    refs.forEach(({ argName, refId, argId }) => {
+      // Pass bindings down so nested free args can be substituted
+      processFn(refId, bindings, nodeId, argName, false);
     });
 
-    const { setArgs, orderedArgs } = collectSetArgs(refId);
-
-    // Process in order: refs first, then values (per level)
-    orderedArgs.forEach((info) => {
-      if (info.refId) {
-        processRefArg(info, targetNodeId);
-      } else if (info.value !== null && info.value !== undefined) {
-        addArgValueNode(info, targetNodeId);
-      }
+    // Process value args
+    values.forEach(({ argName, value, argId }) => {
+      addArgValueNode(argName, value, argId, nodeId);
     });
 
-    const unsetArgs = getUnsetArgs(refId, setArgs);
-    unsetArgs.forEach(arg => addUnsetArg(arg, targetNodeId));
+    // Process unset args (free args shown as placeholders)
+    unset.forEach(({ argName, type, argId }) => {
+      addUnsetArgNode(argName, type, argId, nodeId);
+    });
+
+    return nodeId;
+  }
+
+  // Process expanded fn - show internal structure of parent fn with bindings applied
+  function processExpandedFn(originalFnId, level, sourceNodeId, edgeArgName, isRoot) {
+    const chain = getInheritanceChain(originalFnId);
+    const displayFnId = chain[Math.min(level, chain.length - 1)];
+
+    // Build bindings from originalFn's args
+    const bindings = buildArgBindings(originalFnId);
+
+    // Show the displayFn (parent) with bindings applied
+    return processFn(displayFnId, bindings, sourceNodeId, edgeArgName, isRoot);
+  }
+
+  // Main entry point for processing a fn
+  function processAnyFn(fnId, sourceNodeId, edgeArgName, isRoot) {
+    const level = getEffectiveLevel(fnId);
+
+    if (level > 0) {
+      return processExpandedFn(fnId, level, sourceNodeId, edgeArgName, isRoot);
+    } else {
+      // Build bindings from this fn's own args (for substitution)
+      const bindings = buildArgBindings(fnId);
+      return processFn(fnId, bindings, sourceNodeId, edgeArgName, isRoot);
+    }
   }
 
   // Main: process selected fn
-  const rootNodeId = addFnNode(selectedFnId, true);
-  const { setArgs, orderedArgs } = collectSetArgs(selectedFnId);
-
-  // Process in order: refs first, then values (per level)
-  orderedArgs.forEach((argInfo) => {
-    if (argInfo.refId) {
-      processRefArg(argInfo, rootNodeId);
-    } else if (argInfo.value !== null && argInfo.value !== undefined) {
-      addArgValueNode(argInfo, rootNodeId);
-    }
-  });
-
-  const unsetArgs = getUnsetArgs(selectedFnId, setArgs);
-  unsetArgs.forEach(arg => addUnsetArg(arg, rootNodeId));
+  processAnyFn(selectedFnId, null, null, true);
 
   return { nodes, edges };
 }

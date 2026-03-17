@@ -103,14 +103,17 @@
 
   (testing "builds delay for ref-id with is-fn=false (execute fn)"
     (let [ref-fn-id (random-uuid)
-          arg {:id (random-uuid)
+          arg-id (random-uuid)
+          arg {:id arg-id
                :name "result"
                :type :int
                :ref-id ref-fn-id
                :is-fn false}
           context {:test true}
+          ;; Context will be augmented with :triggering-arg-id
+          expected-ctx (assoc context :triggering-arg-id arg-id)
           execute-ref-fn (fn [ctx fn-id _caller-args _arg-delays]
-                           (is (= context ctx))
+                           (is (= expected-ctx ctx))
                            (is (= ref-fn-id fn-id))
                            100)
           caller-args []

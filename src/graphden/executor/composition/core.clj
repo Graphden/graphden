@@ -51,6 +51,15 @@
          (re-matches #"[a-zA-Z_\-][a-zA-Z0-9_\-]*" s))))
 
 
+(defn- local-fn-name?
+  "Returns true if fn-name starts with _ (local/unnamed fn).
+   Local fns are stored with name=nil in DB and only referenced by id."
+  [fn-name]
+  (when fn-name
+    (let [n (if (keyword? fn-name) (name fn-name) (str fn-name))]
+      (str/starts-with? n "_"))))
+
+
 (defn- parse-fn-ref
   "Parses a keyword that might be a fn reference.
    Returns fn-name keyword or nil if not a fn ref."
@@ -254,12 +263,28 @@
         (recur args-by-id source-arg (inc depth))))))
 
 
+(defn- collect-source-id-chain
+  "Follows source-id chain from an arg-id and collects all arg-ids in the chain.
+   Returns a set of arg-ids including the starting arg-id.
+   Used to determine which args should be shadowed when a child explicitly binds an arg."
+  [args-by-id arg-id]
+  (loop [current-id arg-id
+         ids #{}
+         depth 0]
+    (if (or (nil? current-id) (> depth 100))
+      ids
+      (let [arg (get args-by-id current-id)]
+        (recur (:source-id arg)
+               (conj ids current-id)
+               (inc depth))))))
+
+
 (defn- collect-free-args-from-fn
-  "Collects all free args from a fn by following parent chain and ref-id chain.
-   Returns a vector of {:arg arg-entity :path [fn-id ...]} tuples.
+  "Collects all free args from a fn by following ref-id chains.
+   Returns a vector of free arg entities.
 
    Free args come from:
-   1. Parent fn's free args (via parent-id)
+   1. Direct free args on this fn
    2. Free args from fns referenced in arg values (via ref-id)
 
    args-data contains :by-fn and :by-id indexes."
@@ -288,6 +313,10 @@
 (defn- collect-parent-free-args
   "Collects free args from the parent fn chain.
    Returns vector of arg entities that are free in the parent chain.
+
+   Free args come from:
+   1. Parent fn's direct free args
+   2. Free args from fns referenced in parent's bound args (via ref-id)
 
    args-data contains :by-fn and :by-id indexes."
   [fn-cache args-data parent-fn-id depth]
@@ -441,19 +470,28 @@
 
 (defn- prepare-fn-record
   "Prepares a fn record for batch upsert.
-   Returns {:id :name :parent-id} or nil if already exists."
+   Returns {:id :name :parent-id} or nil if already exists.
+
+   Local fns (names starting with _) are stored with name=nil in DB.
+   They can only be referenced within the same package by their local name."
   [fn-name-cache fn-id-cache created-fns fn-def]
   (let [fn-name (:name fn-def)
-        fn-name-str (clojure.core/name fn-name)]
-    (if-let [existing (get fn-name-cache fn-name-str)]
-      ;; Already exists
-      {:existing existing}
+        fn-name-str (clojure.core/name fn-name)
+        is-local? (local-fn-name? fn-name)]
+    ;; Local fns are never "existing" - they're always created fresh
+    ;; (since they have name=nil in DB and can't be looked up by name)
+    (if (and (not is-local?)
+             (get fn-name-cache fn-name-str))
+      ;; Already exists (only for non-local fns)
+      {:existing (get fn-name-cache fn-name-str)}
       ;; Need to create
       (let [parent (:parent fn-def)
             parent-fn-id (resolve-parent-fn-id-cached
-                           fn-name-cache fn-id-cache created-fns parent)]
+                           fn-name-cache fn-id-cache created-fns parent)
+            ;; Local fns get name=nil in DB
+            db-name (when-not is-local? fn-name-str)]
         {:new {:id (random-uuid)
-               :name fn-name-str
+               :name db-name
                :parent-id parent-fn-id}}))))
 
 
@@ -524,12 +562,7 @@
                      :arg-name arg-name
                      :parent-fn-id parent-fn-id})))
   (let [;; Parse arg value spec (supports {:as :new-name ...})
-        {:keys [rename value-spec is-fn] :as parsed} (parse-arg-value-spec arg-value)
-        _ (when rename
-            (log/info "prepare-arg-record: arg-name=" arg-name
-                      "arg-value=" arg-value
-                      "parsed=" parsed
-                      "rename=" rename))
+        {:keys [rename value-spec is-fn]} (parse-arg-value-spec arg-value)
         ;; Use find-available-arg which searches both parent chain AND propagated free args
         parent-arg (find-available-arg fn-cache args-data parent-fn-id arg-name)
         ;; Validate: cannot override already-bound argument
@@ -592,11 +625,6 @@
                             :type (:type parent-arg)
                             :is-fn effective-is-fn}
                            resolved-with-name)]
-        (when rename
-          (log/info "prepare-arg-record: creating new arg"
-                    "name=" (pr-str (:name new-arg))
-                    "name-type=" (type (:name new-arg))
-                    "full new-arg=" (pr-str new-arg)))
         {:new new-arg}))))
 
 
@@ -708,17 +736,26 @@
                                      fn-name-cache-final fn-id-cache-final created-fns parent)
 
                       ;; 3a: Explicit args from fn-def :args
-                      ;; Single pass: collect source-ids, new args, and update args together
-                      {:keys [explicit-source-ids explicit-new-args explicit-update-args]}
+                      ;; Single pass: collect source-id CHAINS, new args, and update args together
+                      ;; We collect full chains because explicit args shadow ALL args in their
+                      ;; source-id chain, not just the immediate parent arg
+                      ;; Also collect explicit arg names to filter free args with same root name
+                      {:keys [explicit-source-ids explicit-new-args explicit-update-args explicit-arg-names]}
                       (reduce (fn [acc [arg-name arg-value]]
                                 (if-let [record (prepare-arg-record
                                                   fn-id-cache-final args-data fn-name-cache-final
                                                   created-fns fn-id parent-fn-id arg-name arg-value)]
                                   (let [source-id (or (:source-id (:new record))
-                                                      (:source-id (:update record)))]
+                                                      (:source-id (:update record)))
+                                        ;; Collect FULL source-id chain to shadow transitive args
+                                        source-chain (when source-id
+                                                       (collect-source-id-chain (:by-id args-data) source-id))]
                                     (cond-> acc
-                                      source-id
-                                      (update :explicit-source-ids conj source-id)
+                                      ;; Add explicit arg name (as string) to filter free args
+                                      true
+                                      (update :explicit-arg-names conj (name arg-name))
+                                      source-chain
+                                      (update :explicit-source-ids into source-chain)
                                       (:new record)
                                       (update :explicit-new-args conj (:new record))
                                       (:update record)
@@ -726,31 +763,57 @@
                                   acc))
                               {:explicit-source-ids #{}
                                :explicit-new-args []
-                               :explicit-update-args []}
+                               :explicit-update-args []
+                               :explicit-arg-names #{}}
                               (:args fn-def {}))
 
-                      ;; 3b: Propagated free args from parent chain and referenced fns
+                      ;; 3b: Propagated free args from parent fn
+                      ;; NOTE: We don't recursively collect from refs in explicit args (removed step 3c).
+                      ;; The executor handles transitive arg propagation at runtime via trace-source-to-fn.
+                      ;; This prevents internal free args (like html-response.status) from leaking
+                      ;; through bound refs (like editor-route.handler).
                       parent-free-args (collect-parent-free-args
                                          fn-id-cache-final args-data parent-fn-id 0)
+
+                      ;; Use parent-free-args directly (no combination with explicit-ref-free-args)
+                      all-free-args parent-free-args
+
+                      ;; Helper to get root name of a free arg
+                      args-by-id (:by-id args-data)
+                      get-root-name (fn [arg] (resolve-arg-name-cached args-by-id arg 0))
+
                       propagated-new-args
                       (into []
                             (comp
+                              ;; Filter 1: Remove args whose id is in explicit source chain
                               (remove #(contains? explicit-source-ids (:id %)))
+                              ;; Filter 2: Remove args whose ROOT NAME matches an explicit arg name
+                              ;; This handles cases like editor-routes setting item1-10 should
+                              ;; prevent free args from route refs (which also resolve to "item")
+                              ;; from being propagated
+                              (remove (fn [arg]
+                                        (when-let [root-name (get-root-name arg)]
+                                          (contains? explicit-arg-names root-name))))
                               (keep #(when-let [rec (prepare-propagated-arg-record args-data fn-id %)]
                                        (:new rec))))
-                            parent-free-args)
+                            all-free-args)
 
                       ;; Combine explicit and propagated new args
                       fn-new-args (into explicit-new-args propagated-new-args)
                       fn-update-args explicit-update-args
 
                       ;; Update args-data with new args so next fn-def can see them
-                      ;; Update both :by-fn and :by-id indexes
+                      ;; Update all three indexes: :by-fn, :by-id, :by-fn-source
                       args-data' (reduce (fn [data arg]
-                                           (-> data
-                                               (update-in [:by-fn (:fn-id arg)]
-                                                          (fnil conj []) arg)
-                                               (assoc-in [:by-id (:id arg)] arg)))
+                                           (cond-> data
+                                             true
+                                             (update-in [:by-fn (:fn-id arg)]
+                                                        (fnil conj []) arg)
+                                             true
+                                             (assoc-in [:by-id (:id arg)] arg)
+                                             ;; Add to by-fn-source index if has source-id
+                                             (:source-id arg)
+                                             (assoc-in [:by-fn-source [(:fn-id arg) (:source-id arg)]] arg)))
                                          args-data
                                          fn-new-args)]
                   (recur (rest remaining)

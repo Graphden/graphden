@@ -2,6 +2,66 @@
 ;; Route composition, response status, content-type responses, health status
 
 [;; =============================================================================
+ ;; COLLECTION BUILDING BLOCKS
+ ;; =============================================================================
+
+ ;; conj to empty vector - first element of a list (free: item)
+ {:name :conj-empty
+  :parent :conj-any
+  :args {:coll []}}
+
+ ;; pair: builds [item1, item2] - a 2-element vector
+ ;; pair-1 starts chain, renames item->item1 (free: item1)
+ {:name :pair-1
+  :parent :conj-empty
+  :args {:item {:as :item1}}}
+
+ ;; pair adds second item (free: item1 from pair-1, item2)
+ {:name :pair
+  :parent :conj-any
+  :args {:coll :pair-1
+         :item {:as :item2}}}
+
+ ;; triple: builds [item1, item2, item3] - a 3-element vector
+ ;; triple adds third item to pair (free: item1, item2 from pair, item3)
+ {:name :triple
+  :parent :conj-any
+  :args {:coll :pair
+         :item {:as :item3}}}
+
+ ;; =============================================================================
+ ;; LIST-10: 10-element vector builder
+ ;; Hidden cascade of conj-any calls, exposes item1...item10 as free args
+ ;; =============================================================================
+ {:name :list-10-4
+  :parent :conj-any
+  :args {:coll :triple :item {:as :item4}}}
+
+ {:name :list-10-5
+  :parent :conj-any
+  :args {:coll :list-10-4 :item {:as :item5}}}
+
+ {:name :list-10-6
+  :parent :conj-any
+  :args {:coll :list-10-5 :item {:as :item6}}}
+
+ {:name :list-10-7
+  :parent :conj-any
+  :args {:coll :list-10-6 :item {:as :item7}}}
+
+ {:name :list-10-8
+  :parent :conj-any
+  :args {:coll :list-10-7 :item {:as :item8}}}
+
+ {:name :list-10-9
+  :parent :conj-any
+  :args {:coll :list-10-8 :item {:as :item9}}}
+
+ {:name :list-10
+  :parent :conj-any
+  :args {:coll :list-10-9 :item {:as :item10}}}
+
+ ;; =============================================================================
  ;; ROUTE BUILDING BLOCKS
  ;; Pass-Through Args Pattern: each level sets one arg, free args propagate up
  ;; =============================================================================
@@ -23,12 +83,12 @@
   :parent :assoc-empty
   :args {:value :assoc-handler}}
 
- ;; Level 3: route = pair with second=method-map
- ;; Rename first -> path (handler is already renamed in method-map)
+ ;; Level 3: route = [path, method-map] using pair
+ ;; Rename item1 -> path (handler is already renamed in method-map)
  {:name :route
   :parent :pair
-  :args {:second :method-map
-         :first {:as :path}}}
+  :args {:item2 :method-map
+         :item1 {:as :path}}}
 
  ;; Level 4: HTTP method routes (free: path, handler)
  {:name :get-route

@@ -4,8 +4,9 @@
    ## Module Structure
 
    The executor is split into focused namespaces:
-   - core.clj (this file) - Main execution logic
-   - argument_resolution.clj - Delay building and argument resolution
+   - core.clj (this file) - Main execution logic and public API
+   - queue.clj - Work-queue based executor (avoids stack overflow)
+   - argument_resolution.clj - Delay building and argument resolution (legacy)
    - registry.clj - Base function registry (global and context-based)
    - context.clj - ExecutionContext record and creation
    - types.clj - Type hints and validation
@@ -23,7 +24,7 @@
 
    ## Lazy Arguments
 
-   Arguments are passed to base functions as Clojure `delay` objects.
+   Arguments are passed to base functions as SmartDelay objects (IDeref).
    This enables lazy evaluation - values are only computed when dereferenced.
 
    For :fn type arguments (is-fn=true), the delay contains the fn-id
@@ -31,11 +32,22 @@
 
    Base functions should use @ (deref) to get values:
      (+ @a @b)           ; for regular args
-     (f {:item x})       ; for :fn args (f is a callable after wrapping)"
+     (f {:item x})       ; for :fn args (f is a callable after wrapping)
+
+   ## Execution Model
+
+   Uses a work-queue based approach instead of recursive delays:
+   1. Queue root function execution
+   2. For each arg with ref-id: check cache, or queue dependency first
+   3. When all args ready, execute base-fn
+   4. Store result and continue
+
+   This avoids StackOverflowError on deep nesting (e.g., list-10 pattern)."
   (:require
     [clojure.tools.logging :as log]
     [graphden.executor.argument-resolution :as arg-res]
     [graphden.executor.context :as ctx]
+    [graphden.executor.queue :as queue]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.graph :as graph]))
 
@@ -87,7 +99,8 @@
             ;; This ensures that if route.path inherits from pair.first, pair.first is excluded
             own-source-ids (into #{} (keep :source-id) own-args)
             ;; Keep parent args that are NOT the source of any own arg
-            filtered-parent-args (remove #(own-source-ids (:id %)) parent-args)]
+            filtered-parent-args (remove #(own-source-ids (:id %)) parent-args)
+]
         (vec (concat own-args filtered-parent-args)))
       ;; Base fn - just return own args
       (vec own-args))))
@@ -230,7 +243,9 @@
 
 (defn- trace-source-to-fn
   "Traces source-id chain from an arg to find the ultimate source arg-id in target fn.
-   Returns the target arg-id if the chain leads to target-fn-id, nil otherwise."
+   Returns {:target-arg-id uuid :depth int} if the chain leads to target-fn-id, nil otherwise.
+   The depth indicates how many hops through the source-id chain - useful for preferring
+   closer args when multiple args map to the same target."
   [execution-graph arg-id target-fn-id visited depth]
   (when (> depth sp/*max-graph-iterations*)
     nil)
@@ -240,8 +255,8 @@
       (when arg
         (let [arg-fn-id (:fn-id arg)]
           (if (= arg-fn-id target-fn-id)
-            ;; Found! Return this arg-id
-            arg-id
+            ;; Found! Return target arg-id and depth
+            {:target-arg-id arg-id :depth depth}
             ;; Keep tracing through source-id
             (when-let [source-id (:source-id arg)]
               (recur execution-graph source-id target-fn-id
@@ -251,35 +266,105 @@
 (defn- collect-propagated-args-for-ref
   "Collects args from caller that should be passed to a referenced fn.
    Returns a map of {target-arg-id -> caller-arg} for args that have
-   source-id chains leading into the ref-fn."
+   source-id chains leading into the ref-fn.
+
+   Also matches by root-name when caller-arg has a direct value but source-id
+   chain doesn't reach the ref-fn. This handles cases like pair/pair-1 where
+   the route.path arg needs to propagate to pair-1.item even though the
+   source-id chain goes through pair, not directly to pair-1.
+
+   IMPORTANT: For list-10 pattern, multiple caller-args may have source-id chains
+   leading to the SAME target arg (e.g., all itemN trace to conj-any.item).
+   We prefer args WITH values over args WITHOUT values to ensure the correct
+   value is propagated."
   [execution-graph caller-args ref-fn-id]
-  (reduce
-    (fn [acc caller-arg]
-      (if-let [target-arg-id (trace-source-to-fn execution-graph
-                                                 (:source-id caller-arg)
-                                                 ref-fn-id
-                                                 #{} 0)]
-        (assoc acc target-arg-id caller-arg)
-        acc))
-    {}
-    caller-args))
+  (let [fns (sp/get-graph-fns execution-graph)
+        args-by-id (:args-by-id execution-graph)
+        ref-fn-name (:name (get fns ref-fn-id))
+        ;; Build a map of root-name -> arg-id for the ref-fn's args
+        ref-fn-args (filter #(= (:fn-id %) ref-fn-id) (vals args-by-id))
+        ref-fn-args-by-name (reduce (fn [m arg]
+                                      (let [root-name (graph/get-root-arg-name execution-graph arg)]
+                                        (if root-name
+                                          (assoc m root-name (:id arg))
+                                          m)))
+                                    {}
+                                    ref-fn-args)]
+    (reduce
+      (fn [acc caller-arg]
+        (if-let [trace-result (trace-source-to-fn execution-graph
+                                                   (:source-id caller-arg)
+                                                   ref-fn-id
+                                                   #{} 0)]
+          ;; Found via source-id chain
+          ;; trace-result is {:target-arg-id uuid :depth int}
+          (let [target-arg-id (:target-arg-id trace-result)
+                new-depth (:depth trace-result)
+                ;; Get existing entry (with metadata including depth)
+                existing-entry (get acc target-arg-id)
+                existing (when existing-entry (:arg existing-entry))
+                existing-depth (when existing-entry (:depth existing-entry))
+                ;; CRITICAL: When multiple args map to the same target, use multiple criteria:
+                ;; 1. Prefer CLOSER args (shorter source-id chain depth)
+                ;; 2. Prefer args with VALUE over REF-ID over NONE
+                ;; This handles:
+                ;; - list-10 pattern: multiple itemN args with same depth
+                ;; - sibling chains: unrelated args at different depths (e.g., route vs script)
+                existing-has-value? (and existing (some? (:value existing)))
+                existing-has-ref? (and existing (some? (:ref-id existing)))
+                new-has-value? (some? (:value caller-arg))
+                new-has-ref? (some? (:ref-id caller-arg))
+                ;; Replacement logic with depth priority:
+                ;; 1. Shorter depth always wins (closer in chain = more relevant)
+                ;; 2. Same depth: prefer value > ref-id > none
+                should-replace? (cond
+                                  ;; No existing - always add
+                                  (nil? existing) true
+                                  ;; New has shorter depth - always wins (closer = more relevant)
+                                  (< new-depth existing-depth) true
+                                  ;; New has longer depth - existing wins
+                                  (> new-depth existing-depth) false
+                                  ;; Same depth - prefer value > ref-id > none
+                                  new-has-value? true
+                                  new-has-ref? (not existing-has-value?)
+                                  :else (not (or existing-has-value? existing-has-ref?)))]
+            (if should-replace?
+              (assoc acc target-arg-id {:arg caller-arg :depth new-depth})
+              acc))
+          ;; NOTE: Removed fallback name-matching which was causing over-propagation.
+          ;; The fallback matched args by root-name even without source-id chains,
+          ;; leading to args being propagated to unrelated ref-fns (e.g., item1-item10
+          ;; from editor-routes matching item1-item3 in editor-scripts).
+          ;; This caused cache key bloat and excessive executions.
+          ;; If needed, add source-id chains explicitly in fn-defs instead.
+          acc))
+      {}
+      caller-args)))
 
 
 (defn- build-arg-delays-by-id
   "Builds a map of {arg-id -> delay} from caller-args and arg-delays.
    Used for propagation lookup by arg-id instead of arg-name.
 
-   Uses pre-built arg-roots index for O(1) root name lookup.
-   This ensures inherited args (via source-id) are properly matched."
+   arg-delays may be keyed by:
+   - arg-id (UUID) when coming from arg-delays-by-id-atom
+   - keyword (arg name) when coming from by-name map
+
+   For each caller-arg, first tries to find delay by arg-id (exact match),
+   then falls back to looking up by root name (for backwards compatibility)."
   [execution-graph caller-args arg-delays]
   (reduce
     (fn [acc arg]
-      ;; Use root arg name to match arg-delays keying (O(1) via index)
-      (let [root-name (graph/get-root-arg-name execution-graph arg)
-            arg-name-kw (keyword root-name)
-            delay-val (get arg-delays arg-name-kw)]
+      (let [arg-id (:id arg)
+            ;; First try direct lookup by arg-id (when arg-delays is keyed by id)
+            delay-by-id (get arg-delays arg-id)
+            ;; Fallback: lookup by root name (when arg-delays is keyed by name)
+            delay-val (or delay-by-id
+                          (let [root-name (graph/get-root-arg-name execution-graph arg)]
+                            (when root-name
+                              (get arg-delays (keyword root-name)))))]
         (if delay-val
-          (assoc acc (:id arg) delay-val)
+          (assoc acc arg-id delay-val)
           acc)))
     {}
     caller-args))
@@ -296,9 +381,6 @@
    so they propagate through nested ref-fn executions
    (e.g., health-route -> method-map -> assoc-handler)."
   [context ref-fn-id caller-args arg-delays]
-  (log/debug "execute-ref-fn called"
-             {:ref-fn-id ref-fn-id
-              :caller-args-count (count caller-args)})
   (let [result-cache (:result-cache context)
         execution-graph (:execution-graph context)
         ;; Build arg-delays-by-id for current caller
@@ -313,14 +395,25 @@
         ;; Collect propagated args that should be passed to ref-fn
         propagated-arg-map (collect-propagated-args-for-ref
                              execution-graph all-caller-args ref-fn-id)
-        ;; Create cache key that includes ALL caller arg-ids (not just propagated)
-        ;; This ensures different callers (e.g., health-route vs editor-route) get
-        ;; separate cache entries, even when source-id chains don't fully connect
-        ;; (which happens when intermediate fns have non-free args)
-        caller-arg-ids (into #{} (map :id) all-caller-args)
-        cache-key (if (empty? caller-arg-ids)
-                    ref-fn-id
-                    [ref-fn-id caller-arg-ids])
+        ;; Include the actual propagated arg values in the cache key.
+        ;; This ensures different propagated values get separate cache entries
+        ;; (e.g., item1 with path=/health vs item2 with path=/favicon.ico)
+        ;; while allowing caching when the same ref is called with identical values.
+        ;; IMPORTANT: Include BOTH :value AND :ref-id in cache key, because args may have
+        ;; either a literal value or a ref-id (pointer to another fn). Using only :value
+        ;; causes cache collisions when different args have ref-ids but nil values.
+        ;; NOTE: propagated-arg-map now contains {:arg ... :depth ...} entries
+        ;; NOTE: We do NOT include caller-arg-ids in cache key - only propagated values matter.
+        ;; Including all caller-arg-ids causes cache key bloat and prevents sharing.
+        propagated-values (when (seq propagated-arg-map)
+                            (into (sorted-map)
+                                  (map (fn [[k entry]]
+                                         (let [arg (:arg entry)]
+                                           [k [(:value arg) (:ref-id arg)]]))
+                                       propagated-arg-map)))
+        cache-key (if propagated-values
+                    [ref-fn-id propagated-values]
+                    ref-fn-id)
         cached (get @result-cache cache-key)]
     (if (some? cached)
       (do
@@ -333,19 +426,29 @@
                     :propagated-args-count (count propagated-arg-map)
                     :all-caller-args-count (count all-caller-args)})
         ;; Build provided-args by deref'ing caller's arg delays using arg-id
+        ;; NOTE: propagated-arg-map now contains {:arg ... :depth ...} entries
         (let [provided-args (when (seq propagated-arg-map)
                               (reduce-kv
-                                (fn [acc target-arg-id caller-arg]
-                                  (let [caller-arg-id (:id caller-arg)
+                                (fn [acc target-arg-id entry]
+                                  (let [caller-arg (:arg entry)
+                                        caller-arg-id (:id caller-arg)
                                         delay-val (get all-delays-by-id caller-arg-id)]
                                     (if delay-val
                                       (assoc acc target-arg-id @delay-val)
                                       acc)))
                                 {}
                                 propagated-arg-map))
-              ;; Store all-caller-args and all-delays-by-id in context for nested ref-fn calls
+              ;; CRITICAL FIX: Only propagate args that were NOT consumed at this level.
+              ;; Args that matched a target in ref-fn are "consumed" - their values are now
+              ;; bound to ref-fn's args via provided-args. Deeper functions will get these
+              ;; values through the ref-fn's own arg graph, not through propagation.
+              ;; This prevents unbounded growth of propagated-caller-args in deep chains
+              ;; like list-10 (11 levels: list-10 -> list-10-9 -> ... -> conj-any).
+              consumed-arg-ids (into #{} (map (comp :id :arg) (vals propagated-arg-map)))
+              remaining-caller-args (remove #(contains? consumed-arg-ids (:id %)) all-caller-args)
+              ;; Store remaining (unconsumed) args in context for nested ref-fn calls
               context-with-args (assoc context
-                                       :propagated-caller-args all-caller-args
+                                       :propagated-caller-args (vec remaining-caller-args)
                                        :propagated-delays-by-id all-delays-by-id)
               result (execute-internal context-with-args ref-fn-id provided-args)
               new-size (count (swap! result-cache assoc cache-key result))
@@ -405,28 +508,10 @@
 
 (defn- execute-internal
   "Internal execution function with context tracking.
-   Uses the cached execution-graph and base-fns from context."
+   Delegates to queue-based executor for stack-safe execution."
   [context ^java.util.UUID fn-id ^clojure.lang.IPersistentMap provided-args]
-  (check-limits! context)
-  (let [execution-graph (:execution-graph context)
-        fn-data (get-fn-data-from-graph execution-graph fn-id)
-        base-fn (:base-fn fn-data)
-        fn-name (keyword (:name base-fn))
-        registry (:base-fns context)
-        base-fn-impl (get registry fn-name)]
-    (when-not base-fn-impl
-      (log/error "Base function not found in registry"
-                 {:fn-name fn-name
-                  :fn-id fn-id
-                  :registry-size (count registry)})
-      (throw (ex-info (str "Base function '" (name fn-name) "' not found in registry")
-                      {:type :execution-error/base-fn-not-found
-                       :fn-name fn-name
-                       :registry-size (count registry)})))
-    (let [new-context (update context :depth inc)
-          arg-delays (arg-res/build-arg-delays new-context fn-data provided-args
-                                               execute-ref-fn)]
-      (base-fn-impl arg-delays new-context))))
+  ;; Use queue-based executor to avoid stack overflow
+  (queue/execute-with-queue context fn-id provided-args))
 
 
 (defn execute

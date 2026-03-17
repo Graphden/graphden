@@ -1142,8 +1142,9 @@ function buildGraphElements() {
 
   function addUnsetArg(arg, sourceNodeId) {
     const argName = resolveArgName(arg);
-    const sourceId = arg.sourceId || arg.id;
-    const nodeId = 'unset-' + sourceId;
+    // Use arg.id for nodeId (unique per arg instance), not sourceId (shared across inheritance)
+    const argId = arg.id;
+    const nodeId = 'unset-' + argId;
 
     if (addedNodeIds.has(nodeId)) return;
     addedNodeIds.add(nodeId);
@@ -1159,7 +1160,7 @@ function buildGraphElements() {
 
     edges.push({
       data: {
-        id: 'e-unset-' + sourceId,
+        id: 'e-unset-' + argId,
         source: sourceNodeId,
         target: nodeId,
         argName: argName,

@@ -159,13 +159,19 @@
 
 (defn- deref-args
   "Dereferences all delay values in an args map.
-   Used to convert executor's delay-wrapped args to plain values for impls."
+   Used to convert executor's delay-wrapped args to plain values for impls.
+
+   Supports both Clojure Delay and SmartDelay (from queue executor)."
   [args lazy-set]
   (reduce-kv
     (fn [m k v]
       (assoc m k (if (and (instance? clojure.lang.IDeref v)
                           (not (contains? lazy-set k)))
-                   @v
+                   (if (nil? v)
+                     (do
+                       (log/warn "deref-args: nil IDeref" {:arg-key k})
+                       nil)
+                     @v)
                    v)))
     {}
     args))

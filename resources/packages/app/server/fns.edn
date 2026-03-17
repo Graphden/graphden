@@ -55,23 +55,29 @@
 
  ;; =============================================================================
  ;; ROUTES COLLECTION & SERVER
- ;; Merge editor routes with health/metrics
  ;; =============================================================================
 
- ;; Start with editor routes (defined in editor/fns.edn)
- ;; Add health and metrics routes
- {:name :routes-with-health
-  :parent :conj-any
-  :args {:coll :editor-routes :item :health-route}}
-
- {:name :routes-fn
-  :parent :conj-any
-  :args {:coll :routes-with-health :item :metrics-route}}
+ ;; All routes - uses list-10 which hides the conj cascade inside
+ ;; When viewing editor-routes, you see 10 route arguments, not the cascade
+ ;; The cascade (list-10 -> list-10-9 -> ... -> triple -> pair -> conj-any)
+ ;; is only visible when you expand list-10
+ {:name :editor-routes
+  :parent :list-10
+  :args {:item1 :favicon-route
+         :item2 :editor-route
+         :item3 :api-entities-route
+         :item4 :entity-details-route
+         :item5 :entity-form-create-route
+         :item6 :entity-form-edit-route
+         :item7 :create-entity-route
+         :item8 :delete-entity-route
+         :item9 :health-route
+         :item10 :metrics-route}}
 
  ;; Router receives routes vector
  {:name :router-fn
   :parent :router
-  :args {:routes :routes-fn}}
+  :args {:routes :editor-routes}}
 
  ;; Server receives router as handler
  {:name :web-server

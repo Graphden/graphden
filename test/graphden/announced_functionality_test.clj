@@ -910,3 +910,312 @@
             (is (= 3 (exec/execute ctx (:id valid-fn) nil)))))
         (finally
           (sp/close storage))))))
+
+
+;; =============================================================================
+;; Test 19: List Building Cascade Pattern
+;; =============================================================================
+;;
+;; Tests the list-building pattern used for routes:
+;; - conj-empty: starts with []
+;; - pair-1: conj item1 to []
+;; - pair: conj item2 to pair-1
+;; - triple: conj item3 to pair
+;; Each level should produce distinct elements, no duplicates.
+
+(deftest list-building-cascade-test
+  (testing "list building cascade: produces unique elements"
+    (let [storage (create-versioned-storage)]
+      (try
+        ;; Register base functions
+        (registry/initialize-all! storage
+                                  [{:conj-any
+                                    {:args {:coll {:type :any :required true}
+                                            :item {:type :any :required true}}
+                                     :return-type :any
+                                     :impl (fn [{:keys [coll item]} _]
+                                             (conj (or @coll []) @item))}}
+                                   {:const {:args {:x {:type :any :required true}}
+                                            :return-type :any
+                                            :impl (fn [{:keys [x]} _] @x)}}])
+
+        ;; Build the cascade pattern (simplified version of list-10):
+        ;; conj-empty: conj to []
+        ;; pair-1: conj item1 to []
+        ;; pair: conj item2 to pair-1
+        ;; triple: conj item3 to pair
+        (composition/sync-fns-to-storage! storage
+                                          [;; Values
+                                           {:name :item-a :parent :const :args {:x "A"}}
+                                           {:name :item-b :parent :const :args {:x "B"}}
+                                           {:name :item-c :parent :const :args {:x "C"}}
+                                           ;; Cascade
+                                           {:name :conj-empty :parent :conj-any :args {:coll []}}
+                                           {:name :pair-1 :parent :conj-empty :args {:item {:as :item1}}}
+                                           {:name :pair :parent :conj-any :args {:coll :pair-1 :item {:as :item2}}}
+                                           {:name :triple :parent :conj-any :args {:coll :pair :item {:as :item3}}}
+                                           ;; Instantiate triple with items
+                                           {:name :my-triple
+                                            :parent :triple
+                                            :args {:item1 :item-a :item2 :item-b :item3 :item-c}}])
+
+        (let [ctx (exec/create-context {:storage storage})
+              triple-fn (first (sp/query-entities storage :fn {:name "my-triple"}))]
+          (testing "triple produces [A B C] with no duplicates"
+            (let [result (exec/execute ctx (:id triple-fn) nil)]
+              (is (= ["A" "B" "C"] result))
+              (is (= 3 (count result)) "Result should have exactly 3 elements")
+              (is (= (count result) (count (distinct result))) "No duplicates"))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest list-building-with-refs-test
+  (testing "list building with fn refs: each item executed once"
+    (let [storage (create-versioned-storage)
+          call-count (atom 0)]
+      (try
+        ;; Register base functions
+        (registry/initialize-all! storage
+                                  [{:conj-any
+                                    {:args {:coll {:type :any :required true}
+                                            :item {:type :any :required true}}
+                                     :return-type :any
+                                     :impl (fn [{:keys [coll item]} _]
+                                             (conj (or @coll []) @item))}}
+                                   {:tracked-value
+                                    {:args {:x {:type :any :required true}}
+                                     :return-type :any
+                                     :impl (fn [{:keys [x]} _]
+                                             (swap! call-count inc)
+                                             @x)}}])
+
+        ;; Build cascade with tracked values
+        (composition/sync-fns-to-storage! storage
+                                          [;; Tracked values - should each be called once
+                                           {:name :tracked-a :parent :tracked-value :args {:x "A"}}
+                                           {:name :tracked-b :parent :tracked-value :args {:x "B"}}
+                                           {:name :tracked-c :parent :tracked-value :args {:x "C"}}
+                                           ;; Cascade
+                                           {:name :conj-empty :parent :conj-any :args {:coll []}}
+                                           {:name :pair-1 :parent :conj-empty :args {:item {:as :item1}}}
+                                           {:name :pair :parent :conj-any :args {:coll :pair-1 :item {:as :item2}}}
+                                           {:name :triple :parent :conj-any :args {:coll :pair :item {:as :item3}}}
+                                           ;; Instantiate
+                                           {:name :tracked-triple
+                                            :parent :triple
+                                            :args {:item1 :tracked-a :item2 :tracked-b :item3 :tracked-c}}])
+
+        (reset! call-count 0)
+
+        (let [ctx (exec/create-context {:storage storage})
+              triple-fn (first (sp/query-entities storage :fn {:name "tracked-triple"}))]
+          (testing "each item fn is called exactly once"
+            (let [result (exec/execute ctx (:id triple-fn) nil)]
+              (is (= ["A" "B" "C"] result))
+              (is (= 3 @call-count) "Each item should be called exactly once"))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest route-like-cascade-test
+  (testing "route-like cascade: renamed args propagated through ref"
+    ;; This test mimics the route pattern:
+    ;; :pair -> pair with {:item1 {:as :path}, :item2 :method-map}
+    ;; :get-route -> :pair with {:path "/hello"}
+    ;; The :path rename should propagate correctly
+    (let [storage (create-versioned-storage)]
+      (try
+        ;; Register base functions
+        (registry/initialize-all! storage
+                                  [{:conj-any
+                                    {:args {:coll {:type :any :required true}
+                                            :item {:type :any :required true}}
+                                     :return-type :any
+                                     :impl (fn [{:keys [coll item]} _]
+                                             (conj (or @coll []) @item))}}
+                                   {:assoc-any
+                                    {:args {:map {:type :any :required true}
+                                            :key {:type :any :required true}
+                                            :value {:type :any :required true}}
+                                     :return-type :any
+                                     :impl (fn [{:keys [map key value]} _]
+                                             (assoc (or @map {}) @key @value))}}
+                                   {:const {:args {:x {:type :any :required true}}
+                                            :return-type :any
+                                            :impl (fn [{:keys [x]} _] @x)}}])
+
+        ;; Build the route pattern
+        (composition/sync-fns-to-storage! storage
+                                          [;; Level 1: conj-empty = conj with coll=[]
+                                           {:name :conj-empty :parent :conj-any :args {:coll []}}
+
+                                           ;; Level 2: pair-1 = conj-empty with item renamed to item1
+                                           {:name :pair-1 :parent :conj-empty :args {:item {:as :item1}}}
+
+                                           ;; Level 3: pair = conj-any with coll=pair-1, item renamed to item2
+                                           {:name :pair :parent :conj-any :args {:coll :pair-1 :item {:as :item2}}}
+
+                                           ;; Level 4: assoc-empty = assoc with map={}
+                                           {:name :assoc-empty :parent :assoc-any :args {:map {}}}
+
+                                           ;; Level 5: assoc-handler = assoc-empty with key="handler", value renamed to handler
+                                           {:name :assoc-handler
+                                            :parent :assoc-empty
+                                            :args {:key "handler"
+                                                   :value {:as :handler}}}
+
+                                           ;; Level 6: method-map = assoc-empty with value=assoc-handler (composing refs)
+                                           {:name :method-map
+                                            :parent :assoc-empty
+                                            :args {:value :assoc-handler}}
+
+                                           ;; Level 7: route = pair with item2=method-map, item1 renamed to path
+                                           {:name :route
+                                            :parent :pair
+                                            :args {:item2 :method-map
+                                                   :item1 {:as :path}}}
+
+                                           ;; Level 8: get-route = route with key="get"
+                                           {:name :get-route
+                                            :parent :route
+                                            :args {:key "get"}}
+
+                                           ;; Handler fn (simple constant for test)
+                                           {:name :test-handler :parent :const :args {:x "handler-value"}}
+
+                                           ;; Level 9: my-route = get-route with path="/hello", handler=test-handler
+                                           {:name :my-route
+                                            :parent :get-route
+                                            :args {:path "/hello"
+                                                   :handler :test-handler}}])
+
+        (let [ctx (exec/create-context {:storage storage})
+              route-fn (first (sp/query-entities storage :fn {:name "my-route"}))]
+          (testing "route produces [path, {key {\"handler\" value}}]"
+            (let [result (exec/execute ctx (:id route-fn) nil)]
+              (is (= "/hello" (first result)) "First element should be the path")
+              (is (= {"get" {"handler" "handler-value"}} (second result))
+                  "Second element should be method-map"))))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest multi-route-list-test
+  (testing "multiple routes in a list: each route should have correct path"
+    ;; This test mimics the editor-routes pattern:
+    ;; list-3 contains [route1, route2, route3] where each has different path
+    ;; The problem: when routes share parent structure, sibling args interfere
+    (let [storage (create-versioned-storage)]
+      (try
+        ;; Register base functions
+        (registry/initialize-all! storage
+                                  [{:conj-any
+                                    {:args {:coll {:type :any :required true}
+                                            :item {:type :any :required true}}
+                                     :return-type :any
+                                     :impl (fn [{:keys [coll item]} _]
+                                             (conj (or @coll []) @item))}}
+                                   {:assoc-any
+                                    {:args {:map {:type :any :required true}
+                                            :key {:type :any :required true}
+                                            :value {:type :any :required true}}
+                                     :return-type :any
+                                     :impl (fn [{:keys [map key value]} _]
+                                             (assoc (or @map {}) @key @value))}}
+                                   {:const {:args {:x {:type :any :required true}}
+                                            :return-type :any
+                                            :impl (fn [{:keys [x]} _] @x)}}])
+
+        ;; Build the route pattern
+        (composition/sync-fns-to-storage! storage
+                                          [;; Level 1: conj-empty = conj with coll=[]
+                                           {:name :conj-empty :parent :conj-any :args {:coll []}}
+
+                                           ;; Level 2: pair-1 = conj-empty with item renamed to item1
+                                           {:name :pair-1 :parent :conj-empty :args {:item {:as :item1}}}
+
+                                           ;; Level 3: pair = conj-any with coll=pair-1, item renamed to item2
+                                           {:name :pair :parent :conj-any :args {:coll :pair-1 :item {:as :item2}}}
+
+                                           ;; Level 4: triple = conj-any with coll=pair, item renamed to item3
+                                           {:name :triple :parent :conj-any :args {:coll :pair :item {:as :item3}}}
+
+                                           ;; Level 5: assoc-empty = assoc with map={}
+                                           {:name :assoc-empty :parent :assoc-any :args {:map {}}}
+
+                                           ;; Level 6: assoc-handler = assoc-empty with key="handler", value renamed to handler
+                                           {:name :assoc-handler
+                                            :parent :assoc-empty
+                                            :args {:key "handler"
+                                                   :value {:as :handler}}}
+
+                                           ;; Level 7: method-map = assoc-empty with value=assoc-handler
+                                           {:name :method-map
+                                            :parent :assoc-empty
+                                            :args {:value :assoc-handler}}
+
+                                           ;; Level 8: route = pair with item2=method-map, item1 renamed to path
+                                           {:name :route
+                                            :parent :pair
+                                            :args {:item2 :method-map
+                                                   :item1 {:as :path}}}
+
+                                           ;; Level 9: get-route = route with key="get"
+                                           {:name :get-route
+                                            :parent :route
+                                            :args {:key "get"}}
+
+                                           ;; Handlers (simple constants for test)
+                                           {:name :handler-a :parent :const :args {:x "handler-a"}}
+                                           {:name :handler-b :parent :const :args {:x "handler-b"}}
+                                           {:name :handler-c :parent :const :args {:x "handler-c"}}
+
+                                           ;; Three concrete routes with different paths
+                                           {:name :route-a
+                                            :parent :get-route
+                                            :args {:path "/path-a"
+                                                   :handler :handler-a}}
+
+                                           {:name :route-b
+                                            :parent :get-route
+                                            :args {:path "/path-b"
+                                                   :handler :handler-b}}
+
+                                           {:name :route-c
+                                            :parent :get-route
+                                            :args {:path "/path-c"
+                                                   :handler :handler-c}}
+
+                                           ;; Build a list of routes (like editor-routes)
+                                           {:name :routes-list
+                                            :parent :triple
+                                            :args {:item1 :route-a
+                                                   :item2 :route-b
+                                                   :item3 :route-c}}])
+
+        (let [ctx (exec/create-context {:storage storage})
+              routes-list-fn (first (sp/query-entities storage :fn {:name "routes-list"}))]
+          (testing "routes-list produces vector of 3 routes with correct paths"
+            (let [result (exec/execute ctx (:id routes-list-fn) nil)]
+              (is (= 3 (count result)) "Should have 3 routes")
+              ;; Each route should be [path, {key handler-map}]
+              (is (= "/path-a" (first (nth result 0))) "First route should have path-a")
+              (is (= "/path-b" (first (nth result 1))) "Second route should have path-b")
+              (is (= "/path-c" (first (nth result 2))) "Third route should have path-c")
+
+              ;; CRITICAL: Each route's handler should be DIFFERENT
+              ;; This tests that pass-through args are properly propagated
+              ;; across reference boundaries (route -> method-map -> assoc-handler)
+              (let [get-handler (fn [route]
+                                  (get-in (second route) ["get" "handler"]))
+                    handler-a (get-handler (nth result 0))
+                    handler-b (get-handler (nth result 1))
+                    handler-c (get-handler (nth result 2))]
+                (is (= "handler-a" handler-a) "First route should have handler-a")
+                (is (= "handler-b" handler-b) "Second route should have handler-b")
+                (is (= "handler-c" handler-c) "Third route should have handler-c")
+                (is (not= handler-a handler-b) "Handlers should be different")
+                (is (not= handler-b handler-c) "Handlers should be different")))))
+        (finally
+          (sp/close storage))))))

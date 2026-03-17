@@ -185,41 +185,6 @@
   (vec (distinct coll)))
 
 
-(defn pair-fn
-  [{:keys [first second]}]
-  [first second])
-
-
-(defn triple-fn
-  [{:keys [first second third]}]
-  [first second third])
-
-
-(defn list4-fn
-  [{:keys [item1 item2 item3 item4]}]
-  [item1 item2 item3 item4])
-
-
-(defn list5-fn
-  [{:keys [item1 item2 item3 item4 item5]}]
-  [item1 item2 item3 item4 item5])
-
-
-(defn list6-fn
-  [{:keys [item1 item2 item3 item4 item5 item6]}]
-  [item1 item2 item3 item4 item5 item6])
-
-
-(defn list7-fn
-  [{:keys [item1 item2 item3 item4 item5 item6 item7]}]
-  [item1 item2 item3 item4 item5 item6 item7])
-
-
-(defn list8-fn
-  [{:keys [item1 item2 item3 item4 item5 item6 item7 item8]}]
-  [item1 item2 item3 item4 item5 item6 item7 item8])
-
-
 ;; === Registry ===
 
 (def impls
@@ -248,11 +213,4 @@
    :sort sort-fn
    :concat concat-fn
    :flatten flatten-fn
-   :distinct distinct-fn
-   :pair pair-fn
-   :triple triple-fn
-   :list4 list4-fn
-   :list5 list5-fn
-   :list6 list6-fn
-   :list7 list7-fn
-   :list8 list8-fn})
+   :distinct distinct-fn})

@@ -55,12 +55,12 @@
   :parent :const
   :args {:value [:script {:src "https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"}]}}
 
- ;; Scripts collection (3 items)
+ ;; Scripts collection (3 items) using triple
  {:name :editor-scripts
   :parent :triple
-  :args {:first :dagre-script
-         :second :cytoscape-dagre-script
-         :third :editor-script-element}}
+  :args {:item1 :dagre-script
+         :item2 :cytoscape-dagre-script
+         :item3 :editor-script-element}}
 
  ;; Complete HTML page
  {:name :editor-page
@@ -134,18 +134,4 @@
   :parent :delete-route
   :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
 
- ;; =============================================================================
- ;; ROUTES COLLECTION (for server)
- ;; These are exported for use by server/fns.edn
- ;; =============================================================================
-
- {:name :editor-routes
-  :parent :list8
-  :args {:item1 :favicon-route
-         :item2 :editor-route
-         :item3 :api-entities-route
-         :item4 :entity-details-route
-         :item5 :entity-form-create-route
-         :item6 :entity-form-edit-route
-         :item7 :create-entity-route
-         :item8 :delete-entity-route}}]
+]

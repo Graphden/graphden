@@ -2,6 +2,7 @@
   "Implementations for web/reitit base functions."
   (:require
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [clojure.walk :as walk]
     [reitit.core :as r]))
 
@@ -21,7 +22,8 @@
 
 (defn router
   [{:keys [routes not-found-response method-not-allowed-response error-response]}]
-  (let [normalized-routes (keywordize-map-keys routes)
+  (let [non-nil-routes (vec (remove nil? routes))
+        normalized-routes (keywordize-map-keys non-nil-routes)
         compiled-router (r/router normalized-routes)
         default-404 {:status 404
                      :headers {"Content-Type" "text/plain"}
@@ -36,18 +38,19 @@
         resp-405 (or method-not-allowed-response default-405)
         resp-500 (or error-response default-500)]
     (fn [request]
-      (if-let [match (r/match-by-path compiled-router (:uri request))]
-        (let [method (if (keyword? (:method request))
-                       (:method request)
-                       (keyword (str/lower-case (str (:method request)))))
-              route-data (:data match)
-              method-data (get route-data method)]
-          (if method-data
-            (if-let [handler-fn (:handler method-data)]
-              (handler-fn (assoc request :path-params (:path-params match)))
-              resp-500)
-            resp-405))
-        resp-404))))
+      (let [uri (:uri request)]
+        (if-let [match (r/match-by-path compiled-router uri)]
+          (let [method (if (keyword? (:method request))
+                         (:method request)
+                         (keyword (str/lower-case (str (:method request)))))
+                route-data (:data match)
+                method-data (get route-data method)]
+            (if method-data
+              (if-let [handler-fn (:handler method-data)]
+                (handler-fn (assoc request :path-params (:path-params match)))
+                resp-500)
+              resp-405))
+          resp-404)))))
 
 
 ;; === Registry ===

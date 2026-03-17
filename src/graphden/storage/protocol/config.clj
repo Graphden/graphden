@@ -373,8 +373,8 @@
 (def ^:dynamic *max-batch-size*
   "Maximum number of entities in a single batch operation.
    Batch operations larger than this will throw an error.
-   Default: 1000 entities."
-  1000)
+   Default: 5000 entities."
+  5000)
 
 
 (defn validate-batch-size!

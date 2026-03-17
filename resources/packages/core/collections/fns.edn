@@ -1,7 +1,7 @@
 ;; Collection manipulation base functions
 ;; first, rest, cons, conj, get, assoc, dissoc, count, empty?,
 ;; contains?, keys, vals, merge, into, range, repeat, take, drop,
-;; reverse, sort, concat, flatten, distinct, pair, triple
+;; reverse, sort, concat, flatten, distinct
 
 [{:name :first
   :args {:coll :jsonb}
@@ -109,33 +109,4 @@
 
  {:name :distinct
   :args {:coll :jsonb}
-  :return-type :jsonb}
-
- {:name :pair
-  :args {:first :any, :second :any}
-  :return-type :any}
-
- {:name :triple
-  :args {:first :any, :second :any, :third :any}
-  :return-type :any}
-
- ;; List builders for 4-8 elements (avoids long conj chains)
- {:name :list4
-  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any}
-  :return-type :any}
-
- {:name :list5
-  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any, :item5 :any}
-  :return-type :any}
-
- {:name :list6
-  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any, :item5 :any, :item6 :any}
-  :return-type :any}
-
- {:name :list7
-  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any, :item5 :any, :item6 :any, :item7 :any}
-  :return-type :any}
-
- {:name :list8
-  :args {:item1 :any, :item2 :any, :item3 :any, :item4 :any, :item5 :any, :item6 :any, :item7 :any, :item8 :any}
-  :return-type :any}]
+  :return-type :jsonb}]

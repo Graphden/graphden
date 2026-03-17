@@ -27,7 +27,7 @@
   (collect-dependency-chain
     [_this owner-fn-id]
     (constraints/collect-dependency-chain-impl
-      (fn [_helpers current-id]
+      (fn [current-id]
         ;; Get fn record to check parent-id
         (let [fn-rec (sp/read-entity storage :fn current-id)
               ;; Get args for current fn
@@ -49,7 +49,6 @@
             #{}
             (let [fn-results (sp/read-entities storage :fn (vec all-refs))]
               (set (keys fn-results))))))
-      nil  ; helpers arg (unused by our get-fn-dependencies-fn)
       owner-fn-id)))
 
 

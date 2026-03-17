@@ -18,27 +18,34 @@
     [clojure.tools.logging :as log]
     [graphden.executor.context :as ctx]
     [graphden.executor.types :as types]
-    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.config :as config]
+    [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.graph :as graph])
   (:import
-    [java.util ArrayDeque]))
+    (java.util
+      ArrayDeque)))
 
 
 ;; =============================================================================
 ;; NeedComputation marker - thrown when SmartDelay needs a value computed
 ;; =============================================================================
 
-(deftype NeedComputation [cache-key task]
+(deftype NeedComputation
+  [cache-key task]
   ;; Extend Throwable so it can be caught
   Object
+
   (toString [_] (str "NeedComputation: " cache-key)))
 
+
 ;; Use ex-info wrapper for throwable
-(defn throw-need-computation [cache-key task]
+(defn throw-need-computation
+  [cache-key task]
   (throw (ex-info "NeedComputation" {:type ::need-computation :cache-key cache-key :task task})))
 
-(defn need-computation-ex? [e]
+
+(defn need-computation-ex?
+  [e]
   (= ::need-computation (:type (ex-data e))))
 
 
@@ -47,9 +54,9 @@
 ;; =============================================================================
 
 (defrecord ExecutionState
-  [value-map        ;; atom {cache-key -> value}
-   result-cache     ;; atom from context
-   pending-tasks    ;; atom {cache-key -> task}
+  [value-map        ; atom {cache-key -> value}
+   result-cache     ; atom from context
+   pending-tasks    ; atom {cache-key -> task}
    context])
 
 
@@ -57,40 +64,49 @@
 ;; SmartDelay - throws NeedComputation if value not ready
 ;; =============================================================================
 
-(deftype SmartDelay [cache-key
-                     exec-state
-                     task-atom        ;; atom containing task (or nil if already computed)
-                     ^:volatile-mutable cached-value
-                     ^:volatile-mutable realized?]
+(deftype SmartDelay
+  [cache-key
+   exec-state
+   task-atom        ; atom containing task (or nil if already computed)
+   ^:volatile-mutable cached-value
+   ^:volatile-mutable realized-flag]
 
   clojure.lang.IDeref
-  (deref [_]
-    (if realized?
+
+  (deref
+    [_]
+    (if realized-flag
       cached-value
       ;; Check value-map - use contains? to handle nil values with sentinel
       (if (contains? @(:value-map exec-state) cache-key)
         (let [v (get @(:value-map exec-state) cache-key)
-              actual (if (= v ::nil-sentinel) nil v)]
-          (set! cached-value actual) (set! realized? true) actual)
+              actual (when-not (= v ::nil-sentinel) v)]
+          (set! cached-value actual) (set! realized-flag true) actual)
         ;; Check result-cache
         (if (contains? @(:result-cache exec-state) cache-key)
           (let [v (get @(:result-cache exec-state) cache-key)
-                actual (if (= v ::nil-sentinel) nil v)]
-            (set! cached-value actual) (set! realized? true) actual)
+                actual (when-not (= v ::nil-sentinel) v)]
+            (set! cached-value actual) (set! realized-flag true) actual)
           ;; Not computed yet - throw marker
           (throw-need-computation cache-key @task-atom)))))
 
+
   clojure.lang.IPending
-  (isRealized [_]
-    (or realized?
+
+  (isRealized
+    [_]
+    (or realized-flag
         (and exec-state (contains? @(:value-map exec-state) cache-key))
         (and exec-state (contains? @(:result-cache exec-state) cache-key)))))
 
 
-(defn smart-delay [cache-key exec-state task]
+(defn smart-delay
+  [cache-key exec-state task]
   (->SmartDelay cache-key exec-state (atom task) nil false))
 
-(defn smart-delay-realized [value]
+
+(defn smart-delay-realized
+  [value]
   (->SmartDelay nil nil nil value true))
 
 
@@ -98,7 +114,8 @@
 ;; Graph Helpers (same as before)
 ;; =============================================================================
 
-(defn- resolve-base-fn [fns fn-id depth]
+(defn- resolve-base-fn
+  [fns fn-id depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain exceeds maximum depth"
                     {:type :execution-error/parent-chain-too-deep :fn-id fn-id :max-depth sp/*max-graph-iterations*})))
@@ -108,7 +125,9 @@
                       {:type :execution-error/fn-not-found :fn-id fn-id})))
     (if-let [pid (:parent-id fn-rec)] (recur fns pid (inc depth)) fn-rec)))
 
-(defn- get-fn-args-with-inheritance [execution-graph fn-id depth]
+
+(defn- get-fn-args-with-inheritance
+  [execution-graph fn-id depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain exceeds maximum depth"
                     {:type :execution-error/parent-chain-too-deep :fn-id fn-id :max-depth sp/*max-graph-iterations*})))
@@ -122,7 +141,9 @@
         (vec (concat own-args (remove #(own-source-ids (:id %)) parent-args))))
       (vec own-args))))
 
-(defn- get-fn-data-from-graph [execution-graph fn-id]
+
+(defn- get-fn-data-from-graph
+  [execution-graph fn-id]
   (let [fns (:fns execution-graph)
         fn-rec (get fns fn-id)]
     (when-not fn-rec
@@ -137,16 +158,18 @@
 ;; Arg Propagation
 ;; =============================================================================
 
-(defn- trace-source-to-fn [execution-graph arg-id target-fn-id visited depth]
+(defn- trace-source-to-fn
+  [execution-graph arg-id target-fn-id visited depth]
   (when (and (< depth sp/*max-graph-iterations*) (not (contains? visited arg-id)))
-    (let [arg (get (:args-by-id execution-graph) arg-id)]
-      (when arg
-        (if (= (:fn-id arg) target-fn-id)
-          {:target-arg-id arg-id :depth depth}
-          (when-let [sid (:source-id arg)]
-            (recur execution-graph sid target-fn-id (conj visited arg-id) (inc depth))))))))
+    (when-let [arg (get (:args-by-id execution-graph) arg-id)]
+      (if (= (:fn-id arg) target-fn-id)
+        {:target-arg-id arg-id :depth depth}
+        (when-let [sid (:source-id arg)]
+          (recur execution-graph sid target-fn-id (conj visited arg-id) (inc depth)))))))
 
-(defn- collect-propagated-args [execution-graph all-caller-args ref-fn-id]
+
+(defn- collect-propagated-args
+  [execution-graph all-caller-args ref-fn-id]
   (reduce
     (fn [acc caller-arg]
       ;; Direct match: if caller-arg belongs directly to the target fn AND has a value/ref
@@ -162,11 +185,6 @@
         (if trace
           (let [tid (:target-arg-id trace)
                 existing (get acc tid)
-                ;; Both value and ref-id count as "having a value"
-                ;; - value: literal value
-                ;; - ref-id: computed value (execute the ref and use result)
-                has-value? (or (some? (:value caller-arg)) (some? (:ref-id caller-arg)))
-                existing-has-value? (or (some? (:value (:arg existing))) (some? (:ref-id (:arg existing))))
                 ;; Prefer literal values over refs, then shorter depth
                 has-literal? (some? (:value caller-arg))
                 existing-has-literal? (some? (:value (:arg existing)))
@@ -185,7 +203,8 @@
 ;; Limits & Cache
 ;; =============================================================================
 
-(defn- check-limits! [context depth]
+(defn- check-limits!
+  [context depth]
   (when (> depth (:max-depth context))
     (throw (ex-info "Maximum recursion depth exceeded"
                     {:type :execution-error/max-depth-exceeded :depth depth :max-depth (:max-depth context)})))
@@ -194,7 +213,9 @@
       (throw (ex-info "Execution timeout exceeded"
                       {:type :execution-error/timeout :elapsed-ms elapsed :timeout-ms (:timeout-ms context)})))))
 
-(defn- check-cache-limit! [context]
+
+(defn- check-cache-limit!
+  [context]
   (let [rc (:result-cache context)
         size (count @rc)
         max-size (:cache-max-size context)]
@@ -208,7 +229,8 @@
 ;; Lazy Value Realization
 ;; =============================================================================
 
-(defn- realize-lazy-value [value]
+(defn- realize-lazy-value
+  [value]
   (cond
     (nil? value) nil
     (instance? clojure.lang.LazySeq value)
@@ -222,10 +244,13 @@
 ;; Arg Filtering
 ;; =============================================================================
 
-(defn- fn-in-parent-chain? [fns fn-id start-fn-id]
+(defn- fn-in-parent-chain?
+  [fns fn-id start-fn-id]
   (loop [curr start-fn-id, d 0]
-    (cond (> d 100) false (nil? curr) false (= curr fn-id) true
+    (cond (or (> d 100) (nil? curr)) false
+          (= curr fn-id) true
           :else (recur (:parent-id (get fns curr)) (inc d)))))
+
 
 (defn- arg-belongs-to-current-fn?
   "Determines if an arg should be included in the by-name map for base-fn execution.
@@ -240,15 +265,15 @@
         arg-fn-id (:fn-id arg)
         ;; Find the base-fn (end of parent chain)
         base-fn-id (loop [fid current-fn-id, d 0]
-                     (if (or (nil? fid) (> d 100)) nil
-                         (let [fr (get fns fid)]
-                           (if (nil? (:parent-id fr)) fid (recur (:parent-id fr) (inc d))))))
+                     (when-not (or (nil? fid) (> d 100))
+                       (let [fr (get fns fid)]
+                         (if (nil? (:parent-id fr)) fid (recur (:parent-id fr) (inc d))))))
         ;; Follow source-id chain to find root arg
         root-arg (loop [a arg, d 0]
-                   (if (> d 100) nil
-                       (if-let [sid (:source-id a)]
-                         (if-let [sa (get args-by-id sid)] (recur sa (inc d)) a)
-                         a)))
+                   (when-not (> d 100)
+                     (if-let [sid (:source-id a)]
+                       (if-let [sa (get args-by-id sid)] (recur sa (inc d)) a)
+                       a)))
         ;; Check 1: root arg must belong to base-fn
         root-belongs-to-base? (and (some? root-arg)
                                    (some? base-fn-id)
@@ -287,9 +312,12 @@
 ;; Task & Cache Key
 ;; =============================================================================
 
-(defrecord ExecutionTask [cache-key fn-id provided-args caller-args parent-delays depth])
+(defrecord ExecutionTask
+  [cache-key fn-id provided-args caller-args parent-delays depth])
+
 
 (declare build-deep-cache-key)
+
 
 (defn- build-deep-cache-key
   "Builds a cache key that recursively includes propagated args for any ref-id args.
@@ -299,53 +327,48 @@
    The key insight: if an arg has ref-id (meaning it will execute another fn),
    we need to include what args will propagate TO that ref-fn as part of our key."
   [execution-graph all-caller-args ref-fn-id depth visited]
-  (cond
-    ;; Prevent infinite recursion - just return fn-id at max depth
-    (> depth 10)
+  (if (or (> depth 10) (contains? visited ref-fn-id))
+    ;; Prevent infinite recursion or cycle - just return fn-id
     ref-fn-id
-
-    ;; Cycle detected - just return fn-id
-    (contains? visited ref-fn-id)
-    ref-fn-id
-
-    :else
+    ;; Normal case
     (let [visited' (conj visited ref-fn-id)
-        prop-map (collect-propagated-args execution-graph all-caller-args ref-fn-id)
-        ;; For each entry in prop-map, if it has a ref-id (not a literal value),
-        ;; recursively compute what would propagate to that ref-fn
-        deep-entries
-        (into (sorted-map)
-              (map (fn [[arg-id entry]]
-                     (let [arg (:arg entry)
-                           literal-val (:value arg)
-                           ref-id (:ref-id arg)
-                           is-fn? (:is-fn arg)]
-                       (cond
-                         ;; Literal value - just use it
-                         (some? literal-val)
-                         [arg-id [:lit literal-val]]
+          prop-map (collect-propagated-args execution-graph all-caller-args ref-fn-id)
+          ;; For each entry in prop-map, if it has a ref-id (not a literal value),
+          ;; recursively compute what would propagate to that ref-fn
+          deep-entries
+          (into (sorted-map)
+                (map (fn [[arg-id entry]]
+                       (let [arg (:arg entry)
+                             literal-val (:value arg)
+                             ref-id (:ref-id arg)
+                             is-fn? (:is-fn arg)]
+                         (cond
+                           ;; Literal value - just use it
+                           (some? literal-val)
+                           [arg-id [:lit literal-val]]
 
-                         ;; is-fn ref - just use ref-id (function passed as value)
-                         (and (some? ref-id) is-fn?)
-                         [arg-id [:fn ref-id]]
+                           ;; is-fn ref - just use ref-id (function passed as value)
+                           (and (some? ref-id) is-fn?)
+                           [arg-id [:fn ref-id]]
 
-                         ;; Normal ref-id - recursively get cache key for that fn
-                         ;; This is the key fix: we include what args will flow INTO that ref-fn
-                         (some? ref-id)
-                         (let [;; Get the ref-fn's args to find what will propagate to it
-                               ref-fn-args (or (get-fn-args-with-inheritance execution-graph ref-id 0) [])
-                               extended-args (into (vec all-caller-args) ref-fn-args)
-                               sub-key (build-deep-cache-key execution-graph extended-args ref-id (inc depth) visited')]
-                           [arg-id [:ref sub-key]])
+                           ;; Normal ref-id - recursively get cache key for that fn
+                           ;; This is the key fix: we include what args will flow INTO that ref-fn
+                           (some? ref-id)
+                           (let [;; Get the ref-fn's args to find what will propagate to it
+                                 ref-fn-args (or (get-fn-args-with-inheritance execution-graph ref-id 0) [])
+                                 extended-args (into (vec all-caller-args) ref-fn-args)
+                                 sub-key (build-deep-cache-key execution-graph extended-args ref-id (inc depth) visited')]
+                             [arg-id [:ref sub-key]])
 
-                         ;; Pass-through (no value, no ref) - shouldn't be in prop-map but handle anyway
-                         :else
-                         [arg-id [:nil]]))))
-              prop-map)
-        result (if (seq deep-entries)
-                 [ref-fn-id deep-entries]
-                 ref-fn-id)]
+                           ;; Pass-through (no value, no ref) - shouldn't be in prop-map but handle anyway
+                           :else
+                           [arg-id [:nil]]))))
+                prop-map)
+          result (if (seq deep-entries)
+                   [ref-fn-id deep-entries]
+                   ref-fn-id)]
       result)))
+
 
 (defn- build-cache-key
   "Simple wrapper that initiates deep cache key building."
@@ -354,7 +377,10 @@
     (log/debug "build-cache-key: ref-fn-id=" ref-fn-id " result=" result)
     result))
 
-(defn- arg-has-value? [arg] (or (some? (:value arg)) (some? (:ref-id arg))))
+
+(defn- arg-has-value?
+  [arg]
+  (or (some? (:value arg)) (some? (:ref-id arg))))
 
 
 ;; =============================================================================
@@ -461,7 +487,7 @@
                    (if (some? cached)
                      (smart-delay-realized cached)
                      ;; Build task for lazy execution - NOW delays-by-id has ALL sibling delays!
-                     (let [consumed-ids (into #{} (map (comp :id :arg) (vals prop-map)))
+                     (let [consumed-ids (set (map (comp :id :arg) (vals prop-map)))
                            remaining (vec (remove (fn [a] (consumed-ids (:id a))) all-caller-args))
                            ;; Include ref-fn-args so child functions can access their values
                            ;; This is critical: when executing favicon-route, its args (with path value)
@@ -513,7 +539,7 @@
                       {:type :execution-error/base-fn-not-found :fn-name fn-name :registry-size (count (:base-fns context))})))
 
     (let [{:keys [by-name]} (build-arg-delays exec-state fn-data (:provided-args task)
-                                               (:caller-args task) (:parent-delays task) (:depth task))
+                                              (:caller-args task) (:parent-delays task) (:depth task))
           ;; Execute - may throw NeedComputation when @delay is called
           result (base-fn-impl by-name (assoc context :depth (:depth task)))
           realized (realize-lazy-value result)]
@@ -550,22 +576,22 @@
         ;; Stack of tasks to retry after dependencies complete
         retry-stack (ArrayDeque.)]
 
-    (.push retry-stack root-task)
+    (ArrayDeque/.push retry-stack root-task)
 
     (loop [iterations 0]
       (when (> iterations 100000)
         (throw (ex-info "Too many iterations" {:type :execution-error/infinite-loop})))
 
-      (if (.isEmpty retry-stack)
+      (if (ArrayDeque/.isEmpty retry-stack)
         ;; Done
         (get @(:value-map exec-state) :root)
 
-        (let [task (.pop retry-stack)
+        (let [task (ArrayDeque/.pop retry-stack)
               result (try-execute-task task exec-state)]
           (if (:done result)
             (recur (inc iterations))
             ;; Need computation - push tasks back
             (let [{:keys [current dependency]} (:need result)]
-              (.push retry-stack current)
-              (.push retry-stack dependency)
+              (ArrayDeque/.push retry-stack current)
+              (ArrayDeque/.push retry-stack dependency)
               (recur (inc iterations)))))))))

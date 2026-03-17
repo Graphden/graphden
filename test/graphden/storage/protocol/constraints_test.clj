@@ -88,10 +88,9 @@
   storage/ConstraintHelpers
 
   (collect-dependency-chain
-    [this fn-id]
+    [_this fn-id]
     (constraints/collect-dependency-chain-impl
-      (fn [_helpers fid] (get dependencies-map fid #{}))
-      this
+      (fn [fid] (get dependencies-map fid #{}))
       fn-id)))
 
 

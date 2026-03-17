@@ -65,7 +65,7 @@
    credentials (can be used for log injection, header splitting, etc.)."
   [value param-name]
   (when (string? value)
-    (when-let [_dangerous-chars (re-find #"[\x00-\x1F\x7F]" value)]
+    (when (re-find #"[\x00-\x1F\x7F]" value)
       (throw (ex-info (str param-name " contains invalid control characters")
                       {:type :config-error/invalid-credential
                        :param param-name

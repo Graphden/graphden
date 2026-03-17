@@ -1039,8 +1039,11 @@
                                             :key {:type :any :required true}
                                             :value {:type :any :required true}}
                                      :return-type :any
-                                     :impl (fn [{:keys [map key value]} _]
-                                             (assoc (or @map {}) @key @value))}}
+                                     :impl (fn [args _]
+                                             (let [m (get args :map)
+                                                   k (get args :key)
+                                                   v (get args :value)]
+                                               (assoc (or @m {}) @k @v)))}}
                                    {:const {:args {:x {:type :any :required true}}
                                             :return-type :any
                                             :impl (fn [{:keys [x]} _] @x)}}])
@@ -1121,8 +1124,11 @@
                                             :key {:type :any :required true}
                                             :value {:type :any :required true}}
                                      :return-type :any
-                                     :impl (fn [{:keys [map key value]} _]
-                                             (assoc (or @map {}) @key @value))}}
+                                     :impl (fn [args _]
+                                             (let [m (get args :map)
+                                                   k (get args :key)
+                                                   v (get args :value)]
+                                               (assoc (or @m {}) @k @v)))}}
                                    {:const {:args {:x {:type :any :required true}}
                                             :return-type :any
                                             :impl (fn [{:keys [x]} _] @x)}}])

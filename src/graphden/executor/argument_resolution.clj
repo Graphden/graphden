@@ -82,8 +82,6 @@
        :else value))))
 
 
-
-
 (defn- build-ref-delay
   "Builds a delay for a ref-id reference.
 
@@ -131,7 +129,7 @@
 (defn- build-value-delay
   "Builds a delay for a literal value.
    If is-fn=true and value is a UUID string, parse it to UUID."
-  [arg-name value is-fn?]
+  [value is-fn?]
   (let [resolved-value (if (and is-fn? (string? value))
                          (try
                            (java.util.UUID/fromString value)
@@ -168,7 +166,7 @@
                        caller-args arg-delays-atom arg-id)
 
       (some? value)
-      (build-value-delay arg-name value is-fn?)
+      (build-value-delay value is-fn?)
 
       :else
       (delay nil))))
@@ -178,7 +176,7 @@
 
 (defn handle-validated-arg
   "Validates and wraps a user-provided argument value in a delay."
-  [value arg strict? max-unknown-types arg-name unknown-type-counter source]
+  [value arg strict? max-unknown-types unknown-type-counter]
   (types/validate-provided-arg-type! value arg strict? max-unknown-types unknown-type-counter)
   ;; For provided values, use a simple delay without the wrapper
   ;; to avoid potential closure capture issues
@@ -217,17 +215,14 @@
   "Checks if fn-id is in the direct parent chain starting from start-fn-id.
    The parent chain follows parent-id links (inheritance), NOT ref-id links."
   [fns fn-id start-fn-id]
-  (let [result
-        (loop [current-fn-id start-fn-id
-               depth 0]
-          (cond
-            (> depth 100) false  ; safety limit
-            (nil? current-fn-id) false
-            (= current-fn-id fn-id) true
-            :else
-            (let [fn-rec (get fns current-fn-id)]
-              (recur (:parent-id fn-rec) (inc depth)))))]
-    result))
+  (loop [current-fn-id start-fn-id
+         depth 0]
+    (cond
+      (or (> depth 100) (nil? current-fn-id)) false
+      (= current-fn-id fn-id) true
+      :else
+      (let [fn-rec (get fns current-fn-id)]
+        (recur (:parent-id fn-rec) (inc depth))))))
 
 
 (defn- arg-belongs-to-current-fn?
@@ -269,8 +264,7 @@
         ;; Find the base-fn (end of parent chain)
         base-fn-id (loop [fn-id current-fn-id
                           depth 0]
-                     (if (or (nil? fn-id) (> depth 100))
-                       nil
+                     (when-not (or (nil? fn-id) (> depth 100))
                        (let [fn-rec (get fns fn-id)
                              parent-id (:parent-id fn-rec)]
                          (if (nil? parent-id)
@@ -279,8 +273,7 @@
         ;; Follow source-id chain to find root arg
         root-arg (loop [current-arg arg
                         depth 0]
-                   (if (> depth 100)
-                     nil  ; safety limit
+                   (when-not (> depth 100)
                      (if-let [source-id (:source-id current-arg)]
                        (if-let [source-arg (get args-by-id source-id)]
                          (recur source-arg (inc depth))
@@ -354,7 +347,6 @@
   (let [args (:args fn-data)
         execution-graph (:execution-graph context)
         fn-rec (:fn fn-data)
-        parent-fn-id (:parent-id fn-rec)
         strict? (:strict-type-validation? context)
         max-unknown-types (:max-unknown-types context)
         unknown-type-counter (:unknown-type-counter context)
@@ -394,8 +386,7 @@
                         (some? provided-value)
                         (handle-validated-arg provided-value arg
                                               strict? max-unknown-types
-                                              arg-name unknown-type-counter
-                                              :provided-arg)
+                                              unknown-type-counter)
 
                         (:required arg)
                         (throw-missing-required-arg! arg-id arg-name)
@@ -416,26 +407,15 @@
         ;; - item: include-in-by-name?=false, but if it has provided-value, add it
         (when (or include-in-by-name? has-provided-value?)
           (let [existing-info (get @arg-info-by-name-atom key-name-kw)
-                existing-has-ref? (:has-ref? existing-info)
                 current-has-ref? (some? (:ref-id arg))
                 ;; Priority:
                 ;; 1. provided value beats everything
                 ;; 2. own fn's arg (include-in-by-name?) beats inherited
                 ;; 3. ref-id args beat value args
-                should-replace? (cond
-                                  (nil? existing-info)
-                                  true
-
-                                  ;; Provided value always wins
-                                  has-provided-value?
-                                  true
-
-                                  ;; Own fn's arg beats inherited (when existing doesn't have provided value)
-                                  (and include-in-by-name? (not (:has-provided-value? existing-info)))
-                                  true
-
-                                  :else
-                                  false)]
+                should-replace? (or (nil? existing-info)
+                                    has-provided-value?
+                                    (and include-in-by-name?
+                                         (not (:has-provided-value? existing-info))))]
             (when should-replace?
               (swap! arg-info-by-name-atom assoc key-name-kw {:delay delay-val
                                                               :has-ref? current-has-ref?
@@ -444,5 +424,5 @@
         ;; Store by id for propagation (no collision possible)
         (swap! arg-delays-by-id-atom assoc arg-id delay-val)))
     (let [result {:by-name @arg-delays-by-name-atom
-                   :by-id @arg-delays-by-id-atom}]
+                  :by-id @arg-delays-by-id-atom}]
       result)))

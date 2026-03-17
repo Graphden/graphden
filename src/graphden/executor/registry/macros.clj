@@ -432,19 +432,14 @@
                                   (cons nil macro-args))
         {:keys [args return-type]} opts
         ;; Separate :fn type args from regular args
-        fn-type-args (into {}
-                           (filter (fn [[_k v]] (= :fn (get-arg-type v)))
-                                   args))
-        regular-args (into {}
-                           (remove (fn [[_k v]] (= :fn (get-arg-type v)))
-                                   args))
+        fn-type-arg? (fn [entry] (= :fn (get-arg-type (val entry))))
+        fn-type-args (into {} (filter fn-type-arg?) args)
+        regular-args (into {} (remove fn-type-arg?) args)
         ;; Convert keyword arg names to symbols
-        all-arg-syms (for [[k _v] args]
-                       (if (keyword? k) (symbol (clojure.core/name k)) k))
-        fn-arg-syms (for [[k _v] fn-type-args]
-                      (if (keyword? k) (symbol (clojure.core/name k)) k))
-        regular-arg-syms (for [[k _v] regular-args]
-                           (if (keyword? k) (symbol (clojure.core/name k)) k))
+        key->sym (fn [k] (if (keyword? k) (symbol (clojure.core/name k)) k))
+        all-arg-syms (map key->sym (keys args))
+        fn-arg-syms (map key->sym (keys fn-type-args))
+        regular-arg-syms (map key->sym (keys regular-args))
         ;; Transform body to add deref/callable at usage sites
         transformed-body (map #(transform-body % regular-arg-syms fn-arg-syms) body)
         ;; Build the impl function

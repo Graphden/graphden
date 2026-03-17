@@ -152,24 +152,24 @@
   (testing "converts string UUID to UUID when is-fn=true"
     (let [uuid (random-uuid)
           uuid-str (str uuid)
-          result (#'arg-res/build-value-delay "f" uuid-str true)]
+          result (#'arg-res/build-value-delay uuid-str true)]
       (is (delay? result))
       (is (uuid? @result))
       (is (= uuid @result))))
 
   (testing "passes through invalid UUID string when is-fn=true"
-    (let [result (#'arg-res/build-value-delay "f" "not-a-uuid" true)]
+    (let [result (#'arg-res/build-value-delay "not-a-uuid" true)]
       (is (delay? result))
       (is (= "not-a-uuid" @result))))
 
   (testing "passes through non-string value when is-fn=true"
     (let [uuid (random-uuid)
-          result (#'arg-res/build-value-delay "f" uuid true)]
+          result (#'arg-res/build-value-delay uuid true)]
       (is (delay? result))
       (is (= uuid @result))))
 
   (testing "passes through value unchanged when is-fn=false"
     (let [uuid-str (str (random-uuid))
-          result (#'arg-res/build-value-delay "x" uuid-str false)]
+          result (#'arg-res/build-value-delay uuid-str false)]
       (is (delay? result))
       (is (= uuid-str @result)))))

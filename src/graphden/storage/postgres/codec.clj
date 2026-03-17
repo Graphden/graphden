@@ -49,15 +49,16 @@
   (->pgobject "jsonb" (json/generate-string v)))
 
 
-(defn- seqs-to-vectors
+(defn- seqs->vectors
   "Recursively converts lazy seqs to vectors.
    Cheshire returns lazy seqs for JSON arrays, but we need vectors
    for proper conj behavior (append vs prepend)."
   [x]
   (cond
-    (map? x) (persistent! (reduce-kv (fn [m k v] (assoc! m k (seqs-to-vectors v))) (transient {}) x))
-    (sequential? x) (mapv seqs-to-vectors x)
+    (map? x) (persistent! (reduce-kv (fn [m k v] (assoc! m k (seqs->vectors v))) (transient {}) x))
+    (sequential? x) (mapv seqs->vectors x)
     :else x))
+
 
 (defn- parse-jsonb
   "Parses JSONB PGobject value to Clojure data.
@@ -66,7 +67,7 @@
   [pg-value]
   (when pg-value
     (try
-      (seqs-to-vectors (json/parse-string pg-value true))
+      (seqs->vectors (json/parse-string pg-value true))
       (catch JsonParseException e
         (throw (ex-info "Failed to parse JSONB value"
                         {:type :parse-error/jsonb

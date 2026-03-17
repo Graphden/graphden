@@ -38,14 +38,13 @@
    Returns a set of all dependent fn-ids (not including fn-id itself).
 
    Arguments:
-   - get-fn-dependencies-fn: function (fn [helpers fn-id] -> #{dep-fn-ids})
+   - get-fn-dependencies-fn: function (fn [fn-id] -> #{dep-fn-ids})
      Returns immediate fn dependencies for a given fn-id (via ref-id and parent-id).
-   - helpers: ConstraintHelpers implementation
    - fn-id: starting fn UUID
 
    Throws if total visited nodes exceed default-max-dependency-chain-depth."
-  [get-fn-dependencies-fn helpers fn-id]
-  (loop [to-visit (get-fn-dependencies-fn helpers fn-id)
+  [get-fn-dependencies-fn fn-id]
+  (loop [to-visit (get-fn-dependencies-fn fn-id)
          visited #{}
          iter-count 0]
     (when (> iter-count default-max-dependency-chain-depth)
@@ -60,7 +59,7 @@
             rest-queue (disj to-visit current-id)]
         (if (contains? visited current-id)
           (recur rest-queue visited (inc iter-count))
-          (let [new-deps (get-fn-dependencies-fn helpers current-id)
+          (let [new-deps (get-fn-dependencies-fn current-id)
                 unvisited-deps (remove visited new-deps)]
             (recur (into rest-queue unvisited-deps)
                    (conj visited current-id)

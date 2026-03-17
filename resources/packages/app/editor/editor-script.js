@@ -577,9 +577,11 @@ function createCytoscape(elements, shouldFit) {
           return Math.max(30, lines * 16 + 16);
         }
       }},
-      // Non-placeholder fn nodes - hide label for overlay
+      // Non-placeholder fn nodes - hide completely, overlay shows content
       { selector: 'node[type="fn"][!isPlaceholder]', style: {
-        'label': ''
+        'label': '',
+        'background-opacity': 0,
+        'border-width': 0
       }},
       // Placeholder (unset arg) - dashed border, same black color
       { selector: 'node[?isPlaceholder]', style: {
@@ -764,6 +766,56 @@ function createNodeOverlays() {
       more.textContent = '...';
       overlay.appendChild(more);
     }
+
+    // Add drag handle at the bottom
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'drag-handle';
+    dragHandle.style.height = '12px';
+    dragHandle.style.background = 'linear-gradient(to bottom, #f0f0f0, #ddd)';
+    dragHandle.style.borderTop = '1px solid #ccc';
+    dragHandle.style.cursor = 'grab';
+    dragHandle.style.display = 'flex';
+    dragHandle.style.alignItems = 'center';
+    dragHandle.style.justifyContent = 'center';
+    dragHandle.innerHTML = '<span style="color:#999;font-size:8px;">⋮⋮⋮</span>';
+
+    // Make drag handle pass events to cytoscape node
+    dragHandle.addEventListener('mousedown', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+
+      const cyNode = cy.getElementById('fn-' + originalFnId);
+      if (!cyNode.length) return;
+
+      isGrabbing = true;
+      dragHandle.style.cursor = 'grabbing';
+
+      let lastX = e.clientX;
+      let lastY = e.clientY;
+
+      const onMouseMove = (moveE) => {
+        const dx = (moveE.clientX - lastX) / cy.zoom();
+        const dy = (moveE.clientY - lastY) / cy.zoom();
+        lastX = moveE.clientX;
+        lastY = moveE.clientY;
+
+        const pos = cyNode.position();
+        cyNode.position({ x: pos.x + dx, y: pos.y + dy });
+        updateOverlayPositions();
+      };
+
+      const onMouseUp = () => {
+        document.removeEventListener('mousemove', onMouseMove);
+        document.removeEventListener('mouseup', onMouseUp);
+        isGrabbing = false;
+        dragHandle.style.cursor = 'grab';
+      };
+
+      document.addEventListener('mousemove', onMouseMove);
+      document.addEventListener('mouseup', onMouseUp);
+    });
+
+    overlay.appendChild(dragHandle);
 
     overlay.addEventListener('mouseleave', () => {
       if (!rebuildingOverlays && !isGrabbing) {
@@ -1026,13 +1078,16 @@ function buildGraphElements() {
   }
 
   // Process a fn and its args, with bindings from parent
+  // originalFnId: the fn that was clicked/expanded (for overlay tracking)
+  // displayFnId: the fn whose args we're showing
   // bindings: Map of source-arg-id -> {argName, value, refId} from the calling fn
-  function processFn(fnId, bindings, sourceNodeId, edgeArgName, isRoot) {
-    const nodeId = addFnNode(fnId, isRoot);
+  function processFn(originalFnId, displayFnId, bindings, sourceNodeId, edgeArgName, isRoot) {
+    // Use originalFnId for node id (so overlay can find it)
+    const nodeId = addFnNode(originalFnId, isRoot);
 
     // Add edge from source if not root
     if (sourceNodeId && edgeArgName !== null) {
-      const edgeId = 'e-ref-' + sourceNodeId + '-' + fnId;
+      const edgeId = 'e-ref-' + sourceNodeId + '-' + originalFnId;
       if (!addedNodeIds.has(edgeId)) {
         addedNodeIds.add(edgeId);
         edges.push({
@@ -1046,13 +1101,14 @@ function buildGraphElements() {
       }
     }
 
-    // Get this fn's args and apply bindings
-    const { refs, values, unset } = collectFnArgs(fnId, bindings);
+    // Get displayFn's args and apply bindings
+    const { refs, values, unset } = collectFnArgs(displayFnId, bindings);
 
     // Process ref args (children fns)
+    // For children, originalFnId = refId (they're not expanded)
     refs.forEach(({ argName, refId, argId }) => {
       // Pass bindings down so nested free args can be substituted
-      processFn(refId, bindings, nodeId, argName, false);
+      processFn(refId, refId, bindings, nodeId, argName, false);
     });
 
     // Process value args
@@ -1076,8 +1132,8 @@ function buildGraphElements() {
     // Build bindings from originalFn's args
     const bindings = buildArgBindings(originalFnId);
 
-    // Show the displayFn (parent) with bindings applied
-    return processFn(displayFnId, bindings, sourceNodeId, edgeArgName, isRoot);
+    // Show the displayFn (parent) structure but keep originalFnId for tracking
+    return processFn(originalFnId, displayFnId, bindings, sourceNodeId, edgeArgName, isRoot);
   }
 
   // Main entry point for processing a fn
@@ -1089,7 +1145,8 @@ function buildGraphElements() {
     } else {
       // Build bindings from this fn's own args (for substitution)
       const bindings = buildArgBindings(fnId);
-      return processFn(fnId, bindings, sourceNodeId, edgeArgName, isRoot);
+      // originalFnId = displayFnId when not expanded
+      return processFn(fnId, fnId, bindings, sourceNodeId, edgeArgName, isRoot);
     }
   }
 

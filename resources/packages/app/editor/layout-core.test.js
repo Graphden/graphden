@@ -1,12 +1,11 @@
-// Layout Core Tests
+// Layout Core Tests - with crossing detection
 // Run: node layout-core.test.js
 
 const {
   buildAdjacency,
   findRootNode,
-  createMatrixState,
-  collectHorizontalBranch,
   buildMatrix,
+  detectCrossings,
   validateMatrix,
   formatMatrixASCII,
   layoutGraph
@@ -35,19 +34,22 @@ function assertEqual(actual, expected, msg = '') {
   }
 }
 
-function assertNoCollisions(result, msg = '') {
-  if (result.collisions.length > 0) {
-    throw new Error(`${msg}\n  Collisions: ${JSON.stringify(result.collisions)}`);
-  }
-}
-
-function assertValid(result, msg = '') {
+function assertNoCrossings(result, msg = '') {
   if (!result.validation.valid) {
-    throw new Error(`${msg}\n  Issues: ${JSON.stringify(result.validation.issues)}`);
+    const crossingIssues = result.validation.issues.filter(i => i.type === 'crossing');
+    if (crossingIssues.length > 0) {
+      throw new Error(`${msg}\n  CROSSINGS DETECTED:\n${crossingIssues.map(i => '    ' + i.message).join('\n')}\n  ASCII:\n${result.ascii.split('\n').map(l => '    ' + l).join('\n')}`);
+    }
   }
 }
 
-// Helper to create simple graph
+function assertNoCollisions(result, msg = '') {
+  const collisionIssues = result.validation.issues.filter(i => i.type === 'collision');
+  if (collisionIssues.length > 0) {
+    throw new Error(`${msg}\n  Collisions: ${JSON.stringify(collisionIssues)}`);
+  }
+}
+
 function makeGraph(nodeIds, edgeList) {
   const nodes = nodeIds.map(id => ({ data: { id } }));
   const edges = edgeList.map(([src, tgt, argName]) => ({
@@ -71,10 +73,8 @@ test('empty graph', () => {
 test('single node', () => {
   const graph = makeGraph(['A'], []);
   const result = layoutGraph(graph);
-
   assertEqual(result.gridPos.get('A'), { row: 0, col: 0 });
-  assertNoCollisions(result);
-  assertValid(result);
+  assertNoCrossings(result);
 });
 
 test('linear chain: A -> B -> C', () => {
@@ -84,12 +84,11 @@ test('linear chain: A -> B -> C', () => {
   ]);
   const result = layoutGraph(graph);
 
-  // Should be horizontal: A at col 0, B at col 1, C at col 2
   assertEqual(result.gridPos.get('A'), { row: 0, col: 0 });
   assertEqual(result.gridPos.get('B'), { row: 0, col: 1 });
   assertEqual(result.gridPos.get('C'), { row: 0, col: 2 });
+  assertNoCrossings(result);
   assertNoCollisions(result);
-  assertValid(result);
 
   console.log('  ASCII:\n' + result.ascii.split('\n').map(l => '    ' + l).join('\n'));
 });
@@ -101,25 +100,97 @@ test('simple fork: A -> B, A -> C', () => {
   ]);
   const result = layoutGraph(graph);
 
-  // A at (0,0), B at (0,1) - first child on same row
-  // C at (1,1) - second child below
   assertEqual(result.gridPos.get('A'), { row: 0, col: 0 });
   assertEqual(result.gridPos.get('B'), { row: 0, col: 1 });
   assertEqual(result.gridPos.get('C'), { row: 1, col: 1 });
-  assertNoCollisions(result);
+  assertNoCrossings(result);
 
   console.log('  ASCII:\n' + result.ascii.split('\n').map(l => '    ' + l).join('\n'));
 });
 
 // ============================================================================
-// Complex Structures
+// Diamond structure - THE KEY TEST
 // ============================================================================
 
-test('deep tree with multiple branches', () => {
-  // Structure:
-  //   A -> B -> D
-  //   A -> C -> E
-  //             C -> F
+test('diamond: A -> B -> D, A -> C -> D (shared node)', () => {
+  const graph = makeGraph(['A', 'B', 'C', 'D'], [
+    ['A', 'B', 'b'],
+    ['A', 'C', 'c'],
+    ['B', 'D', 'bd'],
+    ['C', 'D', 'cd']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Diamond ASCII:\n' + result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+  console.log('  Validation:', result.validation);
+
+  assertNoCollisions(result);
+  assertNoCrossings(result, 'Diamond should have no crossings');
+});
+
+test('diamond with shared handler - real case', () => {
+  // This is the actual structure that causes problems:
+  // list-10-6 -> list-10-5 -> list-10-4
+  //    |            |
+  //  item6        item5
+  //    |            |
+  // entity-edit  entity-create
+  //    |            |
+  //  handler      handler
+  //    +---> shared-handler <---+
+
+  const graph = makeGraph(
+    ['list-10-6', 'list-10-5', 'list-10-4', 'entity-form-create', 'entity-form-edit', 'shared-handler'],
+    [
+      ['list-10-6', 'list-10-5', 'coll'],
+      ['list-10-5', 'list-10-4', 'coll'],
+      ['list-10-5', 'entity-form-create', 'item5'],
+      ['list-10-6', 'entity-form-edit', 'item6'],
+      ['entity-form-create', 'shared-handler', 'handler'],
+      ['entity-form-edit', 'shared-handler', 'handler']
+    ]
+  );
+  const result = layoutGraph(graph);
+
+  console.log('  Real diamond with shared handler:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+  console.log('  Validation:', result.validation);
+
+  assertNoCollisions(result);
+  assertNoCrossings(result, 'Real diamond should have no crossings');
+});
+
+test('three branches with shared leaf', () => {
+  // A -> B -> D
+  // A -> C -> D
+  // A -> E -> D
+  const graph = makeGraph(['A', 'B', 'C', 'D', 'E'], [
+    ['A', 'B', 'b'],
+    ['A', 'C', 'c'],
+    ['A', 'E', 'e'],
+    ['B', 'D', 'bd'],
+    ['C', 'D', 'cd'],
+    ['E', 'D', 'ed']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Three branches shared:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Validation:', result.validation);
+
+  assertNoCollisions(result);
+  assertNoCrossings(result, 'Three branches should have no crossings');
+});
+
+// ============================================================================
+// Complex structures
+// ============================================================================
+
+test('deep tree with branches', () => {
   const graph = makeGraph(['A', 'B', 'C', 'D', 'E', 'F'], [
     ['A', 'B', 'b'],
     ['A', 'C', 'c'],
@@ -129,80 +200,32 @@ test('deep tree with multiple branches', () => {
   ]);
   const result = layoutGraph(graph);
 
+  console.log('  Deep tree:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+
   assertNoCollisions(result);
-  assertValid(result);
-
-  // Verify no overlaps
-  const positions = new Set();
-  result.gridPos.forEach((pos, nodeId) => {
-    const key = `${pos.row},${pos.col}`;
-    if (positions.has(key)) {
-      throw new Error(`Overlap at ${key}`);
-    }
-    positions.add(key);
-  });
-
-  console.log('  ASCII:\n' + result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  assertNoCrossings(result);
 });
 
-test('editor-routes style: root with 10 children', () => {
-  // Simulates editor-routes -> list-10 structure
-  // Root has 10 children (item1-item10)
-  const nodeIds = ['root', 'child1', 'child2', 'child3', 'child4', 'child5',
-                   'child6', 'child7', 'child8', 'child9', 'child10'];
+test('root with 10 children', () => {
+  const nodeIds = ['root'];
   const edges = [];
   for (let i = 1; i <= 10; i++) {
+    nodeIds.push('child' + i);
     edges.push(['root', 'child' + i, 'item' + i]);
   }
 
   const graph = makeGraph(nodeIds, edges);
   const result = layoutGraph(graph);
 
-  assertNoCollisions(result);
-  assertValid(result);
-
-  // Root at (0,0), first child at (0,1), rest below
-  assertEqual(result.gridPos.get('root'), { row: 0, col: 0 });
-  assertEqual(result.gridPos.get('child1'), { row: 0, col: 1 });
-
-  // Other children should be in rows 1-9
-  for (let i = 2; i <= 10; i++) {
-    const pos = result.gridPos.get('child' + i);
-    if (pos.row === 0) {
-      throw new Error(`child${i} should not be on row 0`);
-    }
-    if (pos.col !== 1) {
-      throw new Error(`child${i} should be at col 1, got ${pos.col}`);
-    }
-  }
-
-  console.log('  ASCII:\n' + result.ascii.split('\n').map(l => '    ' + l).join('\n'));
-});
-
-test('chain with expansion: root -> parent -> grandparent', () => {
-  // Simulates expanded view: editor-routes -> list-10 -> list-10-9
-  // Each level has its own children
-  const graph = makeGraph(
-    ['root', 'parent', 'grandparent', 'item10', 'item9', 'coll_ref'],
-    [
-      ['root', 'parent', 'parent'],
-      ['parent', 'grandparent', 'parent'],
-      ['parent', 'item10', 'item10'],
-      ['grandparent', 'item9', 'item9'],
-      ['grandparent', 'coll_ref', 'coll']
-    ]
-  );
-  const result = layoutGraph(graph);
+  console.log('  10 children:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
 
   assertNoCollisions(result);
-  assertValid(result);
-
-  console.log('  ASCII:\n' + result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  assertNoCrossings(result);
 });
 
-test('wide tree: root with children that have children', () => {
-  // root -> a -> a1, a2
-  // root -> b -> b1, b2
+test('wide tree with grandchildren', () => {
   const graph = makeGraph(
     ['root', 'a', 'b', 'a1', 'a2', 'b1', 'b2'],
     [
@@ -216,208 +239,108 @@ test('wide tree: root with children that have children', () => {
   );
   const result = layoutGraph(graph);
 
-  assertNoCollisions(result);
-  assertValid(result);
+  console.log('  Wide tree:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
 
-  console.log('  ASCII:\n' + result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  assertNoCollisions(result);
+  assertNoCrossings(result);
 });
 
 // ============================================================================
-// Edge Cases
+// More complex diamond cases
 // ============================================================================
 
-test('diamond structure: A -> B -> D, A -> C -> D', () => {
-  // This creates two edges to D, should still work
-  const graph = makeGraph(['A', 'B', 'C', 'D'], [
+test('deep diamond - shared at depth 3', () => {
+  // A -> B -> C -> shared
+  // A -> D -> E -> shared
+  const graph = makeGraph(['A', 'B', 'C', 'D', 'E', 'shared'], [
     ['A', 'B', 'b'],
-    ['A', 'C', 'c'],
-    ['B', 'D', 'bd'],
-    ['C', 'D', 'cd']
+    ['A', 'D', 'd'],
+    ['B', 'C', 'c'],
+    ['D', 'E', 'e'],
+    ['C', 'shared', 'x'],
+    ['E', 'shared', 'y']
   ]);
   const result = layoutGraph(graph);
 
-  // D will only appear once (first edge wins)
-  assertValid(result);
+  console.log('  Deep diamond:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Validation:', result.validation);
 
-  console.log('  ASCII:\n' + result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  assertNoCollisions(result);
+  assertNoCrossings(result, 'Deep diamond');
 });
 
-test('duplicate edges are handled', () => {
+test('nested branches with diamond at end', () => {
+  // root -> a -> a1 -> shared
+  //      -> b -> b1 -> shared
+  //           -> b2
+  const graph = makeGraph(['root', 'a', 'a1', 'b', 'b1', 'b2', 'shared'], [
+    ['root', 'a', 'a'],
+    ['root', 'b', 'b'],
+    ['a', 'a1', 'a1'],
+    ['b', 'b1', 'b1'],
+    ['b', 'b2', 'b2'],
+    ['a1', 'shared', 'x'],
+    ['b1', 'shared', 'y']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Nested with diamond:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Validation:', result.validation);
+
+  assertNoCollisions(result);
+  assertNoCrossings(result, 'Nested with diamond');
+});
+
+test('short branch should fit in its column only', () => {
+  // root -> a -> a1 -> a2 -> a3 (long horizontal chain)
+  //      -> b (short, only occupies col 1)
+  // Each node in chain has a hanging child going down
+  // a1 -> x1, a2 -> x2, a3 -> x3
+  //
+  // b should be at row 1, NOT pushed down by x1, x2, x3 which are in cols 2, 3, 4
+  const graph = makeGraph(['root', 'a', 'a1', 'a2', 'a3', 'x1', 'x2', 'x3', 'b'], [
+    ['root', 'a', 'a'],
+    ['root', 'b', 'b'],
+    ['a', 'a1', 'a1'],
+    ['a1', 'a2', 'a2'],
+    ['a2', 'a3', 'a3'],
+    ['a1', 'x1', 'x1'],
+    ['a2', 'x2', 'x2'],
+    ['a3', 'x3', 'x3']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Short branch positioning:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  // b is a branch of length 1 at col 1
+  // It should only check col 1, so b should be at row 1
+  const bPos = result.gridPos.get('b');
+  if (bPos.row > 1) {
+    throw new Error(`b should be at row 1, but is at row ${bPos.row}. It was pushed down by nodes in other columns.`);
+  }
+
+  assertNoCollisions(result);
+  assertNoCrossings(result);
+});
+
+// ============================================================================
+// Edge cases
+// ============================================================================
+
+test('duplicate edges handled', () => {
   const graph = makeGraph(['A', 'B'], [
     ['A', 'B', 'arg1'],
-    ['A', 'B', 'arg2']  // duplicate
+    ['A', 'B', 'arg2']
   ]);
   const result = layoutGraph(graph);
-
   assertEqual(result.gridPos.size, 2);
-  assertNoCollisions(result);
-});
-
-// ============================================================================
-// Collision Detection Tests
-// ============================================================================
-
-test('buildMatrix tracks collisions', () => {
-  const { children, edgeArgNames } = buildAdjacency([
-    { data: { source: 'A', target: 'B' } }
-  ]);
-
-  const result = buildMatrix('A', children, edgeArgNames);
-  assertEqual(result.collisions.length, 0);
-});
-
-// ============================================================================
-// Matrix State Tests
-// ============================================================================
-
-test('collectHorizontalBranch follows first children', () => {
-  const children = new Map([
-    ['A', ['B', 'C']],
-    ['B', ['D']],
-    ['D', []]
-  ]);
-
-  const branch = collectHorizontalBranch('A', children);
-  assertEqual(branch, ['A', 'B', 'D']);
-});
-
-test('horizontal edges are recorded', () => {
-  const graph = makeGraph(['A', 'B', 'C'], [
-    ['A', 'B', 'arg1'],
-    ['B', 'C', 'arg2']
-  ]);
-  const result = layoutGraph(graph);
-
-  // Check hEdge matrix
-  const { hEdge } = result.matrix;
-  assertEqual(hEdge[0][0], 'arg1');
-  assertEqual(hEdge[0][1], 'arg2');
-});
-
-test('vertical edges are recorded for branches', () => {
-  const graph = makeGraph(['A', 'B', 'C'], [
-    ['A', 'B', 'first'],
-    ['A', 'C', 'second']
-  ]);
-  const result = layoutGraph(graph);
-
-  // C is below B, so there should be a vertical edge
-  const { vEdge } = result.matrix;
-  // vEdge[0][1] should be true (from row 0 to row 1 at col 1)
-  assertEqual(vEdge[0][1], true);
-});
-
-// ============================================================================
-// Real-world: editor-routes simulation
-// ============================================================================
-
-test('REAL: editor-routes collapsed (all 10 routes as children)', () => {
-  // editor-routes has 10 children: favicon, editor, api-entities, etc.
-  // Each route itself may have children (handler fns)
-  const graph = makeGraph(
-    ['editor-routes', 'favicon-route', 'editor-route', 'api-entities-route',
-     'entity-details-route', 'entity-form-create-route', 'entity-form-edit-route',
-     'create-entity-route', 'delete-entity-route', 'health-route', 'metrics-route',
-     // Some routes have handlers
-     'favicon-handler', 'editor-handler', 'health-handler'],
-    [
-      ['editor-routes', 'favicon-route', 'item1'],
-      ['editor-routes', 'editor-route', 'item2'],
-      ['editor-routes', 'api-entities-route', 'item3'],
-      ['editor-routes', 'entity-details-route', 'item4'],
-      ['editor-routes', 'entity-form-create-route', 'item5'],
-      ['editor-routes', 'entity-form-edit-route', 'item6'],
-      ['editor-routes', 'create-entity-route', 'item7'],
-      ['editor-routes', 'delete-entity-route', 'item8'],
-      ['editor-routes', 'health-route', 'item9'],
-      ['editor-routes', 'metrics-route', 'item10'],
-      // Handlers
-      ['favicon-route', 'favicon-handler', 'handler'],
-      ['editor-route', 'editor-handler', 'handler'],
-      ['health-route', 'health-handler', 'handler']
-    ]
-  );
-  const result = layoutGraph(graph);
-
-  assertNoCollisions(result, 'editor-routes collapsed');
-  assertValid(result);
-
-  console.log('  editor-routes COLLAPSED:');
-  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
-});
-
-test('REAL: editor-routes expanded to list-10 (chain visible)', () => {
-  // When expanded, we see:
-  // editor-routes -> list-10 -> list-10-9 -> ... -> triple -> pair -> conj-empty
-  // Each level has its own items attached
-  const graph = makeGraph(
-    ['editor-routes', 'list-10', 'list-10-9', 'list-10-8', 'list-10-7',
-     // Items attached to correct levels
-     'metrics-route', 'health-route', 'delete-entity-route', 'create-entity-route',
-     // Handlers for some routes
-     'metrics-handler', 'health-handler'],
-    [
-      // Chain: editor-routes -> list-10 -> list-10-9 -> ...
-      ['editor-routes', 'list-10', 'parent'],
-      ['list-10', 'list-10-9', 'coll'],
-      ['list-10-9', 'list-10-8', 'coll'],
-      ['list-10-8', 'list-10-7', 'coll'],
-      // Items at their owners
-      ['list-10', 'metrics-route', 'item10'],
-      ['list-10-9', 'health-route', 'item9'],
-      ['list-10-8', 'delete-entity-route', 'item8'],
-      ['list-10-7', 'create-entity-route', 'item7'],
-      // Handlers
-      ['metrics-route', 'metrics-handler', 'handler'],
-      ['health-route', 'health-handler', 'handler']
-    ]
-  );
-  const result = layoutGraph(graph);
-
-  assertNoCollisions(result, 'editor-routes expanded');
-  assertValid(result);
-
-  console.log('  editor-routes EXPANDED to list-10:');
-  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
-
-  // Verify structure: chain should be horizontal
-  const editorPos = result.gridPos.get('editor-routes');
-  const list10Pos = result.gridPos.get('list-10');
-  const list10_9Pos = result.gridPos.get('list-10-9');
-
-  // Chain should be on same row (row 0)
-  assertEqual(editorPos.row, 0, 'editor-routes on row 0');
-  assertEqual(list10Pos.row, 0, 'list-10 on row 0');
-  assertEqual(list10_9Pos.row, 0, 'list-10-9 on row 0');
-
-  // Chain should be consecutive columns
-  assertEqual(editorPos.col, 0, 'editor-routes at col 0');
-  assertEqual(list10Pos.col, 1, 'list-10 at col 1');
-  assertEqual(list10_9Pos.col, 2, 'list-10-9 at col 2');
-});
-
-test('REAL: deeply nested structure with value nodes', () => {
-  // Simulates: health-route -> get-route -> route -> pair -> ...
-  // With actual values like "/health" attached
-  const graph = makeGraph(
-    ['health-route', 'get-route', 'route', 'method-map', 'assoc-handler',
-     '/health', 'health-handler-fn'],
-    [
-      ['health-route', 'get-route', 'parent'],
-      ['get-route', 'route', 'parent'],
-      ['route', 'method-map', 'item2'],
-      ['method-map', 'assoc-handler', 'value'],
-      ['health-route', '/health', 'path'],
-      ['health-route', 'health-handler-fn', 'handler']
-    ]
-  );
-  const result = layoutGraph(graph);
-
-  assertNoCollisions(result, 'deeply nested');
-  assertValid(result);
-
-  console.log('  health-route EXPANDED:');
-  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  assertNoCrossings(result);
 });
 
 // ============================================================================

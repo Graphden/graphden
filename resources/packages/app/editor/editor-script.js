@@ -219,14 +219,6 @@ function setPreviewLevel(originalFnId, level) {
   }
 }
 
-// Clear all preview state
-function clearPreviewState() {
-  if (previewLevel.size > 0) {
-    previewLevel.clear();
-    renderGraph(false);
-  }
-}
-
 function selectFnByName(name, updateHistory = true) {
   const fn = (graphData.fns || []).find(f => f.name === name);
   if (fn) selectFn(fn.id, updateHistory);
@@ -728,51 +720,54 @@ function createDragHandle(overlay, cyNode) {
   overlay.appendChild(dragHandle);
 }
 
-function createNodeOverlays() {
-  // Remove existing overlays
-  document.querySelectorAll('.node-overlay').forEach(el => el.remove());
+// Create overlay element with common styles
+function createOverlay(nodeId, options = {}) {
+  const overlay = document.createElement('div');
+  overlay.className = 'node-overlay';
+  overlay.dataset.nodeId = nodeId;
+  Object.assign(overlay.style, {
+    position: 'absolute',
+    pointerEvents: 'auto',
+    zIndex: '10',
+    background: 'white',
+    border: options.border || '2px solid black',
+    borderRadius: options.borderRadius || '8px',
+    overflow: 'hidden',
+    fontFamily: 'SF Mono, Monaco, monospace',
+    fontSize: options.fontSize || '11px'
+  });
+  return overlay;
+}
 
+function createNodeOverlays() {
+  document.querySelectorAll('.node-overlay').forEach(el => el.remove());
   if (!cy) return;
 
   const container = document.getElementById('cy');
 
-  // Create overlays for fn nodes (with ancestor list)
+  // Fn nodes (with ancestor list)
   cy.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
     const originalFnId = node.data('originalFnId');
     if (!originalFnId) return;
 
     const chain = getInheritanceChain(originalFnId);
     const items = buildAncestorItems(chain);
-
-    const overlay = document.createElement('div');
-    overlay.className = 'node-overlay';
-    overlay.dataset.nodeId = node.id();
-    overlay.dataset.originalFnId = originalFnId;
-    overlay.style.position = 'absolute';
-    overlay.style.pointerEvents = 'auto';
-    overlay.style.zIndex = '10';
-    overlay.style.background = 'white';
-    overlay.style.border = '2px solid black';
-    overlay.style.borderRadius = '8px';
-    overlay.style.overflow = 'hidden';
-    overlay.style.fontFamily = 'SF Mono, Monaco, monospace';
-    overlay.style.fontSize = '11px';
-    overlay.style.cursor = 'default';
-
-    // Build content
     const currentLevel = expansionLevel.get(originalFnId) || 0;
     const visibleItems = items.slice(0, MAX_VISIBLE_ANCESTORS + 1);
-    const hasMore = items.length > MAX_VISIBLE_ANCESTORS + 1;
+
+    const overlay = createOverlay(node.id());
+    overlay.dataset.originalFnId = originalFnId;
+    overlay.style.cursor = 'default';
 
     visibleItems.forEach((item, idx) => {
       const line = document.createElement('div');
       line.className = 'ancestor-line';
       line.dataset.level = item.groupLevel;
-      line.style.padding = '4px 8px';
-      line.style.cursor = 'pointer';
-      const nextItem = visibleItems[idx + 1];
-      const showSeparator = nextItem && nextItem.groupLevel !== item.groupLevel;
-      line.style.borderBottom = showSeparator ? '1px solid #eee' : 'none';
+      Object.assign(line.style, {
+        padding: '4px 8px',
+        cursor: 'pointer',
+        borderBottom: (visibleItems[idx + 1]?.groupLevel !== item.groupLevel) ? '1px solid #eee' : 'none'
+      });
       line.textContent = item.name;
 
       if (item.groupLevel <= currentLevel) {
@@ -781,11 +776,8 @@ function createNodeOverlays() {
       }
 
       line.addEventListener('mouseenter', () => {
-        if (!isGrabbing) {
-          setPreviewLevel(originalFnId, item.groupLevel);
-        }
+        if (!isGrabbing) setPreviewLevel(originalFnId, item.groupLevel);
       });
-
       line.addEventListener('click', (e) => {
         e.stopPropagation();
         setExpansionLevel(originalFnId, item.groupLevel);
@@ -794,11 +786,9 @@ function createNodeOverlays() {
       overlay.appendChild(line);
     });
 
-    if (hasMore) {
+    if (items.length > MAX_VISIBLE_ANCESTORS + 1) {
       const more = document.createElement('div');
-      more.style.padding = '2px 8px';
-      more.style.color = '#999';
-      more.style.fontSize = '10px';
+      Object.assign(more.style, { padding: '2px 8px', color: '#999', fontSize: '10px' });
       more.textContent = '...';
       overlay.appendChild(more);
     }
@@ -806,28 +796,15 @@ function createNodeOverlays() {
     createDragHandle(overlay, node);
 
     overlay.addEventListener('mouseleave', () => {
-      if (!rebuildingOverlays && !isGrabbing) {
-        setPreviewLevel(originalFnId, null);
-      }
+      if (!rebuildingOverlays && !isGrabbing) setPreviewLevel(originalFnId, null);
     });
 
     container.appendChild(overlay);
   });
 
-  // Create overlays for arg nodes (value nodes)
+  // Arg value nodes
   cy.nodes('[type="arg"]').forEach(node => {
-    const overlay = document.createElement('div');
-    overlay.className = 'node-overlay';
-    overlay.dataset.nodeId = node.id();
-    overlay.style.position = 'absolute';
-    overlay.style.pointerEvents = 'auto';
-    overlay.style.zIndex = '10';
-    overlay.style.background = 'white';
-    overlay.style.border = '2px solid black';
-    overlay.style.borderRadius = '4px';
-    overlay.style.overflow = 'hidden';
-    overlay.style.fontFamily = 'SF Mono, Monaco, monospace';
-    overlay.style.fontSize = '10px';
+    const overlay = createOverlay(node.id(), { borderRadius: '4px', fontSize: '10px' });
 
     const content = document.createElement('div');
     content.style.padding = '4px 8px';
@@ -835,24 +812,12 @@ function createNodeOverlays() {
     overlay.appendChild(content);
 
     createDragHandle(overlay, node);
-
     container.appendChild(overlay);
   });
 
-  // Create overlays for placeholder nodes (unset args)
+  // Placeholder nodes (unset args)
   cy.nodes('[?isPlaceholder]').forEach(node => {
-    const overlay = document.createElement('div');
-    overlay.className = 'node-overlay';
-    overlay.dataset.nodeId = node.id();
-    overlay.style.position = 'absolute';
-    overlay.style.pointerEvents = 'auto';
-    overlay.style.zIndex = '10';
-    overlay.style.background = 'white';
-    overlay.style.border = '2px dashed black';
-    overlay.style.borderRadius = '8px';
-    overlay.style.overflow = 'hidden';
-    overlay.style.fontFamily = 'SF Mono, Monaco, monospace';
-    overlay.style.fontSize = '11px';
+    const overlay = createOverlay(node.id(), { border: '2px dashed black' });
 
     const content = document.createElement('div');
     content.style.padding = '4px 8px';
@@ -860,7 +825,6 @@ function createNodeOverlays() {
     overlay.appendChild(content);
 
     createDragHandle(overlay, node);
-
     container.appendChild(overlay);
   });
 
@@ -927,52 +891,16 @@ function buildGraphElements() {
     return chain;
   }
 
-  // Build bindings map: source-id -> binding info
-  // Bindings come from fns between originalFnId and displayFnId
-  function buildBindings(originalFnId, displayLevel) {
-    const chain = getInheritanceChain(originalFnId);
-    const childFns = chain.slice(0, displayLevel); // fns that provide bindings
-
-    const bindings = new Map(); // any source-id in chain -> {value, refId, argName, argId}
-
-    for (const fnId of childFns) {
-      const args = lookups.argsByFn.get(fnId) || [];
-      args.forEach(arg => {
-        const hasValue = arg.value !== null && arg.value !== undefined;
-        const hasRef = !!arg['ref-id'];
-        if ((hasValue || hasRef) && arg['source-id']) {
-          const sourceChain = getSourceChain(arg.id);
-          const bindingInfo = {
-            value: arg.value,
-            refId: arg['ref-id'],
-            argName: resolveArgName(arg),
-            argId: arg.id
-          };
-          // Mark all ancestors in source chain as bound
-          sourceChain.forEach(srcId => {
-            if (!bindings.has(srcId)) {
-              bindings.set(srcId, bindingInfo);
-            }
-          });
-        }
-      });
-    }
-    return bindings;
-  }
-
-  // Build bindings map: source-arg-id -> bound value/ref from originalFn
-  // This maps each free arg in parent fn's structure to its bound value
-  function buildArgBindings(originalFnId) {
-    const bindings = new Map(); // source-arg-id -> {argName, value, refId}
-    const args = lookups.argsByFn.get(originalFnId) || [];
+  // Add bindings from a single fn's args to existing bindings map
+  // Follows source chain to mark all ancestor args as bound
+  function addBindingsFromFn(fnId, bindings) {
+    const args = lookups.argsByFn.get(fnId) || [];
 
     args.forEach(arg => {
       const hasValue = arg.value !== null && arg.value !== undefined;
       const hasRef = !!arg['ref-id'];
 
       if ((hasValue || hasRef) && arg['source-id']) {
-        // This arg binds a value to source-id
-        // Follow the source chain to find all source args this binds
         let sourceId = arg['source-id'];
         while (sourceId) {
           bindings.set(sourceId, {
@@ -986,7 +914,23 @@ function buildGraphElements() {
         }
       }
     });
+  }
 
+  // Build bindings from a single fn
+  function buildArgBindings(fnId) {
+    const bindings = new Map();
+    addBindingsFromFn(fnId, bindings);
+    return bindings;
+  }
+
+  // Build bindings from inheritance chain levels 0..targetLevel-1
+  // Child bindings override parent bindings
+  function buildChainBindings(chain, targetLevel) {
+    const bindings = new Map();
+    // Process from parent to child so child values override
+    for (let i = Math.min(targetLevel, chain.length) - 1; i >= 0; i--) {
+      addBindingsFromFn(chain[i], bindings);
+    }
     return bindings;
   }
 
@@ -1159,21 +1103,11 @@ function buildGraphElements() {
     return nodeId;
   }
 
-  // Process expanded fn - show internal structure of parent fn with bindings applied
+  // Process expanded fn - show internal structure of ancestor fn with bindings applied
   function processExpandedFn(originalFnId, level, sourceNodeId, edgeArgName, isRoot) {
     const chain = getInheritanceChain(originalFnId);
     const displayFnId = chain[Math.min(level, chain.length - 1)];
-
-    // Build bindings from ALL levels 0..level-1 (child values override parent)
-    const bindings = new Map();
-    for (let i = Math.min(level, chain.length) - 1; i >= 0; i--) {
-      const fnId = chain[i];
-      const fnBindings = buildArgBindings(fnId);
-      // Later iterations (closer to originalFn) override earlier ones
-      fnBindings.forEach((v, k) => bindings.set(k, v));
-    }
-
-    // Show the displayFn (parent) structure but keep originalFnId for tracking
+    const bindings = buildChainBindings(chain, level);
     return processFn(originalFnId, displayFnId, bindings, sourceNodeId, edgeArgName, isRoot);
   }
 

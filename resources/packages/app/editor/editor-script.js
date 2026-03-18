@@ -425,6 +425,9 @@ function renderGraph(shouldFit = true) {
   });
 
   function completeUpdate() {
+    // Suppress edge warnings during animation
+    suppressEdgeWarnings = true;
+
     // Remove old elements
     nodesToRemove.forEach(node => {
       const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + node.data('originalFnId') + '"]');
@@ -496,6 +499,7 @@ function renderGraph(shouldFit = true) {
 
     Promise.all(animPromises).then(() => {
       animating = false;
+      suppressEdgeWarnings = false;
       updateOverlayPositions();
       if (shouldFit && cy.nodes().length > 0) {
         cy.fit(50);

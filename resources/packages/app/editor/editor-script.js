@@ -1137,10 +1137,9 @@ function buildGraphElements() {
     const { refs, values, unset } = collectFnArgs(displayFnId, bindings);
 
     // Process ref args (children fns)
-    // For children, originalFnId = refId (they're not expanded)
+    // Each child checks its own expansion level, but receives parent's bindings
     refs.forEach(({ argName, refId, argId }) => {
-      // Pass bindings down so nested free args can be substituted
-      processFn(refId, refId, bindings, nodeId, argName, false);
+      processAnyFn(refId, nodeId, argName, false, bindings);
     });
 
     // Process value args
@@ -1161,15 +1160,22 @@ function buildGraphElements() {
     const chain = getInheritanceChain(originalFnId);
     const displayFnId = chain[Math.min(level, chain.length - 1)];
 
-    // Build bindings from originalFn's args
-    const bindings = buildArgBindings(originalFnId);
+    // Build bindings from ALL levels 0..level-1 (child values override parent)
+    const bindings = new Map();
+    for (let i = Math.min(level, chain.length) - 1; i >= 0; i--) {
+      const fnId = chain[i];
+      const fnBindings = buildArgBindings(fnId);
+      // Later iterations (closer to originalFn) override earlier ones
+      fnBindings.forEach((v, k) => bindings.set(k, v));
+    }
 
     // Show the displayFn (parent) structure but keep originalFnId for tracking
     return processFn(originalFnId, displayFnId, bindings, sourceNodeId, edgeArgName, isRoot);
   }
 
   // Main entry point for processing a fn
-  function processAnyFn(fnId, sourceNodeId, edgeArgName, isRoot) {
+  // parentBindings: optional bindings from parent fn (for nested refs)
+  function processAnyFn(fnId, sourceNodeId, edgeArgName, isRoot, parentBindings) {
     const level = getEffectiveLevel(fnId);
 
     if (level > 0) {
@@ -1177,13 +1183,21 @@ function buildGraphElements() {
     } else {
       // Build bindings from this fn's own args (for substitution)
       const bindings = buildArgBindings(fnId);
+      // Merge with parent bindings (parent bindings fill gaps, don't override)
+      if (parentBindings) {
+        parentBindings.forEach((v, k) => {
+          if (!bindings.has(k)) {
+            bindings.set(k, v);
+          }
+        });
+      }
       // originalFnId = displayFnId when not expanded
       return processFn(fnId, fnId, bindings, sourceNodeId, edgeArgName, isRoot);
     }
   }
 
   // Main: process selected fn
-  processAnyFn(selectedFnId, null, null, true);
+  processAnyFn(selectedFnId, null, null, true, null);
 
   return { nodes, edges };
 }

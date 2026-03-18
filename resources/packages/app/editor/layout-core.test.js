@@ -330,8 +330,372 @@ test('short branch should fit in its column only', () => {
 });
 
 // ============================================================================
+// Argument must be strictly to the right of fn
+// ============================================================================
+
+function assertArgRightOfFn(result, edges, msg = '') {
+  // For each edge (fn -> arg), arg.col must be > fn.col
+  const gridPos = result.gridPos;
+  for (const edge of edges) {
+    const [src, tgt] = edge;
+    const srcPos = gridPos.get(src);
+    const tgtPos = gridPos.get(tgt);
+    if (srcPos && tgtPos && tgtPos.col <= srcPos.col) {
+      throw new Error(`${msg}\n  Argument ${tgt} (col=${tgtPos.col}) is NOT to the right of fn ${src} (col=${srcPos.col})\n  ASCII:\n${result.ascii.split('\n').map(l => '    ' + l).join('\n')}`);
+    }
+  }
+}
+
+test('editor-routes expanded - args must be right of fn', () => {
+  // Real editor-routes structure (simplified)
+  // editor-routes has multiple route children, two of which share entity-form-handler:
+  // - entity-form-create-route -> entity-form-handler
+  // - entity-form-edit-route -> entity-form-handler
+
+  const graph = makeGraph(
+    [
+      'editor-routes',
+      'editor-route', 'editor-path', 'editor-handler',
+      'entity-form-create-route', 'create-path', 'entity-form-handler',
+      'entity-form-edit-route', 'edit-path'
+    ],
+    [
+      ['editor-routes', 'editor-route', 'route1'],
+      ['editor-routes', 'entity-form-create-route', 'route2'],
+      ['editor-routes', 'entity-form-edit-route', 'route3'],
+      ['editor-route', 'editor-path', 'path'],
+      ['editor-route', 'editor-handler', 'handler'],
+      ['entity-form-create-route', 'create-path', 'path'],
+      ['entity-form-create-route', 'entity-form-handler', 'handler'],
+      ['entity-form-edit-route', 'edit-path', 'path'],
+      ['entity-form-edit-route', 'entity-form-handler', 'handler']  // shared!
+    ]
+  );
+  const result = layoutGraph(graph);
+
+  console.log('  Editor-routes with shared handler:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+  console.log('  Validation:', result.validation);
+
+  // Key constraint: every argument must be to the right of its fn
+  const edges = [
+    ['editor-routes', 'editor-route'],
+    ['editor-routes', 'entity-form-create-route'],
+    ['editor-routes', 'entity-form-edit-route'],
+    ['editor-route', 'editor-path'],
+    ['editor-route', 'editor-handler'],
+    ['entity-form-create-route', 'create-path'],
+    ['entity-form-create-route', 'entity-form-handler'],
+    ['entity-form-edit-route', 'edit-path'],
+    ['entity-form-edit-route', 'entity-form-handler']
+  ];
+
+  assertArgRightOfFn(result, edges, 'Editor-routes expanded');
+  assertNoCollisions(result);
+  assertNoCrossings(result, 'Editor-routes expanded should have no crossings');
+});
+
+test('fn and arg in same column is invalid', () => {
+  // This should NOT happen: fn at col 1, arg at col 1
+  // A -> B -> C
+  //      |
+  //      D (D should be at col 2, not col 1)
+  const graph = makeGraph(['A', 'B', 'C', 'D'], [
+    ['A', 'B', 'b'],
+    ['B', 'C', 'c'],
+    ['B', 'D', 'd']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Fn-arg column test:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+
+  const bPos = result.gridPos.get('B');
+  const dPos = result.gridPos.get('D');
+
+  // D must be to the right of B
+  if (dPos.col <= bPos.col) {
+    throw new Error(`D (arg of B) is at col ${dPos.col}, but B is at col ${bPos.col}. Arg must be strictly to the right!`);
+  }
+});
+
+test('shared node must be right of ALL parents', () => {
+  // A -> B -> shared
+  //      |
+  //      C -> shared
+  // shared must be to the right of BOTH B and C
+  const graph = makeGraph(['A', 'B', 'C', 'shared'], [
+    ['A', 'B', 'b'],
+    ['B', 'shared', 'x'],
+    ['B', 'C', 'c'],
+    ['C', 'shared', 'y']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Shared node right of all parents:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  const bPos = result.gridPos.get('B');
+  const cPos = result.gridPos.get('C');
+  const sharedPos = result.gridPos.get('shared');
+
+  // shared must be to the right of B
+  if (sharedPos.col <= bPos.col) {
+    throw new Error(`shared (col=${sharedPos.col}) must be to the right of B (col=${bPos.col})`);
+  }
+  // shared must be to the right of C
+  if (sharedPos.col <= cPos.col) {
+    throw new Error(`shared (col=${sharedPos.col}) must be to the right of C (col=${cPos.col})`);
+  }
+
+  assertNoCollisions(result);
+  assertNoCrossings(result);
+});
+
+test('shift should not cause collisions', () => {
+  // A -> B -> shared -> X
+  //      |
+  //      C -> shared
+  // When shared shifts right, X should shift too (no collision)
+  const graph = makeGraph(['A', 'B', 'C', 'shared', 'X'], [
+    ['A', 'B', 'b'],
+    ['B', 'shared', 'x'],
+    ['shared', 'X', 'child'],
+    ['B', 'C', 'c'],
+    ['C', 'shared', 'y']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Shift with child:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  assertNoCollisions(result);
+  assertNoCrossings(result);
+
+  // X must be to the right of shared
+  const sharedPos = result.gridPos.get('shared');
+  const xPos = result.gridPos.get('X');
+  if (xPos.col <= sharedPos.col) {
+    throw new Error(`X (col=${xPos.col}) must be to the right of shared (col=${sharedPos.col})`);
+  }
+});
+
+test('shift should not cause crossings with other branches', () => {
+  // Complex case: shifting shared might cross edges from other branches
+  // A -> B -> shared
+  //      |
+  //      C -> shared
+  //      |
+  //      D -> E
+  // When C->shared shifts shared right, vertical edge to D/E might cross
+  const graph = makeGraph(['A', 'B', 'C', 'D', 'E', 'shared'], [
+    ['A', 'B', 'b'],
+    ['B', 'shared', 'x'],
+    ['B', 'C', 'c'],
+    ['C', 'shared', 'y'],
+    ['C', 'D', 'd'],
+    ['D', 'E', 'e']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Shift with parallel branches:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+  console.log('  Validation:', result.validation);
+
+  assertNoCollisions(result);
+  assertNoCrossings(result, 'Shift should not cause crossings');
+});
+
+test('shift into occupied column should cascade', () => {
+  // A -> B -> shared
+  //      |      |
+  //      C -> shared
+  //      |
+  //      D -> X (X at col 3, same as where shared wants to go)
+  // When shared shifts to col=3, it might collide with X
+  const graph = makeGraph(['A', 'B', 'C', 'D', 'X', 'shared'], [
+    ['A', 'B', 'b'],
+    ['B', 'shared', 'x'],
+    ['B', 'C', 'c'],
+    ['C', 'shared', 'y'],
+    ['C', 'D', 'd'],
+    ['D', 'X', 'xx']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Shift into occupied:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  assertNoCollisions(result);
+  assertNoCrossings(result);
+});
+
+test('shift should not collide with unrelated node in same row', () => {
+  // A -> B -> shared -> Y
+  //      |
+  //      C -> shared
+  //      |
+  //      D -> X -> Z
+  // shared at row=0, X at row=2. No collision.
+  // But what if X is at same row as shared after shift?
+  // Actually let's make it so shared and Z are at same row after processing:
+  // A -> B -> shared
+  //           |
+  //      C -> shared
+  //      |
+  //   -> D -> X -> Y (Y ends up at col=4)
+  // shared shifts to col=3. If there's something at (0,3) we have collision.
+
+  // Simpler case: shared ends up in same cell as another node
+  const graph = makeGraph(['A', 'B', 'C', 'shared', 'X', 'Y'], [
+    ['A', 'B', 'b'],
+    ['A', 'X', 'x'],
+    ['B', 'shared', 's'],
+    ['B', 'C', 'c'],
+    ['C', 'shared', 'cs'],
+    ['X', 'Y', 'y']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Shift collision test:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  assertNoCollisions(result);
+  assertNoCrossings(result);
+});
+
+test('shift cascades to avoid collision in same row', () => {
+  // Force a collision scenario:
+  // Row 0: A -> B -> shared -> sharedChild
+  // B also has child C which references shared
+  // C is at col 2, shared originally at col 2 (same col as C!)
+  // shared must shift to col 3
+  // But what if there's already something at col 3 row 0?
+  //
+  // Let's create:
+  // A -> B -> shared
+  //      |
+  //      C -> shared
+  // A -> X -> Y -> Z (all on row 0, Z at col 3)
+  //
+  // Initially: A(0,0) B(0,1) shared(0,2) X(1,1) Y(1,2) Z(1,3)
+  // When C at (1,2) references shared at (0,2) - they're in same column!
+  // No wait, C references shared means shared must be RIGHT of C
+  // C at col 2, shared at col 2 -> shift shared to col 3
+  // But that only happens if C is placed before shared references it
+
+  // Actually the scenario is:
+  // 1. A->B->shared placed at row 0: A(0,0), B(0,1), shared(0,2)
+  // 2. B->C placed below: C goes to (1,2)
+  // 3. C->shared: shared is at col 2, C is at col 2 -> same column! Shift shared to col 3
+  // 4. If there's something at (0,3), collision!
+
+  // Create that exact scenario with another branch
+  const graph = makeGraph(['A', 'B', 'C', 'shared', 'D'], [
+    ['A', 'B', 'b'],
+    ['B', 'shared', 's1'],
+    ['shared', 'D', 'd'],  // D will be at col 3
+    ['B', 'C', 'c'],
+    ['C', 'shared', 's2']
+  ]);
+  const result = layoutGraph(graph);
+
+  console.log('  Cascade collision test:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  // shared must be right of both B (col 1) and C
+  const bPos = result.gridPos.get('B');
+  const cPos = result.gridPos.get('C');
+  const sharedPos = result.gridPos.get('shared');
+  const dPos = result.gridPos.get('D');
+
+  if (sharedPos.col <= bPos.col) {
+    throw new Error(`shared must be right of B`);
+  }
+  if (sharedPos.col <= cPos.col) {
+    throw new Error(`shared must be right of C`);
+  }
+  // D must be right of shared
+  if (dPos.col <= sharedPos.col) {
+    throw new Error(`D must be right of shared`);
+  }
+
+  assertNoCollisions(result);
+  assertNoCrossings(result);
+});
+
+// ============================================================================
 // Edge cases
 // ============================================================================
+
+test('real expand case - shared handler referenced from different depths', () => {
+  // Real structure from editor-routes expand:
+  // list-10-6 -> list-10-5 -> list-10-4 -> list-10-3 (coll chain)
+  //                |           |
+  //              item5       item4
+  //                |           |
+  //         entity-form-5  entity-form-4
+  //                |           |
+  //              handler     handler
+  //                +--> shared-handler <--+
+  //
+  // The problem: entity-form-5 is at deeper row than entity-form-4
+  // but both reference shared-handler
+  // shared-handler gets placed when processing entity-form-4 (first)
+  // then entity-form-5 references it from below
+
+  const graph = makeGraph(
+    ['list-6', 'list-5', 'list-4',
+     'entity-5', 'entity-4', 'shared-handler',
+     'path-5', 'path-4'],
+    [
+      ['list-6', 'list-5', 'coll'],
+      ['list-5', 'list-4', 'coll'],
+      ['list-6', 'entity-4', 'item4'],  // list-6 references entity-4
+      ['list-5', 'entity-5', 'item5'],  // list-5 references entity-5
+      ['entity-4', 'shared-handler', 'handler'],
+      ['entity-5', 'shared-handler', 'handler'],
+      ['entity-4', 'path-4', 'path'],
+      ['entity-5', 'path-5', 'path']
+    ]
+  );
+  const result = layoutGraph(graph);
+
+  console.log('  Real expand case:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+  console.log('  Validation:', result.validation);
+
+  // shared-handler must be to the right of BOTH entity-4 and entity-5
+  const e4Pos = result.gridPos.get('entity-4');
+  const e5Pos = result.gridPos.get('entity-5');
+  const sharedPos = result.gridPos.get('shared-handler');
+
+  if (sharedPos.col <= e4Pos.col) {
+    throw new Error(`shared-handler (col=${sharedPos.col}) must be right of entity-4 (col=${e4Pos.col})`);
+  }
+  if (sharedPos.col <= e5Pos.col) {
+    throw new Error(`shared-handler (col=${sharedPos.col}) must be right of entity-5 (col=${e5Pos.col})`);
+  }
+
+  assertNoCollisions(result);
+  assertNoCrossings(result, 'Real expand case');
+});
 
 test('duplicate edges handled', () => {
   const graph = makeGraph(['A', 'B'], [
@@ -341,6 +705,65 @@ test('duplicate edges handled', () => {
   const result = layoutGraph(graph);
   assertEqual(result.gridPos.size, 2);
   assertNoCrossings(result);
+});
+
+test('child with placed descendant should go first in horizontal branch', () => {
+  // This is the KEY test for the issue:
+  // When list-5 has children [list-4, entity-5], and entity-5 has a child shared-handler
+  // that is already placed (because entity-4 was processed first and placed shared-handler),
+  // then entity-5 should go first in horizontal branch (not list-4)
+  //
+  // list-6 -> list-5 -> list-4
+  //    |         |
+  //  entity-4  entity-5
+  //    |         |
+  // shared-handler (SHARED!)
+  //
+  // Expected processing order:
+  // 1. list-6 branch: list-6 -> entity-4 -> shared-handler (shared goes to horizontal)
+  // 2. list-6's other child: list-5 branch
+  //    - list-5 has children: list-4 and entity-5
+  //    - entity-5 has child shared-handler which IS ALREADY PLACED
+  //    - Therefore entity-5 should go first in horizontal branch: list-5 -> entity-5 -> (connect to shared)
+  //    - Then list-4 goes below
+  //
+  // This avoids the vertical edge from list-5 crossing anything
+
+  const graph = makeGraph(
+    ['list-6', 'list-5', 'list-4', 'entity-4', 'entity-5', 'shared-handler'],
+    [
+      ['list-6', 'entity-4', 'item'],  // entity-4 first, will place shared-handler
+      ['list-6', 'list-5', 'coll'],
+      ['list-5', 'list-4', 'coll'],
+      ['list-5', 'entity-5', 'item'],
+      ['entity-4', 'shared-handler', 'handler'],
+      ['entity-5', 'shared-handler', 'handler']
+    ]
+  );
+  const result = layoutGraph(graph);
+
+  console.log('  Child with placed descendant first:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+  console.log('  Validation:', result.validation);
+
+  // Key assertions:
+  // 1. No crossings
+  assertNoCrossings(result, 'Child with placed descendant should prevent crossings');
+  assertNoCollisions(result);
+
+  // 2. shared-handler must be right of BOTH entity-4 and entity-5
+  const e4Pos = result.gridPos.get('entity-4');
+  const e5Pos = result.gridPos.get('entity-5');
+  const sharedPos = result.gridPos.get('shared-handler');
+
+  if (sharedPos.col <= e4Pos.col) {
+    throw new Error(`shared-handler (col=${sharedPos.col}) must be right of entity-4 (col=${e4Pos.col})`);
+  }
+  if (sharedPos.col <= e5Pos.col) {
+    throw new Error(`shared-handler (col=${sharedPos.col}) must be right of entity-5 (col=${e5Pos.col})`);
+  }
 });
 
 // ============================================================================

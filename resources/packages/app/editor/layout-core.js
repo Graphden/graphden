@@ -1,9 +1,9 @@
 // Layout Core - Grid-based layout with no edge crossings
 // Algorithm:
-// 1. Build horizontal branch (follow first children)
+// 1. Build horizontal branch (follow first children, prefer shared nodes)
 // 2. Place branch below lowest existing nodes in its columns
 // 3. Process branch right-to-left, placing remaining children below
-// 4. For shared nodes: detect merge point and place merging branches adjacent
+// 4. For shared nodes: prioritize them to be placed first/higher
 
 /**
  * Build adjacency map from edges
@@ -90,21 +90,17 @@ function placeVEdge(matrix, row, col) {
 /**
  * Find lowest occupied row in columns [startCol, startCol + length)
  * Considers both nodes AND vertical edges
- * Returns -1 if all columns are empty
  */
 function findLowestInColumns(matrix, startCol, length) {
   let lowest = -1;
   for (let c = startCol; c < startCol + length; c++) {
-    // Check nodes
     for (let r = 0; r < matrix.nodeGrid.length; r++) {
       if (getNodeAt(matrix, r, c) !== null) {
         lowest = Math.max(lowest, r);
       }
     }
-    // Check vertical edges - if there's a vEdge at (r, c), something will cross row r+1
     for (let r = 0; r < matrix.vEdge.length; r++) {
       if (matrix.vEdge[r] && matrix.vEdge[r][c]) {
-        // Vertical edge goes from row r to r+1, so row r+1 is "occupied" by this edge
         lowest = Math.max(lowest, r + 1);
       }
     }
@@ -113,18 +109,136 @@ function findLowestInColumns(matrix, startCol, length) {
 }
 
 /**
- * Collect horizontal branch - follow first children until no more
+ * Check if drawing a horizontal edge at given row from startCol to endCol would cross vertical edges
  */
-function collectBranch(nodeId, children, placed) {
+function wouldCrossVerticalEdge(matrix, row, startCol, endCol) {
+  for (let c = startCol + 1; c < endCol; c++) {
+    // Check if there's a vertical edge passing through this row at column c
+    // A vertical edge "passes through" row r if vEdge[r-1][c] && vEdge[r][c] are both true
+    // Or if vEdge[r-1][c] is true and there's a node at (r, c)
+    // Or if there's a node above at (r-1, c) with vEdge[r-1][c]
+    if (row > 0 && matrix.vEdge[row - 1] && matrix.vEdge[row - 1][c]) {
+      // Vertical edge comes from above - would cross
+      return c;
+    }
+    if (matrix.vEdge[row] && matrix.vEdge[row][c]) {
+      // Vertical edge goes down from this row - might cross depending on node
+      // Actually if there's no node at (row, c), then drawing hEdge here would cross
+      if (getNodeAt(matrix, row, c) === null) {
+        return c;
+      }
+    }
+  }
+  return -1;
+}
+
+/**
+ * Check if node or any of its descendants has an already-placed node
+ */
+function hasPlacedDescendant(nodeId, children, placed, visited) {
+  if (visited.has(nodeId)) return false;
+  visited.add(nodeId);
+
+  if (placed.has(nodeId)) return true;
+
+  const nodeChildren = children.get(nodeId) || [];
+  for (const childId of nodeChildren) {
+    if (hasPlacedDescendant(childId, children, placed, visited)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Collect horizontal branch - follow first children
+ * If a child is already placed (shared), stop there
+ * Prioritize children that have already-placed descendants (to minimize vertical edges)
+ */
+function collectBranch(nodeId, children, placed, referencedBy) {
   const branch = [];
   let current = nodeId;
+
   while (current && !placed.has(current)) {
     branch.push(current);
     const nodeChildren = children.get(current) || [];
-    // First child continues the branch
-    current = nodeChildren.length > 0 ? nodeChildren[0] : null;
+    if (nodeChildren.length === 0) break;
+
+    // Sort children:
+    // 1. Already-placed nodes first (we'll connect to them)
+    // 2. Nodes with already-placed descendants (to keep them in horizontal branch)
+    // 3. Shared nodes next
+    // 4. Regular nodes last
+    const sortedChildren = [...nodeChildren].sort((a, b) => {
+      const aPlaced = placed.has(a);
+      const bPlaced = placed.has(b);
+
+      // Already placed nodes first (we'll connect to them)
+      if (aPlaced && !bPlaced) return -1;
+      if (bPlaced && !aPlaced) return 1;
+
+      // Check if either has placed descendants
+      const aHasPlacedDesc = hasPlacedDescendant(a, children, placed, new Set());
+      const bHasPlacedDesc = hasPlacedDescendant(b, children, placed, new Set());
+
+      // Nodes with placed descendants should go first (horizontal branch)
+      if (aHasPlacedDesc && !bHasPlacedDesc) return -1;
+      if (bHasPlacedDesc && !aHasPlacedDesc) return 1;
+
+      // Shared nodes next
+      const aShared = (referencedBy.get(a) || []).length > 1;
+      const bShared = (referencedBy.get(b) || []).length > 1;
+      if (aShared && !bShared) return -1;
+      if (bShared && !aShared) return 1;
+
+      return 0;
+    });
+
+    current = sortedChildren[0];
   }
+
   return branch;
+}
+
+/**
+ * Shift a node and all its descendants to a new column
+ * Also shifts any unrelated nodes that would collide
+ */
+function shiftNodeRight(matrix, gridPos, nodeId, newCol, children, shifted) {
+  if (shifted.has(nodeId)) return;
+  shifted.add(nodeId);
+
+  const pos = gridPos.get(nodeId);
+  if (!pos) return;
+
+  const oldCol = pos.col;
+  const colDelta = newCol - oldCol;
+  if (colDelta <= 0) return;
+
+  // Check if new position is occupied by a different node
+  const occupant = getNodeAt(matrix, pos.row, newCol);
+  if (occupant && occupant !== nodeId) {
+    // Shift the occupant first (cascade)
+    shiftNodeRight(matrix, gridPos, occupant, newCol + 1, children, shifted);
+  }
+
+  // Clear old position
+  if (matrix.nodeGrid[pos.row] && matrix.nodeGrid[pos.row][oldCol] === nodeId) {
+    matrix.nodeGrid[pos.row][oldCol] = null;
+  }
+
+  // Place at new position
+  pos.col = newCol;
+  placeNode(matrix, nodeId, pos.row, newCol);
+
+  // Shift all children too
+  const nodeChildren = children.get(nodeId) || [];
+  for (const childId of nodeChildren) {
+    const childPos = gridPos.get(childId);
+    if (childPos && childPos.col > oldCol) {
+      shiftNodeRight(matrix, gridPos, childId, childPos.col + colDelta, children, shifted);
+    }
+  }
 }
 
 /**
@@ -135,8 +249,8 @@ function buildMatrix(rootId, children, edgeArgNames) {
   const gridPos = new Map();
   const placed = new Set();
 
-  // Track which nodes reference which (for detecting shared nodes)
-  const referencedBy = new Map(); // nodeId -> [parentIds]
+  // Track which nodes are referenced by multiple parents (shared nodes)
+  const referencedBy = new Map();
   children.forEach((childList, parentId) => {
     childList.forEach(childId => {
       if (!referencedBy.has(childId)) referencedBy.set(childId, []);
@@ -145,23 +259,70 @@ function buildMatrix(rootId, children, edgeArgNames) {
   });
 
   /**
+   * Sort children for processing order:
+   * - Already placed (shared) nodes first - we just draw edge to them
+   * - Shared nodes (referenced by multiple) next - they need to be placed higher
+   * - Regular nodes last
+   */
+  function sortChildren(nodeChildren) {
+    return [...nodeChildren].sort((a, b) => {
+      const aPlaced = placed.has(a);
+      const bPlaced = placed.has(b);
+      const aShared = (referencedBy.get(a) || []).length > 1;
+      const bShared = (referencedBy.get(b) || []).length > 1;
+
+      if (aPlaced && !bPlaced) return -1;
+      if (bPlaced && !aPlaced) return 1;
+      if (aShared && !bShared) return -1;
+      if (bShared && !aShared) return 1;
+      return 0;
+    });
+  }
+
+  /**
    * Place a branch starting at nodeId
-   * @param nodeId - starting node
-   * @param startCol - column for first node
-   * @param minRow - minimum row (must be >= this)
-   * @returns {maxRow} - lowest row used by this branch and its subtrees
    */
   function placeBranch(nodeId, startCol, minRow) {
-    // 1. Collect the horizontal branch
-    const branch = collectBranch(nodeId, children, placed);
+    const branch = collectBranch(nodeId, children, placed, referencedBy);
     if (branch.length === 0) return minRow;
 
-    // 2. Find row: below lowest existing node/edge in exactly N columns
-    // where N = branch length. Only check columns that this branch will occupy.
+    // Find row: below lowest existing node/edge in our columns
     const lowest = findLowestInColumns(matrix, startCol, branch.length);
-    const row = Math.max(minRow, lowest + 1);
+    let row = Math.max(minRow, lowest + 1);
 
-    // 3. Place all nodes in branch
+    // Check if any node in branch will connect to a shared node via horizontal edge
+    // that would cross existing vertical edges
+    for (let i = 0; i < branch.length; i++) {
+      const nid = branch[i];
+      const col = startCol + i;
+      const nodeChildren = children.get(nid) || [];
+
+      for (const childId of nodeChildren) {
+        if (placed.has(childId)) {
+          const childPos = gridPos.get(childId);
+          // If child is to the right and same row, horizontal edge would be drawn
+          // Check if it would cross vertical edges
+          if (childPos && childPos.col > col) {
+            // Check if placing at current row would cause crossing
+            const crossCol = wouldCrossVerticalEdge(matrix, row, col, childPos.col);
+            if (crossCol !== -1) {
+              // Find lowest vertical edge extent in the crossing column
+              let lowestVEdge = row;
+              for (let r = row; r < matrix.vEdge.length; r++) {
+                if (matrix.vEdge[r] && matrix.vEdge[r][crossCol]) {
+                  lowestVEdge = r + 1;
+                } else {
+                  break;
+                }
+              }
+              row = Math.max(row, lowestVEdge + 1);
+            }
+          }
+        }
+      }
+    }
+
+    // Place all nodes in branch
     for (let i = 0; i < branch.length; i++) {
       const nid = branch[i];
       const col = startCol + i;
@@ -169,7 +330,6 @@ function buildMatrix(rootId, children, edgeArgNames) {
       gridPos.set(nid, { row, col });
       placed.add(nid);
 
-      // Horizontal edge to next node in branch
       if (i < branch.length - 1) {
         const nextId = branch[i + 1];
         const argName = edgeArgNames.get(nid + '->' + nextId) || '';
@@ -179,32 +339,46 @@ function buildMatrix(rootId, children, edgeArgNames) {
 
     let maxRowUsed = row;
 
-    // 4. Process branch RIGHT TO LEFT
+    // Process branch RIGHT TO LEFT
     for (let i = branch.length - 1; i >= 0; i--) {
       const nid = branch[i];
       const col = startCol + i;
       const nodeChildren = children.get(nid) || [];
 
-      // Skip first child (already in branch), process rest
-      for (let j = 1; j < nodeChildren.length; j++) {
-        const childId = nodeChildren[j];
+      // Sort children, skip first (already in branch if not placed)
+      const sortedChildren = sortChildren(nodeChildren);
+      const firstInBranch = branch[i + 1]; // Next node in branch (if any)
+
+      for (const childId of sortedChildren) {
+        // Skip if this child is the next node in our branch
+        if (childId === firstInBranch) continue;
+
+        const argName = edgeArgNames.get(nid + '->' + childId) || '';
 
         if (placed.has(childId)) {
-          // Shared node - already placed, just draw edge
+          // Shared node already placed - check if it's to the right of current parent
           const childPos = gridPos.get(childId);
-          drawEdge(matrix, row, col, childPos.row, childPos.col, edgeArgNames.get(nid + '->' + childId) || '');
+          const requiredCol = col + 1;
+
+          if (childPos.col < requiredCol) {
+            // Child is not to the right - shift it and its subtree
+            const shifted = new Set();
+            shiftNodeRight(matrix, gridPos, childId, requiredCol, children, shifted);
+          }
+
+          // Now draw edge to the (possibly shifted) child
+          const newChildPos = gridPos.get(childId);
+          drawEdge(matrix, row, col, newChildPos.row, newChildPos.col, argName);
         } else {
           // Place child's branch
-          // Child must be below parent (row + 1), but placeBranch will find
-          // the actual row based on what's in its columns
           const childCol = col + 1;
-          const childMinRow = row + 1;  // Just below parent, not below everything
+          const childMinRow = row + 1;
 
           const childMaxRow = placeBranch(childId, childCol, childMinRow);
           const childPos = gridPos.get(childId);
 
-          // Draw vertical edge from parent down to child
           if (childPos) {
+            // Draw vertical edge from parent down to child
             for (let r = row; r < childPos.row; r++) {
               placeVEdge(matrix, r, childCol);
             }
@@ -219,27 +393,26 @@ function buildMatrix(rootId, children, edgeArgNames) {
   }
 
   /**
-   * Draw edge from (r1,c1) to (r2,c2)
-   * For shared nodes that are already placed
+   * Draw edge from parent to child (for already-placed shared nodes)
    */
-  function drawEdge(matrix, r1, c1, r2, c2, argName) {
-    if (r1 === r2) {
-      // Same row - horizontal
-      const minC = Math.min(c1, c2);
-      const maxC = Math.max(c1, c2);
-      for (let c = minC; c < maxC; c++) {
-        placeHEdge(matrix, r1, c, c === c1 ? argName : '');
+  function drawEdge(matrix, parentRow, parentCol, childRow, childCol, argName) {
+    if (childRow === parentRow && childCol > parentCol) {
+      // Same row, child to the right - horizontal edge
+      for (let c = parentCol; c < childCol; c++) {
+        placeHEdge(matrix, parentRow, c, c === parentCol ? argName : '');
       }
-    } else if (r1 < r2) {
-      // Parent above child - vertical edge down
-      for (let r = r1; r < r2; r++) {
-        placeVEdge(matrix, r, c2);
+    } else if (childRow > parentRow) {
+      // Child below - vertical edge down in child's column
+      for (let r = parentRow; r < childRow; r++) {
+        placeVEdge(matrix, r, childCol);
       }
-    } else {
-      // Parent below child - edge goes up (unusual but handle it)
-      // Use column c2 for vertical
-      for (let r = r2; r < r1; r++) {
-        placeVEdge(matrix, r, c2);
+    } else if (childRow < parentRow) {
+      // Child above parent - edge goes up
+      // This is the problematic case - we need to route carefully
+      // Draw vertical edge up in a column to the right of child
+      const edgeCol = childCol + 1;
+      for (let r = childRow; r < parentRow; r++) {
+        placeVEdge(matrix, r, edgeCol);
       }
     }
   }
@@ -302,9 +475,6 @@ function formatMatrixASCII(matrix, gridPos) {
 
 /**
  * Check for edge crossings
- * A crossing happens when:
- * - Horizontal edge at row r goes from col c to c+1
- * - Vertical edge passes THROUGH row r at col c+1 (from above to below)
  */
 function detectCrossings(matrix, gridPos) {
   const crossings = [];
@@ -313,19 +483,7 @@ function detectCrossings(matrix, gridPos) {
   for (let r = 0; r < hEdge.length; r++) {
     for (let c = 0; c < (hEdge[r] || []).length; c++) {
       if (hEdge[r][c] !== null && hEdge[r][c] !== undefined) {
-        // Horizontal edge at row r from col c to c+1
-        // Check if there's a vertical edge that PASSES THROUGH this row at col c+1
-        // A vertical edge passes through if:
-        // - vEdge[r-1][c+1] = true (edge comes FROM above into row r)
-        // - AND vEdge[r][c+1] = true (edge continues below row r)
-        // OR if there's a node at (r, c+1) with vEdge going down
-
         const colToCheck = c + 1;
-
-        // Check if vertical edge passes through row r at col c+1
-        // vEdge[row][col] means edge from row to row+1 at col
-        // So for a vertical line passing through row r, we need:
-        // vEdge[r-1][col] (entering row r from above) AND vEdge[r][col] (leaving row r going down)
         if (r > 0 && vEdge[r-1] && vEdge[r-1][colToCheck] && vEdge[r] && vEdge[r][colToCheck]) {
           crossings.push({
             type: 'hv_cross',
@@ -358,12 +516,11 @@ function validateMatrix(matrix, gridPos) {
     positions.set(key, nodeId);
   });
 
-  // Check for crossings
   const crossings = detectCrossings(matrix, gridPos);
   crossings.forEach(c => {
     issues.push({
       type: 'crossing',
-      message: `Edge crossing at h(${c.hEdge.row},${c.hEdge.col}) x v(${c.vEdge.row},${c.vEdge.col})`
+      message: `Edge crossing at h(${c.hEdge.row},${c.hEdge.col}) x v(${c.vEdge.col},${c.vEdge.passingRow})`
     });
   });
 
@@ -415,6 +572,7 @@ if (typeof module !== 'undefined' && module.exports) {
     ensureMatrixSize,
     getNodeAt,
     findLowestInColumns,
+    wouldCrossVerticalEdge,
     collectBranch,
     placeNode,
     placeHEdge,

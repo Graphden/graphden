@@ -40,7 +40,8 @@ const ANIM_DURATION = 200;
 
 // Grid constants
 const GRID_GAP_X = 80;  // Horizontal gap between columns (space for edge routing)
-const GRID_GAP_Y = 30;  // Vertical gap between rows
+const GRID_GAP_Y = 40;  // Vertical gap between rows (includes space for drag handle)
+const DRAG_HANDLE_HEIGHT = 14;  // Height of drag handle at bottom of nodes
 
 // Truncate label to maxLen with ellipsis
 function truncateLabel(label, maxLen) {
@@ -179,7 +180,7 @@ function selectFn(fnId, updateHistory = true) {
   renderGraph(true);
 }
 
-// Set expansion level for a node
+// Set expansion level for a node (click)
 function setExpansionLevel(originalFnId, level) {
   if (level === 0) {
     expansionLevel.delete(originalFnId);
@@ -255,19 +256,27 @@ window.addEventListener('popstate', () => {
 // ============================================================================
 
 // Calculate node dimensions based on label
+// Note: all nodes get drag handle, so add DRAG_HANDLE_HEIGHT to height
 function calculateNodeSize(nodeData) {
   const label = nodeData.data.label || '';
   const type = nodeData.data.type;
+  const isPlaceholder = nodeData.data.isPlaceholder;
 
   if (type === 'arg') {
     const maxLen = 30;
     const effectiveLen = Math.min(label.length, maxLen);
     return {
       width: Math.max(40, effectiveLen * 6 + 16),
-      height: 28
+      height: 28 + DRAG_HANDLE_HEIGHT
+    };
+  } else if (isPlaceholder) {
+    // Placeholder node (unset arg)
+    return {
+      width: Math.max(40, label.length * 6 + 16),
+      height: 28 + DRAG_HANDLE_HEIGHT
     };
   } else {
-    // fn node
+    // fn node with overlay
     const lines = label.split('\n');
     const maxLineLen = 30;
     const maxLen = Math.max(...lines.map(l => {
@@ -276,7 +285,7 @@ function calculateNodeSize(nodeData) {
     }));
     return {
       width: Math.max(80, maxLen * 7 + 24),
-      height: Math.max(30, lines.length * 16 + 16)
+      height: Math.max(30, lines.length * 16 + 16) + DRAG_HANDLE_HEIGHT
     };
   }
 }
@@ -290,12 +299,8 @@ function buildGridLayout(elements) {
 
   // Use layout-core.js for matrix building
   const result = layoutGraph(elements);
-  const { matrix, gridPos, collisions, validation } = result;
+  const { matrix, gridPos, validation } = result;
 
-  // Log any issues for debugging
-  if (collisions.length > 0) {
-    console.error('Layout collisions:', collisions);
-  }
   if (!validation.valid) {
     console.error('Layout validation issues:', validation.issues);
   }
@@ -583,32 +588,24 @@ function createCytoscape(elements, shouldFit) {
         'background-opacity': 0,
         'border-width': 0
       }},
-      // Placeholder (unset arg) - dashed border, same black color
+      // Placeholder (unset arg) - hide, overlay shows content with drag handle
       { selector: 'node[?isPlaceholder]', style: {
-        'border-style': 'dashed'
+        'label': '',
+        'background-opacity': 0,
+        'border-width': 0
       }},
-      // Arg value node
+      // Arg value node - hide, overlay shows content with drag handle
       { selector: 'node[type="arg"]', style: {
-        'label': function(node) {
-          return truncateLabel(node.data('label') || '', 30);
-        },
-        'text-valign': 'center',
-        'text-halign': 'center',
-        'font-size': '10px',
-        'font-family': 'SF Mono, Monaco, monospace',
-        'shape': 'rectangle',
-        'background-color': '#ffffff',
-        'border-width': 2,
-        'border-color': '#000000',
-        'color': '#000000',
-        'padding': '8px',
+        'label': '',
+        'background-opacity': 0,
+        'border-width': 0,
         'width': function(node) {
           var label = node.data('label') || '';
           var maxLen = 30;
           var effectiveLen = Math.min(label.length, maxLen);
           return Math.max(40, effectiveLen * 6 + 16);
         },
-        'height': 28
+        'height': 28 + 14  // content + drag handle
       }},
       // Edge - taxi style
       { selector: 'edge', style: {
@@ -645,7 +642,9 @@ function createCytoscape(elements, shouldFit) {
     ],
     layout: { name: 'preset' },
     minZoom: 0.1,
-    maxZoom: 3
+    maxZoom: 3,
+    // Disable direct node dragging - only drag via overlay handle
+    autoungrabify: true
   });
 
   // Apply initial layout
@@ -661,28 +660,8 @@ function createCytoscape(elements, shouldFit) {
     cy.fit(50);
   }
 
-  // Track user-moved nodes
-  cy.on('dragfree', 'node', function(evt) {
-    userMovedNodes.add(evt.target.id());
-  });
-
-  // Event handlers
-  cy.on('grab', 'node', function() {
-    isGrabbing = true;
-    suppressEdgeWarnings = true;
-    clearPreviewState();
-  });
-
-  cy.on('free', 'node', function() {
-    isGrabbing = false;
-    suppressEdgeWarnings = false;
-  });
-
+  // Event handlers for pan/zoom
   cy.on('pan zoom', function() {
-    updateOverlayPositions();
-  });
-
-  cy.on('drag', 'node', function() {
     updateOverlayPositions();
   });
 
@@ -694,6 +673,57 @@ function createCytoscape(elements, shouldFit) {
 // NODE OVERLAYS (for ancestor list interaction)
 // ============================================================================
 
+// Helper to create drag handle for any overlay
+function createDragHandle(overlay, cyNode) {
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'drag-handle';
+  dragHandle.style.height = '12px';
+  dragHandle.style.background = 'linear-gradient(to bottom, #f0f0f0, #ddd)';
+  dragHandle.style.borderTop = '1px solid #ccc';
+  dragHandle.style.cursor = 'grab';
+  dragHandle.style.display = 'flex';
+  dragHandle.style.alignItems = 'center';
+  dragHandle.style.justifyContent = 'center';
+  dragHandle.innerHTML = '<span style="color:#999;font-size:8px;">⋮⋮⋮</span>';
+
+  dragHandle.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+
+    if (!cyNode.length) return;
+
+    isGrabbing = true;
+    dragHandle.style.cursor = 'grabbing';
+    userMovedNodes.add(cyNode.id());
+
+    let lastX = e.clientX;
+    let lastY = e.clientY;
+
+    const onMouseMove = (moveE) => {
+      const dx = (moveE.clientX - lastX) / cy.zoom();
+      const dy = (moveE.clientY - lastY) / cy.zoom();
+      lastX = moveE.clientX;
+      lastY = moveE.clientY;
+
+      const pos = cyNode.position();
+      cyNode.position({ x: pos.x + dx, y: pos.y + dy });
+      updateOverlayPositions();
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+      isGrabbing = false;
+      dragHandle.style.cursor = 'grab';
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  });
+
+  overlay.appendChild(dragHandle);
+}
+
 function createNodeOverlays() {
   // Remove existing overlays
   document.querySelectorAll('.node-overlay').forEach(el => el.remove());
@@ -702,6 +732,7 @@ function createNodeOverlays() {
 
   const container = document.getElementById('cy');
 
+  // Create overlays for fn nodes (with ancestor list)
   cy.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
     const originalFnId = node.data('originalFnId');
     if (!originalFnId) return;
@@ -711,6 +742,7 @@ function createNodeOverlays() {
 
     const overlay = document.createElement('div');
     overlay.className = 'node-overlay';
+    overlay.dataset.nodeId = node.id();
     overlay.dataset.originalFnId = originalFnId;
     overlay.style.position = 'absolute';
     overlay.style.pointerEvents = 'auto';
@@ -721,7 +753,7 @@ function createNodeOverlays() {
     overlay.style.overflow = 'hidden';
     overlay.style.fontFamily = 'SF Mono, Monaco, monospace';
     overlay.style.fontSize = '11px';
-    overlay.style.cursor = 'pointer';
+    overlay.style.cursor = 'default';
 
     // Build content
     const currentLevel = expansionLevel.get(originalFnId) || 0;
@@ -733,7 +765,7 @@ function createNodeOverlays() {
       line.className = 'ancestor-line';
       line.dataset.level = item.groupLevel;
       line.style.padding = '4px 8px';
-      // Only show separator between different groups
+      line.style.cursor = 'pointer';
       const nextItem = visibleItems[idx + 1];
       const showSeparator = nextItem && nextItem.groupLevel !== item.groupLevel;
       line.style.borderBottom = showSeparator ? '1px solid #eee' : 'none';
@@ -767,61 +799,63 @@ function createNodeOverlays() {
       overlay.appendChild(more);
     }
 
-    // Add drag handle at the bottom
-    const dragHandle = document.createElement('div');
-    dragHandle.className = 'drag-handle';
-    dragHandle.style.height = '12px';
-    dragHandle.style.background = 'linear-gradient(to bottom, #f0f0f0, #ddd)';
-    dragHandle.style.borderTop = '1px solid #ccc';
-    dragHandle.style.cursor = 'grab';
-    dragHandle.style.display = 'flex';
-    dragHandle.style.alignItems = 'center';
-    dragHandle.style.justifyContent = 'center';
-    dragHandle.innerHTML = '<span style="color:#999;font-size:8px;">⋮⋮⋮</span>';
-
-    // Make drag handle pass events to cytoscape node
-    dragHandle.addEventListener('mousedown', (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-
-      const cyNode = cy.getElementById('fn-' + originalFnId);
-      if (!cyNode.length) return;
-
-      isGrabbing = true;
-      dragHandle.style.cursor = 'grabbing';
-
-      let lastX = e.clientX;
-      let lastY = e.clientY;
-
-      const onMouseMove = (moveE) => {
-        const dx = (moveE.clientX - lastX) / cy.zoom();
-        const dy = (moveE.clientY - lastY) / cy.zoom();
-        lastX = moveE.clientX;
-        lastY = moveE.clientY;
-
-        const pos = cyNode.position();
-        cyNode.position({ x: pos.x + dx, y: pos.y + dy });
-        updateOverlayPositions();
-      };
-
-      const onMouseUp = () => {
-        document.removeEventListener('mousemove', onMouseMove);
-        document.removeEventListener('mouseup', onMouseUp);
-        isGrabbing = false;
-        dragHandle.style.cursor = 'grab';
-      };
-
-      document.addEventListener('mousemove', onMouseMove);
-      document.addEventListener('mouseup', onMouseUp);
-    });
-
-    overlay.appendChild(dragHandle);
+    createDragHandle(overlay, node);
 
     overlay.addEventListener('mouseleave', () => {
       if (!rebuildingOverlays && !isGrabbing) {
         setPreviewLevel(originalFnId, null);
       }
     });
+
+    container.appendChild(overlay);
+  });
+
+  // Create overlays for arg nodes (value nodes)
+  cy.nodes('[type="arg"]').forEach(node => {
+    const overlay = document.createElement('div');
+    overlay.className = 'node-overlay';
+    overlay.dataset.nodeId = node.id();
+    overlay.style.position = 'absolute';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.zIndex = '10';
+    overlay.style.background = 'white';
+    overlay.style.border = '2px solid black';
+    overlay.style.borderRadius = '4px';
+    overlay.style.overflow = 'hidden';
+    overlay.style.fontFamily = 'SF Mono, Monaco, monospace';
+    overlay.style.fontSize = '10px';
+
+    const content = document.createElement('div');
+    content.style.padding = '4px 8px';
+    content.textContent = truncateLabel(node.data('label') || '', 30);
+    overlay.appendChild(content);
+
+    createDragHandle(overlay, node);
+
+    container.appendChild(overlay);
+  });
+
+  // Create overlays for placeholder nodes (unset args)
+  cy.nodes('[?isPlaceholder]').forEach(node => {
+    const overlay = document.createElement('div');
+    overlay.className = 'node-overlay';
+    overlay.dataset.nodeId = node.id();
+    overlay.style.position = 'absolute';
+    overlay.style.pointerEvents = 'auto';
+    overlay.style.zIndex = '10';
+    overlay.style.background = 'white';
+    overlay.style.border = '2px dashed black';
+    overlay.style.borderRadius = '8px';
+    overlay.style.overflow = 'hidden';
+    overlay.style.fontFamily = 'SF Mono, Monaco, monospace';
+    overlay.style.fontSize = '11px';
+
+    const content = document.createElement('div');
+    content.style.padding = '4px 8px';
+    content.textContent = node.data('label') || 'any';
+    overlay.appendChild(content);
+
+    createDragHandle(overlay, node);
 
     container.appendChild(overlay);
   });
@@ -836,8 +870,10 @@ function updateOverlayPositions() {
   const zoom = cy.zoom();
 
   document.querySelectorAll('.node-overlay').forEach(overlay => {
-    const originalFnId = overlay.dataset.originalFnId;
-    const node = cy.getElementById('fn-' + originalFnId);
+    const nodeId = overlay.dataset.nodeId;
+    if (!nodeId) return;
+
+    const node = cy.getElementById(nodeId);
     if (!node.length) return;
 
     const pos = node.position();
@@ -847,10 +883,6 @@ function updateOverlayPositions() {
     const screenX = pos.x * zoom + pan.x;
     const screenY = pos.y * zoom + pan.y;
 
-    // After scale(zoom), element will be width*zoom x height*zoom
-    // We want to center it at (screenX, screenY)
-    // With transform-origin: center, the scaled element centers at (left + width/2, top + height/2)
-    // So: left + width/2 = screenX, meaning left = screenX - width/2
     overlay.style.left = (screenX - width / 2) + 'px';
     overlay.style.top = (screenY - height / 2) + 'px';
     overlay.style.width = width + 'px';

@@ -114,6 +114,26 @@ clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test
 clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test/execute-test
 ```
 
+### Frontend Build Verification
+
+The editor frontend has a build timestamp to verify deployments:
+
+1. **After ANY frontend change** (`editor-script.js`, `editor-styles.css`, `layout-core.js`):
+   - Update `BUILD_TIMESTAMP` in `resources/packages/app/editor/editor-script.js`
+   - Use format: `'YYYY-MM-DD HH:MM'` (UTC+3 timezone)
+   - Rebuild: `clojure -T:build uber && docker compose build --no-cache executor && docker compose up -d executor`
+   - Tell user the new timestamp
+
+2. **Verification flow**:
+   - User opens browser console and sees: `[Graphden Editor] Build: 2026-03-19 13:53`
+   - If user reports a different timestamp → changes did NOT deploy
+   - Fix deployment before making more code changes
+
+3. **If deployment fails**:
+   - Check JAR contains changes: `unzip -p target/executor-server.jar packages/app/editor/editor-script.js | grep BUILD_TIMESTAMP`
+   - Check Docker image timestamp: `docker inspect graphden-executor --format '{{.Created}}'`
+   - Ensure JAR was built BEFORE Docker image
+
 ## Architecture Overview
 
 Classical Clojure monorepo. Top namespace: `graphden`. Public API through `interface.clj` only.

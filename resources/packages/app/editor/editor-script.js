@@ -1,6 +1,10 @@
 // Graph editor JavaScript - 2-entity schema visualization
 // Grid-based layout with interactive expand/collapse
 
+// Build timestamp (UTC+3) - update on each change
+const BUILD_TIMESTAMP = '2026-03-19 13:53';
+console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
+
 // Suppress Cytoscape edge overlap warnings only during user drag
 let suppressEdgeWarnings = false;
 (function() {

@@ -27,11 +27,18 @@
 
 
 (defn editor-script
-  "Load JavaScript from external files (layout-core + editor-script)."
+  "Load JavaScript from external files (modular structure)."
   [_args]
-  (str (load-resource "packages/app/editor/layout-core.js")
-       "\n\n"
-       (load-resource "packages/app/editor/editor-script.js")))
+  (str
+    ;; Load modules in dependency order
+    (load-resource "packages/app/editor/editor-state.js")   "\n\n"
+    (load-resource "packages/app/editor/editor-data.js")    "\n\n"
+    (load-resource "packages/app/editor/editor-layout.js")  "\n\n"
+    (load-resource "packages/app/editor/editor-graph.js")   "\n\n"
+    (load-resource "packages/app/editor/editor-overlays.js") "\n\n"
+    (load-resource "packages/app/editor/editor-ui.js")      "\n\n"
+    (load-resource "packages/app/editor/editor-cytoscape.js") "\n\n"
+    (load-resource "packages/app/editor/editor-main.js")))
 
 
 (defn editor-body
@@ -58,9 +65,16 @@
 (defn editor-script-element
   "Wrap JavaScript in a script element."
   [_args]
-  [:script (str (load-resource "packages/app/editor/layout-core.js")
-                "\n\n"
-                (load-resource "packages/app/editor/editor-script.js"))])
+  [:script (str
+             ;; Load modules in dependency order
+             (load-resource "packages/app/editor/editor-state.js")   "\n\n"
+             (load-resource "packages/app/editor/editor-data.js")    "\n\n"
+             (load-resource "packages/app/editor/editor-layout.js")  "\n\n"
+             (load-resource "packages/app/editor/editor-graph.js")   "\n\n"
+             (load-resource "packages/app/editor/editor-overlays.js") "\n\n"
+             (load-resource "packages/app/editor/editor-ui.js")      "\n\n"
+             (load-resource "packages/app/editor/editor-cytoscape.js") "\n\n"
+             (load-resource "packages/app/editor/editor-main.js"))])
 
 
 ;; === Registry ===

@@ -118,21 +118,62 @@ clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test/execute
 
 The editor frontend has a build timestamp to verify deployments:
 
-1. **After ANY frontend change** (`editor-script.js`, `editor-styles.css`, `layout-core.js`):
-   - Update `BUILD_TIMESTAMP` in `resources/packages/app/editor/editor-script.js`
+1. **After ANY frontend change** (any `editor-*.js` or `editor-styles.css`):
+   - Update `BUILD_TIMESTAMP` in `resources/packages/app/editor/editor-state.js`
    - Use format: `'YYYY-MM-DD HH:MM'` (UTC+3 timezone)
    - Rebuild: `clojure -T:build uber && docker compose build --no-cache executor && docker compose up -d executor`
    - Tell user the new timestamp
 
 2. **Verification flow**:
-   - User opens browser console and sees: `[Graphden Editor] Build: 2026-03-19 13:53`
+   - User opens browser console and sees: `[Graphden Editor] Build: YYYY-MM-DD HH:MM`
    - If user reports a different timestamp → changes did NOT deploy
    - Fix deployment before making more code changes
 
 3. **If deployment fails**:
-   - Check JAR contains changes: `unzip -p target/executor-server.jar packages/app/editor/editor-script.js | grep BUILD_TIMESTAMP`
+   - Check JAR contains changes: `unzip -p target/executor-server.jar packages/app/editor/editor-state.js | grep BUILD_TIMESTAMP`
    - Check Docker image timestamp: `docker inspect graphden-executor --format '{{.Created}}'`
    - Ensure JAR was built BEFORE Docker image
+
+### Frontend Module Structure
+
+The editor frontend is split into modules for better maintainability:
+
+| File | Purpose | Dependencies |
+|------|---------|--------------|
+| `editor-state.js` | Global variables, constants, timestamp | - |
+| `editor-data.js` | Data utilities, lookups, inheritance | state |
+| `editor-layout.js` | Grid layout algorithm, positioning | state |
+| `editor-graph.js` | Building graph elements (nodes, edges) | state, data |
+| `editor-overlays.js` | HTML overlays, drag handles | state, data |
+| `editor-ui.js` | Sidebar, selection, expansion controls | state, data, cytoscape |
+| `editor-cytoscape.js` | Cytoscape initialization, rendering | state, layout, overlays, graph |
+| `editor-main.js` | Entry point, init | all |
+
+**Load order** (in `impls.clj`): state → data → layout → graph → overlays → ui → cytoscape → main
+
+### Browser Test Tool
+
+Automated browser testing with Playwright in `tools/browser-test/`:
+
+```bash
+cd tools/browser-test
+
+# View a function's graph
+node check-editor.js web-server
+
+# Expand root node ancestors
+node check-editor.js web-server root:1
+
+# Expand multiple nodes
+node check-editor.js web-server root:1 router-fn:1
+```
+
+**Output:**
+- Screenshot: `/tmp/editor-screenshot.png`
+- Console logs printed to terminal
+- Build timestamp verification
+
+**Expand spec format:** `node-name:level` (use `root` for selected function)
 
 ## Architecture Overview
 

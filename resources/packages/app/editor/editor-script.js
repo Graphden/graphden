@@ -392,11 +392,49 @@ function renderGraph(shouldFit = true) {
     return;
   }
 
+  // Find the node that triggered expand (from previewLevel or most recent expansionLevel change)
+  // We want to keep this node stationary so hover doesn't break
+  let anchorNodeId = null;
+  let anchorOldPos = null;
+
+  // Check previewLevel first (hover-triggered expand)
+  if (previewLevel.size > 0) {
+    const previewFnId = previewLevel.keys().next().value;
+    anchorNodeId = 'fn-' + previewFnId;
+  }
+
+  // Save anchor node's current position before any changes
+  if (anchorNodeId) {
+    const anchorNode = cy.getElementById(anchorNodeId);
+    if (anchorNode.length) {
+      anchorOldPos = { ...anchorNode.position() };
+    }
+  }
+
   // Stop any running animations
   cy.nodes().forEach(node => node.stop(true, true));
 
   // Build layout
   const layout = buildGridLayout(elements);
+
+  // Calculate offset to keep anchor node stationary
+  let offsetX = 0;
+  let offsetY = 0;
+  if (anchorNodeId && anchorOldPos) {
+    const anchorNewPos = layout.get(anchorNodeId);
+    if (anchorNewPos) {
+      offsetX = anchorOldPos.x - anchorNewPos.x;
+      offsetY = anchorOldPos.y - anchorNewPos.y;
+    }
+  }
+
+  // Apply offset to all layout positions
+  if (offsetX !== 0 || offsetY !== 0) {
+    layout.forEach((pos, nodeId) => {
+      pos.x += offsetX;
+      pos.y += offsetY;
+    });
+  }
 
   // Build maps for quick lookup
   const newNodeIds = new Set(elements.nodes.map(n => n.data.id));

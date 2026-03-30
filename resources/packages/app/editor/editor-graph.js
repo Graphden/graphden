@@ -86,9 +86,8 @@ function buildGraphElements() {
 
   function collectFnArgs(fnId, bindings) {
     const args = lookups.argsByFn.get(fnId) || [];
-    const refs = [];
-    const values = [];
-    const unset = [];
+    // Collect all args preserving original order from database
+    const allArgs = [];
 
     args.forEach(arg => {
       const argName = resolveArgName(arg);
@@ -99,20 +98,25 @@ function buildGraphElements() {
 
       if (binding) {
         if (binding.refId) {
-          refs.push({ argName: binding.argName, refId: binding.refId, argId: binding.argId });
+          allArgs.push({ type: 'ref', argName: binding.argName, refId: binding.refId, argId: binding.argId });
         } else if (binding.value !== null && binding.value !== undefined) {
-          values.push({ argName: binding.argName, value: binding.value, argId: binding.argId });
+          allArgs.push({ type: 'value', argName: binding.argName, value: binding.value, argId: binding.argId });
         }
       } else if (hasRef) {
-        refs.push({ argName, refId: arg['ref-id'], argId: arg.id });
+        allArgs.push({ type: 'ref', argName, refId: arg['ref-id'], argId: arg.id });
       } else if (hasValue) {
-        values.push({ argName, value: arg.value, argId: arg.id });
+        allArgs.push({ type: 'value', argName, value: arg.value, argId: arg.id });
       } else {
-        unset.push({ argName, type: arg.type || 'any', argId: arg.id });
+        allArgs.push({ type: 'unset', argName, argType: arg.type || 'any', argId: arg.id });
       }
     });
 
-    return { refs, values, unset };
+    // Split back into categories but preserve relative order
+    const refs = allArgs.filter(a => a.type === 'ref');
+    const values = allArgs.filter(a => a.type === 'value');
+    const unset = allArgs.filter(a => a.type === 'unset');
+
+    return { refs, values, unset, allArgs };
   }
 
   // ============================================================================
@@ -224,18 +228,17 @@ function buildGraphElements() {
       }
     }
 
-    const { refs, values, unset } = collectFnArgs(displayFnId, bindings);
+    const { allArgs } = collectFnArgs(displayFnId, bindings);
 
-    refs.forEach(({ argName, refId, argId }) => {
-      processAnyFn(refId, nodeId, argName, false, bindings);
-    });
-
-    values.forEach(({ argName, value, argId }) => {
-      addArgValueNode(argName, value, argId, nodeId);
-    });
-
-    unset.forEach(({ argName, type, argId }) => {
-      addUnsetArgNode(argName, type, argId, nodeId);
+    // Process args in original order (preserves database order)
+    allArgs.forEach(arg => {
+      if (arg.type === 'ref') {
+        processAnyFn(arg.refId, nodeId, arg.argName, false, bindings);
+      } else if (arg.type === 'value') {
+        addArgValueNode(arg.argName, arg.value, arg.argId, nodeId);
+      } else if (arg.type === 'unset') {
+        addUnsetArgNode(arg.argName, arg.argType, arg.argId, nodeId);
+      }
     });
 
     return nodeId;

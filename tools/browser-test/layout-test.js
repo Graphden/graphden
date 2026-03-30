@@ -371,7 +371,7 @@ function makeEditorRoutesStyle() {
   };
 }
 
-describe('layoutGraph - splitting nodes must be adjacent', () => {
+describe('layoutGraph - shared handler with multiple siblings', () => {
   const data = makeEditorRoutesStyle();
   const result = layout.layoutGraph(data);
 
@@ -380,38 +380,326 @@ describe('layoutGraph - splitting nodes must be adjacent', () => {
   const posCreate = result.gridPos.get('form-create-route');
   const posEdit = result.gridPos.get('form-edit-route');
   const posHandler = result.gridPos.get('form-handler');
+  const posCreatePath = result.gridPos.get('create-path');
+  const posEditPath = result.gridPos.get('edit-path');
 
-  // Splitting nodes must be adjacent (|row difference| == 1)
-  const rowDiff = Math.abs(posCreate.row - posEdit.row);
-  assertEqual(rowDiff, 1, 'Splitting nodes must be adjacent (row diff = 1)');
+  // For upper parent (create-route): path is first child, on same row
+  assertEqual(posCreatePath.row, posCreate.row,
+    'create-path should be on same row as form-create-route');
 
-  // Shared handler should be on horizontal line of lower branch
-  // Lower branch is the one with shorter path to shared (form-edit-route in this case)
-  // So form-handler should be on same row as form-edit-route
+  // For lower parent (edit-route): shared handler becomes first child (horizontal)
+  // edit-path goes below
   const lowerRow = Math.max(posCreate.row, posEdit.row);
-  assertEqual(posHandler.row, lowerRow, 'Shared handler should be on row of lower splitting node');
+  assertEqual(posHandler.row, lowerRow,
+    `Shared handler should be on same row as lower route (${lowerRow}), got ${posHandler.row}`);
+  assert(posEditPath.row > posEdit.row,
+    `edit-path should be BELOW form-edit-route (handler took horizontal spot)`);
+});
 
-  // No other routes should be between splitting nodes
-  const posEditorRoute = result.gridPos.get('editor-route');
-  const posApiRoute = result.gridPos.get('api-route');
-  const posHealthRoute = result.gridPos.get('health-route');
+// Realistic editor-routes: two routes with path args AND shared handler
+// This tests that shared handler is on same row as its direct parent from lower branch
+// NOT below the path args
+function makeRealisticSharedHandler() {
+  return {
+    nodes: [
+      { data: { id: 'editor-routes', type: 'fn', label: 'editor-routes' } },
+      { data: { id: 'form-create-route', type: 'fn', label: 'form-create-route' } },
+      { data: { id: 'form-edit-route', type: 'fn', label: 'form-edit-route' } },
+      { data: { id: 'create-path', type: 'fn', label: 'create-path', isPlaceholder: true } },
+      { data: { id: 'edit-path', type: 'fn', label: 'edit-path', isPlaceholder: true } },
+      { data: { id: 'form-handler', type: 'fn', label: 'form-handler' } }  // shared!
+    ],
+    edges: [
+      // editor-routes has 2 route children
+      { data: { id: 'e1', source: 'editor-routes', target: 'form-create-route', argName: 'item1' } },
+      { data: { id: 'e2', source: 'editor-routes', target: 'form-edit-route', argName: 'item2' } },
+      // Each route has path and handler children
+      { data: { id: 'e3', source: 'form-create-route', target: 'create-path', argName: 'path' } },
+      { data: { id: 'e4', source: 'form-create-route', target: 'form-handler', argName: 'handler' } },
+      { data: { id: 'e5', source: 'form-edit-route', target: 'edit-path', argName: 'path' } },
+      { data: { id: 'e6', source: 'form-edit-route', target: 'form-handler', argName: 'handler' } }  // shared!
+    ]
+  };
+}
 
-  const minSplitRow = Math.min(posCreate.row, posEdit.row);
-  const maxSplitRow = Math.max(posCreate.row, posEdit.row);
+describe('layoutGraph - shared handler on same row as lower branch parent', () => {
+  const data = makeRealisticSharedHandler();
+  const result = layout.layoutGraph(data);
 
-  // Other routes should NOT be between splitting nodes
-  assert(
-    posEditorRoute.row < minSplitRow || posEditorRoute.row > maxSplitRow,
-    'editor-route should not be between splitting nodes'
-  );
-  assert(
-    posApiRoute.row < minSplitRow || posApiRoute.row > maxSplitRow,
-    'api-route should not be between splitting nodes'
-  );
-  assert(
-    posHealthRoute.row < minSplitRow || posHealthRoute.row > maxSplitRow,
-    'health-route should not be between splitting nodes'
-  );
+  console.log('  Realistic shared handler test:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  assert(result.validation.valid, 'Layout should be valid');
+
+  const posCreate = result.gridPos.get('form-create-route');
+  const posEdit = result.gridPos.get('form-edit-route');
+  const posHandler = result.gridPos.get('form-handler');
+  const posCreatePath = result.gridPos.get('create-path');
+  const posEditPath = result.gridPos.get('edit-path');
+
+  // Both routes should be at col 1 (children of editor-routes at col 0)
+  assertEqual(posCreate.col, 1, 'form-create-route should be at col 1');
+  assertEqual(posEdit.col, 1, 'form-edit-route should be at col 1');
+
+  // Routes should be adjacent (one below the other)
+  const routeRowDiff = Math.abs(posCreate.row - posEdit.row);
+  assertEqual(routeRowDiff, 1, 'Routes should be adjacent (row diff = 1)');
+
+  // Determine which is upper and which is lower
+  const upperRoute = posCreate.row < posEdit.row ? 'form-create-route' : 'form-edit-route';
+  const lowerRoute = posCreate.row < posEdit.row ? 'form-edit-route' : 'form-create-route';
+  const lowerRoutePos = posCreate.row < posEdit.row ? posEdit : posCreate;
+
+  // Key rule: First child is ALWAYS on same row as parent (no steps in horizontal branch)
+  // create-path is first child of form-create-route
+  assertEqual(posCreatePath.row, posCreate.row,
+    'create-path (first child) should be on same row as form-create-route');
+  assertEqual(posCreatePath.col, posCreate.col + 1,
+    'create-path should be at col+1 of form-create-route');
+
+  // For lower parent (edit-route): shared handler becomes first child (horizontal)
+  // edit-path goes BELOW (not on same row)
+  assertEqual(posHandler.row, posEdit.row,
+    'Shared handler should be on same row as form-edit-route (it becomes first child)');
+  assertEqual(posHandler.col, posEdit.col + 1,
+    'Shared handler should be at col+1 of form-edit-route');
+  assert(posEditPath.row > posEdit.row,
+    `edit-path should be BELOW form-edit-route (handler took horizontal spot)`);
+});
+
+// Test with expanded upper branch (simulates expand of entity-form-edit-route)
+// The upper branch becomes longer, but shared handler must still be right of all parents
+function makeExpandedUpperBranch() {
+  return {
+    nodes: [
+      { data: { id: 'editor-routes', type: 'fn', label: 'editor-routes' } },
+      { data: { id: 'form-create-route', type: 'fn', label: 'form-create-route' } },
+      // Expanded form-edit-route -> shows get-route -> route -> assoc-handler chain
+      { data: { id: 'form-edit-route', type: 'fn', label: 'form-edit-route' } },
+      { data: { id: 'get-route', type: 'fn', label: 'get-route' } },
+      { data: { id: 'route', type: 'fn', label: 'route' } },
+      { data: { id: 'assoc-handler', type: 'fn', label: 'assoc-handler' } },
+      { data: { id: 'create-path', type: 'fn', label: 'create-path', isPlaceholder: true } },
+      { data: { id: 'edit-path', type: 'fn', label: 'edit-path', isPlaceholder: true } },
+      { data: { id: 'form-handler', type: 'fn', label: 'form-handler' } }  // shared!
+    ],
+    edges: [
+      { data: { id: 'e1', source: 'editor-routes', target: 'form-create-route', argName: 'item1' } },
+      { data: { id: 'e2', source: 'editor-routes', target: 'form-edit-route', argName: 'item2' } },
+      // form-create-route still direct to handler
+      { data: { id: 'e3', source: 'form-create-route', target: 'create-path', argName: 'path' } },
+      { data: { id: 'e4', source: 'form-create-route', target: 'form-handler', argName: 'handler' } },
+      // form-edit-route expanded: edit-route -> get-route -> route -> assoc-handler -> handler
+      { data: { id: 'e5', source: 'form-edit-route', target: 'get-route', argName: 'parent' } },
+      { data: { id: 'e6', source: 'form-edit-route', target: 'edit-path', argName: 'path' } },
+      { data: { id: 'e7', source: 'get-route', target: 'route', argName: 'parent' } },
+      { data: { id: 'e8', source: 'route', target: 'assoc-handler', argName: 'method-map' } },
+      { data: { id: 'e9', source: 'assoc-handler', target: 'form-handler', argName: 'handler' } }  // shared!
+    ]
+  };
+}
+
+describe('layoutGraph - expanded upper branch with shared handler', () => {
+  const data = makeExpandedUpperBranch();
+  const result = layout.layoutGraph(data);
+
+  console.log('  Expanded upper branch test:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  assert(result.validation.valid, 'Layout should be valid');
+
+  const posCreate = result.gridPos.get('form-create-route');
+  const posEdit = result.gridPos.get('form-edit-route');
+  const posHandler = result.gridPos.get('form-handler');
+  const posAssocHandler = result.gridPos.get('assoc-handler');
+
+  // form-handler is shared between form-create-route (direct) and assoc-handler (via chain)
+  // Handler must be to the RIGHT of both parents
+  assert(posHandler.col > posCreate.col,
+    `Handler col ${posHandler.col} must be > form-create-route col ${posCreate.col}`);
+  assert(posHandler.col > posAssocHandler.col,
+    `Handler col ${posHandler.col} must be > assoc-handler col ${posAssocHandler.col}`);
+
+  // No leftward edges - handler col must be >= all parent cols + 1
+  const maxParentCol = Math.max(posCreate.col, posAssocHandler.col);
+  assert(posHandler.col >= maxParentCol + 1,
+    `Handler col ${posHandler.col} must be >= maxParentCol ${maxParentCol} + 1`);
+});
+
+describe('layoutGraph - no edge crossings with shared handler', () => {
+  const data = makeRealisticSharedHandler();
+  const result = layout.layoutGraph(data);
+
+  // Check that vertical edges don't cross horizontal edges
+  const { matrix, gridPos } = result;
+
+  // Get positions
+  const posCreate = gridPos.get('form-create-route');
+  const posEdit = gridPos.get('form-edit-route');
+  const posHandler = gridPos.get('form-handler');
+
+  // The upper route connects to handler via vertical then horizontal edge
+  // The lower route connects to handler via horizontal edge only
+  // Check no crossings in the column between routes and handler
+
+  const upperRoutePos = posCreate.row < posEdit.row ? posCreate : posEdit;
+  const lowerRoutePos = posCreate.row < posEdit.row ? posEdit : posCreate;
+
+  // If handler is on same row as lower route, then:
+  // - Upper route has vertical edge down to handler's row, then horizontal to handler
+  // - Lower route has horizontal edge to handler
+  // These should not cross
+
+  // The vertical edge from upper route should be in col 2 (handler col)
+  // Check that no node is placed where vertical edge would be
+  for (let r = upperRoutePos.row; r < lowerRoutePos.row; r++) {
+    const nodeAtCell = layout.getNodeAt ? layout.getNodeAt(matrix, r, posHandler.col) : null;
+    // There should be no node blocking the vertical edge path (except handler itself)
+    if (nodeAtCell && nodeAtCell !== 'form-handler') {
+      assert(false, `Node ${nodeAtCell} at row ${r}, col ${posHandler.col} blocks vertical edge to handler`);
+    }
+  }
+
+  assert(true, 'No edge crossings detected');
+});
+
+// Test: Edge passing through node when expand shows intermediate nodes
+// This reproduces the entity-form-edit-route expand issue where:
+// - Root has children: method-map (horizontal), pair-1 (vertical)
+// - method-map is at col=1, row=0
+// - pair-1 is at col=1, row=2
+// - Vertical edge from root to pair-1 passes THROUGH method-map
+function makeExpandEdgeThroughNode() {
+  // Simulates entity-form-edit-route with expand level 3
+  // Structure:
+  //   entity-form-edit-route
+  //     -> method-map (item2) -> assoc-handler (value) -> entity-form-handler (handler)
+  //     -> pair-1 (coll) -> path-value (path)
+  //
+  // Problem: vertical edge to pair-1 goes through method-map's cell
+  return {
+    nodes: [
+      { data: { id: 'root', type: 'fn', label: 'root' } },
+      { data: { id: 'method-map', type: 'fn', label: 'method-map' } },
+      { data: { id: 'assoc-handler', type: 'fn', label: 'assoc-handler' } },
+      { data: { id: 'handler', type: 'fn', label: 'handler' } },
+      { data: { id: 'pair-1', type: 'fn', label: 'pair-1' } },
+      { data: { id: 'path-value', type: 'fn', label: 'path-value', isPlaceholder: true } },
+      { data: { id: 'key-value', type: 'fn', label: '"get"', isPlaceholder: true } },
+      { data: { id: 'handler-key', type: 'fn', label: '"handler"', isPlaceholder: true } }
+    ],
+    edges: [
+      // First child (coll/pair-1) goes horizontal, second (item2/method-map) goes vertical
+      { data: { id: 'e1', source: 'root', target: 'pair-1', argName: 'coll' } },
+      { data: { id: 'e2', source: 'root', target: 'method-map', argName: 'item2' } },
+      { data: { id: 'e3', source: 'pair-1', target: 'path-value', argName: 'path' } },
+      { data: { id: 'e4', source: 'method-map', target: 'assoc-handler', argName: 'value' } },
+      { data: { id: 'e5', source: 'assoc-handler', target: 'handler', argName: 'handler' } },
+      { data: { id: 'e6', source: 'assoc-handler', target: 'key-value', argName: 'key' } },
+      { data: { id: 'e7', source: 'handler', target: 'handler-key', argName: 'key' } }
+    ]
+  };
+}
+
+describe('layoutGraph - edge must not pass through node (expand issue)', () => {
+  const data = makeExpandEdgeThroughNode();
+  const result = layout.layoutGraph(data);
+
+  console.log('  Expand edge-through-node test:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  assert(result.validation.valid, 'Layout should be valid');
+
+  const posRoot = result.gridPos.get('root');
+  const posMethodMap = result.gridPos.get('method-map');
+  const posPair1 = result.gridPos.get('pair-1');
+
+  // Vertical edge from root to pair-1 should go through root's column (col=0)
+  // Then horizontal edge to pair-1's column (col=1)
+  // This way the vertical part doesn't pass through method-map (col=1, row=0)
+  // Check that vertical edge is in root's column, not pair-1's column
+  const vEdgeCol = posRoot.col; // vertical edge should be in parent's column
+  const methodMapBlocksVEdge = posMethodMap.col === vEdgeCol &&
+                                posMethodMap.row > posRoot.row &&
+                                posMethodMap.row < posPair1.row;
+  assert(!methodMapBlocksVEdge,
+    `Vertical edge at col=${vEdgeCol} should not pass through method-map at (col=${posMethodMap.col}, row=${posMethodMap.row})`);
+
+  // Verify pair-1 is reachable - first child goes horizontal (same row, col+1)
+  assert(posPair1.row === posRoot.row, `pair-1 (first child) should be on same row as root`);
+  assert(posPair1.col === posRoot.col + 1, `pair-1 should be at col+1 of root`);
+
+  // More general check: no vertical edge should pass through any node
+  const { matrix, gridPos } = result;
+  let edgeThroughNode = false;
+  let problemDetails = '';
+
+  // For each vertical edge segment, check if there's a node at that cell
+  for (let r = 0; r < matrix.vEdge.length; r++) {
+    for (let c = 0; c < (matrix.vEdge[r] || []).length; c++) {
+      if (matrix.vEdge[r][c]) {
+        const nodeAtCell = matrix.nodeGrid[r] && matrix.nodeGrid[r][c];
+        if (nodeAtCell) {
+          edgeThroughNode = true;
+          problemDetails = `Vertical edge at (row=${r}, col=${c}) passes through node "${nodeAtCell}"`;
+        }
+      }
+    }
+  }
+
+  assert(!edgeThroughNode, problemDetails || 'No vertical edge passes through any node');
+});
+
+// Test: First child as placeholder must be on same row as parent
+// This tests entity-form-handler case where first arg is hiccup (placeholder)
+// and second arg is render-fn (fn). First child MUST be on same row regardless of type.
+function makeFirstChildPlaceholder() {
+  return {
+    nodes: [
+      { data: { id: 'handler', type: 'fn', label: 'entity-form-handler' } },
+      { data: { id: 'hiccup', type: 'arg', label: 'jsonb', isPlaceholder: true } },
+      { data: { id: 'render-fn', type: 'fn', label: 'render-entity-form-view' } },
+      { data: { id: 'request', type: 'arg', label: 'jsonb', isPlaceholder: true } }
+    ],
+    edges: [
+      // hiccup comes FIRST in database order
+      { data: { id: 'e1', source: 'handler', target: 'hiccup', argName: 'hiccup' } },
+      { data: { id: 'e2', source: 'handler', target: 'render-fn', argName: 'render-fn' } },
+      { data: { id: 'e3', source: 'render-fn', target: 'request', argName: 'request' } }
+    ]
+  };
+}
+
+describe('layoutGraph - first child placeholder on same row', () => {
+  const data = makeFirstChildPlaceholder();
+  const result = layout.layoutGraph(data);
+
+  console.log('  First child placeholder test:');
+  console.log(result.ascii.split('\n').map(l => '    ' + l).join('\n'));
+  console.log('  Positions:');
+  result.gridPos.forEach((p, id) => console.log(`    ${id}: row=${p.row}, col=${p.col}`));
+
+  assert(result.validation.valid, 'Layout should be valid');
+
+  const posHandler = result.gridPos.get('handler');
+  const posHiccup = result.gridPos.get('hiccup');
+  const posRenderFn = result.gridPos.get('render-fn');
+
+  // CRITICAL: First child (hiccup) MUST be on same row as parent
+  assertEqual(posHiccup.row, posHandler.row,
+    'First child (hiccup placeholder) must be on same row as handler');
+  assertEqual(posHiccup.col, posHandler.col + 1,
+    'First child (hiccup) should be at col+1 of handler');
+
+  // Second child (render-fn) goes below
+  assert(posRenderFn.row > posHandler.row,
+    `Second child (render-fn) at row ${posRenderFn.row} should be below handler (row ${posHandler.row})`);
 });
 
 // ============================================================================

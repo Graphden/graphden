@@ -30,5 +30,8 @@ pom.xml.asc
 # Tools
 .aider*
 
+# Node modules
+node_modules/
+
 # Security (contains API key)
 cljwatson.properties

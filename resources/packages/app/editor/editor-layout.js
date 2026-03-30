@@ -77,23 +77,12 @@ function getNodeType(nodeId, nodeDataMap) {
 }
 
 /**
- * Sort children by priority: fn > fixed > free, then by name for stability
+ * Return children in original order (as they appear in edges)
+ * The order from database/edges should be preserved - no sorting needed
  */
-function sortChildrenByPriority(childIds, nodeDataMap, sharedInfo, currentNodeId) {
-  const typeOrder = { 'fn': 0, 'fixed': 1, 'free': 2 };
-
-  return [...childIds].sort((a, b) => {
-    // First by type
-    const typeA = getNodeType(a, nodeDataMap);
-    const typeB = getNodeType(b, nodeDataMap);
-    const typeDiff = typeOrder[typeA] - typeOrder[typeB];
-    if (typeDiff !== 0) return typeDiff;
-
-    // Then by name for stability
-    const nameA = nodeDataMap.get(a)?.label || a;
-    const nameB = nodeDataMap.get(b)?.label || b;
-    return nameA.localeCompare(nameB);
-  });
+function sortChildrenByPriority(childIds, nodeDataMap, sharedInfo, currentNodeId, edgeArgNames) {
+  // Return as-is, preserving original order from edges
+  return [...childIds];
 }
 
 // ============================================================================
@@ -329,7 +318,10 @@ function buildHorizontalBranch(
   nodeDataMap,
   sharedInfo,
   branchContext,  // { isLowerBranch, targetSharedId, isUpperBranch }
-  reservedForLower  // Set of nodeIds reserved for lower branch
+  edgeArgNames,   // Map of "parentId->childId" -> argName
+  reservedForLower,  // Set of nodeIds reserved for lower branch
+  parents,         // Map of nodeId -> [parentIds]
+  gridPos          // Map of nodeId -> { row, col }
 ) {
   const branch = [];
   let current = startNodeId;
@@ -353,26 +345,32 @@ function buildHorizontalBranch(
     const nodeChildren = children.get(current) || [];
     if (nodeChildren.length === 0) break;
 
-    // Sort children by priority
-    let sortedChildren = sortChildrenByPriority(nodeChildren, nodeDataMap, sharedInfo, current);
+    // Sort children by priority (preserves original order from DB)
+    let sortedChildren = sortChildrenByPriority(nodeChildren, nodeDataMap, sharedInfo, current, edgeArgNames);
 
     // Modify priority for shared argument handling
-    if (branchContext && sharedInfo.sharedNodes.size > 0) {
+    // For lower parent of shared node: put shared node FIRST (goes horizontal)
+    if (sharedInfo.sharedNodes.size > 0) {
       sortedChildren = adjustPriorityForShared(
         sortedChildren,
         sharedInfo,
         branchContext,
-        placed
+        placed,
+        current,
+        parents,
+        gridPos,
+        reservedForLower
       );
     }
 
-    // Take first unplaced child that isn't reserved (for upper branch)
+    // Take first unplaced child that isn't reserved
+    // IMPORTANT: First child ALWAYS goes horizontal, regardless of shared handling
     let nextChild = null;
     for (const c of sortedChildren) {
       if (placed.has(c)) continue;
-      // Upper branch should not enter reserved shared nodes
-      if (branchContext && branchContext.isUpperBranch &&
-          reservedForLower && reservedForLower.has(c)) {
+      // NEVER include reserved shared nodes in horizontal branch
+      // They must be placed via tryPlaceSharedNode when ALL parents are ready
+      if (reservedForLower && reservedForLower.has(c)) {
         continue;
       }
       nextChild = c;
@@ -380,13 +378,17 @@ function buildHorizontalBranch(
     }
     if (!nextChild) break;
 
-    // If next child is fn, continue branch; otherwise end here
+    // Check node type for branch continuation decision
     const nextType = getNodeType(nextChild, nodeDataMap);
+
+    // If next child is NOT fn (placeholder/value), add it and stop branch
+    // It will be placed on same row as parent (first child rule)
     if (nextType !== 'fn') {
       branch.push(nextChild);
       break;
     }
 
+    // For fn nodes, continue the branch
     current = nextChild;
   }
 
@@ -394,37 +396,45 @@ function buildHorizontalBranch(
 }
 
 /**
- * Adjust child priority based on shared argument handling
+ * Adjust child priority based on shared argument handling.
+ * For the lower parent of a shared node: put shared node FIRST so it goes horizontal.
+ * This is called from buildHorizontalBranch with current node's children.
+ * Also removes the shared node from reservedForLower so it can be included in horizontal branch.
  */
-function adjustPriorityForShared(sortedChildren, sharedInfo, branchContext, placed) {
-  const { pathsToShared } = sharedInfo;
-  const { isLowerBranch, targetSharedId, isUpperBranch } = branchContext;
+function adjustPriorityForShared(sortedChildren, sharedInfo, branchContext, placed, currentNodeId, parents, gridPos, reservedForLower) {
+  // Check if any child is a shared node where current node is the lower parent
+  // and all other parents are already placed
+  for (const childId of sortedChildren) {
+    if (!sharedInfo.sharedNodes.has(childId)) continue;
 
-  if (!targetSharedId) return sortedChildren;
+    // Get all parents of this shared node
+    const childParents = parents.get(childId) || [];
+    if (childParents.length < 2) continue;
 
-  // Separate children that lead to target shared from others
-  const leadsToShared = [];
-  const others = [];
+    // Check if current node is among parents
+    if (!childParents.includes(currentNodeId)) continue;
 
-  sortedChildren.forEach(childId => {
-    if (placed.has(childId)) {
-      others.push(childId);
-      return;
+    // Check if all OTHER parents are placed
+    const otherParents = childParents.filter(p => p !== currentNodeId);
+    const allOthersPlaced = otherParents.every(p => placed.has(p));
+    if (!allOthersPlaced) continue;
+
+    // Current node is the last parent to be processed (all others are already placed)
+    // Since we process nodes top-to-bottom, current node will be placed at or below
+    // the rows of already-placed parents. So current IS the lower parent.
+    //
+    // Note: currentNodeId may not be in gridPos yet (we're building its branch),
+    // but since all other parents ARE placed and we process top-to-bottom,
+    // current will be placed below them.
+
+    // Current IS the lower parent - put shared node FIRST
+    // Also remove from reservedForLower so it can be included in horizontal branch
+    if (reservedForLower) {
+      reservedForLower.delete(childId);
     }
-    const paths = pathsToShared.get(childId);
-    if (paths && paths.has(targetSharedId)) {
-      leadsToShared.push(childId);
-    } else {
-      others.push(childId);
-    }
-  });
 
-  if (isLowerBranch) {
-    // Lower branch: path to shared gets HIGHEST priority (first = horizontal)
-    return [...leadsToShared, ...others];
-  } else if (isUpperBranch) {
-    // Upper branch: path to shared gets LOWEST priority (last = hangs below)
-    return [...others, ...leadsToShared];
+    const reordered = [childId, ...sortedChildren.filter(c => c !== childId)];
+    return reordered;
   }
 
   return sortedChildren;
@@ -451,11 +461,161 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
   // Reserved nodes - shared arguments that should only be placed by lower branch
   const reservedForLower = new Set();  // Set of shared nodeIds reserved for lower branch
 
+  // Track how many parents of each shared node have been placed
+  // Shared node is placed only when ALL parents are placed
+  const sharedParentCount = new Map();  // sharedId -> total parent count
+  const sharedParentsPlaced = new Map();  // sharedId -> Set of placed parent nodeIds
+
   // Pre-analyze: find all shared nodes and reserve them for lower branches
   // This ensures upper branches don't place shared nodes before lower branches get to them
   sharedInfo.sharedNodes.forEach(sharedId => {
     reservedForLower.add(sharedId);
+    const parentIds = parents.get(sharedId) || [];
+    sharedParentCount.set(sharedId, parentIds.length);
+    sharedParentsPlaced.set(sharedId, new Set());
   });
+
+  /**
+   * Try to place a shared node after a parent has been placed.
+   * Only places the shared node when ALL its parents have been placed.
+   * Places it at column = max(branch end columns) + 1, on the row of the lower branch.
+   * @returns true if shared node was placed, false otherwise
+   */
+  function tryPlaceSharedNode(sharedId, parentNodeId, parentPos) {
+    if (placed.has(sharedId)) return true;  // Already placed
+    if (!reservedForLower.has(sharedId)) return false;  // Not a shared node we're tracking
+
+    // Record this parent as placed
+    const placedParents = sharedParentsPlaced.get(sharedId);
+    placedParents.add(parentNodeId);
+
+    // Check if all parents are placed
+    const totalParents = sharedParentCount.get(sharedId);
+    if (placedParents.size < totalParents) {
+      return false;  // Still waiting for more parents
+    }
+
+    // All parents are placed! Now place the shared node.
+    // Find max column among ALL nodes in branches leading to this shared node
+    // (not just immediate parents, but their children too)
+    let maxBranchCol = 0;
+
+    // Find the parent with maximum row (the one that is lowest on screen)
+    // Shared node should be on the same row as this parent to avoid upward edges
+    let maxParentRow = 0;
+    let maxRowParent = null;
+
+    placedParents.forEach(pid => {
+      const pos = gridPos.get(pid);
+      if (pos) {
+        maxBranchCol = Math.max(maxBranchCol, pos.col);
+        if (pos.row >= maxParentRow) {
+          maxParentRow = pos.row;
+          maxRowParent = pid;
+        }
+
+        // Also check all children of this parent that are already placed
+        // (these are siblings to the shared node and occupy columns)
+        const parentChildren = children.get(pid) || [];
+        parentChildren.forEach(childId => {
+          if (childId !== sharedId && placed.has(childId)) {
+            const childPos = gridPos.get(childId);
+            if (childPos) {
+              maxBranchCol = Math.max(maxBranchCol, childPos.col);
+            }
+          }
+        });
+      }
+    });
+
+    const sharedCol = maxBranchCol + 1;
+
+    // Shared node goes on the same row as the lower parent
+    // It continues the horizontal branch after the first child (path)
+    // Since sharedCol = maxBranchCol + 1, it's placed AFTER the path node,
+    // so there's no crossing - the edge goes through empty cells
+    let sharedRow = maxParentRow;
+
+    // Check if cell is free, find first free row if not
+    // IMPORTANT: We need to check BOTH sharedCol AND sharedCol+1 (for first child)
+    // to ensure first child can be placed on same row as shared node
+    let actualRow = sharedRow;
+    const sharedChildrenForRowCheck = children.get(sharedId) || [];
+    const needsChildCol = sharedChildrenForRowCheck.length > 0 &&
+                          !placed.has(sharedChildrenForRowCheck[0]);
+
+    while (true) {
+      const sharedCellOccupied = isCellOccupied(matrix, actualRow, sharedCol);
+      const childCellOccupied = needsChildCol && isCellOccupied(matrix, actualRow, sharedCol + 1);
+
+      if (!sharedCellOccupied && !childCellOccupied) {
+        break; // Both cells are free
+      }
+      actualRow++;
+      if (actualRow > 1000) {
+        console.error('Layout error: could not find row for shared node and child');
+        break;
+      }
+    }
+
+    // Place the shared node
+    placeNode(matrix, sharedId, actualRow, sharedCol);
+    gridPos.set(sharedId, { row: actualRow, col: sharedCol });
+    placed.add(sharedId);
+    reservedForLower.delete(sharedId);
+
+    // Now recursively place children of the shared node
+    // IMPORTANT: First child goes on SAME row as shared node (horizontal)
+    const sharedChildren = children.get(sharedId) || [];
+    if (sharedChildren.length > 0) {
+      let isFirstChild = true;
+      let childRow = actualRow;  // Start on same row, not below!
+
+      for (const childId of sharedChildren) {
+        if (placed.has(childId)) continue;
+
+        const childCol = sharedCol + 1;
+
+        if (isFirstChild) {
+          // First child: place on same row as shared node
+          placeBranchAndChildren(childId, childCol, childRow, null);
+          isFirstChild = false;
+        } else {
+          // Subsequent children: place below
+          childRow = Math.max(childRow + 1, actualRow + 1);
+          placeBranchAndChildren(childId, childCol, childRow, null);
+        }
+
+        const childPos = gridPos.get(childId);
+        if (childPos) {
+          // Draw edge to child
+          const argName = edgeArgNames.get(sharedId + '->' + childId) || '';
+          if (childPos.row === actualRow) {
+            // Horizontal edge
+            for (let c = sharedCol; c < childPos.col; c++) {
+              if (!hasHEdgeAt(matrix, actualRow, c)) {
+                placeHEdge(matrix, actualRow, c, c === sharedCol ? argName : '');
+              }
+            }
+          } else {
+            // Vertical edge (L-shaped)
+            for (let r = actualRow + 1; r <= childPos.row; r++) {
+              placeVEdge(matrix, r, sharedCol);
+            }
+            // Horizontal part at child's row
+            for (let c = sharedCol; c < childPos.col; c++) {
+              if (!hasHEdgeAt(matrix, childPos.row, c)) {
+                placeHEdge(matrix, childPos.row, c, c === sharedCol ? argName : '');
+              }
+            }
+          }
+          childRow = childPos.row;
+        }
+      }
+    }
+
+    return true;
+  }
 
   /**
    * Place a horizontal branch and recursively place its sub-branches
@@ -463,7 +623,7 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
   function placeBranchAndChildren(startNodeId, startCol, minRow, branchContext) {
     // Build the horizontal branch
     const branch = buildHorizontalBranch(
-      startNodeId, children, placed, nodeDataMap, sharedInfo, branchContext, reservedForLower
+      startNodeId, children, placed, nodeDataMap, sharedInfo, branchContext, edgeArgNames, reservedForLower, parents, gridPos
     );
 
     if (branch.length === 0) return minRow;
@@ -519,11 +679,11 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
       if (nodeChildren.length === 0) continue;
 
       // Sort and get children to process (excluding the one that continued the branch)
-      let sortedChildren = sortChildrenByPriority(nodeChildren, nodeDataMap, sharedInfo, nodeId);
+      let sortedChildren = sortChildrenByPriority(nodeChildren, nodeDataMap, sharedInfo, nodeId, edgeArgNames);
 
       // Adjust for shared arguments
-      if (branchContext && sharedInfo.sharedNodes.size > 0) {
-        sortedChildren = adjustPriorityForShared(sortedChildren, sharedInfo, branchContext, placed);
+      if (sharedInfo.sharedNodes.size > 0) {
+        sortedChildren = adjustPriorityForShared(sortedChildren, sharedInfo, branchContext, placed, nodeId, parents, gridPos, reservedForLower);
       }
 
       // Find which child was the branch continuation
@@ -536,47 +696,14 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
         if (info) splittingInfos.push(info);
       });
 
-      // Process remaining children
-      // IMPORTANT: Process upper branches FIRST (they go above), then lower branch LAST
-      // This ensures upper branches are placed higher on the screen, so edges go DOWN to shared nodes
+      // Process remaining children in original order from database
+      // First child MUST go on same row as parent (horizontal)
+      // Shared nodes are handled via reservedForLower and tryPlaceSharedNode
       let childRow = nodeRow + 1;
 
-      // Reorder children: splitting nodes (upper then lower) go together, then others
-      // This ensures splitting nodes are placed adjacent to each other
-      let reorderedChildren = [...sortedChildren];
-      if (splittingInfos.length > 0) {
-        const lowerChildren = new Set();
-        const upperChildren = new Set();
-        splittingInfos.forEach(info => {
-          lowerChildren.add(info.lowerChild);
-          info.upperChildren.forEach(c => upperChildren.add(c));
-        });
-
-        // Sort: upper children first, then lower children (adjacent!), then others
-        // This keeps splitting nodes together so vertical edges don't cross other branches
-        reorderedChildren.sort((a, b) => {
-          const aIsLower = lowerChildren.has(a);
-          const bIsLower = lowerChildren.has(b);
-          const aIsUpper = upperChildren.has(a);
-          const bIsUpper = upperChildren.has(b);
-          const aIsSplitting = aIsLower || aIsUpper;
-          const bIsSplitting = bIsLower || bIsUpper;
-
-          // Splitting nodes go first (together)
-          if (aIsSplitting && !bIsSplitting) return -1;
-          if (!aIsSplitting && bIsSplitting) return 1;
-
-          // Among splitting nodes: upper first, then lower
-          if (aIsSplitting && bIsSplitting) {
-            if (aIsUpper && bIsLower) return -1;
-            if (aIsLower && bIsUpper) return 1;
-          }
-
-          return 0;  // maintain original order otherwise
-        });
-      }
-
-      for (const childId of reorderedChildren) {
+      // Keep original order - no reordering based on splitting
+      // This ensures first child from DB goes horizontal
+      for (const childId of sortedChildren) {
         if (childId === branchContinuation) continue;
         if (placed.has(childId)) {
           // Child already placed (shared argument) - draw edge to it
@@ -588,10 +715,23 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
           continue;
         }
 
-        // Skip reserved nodes on upper branch - they will be placed by lower branch
-        if (branchContext && branchContext.isUpperBranch && reservedForLower.has(childId)) {
-          // Don't place this child now, but remember we need to draw edge later
-          continue;
+        // Handle shared nodes specially - they are placed only when ALL parents are placed
+        if (reservedForLower.has(childId)) {
+          // This is a shared node - register this parent and try to place
+          const nodePos = gridPos.get(nodeId);
+          if (nodePos) {
+            const wasPlaced = tryPlaceSharedNode(childId, nodeId, nodePos);
+            if (wasPlaced) {
+              // Shared node is now placed - draw edge to it
+              const childPos = gridPos.get(childId);
+              if (childPos) {
+                drawEdgeToPlaced(matrix, nodeRow, nodeCol, childPos.row, childPos.col,
+                               edgeArgNames.get(nodeId + '->' + childId) || '');
+              }
+            }
+            // Whether placed or not, we're done with this child for now
+            continue;
+          }
         }
 
         // Determine branch context for this child
@@ -614,33 +754,13 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
           childBranchContext = branchContext;
         }
 
-        // Special case: if child is a reserved shared node and we have no context yet,
-        // check if current node is on the lower path to it (using splittingDecisions)
-        if (!childBranchContext && reservedForLower.has(childId)) {
-          const decision = splittingDecisions.get(childId);
-          if (decision) {
-            // Check if current node (nodeId) is the lowerChild or on its path
-            const lowerChildPaths = sharedInfo.pathsToShared.get(decision.lowerChild);
-            const isOnLowerPath = (nodeId === decision.lowerChild) ||
-                                  (lowerChildPaths && lowerChildPaths.has(childId));
-            if (isOnLowerPath) {
-              // We're on the path from lowerChild to shared - this is lower branch
-              childBranchContext = { isLowerBranch: true, targetSharedId: childId };
-            }
-          }
-        }
-
-        // Place vertical edge segments
+        // Determine column for this child - always col+1
+        // First child goes horizontal (already handled by buildHorizontalBranch)
+        // Vertical children go to col+1 as well
         const childCol = nodeCol + 1;
 
         // Find row for this child's branch
-        // If this is the lower branch leading to a shared node, it continues horizontally
         let childMinRow = childRow;
-        if (childBranchContext && childBranchContext.isLowerBranch &&
-            childBranchContext.targetSharedId === childId) {
-          // This child IS the shared node that lower branch should place on same row
-          childMinRow = nodeRow;
-        }
         const childMaxRow = placeBranchAndChildren(childId, childCol, childMinRow, childBranchContext);
 
         // Get actual position of placed child
@@ -655,9 +775,42 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
               }
             }
           } else {
-            // Place vertical edge from parent row to child row
-            for (let r = nodeRow; r < childPos.row; r++) {
-              placeVEdge(matrix, r, childCol);
+            // Child below parent - need edge going down then right (L-shaped)
+            // Check if childCol has any nodes between parentRow and childRow
+            // If so, route through parentCol instead
+            const argName = edgeArgNames.get(nodeId + '->' + childId) || '';
+
+            let hasBlockingNode = false;
+            for (let r = nodeRow + 1; r < childPos.row; r++) {
+              if (getNodeAt(matrix, r, childPos.col) !== null) {
+                hasBlockingNode = true;
+                break;
+              }
+            }
+
+            if (hasBlockingNode || childPos.col === nodeCol) {
+              // Route through parent's column: down in parentCol, then right at childRow
+              for (let r = nodeRow + 1; r < childPos.row; r++) {
+                placeVEdge(matrix, r, nodeCol);
+              }
+              // Horizontal edge at child's row
+              for (let c = nodeCol; c < childPos.col; c++) {
+                if (!hasHEdgeAt(matrix, childPos.row, c)) {
+                  placeHEdge(matrix, childPos.row, c, c === nodeCol ? argName : '');
+                }
+              }
+            } else {
+              // Direct route through child's column: right at parentRow, then down
+              // Horizontal edge from parent to child's column at parent's row
+              for (let c = nodeCol; c < childPos.col; c++) {
+                if (!hasHEdgeAt(matrix, nodeRow, c)) {
+                  placeHEdge(matrix, nodeRow, c, c === nodeCol ? argName : '');
+                }
+              }
+              // Vertical edge in child's column from parent's row to child's row
+              for (let r = nodeRow + 1; r < childPos.row; r++) {
+                placeVEdge(matrix, r, childPos.col);
+              }
             }
           }
           childRow = Math.max(childRow, childPos.row + 1);
@@ -674,16 +827,27 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
    */
   function drawEdgeToPlaced(matrix, parentRow, parentCol, childRow, childCol, argName) {
     if (childRow === parentRow && childCol > parentCol) {
-      // Horizontal edge
+      // Horizontal edge on same row
       for (let c = parentCol; c < childCol; c++) {
         if (!hasHEdgeAt(matrix, parentRow, c)) {
           placeHEdge(matrix, parentRow, c, c === parentCol ? argName : '');
         }
       }
     } else if (childRow > parentRow) {
-      // Vertical edge going down
-      for (let r = parentRow; r < childRow; r++) {
-        placeVEdge(matrix, r, childCol);
+      // Child is below parent - use L-shaped edge to avoid crossing nodes
+      // Route: down through parentCol, then right at childRow
+      // This avoids crossing any nodes between parent and child on same row
+
+      // First, vertical part: down from parentRow to childRow in parentCol
+      for (let r = parentRow + 1; r <= childRow; r++) {
+        placeVEdge(matrix, r, parentCol);
+      }
+
+      // Then horizontal part: from parentCol to childCol at childRow
+      for (let c = parentCol; c < childCol; c++) {
+        if (!hasHEdgeAt(matrix, childRow, c)) {
+          placeHEdge(matrix, childRow, c, c === parentCol ? argName : '');
+        }
       }
     } else if (childRow < parentRow) {
       // Vertical edge going up - should not happen with proper ordering

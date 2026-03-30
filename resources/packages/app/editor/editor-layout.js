@@ -1,19 +1,26 @@
 // Editor Layout - Grid-based layout algorithm with no edge crossings
 // Depends on: editor-state.js
 //
-// Algorithm:
-// 1. Build horizontal branch (follow first children, prefer shared nodes)
-// 2. Place branch below lowest existing nodes in its columns
-// 3. Process branch right-to-left, placing remaining children below
-// 4. For shared nodes: prioritize them to be placed first/higher
+// See docs/LAYOUT_ALGORITHM.md for full algorithm description
+//
+// Core principles:
+// 1. Nodes placed in matrix - one node per cell maximum
+// 2. Horizontal branches: first argument on same row as parent
+// 3. Other arguments hang below, creating vertical edges
+// 4. Shared arguments handled specially to avoid upward edges
 
 // ============================================================================
 // ADJACENCY AND ROOT DETECTION
 // ============================================================================
 
+/**
+ * Build adjacency maps from edges
+ * @returns {Object} { children, parents, edgeArgNames }
+ */
 function buildAdjacency(edges) {
-  const children = new Map();
-  const edgeArgNames = new Map();
+  const children = new Map();   // parentId -> [childId, ...]
+  const parents = new Map();    // childId -> [parentId, ...]
+  const edgeArgNames = new Map(); // "parentId->childId" -> argName
   const edgeSet = new Set();
 
   edges.forEach(e => {
@@ -27,14 +34,20 @@ function buildAdjacency(edges) {
     if (!children.has(src)) children.set(src, []);
     children.get(src).push(tgt);
 
+    if (!parents.has(tgt)) parents.set(tgt, []);
+    parents.get(tgt).push(src);
+
     if (e.data.argName) {
       edgeArgNames.set(edgeKey, e.data.argName);
     }
   });
 
-  return { children, edgeArgNames };
+  return { children, parents, edgeArgNames };
 }
 
+/**
+ * Find root node (node with no incoming edges)
+ */
 function findRootNode(nodes, edges) {
   const hasIncoming = new Set();
   edges.forEach(e => hasIncoming.add(e.data.target));
@@ -43,14 +56,139 @@ function findRootNode(nodes, edges) {
 }
 
 // ============================================================================
+// NODE TYPE DETECTION
+// ============================================================================
+
+/**
+ * Get node type for sorting: 'fn' > 'fixed' > 'free'
+ */
+function getNodeType(nodeId, nodeDataMap) {
+  const data = nodeDataMap.get(nodeId);
+  if (!data) return 'free';
+
+  // Check placeholder first - these are unset args displayed as "any"
+  if (data.isPlaceholder) return 'free';
+
+  if (data.type === 'fn') return 'fn';
+  if (data.type === 'arg') {
+    return 'fixed';  // arg with value
+  }
+  return 'free';
+}
+
+/**
+ * Sort children by priority: fn > fixed > free, then by name for stability
+ */
+function sortChildrenByPriority(childIds, nodeDataMap, sharedInfo, currentNodeId) {
+  const typeOrder = { 'fn': 0, 'fixed': 1, 'free': 2 };
+
+  return [...childIds].sort((a, b) => {
+    // First by type
+    const typeA = getNodeType(a, nodeDataMap);
+    const typeB = getNodeType(b, nodeDataMap);
+    const typeDiff = typeOrder[typeA] - typeOrder[typeB];
+    if (typeDiff !== 0) return typeDiff;
+
+    // Then by name for stability
+    const nameA = nodeDataMap.get(a)?.label || a;
+    const nameB = nodeDataMap.get(b)?.label || b;
+    return nameA.localeCompare(nameB);
+  });
+}
+
+// ============================================================================
+// SHARED ARGUMENT DETECTION
+// ============================================================================
+
+/**
+ * Find all shared arguments and build path information
+ * @returns {Object} {
+ *   sharedNodes: Set of nodeIds with multiple parents,
+ *   pathsToShared: Map nodeId -> Set of reachable shared nodeIds,
+ *   pathLengths: Map "nodeId->sharedId" -> distance
+ * }
+ */
+function analyzeSharedArguments(children, parents) {
+  // Find shared nodes
+  const sharedNodes = new Set();
+  parents.forEach((parentList, nodeId) => {
+    if (parentList.length > 1) {
+      sharedNodes.add(nodeId);
+    }
+  });
+
+  if (sharedNodes.size === 0) {
+    return { sharedNodes, pathsToShared: new Map(), pathLengths: new Map() };
+  }
+
+  // Build paths to shared nodes using BFS from each shared node backwards
+  const pathsToShared = new Map();  // nodeId -> Set of reachable shared nodeIds
+  const pathLengths = new Map();    // "nodeId->sharedId" -> distance
+
+  // For each shared node, trace back to find all ancestors
+  sharedNodes.forEach(sharedId => {
+    const visited = new Set();
+    const queue = [{ nodeId: sharedId, dist: 0 }];
+
+    while (queue.length > 0) {
+      const { nodeId, dist } = queue.shift();
+
+      if (visited.has(nodeId)) continue;
+      visited.add(nodeId);
+
+      // Record that this node leads to sharedId
+      if (!pathsToShared.has(nodeId)) pathsToShared.set(nodeId, new Set());
+      pathsToShared.get(nodeId).add(sharedId);
+      pathLengths.set(nodeId + '->' + sharedId, dist);
+
+      // Add all parents to queue
+      const nodeParents = parents.get(nodeId) || [];
+      nodeParents.forEach(parentId => {
+        if (!visited.has(parentId)) {
+          queue.push({ nodeId: parentId, dist: dist + 1 });
+        }
+      });
+    }
+  });
+
+  return { sharedNodes, pathsToShared, pathLengths };
+}
+
+/**
+ * Find splitting nodes for a shared argument
+ * (siblings that both lead to the same shared node)
+ */
+function findSplittingInfo(nodeId, childIds, sharedId, pathsToShared, pathLengths) {
+  const leadingChildren = childIds.filter(childId => {
+    const paths = pathsToShared.get(childId);
+    return paths && paths.has(sharedId);
+  });
+
+  if (leadingChildren.length < 2) return null;
+
+  // Sort by path length - shorter path becomes "lower" branch
+  leadingChildren.sort((a, b) => {
+    const distA = pathLengths.get(a + '->' + sharedId) || Infinity;
+    const distB = pathLengths.get(b + '->' + sharedId) || Infinity;
+    return distA - distB;
+  });
+
+  return {
+    sharedId,
+    lowerChild: leadingChildren[0],  // shortest path - goes horizontal
+    upperChildren: leadingChildren.slice(1)  // longer paths - hang below
+  };
+}
+
+// ============================================================================
 // MATRIX STATE
 // ============================================================================
 
 function createMatrixState() {
   return {
-    nodeGrid: [],
-    hEdge: [],
-    vEdge: []
+    nodeGrid: [],   // nodeGrid[row][col] = nodeId or null
+    hEdge: [],      // hEdge[row][col] = argName or null (horizontal edge segment)
+    vEdge: []       // vEdge[row][col] = true/false (vertical edge passes through)
   };
 }
 
@@ -73,19 +211,46 @@ function getNodeAt(matrix, row, col) {
   return matrix.nodeGrid[row][col];
 }
 
+function hasVEdgeAt(matrix, row, col) {
+  if (row < 0 || col < 0) return false;
+  if (row >= matrix.vEdge.length) return false;
+  if (col >= matrix.vEdge[row].length) return false;
+  return matrix.vEdge[row][col];
+}
+
+function hasHEdgeAt(matrix, row, col) {
+  if (row < 0 || col < 0) return false;
+  if (row >= matrix.hEdge.length) return false;
+  if (col >= matrix.hEdge[row].length) return false;
+  return matrix.hEdge[row][col] !== null;
+}
+
+function isCellOccupied(matrix, row, col) {
+  return getNodeAt(matrix, row, col) !== null ||
+         hasVEdgeAt(matrix, row, col) ||
+         hasHEdgeAt(matrix, row, col);
+}
+
 function placeNode(matrix, nodeId, row, col) {
   ensureMatrixSize(matrix, row, col);
   matrix.nodeGrid[row][col] = nodeId;
 }
 
 function placeHEdge(matrix, row, col, argName) {
-  ensureMatrixSize(matrix, row, col + 1);
+  ensureMatrixSize(matrix, row, col);
   matrix.hEdge[row][col] = argName || '';
 }
 
 function placeVEdge(matrix, row, col) {
-  ensureMatrixSize(matrix, row + 1, col);
+  ensureMatrixSize(matrix, row, col);
   matrix.vEdge[row][col] = true;
+}
+
+function removeVEdge(matrix, row, col) {
+  if (row >= 0 && row < matrix.vEdge.length &&
+      col >= 0 && col < matrix.vEdge[row].length) {
+    matrix.vEdge[row][col] = false;
+  }
 }
 
 // ============================================================================
@@ -93,20 +258,28 @@ function placeVEdge(matrix, row, col) {
 // ============================================================================
 
 /**
- * Find lowest occupied row in columns [startCol, startCol + length)
- * Considers both nodes AND vertical edges
+ * Find the lowest occupied row in given column range
+ * Considers both nodes and edges
  */
 function findLowestInColumns(matrix, startCol, length) {
   let lowest = -1;
   for (let c = startCol; c < startCol + length; c++) {
+    // Check nodes
     for (let r = 0; r < matrix.nodeGrid.length; r++) {
       if (getNodeAt(matrix, r, c) !== null) {
         lowest = Math.max(lowest, r);
       }
     }
+    // Check vertical edges
     for (let r = 0; r < matrix.vEdge.length; r++) {
-      if (matrix.vEdge[r] && matrix.vEdge[r][c]) {
-        lowest = Math.max(lowest, r + 1);
+      if (hasVEdgeAt(matrix, r, c)) {
+        lowest = Math.max(lowest, r);
+      }
+    }
+    // Check horizontal edges
+    for (let r = 0; r < matrix.hEdge.length; r++) {
+      if (hasHEdgeAt(matrix, r, c)) {
+        lowest = Math.max(lowest, r);
       }
     }
   }
@@ -114,34 +287,11 @@ function findLowestInColumns(matrix, startCol, length) {
 }
 
 /**
- * Check if drawing a horizontal edge at given row from startCol to endCol would cross vertical edges
+ * Check if placing a horizontal branch at given row would cause collisions
  */
-function wouldCrossVerticalEdge(matrix, row, startCol, endCol) {
-  for (let c = startCol + 1; c < endCol; c++) {
-    if (row > 0 && matrix.vEdge[row - 1] && matrix.vEdge[row - 1][c]) {
-      return c;
-    }
-    if (matrix.vEdge[row] && matrix.vEdge[row][c]) {
-      if (getNodeAt(matrix, row, c) === null) {
-        return c;
-      }
-    }
-  }
-  return -1;
-}
-
-/**
- * Check if node or any of its descendants has an already-placed node
- */
-function hasPlacedDescendant(nodeId, children, placed, visited) {
-  if (visited.has(nodeId)) return false;
-  visited.add(nodeId);
-
-  if (placed.has(nodeId)) return true;
-
-  const nodeChildren = children.get(nodeId) || [];
-  for (const childId of nodeChildren) {
-    if (hasPlacedDescendant(childId, children, placed, visited)) {
+function checkBranchCollision(matrix, row, startCol, length) {
+  for (let c = startCol; c < startCol + length; c++) {
+    if (isCellOccupied(matrix, row, c)) {
       return true;
     }
   }
@@ -149,198 +299,368 @@ function hasPlacedDescendant(nodeId, children, placed, visited) {
 }
 
 /**
- * Collect horizontal branch - follow first children
- * If a child is already placed (shared), stop there
- * Prioritize children that have already-placed descendants
+ * Find a row where a branch of given length can fit starting at startCol
  */
-function collectBranch(nodeId, children, placed, referencedBy) {
+function findRowForBranch(matrix, startCol, length, minRow) {
+  let row = minRow;
+  while (checkBranchCollision(matrix, row, startCol, length)) {
+    row++;
+    if (row > 1000) {
+      console.error('Layout error: could not find row for branch');
+      break;
+    }
+  }
+  return row;
+}
+
+// ============================================================================
+// HORIZONTAL BRANCH BUILDING
+// ============================================================================
+
+/**
+ * Build a horizontal branch starting from nodeId
+ * Follows first children until reaching a leaf or already-placed node
+ * @returns Array of nodeIds forming the branch
+ */
+function buildHorizontalBranch(
+  startNodeId,
+  children,
+  placed,
+  nodeDataMap,
+  sharedInfo,
+  branchContext,  // { isLowerBranch, targetSharedId, isUpperBranch }
+  reservedForLower  // Set of nodeIds reserved for lower branch
+) {
   const branch = [];
-  let current = nodeId;
+  let current = startNodeId;
 
   while (current && !placed.has(current)) {
+    // If this node is reserved for lower branch, only lower branch targeting it can place it
+    if (reservedForLower && reservedForLower.has(current)) {
+      // Only lower branch targeting this exact shared node can proceed
+      if (branchContext && branchContext.isLowerBranch && branchContext.targetSharedId === current) {
+        // Lower branch reaching its target - unreserve it so it can be placed
+        reservedForLower.delete(current);
+      } else {
+        // All other cases (upper branch, no context, or lower branch targeting different shared)
+        // should stop here - the correct lower branch will place this node later
+        break;
+      }
+    }
+
     branch.push(current);
+
     const nodeChildren = children.get(current) || [];
     if (nodeChildren.length === 0) break;
 
-    const sortedChildren = [...nodeChildren].sort((a, b) => {
-      const aPlaced = placed.has(a);
-      const bPlaced = placed.has(b);
+    // Sort children by priority
+    let sortedChildren = sortChildrenByPriority(nodeChildren, nodeDataMap, sharedInfo, current);
 
-      if (aPlaced && !bPlaced) return -1;
-      if (bPlaced && !aPlaced) return 1;
+    // Modify priority for shared argument handling
+    if (branchContext && sharedInfo.sharedNodes.size > 0) {
+      sortedChildren = adjustPriorityForShared(
+        sortedChildren,
+        sharedInfo,
+        branchContext,
+        placed
+      );
+    }
 
-      const aHasPlacedDesc = hasPlacedDescendant(a, children, placed, new Set());
-      const bHasPlacedDesc = hasPlacedDescendant(b, children, placed, new Set());
+    // Take first unplaced child that isn't reserved (for upper branch)
+    let nextChild = null;
+    for (const c of sortedChildren) {
+      if (placed.has(c)) continue;
+      // Upper branch should not enter reserved shared nodes
+      if (branchContext && branchContext.isUpperBranch &&
+          reservedForLower && reservedForLower.has(c)) {
+        continue;
+      }
+      nextChild = c;
+      break;
+    }
+    if (!nextChild) break;
 
-      if (aHasPlacedDesc && !bHasPlacedDesc) return -1;
-      if (bHasPlacedDesc && !aHasPlacedDesc) return 1;
+    // If next child is fn, continue branch; otherwise end here
+    const nextType = getNodeType(nextChild, nodeDataMap);
+    if (nextType !== 'fn') {
+      branch.push(nextChild);
+      break;
+    }
 
-      const aShared = (referencedBy.get(a) || []).length > 1;
-      const bShared = (referencedBy.get(b) || []).length > 1;
-      if (aShared && !bShared) return -1;
-      if (bShared && !aShared) return 1;
-
-      return 0;
-    });
-
-    current = sortedChildren[0];
+    current = nextChild;
   }
 
   return branch;
 }
 
 /**
- * Shift a node and all its descendants to a new column
+ * Adjust child priority based on shared argument handling
  */
-function shiftNodeRight(matrix, gridPos, nodeId, newCol, children, shifted) {
-  if (shifted.has(nodeId)) return;
-  shifted.add(nodeId);
+function adjustPriorityForShared(sortedChildren, sharedInfo, branchContext, placed) {
+  const { pathsToShared } = sharedInfo;
+  const { isLowerBranch, targetSharedId, isUpperBranch } = branchContext;
 
-  const pos = gridPos.get(nodeId);
-  if (!pos) return;
+  if (!targetSharedId) return sortedChildren;
 
-  const oldCol = pos.col;
-  const colDelta = newCol - oldCol;
-  if (colDelta <= 0) return;
+  // Separate children that lead to target shared from others
+  const leadsToShared = [];
+  const others = [];
 
-  const occupant = getNodeAt(matrix, pos.row, newCol);
-  if (occupant && occupant !== nodeId) {
-    shiftNodeRight(matrix, gridPos, occupant, newCol + 1, children, shifted);
-  }
-
-  if (matrix.nodeGrid[pos.row] && matrix.nodeGrid[pos.row][oldCol] === nodeId) {
-    matrix.nodeGrid[pos.row][oldCol] = null;
-  }
-
-  pos.col = newCol;
-  placeNode(matrix, nodeId, pos.row, newCol);
-
-  const nodeChildren = children.get(nodeId) || [];
-  for (const childId of nodeChildren) {
-    const childPos = gridPos.get(childId);
-    if (childPos && childPos.col > oldCol) {
-      shiftNodeRight(matrix, gridPos, childId, childPos.col + colDelta, children, shifted);
+  sortedChildren.forEach(childId => {
+    if (placed.has(childId)) {
+      others.push(childId);
+      return;
     }
+    const paths = pathsToShared.get(childId);
+    if (paths && paths.has(targetSharedId)) {
+      leadsToShared.push(childId);
+    } else {
+      others.push(childId);
+    }
+  });
+
+  if (isLowerBranch) {
+    // Lower branch: path to shared gets HIGHEST priority (first = horizontal)
+    return [...leadsToShared, ...others];
+  } else if (isUpperBranch) {
+    // Upper branch: path to shared gets LOWEST priority (last = hangs below)
+    return [...others, ...leadsToShared];
   }
+
+  return sortedChildren;
 }
 
 // ============================================================================
-// MAIN MATRIX BUILDING ALGORITHM
+// MAIN LAYOUT ALGORITHM
 // ============================================================================
 
-function buildMatrix(rootId, children, edgeArgNames) {
+/**
+ * Build the complete layout matrix
+ */
+function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
   const matrix = createMatrixState();
-  const gridPos = new Map();
+  const gridPos = new Map();  // nodeId -> { row, col }
   const placed = new Set();
 
-  const referencedBy = new Map();
-  children.forEach((childList, parentId) => {
-    childList.forEach(childId => {
-      if (!referencedBy.has(childId)) referencedBy.set(childId, []);
-      referencedBy.get(childId).push(parentId);
-    });
+  // Analyze shared arguments
+  const sharedInfo = analyzeSharedArguments(children, parents);
+
+  // Track splitting decisions
+  const splittingDecisions = new Map();  // sharedId -> { lowerChild, upperChildren }
+
+  // Reserved nodes - shared arguments that should only be placed by lower branch
+  const reservedForLower = new Set();  // Set of shared nodeIds reserved for lower branch
+
+  // Pre-analyze: find all shared nodes and reserve them for lower branches
+  // This ensures upper branches don't place shared nodes before lower branches get to them
+  sharedInfo.sharedNodes.forEach(sharedId => {
+    reservedForLower.add(sharedId);
   });
 
-  function sortChildren(nodeChildren) {
-    return [...nodeChildren].sort((a, b) => {
-      const aPlaced = placed.has(a);
-      const bPlaced = placed.has(b);
-      const aShared = (referencedBy.get(a) || []).length > 1;
-      const bShared = (referencedBy.get(b) || []).length > 1;
+  /**
+   * Place a horizontal branch and recursively place its sub-branches
+   */
+  function placeBranchAndChildren(startNodeId, startCol, minRow, branchContext) {
+    // Build the horizontal branch
+    const branch = buildHorizontalBranch(
+      startNodeId, children, placed, nodeDataMap, sharedInfo, branchContext, reservedForLower
+    );
 
-      if (aPlaced && !bPlaced) return -1;
-      if (bPlaced && !aPlaced) return 1;
-      if (aShared && !bShared) return -1;
-      if (bShared && !aShared) return 1;
-      return 0;
-    });
-  }
-
-  function placeBranch(nodeId, startCol, minRow) {
-    const branch = collectBranch(nodeId, children, placed, referencedBy);
     if (branch.length === 0) return minRow;
 
-    const lowest = findLowestInColumns(matrix, startCol, branch.length);
-    let row = Math.max(minRow, lowest + 1);
+    // Filter out already placed nodes
+    const newNodes = branch.filter(n => !placed.has(n));
+    if (newNodes.length === 0) return minRow;
 
-    for (let i = 0; i < branch.length; i++) {
-      const nid = branch[i];
+    // Find row for this branch
+    const row = findRowForBranch(matrix, startCol, newNodes.length, minRow);
+
+    // Place branch nodes
+    for (let i = 0; i < newNodes.length; i++) {
+      const nodeId = newNodes[i];
       const col = startCol + i;
-      const nodeChildren = children.get(nid) || [];
 
-      for (const childId of nodeChildren) {
-        if (placed.has(childId)) {
-          const childPos = gridPos.get(childId);
-          if (childPos && childPos.col > col) {
-            const crossCol = wouldCrossVerticalEdge(matrix, row, col, childPos.col);
-            if (crossCol !== -1) {
-              let lowestVEdge = row;
-              for (let r = row; r < matrix.vEdge.length; r++) {
-                if (matrix.vEdge[r] && matrix.vEdge[r][crossCol]) {
-                  lowestVEdge = r + 1;
-                } else {
-                  break;
-                }
-              }
-              row = Math.max(row, lowestVEdge + 1);
-            }
-          }
-        }
-      }
-    }
+      placeNode(matrix, nodeId, row, col);
+      gridPos.set(nodeId, { row, col });
+      placed.add(nodeId);
 
-    for (let i = 0; i < branch.length; i++) {
-      const nid = branch[i];
-      const col = startCol + i;
-      placeNode(matrix, nid, row, col);
-      gridPos.set(nid, { row, col });
-      placed.add(nid);
-
-      if (i < branch.length - 1) {
-        const nextId = branch[i + 1];
-        const argName = edgeArgNames.get(nid + '->' + nextId) || '';
+      // Place horizontal edge to next node
+      if (i < newNodes.length - 1) {
+        const nextId = newNodes[i + 1];
+        const argName = edgeArgNames.get(nodeId + '->' + nextId) || '';
         placeHEdge(matrix, row, col, argName);
       }
     }
 
+    // FIRST PASS: Detect all splitting in this branch (left to right)
+    // This ensures we know which nodes are lower/upper branches before placing children
+    for (let i = 0; i < newNodes.length; i++) {
+      const nodeId = newNodes[i];
+      const nodeChildren = children.get(nodeId) || [];
+      if (nodeChildren.length === 0) continue;
+
+      sharedInfo.sharedNodes.forEach(sharedId => {
+        const info = findSplittingInfo(nodeId, nodeChildren, sharedId, sharedInfo.pathsToShared, sharedInfo.pathLengths);
+        if (info && !splittingDecisions.has(info.sharedId)) {
+          splittingDecisions.set(info.sharedId, info);
+        }
+      });
+    }
+
+    // Process children of branch nodes, right to left
     let maxRowUsed = row;
 
-    for (let i = branch.length - 1; i >= 0; i--) {
-      const nid = branch[i];
-      const col = startCol + i;
-      const nodeChildren = children.get(nid) || [];
-      const sortedChildren = sortChildren(nodeChildren);
-      const firstInBranch = branch[i + 1];
+    for (let i = newNodes.length - 1; i >= 0; i--) {
+      const nodeId = newNodes[i];
+      const nodeCol = startCol + i;
+      const nodeRow = row;
 
-      for (const childId of sortedChildren) {
-        if (childId === firstInBranch) continue;
+      const nodeChildren = children.get(nodeId) || [];
+      if (nodeChildren.length === 0) continue;
 
-        const argName = edgeArgNames.get(nid + '->' + childId) || '';
+      // Sort and get children to process (excluding the one that continued the branch)
+      let sortedChildren = sortChildrenByPriority(nodeChildren, nodeDataMap, sharedInfo, nodeId);
 
-        if (placed.has(childId)) {
-          const childPos = gridPos.get(childId);
-          const requiredCol = col + 1;
+      // Adjust for shared arguments
+      if (branchContext && sharedInfo.sharedNodes.size > 0) {
+        sortedChildren = adjustPriorityForShared(sortedChildren, sharedInfo, branchContext, placed);
+      }
 
-          if (childPos.col < requiredCol) {
-            const shifted = new Set();
-            shiftNodeRight(matrix, gridPos, childId, requiredCol, children, shifted);
+      // Find which child was the branch continuation
+      const branchContinuation = newNodes[i + 1];
+
+      // Check for splitting at this node (already computed in first pass)
+      const splittingInfos = [];
+      sharedInfo.sharedNodes.forEach(sharedId => {
+        const info = findSplittingInfo(nodeId, nodeChildren, sharedId, sharedInfo.pathsToShared, sharedInfo.pathLengths);
+        if (info) splittingInfos.push(info);
+      });
+
+      // Process remaining children
+      // IMPORTANT: Process upper branches FIRST (they go above), then lower branch LAST
+      // This ensures upper branches are placed higher on the screen, so edges go DOWN to shared nodes
+      let childRow = nodeRow + 1;
+
+      // Reorder children: splitting nodes (upper then lower) go together, then others
+      // This ensures splitting nodes are placed adjacent to each other
+      let reorderedChildren = [...sortedChildren];
+      if (splittingInfos.length > 0) {
+        const lowerChildren = new Set();
+        const upperChildren = new Set();
+        splittingInfos.forEach(info => {
+          lowerChildren.add(info.lowerChild);
+          info.upperChildren.forEach(c => upperChildren.add(c));
+        });
+
+        // Sort: upper children first, then lower children (adjacent!), then others
+        // This keeps splitting nodes together so vertical edges don't cross other branches
+        reorderedChildren.sort((a, b) => {
+          const aIsLower = lowerChildren.has(a);
+          const bIsLower = lowerChildren.has(b);
+          const aIsUpper = upperChildren.has(a);
+          const bIsUpper = upperChildren.has(b);
+          const aIsSplitting = aIsLower || aIsUpper;
+          const bIsSplitting = bIsLower || bIsUpper;
+
+          // Splitting nodes go first (together)
+          if (aIsSplitting && !bIsSplitting) return -1;
+          if (!aIsSplitting && bIsSplitting) return 1;
+
+          // Among splitting nodes: upper first, then lower
+          if (aIsSplitting && bIsSplitting) {
+            if (aIsUpper && bIsLower) return -1;
+            if (aIsLower && bIsUpper) return 1;
           }
 
-          const newChildPos = gridPos.get(childId);
-          drawEdge(matrix, row, col, newChildPos.row, newChildPos.col, argName);
-        } else {
-          const childCol = col + 1;
-          const childMinRow = row + 1;
+          return 0;  // maintain original order otherwise
+        });
+      }
 
-          const childMaxRow = placeBranch(childId, childCol, childMinRow);
+      for (const childId of reorderedChildren) {
+        if (childId === branchContinuation) continue;
+        if (placed.has(childId)) {
+          // Child already placed (shared argument) - draw edge to it
           const childPos = gridPos.get(childId);
-
           if (childPos) {
-            for (let r = row; r < childPos.row; r++) {
+            drawEdgeToPlaced(matrix, nodeRow, nodeCol, childPos.row, childPos.col,
+                           edgeArgNames.get(nodeId + '->' + childId) || '');
+          }
+          continue;
+        }
+
+        // Skip reserved nodes on upper branch - they will be placed by lower branch
+        if (branchContext && branchContext.isUpperBranch && reservedForLower.has(childId)) {
+          // Don't place this child now, but remember we need to draw edge later
+          continue;
+        }
+
+        // Determine branch context for this child
+        // First check if current splitting creates a context
+        let childBranchContext = null;
+        for (const info of splittingInfos) {
+          if (childId === info.lowerChild) {
+            childBranchContext = { isLowerBranch: true, targetSharedId: info.sharedId };
+            break;
+          }
+          if (info.upperChildren.includes(childId)) {
+            childBranchContext = { isUpperBranch: true, targetSharedId: info.sharedId };
+            break;
+          }
+        }
+
+        // If no new splitting context, inherit parent's context
+        // This propagates lower/upper branch info down the chain to the shared node
+        if (!childBranchContext && branchContext) {
+          childBranchContext = branchContext;
+        }
+
+        // Special case: if child is a reserved shared node and we have no context yet,
+        // check if current node is on the lower path to it (using splittingDecisions)
+        if (!childBranchContext && reservedForLower.has(childId)) {
+          const decision = splittingDecisions.get(childId);
+          if (decision) {
+            // Check if current node (nodeId) is the lowerChild or on its path
+            const lowerChildPaths = sharedInfo.pathsToShared.get(decision.lowerChild);
+            const isOnLowerPath = (nodeId === decision.lowerChild) ||
+                                  (lowerChildPaths && lowerChildPaths.has(childId));
+            if (isOnLowerPath) {
+              // We're on the path from lowerChild to shared - this is lower branch
+              childBranchContext = { isLowerBranch: true, targetSharedId: childId };
+            }
+          }
+        }
+
+        // Place vertical edge segments
+        const childCol = nodeCol + 1;
+
+        // Find row for this child's branch
+        // If this is the lower branch leading to a shared node, it continues horizontally
+        let childMinRow = childRow;
+        if (childBranchContext && childBranchContext.isLowerBranch &&
+            childBranchContext.targetSharedId === childId) {
+          // This child IS the shared node that lower branch should place on same row
+          childMinRow = nodeRow;
+        }
+        const childMaxRow = placeBranchAndChildren(childId, childCol, childMinRow, childBranchContext);
+
+        // Get actual position of placed child
+        const childPos = gridPos.get(childId);
+        if (childPos) {
+          if (childPos.row === nodeRow) {
+            // Child on same row - place horizontal edge
+            const argName = edgeArgNames.get(nodeId + '->' + childId) || '';
+            for (let c = nodeCol; c < childPos.col; c++) {
+              if (!hasHEdgeAt(matrix, nodeRow, c)) {
+                placeHEdge(matrix, nodeRow, c, c === nodeCol ? argName : '');
+              }
+            }
+          } else {
+            // Place vertical edge from parent row to child row
+            for (let r = nodeRow; r < childPos.row; r++) {
               placeVEdge(matrix, r, childCol);
             }
           }
-
+          childRow = Math.max(childRow, childPos.row + 1);
           maxRowUsed = Math.max(maxRowUsed, childMaxRow);
         }
       }
@@ -349,93 +669,64 @@ function buildMatrix(rootId, children, edgeArgNames) {
     return maxRowUsed;
   }
 
-  function drawEdge(matrix, parentRow, parentCol, childRow, childCol, argName) {
+  /**
+   * Draw edge to an already-placed node (shared argument)
+   */
+  function drawEdgeToPlaced(matrix, parentRow, parentCol, childRow, childCol, argName) {
     if (childRow === parentRow && childCol > parentCol) {
+      // Horizontal edge
       for (let c = parentCol; c < childCol; c++) {
-        placeHEdge(matrix, parentRow, c, c === parentCol ? argName : '');
+        if (!hasHEdgeAt(matrix, parentRow, c)) {
+          placeHEdge(matrix, parentRow, c, c === parentCol ? argName : '');
+        }
       }
     } else if (childRow > parentRow) {
+      // Vertical edge going down
       for (let r = parentRow; r < childRow; r++) {
         placeVEdge(matrix, r, childCol);
       }
     } else if (childRow < parentRow) {
-      const edgeCol = childCol + 1;
+      // Vertical edge going up - should not happen with proper ordering
+      console.warn('Upward edge detected from row ' + parentRow + ' to row ' + childRow +
+                   ' at col ' + childCol + ' - this may cause visual issues');
       for (let r = childRow; r < parentRow; r++) {
-        placeVEdge(matrix, r, edgeCol);
+        placeVEdge(matrix, r, childCol);
       }
     }
   }
 
+  // Start placement from root - place entire branch starting from root
   if (rootId) {
-    placeBranch(rootId, 0, 0);
+    placeBranchAndChildren(rootId, 0, 0, null);
   }
 
-  return { matrix, gridPos, collisions: [] };
+  return { matrix, gridPos };
 }
 
 // ============================================================================
-// VALIDATION AND DEBUG
+// VALIDATION
 // ============================================================================
 
-function formatMatrixASCII(matrix, gridPos) {
-  const { nodeGrid, hEdge, vEdge } = matrix;
-  const lines = [];
-
-  const maxRow = nodeGrid.length;
-  const maxCol = Math.max(...nodeGrid.map(r => r.length), 0);
-
-  if (maxRow === 0 || maxCol === 0) {
-    return '(empty matrix)';
-  }
-
-  const nodeNames = new Map();
-  gridPos.forEach((pos, nodeId) => {
-    const name = nodeId.length > 8 ? nodeId.substring(0, 7) + '…' : nodeId;
-    nodeNames.set(pos.row + ',' + pos.col, name.padEnd(8));
-  });
-
-  for (let r = 0; r < maxRow; r++) {
-    let nodeLine = '';
-    for (let c = 0; c < maxCol; c++) {
-      const key = r + ',' + c;
-      const node = nodeNames.get(key) || '        ';
-      nodeLine += '[' + node + ']';
-      if (c < maxCol - 1) {
-        const hasHEdge = hEdge[r] && hEdge[r][c] !== null && hEdge[r][c] !== undefined;
-        nodeLine += hasHEdge ? '──' : '  ';
-      }
-    }
-    lines.push(nodeLine);
-
-    if (r < maxRow - 1) {
-      let vLine = '';
-      for (let c = 0; c < maxCol; c++) {
-        const hasVEdge = vEdge[r] && vEdge[r][c];
-        vLine += '    ' + (hasVEdge ? '│' : ' ') + '     ';
-        if (c < maxCol - 1) {
-          vLine += '  ';
-        }
-      }
-      lines.push(vLine);
-    }
-  }
-
-  return lines.join('\n');
-}
-
-function detectCrossings(matrix, gridPos) {
+function detectCrossings(matrix) {
   const crossings = [];
-  const { hEdge, vEdge } = matrix;
+  const { hEdge, vEdge, nodeGrid } = matrix;
 
   for (let r = 0; r < hEdge.length; r++) {
     for (let c = 0; c < (hEdge[r] || []).length; c++) {
-      if (hEdge[r][c] !== null && hEdge[r][c] !== undefined) {
-        const colToCheck = c + 1;
-        if (r > 0 && vEdge[r-1] && vEdge[r-1][colToCheck] && vEdge[r] && vEdge[r][colToCheck]) {
+      if (hEdge[r][c] !== null) {
+        // Check if horizontal edge crosses a vertical edge
+        const checkCol = c + 1;
+        // Vertical edge passes through if vEdge[r-1][c+1] and vEdge[r][c+1] are both true
+        // and there's no node at [r][c+1]
+        if (r > 0 &&
+            hasVEdgeAt(matrix, r - 1, checkCol) &&
+            hasVEdgeAt(matrix, r, checkCol) &&
+            getNodeAt(matrix, r, checkCol) === null) {
           crossings.push({
             type: 'hv_cross',
-            hEdge: { row: r, col: c },
-            vEdge: { col: colToCheck, passingRow: r }
+            row: r,
+            col: c,
+            vEdgeCol: checkCol
           });
         }
       }
@@ -449,6 +740,7 @@ function validateMatrix(matrix, gridPos) {
   const issues = [];
   const positions = new Map();
 
+  // Check for node collisions
   gridPos.forEach((pos, nodeId) => {
     const key = pos.row + ',' + pos.col;
     if (positions.has(key)) {
@@ -460,11 +752,12 @@ function validateMatrix(matrix, gridPos) {
     positions.set(key, nodeId);
   });
 
-  const crossings = detectCrossings(matrix, gridPos);
+  // Check for edge crossings
+  const crossings = detectCrossings(matrix);
   crossings.forEach(c => {
     issues.push({
       type: 'crossing',
-      message: `Edge crossing at h(${c.hEdge.row},${c.hEdge.col}) x v(${c.vEdge.col},${c.vEdge.passingRow})`
+      message: `Edge crossing at row ${c.row}, cols ${c.col}-${c.vEdgeCol}`
     });
   });
 
@@ -472,12 +765,71 @@ function validateMatrix(matrix, gridPos) {
 }
 
 // ============================================================================
-// HIGH-LEVEL LAYOUT API
+// ASCII DEBUG OUTPUT
+// ============================================================================
+
+function formatMatrixASCII(matrix, gridPos) {
+  const { nodeGrid, hEdge, vEdge } = matrix;
+  const lines = [];
+
+  const maxRow = Math.max(nodeGrid.length, 1);
+  const maxCol = Math.max(...nodeGrid.map(r => r ? r.length : 0), 1);
+
+  if (maxRow === 0 || maxCol === 0) {
+    return '(empty matrix)';
+  }
+
+  // Build name map
+  const nodeNames = new Map();
+  gridPos.forEach((pos, nodeId) => {
+    const name = nodeId.length > 8 ? nodeId.substring(0, 7) + '~' : nodeId;
+    nodeNames.set(pos.row + ',' + pos.col, name.padEnd(8));
+  });
+
+  for (let r = 0; r < maxRow; r++) {
+    let nodeLine = '';
+    for (let c = 0; c < maxCol; c++) {
+      const key = r + ',' + c;
+      const node = nodeNames.get(key);
+      if (node) {
+        nodeLine += '[' + node + ']';
+      } else if (hasHEdgeAt(matrix, r, c)) {
+        nodeLine += '[---h---]';
+      } else if (hasVEdgeAt(matrix, r, c)) {
+        nodeLine += '[   |   ]';
+      } else {
+        nodeLine += '[       ]';
+      }
+
+      if (c < maxCol - 1) {
+        const hasH = hEdge[r] && hEdge[r][c] !== null;
+        nodeLine += hasH ? '--' : '  ';
+      }
+    }
+    lines.push(nodeLine);
+
+    if (r < maxRow - 1) {
+      let vLine = '';
+      for (let c = 0; c < maxCol; c++) {
+        const hasV = vEdge[r] && vEdge[r][c];
+        vLine += '    ' + (hasV ? '|' : ' ') + '    ';
+        if (c < maxCol - 1) {
+          vLine += '  ';
+        }
+      }
+      lines.push(vLine);
+    }
+  }
+
+  return lines.join('\n');
+}
+
+// ============================================================================
+// HIGH-LEVEL API
 // ============================================================================
 
 /**
  * Build graph layout from elements
- * Returns: { matrix, gridPos, validation, ascii }
  */
 function layoutGraph(elements) {
   const { nodes, edges } = elements;
@@ -486,39 +838,44 @@ function layoutGraph(elements) {
     return {
       matrix: createMatrixState(),
       gridPos: new Map(),
-      collisions: [],
       validation: { valid: true, issues: [] },
       ascii: '(empty graph)'
     };
   }
 
-  const { children, edgeArgNames } = buildAdjacency(edges);
+  const { children, parents, edgeArgNames } = buildAdjacency(edges);
   const rootId = findRootNode(nodes, edges);
 
   if (!rootId) {
     return {
       matrix: createMatrixState(),
       gridPos: new Map(),
-      collisions: [],
       validation: { valid: false, issues: [{ type: 'no_root', message: 'No root node found' }] },
       ascii: '(no root node)'
     };
   }
 
-  const { matrix, gridPos, collisions } = buildMatrix(rootId, children, edgeArgNames);
+  // Build node data map for type detection
+  const nodeDataMap = new Map();
+  nodes.forEach(n => {
+    nodeDataMap.set(n.data.id, n.data);
+  });
+
+  const { matrix, gridPos } = buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap);
   const validation = validateMatrix(matrix, gridPos);
   const ascii = formatMatrixASCII(matrix, gridPos);
 
-  return { matrix, gridPos, collisions, validation, ascii };
+  if (!validation.valid) {
+    console.warn('Layout validation issues:', validation.issues);
+  }
+
+  return { matrix, gridPos, validation, ascii };
 }
 
 // ============================================================================
 // NODE SIZE CALCULATION
 // ============================================================================
 
-/**
- * Calculate node dimensions based on label
- */
 function calculateNodeSize(nodeData) {
   const label = nodeData.data.label || '';
   const type = nodeData.data.type;
@@ -552,7 +909,6 @@ function calculateNodeSize(nodeData) {
 
 /**
  * Build grid layout with pixel positions
- * Returns: Map<nodeId, {row, col, width, height, x, y}>
  */
 function buildGridLayout(elements) {
   const { nodes, edges } = elements;
@@ -647,25 +1003,20 @@ function buildGridLayout(elements) {
   return layout;
 }
 
-// Export for Node.js testing
+// ============================================================================
+// EXPORTS
+// ============================================================================
+
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     buildAdjacency,
     findRootNode,
+    analyzeSharedArguments,
     createMatrixState,
-    ensureMatrixSize,
-    getNodeAt,
-    findLowestInColumns,
-    wouldCrossVerticalEdge,
-    collectBranch,
-    placeNode,
-    placeHEdge,
-    placeVEdge,
     buildMatrix,
-    detectCrossings,
+    layoutGraph,
     validateMatrix,
     formatMatrixASCII,
-    layoutGraph,
     calculateNodeSize,
     buildGridLayout
   };

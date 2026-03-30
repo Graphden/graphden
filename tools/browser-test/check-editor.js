@@ -10,7 +10,7 @@
 
 const { chromium } = require('playwright');
 
-const BASE_URL = 'http://localhost:9002';
+const BASE_URL = process.env.EDITOR_URL || 'http://localhost:9002';
 const args = process.argv.slice(2);
 const fnName = args[0] || '';
 const expandSpecs = args.slice(1); // e.g., ["root:2", "router-fn:1"]

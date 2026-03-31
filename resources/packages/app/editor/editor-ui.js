@@ -75,6 +75,9 @@ function selectFnByName(name, updateHistory = true) {
  * Set expansion level for a node (click)
  */
 function setExpansionLevel(originalFnId, level) {
+  // Set this node as anchor so it stays stationary during layout
+  anchorFnId = originalFnId;
+
   if (level === 0) {
     expansionLevel.delete(originalFnId);
   } else {
@@ -82,28 +85,54 @@ function setExpansionLevel(originalFnId, level) {
   }
   previewLevel.delete(originalFnId);
   renderGraph(false);
+
+  // Clear anchor after render
+  anchorFnId = null;
 }
 
 /**
  * Set preview level (hover)
+ *
+ * Uses debouncing to prevent flickering when:
+ * 1. Mouse moves between overlay lines (level changes within same overlay)
+ * 2. Overlays are rebuilt (mouseleave fires on removed overlays)
  */
 function setPreviewLevel(originalFnId, level) {
   const oldLevel = previewLevel.get(originalFnId);
 
+  // Clear any pending debounce timer
   if (previewDebounceTimer) {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = null;
   }
 
   if (level === null) {
-    previewLevel.delete(originalFnId);
-    if (oldLevel !== level) {
-      renderGraph(false);
+    // Only process if there was actually a preview set for this fnId
+    if (oldLevel === undefined) {
+      return; // No preview was set for this fnId
     }
-  } else {
+
+    // Debounce the clear to allow mouseenter on new overlay to cancel it
     previewDebounceTimer = setTimeout(() => {
-      previewLevel.set(originalFnId, level);
-      if (oldLevel !== level) {
+      // Re-check: if preview level changed (mouse entered another overlay), don't clear
+      const currentLevel = previewLevel.get(originalFnId);
+      if (currentLevel === oldLevel) {
+        previewLevel.delete(originalFnId);
+        renderGraph(false);
+      }
+    }, PREVIEW_DEBOUNCE_MS);
+  } else {
+    // Check if this is the same level as currently set - skip entirely
+    if (oldLevel === level) {
+      return; // No change needed
+    }
+
+    // Debounce the preview change
+    previewDebounceTimer = setTimeout(() => {
+      // Re-check in case state changed during debounce
+      const currentLevel = previewLevel.get(originalFnId);
+      if (currentLevel !== level) {
+        previewLevel.set(originalFnId, level);
         renderGraph(false);
       }
     }, PREVIEW_DEBOUNCE_MS);

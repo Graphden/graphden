@@ -9,6 +9,7 @@
 ;;   GET /partials/entity-form/:type (HTML partial)
 ;;   GET /partials/entity-form/:type/:id (HTML partial)
 ;;   POST /api/entities/:type (JSON)
+;;   POST /api/graph/layout (JSON)
 ;;   DELETE /api/entities/:type/:id (JSON)
 
 [;; =============================================================================
@@ -57,12 +58,12 @@
  ;; ROUTES COLLECTION & SERVER
  ;; =============================================================================
 
- ;; All routes - uses list-10 which hides the conj cascade inside
- ;; When viewing editor-routes, you see 10 route arguments, not the cascade
- ;; The cascade (list-10 -> list-10-9 -> ... -> triple -> pair -> conj-any)
- ;; is only visible when you expand list-10
+ ;; All routes - uses list-11 which hides the conj cascade inside
+ ;; When viewing editor-routes, you see 11 route arguments, not the cascade
+ ;; The cascade (list-11 -> list-10 -> ... -> triple -> pair -> conj-any)
+ ;; is only visible when you expand list-11
  {:name :editor-routes
-  :parent :list-10
+  :parent :list-11
   :args {:item1 :favicon-route
          :item2 :editor-route
          :item3 :api-entities-route
@@ -72,7 +73,8 @@
          :item7 :create-entity-route
          :item8 :delete-entity-route
          :item9 :health-route
-         :item10 :metrics-route}}
+         :item10 :metrics-route
+         :item11 :layout-api-route}}
 
  ;; Router receives routes vector
  {:name :router-fn

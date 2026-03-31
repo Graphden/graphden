@@ -406,50 +406,41 @@ function buildHorizontalBranch(
       );
     }
 
-    // Take first unplaced child that isn't reserved
-    // SPECIAL CASE: If the first child (after priority adjustment) is a reserved shared node,
-    // and current node is its "lower parent", then we should NOT select any child for
-    // horizontal branch continuation. All children should go below this node.
-    // This ensures the shared node's row is reserved for it, and siblings go below.
+    // Take first unplaced child
+    // For shared nodes: lower parent places them horizontally, upper parent skips them
     let nextChild = null;
-    const firstUnplacedChild = sortedChildren.find(c => !placed.has(c));
 
-    // Check if first child is a reserved shared node and we are its LOWER parent
-    // In this case, we should NOT continue horizontal branch, so the shared node
-    // can be placed on the same row when all parents are ready.
-    let skipHorizontalBranch = false;
-    if (firstUnplacedChild && reservedForLower && reservedForLower.has(firstUnplacedChild)) {
-      // Check if current node is the LOWER parent of this shared node
-      const sharedParents = parents.get(firstUnplacedChild) || [];
-      if (sharedParents.length >= 2) {
-        let maxPathLen = -1;
-        let lowerParent = null;
-        for (const pid of sharedParents) {
-          const pathKey = pid + '->' + firstUnplacedChild;
-          const pathLen = sharedInfo.pathLengths.get(pathKey) || 1;
-          if (pathLen >= maxPathLen) {
-            maxPathLen = pathLen;
-            lowerParent = pid;
+    for (const c of sortedChildren) {
+      if (placed.has(c)) continue;
+
+      // Check if this is a reserved shared node
+      if (reservedForLower && reservedForLower.has(c)) {
+        // Check if current node is the LOWER parent of this shared node
+        const sharedParents = parents.get(c) || [];
+        if (sharedParents.length >= 2) {
+          let maxPathLen = -1;
+          let lowerParent = null;
+          for (const pid of sharedParents) {
+            const pathKey = pid + '->' + c;
+            const pathLen = sharedInfo.pathLengths.get(pathKey) || 1;
+            if (pathLen >= maxPathLen) {
+              maxPathLen = pathLen;
+              lowerParent = pid;
+            }
+          }
+          if (lowerParent === current) {
+            // We ARE the lower parent - unreserve and include in horizontal branch
+            reservedForLower.delete(c);
+            nextChild = c;
+            break;
           }
         }
-        if (lowerParent === current) {
-          // We are the lower parent - don't continue horizontal branch
-          skipHorizontalBranch = true;
-        }
+        // Not the lower parent - skip this shared node
+        continue;
       }
-    }
 
-    if (!skipHorizontalBranch) {
-      for (const c of sortedChildren) {
-        if (placed.has(c)) continue;
-        // NEVER include reserved shared nodes in horizontal branch
-        // They must be placed via tryPlaceSharedNode when ALL parents are ready
-        if (reservedForLower && reservedForLower.has(c)) {
-          continue;
-        }
-        nextChild = c;
-        break;
-      }
+      nextChild = c;
+      break;
     }
     if (!nextChild) break;
 
@@ -492,39 +483,40 @@ function adjustPriorityForShared(sortedChildren, sharedInfo, branchContext, plac
   const result = [...sortedChildren];
 
   // Case 1: Direct - current node is a parent of a shared node
-  // For LOWER parent: shared child goes FIRST (so it's placed on same row)
-  // For UPPER parent: shared child goes LAST (so other children go horizontal, shared is placed later)
+  // For LOWER parent: shared child goes FIRST (horizontal, on same row)
+  // For UPPER parent: shared child goes LAST (hangs below)
   const sharedChildren = sortedChildren.filter(childId => sharedInfo.sharedNodes.has(childId));
 
   for (const sharedChildId of sharedChildren) {
     const childParents = parents.get(sharedChildId) || [];
     if (childParents.length < 2) continue;
 
-    // Find the "lower parent" (the one with longest path to shared)
+    // Check if current node is a parent of this shared child
+    if (!childParents.includes(currentNodeId)) continue;
+
+    // Determine which parent is "lower" (longer path = processed later = lower row)
+    // When path lengths are equal, later in parent list = lower
     let lowerParent = null;
     let maxPathLen = -1;
-
-    for (const parentId of childParents) {
-      const pathKey = parentId + '->' + sharedChildId;
-      const pathLen = sharedInfo.pathLengths.get(pathKey) || 1;
+    for (const pid of childParents) {
+      const pathLen = sharedInfo.pathLengths.get(pid + '->' + sharedChildId) || 1;
       if (pathLen >= maxPathLen) {
         maxPathLen = pathLen;
-        lowerParent = parentId;
+        lowerParent = pid;
       }
     }
 
     const idx = result.indexOf(sharedChildId);
     if (idx < 0) continue;
 
-    if (lowerParent === currentNodeId) {
-      // We are the LOWER parent - move shared child to FIRST position
+    if (currentNodeId === lowerParent) {
+      // LOWER parent: shared child goes FIRST (horizontal)
       if (idx > 0) {
         result.splice(idx, 1);
         result.unshift(sharedChildId);
       }
-    } else if (childParents.includes(currentNodeId)) {
-      // We are an UPPER parent - move shared child to LAST position
-      // This way other children go horizontal, and shared node is placed later
+    } else {
+      // UPPER parent: shared child goes LAST (hangs below)
       if (idx < result.length - 1) {
         result.splice(idx, 1);
         result.push(sharedChildId);
@@ -675,6 +667,9 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
 
   // Reserved nodes - shared arguments that should only be placed by lower branch
   const reservedForLower = new Set();  // Set of shared nodeIds reserved for lower branch
+
+  // Deferred children - children of upper parents that should be placed after shared node
+  const deferredChildren = new Map();  // parentId -> [{ childId, nodeCol, nodeRow }]
 
   // Track how many parents of each shared node have been placed
   // Shared node is placed only when ALL parents are placed
@@ -943,6 +938,39 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
       }
     }
 
+    // Process deferred children of upper parents now that shared node is placed
+    // These were skipped during upper parent processing to keep shared node row free
+    const upperParentIds = parents.get(sharedId) || [];
+    for (const upperParentId of upperParentIds) {
+      if (upperParentId === lowerParent) continue;  // Skip lower parent
+
+      const deferred = deferredChildren.get(upperParentId);
+      if (!deferred || deferred.length === 0) continue;
+
+      const upperPos = gridPos.get(upperParentId);
+      if (!upperPos) continue;
+
+      // Place deferred children below the shared node
+      let deferredRow = actualRow + 1;
+      for (const { childId, nodeCol } of deferred) {
+        if (placed.has(childId)) continue;
+
+        const childCol = nodeCol + 1;
+        placeBranchAndChildren(childId, childCol, deferredRow, null);
+
+        const childPos = gridPos.get(childId);
+        if (childPos) {
+          // Draw edge from upper parent to this child
+          const argName = edgeArgNames.get(upperParentId + '->' + childId) || '';
+          drawEdgeToPlaced(matrix, upperPos.row, upperPos.col, childPos.row, childPos.col, argName);
+          deferredRow = childPos.row + 1;
+        }
+      }
+
+      // Clear processed deferred children
+      deferredChildren.delete(upperParentId);
+    }
+
     return true;
   }
 
@@ -1005,6 +1033,51 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
       placeNode(matrix, nodeId, row, col);
       gridPos.set(nodeId, { row, col });
       placed.add(nodeId);
+
+      // If this node was a shared node, process deferred children of its upper parents
+      if (sharedInfo.sharedNodes.has(nodeId)) {
+        const sharedParents = parents.get(nodeId) || [];
+
+        // Find lower parent
+        let lowerParent = null;
+        let maxPathLen = -1;
+        for (const pid of sharedParents) {
+          const pathLen = sharedInfo.pathLengths.get(pid + '->' + nodeId) || 1;
+          if (pathLen >= maxPathLen) {
+            maxPathLen = pathLen;
+            lowerParent = pid;
+          }
+        }
+
+        // Process deferred children of upper parents
+        for (const upperParentId of sharedParents) {
+          if (upperParentId === lowerParent) continue;
+
+          const deferred = deferredChildren.get(upperParentId);
+          if (!deferred || deferred.length === 0) continue;
+
+          const upperPos = gridPos.get(upperParentId);
+          if (!upperPos) continue;
+
+          // Place deferred children below the shared node
+          let deferredRow = row + 1;
+          for (const { childId, nodeCol: parentCol } of deferred) {
+            if (placed.has(childId)) continue;
+
+            const childCol = parentCol + 1;
+            const childMaxRow = placeBranchAndChildren(childId, childCol, deferredRow, null);
+
+            const childPos = gridPos.get(childId);
+            if (childPos) {
+              const argName = edgeArgNames.get(upperParentId + '->' + childId) || '';
+              drawEdgeToPlaced(matrix, upperPos.row, upperPos.col, childPos.row, childPos.col, argName);
+              deferredRow = childPos.row + 1;
+            }
+          }
+
+          deferredChildren.delete(upperParentId);
+        }
+      }
 
       // Place horizontal edge to next node
       if (i < newNodes.length - 1) {
@@ -1108,6 +1181,35 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
       // Shared nodes are handled via reservedForLower and tryPlaceSharedNode
       let childRow = nodeRow + 1;
 
+      // Check if this node is an UPPER parent of a shared node
+      // If so, defer non-horizontal children until after shared node is placed
+      let isUpperParentOfShared = false;
+      let pendingSharedChild = null;
+      for (const childId of sortedChildren) {
+        if (reservedForLower.has(childId)) {
+          // This node has a shared child that is reserved
+          // Check if we are NOT the lower parent (i.e., we are upper)
+          const sharedParents = parents.get(childId) || [];
+          if (sharedParents.length >= 2) {
+            let maxPathLen = -1;
+            let lowerParent = null;
+            for (const pid of sharedParents) {
+              const pathLen = sharedInfo.pathLengths.get(pid + '->' + childId) || 1;
+              if (pathLen >= maxPathLen) {
+                maxPathLen = pathLen;
+                lowerParent = pid;
+              }
+            }
+            if (lowerParent !== nodeId) {
+              // We are the upper parent
+              isUpperParentOfShared = true;
+              pendingSharedChild = childId;
+              break;
+            }
+          }
+        }
+      }
+
       // Keep original order - no reordering based on splitting
       // This ensures first child from DB goes horizontal
       for (const childId of sortedChildren) {
@@ -1137,6 +1239,21 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
               }
             }
             // Whether placed or not, we're done with this child for now
+            continue;
+          }
+        }
+
+        // If we are UPPER parent and shared child is not yet placed,
+        // defer ALL non-horizontal children until after shared node is placed
+        // The horizontal child was already processed via branchContinuation
+        if (isUpperParentOfShared && pendingSharedChild && !placed.has(pendingSharedChild)) {
+          // Shared child not yet placed - skip all children except the shared one itself
+          if (childId !== pendingSharedChild) {
+            // Store for later processing
+            if (!deferredChildren.has(nodeId)) {
+              deferredChildren.set(nodeId, []);
+            }
+            deferredChildren.get(nodeId).push({ childId, nodeCol, nodeRow });
             continue;
           }
         }
@@ -1228,17 +1345,9 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
         }
       }
 
-      if (parentColClear) {
-        // Route: down through parentCol, then right at childRow
-        for (let r = parentRow + 1; r <= childRow; r++) {
-          placeVEdge(matrix, r, parentCol);
-        }
-        for (let c = parentCol; c < childCol; c++) {
-          if (!hasHEdgeAt(matrix, childRow, c)) {
-            placeHEdge(matrix, childRow, c, c === parentCol ? argName : '');
-          }
-        }
-      } else if (childColClear) {
+      // PREFER routing through childCol to avoid blocking parentCol for siblings
+      // This is important for shared arguments where multiple parents need to be in same column
+      if (childColClear) {
         // Route: right at parentRow, then down through childCol
         for (let c = parentCol; c < childCol; c++) {
           if (!hasHEdgeAt(matrix, parentRow, c)) {
@@ -1247,6 +1356,16 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
         }
         for (let r = parentRow + 1; r < childRow; r++) {
           placeVEdge(matrix, r, childCol);
+        }
+      } else if (parentColClear) {
+        // Fallback: route down through parentCol, then right at childRow
+        for (let r = parentRow + 1; r <= childRow; r++) {
+          placeVEdge(matrix, r, parentCol);
+        }
+        for (let c = parentCol; c < childCol; c++) {
+          if (!hasHEdgeAt(matrix, childRow, c)) {
+            placeHEdge(matrix, childRow, c, c === parentCol ? argName : '');
+          }
         }
       } else {
         // Both parentCol and childCol are blocked
@@ -1675,6 +1794,145 @@ function buildGridLayout(elements) {
 }
 
 // ============================================================================
+// BACKEND LAYOUT API
+// ============================================================================
+
+/**
+ * Fetch layout from backend API
+ * @param {Object} elements - { nodes: [...], edges: [...] }
+ * @returns {Promise<Map>} Layout map: nodeId -> { x, y, width, height, row, col }
+ */
+async function fetchBackendLayout(elements) {
+  try {
+    const response = await fetch('/api/graph/layout', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ elements })
+    });
+
+    if (!response.ok) {
+      console.warn('Backend layout API failed, falling back to local layout');
+      return null;
+    }
+
+    const data = await response.json();
+
+    if (!data['grid-pos'] && !data.grid_pos && !data.gridPos) {
+      console.warn('Invalid backend layout response');
+      return null;
+    }
+
+    // Convert backend response to frontend layout format
+    // Handle different naming conventions: 'grid-pos' (Clojure), 'grid_pos', 'gridPos'
+    const gridPos = data['grid-pos'] || data.grid_pos || data.gridPos || {};
+    const layout = new Map();
+
+    // Calculate sizes for all nodes
+    const sizes = new Map();
+    elements.nodes.forEach(n => {
+      sizes.set(n.data.id, calculateNodeSize(n));
+    });
+
+    // Calculate column widths
+    const colWidths = new Map();
+    Object.entries(gridPos).forEach(([nodeId, pos]) => {
+      const size = sizes.get(nodeId);
+      if (size) {
+        const currentMax = colWidths.get(pos.col) || 0;
+        colWidths.set(pos.col, Math.max(currentMax, size.width));
+      }
+    });
+
+    // Calculate row heights
+    const rowHeights = new Map();
+    Object.entries(gridPos).forEach(([nodeId, pos]) => {
+      const size = sizes.get(nodeId);
+      if (size) {
+        const currentMax = rowHeights.get(pos.row) || 0;
+        rowHeights.set(pos.row, Math.max(currentMax, size.height));
+      }
+    });
+
+    // Calculate X positions
+    const colLeftX = new Map();
+    const maxColKey = Math.max(...Array.from(colWidths.keys()), 0);
+    let currentX = 0;
+    for (let c = 0; c <= maxColKey; c++) {
+      colLeftX.set(c, currentX);
+      const width = colWidths.get(c) || 80;
+      currentX += width + GRID_GAP_X;
+    }
+
+    // Calculate Y positions
+    const rowCenterY = new Map();
+    let currentY = 0;
+    const maxRowKey = Math.max(...Array.from(rowHeights.keys()), 0);
+    for (let r = 0; r <= maxRowKey; r++) {
+      const height = rowHeights.get(r) || 30;
+      rowCenterY.set(r, currentY + height / 2);
+      currentY += height + GRID_GAP_Y;
+    }
+
+    // Build final layout
+    Object.entries(gridPos).forEach(([nodeId, pos]) => {
+      const size = sizes.get(nodeId);
+      if (size) {
+        const leftX = colLeftX.get(pos.col);
+        layout.set(nodeId, {
+          x: leftX + size.width / 2,
+          y: rowCenterY.get(pos.row),
+          width: size.width,
+          height: size.height,
+          row: pos.row,
+          col: pos.col
+        });
+      }
+    });
+
+    cachedBackendLayout = layout;
+    return layout;
+  } catch (error) {
+    console.warn('Backend layout fetch error:', error);
+    return null;
+  }
+}
+
+/**
+ * Build grid layout - uses backend API if enabled, otherwise local calculation
+ * Synchronous wrapper that returns cached layout or computes locally
+ */
+function buildGridLayoutSync(elements) {
+  // Use cached backend layout if available and matches current elements
+  if (USE_BACKEND_LAYOUT && cachedBackendLayout) {
+    // Verify cache validity - all element ids must be in cache
+    const allIds = new Set(elements.nodes.map(n => n.data.id));
+    let cacheValid = true;
+    allIds.forEach(id => {
+      if (!cachedBackendLayout.has(id)) cacheValid = false;
+    });
+    if (cacheValid) {
+      return cachedBackendLayout;
+    }
+  }
+
+  // Fallback to local layout calculation
+  return buildGridLayout(elements);
+}
+
+/**
+ * Refresh layout from backend (async)
+ * Call this when graph elements change
+ */
+async function refreshBackendLayout(elements) {
+  if (!USE_BACKEND_LAYOUT) return;
+
+  const layout = await fetchBackendLayout(elements);
+  if (layout) {
+    cachedBackendLayout = layout;
+  }
+}
+
+// ============================================================================
 // EXPORTS
 // ============================================================================
 
@@ -1689,6 +1947,9 @@ if (typeof module !== 'undefined' && module.exports) {
     validateMatrix,
     formatMatrixASCII,
     calculateNodeSize,
-    buildGridLayout
+    buildGridLayout,
+    fetchBackendLayout,
+    buildGridLayoutSync,
+    refreshBackendLayout
   };
 }

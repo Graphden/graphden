@@ -136,7 +136,13 @@ function createFnOverlay(node, container) {
   createDragHandle(overlay, node);
 
   overlay.addEventListener('mouseleave', () => {
-    if (!rebuildingOverlays && !isGrabbing) setPreviewLevel(originalFnId, null);
+    // Don't clear preview if:
+    // 1. Overlays are being rebuilt (rebuildingOverlays flag)
+    // 2. User is dragging (isGrabbing flag)
+    // 3. Overlay was removed from DOM (happens during rebuild, mouseleave fires async)
+    if (!rebuildingOverlays && !isGrabbing && overlay.isConnected) {
+      setPreviewLevel(originalFnId, null);
+    }
   });
 
   container.appendChild(overlay);
@@ -180,13 +186,34 @@ function createPlaceholderOverlay(node, container) {
  * Create all node overlays
  */
 function createNodeOverlays() {
-  document.querySelectorAll('.node-overlay').forEach(el => el.remove());
+  // Find the node that has active preview - we should NOT remove its overlay
+  // to prevent mouseleave events during rebuild
+  let preservedOverlayId = null;
+  if (previewLevel.size > 0) {
+    const previewFnId = previewLevel.keys().next().value;
+    preservedOverlayId = 'fn-' + previewFnId;
+  }
+
+  // Remove overlays except the preserved one
+  document.querySelectorAll('.node-overlay').forEach(el => {
+    if (el.dataset.nodeId === preservedOverlayId) {
+      // Keep this overlay - it's the one user is hovering over
+      return;
+    }
+    el.remove();
+  });
+
   if (!cy) return;
 
   const container = document.getElementById('cy');
 
   // Fn nodes (with ancestor list)
   cy.nodes('[type="fn"][!isPlaceholder]').forEach(node => {
+    // Skip if overlay already exists (preserved)
+    if (node.id() === preservedOverlayId) {
+      const existingOverlay = document.querySelector(`.node-overlay[data-node-id="${node.id()}"]`);
+      if (existingOverlay) return;
+    }
     createFnOverlay(node, container);
   });
 

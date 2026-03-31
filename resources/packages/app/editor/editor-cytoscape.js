@@ -152,12 +152,15 @@ function renderGraph(shouldFit = true) {
     return;
   }
 
-  // Find the node that triggered expand (from previewLevel)
-  // We want to keep this node stationary so hover doesn't break
+  // Find the anchor node - the node that should stay stationary during layout
+  // Priority: 1. Explicit anchorFnId (from click/expansion)
+  //           2. Preview node (from hover)
   let anchorNodeId = null;
   let anchorOldPos = null;
 
-  if (previewLevel.size > 0) {
+  if (anchorFnId) {
+    anchorNodeId = 'fn-' + anchorFnId;
+  } else if (previewLevel.size > 0) {
     const previewFnId = previewLevel.keys().next().value;
     anchorNodeId = 'fn-' + previewFnId;
   }

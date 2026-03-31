@@ -387,13 +387,16 @@ describe('layoutGraph - shared handler with multiple siblings', () => {
   assertEqual(posCreatePath.row, posCreate.row,
     'create-path should be on same row as form-create-route');
 
-  // For lower parent (edit-route): shared handler becomes first child (horizontal)
-  // edit-path goes below
-  const lowerRow = Math.max(posCreate.row, posEdit.row);
-  assertEqual(posHandler.row, lowerRow,
-    `Shared handler should be on same row as lower route (${lowerRow}), got ${posHandler.row}`);
+  // Shared handler must be placed AFTER all its parents and their children
+  // So handler col = max(all parent cols, all sibling cols) + 1
+  const maxSiblingCol = Math.max(posCreatePath.col, posEditPath.col);
+  assert(posHandler.col > maxSiblingCol,
+    `Shared handler col ${posHandler.col} should be > max sibling col ${maxSiblingCol}`);
+
+  // For lower parent (edit-route): shared handler goes horizontal, path goes below
+  // edit-path is NOT on same row as edit-route because handler takes priority
   assert(posEditPath.row > posEdit.row,
-    `edit-path should be BELOW form-edit-route (handler took horizontal spot)`);
+    `edit-path should be below form-edit-route (shared handler takes horizontal slot)`);
 });
 
 // Realistic editor-routes: two routes with path args AND shared handler
@@ -422,7 +425,7 @@ function makeRealisticSharedHandler() {
   };
 }
 
-describe('layoutGraph - shared handler on same row as lower branch parent', () => {
+describe('layoutGraph - shared handler positioned correctly', () => {
   const data = makeRealisticSharedHandler();
   const result = layout.layoutGraph(data);
 
@@ -447,11 +450,6 @@ describe('layoutGraph - shared handler on same row as lower branch parent', () =
   const routeRowDiff = Math.abs(posCreate.row - posEdit.row);
   assertEqual(routeRowDiff, 1, 'Routes should be adjacent (row diff = 1)');
 
-  // Determine which is upper and which is lower
-  const upperRoute = posCreate.row < posEdit.row ? 'form-create-route' : 'form-edit-route';
-  const lowerRoute = posCreate.row < posEdit.row ? 'form-edit-route' : 'form-create-route';
-  const lowerRoutePos = posCreate.row < posEdit.row ? posEdit : posCreate;
-
   // Key rule: First child is ALWAYS on same row as parent (no steps in horizontal branch)
   // create-path is first child of form-create-route
   assertEqual(posCreatePath.row, posCreate.row,
@@ -459,14 +457,18 @@ describe('layoutGraph - shared handler on same row as lower branch parent', () =
   assertEqual(posCreatePath.col, posCreate.col + 1,
     'create-path should be at col+1 of form-create-route');
 
-  // For lower parent (edit-route): shared handler becomes first child (horizontal)
-  // edit-path goes BELOW (not on same row)
-  assertEqual(posHandler.row, posEdit.row,
-    'Shared handler should be on same row as form-edit-route (it becomes first child)');
-  assertEqual(posHandler.col, posEdit.col + 1,
-    'Shared handler should be at col+1 of form-edit-route');
+  // For lower parent (edit-route): shared handler goes horizontal, path goes below
+  // edit-path is NOT first child anymore - handler is first child for lower parent
   assert(posEditPath.row > posEdit.row,
-    `edit-path should be BELOW form-edit-route (handler took horizontal spot)`);
+    'edit-path should be below form-edit-route (handler goes horizontal)');
+  assertEqual(posEditPath.col, posEdit.col + 1,
+    'edit-path should be at col+1 of form-edit-route');
+
+  // Shared handler must be at col > max(all parent children cols)
+  // This ensures no backward edges
+  const maxChildCol = Math.max(posCreatePath.col, posEditPath.col);
+  assert(posHandler.col > maxChildCol,
+    `Shared handler col ${posHandler.col} must be > max child col ${maxChildCol}`);
 });
 
 // Test with expanded upper branch (simulates expand of entity-form-edit-route)

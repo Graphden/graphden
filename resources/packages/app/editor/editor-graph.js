@@ -14,6 +14,11 @@ function buildGraphElements() {
   const edges = [];
   const addedNodeIds = new Set();
 
+  // Track which (argId, targetId) combinations have been processed
+  // This prevents duplicate edges when the same binding is inherited by multiple nodes
+  // But allows different args to point to the same target (shared arguments)
+  const processedArgTargets = new Set();
+
   if (!selectedFnId || !lookups.fnMap.has(selectedFnId)) {
     return { nodes: [], edges: [] };
   }
@@ -210,13 +215,23 @@ function buildGraphElements() {
   // FN PROCESSING
   // ============================================================================
 
-  function processFn(originalFnId, displayFnId, bindings, sourceNodeId, edgeArgName, isRoot) {
+  function processFn(originalFnId, displayFnId, bindings, sourceNodeId, edgeArgName, isRoot, sourceArgId) {
     const nodeId = addFnNode(originalFnId, isRoot);
 
     if (sourceNodeId && edgeArgName !== null) {
       const edgeId = 'e-ref-' + sourceNodeId + '-' + originalFnId;
-      if (!addedNodeIds.has(edgeId)) {
+
+      // Track (argId, targetFnId) to prevent duplicate edges from inherited bindings
+      // The same argId binding can appear in multiple nodes due to inheritance,
+      // but should only create one edge (to the first source that processes it)
+      const argTargetKey = sourceArgId ? (sourceArgId + '->' + originalFnId) : null;
+      const isDuplicateBinding = argTargetKey && processedArgTargets.has(argTargetKey);
+
+      if (!addedNodeIds.has(edgeId) && !isDuplicateBinding) {
         addedNodeIds.add(edgeId);
+        if (argTargetKey) {
+          processedArgTargets.add(argTargetKey);
+        }
         edges.push({
           data: {
             id: edgeId,
@@ -233,7 +248,7 @@ function buildGraphElements() {
     // Process args in original order (preserves database order)
     allArgs.forEach(arg => {
       if (arg.type === 'ref') {
-        processAnyFn(arg.refId, nodeId, arg.argName, false, bindings);
+        processAnyFn(arg.refId, nodeId, arg.argName, false, bindings, arg.argId);
       } else if (arg.type === 'value') {
         addArgValueNode(arg.argName, arg.value, arg.argId, nodeId);
       } else if (arg.type === 'unset') {
@@ -244,18 +259,18 @@ function buildGraphElements() {
     return nodeId;
   }
 
-  function processExpandedFn(originalFnId, level, sourceNodeId, edgeArgName, isRoot) {
+  function processExpandedFn(originalFnId, level, sourceNodeId, edgeArgName, isRoot, sourceArgId) {
     const chain = getInheritanceChain(originalFnId);
     const displayFnId = chain[Math.min(level, chain.length - 1)];
     const bindings = buildChainBindings(chain, level);
-    return processFn(originalFnId, displayFnId, bindings, sourceNodeId, edgeArgName, isRoot);
+    return processFn(originalFnId, displayFnId, bindings, sourceNodeId, edgeArgName, isRoot, sourceArgId);
   }
 
-  function processAnyFn(fnId, sourceNodeId, edgeArgName, isRoot, parentBindings) {
+  function processAnyFn(fnId, sourceNodeId, edgeArgName, isRoot, parentBindings, sourceArgId) {
     const level = getEffectiveLevel(fnId);
 
     if (level > 0) {
-      return processExpandedFn(fnId, level, sourceNodeId, edgeArgName, isRoot);
+      return processExpandedFn(fnId, level, sourceNodeId, edgeArgName, isRoot, sourceArgId);
     } else {
       const bindings = buildArgBindings(fnId);
       if (parentBindings) {
@@ -265,7 +280,7 @@ function buildGraphElements() {
           }
         });
       }
-      return processFn(fnId, fnId, bindings, sourceNodeId, edgeArgName, isRoot);
+      return processFn(fnId, fnId, bindings, sourceNodeId, edgeArgName, isRoot, sourceArgId);
     }
   }
 
@@ -273,7 +288,7 @@ function buildGraphElements() {
   // MAIN
   // ============================================================================
 
-  processAnyFn(selectedFnId, null, null, true, null);
+  processAnyFn(selectedFnId, null, null, true, null, null);
 
   return { nodes, edges };
 }

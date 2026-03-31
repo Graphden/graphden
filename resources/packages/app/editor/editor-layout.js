@@ -77,12 +77,32 @@ function getNodeType(nodeId, nodeDataMap) {
 }
 
 /**
- * Return children in original order (as they appear in edges)
- * The order from database/edges should be preserved - no sorting needed
+ * Sort children by priority:
+ * 1. Lower branch start items for shared args (handled by adjustPriorityForShared)
+ * 2. fn type arguments (functions)
+ * 3. fixed arguments (values)
+ * 4. free arguments (unset/placeholders)
+ * 5. Lower branch end items for shared args (handled by adjustPriorityForShared)
  */
 function sortChildrenByPriority(childIds, nodeDataMap, sharedInfo, currentNodeId, edgeArgNames) {
-  // Return as-is, preserving original order from edges
-  return [...childIds];
+  // Sort by: fn > fixed > free (preserve relative order within each group)
+  const prioritized = childIds.map((childId, originalIndex) => {
+    const type = getNodeType(childId, nodeDataMap);
+    // Priority: fn=0, fixed=1, free=2
+    let priority;
+    if (type === 'fn') priority = 0;
+    else if (type === 'fixed') priority = 1;
+    else priority = 2;  // free
+    return { childId, priority, originalIndex };
+  });
+
+  // Stable sort: sort by priority, preserve original order within same priority
+  prioritized.sort((a, b) => {
+    if (a.priority !== b.priority) return a.priority - b.priority;
+    return a.originalIndex - b.originalIndex;
+  });
+
+  return prioritized.map(p => p.childId);
 }
 
 // ============================================================================
@@ -146,6 +166,13 @@ function analyzeSharedArguments(children, parents) {
 /**
  * Find splitting nodes for a shared argument
  * (siblings that both lead to the same shared node)
+ *
+ * Returns lowerChild (the one that will be on the lower row, where shared node goes)
+ * and upperChildren (the ones above).
+ *
+ * The "lower" child is determined by:
+ * 1. LONGER path length to shared node (more levels = more branching = lower on screen)
+ * 2. If equal, LATER index in childIds (later in list = processed later = lower row)
  */
 function findSplittingInfo(nodeId, childIds, sharedId, pathsToShared, pathLengths) {
   const leadingChildren = childIds.filter(childId => {
@@ -155,17 +182,28 @@ function findSplittingInfo(nodeId, childIds, sharedId, pathsToShared, pathLength
 
   if (leadingChildren.length < 2) return null;
 
-  // Sort by path length - shorter path becomes "lower" branch
-  leadingChildren.sort((a, b) => {
-    const distA = pathLengths.get(a + '->' + sharedId) || Infinity;
-    const distB = pathLengths.get(b + '->' + sharedId) || Infinity;
-    return distA - distB;
+  // Sort by path length DESCENDING (longer path = lower branch)
+  // When equal, preserve original order (stable sort) - later index = lower
+  // We need the LAST one with max path length
+  let maxPathLen = -1;
+  let lowerChildIdx = -1;
+
+  leadingChildren.forEach((childId, idx) => {
+    const dist = pathLengths.get(childId + '->' + sharedId) || 0;
+    // Use >= so that when path lengths are equal, the LAST one wins
+    if (dist >= maxPathLen) {
+      maxPathLen = dist;
+      lowerChildIdx = idx;
+    }
   });
+
+  const lowerChild = leadingChildren[lowerChildIdx];
+  const upperChildren = leadingChildren.filter((_, idx) => idx !== lowerChildIdx);
 
   return {
     sharedId,
-    lowerChild: leadingChildren[0],  // shortest path - goes horizontal
-    upperChildren: leadingChildren.slice(1)  // longer paths - hang below
+    lowerChild,      // longest path (or last when equal) - goes horizontal, shared node on its row
+    upperChildren    // shorter paths (or earlier when equal) - hang above
   };
 }
 
@@ -232,7 +270,12 @@ function placeHEdge(matrix, row, col, argName) {
 
 function placeVEdge(matrix, row, col) {
   ensureMatrixSize(matrix, row, col);
+  // Don't place vEdge where a node already exists - would cause crossing
+  if (matrix.nodeGrid[row][col] !== null) {
+    return false; // Indicate failure
+  }
   matrix.vEdge[row][col] = true;
+  return true;
 }
 
 function removeVEdge(matrix, row, col) {
@@ -364,17 +407,49 @@ function buildHorizontalBranch(
     }
 
     // Take first unplaced child that isn't reserved
-    // IMPORTANT: First child ALWAYS goes horizontal, regardless of shared handling
+    // SPECIAL CASE: If the first child (after priority adjustment) is a reserved shared node,
+    // and current node is its "lower parent", then we should NOT select any child for
+    // horizontal branch continuation. All children should go below this node.
+    // This ensures the shared node's row is reserved for it, and siblings go below.
     let nextChild = null;
-    for (const c of sortedChildren) {
-      if (placed.has(c)) continue;
-      // NEVER include reserved shared nodes in horizontal branch
-      // They must be placed via tryPlaceSharedNode when ALL parents are ready
-      if (reservedForLower && reservedForLower.has(c)) {
-        continue;
+    const firstUnplacedChild = sortedChildren.find(c => !placed.has(c));
+
+    // Check if first child is a reserved shared node and we are its LOWER parent
+    // In this case, we should NOT continue horizontal branch, so the shared node
+    // can be placed on the same row when all parents are ready.
+    let skipHorizontalBranch = false;
+    if (firstUnplacedChild && reservedForLower && reservedForLower.has(firstUnplacedChild)) {
+      // Check if current node is the LOWER parent of this shared node
+      const sharedParents = parents.get(firstUnplacedChild) || [];
+      if (sharedParents.length >= 2) {
+        let maxPathLen = -1;
+        let lowerParent = null;
+        for (const pid of sharedParents) {
+          const pathKey = pid + '->' + firstUnplacedChild;
+          const pathLen = sharedInfo.pathLengths.get(pathKey) || 1;
+          if (pathLen >= maxPathLen) {
+            maxPathLen = pathLen;
+            lowerParent = pid;
+          }
+        }
+        if (lowerParent === current) {
+          // We are the lower parent - don't continue horizontal branch
+          skipHorizontalBranch = true;
+        }
       }
-      nextChild = c;
-      break;
+    }
+
+    if (!skipHorizontalBranch) {
+      for (const c of sortedChildren) {
+        if (placed.has(c)) continue;
+        // NEVER include reserved shared nodes in horizontal branch
+        // They must be placed via tryPlaceSharedNode when ALL parents are ready
+        if (reservedForLower && reservedForLower.has(c)) {
+          continue;
+        }
+        nextChild = c;
+        break;
+      }
     }
     if (!nextChild) break;
 
@@ -397,47 +472,187 @@ function buildHorizontalBranch(
 
 /**
  * Adjust child priority based on shared argument handling.
- * For the lower parent of a shared node: put shared node FIRST so it goes horizontal.
- * This is called from buildHorizontalBranch with current node's children.
- * Also removes the shared node from reservedForLower so it can be included in horizontal branch.
+ *
+ * This function handles TWO cases:
+ * 1. Direct: current node is a parent of a shared node → put shared node FIRST
+ * 2. Splitting node: current node is where paths to shared node diverge →
+ *    put the child leading to LOWER parent LAST (so it goes below)
+ *
+ * The goal is to ensure that branches between two parents of a shared node
+ * don't interfere - the lower parent's branch should be below other branches.
+ *
+ * NOTE: This function is called DURING layout, before gridPos is fully populated,
+ * so we cannot rely on row positions. We use path lengths and parent order instead.
  */
 function adjustPriorityForShared(sortedChildren, sharedInfo, branchContext, placed, currentNodeId, parents, gridPos, reservedForLower) {
-  // Check if any child is a shared node where current node is the lower parent
-  // and all other parents are already placed
-  for (const childId of sortedChildren) {
-    if (!sharedInfo.sharedNodes.has(childId)) continue;
-
-    // Get all parents of this shared node
-    const childParents = parents.get(childId) || [];
-    if (childParents.length < 2) continue;
-
-    // Check if current node is among parents
-    if (!childParents.includes(currentNodeId)) continue;
-
-    // Check if all OTHER parents are placed
-    const otherParents = childParents.filter(p => p !== currentNodeId);
-    const allOthersPlaced = otherParents.every(p => placed.has(p));
-    if (!allOthersPlaced) continue;
-
-    // Current node is the last parent to be processed (all others are already placed)
-    // Since we process nodes top-to-bottom, current node will be placed at or below
-    // the rows of already-placed parents. So current IS the lower parent.
-    //
-    // Note: currentNodeId may not be in gridPos yet (we're building its branch),
-    // but since all other parents ARE placed and we process top-to-bottom,
-    // current will be placed below them.
-
-    // Current IS the lower parent - put shared node FIRST
-    // Also remove from reservedForLower so it can be included in horizontal branch
-    if (reservedForLower) {
-      reservedForLower.delete(childId);
-    }
-
-    const reordered = [childId, ...sortedChildren.filter(c => c !== childId)];
-    return reordered;
+  if (sharedInfo.sharedNodes.size === 0) {
+    return sortedChildren;
   }
 
-  return sortedChildren;
+  const result = [...sortedChildren];
+
+  // Case 1: Direct - current node is a parent of a shared node
+  // For LOWER parent: shared child goes FIRST (so it's placed on same row)
+  // For UPPER parent: shared child goes LAST (so other children go horizontal, shared is placed later)
+  const sharedChildren = sortedChildren.filter(childId => sharedInfo.sharedNodes.has(childId));
+
+  for (const sharedChildId of sharedChildren) {
+    const childParents = parents.get(sharedChildId) || [];
+    if (childParents.length < 2) continue;
+
+    // Find the "lower parent" (the one with longest path to shared)
+    let lowerParent = null;
+    let maxPathLen = -1;
+
+    for (const parentId of childParents) {
+      const pathKey = parentId + '->' + sharedChildId;
+      const pathLen = sharedInfo.pathLengths.get(pathKey) || 1;
+      if (pathLen >= maxPathLen) {
+        maxPathLen = pathLen;
+        lowerParent = parentId;
+      }
+    }
+
+    const idx = result.indexOf(sharedChildId);
+    if (idx < 0) continue;
+
+    if (lowerParent === currentNodeId) {
+      // We are the LOWER parent - move shared child to FIRST position
+      if (idx > 0) {
+        result.splice(idx, 1);
+        result.unshift(sharedChildId);
+      }
+    } else if (childParents.includes(currentNodeId)) {
+      // We are an UPPER parent - move shared child to LAST position
+      // This way other children go horizontal, and shared node is placed later
+      if (idx < result.length - 1) {
+        result.splice(idx, 1);
+        result.push(sharedChildId);
+      }
+    }
+  }
+
+  // Case 2: Handle nodes on the path to lower parent
+  // If current node has exactly ONE child leading to a shared node's lower parent,
+  // that child should go FIRST (horizontal) to minimize distance between parents.
+  //
+  // Exception: at the SPLITTING NODE (where paths diverge), the child leading to
+  // lower parent should go LAST so upper parent is placed first (higher row).
+
+  sharedInfo.sharedNodes.forEach(sharedId => {
+    const sharedParents = parents.get(sharedId) || [];
+    if (sharedParents.length < 2) return;
+
+    // Find children that lead to this shared node
+    const childrenLeadingToShared = result.filter(childId => {
+      const paths = sharedInfo.pathsToShared.get(childId);
+      return paths && paths.has(sharedId);
+    });
+
+    if (childrenLeadingToShared.length === 0) return;
+
+    // Find the lower parent
+    let lowerParent = null;
+    let maxPathLen = -1;
+
+    for (const parentId of sharedParents) {
+      const pathKey = parentId + '->' + sharedId;
+      const pathLen = sharedInfo.pathLengths.get(pathKey) || 1;
+      if (pathLen >= maxPathLen) {
+        maxPathLen = pathLen;
+        lowerParent = parentId;
+      }
+    }
+
+    if (!lowerParent) return;
+
+    // Find which child leads to the lower parent (has longest path to shared)
+    let childToLower = null;
+    let maxChildPath = -1;
+
+    for (const childId of childrenLeadingToShared) {
+      const pathLen = sharedInfo.pathLengths.get(childId + '->' + sharedId) || 0;
+      if (pathLen > maxChildPath) {
+        maxChildPath = pathLen;
+        childToLower = childId;
+      }
+    }
+
+    if (!childToLower) return;
+
+    // Check if this is a SPLITTING NODE (2+ children lead to the same shared node)
+    const isSplittingNode = childrenLeadingToShared.length >= 2;
+
+    if (isSplittingNode) {
+      // At splitting node: children are processed RIGHT-TO-LEFT when placing.
+      // So higher index = processed first = placed at lower row number.
+
+      // Find the child leading to upper parent (shorter path to shared)
+      let childToUpper = null;
+      let minChildPath = Infinity;
+      for (const childId of childrenLeadingToShared) {
+        if (childId === childToLower) continue;
+        const pathLen = sharedInfo.pathLengths.get(childId + '->' + sharedId) || 0;
+        if (pathLen < minChildPath) {
+          minChildPath = pathLen;
+          childToUpper = childId;
+        }
+      }
+
+      if (childToUpper) {
+        // Check if these children ARE the parents themselves (direct case)
+        // vs children that LEAD TO the parents (indirect case)
+        const sharedParents = parents.get(sharedId) || [];
+        const isDirectCase = sharedParents.includes(childToUpper) && sharedParents.includes(childToLower);
+
+        if (isDirectCase) {
+          // Direct case: children ARE the parents of shared node
+          // Move them to END of list so they're processed first (right-to-left)
+          // and placed adjacent to each other
+          const toRemove = [childToUpper, childToLower];
+          const newResult = result.filter(id => !toRemove.includes(id));
+
+          // Push in order: lower first (lower index), upper second (higher index)
+          // Higher index = processed first = placed at lower row
+          newResult.push(childToLower);  // processed second, higher row
+          newResult.push(childToUpper);  // processed first, lower row
+
+          result.length = 0;
+          newResult.forEach(id => result.push(id));
+        } else {
+          // Indirect case: children LEAD TO the parents
+          // childToLower should come right after childToUpper
+          const upperIdx = result.indexOf(childToUpper);
+          const lowerIdx = result.indexOf(childToLower);
+
+          if (upperIdx >= 0 && lowerIdx >= 0 && lowerIdx !== upperIdx + 1) {
+            result.splice(lowerIdx, 1);
+            const newUpperIdx = result.indexOf(childToUpper);
+            result.splice(newUpperIdx + 1, 0, childToLower);
+          }
+        }
+      }
+    } else {
+      // Not a splitting node: only one child leads to shared node
+      // Check if childToLower IS the lower parent itself, or is its DIRECT parent
+      // Only in these cases do we move it to front
+      const isDirectParentOfLower = childToLower === lowerParent ||
+        (parents.get(lowerParent) || []).includes(childToLower);
+
+      if (isDirectParentOfLower) {
+        // This child is the lower parent or its direct parent
+        // Move to FIRST (horizontal) to keep the path compact
+        const idx = result.indexOf(childToLower);
+        if (idx > 0) {
+          result.splice(idx, 1);
+          result.unshift(childToLower);
+        }
+      }
+      // Otherwise, don't change order - we're too far from the lower parent
+    }
+  });
+
+  return result;
 }
 
 // ============================================================================
@@ -475,10 +690,105 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
     sharedParentsPlaced.set(sharedId, new Set());
   });
 
+  // Track target columns for parents of shared nodes
+  // When a splitting node is detected, we calculate where all parents should be aligned
+  // sharedParentTargetCol: Map<sharedId, { targetCol: number, splittingNodeId: nodeId, splittingCol: number }>
+  const sharedParentTargetCol = new Map();
+
+  // Map from parent nodeId to its target column (for shared node alignment)
+  // parentTargetCol: Map<parentNodeId, targetCol>
+  const parentTargetCol = new Map();
+
+  // ============================================================================
+  // GLOBAL PRE-ANALYSIS: Find all splitting nodes and calculate target columns
+  // This must happen BEFORE any placement so we know where to place nodes
+  // ============================================================================
+
+  /**
+   * Recursively analyze tree to find splitting nodes and calculate target columns
+   * for parents of shared arguments.
+   *
+   * @param nodeId Current node being analyzed
+   * @param currentCol Column where this node would be placed (estimated)
+   * @param visited Set of already-visited nodes to prevent infinite loops
+   */
+  function preAnalyzeTree(nodeId, currentCol, visited) {
+    if (visited.has(nodeId)) return;
+    visited.add(nodeId);
+
+    const nodeChildren = children.get(nodeId) || [];
+    if (nodeChildren.length === 0) return;
+
+    // Check if this node is a splitting node for any shared argument
+    sharedInfo.sharedNodes.forEach(sharedId => {
+      const info = findSplittingInfo(nodeId, nodeChildren, sharedId, sharedInfo.pathsToShared, sharedInfo.pathLengths);
+      if (info && !splittingDecisions.has(info.sharedId)) {
+        splittingDecisions.set(info.sharedId, info);
+
+        // Calculate target column for parents of this shared node
+        const sharedParents = parents.get(sharedId) || [];
+        let maxDistToParent = 0;
+
+        for (const childId of nodeChildren) {
+          const paths = sharedInfo.pathsToShared.get(childId);
+          if (paths && paths.has(sharedId)) {
+            const distToShared = sharedInfo.pathLengths.get(childId + '->' + sharedId) || 0;
+            const distToParent = Math.max(0, distToShared - 1);
+            maxDistToParent = Math.max(maxDistToParent, distToParent);
+          }
+        }
+
+        // Target column: splitting node's column + 1 + max distance to parent
+        const targetCol = currentCol + 1 + maxDistToParent;
+        sharedParentTargetCol.set(sharedId, {
+          targetCol,
+          splittingNodeId: nodeId,
+          splittingCol: currentCol
+        });
+
+        // Register each parent of this shared node to be placed at targetCol
+        for (const parentId of sharedParents) {
+          if (!parentTargetCol.has(parentId)) {
+            parentTargetCol.set(parentId, targetCol);
+          }
+        }
+      }
+    });
+
+    // Recursively analyze children
+    // First child continues at currentCol + 1, others go below (same column)
+    let childCol = currentCol + 1;
+    for (const childId of nodeChildren) {
+      // Check if this child has a target column (is parent of shared node)
+      const targetCol = parentTargetCol.get(childId);
+      const actualCol = (targetCol !== undefined && targetCol > childCol) ? targetCol : childCol;
+
+      preAnalyzeTree(childId, actualCol, visited);
+
+      // Only first child advances the column
+      // (subsequent children are placed below, not to the right)
+      // But we still need to track the rightmost column in the subtree
+    }
+  }
+
+  // Run global pre-analysis starting from root
+  if (rootId) {
+    preAnalyzeTree(rootId, 0, new Set());
+  }
+
+  // ============================================================================
+  // END OF GLOBAL PRE-ANALYSIS
+  // ============================================================================
+
   /**
    * Try to place a shared node after a parent has been placed.
    * Only places the shared node when ALL its parents have been placed.
-   * Places it at column = max(branch end columns) + 1, on the row of the lower branch.
+   * Places it at column = max(branch end columns) + 1.
+   *
+   * Row determination (to satisfy FIRST_CHILD_SAME_ROW rule):
+   * - If shared node is the FIRST child of any parent, use that parent's row
+   * - Otherwise, use the row of the lower parent (max row)
+   *
    * @returns true if shared node was placed, false otherwise
    */
   function tryPlaceSharedNode(sharedId, parentNodeId, parentPos) {
@@ -500,18 +810,22 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
     // (not just immediate parents, but their children too)
     let maxBranchCol = 0;
 
-    // Find the parent with maximum row (the one that is lowest on screen)
-    // Shared node should be on the same row as this parent to avoid upward edges
-    let maxParentRow = 0;
-    let maxRowParent = null;
+    // First, find the "lower parent" - the one that should have shared node on its row
+    // Lower parent = the one with the HIGHEST row number (visually lowest on screen)
+    // This must be determined by actual position since all parents are now placed.
+    const parentIds = parents.get(sharedId) || [];
+    let lowerParent = null;
+    let maxParentRow = -1;
 
     placedParents.forEach(pid => {
       const pos = gridPos.get(pid);
       if (pos) {
         maxBranchCol = Math.max(maxBranchCol, pos.col);
-        if (pos.row >= maxParentRow) {
+
+        // Find parent with highest row number (visually lowest)
+        if (pos.row > maxParentRow) {
           maxParentRow = pos.row;
-          maxRowParent = pid;
+          lowerParent = pid;
         }
 
         // Also check all children of this parent that are already placed
@@ -528,34 +842,49 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
       }
     });
 
-    const sharedCol = maxBranchCol + 1;
-
-    // Shared node goes on the same row as the lower parent
-    // It continues the horizontal branch after the first child (path)
-    // Since sharedCol = maxBranchCol + 1, it's placed AFTER the path node,
-    // so there's no crossing - the edge goes through empty cells
+    // Determine the correct row for the shared node:
+    // Use the row of the lower parent (the one with highest row number)
     let sharedRow = maxParentRow;
 
-    // Check if cell is free, find first free row if not
-    // IMPORTANT: We need to check BOTH sharedCol AND sharedCol+1 (for first child)
-    // to ensure first child can be placed on same row as shared node
+    const sharedCol = maxBranchCol + 1;
+
+    // Place shared node at the target row (lower parent's row)
+    // If there are blocking vertical edges, REMOVE them - they can be rerouted later
+    // This ensures shared nodes are placed at the correct position
     let actualRow = sharedRow;
     const sharedChildrenForRowCheck = children.get(sharedId) || [];
     const needsChildCol = sharedChildrenForRowCheck.length > 0 &&
                           !placed.has(sharedChildrenForRowCheck[0]);
 
-    while (true) {
-      const sharedCellOccupied = isCellOccupied(matrix, actualRow, sharedCol);
-      const childCellOccupied = needsChildCol && isCellOccupied(matrix, actualRow, sharedCol + 1);
+    // Check if target cell has a NODE (not edge) - only then do we need to move
+    const hasNodeAtTarget = getNodeAt(matrix, sharedRow, sharedCol) !== null;
+    const hasNodeAtChildTarget = needsChildCol && getNodeAt(matrix, sharedRow, sharedCol + 1) !== null;
 
-      if (!sharedCellOccupied && !childCellOccupied) {
-        break; // Both cells are free
+    if (hasNodeAtTarget || hasNodeAtChildTarget) {
+      // There's an actual node blocking the target position
+      // Find next free row
+      while (true) {
+        const sharedCellHasNode = getNodeAt(matrix, actualRow, sharedCol) !== null;
+        const childCellHasNode = needsChildCol && getNodeAt(matrix, actualRow, sharedCol + 1) !== null;
+
+        if (!sharedCellHasNode && !childCellHasNode) {
+          break; // Both cells are free (no nodes)
+        }
+        actualRow++;
+        if (actualRow > 1000) {
+          console.error('Layout error: could not find row for shared node and child');
+          break;
+        }
       }
-      actualRow++;
-      if (actualRow > 1000) {
-        console.error('Layout error: could not find row for shared node and child');
-        break;
-      }
+    }
+
+    // Clear any vertical edges at the target position - they can be rerouted
+    // This is safe because we'll redraw edges to the shared node properly
+    if (hasVEdgeAt(matrix, actualRow, sharedCol)) {
+      removeVEdge(matrix, actualRow, sharedCol);
+    }
+    if (needsChildCol && hasVEdgeAt(matrix, actualRow, sharedCol + 1)) {
+      removeVEdge(matrix, actualRow, sharedCol + 1);
     }
 
     // Place the shared node
@@ -632,13 +961,46 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
     const newNodes = branch.filter(n => !placed.has(n));
     if (newNodes.length === 0) return minRow;
 
+    // Check if any node in branch has a target column (is parent of shared node)
+    // If so, we need to adjust placement to respect that target column
+    let hasTargetCol = false;
+    let maxTargetCol = startCol;
+    for (const nodeId of newNodes) {
+      const targetCol = parentTargetCol.get(nodeId);
+      if (targetCol !== undefined) {
+        hasTargetCol = true;
+        maxTargetCol = Math.max(maxTargetCol, targetCol);
+      }
+    }
+
+    // Calculate actual column for each node
+    // If a node has a target column, place it there; otherwise place sequentially
+    const nodeColumns = new Map();
+    let currentCol = startCol;
+
+    for (const nodeId of newNodes) {
+      const targetCol = parentTargetCol.get(nodeId);
+      if (targetCol !== undefined && targetCol > currentCol) {
+        // This node is a parent of a shared node - place at target column
+        nodeColumns.set(nodeId, targetCol);
+        currentCol = targetCol + 1;
+      } else {
+        nodeColumns.set(nodeId, currentCol);
+        currentCol++;
+      }
+    }
+
+    // Determine actual branch length (may be longer due to gaps for target columns)
+    const branchEndCol = currentCol;
+    const branchLength = branchEndCol - startCol;
+
     // Find row for this branch
-    const row = findRowForBranch(matrix, startCol, newNodes.length, minRow);
+    const row = findRowForBranch(matrix, startCol, branchLength, minRow);
 
     // Place branch nodes
     for (let i = 0; i < newNodes.length; i++) {
       const nodeId = newNodes[i];
-      const col = startCol + i;
+      const col = nodeColumns.get(nodeId);
 
       placeNode(matrix, nodeId, row, col);
       gridPos.set(nodeId, { row, col });
@@ -647,15 +1009,21 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
       // Place horizontal edge to next node
       if (i < newNodes.length - 1) {
         const nextId = newNodes[i + 1];
+        const nextCol = nodeColumns.get(nextId);
         const argName = edgeArgNames.get(nodeId + '->' + nextId) || '';
-        placeHEdge(matrix, row, col, argName);
+        // Fill horizontal edges from current node to next node
+        for (let c = col; c < nextCol; c++) {
+          placeHEdge(matrix, row, c, c === col ? argName : '');
+        }
       }
     }
 
     // FIRST PASS: Detect all splitting in this branch (left to right)
     // This ensures we know which nodes are lower/upper branches before placing children
+    // Also calculate target columns for shared node parents
     for (let i = 0; i < newNodes.length; i++) {
       const nodeId = newNodes[i];
+      const nodeCol = nodeColumns.get(nodeId);
       const nodeChildren = children.get(nodeId) || [];
       if (nodeChildren.length === 0) continue;
 
@@ -663,6 +1031,45 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
         const info = findSplittingInfo(nodeId, nodeChildren, sharedId, sharedInfo.pathsToShared, sharedInfo.pathLengths);
         if (info && !splittingDecisions.has(info.sharedId)) {
           splittingDecisions.set(info.sharedId, info);
+
+          // Calculate target column for parents of this shared node
+          // All parents should be at: splittingCol + maxPathLength
+          // where maxPathLength is the longest path from any child to the shared node's parents
+          const sharedParents = parents.get(sharedId) || [];
+          let maxDistToParent = 0;
+
+          // For each child that leads to this shared node, find the path length
+          // The path length to the shared node itself is stored, but we need the path to its PARENT
+          // Path to parent = path to shared - 1 (since parent is 1 step before shared)
+          for (const childId of nodeChildren) {
+            const paths = sharedInfo.pathsToShared.get(childId);
+            if (paths && paths.has(sharedId)) {
+              // Distance from this child to the shared node
+              const distToShared = sharedInfo.pathLengths.get(childId + '->' + sharedId) || 0;
+              // Distance to the parent = distToShared - 1 (parent is one step before shared)
+              // But we want from the splitting node's child, so it's distToShared - 1
+              const distToParent = Math.max(0, distToShared - 1);
+              maxDistToParent = Math.max(maxDistToParent, distToParent);
+            }
+          }
+
+          // Target column for all parents of this shared node
+          // +1 because children start at nodeCol + 1
+          const targetCol = nodeCol + 1 + maxDistToParent;
+          sharedParentTargetCol.set(sharedId, {
+            targetCol,
+            splittingNodeId: nodeId,
+            splittingCol: nodeCol
+          });
+
+          // IMPORTANT: Also register each parent of this shared node to be placed at targetCol
+          // This ensures all parents end up in the same column
+          for (const parentId of sharedParents) {
+            // Only set target if not already set (first shared node wins)
+            if (!parentTargetCol.has(parentId)) {
+              parentTargetCol.set(parentId, targetCol);
+            }
+          }
         }
       });
     }
@@ -754,65 +1161,30 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
           childBranchContext = branchContext;
         }
 
-        // Determine column for this child - always col+1
-        // First child goes horizontal (already handled by buildHorizontalBranch)
-        // Vertical children go to col+1 as well
-        const childCol = nodeCol + 1;
+        // Determine column for this child
+        // Check if this child is a parent of a shared node with a target column
+        let childCol = nodeCol + 1;
+
+        // If this child is a direct parent of a shared node, use the target column
+        const childChildren = children.get(childId) || [];
+        for (const grandchildId of childChildren) {
+          const targetInfo = sharedParentTargetCol.get(grandchildId);
+          if (targetInfo && targetInfo.targetCol > childCol) {
+            // This child is a parent of a shared node - align to target column
+            childCol = targetInfo.targetCol;
+            break;
+          }
+        }
 
         // Find row for this child's branch
         let childMinRow = childRow;
         const childMaxRow = placeBranchAndChildren(childId, childCol, childMinRow, childBranchContext);
 
-        // Get actual position of placed child
+        // Get actual position of placed child and draw edge using smart routing
         const childPos = gridPos.get(childId);
         if (childPos) {
-          if (childPos.row === nodeRow) {
-            // Child on same row - place horizontal edge
-            const argName = edgeArgNames.get(nodeId + '->' + childId) || '';
-            for (let c = nodeCol; c < childPos.col; c++) {
-              if (!hasHEdgeAt(matrix, nodeRow, c)) {
-                placeHEdge(matrix, nodeRow, c, c === nodeCol ? argName : '');
-              }
-            }
-          } else {
-            // Child below parent - need edge going down then right (L-shaped)
-            // Check if childCol has any nodes between parentRow and childRow
-            // If so, route through parentCol instead
-            const argName = edgeArgNames.get(nodeId + '->' + childId) || '';
-
-            let hasBlockingNode = false;
-            for (let r = nodeRow + 1; r < childPos.row; r++) {
-              if (getNodeAt(matrix, r, childPos.col) !== null) {
-                hasBlockingNode = true;
-                break;
-              }
-            }
-
-            if (hasBlockingNode || childPos.col === nodeCol) {
-              // Route through parent's column: down in parentCol, then right at childRow
-              for (let r = nodeRow + 1; r < childPos.row; r++) {
-                placeVEdge(matrix, r, nodeCol);
-              }
-              // Horizontal edge at child's row
-              for (let c = nodeCol; c < childPos.col; c++) {
-                if (!hasHEdgeAt(matrix, childPos.row, c)) {
-                  placeHEdge(matrix, childPos.row, c, c === nodeCol ? argName : '');
-                }
-              }
-            } else {
-              // Direct route through child's column: right at parentRow, then down
-              // Horizontal edge from parent to child's column at parent's row
-              for (let c = nodeCol; c < childPos.col; c++) {
-                if (!hasHEdgeAt(matrix, nodeRow, c)) {
-                  placeHEdge(matrix, nodeRow, c, c === nodeCol ? argName : '');
-                }
-              }
-              // Vertical edge in child's column from parent's row to child's row
-              for (let r = nodeRow + 1; r < childPos.row; r++) {
-                placeVEdge(matrix, r, childPos.col);
-              }
-            }
-          }
+          const argName = edgeArgNames.get(nodeId + '->' + childId) || '';
+          drawEdgeToPlaced(matrix, nodeRow, nodeCol, childPos.row, childPos.col, argName);
           childRow = Math.max(childRow, childPos.row + 1);
           maxRowUsed = Math.max(maxRowUsed, childMaxRow);
         }
@@ -824,6 +1196,7 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
 
   /**
    * Draw edge to an already-placed node (shared argument)
+   * Uses smart routing to avoid crossing any nodes
    */
   function drawEdgeToPlaced(matrix, parentRow, parentCol, childRow, childCol, argName) {
     if (childRow === parentRow && childCol > parentCol) {
@@ -834,19 +1207,153 @@ function buildMatrix(rootId, children, parents, edgeArgNames, nodeDataMap) {
         }
       }
     } else if (childRow > parentRow) {
-      // Child is below parent - use L-shaped edge to avoid crossing nodes
-      // Route: down through parentCol, then right at childRow
-      // This avoids crossing any nodes between parent and child on same row
+      // Child is below parent - need to route around any nodes in the path
+      // Strategy: find a clear column to use for vertical path
 
-      // First, vertical part: down from parentRow to childRow in parentCol
-      for (let r = parentRow + 1; r <= childRow; r++) {
-        placeVEdge(matrix, r, parentCol);
+      // Check if parentCol is clear for vertical path
+      let parentColClear = true;
+      for (let r = parentRow + 1; r < childRow; r++) {
+        if (getNodeAt(matrix, r, parentCol) !== null) {
+          parentColClear = false;
+          break;
+        }
       }
 
-      // Then horizontal part: from parentCol to childCol at childRow
-      for (let c = parentCol; c < childCol; c++) {
-        if (!hasHEdgeAt(matrix, childRow, c)) {
-          placeHEdge(matrix, childRow, c, c === parentCol ? argName : '');
+      // Check if childCol is clear for vertical path
+      let childColClear = true;
+      for (let r = parentRow + 1; r < childRow; r++) {
+        if (getNodeAt(matrix, r, childCol) !== null) {
+          childColClear = false;
+          break;
+        }
+      }
+
+      if (parentColClear) {
+        // Route: down through parentCol, then right at childRow
+        for (let r = parentRow + 1; r <= childRow; r++) {
+          placeVEdge(matrix, r, parentCol);
+        }
+        for (let c = parentCol; c < childCol; c++) {
+          if (!hasHEdgeAt(matrix, childRow, c)) {
+            placeHEdge(matrix, childRow, c, c === parentCol ? argName : '');
+          }
+        }
+      } else if (childColClear) {
+        // Route: right at parentRow, then down through childCol
+        for (let c = parentCol; c < childCol; c++) {
+          if (!hasHEdgeAt(matrix, parentRow, c)) {
+            placeHEdge(matrix, parentRow, c, c === parentCol ? argName : '');
+          }
+        }
+        for (let r = parentRow + 1; r < childRow; r++) {
+          placeVEdge(matrix, r, childCol);
+        }
+      } else {
+        // Both parentCol and childCol are blocked
+        // Try to find a clear column anywhere
+        let clearCol = -1;
+
+        // Helper to check if a column is clear for vertical path
+        function isColClear(col) {
+          for (let r = parentRow + 1; r < childRow; r++) {
+            if (getNodeAt(matrix, r, col) !== null) {
+              return false;
+            }
+          }
+          return true;
+        }
+
+        // Try columns between parent and child first
+        for (let tryCol = parentCol + 1; tryCol < childCol; tryCol++) {
+          if (isColClear(tryCol)) {
+            clearCol = tryCol;
+            break;
+          }
+        }
+
+        // If no clear column between, try columns beyond childCol (up to +20)
+        if (clearCol < 0) {
+          for (let tryCol = childCol + 1; tryCol <= childCol + 20; tryCol++) {
+            if (isColClear(tryCol)) {
+              clearCol = tryCol;
+              break;
+            }
+          }
+        }
+
+        // If still no clear column, try columns BEFORE parentCol (down to 0)
+        if (clearCol < 0) {
+          for (let tryCol = parentCol - 1; tryCol >= 0; tryCol--) {
+            if (isColClear(tryCol)) {
+              clearCol = tryCol;
+              break;
+            }
+          }
+        }
+
+        if (clearCol >= 0) {
+          if (clearCol < parentCol) {
+            // Clear col is BEFORE parentCol - route left, down, then right to child
+            // Horizontal left at parent row
+            for (let c = clearCol; c < parentCol; c++) {
+              if (!hasHEdgeAt(matrix, parentRow, c)) {
+                placeHEdge(matrix, parentRow, c, c === clearCol ? argName : '');
+              }
+            }
+            // Vertical down
+            for (let r = parentRow + 1; r <= childRow; r++) {
+              placeVEdge(matrix, r, clearCol);
+            }
+            // Horizontal right at child row
+            for (let c = clearCol; c < childCol; c++) {
+              if (!hasHEdgeAt(matrix, childRow, c)) {
+                placeHEdge(matrix, childRow, c, '');
+              }
+            }
+          } else if (clearCol < childCol) {
+            // Route: right to clearCol, down, then right to childCol
+            for (let c = parentCol; c < clearCol; c++) {
+              if (!hasHEdgeAt(matrix, parentRow, c)) {
+                placeHEdge(matrix, parentRow, c, c === parentCol ? argName : '');
+              }
+            }
+            for (let r = parentRow + 1; r <= childRow; r++) {
+              placeVEdge(matrix, r, clearCol);
+            }
+            for (let c = clearCol; c < childCol; c++) {
+              if (!hasHEdgeAt(matrix, childRow, c)) {
+                placeHEdge(matrix, childRow, c, '');
+              }
+            }
+          } else {
+            // Clear col is beyond childCol - route right past child, down, then left
+            for (let c = parentCol; c < clearCol; c++) {
+              if (!hasHEdgeAt(matrix, parentRow, c)) {
+                placeHEdge(matrix, parentRow, c, c === parentCol ? argName : '');
+              }
+            }
+            for (let r = parentRow + 1; r <= childRow; r++) {
+              placeVEdge(matrix, r, clearCol);
+            }
+            // Horizontal part at child row from clearCol back to childCol
+            for (let c = childCol; c < clearCol; c++) {
+              if (!hasHEdgeAt(matrix, childRow, c)) {
+                placeHEdge(matrix, childRow, c, '');
+              }
+            }
+          }
+        } else {
+          // No clear column found at all - use parentCol anyway (will cause crossing)
+          console.warn('No clear path found for edge from (' + parentRow + ',' + parentCol +
+                       ') to (' + childRow + ',' + childCol + ')');
+          for (let r = parentRow + 1; r <= childRow; r++) {
+            placeVEdge(matrix, r, parentCol);
+          }
+          for (let c = parentCol; c < childCol; c++) {
+            if (!hasHEdgeAt(matrix, childRow, c)) {
+              placeHEdge(matrix, childRow, c, c === parentCol ? argName : '');
+            }
+          }
         }
       }
     } else if (childRow < parentRow) {

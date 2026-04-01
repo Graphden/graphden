@@ -101,11 +101,12 @@ bb coverage     # Tests with coverage report (open target/coverage/index.html)
 bb check        # Linters only (clj-kondo, splint, cljstyle in parallel)
 bb fix          # Auto-fix formatting
 
-# Build & Run
-clojure -T:build uber    # Build uberjar (target/executor-server.jar)
-clojure -M:run           # Run server
-docker-compose up        # Run with PostgreSQL
+# Build & Deploy (Docker)
+bb rebuild      # Rebuild jar + docker + restart (ALWAYS use this after code changes!)
+bb deploy       # Full rebuild with DB truncate (for clean deployments)
 ```
+
+**IMPORTANT:** After ANY backend code change (Clojure files, resources/packages/), ALWAYS run `bb rebuild` to apply changes. Never use raw docker commands.
 
 ### Running a Single Test
 

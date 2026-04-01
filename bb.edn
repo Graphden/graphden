@@ -141,8 +141,32 @@
 
   ;; === DOCKER DEPLOYMENT ===
 
+  rebuild
+  {:doc "Rebuild jar + docker and restart (keeps DB data)"
+   :task (do
+           (println "1. Building uberjar...")
+           (p/shell "clojure -T:build uber")
+
+           (println "2. Rebuilding docker image...")
+           (p/shell "docker-compose build executor")
+
+           (println "3. Restarting container...")
+           (p/shell "docker-compose up -d executor")
+
+           (println "4. Waiting for server...")
+           (loop [attempts 0]
+             (Thread/sleep 2000)
+             (let [result (p/shell {:continue true :out :string :err :string}
+                                   "docker exec graphden-executor curl -sf http://localhost:8080/health")]
+               (if (= 0 (:exit result))
+                 (println (str green "✓ Server ready at http://localhost:9002/" reset))
+                 (if (< attempts 30)
+                   (do (print ".") (flush) (recur (inc attempts)))
+                   (do (println (str red "✗ Server failed to start" reset))
+                       (System/exit 1)))))))}
+
   deploy
-  {:doc "Build and deploy to docker (clean rebuild)"
+  {:doc "Build and deploy to docker (clean rebuild with DB truncate)"
    :task (do
            (println "1. Cleaning target...")
            (fs/delete-tree "target")

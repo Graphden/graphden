@@ -285,11 +285,121 @@
                       nil)))
                 node-id))
 
+            ;; Get root source-id for an arg (walk up source chain)
+            (get-root-source-id [arg]
+              (loop [source-id (:id arg)
+                     current arg
+                     depth 0]
+                (if (or (nil? current) (> depth 100))
+                  source-id
+                  (if-let [parent-source-id (:source-id current)]
+                    (recur parent-source-id (get arg-map parent-source-id) (inc depth))
+                    source-id))))
+
+            ;; Collect ALL source-ids in the chain from arg up to root
+            (collect-source-chain [arg]
+              (loop [current arg
+                     chain #{}
+                     depth 0]
+                (if (or (nil? current) (> depth 100))
+                  chain
+                  (let [chain (conj chain (:id current))]
+                    (if-let [source-id (:source-id current)]
+                      (recur (get arg-map source-id) chain (inc depth))
+                      chain)))))
+
+            ;; Collect SET args from ALL fns in chain [0..level]
+            ;; Returns {:set-args #{all-covered-source-ids}, :ordered-args [...]}
+            ;; When an arg sets a value/ref, ALL source-ids in its chain are marked as "covered"
+            (collect-set-args-from-chain [chain level]
+              (let [active-fns (take (inc level) chain) ; fns from 0 to level inclusive
+                    set-args (atom #{}) ; Set of ALL covered source-ids
+                    ordered-args (atom [])]
+                ;; Process each fn in chain
+                (doseq [fn-id active-fns]
+                  (let [args (get args-by-fn fn-id [])
+                        level-ref-args (atom [])
+                        level-value-args (atom [])]
+                    (doseq [arg args]
+                      (let [has-value (some? (:value arg))
+                            has-ref (some? (:ref-id arg))]
+                        (when (or has-value has-ref)
+                          ;; Check if this arg's immediate source is already covered
+                          (let [immediate-source (or (:source-id arg) (:id arg))]
+                            (when-not (contains? @set-args immediate-source)
+                              ;; Mark ALL source-ids in chain as covered
+                              (let [source-chain (collect-source-chain arg)]
+                                (swap! set-args into source-chain))
+                              (let [arg-info {:arg-name (resolve-arg-name arg arg-map)
+                                              :value (:value arg)
+                                              :ref-id (:ref-id arg)
+                                              :arg-id (:id arg)
+                                              :source-id immediate-source}]
+                                (if has-ref
+                                  (swap! level-ref-args conj arg-info)
+                                  (swap! level-value-args conj arg-info))))))))
+                    ;; Add this level's args: refs first, then values
+                    (doseq [a @level-ref-args] (swap! ordered-args conj a))
+                    (doseq [a @level-value-args] (swap! ordered-args conj a))))
+                {:set-args @set-args
+                 :ordered-args @ordered-args}))
+
+            ;; Collect UNSET args from displayFnId only
+            ;; Returns list of unset arg infos
+            ;; set-args is now a set of ALL covered arg-ids in the source chains
+            (collect-unset-args-from-display [display-fn-id set-args]
+              (let [args (get args-by-fn display-fn-id [])]
+                (filterv
+                  (fn [arg]
+                    (let [has-value (some? (:value arg))
+                          has-ref (some? (:ref-id arg))]
+                      (and (not has-value)
+                           (not has-ref)
+                           ;; Check if this arg's id is covered
+                           (not (contains? set-args (:id arg))))))
+                  args)))
+
             (process-expanded-fn [original-fn-id level source-node-id edge-arg-name is-root source-arg-id]
               (let [chain (get-inheritance-chain original-fn-id fn-map)
                     display-fn-id (nth chain (min level (dec (count chain))) original-fn-id)
-                    bindings (build-chain-bindings chain level args-by-fn arg-map)]
-                (process-fn original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id)))
+                    ;; Collect set args from ALL fns in chain [0..level]
+                    {:keys [set-args ordered-args]} (collect-set-args-from-chain chain level)
+                    ;; Collect unset args from display-fn-id only
+                    unset-args (collect-unset-args-from-display display-fn-id set-args)
+                    ;; Add the node
+                    node-id (add-fn-node original-fn-id is-root)]
+
+                ;; Add edge from parent
+                (when (and source-node-id edge-arg-name)
+                  (let [edge-id (str "e-ref-" source-node-id "-" original-fn-id)
+                        arg-target-key (when source-arg-id
+                                         (str source-arg-id "->" original-fn-id))
+                        is-duplicate (and arg-target-key
+                                          (contains? @processed-arg-targets arg-target-key))]
+                    (when (and (not (contains? @added-node-ids edge-id))
+                               (not is-duplicate))
+                      (swap! added-node-ids conj edge-id)
+                      (when arg-target-key
+                        (swap! processed-arg-targets conj arg-target-key))
+                      (swap! edges conj
+                             {:data {:id edge-id
+                                     :source source-node-id
+                                     :target node-id
+                                     :argName (when edge-arg-name (name edge-arg-name))}}))))
+
+                ;; Process ordered set args (refs and values)
+                (doseq [arg-info ordered-args]
+                  (if (:ref-id arg-info)
+                    ;; Ref arg -> recursively process
+                    (process-any-fn (:ref-id arg-info) node-id (:arg-name arg-info) false nil (:arg-id arg-info))
+                    ;; Value arg
+                    (add-arg-value-node (:arg-name arg-info) (:value arg-info) (:arg-id arg-info) node-id)))
+
+                ;; Process unset args
+                (doseq [arg unset-args]
+                  (add-unset-arg-node (resolve-arg-name arg arg-map) (:type arg) (:id arg) node-id))
+
+                node-id))
 
             (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id]
               (let [level (get-effective-level fn-id)]

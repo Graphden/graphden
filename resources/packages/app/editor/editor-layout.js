@@ -74,13 +74,16 @@ async function fetchBackendLayout() {
       expansions[fnId] = level;
     });
 
+    const requestBody = {
+      'root-id': selectedFnId,
+      expansions: expansions
+    };
+    console.log('[Layout API] Request:', JSON.stringify(requestBody));
+
     const response = await fetch('/api/graph/layout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        'root-id': selectedFnId,
-        expansions: expansions
-      })
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {

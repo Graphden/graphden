@@ -84,10 +84,13 @@ function fnSetsArgs(fnId) {
 // ============================================================================
 
 // Build ancestor items for display in node overlay
-// Groups consecutive non-arg-setting ancestors together
+// Groups consecutive non-arg-setting ancestors with previous "real" ancestor
+// A "real" ancestor is one that sets args (has value or ref-id)
+// Empty ancestors (no args set) are grouped with the previous real one
 function buildAncestorItems(chain) {
   const items = [];
-  let currentGroupLevel = 0;
+  let currentGroupId = 0;       // Unique group identifier
+  let currentGroupLevel = 0;    // Level of the "real" ancestor in this group
 
   chain.forEach((fnId, idx) => {
     const fn = lookups.fnMap.get(fnId);
@@ -96,18 +99,22 @@ function buildAncestorItems(chain) {
     const name = fn.name || '(anonymous)';
     const setsArgs = fnSetsArgs(fnId);
 
+    if (setsArgs) {
+      // This is a "real" ancestor - start new group
+      currentGroupId++;
+      currentGroupLevel = idx;
+    }
+    // else: empty ancestor - stays in current group with previous real ancestor
+
     items.push({
       fnId,
       name,
       level: idx,
-      groupLevel: currentGroupLevel,
-      setsArgs
+      groupId: currentGroupId,           // Which group this belongs to
+      groupLevel: currentGroupLevel,     // Level of the "real" ancestor in this group
+      setsArgs,
+      isGroupStart: setsArgs             // Is this the start of a group (real ancestor)?
     });
-
-    // Start new group after fn that sets args
-    if (setsArgs) {
-      currentGroupLevel++;
-    }
   });
 
   return items;

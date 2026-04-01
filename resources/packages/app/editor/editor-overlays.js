@@ -85,6 +85,10 @@ function createOverlay(nodeId, options = {}) {
 
 /**
  * Create overlay for fn node with ancestor list
+ * Groups "empty" ancestors (no args set) with previous "real" ancestor:
+ * - No separator line between items in same group
+ * - Hover highlights entire group
+ * - Click on any item in group activates the group's level
  */
 function createFnOverlay(node, container) {
   const originalFnId = node.data('originalFnId');
@@ -99,25 +103,68 @@ function createFnOverlay(node, container) {
   overlay.dataset.originalFnId = originalFnId;
   overlay.style.cursor = 'default';
 
+  // Group items by groupId for hover highlighting
+  const linesByGroup = new Map();
+
   visibleItems.forEach((item, idx) => {
     const line = document.createElement('div');
     line.className = 'ancestor-line';
-    line.dataset.level = item.groupLevel;
+    line.dataset.level = item.level;
+    line.dataset.groupId = item.groupId;
+    line.dataset.groupLevel = item.groupLevel;
+
+    // Check if next item is in different group (show separator)
+    const nextItem = visibleItems[idx + 1];
+    const showSeparator = nextItem && nextItem.groupId !== item.groupId;
+
     Object.assign(line.style, {
       padding: '4px 8px',
       cursor: 'pointer',
-      borderBottom: (visibleItems[idx + 1]?.groupLevel !== item.groupLevel) ? '1px solid #eee' : 'none'
+      borderBottom: showSeparator ? '1px solid #eee' : 'none'
     });
     line.textContent = item.name;
 
+    // Current expansion level highlighting
+    // All items in group up to and including current level are bold
     if (item.groupLevel <= currentLevel) {
       line.style.fontWeight = 'bold';
       line.style.background = '#f0f0f0';
     }
 
+    // Track lines by group for hover highlighting
+    if (!linesByGroup.has(item.groupId)) {
+      linesByGroup.set(item.groupId, []);
+    }
+    linesByGroup.get(item.groupId).push(line);
+
+    // Hover: highlight entire group, use group's level for preview
     line.addEventListener('mouseenter', () => {
-      if (!isGrabbing) setPreviewLevel(originalFnId, item.groupLevel);
+      if (isGrabbing) return;
+
+      // Highlight all lines in this group
+      const groupLines = linesByGroup.get(item.groupId) || [];
+      groupLines.forEach(l => {
+        l.style.background = '#e8e8e8';
+      });
+
+      // Preview uses the group's level (the "real" ancestor's level)
+      setPreviewLevel(originalFnId, item.groupLevel);
     });
+
+    line.addEventListener('mouseleave', () => {
+      // Remove highlight from this group
+      const groupLines = linesByGroup.get(item.groupId) || [];
+      groupLines.forEach(l => {
+        // Restore original background based on current expansion
+        if (parseInt(l.dataset.groupLevel) <= currentLevel) {
+          l.style.background = '#f0f0f0';
+        } else {
+          l.style.background = '';
+        }
+      });
+    });
+
+    // Click: use group's level
     line.addEventListener('click', (e) => {
       e.stopPropagation();
       setExpansionLevel(originalFnId, item.groupLevel);

@@ -102,7 +102,7 @@ const CYTOSCAPE_STYLES = [
 /**
  * Create Cytoscape instance with initial elements
  */
-function createCytoscape(elements, shouldFit) {
+async function createCytoscape(elements, shouldFit) {
   cy = cytoscape({
     container: document.getElementById('cy'),
     elements: elements,
@@ -113,14 +113,16 @@ function createCytoscape(elements, shouldFit) {
     autoungrabify: true  // Disable direct node dragging - only drag via overlay handle
   });
 
-  // Apply initial layout
-  const layout = buildGridLayout({ nodes: elements.nodes, edges: elements.edges });
-  cy.nodes().forEach(node => {
-    const pos = layout.get(node.id());
-    if (pos) {
-      node.position({ x: pos.x, y: pos.y });
-    }
-  });
+  // Apply initial layout from backend
+  const layout = await fetchBackendLayout({ nodes: elements.nodes, edges: elements.edges });
+  if (layout) {
+    cy.nodes().forEach(node => {
+      const pos = layout.get(node.id());
+      if (pos) {
+        node.position({ x: pos.x, y: pos.y });
+      }
+    });
+  }
 
   if (shouldFit && cy.nodes().length > 0) {
     cy.fit(50);
@@ -143,12 +145,12 @@ function createCytoscape(elements, shouldFit) {
  * Render or update the graph
  * Handles anchor node positioning to keep expanded node stationary
  */
-function renderGraph(shouldFit = true) {
+async function renderGraph(shouldFit = true) {
   const elements = buildGraphElements();
 
   // First render - create cytoscape
   if (!cy) {
-    createCytoscape(elements, shouldFit);
+    await createCytoscape(elements, shouldFit);
     return;
   }
 
@@ -176,8 +178,12 @@ function renderGraph(shouldFit = true) {
   // Stop any running animations
   cy.nodes().forEach(node => node.stop(true, true));
 
-  // Build layout
-  const layout = buildGridLayout(elements);
+  // Build layout from backend
+  const layout = await fetchBackendLayout(elements);
+  if (!layout) {
+    console.error('Failed to fetch layout from backend');
+    return;
+  }
 
   // Calculate offset to keep anchor node stationary
   let offsetX = 0;

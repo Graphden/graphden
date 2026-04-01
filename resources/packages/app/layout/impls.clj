@@ -77,6 +77,53 @@
          (mapv :child-id))))
 
 
+(defn group-shared-parents
+  "Reorder children so that parents of the same shared node are adjacent.
+   This minimizes edge crossings when connecting to shared nodes.
+
+   Strategy:
+   1. Find which children lead to which shared nodes
+   2. Group children by their shared node targets
+   3. Place groups consecutively, with shared-targeting children at the end"
+  [child-ids children shared-info]
+  (if (empty? (:shared-nodes shared-info))
+    child-ids
+    (let [paths-to-shared (:paths-to-shared shared-info)
+          ;; Find which shared nodes each child leads to
+          child-shared-targets (into {}
+                                     (map (fn [child-id]
+                                            [child-id (get paths-to-shared child-id #{})])
+                                          child-ids))
+          ;; Separate children that lead to shared nodes from those that don't
+          {shared-parents true, non-shared false}
+          (group-by #(boolean (seq (get child-shared-targets %))) child-ids)
+
+          ;; Group shared parents by their target shared node
+          ;; Children leading to the same shared node should be adjacent
+          shared-groups (if shared-parents
+                          (let [;; Get all shared nodes these children lead to
+                                all-targets (distinct (mapcat #(get child-shared-targets %) shared-parents))
+                                ;; For each shared node, collect children that lead to it
+                                groups-by-target (map (fn [shared-id]
+                                                        {:shared-id shared-id
+                                                         :parents (filterv #(contains? (get child-shared-targets %) shared-id)
+                                                                           shared-parents)})
+                                                      all-targets)]
+                            ;; Flatten groups, keeping parents of same shared node together
+                            ;; Use a set to avoid duplicates (a child might lead to multiple shared nodes)
+                            (let [seen (atom #{})
+                                  result (atom [])]
+                              (doseq [{:keys [parents]} groups-by-target
+                                      parent parents]
+                                (when-not (contains? @seen parent)
+                                  (swap! seen conj parent)
+                                  (swap! result conj parent)))
+                              @result))
+                          [])]
+      ;; Non-shared children first, then grouped shared parents
+      (vec (concat non-shared shared-groups)))))
+
+
 ;; =============================================================================
 ;; SHARED ARGUMENT DETECTION
 ;; =============================================================================
@@ -253,7 +300,7 @@
 
 (defn adjust-priority-for-shared
   "Adjust child priority based on shared argument handling."
-  [sorted-children shared-info current-node-id parents path-lengths reserved-for-lower]
+  [sorted-children shared-info current-node-id parents path-lengths _reserved-for-lower]
   (if (empty? (:shared-nodes shared-info))
     sorted-children
     (let [result (atom (vec sorted-children))]
@@ -292,31 +339,41 @@
 
 
 (defn build-horizontal-branch
-  "Build a horizontal branch starting from node-id."
+  "Build a horizontal branch starting from node-id.
+
+   For shared nodes (nodes with multiple parents):
+   - Skip shared nodes unless they are 'ready' (all parents placed)
+   - Ready shared nodes get PRIORITY in horizontal branch (placed first)
+   - This ensures shared node is on same row as last parent
+
+   Parameters:
+   - ready-shared-nodes: set of shared nodes whose all parents are placed
+     (these get priority in horizontal branch)"
   [start-node-id children placed node-data-map shared-info
-   reserved-for-lower parents path-lengths]
-  (loop [branch []
-         current start-node-id]
-    (if (or (nil? current) (contains? placed current))
-      branch
-      (if (and (contains? reserved-for-lower current)
-               ;; Not lower branch targeting this
-               true)
+   ready-shared-nodes parents path-lengths]
+  (let [shared-nodes (:shared-nodes shared-info)]
+    (loop [branch []
+           current start-node-id]
+      (if (or (nil? current) (contains? placed current))
         branch
         (let [new-branch (conj branch current)
               node-children (get children current [])
               sorted-children (sort-children-by-priority node-children node-data-map)
-              adjusted-children (if (seq (:shared-nodes shared-info))
-                                 (adjust-priority-for-shared
-                                   sorted-children shared-info current
-                                   parents path-lengths reserved-for-lower)
-                                 sorted-children)
-              ;; Find next unplaced child
+              ;; Prioritize ready shared nodes - they go FIRST in horizontal branch
+              ;; This ensures shared node is placed horizontally with last parent
+              prioritized-children (let [ready (filterv #(contains? ready-shared-nodes %) sorted-children)
+                                         others (filterv #(not (contains? ready-shared-nodes %)) sorted-children)]
+                                     (vec (concat ready others)))
+              ;; Find next unplaced child that we can place
+              ;; - Ready shared nodes: YES (prioritized above)
+              ;; - Non-ready shared nodes: NO (skip, wait for all parents)
+              ;; - Regular nodes: YES
               next-child (first (filter
                                   (fn [c]
                                     (and (not (contains? placed c))
-                                         (not (contains? reserved-for-lower c))))
-                                  adjusted-children))]
+                                         (or (not (contains? shared-nodes c))
+                                             (contains? ready-shared-nodes c))))
+                                  prioritized-children))]
           (if (nil? next-child)
             new-branch
             (let [next-type (get-node-type next-child node-data-map)]
@@ -332,20 +389,109 @@
 ;; =============================================================================
 
 (defn build-matrix
-  "Build the complete layout matrix."
+  "Build the complete layout matrix.
+
+   Strategy for shared nodes (nodes with multiple parents):
+   1. First pass: place all non-shared nodes, defer shared nodes
+   2. Track which parents have been placed for each shared node
+   3. When all parents of a shared node are placed, place the shared node
+      on the row of its last-placed parent (to minimize edge crossings)"
   [root-id children parents edge-arg-names node-data-map]
   (let [shared-info (analyze-shared-arguments children parents)
+        shared-nodes (:shared-nodes shared-info)
         state (atom {:matrix (create-matrix-state)
                      :grid-pos {}
                      :placed #{}
-                     :reserved-for-lower (:shared-nodes shared-info)
-                     :deferred-children {}})]
+                     ;; Track which parents are placed for each shared node
+                     :shared-parent-info {}})]
 
-    (letfn [(place-branch-and-children [start-node-id start-col min-row]
+    ;; Initialize shared parent tracking
+    (doseq [shared-id shared-nodes]
+      (swap! state assoc-in [:shared-parent-info shared-id]
+             {:parent-ids (set (get parents shared-id []))
+              :placed-parents #{}}))
+
+    (letfn [(all-parents-placed? [shared-id]
+              (let [info (get-in @state [:shared-parent-info shared-id])]
+                (= (:parent-ids info) (:placed-parents info))))
+
+            (mark-parent-placed [parent-id]
+              ;; Mark this parent as placed for all shared children
+              (doseq [child-id (get children parent-id [])]
+                (when (contains? shared-nodes child-id)
+                  (swap! state update-in [:shared-parent-info child-id :placed-parents]
+                         conj parent-id))))
+
+            (draw-edge [from-id to-id]
+              (let [from-pos (get-in @state [:grid-pos from-id])
+                    to-pos (get-in @state [:grid-pos to-id])
+                    arg-name (get edge-arg-names (str from-id "->" to-id) "")]
+                (when (and from-pos to-pos)
+                  (let [from-col (:col from-pos)
+                        from-row (:row from-pos)
+                        to-col (:col to-pos)
+                        to-row (:row to-pos)]
+                    (if (= to-row from-row)
+                      ;; Horizontal edge
+                      (doseq [c (range from-col to-col)]
+                        (when-not (has-h-edge-at? (:matrix @state) from-row c)
+                          (swap! state update :matrix place-h-edge from-row c
+                                 (if (= c from-col) arg-name ""))))
+                      ;; Vertical + horizontal edge
+                      (do
+                        (let [[r-start r-end] (if (< from-row to-row)
+                                                [(inc from-row) (inc to-row)]
+                                                [(inc to-row) (inc from-row)])]
+                          (doseq [r (range r-start r-end)]
+                            (swap! state update :matrix place-v-edge r from-col)))
+                        (doseq [c (range from-col to-col)]
+                          (when-not (has-h-edge-at? (:matrix @state) to-row c)
+                            (swap! state update :matrix place-h-edge to-row c
+                                   (if (= c from-col) arg-name ""))))))))))
+
+            (place-shared-node-if-ready [shared-id]
+              ;; Place shared node when all its parents are placed
+              ;; Strategy: place on the SAME ROW as the last (lowest) parent
+              ;; This creates a horizontal connection from the last parent
+              (when (and (not (contains? (:placed @state) shared-id))
+                         (all-parents-placed? shared-id))
+                (let [parent-ids (get parents shared-id [])
+                      parent-positions (keep #(get-in @state [:grid-pos %]) parent-ids)
+                      ;; Place on row of last (lowest) parent - SAME row for horizontal edge
+                      target-row (apply max (map :row parent-positions))
+                      ;; Column is one past the rightmost parent
+                      max-parent-col (apply max (map :col parent-positions))
+                      target-col (inc max-parent-col)
+                      ;; Check if target cell is free, otherwise find next free row
+                      actual-row (if (cell-occupied? (:matrix @state) target-row target-col)
+                                   (find-row-for-branch (:matrix @state) target-col 1 target-row)
+                                   target-row)]
+                  ;; Place the shared node
+                  (swap! state update :matrix place-node shared-id actual-row target-col)
+                  (swap! state assoc-in [:grid-pos shared-id] {:row actual-row :col target-col})
+                  (swap! state update :placed conj shared-id)
+                  (mark-parent-placed shared-id)
+                  ;; Draw edges from all parents
+                  (doseq [parent-id parent-ids]
+                    (draw-edge parent-id shared-id))
+                  ;; Recursively process children of shared node
+                  (let [shared-children (get children shared-id [])]
+                    (when (seq shared-children)
+                      (let [sorted-children (sort-children-by-priority shared-children node-data-map)
+                            child-row-atom (atom (inc actual-row))]
+                        (doseq [child-id sorted-children]
+                          (when (not (contains? (:placed @state) child-id))
+                            (let [child-col (inc target-col)]
+                              (place-branch-and-children child-id child-col @child-row-atom)
+                              (when-let [child-pos (get-in @state [:grid-pos child-id])]
+                                (draw-edge shared-id child-id)
+                                (reset! child-row-atom (inc (:row child-pos)))))))))))))
+
+            (place-branch-and-children [start-node-id start-col min-row]
               (let [branch (build-horizontal-branch
                              start-node-id children
                              (:placed @state) node-data-map shared-info
-                             (:reserved-for-lower @state) parents
+                             #{} parents
                              (:path-lengths shared-info))
                     new-nodes (filterv #(not (contains? (:placed @state) %)) branch)]
                 (if (seq new-nodes)
@@ -357,6 +503,8 @@
                         (swap! state update :matrix place-node node-id current-row col)
                         (swap! state assoc-in [:grid-pos node-id] {:row current-row :col col})
                         (swap! state update :placed conj node-id)
+                        ;; Mark as parent placed for shared children
+                        (mark-parent-placed node-id)
                         ;; Place horizontal edge to next node
                         (when (< i (dec (count new-nodes)))
                           (let [next-id (nth new-nodes (inc i))
@@ -374,38 +522,88 @@
                                                     (nth new-nodes (inc i)))]
                           (when (seq node-children)
                             (let [sorted-children (sort-children-by-priority node-children node-data-map)
-                                  adjusted-children (if (seq (:shared-nodes shared-info))
+                                  ;; Group parents of shared nodes together
+                                  grouped-children (group-shared-parents sorted-children children shared-info)
+                                  adjusted-children (if (seq shared-nodes)
                                                       (adjust-priority-for-shared
-                                                        sorted-children shared-info node-id
+                                                        grouped-children shared-info node-id
                                                         parents (:path-lengths shared-info)
-                                                        (:reserved-for-lower @state))
-                                                      sorted-children)
+                                                        #{})
+                                                      grouped-children)
+                                  ;; IMPORTANT: Separate ready shared nodes from other children
+                                  ;; Ready shared nodes go HORIZONTAL (same row as this parent)
+                                  ;; Other children go VERTICAL (below on separate rows)
+                                  ready-shared (filterv #(and (contains? shared-nodes %)
+                                                              (all-parents-placed? %))
+                                                        adjusted-children)
+                                  other-children (filterv #(not (and (contains? shared-nodes %)
+                                                                     (all-parents-placed? %)))
+                                                          adjusted-children)
+                                  ;; Start vertical children below current row
                                   child-row-atom (atom (inc node-row))]
-                              (doseq [child-id adjusted-children]
-                                (when (and (not= child-id branch-continuation)
-                                           (not (contains? (:placed @state) child-id))
-                                           (not (contains? (:reserved-for-lower @state) child-id)))
-                                  (let [child-col (inc node-col)]
-                                    (place-branch-and-children child-id child-col @child-row-atom)
-                                    (when-let [child-pos (get-in @state [:grid-pos child-id])]
-                                      ;; Draw edge to child
-                                      (let [arg-name (get edge-arg-names (str node-id "->" child-id) "")]
-                                        (if (= (:row child-pos) node-row)
-                                          ;; Horizontal edge
-                                          (doseq [c (range node-col (:col child-pos))]
-                                            (when-not (has-h-edge-at? (:matrix @state) node-row c)
-                                              (swap! state update :matrix place-h-edge node-row c
-                                                     (if (= c node-col) arg-name ""))))
-                                          ;; Vertical + horizontal edge
-                                          (do
-                                            (doseq [r (range (inc node-row) (inc (:row child-pos)))]
-                                              (swap! state update :matrix place-v-edge r node-col))
-                                            (doseq [c (range node-col (:col child-pos))]
-                                              (when-not (has-h-edge-at? (:matrix @state) (:row child-pos) c)
-                                                (swap! state update :matrix place-h-edge (:row child-pos) c
-                                                       (if (= c node-col) arg-name "")))))))
-                                      (reset! child-row-atom (inc (:row child-pos)))
-                                      (reset! max-row-used (max @max-row-used (:row child-pos)))))))))))
+
+                              ;; FIRST: Place ready shared nodes HORIZONTALLY
+                              ;; These go on same row as this parent (extends branch)
+                              (doseq [shared-id ready-shared]
+                                (when-not (contains? (:placed @state) shared-id)
+                                  (let [shared-col (inc node-col)
+                                        ;; Find first free column on this row
+                                        actual-col (loop [c shared-col]
+                                                     (if (cell-occupied? (:matrix @state) node-row c)
+                                                       (recur (inc c))
+                                                       c))]
+                                    ;; Place shared node on same row
+                                    (swap! state update :matrix place-node shared-id node-row actual-col)
+                                    (swap! state assoc-in [:grid-pos shared-id] {:row node-row :col actual-col})
+                                    (swap! state update :placed conj shared-id)
+                                    (mark-parent-placed shared-id)
+                                    ;; Draw edge from this parent
+                                    (draw-edge node-id shared-id)
+                                    ;; Draw edges from OTHER parents
+                                    (doseq [other-parent-id (get parents shared-id [])]
+                                      (when (and (not= other-parent-id node-id)
+                                                 (contains? (:placed @state) other-parent-id))
+                                        (draw-edge other-parent-id shared-id)))
+                                    ;; Process children of shared node
+                                    (let [shared-children (get children shared-id [])]
+                                      (when (seq shared-children)
+                                        (let [sorted-sc (sort-children-by-priority shared-children node-data-map)
+                                              sc-row-atom (atom (inc node-row))]
+                                          (doseq [sc-id sorted-sc]
+                                            (when-not (contains? (:placed @state) sc-id)
+                                              (place-branch-and-children sc-id (inc actual-col) @sc-row-atom)
+                                              (when-let [sc-pos (get-in @state [:grid-pos sc-id])]
+                                                (draw-edge shared-id sc-id)
+                                                (reset! sc-row-atom (inc (:row sc-pos)))
+                                                (reset! max-row-used (max @max-row-used (:row sc-pos))))))))))))
+
+                              ;; SECOND: Place other children VERTICALLY (below)
+                              (doseq [child-id other-children]
+                                (when (not= child-id branch-continuation)
+                                  (let [child-col (inc node-col)
+                                        is-shared (contains? shared-nodes child-id)
+                                        already-placed (contains? (:placed @state) child-id)]
+                                    (cond
+                                      ;; Shared node not yet ready - skip for now
+                                      is-shared
+                                      (do
+                                        (place-shared-node-if-ready child-id)
+                                        (when-let [child-pos (get-in @state [:grid-pos child-id])]
+                                          (reset! max-row-used (max @max-row-used (:row child-pos)))))
+
+                                      ;; Already placed - draw edge
+                                      already-placed
+                                      (when-let [child-pos (get-in @state [:grid-pos child-id])]
+                                        (draw-edge node-id child-id))
+
+                                      ;; New non-shared node - place BELOW and draw edge
+                                      :else
+                                      (do
+                                        (place-branch-and-children child-id child-col @child-row-atom)
+                                        (when-let [child-pos (get-in @state [:grid-pos child-id])]
+                                          (draw-edge node-id child-id)
+                                          (reset! child-row-atom (inc (:row child-pos)))
+                                          (reset! max-row-used (max @max-row-used (:row child-pos)))))))))))))
                       @max-row-used)
                     current-row)
                   min-row)))]

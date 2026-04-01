@@ -1,6 +1,6 @@
 // Editor State - Global variables, constants, and configuration
 // Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-01 03:50';
+const BUILD_TIMESTAMP = '2026-04-01 12:56';
 console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================
@@ -37,9 +37,6 @@ const GRID_GAP_X = 80;            // Horizontal gap between columns
 const GRID_GAP_Y = 40;            // Vertical gap between rows
 const DRAG_HANDLE_HEIGHT = 14;    // Height of drag handle at bottom of nodes
 
-// Backend layout API (set to true to use backend for layout calculation)
-const USE_BACKEND_LAYOUT = true;
-let cachedBackendLayout = null;   // Cached layout from backend API
 
 // ============================================================================
 // CONSOLE WARNING SUPPRESSION

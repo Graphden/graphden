@@ -1,18 +1,15 @@
 ;; Graph layout calculation base functions
-;; compute-layout-matrix: calculates grid-based layout for graph visualization
+;; get-layout-data: fetches data from DB, builds graph, computes layout
+;;
+;; Input: {root-id: uuid-string, expansions: {fn-id: level, ...}}
+;; Output: {nodes: [...], edges: [...], grid-pos: {...}, validation: {...}}
 
-[;; Core layout function - takes nodes/edges and returns layout matrix
- ;; Input: {:nodes [{:id :type :label ...}], :edges [{:source :target :argName}], :root-id uuid}
- ;; Output: {:grid-pos {node-id {:row n :col n}}, :matrix {...}, :validation {...}}
- {:name :compute-layout-matrix
-  :args {:elements :jsonb}
-  :return-type :jsonb}
-
- ;; Layout data function - computes layout from elements in request body
- ;; Used by make-json-response-handler
+[;; Layout data function - fetches from DB, builds graph, computes layout
+ ;; Context-aware: receives storage from ctx
  {:name :get-layout-data
   :args {:request :jsonb}
-  :return-type :jsonb}
+  :return-type :jsonb
+  :ctx true}
 
  ;; =============================================================================
  ;; FN-DEFS: Layout API handler
@@ -23,7 +20,7 @@
   :parent :make-json-response-handler
   :args {:data-fn :get-layout-data}}
 
- ;; POST /api/graph/layout - accepts root-id and expands list
+ ;; POST /api/graph/layout - accepts root-id and expansions
  {:name :layout-api-route
   :parent :post-route
   :args {:path "/api/graph/layout" :handler :layout-api-handler}}]

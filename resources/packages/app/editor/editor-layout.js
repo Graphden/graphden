@@ -1,9 +1,14 @@
-// Editor Layout - Backend API client for grid-based layout
-// Depends on: editor-state.js (GRID_GAP_X, GRID_GAP_Y, DRAG_HANDLE_HEIGHT)
+// Editor Layout - Backend API client for graph layout
+// Depends on: editor-state.js (GRID_GAP_X, GRID_GAP_Y, DRAG_HANDLE_HEIGHT, selectedFnId, expansionLevel, previewLevel)
 //
 // Layout is computed on the backend via POST /api/graph/layout
-// This file only handles:
-// 1. Fetching layout from backend API
+// Backend handles:
+// 1. Fetching data from DB
+// 2. Building graph elements with expansions
+// 3. Computing grid layout
+//
+// This file handles:
+// 1. Sending root-id + expansions to backend
 // 2. Converting grid positions to pixel coordinates
 // 3. Calculating node sizes for rendering
 
@@ -12,9 +17,9 @@
 // ============================================================================
 
 function calculateNodeSize(nodeData) {
-  const label = nodeData.data.label || '';
-  const type = nodeData.data.type;
-  const isPlaceholder = nodeData.data.isPlaceholder;
+  const label = nodeData.label || '';
+  const type = nodeData.type;
+  const isPlaceholder = nodeData.isPlaceholder;
 
   if (type === 'arg') {
     const maxLen = 30;
@@ -48,30 +53,34 @@ function calculateNodeSize(nodeData) {
 
 /**
  * Fetch layout from backend API
- * @param {Object} elements - { nodes: [...], edges: [...] }
- * @returns {Promise<Map>} Layout map: nodeId -> { x, y, width, height, row, col }
+ * @returns {Promise<{nodes: Array, edges: Array, layout: Map}>}
+ *   - nodes: Array of {data: {id, label, type, ...}}
+ *   - edges: Array of {data: {id, source, target, argName, ...}}
+ *   - layout: Map nodeId -> {x, y, width, height, row, col}
  */
-async function fetchBackendLayout(elements) {
+async function fetchBackendLayout() {
+  if (!selectedFnId) {
+    return { nodes: [], edges: [], layout: new Map() };
+  }
+
   try {
-    // Convert cytoscape format to backend format
-    const backendElements = {
-      nodes: elements.nodes.map(n => ({
-        id: n.data.id,
-        type: n.data.type,
-        label: n.data.label,
-        isPlaceholder: n.data.isPlaceholder
-      })),
-      edges: elements.edges.map(e => ({
-        source: e.data.source,
-        target: e.data.target,
-        argName: e.data.argName
-      }))
-    };
+    // Build expansions map: merge expansionLevel and previewLevel
+    // previewLevel takes priority
+    const expansions = {};
+    expansionLevel.forEach((level, fnId) => {
+      expansions[fnId] = level;
+    });
+    previewLevel.forEach((level, fnId) => {
+      expansions[fnId] = level;
+    });
 
     const response = await fetch('/api/graph/layout', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ elements: backendElements })
+      body: JSON.stringify({
+        'root-id': selectedFnId,
+        expansions: expansions
+      })
     });
 
     if (!response.ok) {
@@ -83,16 +92,17 @@ async function fetchBackendLayout(elements) {
 
     // Handle different naming conventions: 'grid-pos' (Clojure kebab-case)
     const gridPos = data['grid-pos'] || data.gridPos || {};
+    const nodes = data.nodes || [];
+    const edges = data.edges || [];
 
-    if (Object.keys(gridPos).length === 0) {
-      console.warn('Empty grid positions from backend');
-      return new Map();
+    if (nodes.length === 0) {
+      return { nodes: [], edges: [], layout: new Map() };
     }
 
     // Calculate sizes for all nodes
     const sizes = new Map();
-    elements.nodes.forEach(n => {
-      sizes.set(n.data.id, calculateNodeSize(n));
+    nodes.forEach(n => {
+      sizes.set(n.data.id, calculateNodeSize(n.data));
     });
 
     // Calculate column widths
@@ -152,7 +162,7 @@ async function fetchBackendLayout(elements) {
       }
     });
 
-    return layout;
+    return { nodes, edges, layout };
   } catch (error) {
     console.error('Backend layout fetch error:', error);
     return null;

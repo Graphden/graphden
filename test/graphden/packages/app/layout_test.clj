@@ -211,3 +211,144 @@
       (is (:valid (:validation result)))
       ;; Only root node is placed (B has no connection)
       (is (= 1 (count (:grid-pos result)))))))
+
+
+;; =============================================================================
+;; STRICT LAYOUT RULES TESTS
+;; =============================================================================
+
+(deftest rule-first-child-same-row-as-parent
+  (testing "RULE: First child must be on SAME ROW as parent"
+    (let [nodes [(make-node "P") (make-node "C1") (make-node "C2") (make-node "C3")]
+          edges [(make-edge "P" "C1") (make-edge "P" "C2") (make-edge "P" "C3")]
+          result (layout-elements nodes edges)
+          p-row (:row (get-pos result "P"))
+          c1-row (:row (get-pos result "C1"))]
+      (is (:valid (:validation result)))
+      (is (= p-row c1-row)
+          (str "First child C1 must be on same row as parent P. "
+               "P row=" p-row ", C1 row=" c1-row)))))
+
+
+(deftest rule-other-children-different-rows
+  (testing "RULE: All children of same parent must be on DIFFERENT rows"
+    (let [nodes [(make-node "P") (make-node "C1") (make-node "C2") (make-node "C3")]
+          edges [(make-edge "P" "C1") (make-edge "P" "C2") (make-edge "P" "C3")]
+          result (layout-elements nodes edges)
+          c1-row (:row (get-pos result "C1"))
+          c2-row (:row (get-pos result "C2"))
+          c3-row (:row (get-pos result "C3"))
+          all-rows [c1-row c2-row c3-row]]
+      (is (:valid (:validation result)))
+      (is (= 3 (count (set all-rows)))
+          (str "All children must be on different rows. Rows: " all-rows)))))
+
+
+(deftest rule-shared-node-on-last-parent-row
+  (testing "RULE: Shared node must be on SAME ROW as its LAST (lowest) parent"
+    (let [nodes [(make-node "R")
+                 (make-node "P1") (make-node "P2") (make-node "P3")
+                 (make-node "S")]
+          ;; R -> P1, P2, P3 and all three point to S
+          edges [(make-edge "R" "P1") (make-edge "R" "P2") (make-edge "R" "P3")
+                 (make-edge "P1" "S") (make-edge "P2" "S") (make-edge "P3" "S")]
+          result (layout-elements nodes edges)
+          p1-row (:row (get-pos result "P1"))
+          p2-row (:row (get-pos result "P2"))
+          p3-row (:row (get-pos result "P3"))
+          s-row (:row (get-pos result "S"))
+          last-parent-row (max p1-row p2-row p3-row)]
+      (is (:valid (:validation result)))
+      (is (= s-row last-parent-row)
+          (str "Shared node S must be on row of last parent. "
+               "P1=" p1-row ", P2=" p2-row ", P3=" p3-row
+               ", S=" s-row ", expected=" last-parent-row)))))
+
+
+(deftest rule-deep-chain-first-child-same-row
+  (testing "RULE: In chain A->B->C->D, all should be on same row (first child rule)"
+    (let [nodes [(make-node "A") (make-node "B") (make-node "C") (make-node "D")]
+          edges [(make-edge "A" "B") (make-edge "B" "C") (make-edge "C" "D")]
+          result (layout-elements nodes edges)
+          a-row (:row (get-pos result "A"))
+          b-row (:row (get-pos result "B"))
+          c-row (:row (get-pos result "C"))
+          d-row (:row (get-pos result "D"))]
+      (is (:valid (:validation result)))
+      (is (= a-row b-row c-row d-row)
+          (str "Chain should be horizontal. Rows: A=" a-row " B=" b-row " C=" c-row " D=" d-row)))))
+
+
+(deftest rule-complex-shared-with-subtrees
+  (testing "RULE: Shared node with subtrees - first child same row, shared on last parent row"
+    ;; Structure:
+    ;;   R -> P1 -> S -> C1
+    ;;   R -> P2 -> S -> C2
+    ;; P1 should be row 0, P2 row 1
+    ;; S should be on row 1 (same as P2 - last parent)
+    ;; C1 should be on row 1 (same as S - first child)
+    (let [nodes [(make-node "R") (make-node "P1") (make-node "P2")
+                 (make-node "S") (make-node "C1") (make-node "C2")]
+          edges [(make-edge "R" "P1") (make-edge "R" "P2")
+                 (make-edge "P1" "S") (make-edge "P2" "S")
+                 (make-edge "S" "C1") (make-edge "S" "C2")]
+          result (layout-elements nodes edges)
+          r-row (:row (get-pos result "R"))
+          p1-row (:row (get-pos result "P1"))
+          p2-row (:row (get-pos result "P2"))
+          s-row (:row (get-pos result "S"))
+          c1-row (:row (get-pos result "C1"))
+          c2-row (:row (get-pos result "C2"))
+          last-parent-row (max p1-row p2-row)]
+      (is (:valid (:validation result)))
+      ;; R and P1 same row (first child)
+      (is (= r-row p1-row)
+          (str "P1 should be same row as R. R=" r-row ", P1=" p1-row))
+      ;; P1 and P2 different rows
+      (is (not= p1-row p2-row)
+          (str "P1 and P2 should be on different rows. P1=" p1-row ", P2=" p2-row))
+      ;; S on last parent row
+      (is (= s-row last-parent-row)
+          (str "S should be on last parent row. S=" s-row ", last parent=" last-parent-row))
+      ;; C1 same row as S (first child)
+      (is (= s-row c1-row)
+          (str "C1 should be same row as S. S=" s-row ", C1=" c1-row))
+      ;; C1 and C2 different rows
+      (is (not= c1-row c2-row)
+          (str "C1 and C2 should be on different rows. C1=" c1-row ", C2=" c2-row)))))
+
+
+(deftest rule-shared-with-many-siblings
+  (testing "RULE: Shared node with many siblings between its parents"
+    ;; This mimics the editor-routes structure:
+    ;; R -> P1 -> S (shared), A1 (arg)
+    ;; R -> X1 -> H1 (other route)
+    ;; R -> X2 -> H2 (other route)
+    ;; R -> P2 -> S (shared), A2 (arg)
+    ;; R -> X3 -> H3 (other route)
+    ;;
+    ;; P1 and P2 both point to S, but they are NOT consecutive children of R.
+    ;; S should still be on the row of P2 (last parent).
+    (let [nodes [(make-node "R")
+                 (make-node "P1") (make-node "X1") (make-node "X2") (make-node "P2") (make-node "X3")
+                 (make-node "S")
+                 (make-node "A1" "arg") (make-node "A2" "arg")
+                 (make-node "H1") (make-node "H2") (make-node "H3")]
+          edges [(make-edge "R" "P1") (make-edge "R" "X1") (make-edge "R" "X2")
+                 (make-edge "R" "P2") (make-edge "R" "X3")
+                 ;; P1 and P2 both connect to shared S
+                 (make-edge "P1" "S") (make-edge "P1" "A1")
+                 (make-edge "P2" "S") (make-edge "P2" "A2")
+                 ;; Other routes
+                 (make-edge "X1" "H1") (make-edge "X2" "H2") (make-edge "X3" "H3")]
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          p1-row (:row (get-pos result "P1"))
+          p2-row (:row (get-pos result "P2"))
+          s-row (:row (get-pos result "S"))
+          last-parent-row (max p1-row p2-row)]
+      ;; The key test: S must be on last parent row
+      (is (= s-row last-parent-row)
+          (str "S should be on last parent row. S=" s-row
+               ", P1=" p1-row ", P2=" p2-row ", last parent=" last-parent-row)))))

@@ -1,5 +1,5 @@
 // Editor Cytoscape - Cytoscape.js initialization and rendering
-// Depends on: editor-state.js, editor-layout.js, editor-overlays.js, editor-graph.js
+// Depends on: editor-state.js, editor-layout.js, editor-overlays.js
 
 // ============================================================================
 // CYTOSCAPE STYLES
@@ -100,29 +100,27 @@ const CYTOSCAPE_STYLES = [
 // ============================================================================
 
 /**
- * Create Cytoscape instance with initial elements
+ * Create Cytoscape instance with initial elements and layout
  */
-async function createCytoscape(elements, shouldFit) {
+async function createCytoscape(nodes, edges, layout, shouldFit) {
+  // Apply positions to nodes
+  const nodesWithPos = nodes.map(n => {
+    const pos = layout.get(n.data.id);
+    if (pos) {
+      return { ...n, position: { x: pos.x, y: pos.y } };
+    }
+    return n;
+  });
+
   cy = cytoscape({
     container: document.getElementById('cy'),
-    elements: elements,
+    elements: { nodes: nodesWithPos, edges: edges },
     style: CYTOSCAPE_STYLES,
     layout: { name: 'preset' },
     minZoom: 0.1,
     maxZoom: 3,
     autoungrabify: true  // Disable direct node dragging - only drag via overlay handle
   });
-
-  // Apply initial layout from backend
-  const layout = await fetchBackendLayout({ nodes: elements.nodes, edges: elements.edges });
-  if (layout) {
-    cy.nodes().forEach(node => {
-      const pos = layout.get(node.id());
-      if (pos) {
-        node.position({ x: pos.x, y: pos.y });
-      }
-    });
-  }
 
   if (shouldFit && cy.nodes().length > 0) {
     cy.fit(50);
@@ -143,14 +141,23 @@ async function createCytoscape(elements, shouldFit) {
 
 /**
  * Render or update the graph
- * Handles anchor node positioning to keep expanded node stationary
+ * Fetches nodes, edges, and layout from backend in single request
  */
 async function renderGraph(shouldFit = true) {
-  const elements = buildGraphElements();
+  // Fetch everything from backend
+  const result = await fetchBackendLayout();
+  if (!result) {
+    console.error('Failed to fetch layout from backend');
+    return;
+  }
+
+  const { nodes, edges, layout } = result;
 
   // First render - create cytoscape
   if (!cy) {
-    await createCytoscape(elements, shouldFit);
+    if (nodes.length > 0) {
+      await createCytoscape(nodes, edges, layout, shouldFit);
+    }
     return;
   }
 
@@ -178,13 +185,6 @@ async function renderGraph(shouldFit = true) {
   // Stop any running animations
   cy.nodes().forEach(node => node.stop(true, true));
 
-  // Build layout from backend
-  const layout = await fetchBackendLayout(elements);
-  if (!layout) {
-    console.error('Failed to fetch layout from backend');
-    return;
-  }
-
   // Calculate offset to keep anchor node stationary
   let offsetX = 0;
   let offsetY = 0;
@@ -205,18 +205,18 @@ async function renderGraph(shouldFit = true) {
   }
 
   // Build maps for quick lookup
-  const newNodeIds = new Set(elements.nodes.map(n => n.data.id));
-  const newEdgeIds = new Set(elements.edges.map(e => e.data.id));
+  const newNodeIds = new Set(nodes.map(n => n.data.id));
+  const newEdgeIds = new Set(edges.map(e => e.data.id));
 
   // Find nodes/edges to remove and add
   const nodesToRemove = cy.nodes().filter(node => !newNodeIds.has(node.id()));
   const edgesToRemove = cy.edges().filter(edge => !newEdgeIds.has(edge.id()));
-  const nodesToAdd = elements.nodes.filter(n => !cy.getElementById(n.data.id).length);
-  const edgesToAdd = elements.edges.filter(e => !cy.getElementById(e.data.id).length);
+  const nodesToAdd = nodes.filter(n => !cy.getElementById(n.data.id).length);
+  const edgesToAdd = edges.filter(e => !cy.getElementById(e.data.id).length);
 
   // Update existing node data
   cy.nodes().forEach(node => {
-    const newData = elements.nodes.find(n => n.data.id === node.id());
+    const newData = nodes.find(n => n.data.id === node.id());
     if (newData) {
       node.data(newData.data);
     }

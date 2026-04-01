@@ -9,6 +9,8 @@
  * Initialize the graph editor
  */
 async function initGraph() {
+  // Load entities for sidebar list only
+  // Graph data will be fetched on-demand via layout endpoint
   const response = await fetch('/api/graph/entities');
   graphData = await response.json();
   lookups = buildLookups(graphData);

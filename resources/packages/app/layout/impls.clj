@@ -1,68 +1,347 @@
 (ns graphden.packages.app.layout.impls
-  "Graph layout calculation - simplified recursive algorithm.
+  "Graph layout calculation - fetches data from DB, builds graph, computes layout.
 
-   Core rules:
+   API: POST /api/graph/layout
+   Input: {root-id: uuid, expansions: {fn-id: level, ...}}
+   Output: {nodes: [...], edges: [...], grid-pos: {...}}
+
+   Core layout rules:
    1. Children of a node are placed RIGHT of parent, never above
    2. First child is on SAME ROW as parent, others are BELOW (each on own row)
    3. Horizontal branch = chain of first children
    4. Shared nodes (multiple parents) go in horizontal branch of LAST parent
-   5. Splitting siblings (leading to same shared node) must be adjacent in child list
-   6. Parents of shared node must be in same column (shift right if needed)"
+   5. Splitting siblings (leading to same shared node) must be adjacent in child list"
   (:require
     [cheshire.core :as json]
-    [clojure.string :as str]))
+    [clojure.string :as str]
+    [clojure.tools.logging :as log]
+    [graphden.storage.protocol.core :as sp]
+    [graphden.versioning.storage.core :as vs])
+  (:import
+    (graphden.versioning.storage.core VersionedStorage)))
 
 
 ;; =============================================================================
-;; GRAPH ANALYSIS
+;; DATA LOADING FROM STORAGE
 ;; =============================================================================
 
-(defn build-graph-info
-  "Build graph structure from nodes and edges.
-   Returns {:children {id -> [child-ids]}
-            :parents {id -> [parent-ids]}
-            :shared-nodes #{ids with multiple parents}
-            :edge-names {\"src->tgt\" -> arg-name}
-            :node-data-map {id -> node-data}}"
+(defn- load-graph-entities
+  "Load all fns and args from storage."
+  [storage]
+  (if (instance? VersionedStorage storage)
+    (vs/query-all-graph-entities storage)
+    {:fns (vec (sp/query-entities storage :fn {}))
+     :args (vec (sp/query-entities storage :arg {}))}))
+
+
+(defn- build-lookups
+  "Build lookup maps from raw data."
+  [{:keys [fns args]}]
+  (let [fn-map (into {} (map (fn [f] [(:id f) f]) fns))
+        arg-map (into {} (map (fn [a] [(:id a) a]) args))
+        args-by-fn (reduce (fn [m a]
+                             (if-let [fn-id (:fn-id a)]
+                               (update m fn-id (fnil conj []) a)
+                               m))
+                           {} args)]
+    {:fn-map fn-map
+     :arg-map arg-map
+     :args-by-fn args-by-fn}))
+
+
+;; =============================================================================
+;; INHERITANCE & ARG RESOLUTION
+;; =============================================================================
+
+(defn- get-inheritance-chain
+  "Get inheritance chain: [fn-id, parent-id, grandparent-id, ...]"
+  [fn-id fn-map]
+  (loop [current fn-id
+         chain []
+         visited #{}]
+    (if (or (nil? current) (contains? visited current))
+      chain
+      (let [f (get fn-map current)]
+        (recur (:parent-id f)
+               (conj chain current)
+               (conj visited current))))))
+
+
+(defn- resolve-arg-name
+  "Resolve arg name by following source chain."
+  [arg arg-map]
+  (loop [current arg
+         depth 0]
+    (cond
+      (nil? current) nil
+      (> depth 100) nil
+      (:name current) (:name current)
+      (:source-id current) (recur (get arg-map (:source-id current)) (inc depth))
+      :else nil)))
+
+
+(defn- fn-sets-args?
+  "Check if fn sets any args (has value or ref-id)."
+  [fn-id args-by-fn]
+  (let [args (get args-by-fn fn-id [])]
+    (some (fn [arg]
+            (or (some? (:value arg))
+                (some? (:ref-id arg))))
+          args)))
+
+
+;; =============================================================================
+;; BINDINGS RESOLUTION
+;; =============================================================================
+
+(defn- add-bindings-from-fn
+  "Add arg bindings from a fn to bindings map."
+  [fn-id bindings args-by-fn arg-map]
+  (let [args (get args-by-fn fn-id [])]
+    (reduce
+      (fn [b arg]
+        (let [has-value (some? (:value arg))
+              has-ref (some? (:ref-id arg))]
+          (if (and (or has-value has-ref) (:source-id arg))
+            ;; Walk up source chain and bind all ancestors
+            (loop [source-id (:source-id arg)
+                   b b]
+              (if-not source-id
+                b
+                (let [b (assoc b source-id
+                               {:arg-name (resolve-arg-name arg arg-map)
+                                :value (:value arg)
+                                :ref-id (:ref-id arg)
+                                :arg-id (:id arg)})
+                      source-arg (get arg-map source-id)]
+                  (recur (:source-id source-arg) b))))
+            b)))
+      bindings
+      args)))
+
+
+(defn- build-chain-bindings
+  "Build bindings for inheritance chain up to target level."
+  [chain target-level args-by-fn arg-map]
+  (reduce
+    (fn [bindings fn-id]
+      (add-bindings-from-fn fn-id bindings args-by-fn arg-map))
+    {}
+    (take target-level (reverse chain))))
+
+
+(defn- build-arg-bindings
+  "Build bindings just from the fn itself."
+  [fn-id args-by-fn arg-map]
+  (add-bindings-from-fn fn-id {} args-by-fn arg-map))
+
+
+;; =============================================================================
+;; GRAPH BUILDING (translated from editor-graph.js)
+;; =============================================================================
+
+(defn- truncate-label [s max-len]
+  (if (> (count s) max-len)
+    (str (subs s 0 (dec max-len)) "…")
+    s))
+
+
+(defn- build-graph-elements
+  "Build graph elements (nodes, edges) from selected function.
+   Returns {:nodes [...] :edges [...]}"
+  [root-fn-id expansions lookups]
+  (let [{:keys [fn-map arg-map args-by-fn]} lookups
+        nodes (atom [])
+        edges (atom [])
+        added-node-ids (atom #{})
+        processed-arg-targets (atom #{})
+        max-visible-ancestors 4
+
+        get-effective-level
+        (fn [fn-id]
+          (get expansions fn-id 0))
+
+        add-fn-node
+        (fn [original-fn-id is-root]
+          (let [node-id (str "fn-" original-fn-id)]
+            (when-not (contains? @added-node-ids node-id)
+              (swap! added-node-ids conj node-id)
+              (let [chain (get-inheritance-chain original-fn-id fn-map)
+                    label-lines (mapv (fn [fid]
+                                        (let [f (get fn-map fid)]
+                                          (if (:name f)
+                                            (name (:name f))
+                                            "(anonymous)")))
+                                      (take (inc max-visible-ancestors) chain))
+                    label-lines (if (> (count chain) (inc max-visible-ancestors))
+                                  (conj label-lines "...")
+                                  label-lines)
+                    label (str/join "\n" label-lines)]
+                (swap! nodes conj
+                       {:data {:id node-id
+                               :label label
+                               :type "fn"
+                               :isRoot is-root
+                               :originalFnId (str original-fn-id)}})))
+            node-id))
+
+        add-arg-value-node
+        (fn [arg-name value arg-id source-node-id]
+          (let [node-id (str "arg-" arg-id)]
+            (when-not (contains? @added-node-ids node-id)
+              (swap! added-node-ids conj node-id)
+              (let [display-value (truncate-label (json/generate-string value) 20)]
+                (swap! nodes conj
+                       {:data {:id node-id
+                               :label display-value
+                               :type "arg"}}))
+              (swap! edges conj
+                     {:data {:id (str "e-val-" arg-id)
+                             :source source-node-id
+                             :target node-id
+                             :argName (when arg-name (name arg-name))}}))
+            node-id))
+
+        add-unset-arg-node
+        (fn [arg-name arg-type arg-id source-node-id]
+          (let [node-id (str "unset-" arg-id)]
+            (when-not (contains? @added-node-ids node-id)
+              (swap! added-node-ids conj node-id)
+              (swap! nodes conj
+                     {:data {:id node-id
+                             :label (if arg-type (name arg-type) "any")
+                             :type "fn"
+                             :isPlaceholder true}})
+              (swap! edges conj
+                     {:data {:id (str "e-unset-" arg-id)
+                             :source source-node-id
+                             :target node-id
+                             :argName (when arg-name (name arg-name))
+                             :isUnset true}}))))
+
+        collect-fn-args
+        (fn [fn-id bindings]
+          (let [args (get args-by-fn fn-id [])
+                all-args (mapv (fn [arg]
+                                 (let [arg-name (resolve-arg-name arg arg-map)
+                                       has-value (some? (:value arg))
+                                       has-ref (some? (:ref-id arg))
+                                       binding (get bindings (:id arg))]
+                                   (cond
+                                     binding
+                                     (cond
+                                       (:ref-id binding)
+                                       {:type :ref :arg-name (:arg-name binding)
+                                        :ref-id (:ref-id binding) :arg-id (:arg-id binding)}
+
+                                       (some? (:value binding))
+                                       {:type :value :arg-name (:arg-name binding)
+                                        :value (:value binding) :arg-id (:arg-id binding)}
+
+                                       :else nil)
+
+                                     has-ref
+                                     {:type :ref :arg-name arg-name
+                                      :ref-id (:ref-id arg) :arg-id (:id arg)}
+
+                                     has-value
+                                     {:type :value :arg-name arg-name
+                                      :value (:value arg) :arg-id (:id arg)}
+
+                                     :else
+                                     {:type :unset :arg-name arg-name
+                                      :arg-type (:type arg) :arg-id (:id arg)})))
+                               args)]
+            (filterv some? all-args)))]
+
+    ;; Declare process-any-fn before using it
+    (letfn [(process-fn [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id]
+              (let [node-id (add-fn-node original-fn-id is-root)]
+                ;; Add edge from parent
+                (when (and source-node-id edge-arg-name)
+                  (let [edge-id (str "e-ref-" source-node-id "-" original-fn-id)
+                        arg-target-key (when source-arg-id
+                                         (str source-arg-id "->" original-fn-id))
+                        is-duplicate (and arg-target-key
+                                          (contains? @processed-arg-targets arg-target-key))]
+                    (when (and (not (contains? @added-node-ids edge-id))
+                               (not is-duplicate))
+                      (swap! added-node-ids conj edge-id)
+                      (when arg-target-key
+                        (swap! processed-arg-targets conj arg-target-key))
+                      (swap! edges conj
+                             {:data {:id edge-id
+                                     :source source-node-id
+                                     :target node-id
+                                     :argName (when edge-arg-name (name edge-arg-name))}}))))
+
+                ;; Process children
+                (let [all-args (collect-fn-args display-fn-id bindings)]
+                  (doseq [arg all-args]
+                    (case (:type arg)
+                      :ref (process-any-fn (:ref-id arg) node-id (:arg-name arg) false bindings (:arg-id arg))
+                      :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
+                      :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
+                      nil)))
+                node-id))
+
+            (process-expanded-fn [original-fn-id level source-node-id edge-arg-name is-root source-arg-id]
+              (let [chain (get-inheritance-chain original-fn-id fn-map)
+                    display-fn-id (nth chain (min level (dec (count chain))) original-fn-id)
+                    bindings (build-chain-bindings chain level args-by-fn arg-map)]
+                (process-fn original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id)))
+
+            (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id]
+              (let [level (get-effective-level fn-id)]
+                (if (> level 0)
+                  (process-expanded-fn fn-id level source-node-id edge-arg-name is-root source-arg-id)
+                  (let [bindings (build-arg-bindings fn-id args-by-fn arg-map)
+                        ;; Merge parent bindings (don't override)
+                        bindings (if parent-bindings
+                                   (merge parent-bindings bindings)
+                                   bindings)]
+                    (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id)))))]
+
+      ;; Start processing from root
+      (process-any-fn root-fn-id nil nil true nil nil))
+
+    {:nodes @nodes
+     :edges @edges}))
+
+
+;; =============================================================================
+;; LAYOUT ALGORITHM
+;; =============================================================================
+
+(defn- build-graph-info
+  "Build graph structure from nodes and edges for layout."
   [nodes edges]
   (let [children (reduce (fn [m e]
-                           (update m (:source e) (fnil conj []) (:target e)))
+                           (update m (get-in e [:data :source]) (fnil conj []) (get-in e [:data :target])))
                          {} edges)
         parents (reduce (fn [m e]
-                          (update m (:target e) (fnil conj []) (:source e)))
+                          (update m (get-in e [:data :target]) (fnil conj []) (get-in e [:data :source])))
                         {} edges)
         shared-nodes (->> parents
                           (filter (fn [[_ ps]] (> (count ps) 1)))
                           (map first)
                           (into #{}))
-        edge-names (reduce (fn [m e]
-                             (if (:argName e)
-                               (assoc m (str (:source e) "->" (:target e)) (:argName e))
-                               m))
-                           {} edges)
-        node-data-map (into {} (map (fn [n] [(:id n) n]) nodes))]
+        node-data-map (into {} (map (fn [n] [(get-in n [:data :id]) (:data n)]) nodes))]
     {:children children
      :parents parents
      :shared-nodes shared-nodes
-     :edge-names edge-names
-     :node-set (into #{} (map :id nodes))
      :node-data-map node-data-map}))
 
 
-(defn find-root
+(defn- find-root-node
   "Find root node (no incoming edges)."
   [nodes edges]
-  (let [has-parent (into #{} (map :target edges))]
-    (first (filter #(not (contains? has-parent (:id %))) nodes))))
+  (let [has-parent (into #{} (map #(get-in % [:data :target]) edges))]
+    (first (filter #(not (contains? has-parent (get-in % [:data :id]))) nodes))))
 
 
-;; =============================================================================
-;; PATH ANALYSIS FOR SHARED NODES
-;; =============================================================================
-
-(defn find-paths-to-shared
-  "For each node, find which shared nodes are reachable from it.
-   Returns {node-id -> #{reachable shared node ids}}"
+(defn- find-paths-to-shared
+  "For each node, find which shared nodes are reachable from it."
   [children shared-nodes]
   (let [memo (atom {})]
     (letfn [(reachable-from [node-id]
@@ -82,9 +361,8 @@
               (keys children)))))
 
 
-(defn path-length-to-shared
-  "Calculate path length from node to shared node (BFS).
-   Returns nil if not reachable."
+(defn- path-length-to-shared
+  "Calculate path length from node to shared node (BFS)."
   [from-id shared-id children]
   (loop [queue [[from-id 0]]
          visited #{}]
@@ -100,11 +378,7 @@
                    (conj visited node-id))))))))
 
 
-;; =============================================================================
-;; CHILD ORDERING
-;; =============================================================================
-
-(defn get-child-type
+(defn- get-child-type
   "Get type of child node: :fn, :fixed, or :free"
   [child-id node-data-map]
   (let [data (get node-data-map child-id)]
@@ -116,264 +390,286 @@
       :else :free)))
 
 
-(defn order-children
-  "Order children according to strict rules:
+(defn- order-children
+  "Order children: group by shared target (so siblings leading to same shared are adjacent),
+   then by type (fn > fixed > free).
 
-   1. LOWER paths to shared args (longest path = lower branch) - FIRST
-   2. fn args (not part of any shared path)
-   3. fixed args (not part of any shared path)
-   4. free args (not part of any shared path)
-   5. UPPER paths to shared args (shortest path = upper branch) - LAST
-
-   Splitting siblings (leading to same shared node) must be adjacent."
+   Children with SAME shared target are placed together. Within a shared-target group,
+   longer paths come before shorter paths (so shorter = last parent for that shared).
+   This ensures the shared node ends up on the row of its last parent."
   [parent-id children-map paths-to-shared shared-nodes graph-children node-data-map]
   (let [child-ids (get children-map parent-id [])
+        type-order {:fn 0 :fixed 1 :free 2}
 
-        ;; For each child, determine if it's part of a path to shared node
-        ;; and if so, whether it's upper (short) or lower (long) path
         classify-child
         (fn [child-id]
           (let [targets (get paths-to-shared child-id #{})
                 child-type (get-child-type child-id node-data-map)]
-            (if (empty? targets)
-              ;; Not part of any shared path - classify by type
-              {:id child-id
-               :category :regular
-               :type child-type
-               :targets #{}}
-              ;; Part of shared path - determine if upper or lower
-              ;; For each shared node, find path length
-              (let [path-info (map (fn [shared-id]
-                                     {:shared-id shared-id
-                                      :path-len (or (path-length-to-shared child-id shared-id graph-children) 999)})
-                                   targets)
-                    ;; Find max path among siblings to this shared node
-                    ;; Child with max path = lower, others = upper
-                    ;; We need to compare with siblings, so just store info for now
-                    min-path (apply min (map :path-len path-info))]
-                {:id child-id
-                 :category :shared-path
-                 :type child-type
-                 :targets targets
-                 :min-path-len min-path}))))
+            {:id child-id
+             :type child-type
+             :targets targets
+             ;; Primary sort key: first shared target (or nil)
+             :primary-target (first (sort targets))
+             ;; Path length for ordering within group
+             :path-len (if (seq targets)
+                         (apply min (map #(or (path-length-to-shared child-id % graph-children) 999) targets))
+                         0)}))
 
         classified (map classify-child child-ids)
 
-        ;; Separate regular children from shared-path children
-        regular (filter #(= (:category %) :regular) classified)
-        shared-path (filter #(= (:category %) :shared-path) classified)
+        ;; Separate into groups: those leading to shared nodes vs those without
+        with-targets (filter #(seq (:targets %)) classified)
+        without-targets (filter #(empty? (:targets %)) classified)
 
-        ;; Sort regular children by type: fn > fixed > free
-        type-order {:fn 0, :fixed 1, :free 2}
-        sorted-regular (sort-by #(get type-order (:type %) 2) regular)
+        ;; Group children by their primary shared target
+        by-target (group-by :primary-target with-targets)
 
-        ;; For shared-path children, determine upper vs lower
-        ;; Group by shared node, find max path length, classify
-        shared-path-classified
-        (when (seq shared-path)
-          (let [;; Find all shared targets
-                all-targets (distinct (mapcat :targets shared-path))
-                ;; For each shared target, find the max path length among siblings
-                max-paths (into {}
-                                (map (fn [shared-id]
-                                       (let [leading (filter #(contains? (:targets %) shared-id) shared-path)
-                                             max-len (apply max (map :min-path-len leading))]
-                                         [shared-id max-len]))
-                                     all-targets))
-                ;; Classify each child as upper or lower
-                classify-path (fn [child]
-                                (let [;; Check if this child is the lower path for ANY of its targets
-                                      is-lower? (some (fn [shared-id]
-                                                        (let [max-len (get max-paths shared-id)
-                                                              my-len (or (path-length-to-shared (:id child) shared-id graph-children) 999)]
-                                                          (= my-len max-len)))
-                                                      (:targets child))]
-                                  (assoc child :path-position (if is-lower? :lower :upper))))]
-            (map classify-path shared-path)))
+        ;; Sort each group: longer paths first (so shorter path = last = on same row as shared)
+        sorted-groups (mapcat (fn [[_target group]]
+                                (sort-by (fn [c] [(- (:path-len c)) (get type-order (:type c) 2) (:id c)]) group))
+                              (sort-by first by-target))
 
-        ;; Separate lower and upper paths
-        lower-paths (filter #(= (:path-position %) :lower) shared-path-classified)
-        upper-paths (filter #(= (:path-position %) :upper) shared-path-classified)
+        ;; Sort non-shared children by type then id
+        sorted-regular (sort-by (fn [c] [(get type-order (:type c) 2) (:id c)]) without-targets)]
 
-        ;; Sort lower paths by shared-id for grouping (siblings adjacent)
-        ;; Sort upper paths similarly
-        sort-by-first-target (fn [items]
-                               (sort-by #(first (:targets %)) items))]
-
-    ;; Final order:
-    ;; 1. Lower paths (longest path first in each group)
-    ;; 2. Regular: fn, then fixed, then free
-    ;; 3. Upper paths (shortest path last)
-    (vec (concat
-           (map :id (sort-by-first-target lower-paths))
-           (map :id sorted-regular)
-           (map :id (sort-by-first-target upper-paths))))))
+    ;; Children leading to shared nodes come first (grouped by target),
+    ;; then regular children sorted by type
+    (vec (concat (map :id sorted-groups)
+                 (map :id sorted-regular)))))
 
 
-;; =============================================================================
-;; MATRIX OPERATIONS (PURE FUNCTIONS)
-;; =============================================================================
-
-(defn empty-matrix []
-  {:grid {}        ; {[row col] -> node-id}
-   :positions {}}) ; {node-id -> {:row r :col c}}
-
-
-(defn get-cell [matrix row col]
-  (get (:grid matrix) [row col]))
-
-
-(defn cell-occupied? [matrix row col]
-  (some? (get-cell matrix row col)))
-
-
-(defn place-node [matrix node-id row col]
+;; Matrix operations
+(defn- empty-matrix [] {:grid {} :positions {}})
+(defn- get-cell [matrix row col] (get (:grid matrix) [row col]))
+(defn- cell-occupied? [matrix row col] (some? (get-cell matrix row col)))
+(defn- place-node-in-matrix [matrix node-id row col]
   (-> matrix
       (assoc-in [:grid [row col]] node-id)
       (assoc-in [:positions node-id] {:row row :col col})))
+(defn- get-node-pos [matrix node-id] (get-in matrix [:positions node-id]))
 
 
-(defn get-node-pos [matrix node-id]
-  (get-in matrix [:positions node-id]))
+(defn- layout-graph
+  "Main layout function.
 
+   Algorithm:
+   1. Order children: shared-target siblings grouped, then fn > fixed > free
+   2. Place horizontal branch (chain of first children) as a unit
+   3. If collision, shift entire branch down
+   4. Then process remaining children of rightmost fn in branch
+   5. Recurse back up to parent when done with a subtree
 
-(defn max-col-at-row
-  "Find the maximum occupied column at given row, or -1 if none."
-  [matrix row]
-  (let [occupied-cols (->> (:grid matrix)
-                           (filter (fn [[[r _] _]] (= r row)))
-                           (map (fn [[[_ c] _]] c)))]
-    (if (seq occupied-cols)
-      (apply max occupied-cols)
-      -1)))
-
-
-(defn find-free-row
-  "Find first row >= min-row where columns from start-col to start-col+length are free."
-  [matrix start-col length min-row]
-  (loop [row min-row]
-    (let [collision (some #(cell-occupied? matrix row %)
-                          (range start-col (+ start-col length)))]
-      (if collision
-        (recur (inc row))
-        row))))
-
-
-(defn shift-subtree-down
-  "Shift a node and all its descendants down by delta rows."
-  [matrix node-id delta children-map]
-  (if (zero? delta)
-    matrix
-    (letfn [(collect-subtree [nid visited]
-              (if (contains? visited nid)
-                visited
-                (let [visited (conj visited nid)
-                      child-ids (get children-map nid [])]
-                  (reduce (fn [v cid] (collect-subtree cid v))
-                          visited child-ids))))]
-      (let [subtree-nodes (collect-subtree node-id #{})
-            ;; Move all nodes in subtree
-            new-matrix (reduce
-                         (fn [m nid]
-                           (if-let [pos (get-node-pos m nid)]
-                             (let [old-row (:row pos)
-                                   old-col (:col pos)
-                                   new-row (+ old-row delta)]
-                               (-> m
-                                   (update :grid dissoc [old-row old-col])
-                                   (assoc-in [:grid [new-row old-col]] nid)
-                                   (assoc-in [:positions nid] {:row new-row :col old-col})))
-                             m))
-                         matrix
-                         subtree-nodes)]
-        new-matrix))))
-
-
-(defn shift-subtree-right
-  "Shift a node and all its descendants right by delta columns."
-  [matrix node-id delta children-map]
-  (if (zero? delta)
-    matrix
-    (letfn [(collect-subtree [nid visited]
-              (if (contains? visited nid)
-                visited
-                (let [visited (conj visited nid)
-                      child-ids (get children-map nid [])]
-                  (reduce (fn [v cid] (collect-subtree cid v))
-                          visited child-ids))))]
-      (let [subtree-nodes (collect-subtree node-id #{})
-            new-matrix (reduce
-                         (fn [m nid]
-                           (if-let [pos (get-node-pos m nid)]
-                             (let [old-row (:row pos)
-                                   old-col (:col pos)
-                                   new-col (+ old-col delta)]
-                               (-> m
-                                   (update :grid dissoc [old-row old-col])
-                                   (assoc-in [:grid [old-row new-col]] nid)
-                                   (assoc-in [:positions nid] {:row old-row :col new-col})))
-                             m))
-                         matrix
-                         subtree-nodes)]
-        new-matrix))))
-
-
-;; =============================================================================
-;; MAIN LAYOUT ALGORITHM
-;; =============================================================================
-
-(defn layout-graph
-  "Main layout function. Pure recursive algorithm.
-
-   Core rules:
-   1. First child is ALWAYS on same row as parent (horizontal branch)
-   2. Other children are below, each on its own row
-   3. If first child's cell is occupied, shift parent (and ancestors) down
-   4. Shared nodes placed when last parent is reached"
+   Rules:
+   - First child of each node is on SAME ROW as parent (horizontal branch)
+   - Other children are BELOW (each on own row)
+   - Shared node goes on SAME ROW as its LAST (max row) parent"
   [root-id graph-info]
   (let [{:keys [children parents shared-nodes node-data-map]} graph-info
         paths-to-shared (find-paths-to-shared children shared-nodes)
-
-        ;; State: matrix + tracking info
         initial-state {:matrix (empty-matrix)
                        :placed #{}
-                       :shared-parent-placed {}  ; {shared-id -> #{placed parent ids}}
-                       :first-child {}}]         ; {node-id -> first-child-id} for shift propagation
+                       :pending-shared #{}
+                       :col-max-rows {}}]  ; Track max row used in each column
 
-    ;; Initialize shared parent tracking
-    (letfn [(init-shared-tracking [state]
-              (reduce
-                (fn [s shared-id]
-                  (assoc-in s [:shared-parent-placed shared-id] #{}))
-                state
-                shared-nodes))
-
-            (all-parents-placed? [state shared-id]
-              (let [parent-ids (set (get parents shared-id []))
-                    placed-parents (get-in state [:shared-parent-placed shared-id] #{})]
-                (= parent-ids placed-parents)))
-
-            (mark-as-parent-placed [state parent-id]
-              (reduce
-                (fn [s child-id]
-                  (if (contains? shared-nodes child-id)
-                    (update-in s [:shared-parent-placed child-id] conj parent-id)
-                    s))
-                state
-                (get children parent-id [])))
-
-            ;; Find minimum row where we can place node at given col
-            ;; considering the entire horizontal branch
-            (find-free-row-for-branch [matrix col min-row]
+    (letfn [(find-free-row [matrix col min-row]
               (loop [row min-row]
                 (if (cell-occupied? matrix row col)
                   (recur (inc row))
                   row)))
 
-            ;; Shift a node and ALL nodes below it in the same "vertical slice"
-            ;; This includes: the node, its subtree, and any nodes below
-            (shift-node-down [state node-id delta]
-              (if (zero? delta)
+            (place-node-at [state node-id row col]
+              (-> state
+                  (update :matrix place-node-in-matrix node-id row col)
+                  (update :placed conj node-id)
+                  (update :col-max-rows (fn [m] (update m col #(max (or % -1) row))))))
+
+            (get-col-max-row [state col]
+              (get-in state [:col-max-rows col] -1))
+
+            ;; Check if current node is the "last" parent for a shared node
+            ;; (last = will have max row when all parents are placed)
+            ;; For now, we use order in children list as proxy - siblings that come
+            ;; later in child order will have higher row numbers
+            (is-last-parent-of? [parent-id shared-id placed-set]
+              ;; A parent is "last" if all other parents are already placed
+              ;; OR if this parent comes later in sibling order than other parents
+              (let [all-parents (get parents shared-id [])
+                    other-parents (remove #{parent-id} all-parents)]
+                ;; If all other parents are placed, this is effectively the last one
+                (every? #(contains? placed-set %) other-parents)))
+
+            ;; Get children for node, excluding shared nodes that should go via lower branches
+            ;; Returns {:children [...], :excluded-shared [...]}
+            ;; Shared nodes are included if this node is their "last" parent
+            (get-children-for-branch [node-id placed-set]
+              (let [all-children (order-children node-id children paths-to-shared
+                                                  shared-nodes children node-data-map)
+                    ;; For each shared child, check if this is its last parent
+                    should-include? (fn [child-id]
+                                      (if (contains? shared-nodes child-id)
+                                        (is-last-parent-of? node-id child-id placed-set)
+                                        true))
+                    included (filterv should-include? all-children)
+                    excluded (filterv #(and (contains? shared-nodes %)
+                                            (not (should-include? %))) all-children)]
+                {:children included
+                 :excluded-shared excluded}))
+
+            ;; Build the horizontal branch starting from a node
+            ;; Returns {:branch [...], :ends-at-shared node-id-or-nil, :all-excluded-shared [...]}
+            ;; placed-set: nodes that are already placed (used to determine if this is last parent)
+            (build-horizontal-branch [node-id start-col placed-set]
+              (loop [current-id node-id
+                     col start-col
+                     branch []
+                     all-excluded-shared []
+                     current-placed placed-set]
+                (cond
+                  (nil? current-id)
+                  {:branch branch :ends-at-shared nil :all-excluded-shared all-excluded-shared}
+
+                  :else
+                  (let [;; Check if this is a shared node that should be deferred
+                        ;; (i.e., not all other parents are placed yet)
+                        defer-shared? (and (contains? shared-nodes current-id)
+                                           (not (is-last-parent-of?
+                                                  ;; Find which parent led us here
+                                                  (some #(when (some #{current-id}
+                                                                     (get children %)) %)
+                                                        current-placed)
+                                                  current-id
+                                                  current-placed)))]
+                    (if defer-shared?
+                      ;; Stop at shared nodes that should be deferred
+                      {:branch branch :ends-at-shared current-id :all-excluded-shared all-excluded-shared}
+                      ;; Continue building branch
+                      (let [branch (conj branch {:id current-id :col col})
+                            ;; Update placed set to include nodes in branch so far
+                            updated-placed (conj current-placed current-id)
+                            {:keys [children excluded-shared]} (get-children-for-branch current-id updated-placed)
+                            ;; Collect all excluded shared nodes
+                            all-excluded-shared (into all-excluded-shared excluded-shared)
+                            ;; First child continues the horizontal branch
+                            first-child (first children)]
+                        (if first-child
+                          (recur first-child (inc col) branch all-excluded-shared updated-placed)
+                          {:branch branch :ends-at-shared nil :all-excluded-shared all-excluded-shared})))))))
+
+            ;; Check if placing branch at given row would collide
+            (branch-collides? [state branch row]
+              (some (fn [{:keys [col]}]
+                      (cell-occupied? (:matrix state) row col))
+                    branch))
+
+            ;; Find minimum row where branch can be placed without collision
+            (find-branch-row [state branch min-row]
+              (loop [row min-row]
+                (if (branch-collides? state branch row)
+                  (recur (inc row))
+                  row)))
+
+            ;; Place entire horizontal branch at given row
+            (place-branch [state branch row]
+              (reduce (fn [s {:keys [id col]}]
+                        (place-node-at s id row col))
+                      state
+                      branch))
+
+            ;; Process a node: place its horizontal branch, then recurse on remaining children
+            (place-subtree [state node-id target-row target-col]
+              (cond
+                ;; Already placed - skip
+                (contains? (:placed state) node-id)
+                state
+
+                ;; Shared node - defer to phase 2
+                (contains? shared-nodes node-id)
+                (update state :pending-shared conj node-id)
+
+                :else
+                (let [;; Build horizontal branch starting from this node
+                      ;; Pass current placed set to determine which shared nodes to include
+                      {:keys [branch ends-at-shared all-excluded-shared]} (build-horizontal-branch node-id target-col (:placed state))
+
+                      ;; Find row where branch fits (starting from target-row)
+                      actual-row (find-branch-row state branch target-row)
+
+                      ;; Place the entire branch
+                      state (place-branch state branch actual-row)
+
+                      ;; Add all excluded shared nodes to pending
+                      state (reduce (fn [s shared-id]
+                                      (update s :pending-shared conj shared-id))
+                                    state
+                                    all-excluded-shared)
+
+                      ;; If branch ends at shared node, add to pending
+                      state (if ends-at-shared
+                              (update state :pending-shared conj ends-at-shared)
+                              state)]
+
+                  ;; Now process remaining children of each fn in the branch (right to left)
+                  ;; Start from rightmost fn and work back
+                  (let [fns-in-branch (filter (fn [{:keys [id]}]
+                                                (= :fn (get-child-type id node-data-map)))
+                                              (reverse branch))]
+                    (reduce
+                      (fn [s {:keys [id col]}]
+                        (let [;; Get children, using current placed set to determine shared inclusion
+                              {:keys [children excluded-shared]} (get-children-for-branch id (:placed s))
+                              ;; Add excluded shared to pending
+                              s (reduce (fn [st shared-id]
+                                          (update st :pending-shared conj shared-id))
+                                        s
+                                        excluded-shared)
+                              ;; Skip first child (already in horizontal branch)
+                              remaining-children (rest children)
+                              child-col (inc col)]
+                          ;; Place each remaining child below the previous one
+                          (loop [remaining remaining-children
+                                 next-row (inc actual-row)
+                                 state s]
+                            (if (empty? remaining)
+                              state
+                              (let [child-id (first remaining)
+                                    ;; Find actual row for this child
+                                    child-row (find-free-row (:matrix state) child-col next-row)
+                                    ;; Recursively place this child's subtree
+                                    state (place-subtree state child-id child-row child-col)
+                                    ;; Get max row used by this subtree
+                                    child-pos (get-node-pos (:matrix state) child-id)
+                                    new-next-row (if child-pos
+                                                   (inc (max (:row child-pos)
+                                                             (get-col-max-row state child-col)))
+                                                   next-row)]
+                                (recur (rest remaining) new-next-row state))))))
+                      state
+                      fns-in-branch)))))
+
+            (place-shared-node [state shared-id]
+              ;; Place shared node on same row as its LAST (max-row) parent
+              (if (contains? (:placed state) shared-id)
+                state
+                (let [parent-ids (get parents shared-id [])
+                      parent-positions (keep #(get-node-pos (:matrix state) %) parent-ids)]
+                  (if (empty? parent-positions)
+                    state
+                    (let [max-row (apply max (map :row parent-positions))
+                          max-col (apply max (map :col parent-positions))
+                          shared-col (inc max-col)
+                          ;; Check if target cell is occupied
+                          occupied? (cell-occupied? (:matrix state) max-row shared-col)
+                          ;; If occupied, shift the blocking subtree down
+                          state (if occupied?
+                                  (let [blocking-node (get-cell (:matrix state) max-row shared-col)
+                                        free-row (find-free-row (:matrix state) shared-col (inc max-row))
+                                        shift-amount (- free-row max-row)]
+                                    (shift-subtree-down state blocking-node shift-amount shared-nodes children))
+                                  state)]
+                      (place-node-at state shared-id max-row shared-col))))))
+
+            (shift-subtree-down [state node-id delta shared-nodes-set children-map]
+              (if (or (zero? delta) (contains? shared-nodes-set node-id))
                 state
                 (let [pos (get-node-pos (:matrix state) node-id)]
                   (if-not pos
@@ -381,117 +677,79 @@
                     (let [old-row (:row pos)
                           old-col (:col pos)
                           new-row (+ old-row delta)
-                          ;; Move this node
                           matrix (-> (:matrix state)
                                      (update :grid dissoc [old-row old-col])
                                      (assoc-in [:grid [new-row old-col]] node-id)
                                      (assoc-in [:positions node-id] {:row new-row :col old-col}))
-                          state (assoc state :matrix matrix)
-                          ;; Recursively shift all children
-                          child-ids (get children node-id [])]
+                          state (-> state
+                                    (assoc :matrix matrix)
+                                    (update :col-max-rows (fn [m] (update m old-col #(max (or % -1) new-row)))))
+                          child-ids (get children-map node-id [])]
                       (reduce
                         (fn [s cid]
-                          (if (contains? (:placed s) cid)
-                            (shift-node-down s cid delta)
+                          (if (and (contains? (:placed s) cid)
+                                   (not (contains? shared-nodes-set cid)))
+                            (shift-subtree-down s cid delta shared-nodes-set children-map)
                             s))
                         state
                         child-ids))))))
 
-            ;; Place node and its children
-            ;; Returns updated state
-            (place-node-at [state node-id row col]
-              (-> state
-                  (update :matrix place-node node-id row col)
-                  (update :placed conj node-id)
-                  (mark-as-parent-placed node-id)))
+            (place-shared-subtree [state shared-id]
+              ;; Place a shared node and its children
+              (let [state (place-shared-node state shared-id)
+                    node-pos (get-node-pos (:matrix state) shared-id)]
+                (if-not node-pos
+                  state
+                  ;; Process children of shared node using same algorithm
+                  (let [ordered-children (order-children shared-id children paths-to-shared
+                                                         shared-nodes children node-data-map)
+                        child-col (inc (:col node-pos))]
+                    ;; First child on same row, rest below
+                    (loop [remaining ordered-children
+                           first? true
+                           next-row (inc (:row node-pos))
+                           s state]
+                      (if (empty? remaining)
+                        s
+                        (let [child-id (first remaining)
+                              child-row (if first? (:row node-pos) next-row)
+                              s (place-subtree s child-id child-row child-col)
+                              child-pos (get-node-pos (:matrix s) child-id)
+                              new-next-row (if child-pos
+                                             (inc (max (:row child-pos)
+                                                       (get-col-max-row s child-col)))
+                                             next-row)]
+                          (recur (rest remaining) false new-next-row s))))))))
 
-            ;; Main recursive function
-            (place-subtree [state node-id target-row target-col parent-id is-first-child]
-              (if (contains? (:placed state) node-id)
-                state
-                (let [;; Check if target cell is free
-                      cell-free? (not (cell-occupied? (:matrix state) target-row target-col))
+            (place-all-shared-nodes [state]
+              ;; Phase 2: Place all pending shared nodes based on final parent positions
+              (loop [s state
+                     max-iterations 100]
+                (if (or (zero? max-iterations) (empty? (:pending-shared s)))
+                  s
+                  (let [pending (vec (:pending-shared s))
+                        s (reduce
+                            (fn [acc shared-id]
+                              ;; Check if all parents are placed
+                              (let [parent-ids (set (get parents shared-id []))
+                                    placed-parents (clojure.set/intersection parent-ids (:placed acc))]
+                                (if (= parent-ids placed-parents)
+                                  ;; All parents placed - place this shared node
+                                  (let [acc (place-shared-subtree acc shared-id)]
+                                    (update acc :pending-shared disj shared-id))
+                                  ;; Not all parents placed yet - keep pending
+                                  acc)))
+                            s
+                            pending)]
+                    (recur s (dec max-iterations))))))]
 
-                      ;; If not free and this is first child, we need to shift parent down
-                      state (if (and (not cell-free?) is-first-child parent-id)
-                              ;; Find how much to shift
-                              (let [free-row (find-free-row-for-branch (:matrix state) target-col target-row)
-                                    shift-amount (- free-row target-row)]
-                                ;; Shift parent (which shifts us too via recursion)
-                                (shift-node-down state parent-id shift-amount))
-                              state)
-
-                      ;; After potential shift, recalculate our target row
-                      actual-row (if parent-id
-                                   (let [parent-pos (get-node-pos (:matrix state) parent-id)]
-                                     (if is-first-child
-                                       (:row parent-pos)  ; Same row as parent
-                                       (find-free-row-for-branch (:matrix state) target-col target-row)))
-                                   target-row)
-
-                      ;; Place this node
-                      state (place-node-at state node-id actual-row target-col)
-
-                      ;; Get ordered children
-                      ordered-children (order-children node-id children paths-to-shared
-                                                       shared-nodes children node-data-map)
-
-                      ;; Filter out shared nodes that aren't ready
-                      ready-children (filterv
-                                       (fn [cid]
-                                         (if (contains? shared-nodes cid)
-                                           (all-parents-placed? state cid)
-                                           true))
-                                       ordered-children)
-
-                      ;; Place children: first on same row, rest below
-                      child-col (inc target-col)]
-
-                  (loop [remaining ready-children
-                         next-row (inc actual-row)  ; Second child starts below
-                         first? true
-                         state state]
-                    (if (empty? remaining)
-                      state
-                      (let [child-id (first remaining)
-                            child-row (if first? actual-row next-row)
-                            is-shared (contains? shared-nodes child-id)]
-
-                        (if is-shared
-                          ;; Shared node: place on row of this (last) parent
-                          (let [parent-ids (get parents child-id [])
-                                parent-positions (keep #(get-node-pos (:matrix state) %) parent-ids)
-                                max-parent-col (if (seq parent-positions)
-                                                 (apply max (map :col parent-positions))
-                                                 target-col)
-                                shared-col (inc max-parent-col)
-                                ;; Place shared node on current row (this parent's row)
-                                state (place-subtree state child-id actual-row shared-col node-id true)
-                                child-pos (get-node-pos (:matrix state) child-id)]
-                            (recur (rest remaining)
-                                   (if child-pos (inc (:row child-pos)) next-row)
-                                   false
-                                   state))
-
-                          ;; Regular node
-                          (let [state (place-subtree state child-id child-row child-col node-id first?)
-                                child-pos (get-node-pos (:matrix state) child-id)]
-                            (recur (rest remaining)
-                                   (if child-pos (inc (:row child-pos)) (inc next-row))
-                                   false
-                                   state)))))))))]
-
-      ;; Start from root at (0,0)
-      (let [state (init-shared-tracking initial-state)
-            final-state (place-subtree state root-id 0 0 nil false)]
-        (:matrix final-state)))))
+      ;; Execute layout
+      (let [state (place-subtree initial-state root-id 0 0)
+            state (place-all-shared-nodes state)]
+        (:matrix state)))))
 
 
-;; =============================================================================
-;; VALIDATION
-;; =============================================================================
-
-(defn validate-layout
+(defn- validate-layout
   "Check for collisions in the layout."
   [matrix]
   (let [positions (vals (:positions matrix))
@@ -505,50 +763,88 @@
 
 
 ;; =============================================================================
-;; HIGH-LEVEL API
+;; PUBLIC API
 ;; =============================================================================
 
 (defn compute-layout-matrix
-  "Compute grid-based layout from elements.
+  "Compute grid-based layout from elements (for testing).
    Input: {:elements {:nodes [...], :edges [...]}}
    Output: {:grid-pos {node-id {:row r :col c}}, :validation {...}}"
   [{:keys [elements]}]
-  (let [nodes (or (:nodes elements) [])
-        edges (or (:edges elements) [])]
+  (let [nodes (mapv (fn [n] {:data n}) (or (:nodes elements) []))
+        edges (mapv (fn [e] {:data e}) (or (:edges elements) []))]
     (if (empty? nodes)
       {:grid-pos {}
        :validation {:valid true :issues []}}
       (let [graph-info (build-graph-info nodes edges)
-            root (find-root nodes edges)]
+            root (find-root-node nodes edges)]
         (if-not root
           {:grid-pos {}
            :validation {:valid false
                         :issues [{:type "no_root" :message "No root node found"}]}}
-          (let [matrix (layout-graph (:id root) graph-info)
+          (let [matrix (layout-graph (get-in root [:data :id]) graph-info)
                 validation (validate-layout matrix)]
             {:grid-pos (:positions matrix)
              :validation validation}))))))
 
 
-;; =============================================================================
-;; API HANDLER
-;; =============================================================================
-
 (defn get-layout-data
-  "Compute layout from elements passed in request body."
-  [{:keys [request]}]
-  (let [body-str (:body request)
+  "Compute layout from root-id and expansions.
+   Input (from request body): {root-id: uuid-string, expansions: {fn-id: level, ...}}
+   Output: {nodes: [...], edges: [...], grid-pos: {...}, validation: {...}}"
+  [{:keys [request]} ctx]
+  (let [storage (:storage ctx)
+        body-str (:body request)
         body (when (and body-str (not (str/blank? body-str)))
                (json/parse-string body-str true))
-        elements (:elements body)]
-    (if-not elements
-      (throw (ex-info "Request body must contain 'elements' with 'nodes' and 'edges'"
-                      {:type :execution-error/invalid-args}))
-      (compute-layout-matrix {:elements elements}))))
+        root-id-str (:root-id body)
+        expansions-raw (:expansions body {})]
+
+    (when-not storage
+      (throw (ex-info "Storage not available in context"
+                      {:type :execution-error/missing-storage})))
+
+    (when-not root-id-str
+      (throw (ex-info "Request body must contain 'root-id'"
+                      {:type :execution-error/invalid-args})))
+
+    (let [;; Parse root-id
+          root-id (java.util.UUID/fromString root-id-str)
+
+          ;; Parse expansions: {"uuid-string": level} -> {uuid: level}
+          expansions (into {}
+                           (map (fn [[k v]]
+                                  [(java.util.UUID/fromString (name k)) v])
+                                expansions-raw))
+
+          ;; Load data from storage
+          raw-data (load-graph-entities storage)
+          lookups (build-lookups raw-data)
+
+          ;; Verify root exists
+          _ (when-not (get (:fn-map lookups) root-id)
+              (throw (ex-info "Root function not found"
+                              {:type :execution-error/not-found
+                               :root-id root-id})))
+
+          ;; Build graph elements
+          {:keys [nodes edges]} (build-graph-elements root-id expansions lookups)
+
+          ;; Compute layout
+          graph-info (build-graph-info nodes edges)
+          root-node (find-root-node nodes edges)
+          matrix (if root-node
+                   (layout-graph (get-in root-node [:data :id]) graph-info)
+                   (empty-matrix))
+          validation (validate-layout matrix)]
+
+      {:nodes nodes
+       :edges edges
+       :grid-pos (:positions matrix)
+       :validation validation})))
 
 
 ;; === Registry ===
 
 (def impls
-  {:compute-layout-matrix compute-layout-matrix
-   :get-layout-data (with-meta get-layout-data {:ctx true})})
+  {:get-layout-data (with-meta get-layout-data {:ctx true})})

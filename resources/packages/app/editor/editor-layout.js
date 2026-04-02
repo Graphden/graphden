@@ -78,7 +78,6 @@ async function fetchBackendLayout() {
       'root-id': selectedFnId,
       expansions: expansions
     };
-    console.log('[Layout API] Request:', JSON.stringify(requestBody));
 
     const response = await fetch('/api/graph/layout', {
       method: 'POST',
@@ -92,8 +91,6 @@ async function fetchBackendLayout() {
     }
 
     const data = await response.json();
-    console.log('[Layout API] Response: nodes=' + data.nodes.length + ' edges=' + data.edges.length);
-    console.log('[Layout API] Grid positions:', JSON.stringify(data['grid-pos']));
 
     // Handle different naming conventions: 'grid-pos' (Clojure kebab-case)
     const gridPos = data['grid-pos'] || data.gridPos || {};

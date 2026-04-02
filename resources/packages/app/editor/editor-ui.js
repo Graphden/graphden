@@ -75,9 +75,6 @@ function selectFnByName(name, updateHistory = true) {
  * Set expansion level for a node (click)
  */
 function setExpansionLevel(originalFnId, level) {
-  console.log('[setExpansionLevel] fnId=' + originalFnId.slice(0, 8) + '... level=' + level);
-  console.log('[setExpansionLevel] before: expansionLevel=', Object.fromEntries(expansionLevel));
-
   // Clear any pending preview debounce timer to prevent race condition:
   // If user clicks while preview debounce is pending, the debounced callback
   // would fire AFTER this render, causing the old overlay to be preserved
@@ -95,8 +92,6 @@ function setExpansionLevel(originalFnId, level) {
     expansionLevel.set(originalFnId, level);
   }
   previewLevel.delete(originalFnId);
-
-  console.log('[setExpansionLevel] after: expansionLevel=', Object.fromEntries(expansionLevel));
   renderGraph(false);
 
   // Clear anchor after render

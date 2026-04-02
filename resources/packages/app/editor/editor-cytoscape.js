@@ -224,12 +224,6 @@ async function renderGraph(shouldFit = true) {
   const nodesToAdd = nodes.filter(n => !cy.getElementById(n.data.id).length);
   const edgesToAdd = edges.filter(e => !cy.getElementById(e.data.id).length);
 
-  console.log('[renderGraph] Current cy nodes:', cy.nodes().length, 'edges:', cy.edges().length);
-  console.log('[renderGraph] New nodes:', nodes.length, 'edges:', edges.length);
-  console.log('[renderGraph] To remove:', nodesToRemove.length, 'nodes,', edgesToRemove.length, 'edges');
-  console.log('[renderGraph] To add:', nodesToAdd.length, 'nodes,', edgesToAdd.length, 'edges');
-  console.log('[renderGraph] nodesToRemove IDs:', nodesToRemove.map(n => n.id()).join(', '));
-  console.log('[renderGraph] edgesToRemove IDs:', edgesToRemove.map(e => e.id()).join(', '));
 
   // Update existing node data
   cy.nodes().forEach(node => {

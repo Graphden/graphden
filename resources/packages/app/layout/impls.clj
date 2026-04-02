@@ -190,7 +190,9 @@
 
         add-arg-value-node
         (fn [arg-name value arg-id source-node-id]
-          (let [node-id (str "arg-" arg-id)]
+          (let [node-id (str "arg-" arg-id)
+                ;; Edge ID must include source to handle re-parenting when expansion level changes
+                edge-id (str "e-val-" source-node-id "-" arg-id)]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
               (let [display-value (truncate-label (json/generate-string value) 20)]
@@ -199,7 +201,7 @@
                                :label display-value
                                :type "arg"}}))
               (swap! edges conj
-                     {:data {:id (str "e-val-" arg-id)
+                     {:data {:id edge-id
                              :source source-node-id
                              :target node-id
                              :argName (when arg-name (name arg-name))}}))
@@ -207,7 +209,9 @@
 
         add-unset-arg-node
         (fn [arg-name arg-type arg-id source-node-id]
-          (let [node-id (str "unset-" arg-id)]
+          (let [node-id (str "unset-" arg-id)
+                ;; Edge ID must include source to handle re-parenting when expansion level changes
+                edge-id (str "e-unset-" source-node-id "-" arg-id)]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
               (swap! nodes conj
@@ -216,7 +220,7 @@
                              :type "fn"
                              :isPlaceholder true}})
               (swap! edges conj
-                     {:data {:id (str "e-unset-" arg-id)
+                     {:data {:id edge-id
                              :source source-node-id
                              :target node-id
                              :argName (when arg-name (name arg-name))

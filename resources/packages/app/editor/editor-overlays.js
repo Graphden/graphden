@@ -183,6 +183,8 @@ function createFnOverlay(node, container) {
       e.stopPropagation();
       const clickLevel = item.groupLevel;
 
+      console.log('[overlay click] originalFnId=' + originalFnId.slice(0, 8) + '... item.name=' + item.name + ' clickLevel=' + clickLevel + ' currentLevel=' + currentLevel);
+
       if (clickLevel > currentLevel) {
         // Expanding to deeper ancestor
         setExpansionLevel(originalFnId, clickLevel);

@@ -103,6 +103,16 @@ const CYTOSCAPE_STYLES = [
  * Create Cytoscape instance with initial elements and layout
  */
 async function createCytoscape(nodes, edges, layout, shouldFit) {
+  // Ensure cytoscape library is loaded
+  if (typeof cytoscape === 'undefined') {
+    console.error('Cytoscape library not loaded yet, retrying in 100ms...');
+    await new Promise(resolve => setTimeout(resolve, 100));
+    if (typeof cytoscape === 'undefined') {
+      console.error('Cytoscape library still not loaded!');
+      return;
+    }
+  }
+
   // Apply positions to nodes
   const nodesWithPos = nodes.map(n => {
     const pos = layout.get(n.data.id);
@@ -213,6 +223,13 @@ async function renderGraph(shouldFit = true) {
   const edgesToRemove = cy.edges().filter(edge => !newEdgeIds.has(edge.id()));
   const nodesToAdd = nodes.filter(n => !cy.getElementById(n.data.id).length);
   const edgesToAdd = edges.filter(e => !cy.getElementById(e.data.id).length);
+
+  console.log('[renderGraph] Current cy nodes:', cy.nodes().length, 'edges:', cy.edges().length);
+  console.log('[renderGraph] New nodes:', nodes.length, 'edges:', edges.length);
+  console.log('[renderGraph] To remove:', nodesToRemove.length, 'nodes,', edgesToRemove.length, 'edges');
+  console.log('[renderGraph] To add:', nodesToAdd.length, 'nodes,', edgesToAdd.length, 'edges');
+  console.log('[renderGraph] nodesToRemove IDs:', nodesToRemove.map(n => n.id()).join(', '));
+  console.log('[renderGraph] edgesToRemove IDs:', edgesToRemove.map(e => e.id()).join(', '));
 
   // Update existing node data
   cy.nodes().forEach(node => {

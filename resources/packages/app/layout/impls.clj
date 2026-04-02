@@ -637,6 +637,10 @@
                       visited (into visited (map :id branch))]
 
                   ;; Process non-first children of each node in the branch
+                  ;; IMPORTANT: Process right-to-left (reverse branch) so that
+                  ;; children of deeper nodes are placed before siblings of shallower nodes.
+                  ;; This ensures delete-entity-route's path is placed right after its
+                  ;; horizontal branch, not after all sibling routes.
                   (reduce
                     (fn [[matrix visited] {:keys [id col]}]
                       (let [children (get-sorted-children id)
@@ -659,7 +663,7 @@
                                      matrix
                                      visited))))))
                     [matrix visited]
-                    branch))))]
+                    (reverse branch)))))]
 
       (let [[matrix _] (layout-subtree (empty-matrix) root-id 0 0 #{})]
         matrix))))

@@ -137,37 +137,63 @@ function createFnOverlay(node, container) {
     }
     linesByGroup.get(item.groupId).push(line);
 
-    // Hover: highlight entire group, use group's level for preview
+    // Hover: highlight entire group AND all groups above (younger ancestors)
+    // If already expanded to this level or beyond, don't trigger preview
     line.addEventListener('mouseenter', () => {
       if (isGrabbing) return;
 
-      // Highlight all lines in this group
-      const groupLines = linesByGroup.get(item.groupId) || [];
-      groupLines.forEach(l => {
-        l.style.background = '#e8e8e8';
+      const hoverLevel = item.groupLevel;
+
+      // Highlight this group and all groups with lower level (younger ancestors)
+      linesByGroup.forEach((lines, groupId) => {
+        const groupLevel = parseInt(lines[0].dataset.groupLevel);
+        if (groupLevel <= hoverLevel) {
+          lines.forEach(l => {
+            l.style.background = '#e8e8e8';
+          });
+        }
       });
 
-      // Preview uses the group's level (the "real" ancestor's level)
-      setPreviewLevel(originalFnId, item.groupLevel);
+      // Only trigger preview if hovering on level > currentLevel
+      // (i.e., expanding to a deeper ancestor)
+      if (hoverLevel > currentLevel) {
+        setPreviewLevel(originalFnId, hoverLevel);
+      }
     });
 
     line.addEventListener('mouseleave', () => {
-      // Remove highlight from this group
-      const groupLines = linesByGroup.get(item.groupId) || [];
-      groupLines.forEach(l => {
-        // Restore original background based on current expansion
-        if (parseInt(l.dataset.groupLevel) <= currentLevel) {
-          l.style.background = '#f0f0f0';
-        } else {
-          l.style.background = '';
-        }
+      // Restore all lines to their proper state based on current expansion
+      linesByGroup.forEach((lines, groupId) => {
+        const groupLevel = parseInt(lines[0].dataset.groupLevel);
+        lines.forEach(l => {
+          if (groupLevel <= currentLevel) {
+            l.style.background = '#f0f0f0';
+          } else {
+            l.style.background = '';
+          }
+        });
       });
     });
 
-    // Click: use group's level
+    // Click: toggle expansion
+    // - If clicking on level > currentLevel: expand to that level
+    // - If clicking on level <= currentLevel: collapse to that level
+    //   (but clicking on level 0 when currentLevel > 0 collapses to 0)
     line.addEventListener('click', (e) => {
       e.stopPropagation();
-      setExpansionLevel(originalFnId, item.groupLevel);
+      const clickLevel = item.groupLevel;
+
+      if (clickLevel > currentLevel) {
+        // Expanding to deeper ancestor
+        setExpansionLevel(originalFnId, clickLevel);
+      } else if (clickLevel < currentLevel) {
+        // Collapsing to younger ancestor
+        setExpansionLevel(originalFnId, clickLevel);
+      } else {
+        // Clicking on current level - collapse one step
+        // If at level 0, stay at 0
+        setExpansionLevel(originalFnId, Math.max(0, clickLevel - 1));
+      }
     });
 
     overlay.appendChild(line);

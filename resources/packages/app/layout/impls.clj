@@ -388,11 +388,10 @@
                                      :target node-id
                                      :argName (when edge-arg-name (name edge-arg-name))}}))))
 
-                ;; For expanded mode, show args only from display-fn
-                ;; This prevents showing args from descendants that are already
-                ;; reachable through refs in display-fn
+                ;; For expanded mode, collect args from entire chain [0..level]
+                ;; This shows all args from the expansion chain with proper ordering
                 ;; The chain-bindings ensure that unset args show bound values
-                (let [all-args (collect-fn-args display-fn-id chain-bindings)]
+                (let [all-args (collect-expanded-args chain level chain-bindings)]
                   (doseq [arg all-args]
                     (case (:type arg)
                       :ref (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg))

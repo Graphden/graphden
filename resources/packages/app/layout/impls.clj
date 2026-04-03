@@ -563,17 +563,14 @@
   "Order children for layout placement.
 
    Rules (in priority order):
-   1. Regular children (not leading to shared) come FIRST
-      - Sort by type: fn > fixed > free (fn on horizontal branch)
-      - Within same type, preserve original edge order
-   2. Children leading to shared nodes come LAST
-      - These go below regular children
-      - Longer paths before shorter
+   1. Direct shared children (the shared node itself) - sort by type like regular
+   2. Regular children (not leading to shared) - sort by type: fn > fixed > free
+   3. Children leading to shared (but not the shared node itself) - LAST
 
    This ensures:
-   - fn children are on horizontal branch (same row as parent)
+   - fn children (including shared fn nodes) are on horizontal branch
    - fixed/free children are below
-   - Paths to shared nodes are at the bottom"
+   - Intermediate nodes on path to shared are at the bottom"
   [parent-id children-map paths-to-shared shared-nodes graph-children node-data-map]
   (let [child-ids (get children-map parent-id [])
         type-order {:fn 0 :fixed 1 :free 2}
@@ -581,11 +578,14 @@
         classify-child
         (fn [child-id idx]
           (let [targets (get paths-to-shared child-id #{})
-                child-type (get-child-type child-id node-data-map)]
+                child-type (get-child-type child-id node-data-map)
+                ;; Check if this child IS a shared node (direct shared child)
+                is-shared-node (contains? shared-nodes child-id)]
             {:id child-id
              :type child-type
              :original-idx idx
              :targets targets
+             :is-shared-node is-shared-node
              :primary-target (first (sort targets))
              :path-len (if (seq targets)
                          (apply min (map #(or (path-length-to-shared child-id % graph-children) 999) targets))
@@ -593,13 +593,18 @@
 
         classified (map-indexed (fn [idx id] (classify-child id idx)) child-ids)
 
-        ;; Separate into groups: those leading to shared nodes vs those without
-        with-targets (filter #(seq (:targets %)) classified)
-        without-targets (filter #(empty? (:targets %)) classified)
+        ;; Separate into groups:
+        ;; 1. Direct shared children - the shared node itself (treat as regular for sorting)
+        ;; 2. Regular children - not leading to shared
+        ;; 3. Path-to-shared children - leading to shared but not the shared node itself
+        direct-shared (filter :is-shared-node classified)
+        not-direct-shared (filter (complement :is-shared-node) classified)
+        with-targets (filter #(seq (:targets %)) not-direct-shared)
+        without-targets (filter #(empty? (:targets %)) not-direct-shared)
 
-        ;; Regular children: sort by type (fn first for horizontal branch)
-        ;; Within same type, preserve original edge order
-        sorted-regular (sort-by (fn [c] [(get type-order (:type c) 2) (:original-idx c)]) without-targets)
+        ;; Direct shared + regular: sort by type (fn first for horizontal branch)
+        regular-and-shared (concat direct-shared without-targets)
+        sorted-regular (sort-by (fn [c] [(get type-order (:type c) 2) (:original-idx c)]) regular-and-shared)
 
         ;; Shared-path children: group by target, longer paths first within group
         by-target (group-by :primary-target with-targets)
@@ -607,7 +612,7 @@
                                 (sort-by (fn [c] [(- (:path-len c)) (:original-idx c)]) group))
                               (sort-by first by-target))]
 
-    ;; Regular children FIRST, shared-path children LAST
+    ;; Regular (including direct shared) FIRST, path-to-shared children LAST
     (vec (concat (map :id sorted-regular)
                  (map :id sorted-groups)))))
 
@@ -623,6 +628,77 @@
 (defn- get-node-pos [matrix node-id] (get-in matrix [:positions node-id]))
 
 
+(defn- compute-column-depths
+  "Compute column depth (distance from root in columns) for each node.
+   Each step in the graph = +1 column.
+   Returns map: node-id -> column-depth"
+  [root-id children]
+  (loop [queue [[root-id 0]]
+         depths {}]
+    (if (empty? queue)
+      depths
+      (let [[node-id depth] (first queue)
+            rest-queue (rest queue)]
+        (if (contains? depths node-id)
+          (recur rest-queue depths)
+          (let [depths (assoc depths node-id depth)
+                child-ids (get children node-id [])
+                new-entries (map (fn [c] [c (inc depth)]) child-ids)]
+            (recur (into (vec rest-queue) new-entries) depths)))))))
+
+
+(defn- compute-parent-offsets
+  "For each shared node, compute how much each parent needs to be shifted right.
+
+   Logic:
+   1. Find all parents of shared node
+   2. Compute their column depths (distance from root)
+   3. Find max depth (rightmost parent)
+   4. For each parent, offset = max_depth - their_depth
+
+   Returns map: parent-id -> offset (number of extra columns to shift right)"
+  [shared-nodes parents-map column-depths]
+  (reduce
+    (fn [offsets shared-id]
+      (let [parent-ids (get parents-map shared-id [])
+            parent-depths (map (fn [pid] [pid (get column-depths pid 0)]) parent-ids)
+            max-depth (if (seq parent-depths)
+                        (apply max (map second parent-depths))
+                        0)]
+        (reduce
+          (fn [offs [pid depth]]
+            (let [needed-offset (- max-depth depth)]
+              (if (> needed-offset 0)
+                ;; Take max if parent already has an offset from another shared node
+                (update offs pid (fn [old] (max (or old 0) needed-offset)))
+                offs)))
+          offsets
+          parent-depths)))
+    {}
+    shared-nodes))
+
+
+(defn- remove-shared-from-upper-parents
+  "For each shared node, remove it from children lists of all parents EXCEPT the last one.
+
+   This ensures:
+   - Upper parents don't process the shared node at all
+   - Shared node is placed only in the branch of the bottom parent
+   - Edges still exist for drawing (edges are separate from children-map)"
+  [children-map parents-map shared-nodes]
+  (reduce
+    (fn [cm shared-id]
+      (let [parent-ids (get parents-map shared-id [])
+            upper-parents (butlast parent-ids)]
+        (reduce
+          (fn [cm2 parent-id]
+            (update cm2 parent-id (fn [kids] (vec (remove #(= % shared-id) kids)))))
+          cm
+          upper-parents)))
+    children-map
+    shared-nodes))
+
+
 (defn- layout-graph
   "Main layout function - simple and uniform.
 
@@ -630,10 +706,15 @@
    - Graph is fully built with all nodes (including expanded ancestors)
    - Children lists are already sorted (fn > fixed > free, shared-path last)
 
-   This function just fills the matrix uniformly:
+   Shared node handling:
+   - Shared nodes are REMOVED from upper parents' children lists
+   - Only the LAST (bottom) parent has the shared node in its children
+   - Upper parents are shifted right so all parents of a shared node align in same column
+   - This ensures edges to shared nodes always go right or down, never left
+
+   This function fills the matrix:
    - First child goes on horizontal branch (same row as parent)
-   - Other children go below (each on own row)
-   - No special handling for shared/expanded - they're just regular nodes"
+   - Other children go below (each on own row)"
   [root-id graph-info]
   (let [{:keys [children parents shared-nodes node-data-map]} graph-info
         paths-to-shared (find-paths-to-shared children shared-nodes)
@@ -644,23 +725,47 @@
               (map (fn [node-id]
                      [node-id (order-children node-id children paths-to-shared
                                               shared-nodes children node-data-map)])
-                   (keys node-data-map)))]
+                   (keys node-data-map)))
+
+        ;; Remove shared nodes from upper parents' children lists
+        ;; This ensures shared node is only processed by the bottom parent
+        sorted-children-map (remove-shared-from-upper-parents
+                              sorted-children-map parents shared-nodes)
+
+        ;; Compute column offsets for upper parents of shared nodes
+        ;; This ensures all parents align in the same column
+        column-depths (compute-column-depths root-id children)
+        parent-offsets (compute-parent-offsets shared-nodes parents column-depths)]
 
     (letfn [(get-sorted-children [node-id]
               (get sorted-children-map node-id []))
 
+            ;; Get offset for a node (how many extra columns to shift right)
+            (get-offset [node-id]
+              (get parent-offsets node-id 0))
+
             ;; Build horizontal branch (chain of first children)
+            ;; Apply offsets to nodes that need to be shifted right
             (build-branch [node-id start-col visited]
               (loop [current node-id
                      col start-col
                      branch []]
-                (if (or (nil? current) (contains? visited current))
+                (cond
+                  (nil? current)
                   branch
-                  (let [branch (conj branch {:id current :col col})
+
+                  (contains? visited current)
+                  branch
+
+                  :else
+                  (let [;; Apply offset if this node is an upper parent of shared node
+                        offset (get-offset current)
+                        actual-col (+ col offset)
+                        branch (conj branch {:id current :col actual-col})
                         children (get-sorted-children current)
                         first-child (first children)]
                     (if first-child
-                      (recur first-child (inc col) branch)
+                      (recur first-child (inc actual-col) branch)
                       branch)))))
 
             ;; Check if entire branch fits at given row

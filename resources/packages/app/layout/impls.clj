@@ -165,8 +165,12 @@
           (get expansions fn-id 0))
 
         add-fn-node
-        (fn [original-fn-id is-root]
-          (let [node-id (str "fn-" original-fn-id)]
+        (fn [original-fn-id is-root expansion-root]
+          ;; expansion-root: when processing refs inside an expansion, use this to create unique IDs
+          ;; If nil, this is the expansion root itself or a top-level non-expanded fn
+          (let [node-id (if expansion-root
+                          (str "fn-" expansion-root "-" original-fn-id)
+                          (str "fn-" original-fn-id))]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
               (let [chain (get-inheritance-chain original-fn-id fn-map)
@@ -190,8 +194,9 @@
 
         add-arg-value-node
         (fn [arg-name value arg-id source-node-id]
-          (let [node-id (str "arg-" arg-id)
-                ;; Edge ID must include source to handle re-parenting when expansion level changes
+          ;; Node ID must include source-node-id to ensure uniqueness per expansion
+          ;; Different fns expanding to same ancestor should get separate arg nodes
+          (let [node-id (str "arg-" source-node-id "-" arg-id)
                 edge-id (str "e-val-" source-node-id "-" arg-id)]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
@@ -209,8 +214,9 @@
 
         add-unset-arg-node
         (fn [arg-name arg-type arg-id source-node-id]
-          (let [node-id (str "unset-" arg-id)
-                ;; Edge ID must include source to handle re-parenting when expansion level changes
+          ;; Node ID must include source-node-id to ensure uniqueness per expansion
+          ;; Different fns expanding to same ancestor should get separate unset nodes
+          (let [node-id (str "unset-" source-node-id "-" arg-id)
                 edge-id (str "e-unset-" source-node-id "-" arg-id)]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
@@ -273,69 +279,117 @@
         ;; For each fn in chain (from original to display-fn):
         ;;   - refs first, then values, then unset
         ;; Args covered by earlier fns in chain are skipped
+        ;; Returns args with :from-ancestor flag indicating if arg came from ancestor (level > 0)
+        ;;
+        ;; Key insight: when a ref-fn is shown, value args that bind TO that ref-fn's args
+        ;; should not be shown as direct children - they become part of the ref-fn's display
         collect-expanded-args
         (fn [chain level bindings]
           (let [active-fns (take (inc level) chain)
                 covered-sources (atom #{})
-                result (atom [])]
-            ;; Process each fn in chain order (original first, ancestors after)
+                ;; First pass: collect all refs to know which fns will be displayed
+                ref-fn-ids (atom #{})
+                _ (doseq [fn-id active-fns]
+                    (let [args (get args-by-fn fn-id [])]
+                      (doseq [arg args]
+                        (when-let [ref-id (:ref-id arg)]
+                          (swap! ref-fn-ids conj ref-id))
+                        ;; Also check bindings
+                        (when-let [binding (get bindings (:id arg))]
+                          (when-let [ref-id (:ref-id binding)]
+                            (swap! ref-fn-ids conj ref-id))))))
+                ;; Collect all arg-ids that belong to displayed ref-fns (including inheritance)
+                ref-fn-arg-ids (atom #{})
+                _ (doseq [ref-fn-id @ref-fn-ids]
+                    (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
+                      (doseq [rfn-id ref-chain]
+                        (let [ref-args (get args-by-fn rfn-id [])]
+                          (doseq [ra ref-args]
+                            (swap! ref-fn-arg-ids conj (:id ra)))))))
+                result (atom [])
+                chain-level (atom 0)
+                ;; Helper: check if any arg in the source chain is in ref-fn-arg-ids
+                source-chain-binds-to-ref-fn
+                (fn [start-arg-id]
+                  (loop [sid start-arg-id]
+                    (when sid
+                      (if (contains? @ref-fn-arg-ids sid)
+                        true
+                        (let [src-arg (get arg-map sid)]
+                          (recur (:source-id src-arg)))))))]
+            ;; Second pass: collect args, skipping those that bind to ref-fn args
             (doseq [fn-id active-fns]
               (let [args (get args-by-fn fn-id [])
+                    current-level @chain-level
                     fn-refs (atom [])
                     fn-values (atom [])
                     fn-unsets (atom [])]
                 (doseq [arg args]
                   (let [arg-id (:id arg)
-                        ;; Check if this arg or its source is already covered
                         source-id (or (:source-id arg) arg-id)
-                        already-covered (contains? @covered-sources source-id)]
-                    (when-not already-covered
+                        already-covered (contains? @covered-sources source-id)
+                        has-value (some? (:value arg))
+                        has-ref (some? (:ref-id arg))
+                        binding (get bindings arg-id)
+                        ;; Check if ANY arg in the source chain is an arg of a displayed ref-fn
+                        ;; This applies to BOTH value and ref args - if the arg's source chain
+                        ;; leads to an arg inside a displayed ref-fn, this arg is a binding for
+                        ;; that ref-fn's arg and should be shown inside, not as direct child
+                        binds-to-ref-fn (and (:source-id arg)
+                                             (source-chain-binds-to-ref-fn (:source-id arg)))]
+                    (when (and (not already-covered) (not binds-to-ref-fn))
                       ;; Mark as covered (including all sources in chain)
                       (loop [sid source-id]
                         (when sid
                           (swap! covered-sources conj sid)
                           (let [source-arg (get arg-map sid)]
                             (recur (:source-id source-arg)))))
-                      ;; Classify the arg
+                      ;; Classify the arg - add :from-ancestor flag
                       (let [arg-name (resolve-arg-name arg arg-map)
-                            has-value (some? (:value arg))
-                            has-ref (some? (:ref-id arg))
-                            binding (get bindings arg-id)]
+                            from-ancestor (> current-level 0)]
                         (cond
                           binding
                           (cond
                             (:ref-id binding)
                             (swap! fn-refs conj {:type :ref :arg-name (:arg-name binding)
-                                                 :ref-id (:ref-id binding) :arg-id (:arg-id binding)})
+                                                 :ref-id (:ref-id binding) :arg-id (:arg-id binding)
+                                                 :from-ancestor from-ancestor})
                             (some? (:value binding))
                             (swap! fn-values conj {:type :value :arg-name (:arg-name binding)
-                                                   :value (:value binding) :arg-id (:arg-id binding)}))
+                                                   :value (:value binding) :arg-id (:arg-id binding)
+                                                   :from-ancestor from-ancestor}))
 
                           has-ref
                           (swap! fn-refs conj {:type :ref :arg-name arg-name
-                                               :ref-id (:ref-id arg) :arg-id arg-id})
+                                               :ref-id (:ref-id arg) :arg-id arg-id
+                                               :from-ancestor from-ancestor})
 
                           has-value
                           (swap! fn-values conj {:type :value :arg-name arg-name
-                                                 :value (:value arg) :arg-id arg-id})
+                                                 :value (:value arg) :arg-id arg-id
+                                                 :from-ancestor from-ancestor})
 
                           :else
                           (swap! fn-unsets conj {:type :unset :arg-name arg-name
-                                                 :arg-type (:type arg) :arg-id arg-id}))))))
+                                                 :arg-type (:type arg) :arg-id arg-id
+                                                 :from-ancestor from-ancestor}))))))
                 ;; Add this fn's args in order: refs, values, unsets
                 (doseq [a @fn-refs] (swap! result conj a))
                 (doseq [a @fn-values] (swap! result conj a))
-                (doseq [a @fn-unsets] (swap! result conj a))))
+                (doseq [a @fn-unsets] (swap! result conj a))
+                (swap! chain-level inc)))
             @result))]
 
     ;; Declare process-any-fn before using it
-    (letfn [(process-fn [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id]
-              (let [node-id (add-fn-node original-fn-id is-root)]
+    ;; expansion-root: the original-fn-id of the expanded function we're inside (nil if not in expansion)
+    (letfn [(process-fn [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root]
+              (let [node-id (add-fn-node original-fn-id is-root expansion-root)]
                 ;; Add edge from parent
                 (when (and source-node-id edge-arg-name)
-                  (let [edge-id (str "e-ref-" source-node-id "-" original-fn-id)
+                  (let [edge-id (str "e-ref-" source-node-id "-" node-id)
+                        ;; Include source-node-id in key to allow same arg->target from different sources
                         arg-target-key (when source-arg-id
-                                         (str source-arg-id "->" original-fn-id))
+                                         (str source-node-id "-" source-arg-id "->" node-id))
                         is-duplicate (and arg-target-key
                                           (contains? @processed-arg-targets arg-target-key))]
                     (when (and (not (contains? @added-node-ids edge-id))
@@ -350,10 +404,12 @@
                                      :argName (when edge-arg-name (name edge-arg-name))}}))))
 
                 ;; Process children
+                ;; For ref args, DON'T pass expansion-root - ref functions should use global IDs
+                ;; expansion-root is only for structural nodes (values, unsets from ancestor args)
                 (let [all-args (collect-fn-args display-fn-id bindings)]
                   (doseq [arg all-args]
                     (case (:type arg)
-                      :ref (process-any-fn (:ref-id arg) node-id (:arg-name arg) false bindings (:arg-id arg))
+                      :ref (process-any-fn (:ref-id arg) node-id (:arg-name arg) false bindings (:arg-id arg) nil)
                       :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
                       :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
                       nil)))
@@ -367,14 +423,15 @@
                     ;; Merge with parent-bindings (parent takes precedence)
                     base-chain-bindings (build-chain-bindings chain (inc level) args-by-fn arg-map)
                     chain-bindings (merge base-chain-bindings parent-bindings)
-                    ;; Add the node
-                    node-id (add-fn-node original-fn-id is-root)]
+                    ;; Add the node - expansion root is nil because this IS the expansion root
+                    node-id (add-fn-node original-fn-id is-root nil)]
 
                 ;; Add edge from parent
                 (when (and source-node-id edge-arg-name)
-                  (let [edge-id (str "e-ref-" source-node-id "-" original-fn-id)
+                  (let [edge-id (str "e-ref-" source-node-id "-" node-id)
+                        ;; Include source-node-id in key to allow same arg->target from different sources
                         arg-target-key (when source-arg-id
-                                         (str source-arg-id "->" original-fn-id))
+                                         (str source-node-id "-" source-arg-id "->" node-id))
                         is-duplicate (and arg-target-key
                                           (contains? @processed-arg-targets arg-target-key))]
                     (when (and (not (contains? @added-node-ids edge-id))
@@ -389,33 +446,33 @@
                                      :argName (when edge-arg-name (name edge-arg-name))}}))))
 
                 ;; For expanded mode, collect args from entire chain [0..level]
-                ;; This shows all args from the expansion chain with proper ordering
-                ;; The chain-bindings ensure that unset args show bound values
+                ;; Use expansion-root only for args from ancestors (from-ancestor = true)
+                ;; Args from level 0 (the function itself) should use global node IDs
                 (let [all-args (collect-expanded-args chain level chain-bindings)]
                   (doseq [arg all-args]
-                    (case (:type arg)
-                      :ref (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg))
-                      :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
-                      :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
-                      nil)))
+                    (let [exp-root (when (:from-ancestor arg) original-fn-id)]
+                      (case (:type arg)
+                        :ref (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) exp-root)
+                        :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
+                        :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
+                        nil))))
 
                 node-id))
 
-            (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id]
+            (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root]
               (let [level (get-effective-level fn-id)]
                 (if (> level 0)
-                  ;; Expanded mode - process-expanded-fn builds its own chain-bindings
-                  ;; but we need to pass parent-bindings for merging
+                  ;; Expanded mode - process-expanded-fn will set its own expansion-root
                   (process-expanded-fn fn-id level source-node-id edge-arg-name is-root source-arg-id parent-bindings)
                   (let [bindings (build-arg-bindings fn-id args-by-fn arg-map)
                         ;; Merge parent bindings - parent takes precedence
                         bindings (if parent-bindings
                                    (merge bindings parent-bindings)
                                    bindings)]
-                    (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id)))))]
+                    (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root)))))]
 
-      ;; Start processing from root
-      (process-any-fn root-fn-id nil nil true nil nil))
+      ;; Start processing from root - no expansion-root initially
+      (process-any-fn root-fn-id nil nil true nil nil nil))
 
     {:nodes @nodes
      :edges @edges}))

@@ -158,6 +158,10 @@
         edges (atom [])
         added-node-ids (atom #{})
         processed-arg-targets (atom #{})
+        ;; Track fully processed fn nodes (with all children processed)
+        ;; Different from added-node-ids which only tracks node creation
+        ;; This prevents infinite recursion when same fn is reached via different paths
+        processed-fn-nodes (atom #{})
         max-visible-ancestors 4
 
         get-effective-level
@@ -249,39 +253,43 @@
                              :isUnset true}}))))
 
         collect-fn-args
-        (fn [fn-id bindings]
+        ;; is-structural: true when collecting args for a structural node inside expansion
+        ;; For structural nodes, unbound refs (no binding) should be shown as unset, not as direct refs
+        ;; This prevents false sharing with other fns that happen to have the same ancestor ref-id
+        (fn [fn-id bindings & {:keys [is-structural] :or {is-structural false}}]
           (let [args (get args-by-fn fn-id [])
                 all-args (mapv (fn [arg]
                                  (let [arg-name (resolve-arg-name arg arg-map)
                                        has-value (some? (:value arg))
                                        has-ref (some? (:ref-id arg))
-                                       ;; Binding only applies to UNSET args (no value, no ref)
-                                       ;; If arg already has value or ref, use that
-                                       binding (when (and (not has-value) (not has-ref))
-                                                 (or (get bindings (:id arg))
-                                                     (when-let [sid (:source-id arg)]
-                                                       (get bindings sid))))]
+                                       ;; Check for binding - applies to UNSET args
+                                       ;; For structural nodes, also check binding for args with ref
+                                       binding (or (get bindings (:id arg))
+                                                   (when-let [sid (:source-id arg)]
+                                                     (get bindings sid)))]
                                    (cond
                                      ;; Binding ref - these come from bindings map, should use canonical ID
                                      ;; Mark with :is-binding true so process-fn knows to use nil expansion-root
-                                     binding
-                                     (cond
-                                       (:ref-id binding)
-                                       {:type :ref :arg-name (:arg-name binding)
-                                        :ref-id (:ref-id binding) :arg-id (:arg-id binding)
-                                        :is-binding true}
+                                     (and binding (:ref-id binding))
+                                     {:type :ref :arg-name (:arg-name binding)
+                                      :ref-id (:ref-id binding) :arg-id (:arg-id binding)
+                                      :is-binding true}
 
-                                       (some? (:value binding))
-                                       {:type :value :arg-name (:arg-name binding)
-                                        :value (:value binding) :arg-id (:arg-id binding)}
+                                     (and binding (some? (:value binding)))
+                                     {:type :value :arg-name (:arg-name binding)
+                                      :value (:value binding) :arg-id (:arg-id binding)}
 
-                                       :else nil)
-
-                                     ;; Direct ref - structural, uses expansion context
-                                     has-ref
+                                     ;; Direct ref - but for structural nodes WITHOUT binding, treat as unset
+                                     ;; This prevents pair-1.item1 from pointing to favicon-route
+                                     (and has-ref (not is-structural))
                                      {:type :ref :arg-name arg-name
                                       :ref-id (:ref-id arg) :arg-id (:id arg)
                                       :is-binding false}
+
+                                     ;; Structural node with unbound ref - treat as unset
+                                     (and has-ref is-structural)
+                                     {:type :unset :arg-name arg-name
+                                      :arg-type (:type arg) :arg-id (:id arg)}
 
                                      has-value
                                      {:type :value :arg-name arg-name
@@ -412,8 +420,10 @@
     ;; Declare process-any-fn before using it
     ;; expansion-root: the original-fn-id of the expanded function we're inside (nil if not in expansion)
     (letfn [(process-fn [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root]
-              (let [node-id (add-fn-node original-fn-id is-root expansion-root)]
-                ;; Add edge from parent
+              (let [node-id (add-fn-node original-fn-id is-root expansion-root)
+                    ;; Key for tracking fully processed nodes - includes expansion context
+                    process-key (str node-id "-" (hash bindings))]
+                ;; Add edge from parent ALWAYS (even if node already processed)
                 (when (and source-node-id edge-arg-name)
                   (let [edge-id (str "e-ref-" source-node-id "-" node-id)
                         ;; Include source-node-id in key to allow same arg->target from different sources
@@ -432,19 +442,27 @@
                                      :target node-id
                                      :argName (when edge-arg-name (name edge-arg-name))}}))))
 
-                ;; Process children
-                ;; When inside an expansion context (expansion-root is set),
-                ;; we WANT to show bindings - they should appear here, not at the root
-                (let [all-args (collect-fn-args display-fn-id bindings)]
-                  (doseq [arg all-args]
-                    (case (:type arg)
-                      ;; For refs: binding refs use canonical ID (nil expansion-root)
-                      ;; structural refs use expansion context
-                      :ref (let [ref-expansion-root (if (:is-binding arg) nil expansion-root)]
-                             (process-any-fn (:ref-id arg) node-id (:arg-name arg) false bindings (:arg-id arg) ref-expansion-root))
-                      :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
-                      :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
-                      nil)))
+                ;; Only process children if this node wasn't already fully processed
+                ;; This prevents infinite recursion when same fn is reached via different paths
+                (when-not (contains? @processed-fn-nodes process-key)
+                  (swap! processed-fn-nodes conj process-key)
+                  ;; Process children
+                  ;; When inside an expansion context (expansion-root is set),
+                  ;; we WANT to show bindings - they should appear here, not at the root
+                  ;; Mark as structural when inside expansion - prevents false refs to other fns
+                  (let [all-args (collect-fn-args display-fn-id bindings :is-structural (some? expansion-root))]
+                    (doseq [arg all-args]
+                      (case (:type arg)
+                        ;; For refs: binding refs use canonical ID (nil expansion-root)
+                        ;; structural refs use expansion context
+                        ;; IMPORTANT: when switching to canonical mode (nil expansion-root),
+                        ;; don't pass expansion bindings - they don't apply to canonical nodes
+                        :ref (let [ref-expansion-root (if (:is-binding arg) nil expansion-root)
+                                   ref-bindings (if (:is-binding arg) {} bindings)]
+                               (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root))
+                        :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
+                        :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
+                        nil))))
                 node-id))
 
             (process-expanded-fn [original-fn-id level source-node-id edge-arg-name is-root source-arg-id parent-bindings]

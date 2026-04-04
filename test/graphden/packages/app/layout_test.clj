@@ -352,3 +352,152 @@
       (is (= s-row last-parent-row)
           (str "S should be on last parent row. S=" s-row
                ", P1=" p1-row ", P2=" p2-row ", last parent=" last-parent-row)))))
+
+
+;; =============================================================================
+;; SUBTREE CONTAINMENT TESTS
+;; =============================================================================
+
+(deftest rule-sibling-uses-compaction-test
+  (testing "RULE: Sibling CAN share row with subtree if columns don't overlap"
+    ;; Structure:
+    ;;   R -> A -> B -> C   (horizontal branch)
+    ;;            B -> D    (B's second child at col 3)
+    ;;   R -> E -> F        (R's second child, branch is cols 1-2)
+    ;;
+    ;; D is at col 3, E -> F is at cols 1-2. No overlap!
+    ;; With compaction, E can be at row 1 (same as D).
+    ;;
+    ;; Correct layout:
+    ;;   row 0: R  A  B  C
+    ;;   row 1:    E  F  D   <-- E and D share row, different columns
+    (let [nodes [(make-node "R") (make-node "A") (make-node "B")
+                 (make-node "C") (make-node "D")
+                 (make-node "E") (make-node "F")]
+          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C")
+                 (make-edge "B" "D")  ; B's second child at col 3
+                 (make-edge "R" "E") (make-edge "E" "F")]  ; R's second child
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          d-row (:row (get-pos result "D"))
+          d-col (:col (get-pos result "D"))
+          e-row (:row (get-pos result "E"))
+          e-col (:col (get-pos result "E"))
+          f-col (:col (get-pos result "F"))]
+      ;; D should be at col 3 (child of B which is at col 2)
+      (is (= 3 d-col) (str "D should be at col 3, got " d-col))
+      ;; E should be at col 1, F at col 2
+      (is (= 1 e-col) (str "E should be at col 1, got " e-col))
+      (is (= 2 f-col) (str "F should be at col 2, got " f-col))
+      ;; E's branch (cols 1-2) doesn't overlap with D (col 3)
+      ;; So E CAN be at same row as D (compaction)
+      (is (= e-row d-row)
+          (str "E's branch (cols " e-col "-" f-col ") doesn't overlap with D (col " d-col "). "
+               "E can be at same row as D. E row=" e-row ", D row=" d-row)))))
+
+
+(deftest rule-deep-subtree-containment-test
+  (testing "RULE: Deep subtree must complete before sibling starts"
+    ;; Structure mimicking the bug with expanded delete-entity-route:
+    ;;   R -> A -> B -> C -> D    (horizontal branch with depth 4)
+    ;;                 C -> E     (C's second child)
+    ;;        A -> F -> G         (A's second child)
+    ;;   R -> H -> I              (R's second child)
+    ;;
+    ;; The subtree of A includes: B, C, D, E, F, G
+    ;; H must start AFTER all of these, even if H's branch (cols 1-2)
+    ;; doesn't overlap with E (col 4) or D (col 4)
+    (let [nodes [(make-node "R") (make-node "A") (make-node "B") (make-node "C")
+                 (make-node "D") (make-node "E")
+                 (make-node "F") (make-node "G")
+                 (make-node "H") (make-node "I")]
+          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C") (make-edge "C" "D")
+                 (make-edge "C" "E")  ; C's second child
+                 (make-edge "A" "F") (make-edge "F" "G")  ; A's second child subtree
+                 (make-edge "R" "H") (make-edge "H" "I")]  ; R's second child
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          ;; Get all rows from A's subtree
+          a-subtree-rows (map #(:row (get-pos result %)) ["A" "B" "C" "D" "E" "F" "G"])
+          max-subtree-row (apply max a-subtree-rows)
+          h-row (:row (get-pos result "H"))]
+      ;; H must start AFTER entire subtree of A
+      (is (> h-row max-subtree-row)
+          (str "Sibling H must be placed AFTER entire subtree of A. "
+               "Max subtree row=" max-subtree-row ", H row=" h-row
+               ". A's subtree rows: " (zipmap ["A" "B" "C" "D" "E" "F" "G"] a-subtree-rows))))))
+
+
+(deftest rule-column-specific-compaction-inner-test
+  (testing "RULE: Inner children use compaction (check only branch columns)"
+    ;; Structure:
+    ;;   R -> A -> B -> C -> D -> E    (horizontal branch with depth 5)
+    ;;                       D -> F    (D's second child at col 5)
+    ;;        A -> G                   (A's second child, branch is cols 2-2)
+    ;;
+    ;; G is a child of A (inner branch node), so compaction applies.
+    ;; G's branch (col 2) should be able to fit at row 1 because
+    ;; only col 5 is occupied there (by F).
+    (let [nodes [(make-node "R") (make-node "A") (make-node "B") (make-node "C")
+                 (make-node "D") (make-node "E") (make-node "F") (make-node "G")]
+          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C")
+                 (make-edge "C" "D") (make-edge "D" "E")
+                 (make-edge "D" "F")  ; D's second child at col 5
+                 (make-edge "A" "G")]  ; A's second child at col 2
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          f-row (:row (get-pos result "F"))
+          f-col (:col (get-pos result "F"))
+          g-row (:row (get-pos result "G"))
+          g-col (:col (get-pos result "G"))]
+      ;; F should be at col 5 (child of D which is at col 4)
+      (is (= 5 f-col) (str "F should be at col 5, got " f-col))
+      ;; G should be at col 2 (child of A which is at col 1)
+      (is (= 2 g-col) (str "G should be at col 2, got " g-col))
+      ;; G should be at the SAME row as F (compaction works because cols don't overlap)
+      (is (= g-row f-row)
+          (str "G (col " g-col ") should be at same row as F (col " f-col ") "
+               "because their columns don't overlap. G row=" g-row ", F row=" f-row)))))
+
+
+(deftest rule-column-specific-compaction-sibling-test
+  (testing "RULE: Sibling of branch root uses compaction if columns don't overlap"
+    ;; Structure:
+    ;;   R -> A -> B -> C -> D -> E    (horizontal branch with depth 5)
+    ;;                       D -> F    (D's second child at col 5)
+    ;;   R -> G -> H                   (R's second child, branch is cols 1-2)
+    ;;
+    ;; G is a sibling of A (both children of R).
+    ;; G's branch (cols 1-2) should be able to fit at row 1 because
+    ;; only col 5 is occupied there (by F).
+    ;;
+    ;; Currently this is broken: G waits for global-max even though
+    ;; its columns (1-2) don't overlap with F's column (5).
+    (let [nodes [(make-node "R") (make-node "A") (make-node "B") (make-node "C")
+                 (make-node "D") (make-node "E") (make-node "F")
+                 (make-node "G") (make-node "H")]
+          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C")
+                 (make-edge "C" "D") (make-edge "D" "E")
+                 (make-edge "D" "F")  ; D's second child at col 5
+                 (make-edge "R" "G") (make-edge "G" "H")]  ; R's second child
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          f-row (:row (get-pos result "F"))
+          f-col (:col (get-pos result "F"))
+          g-row (:row (get-pos result "G"))
+          g-col (:col (get-pos result "G"))
+          h-col (:col (get-pos result "H"))]
+      ;; F should be at col 5
+      (is (= 5 f-col) (str "F should be at col 5, got " f-col))
+      ;; G should be at col 1, H at col 2
+      (is (= 1 g-col) (str "G should be at col 1, got " g-col))
+      (is (= 2 h-col) (str "H should be at col 2, got " h-col))
+      ;; G's branch (cols 1-2) doesn't overlap with F (col 5)
+      ;; So G should be at same row as F (compaction)
+      (is (= g-row f-row)
+          (str "G's branch (cols " g-col "-" h-col ") doesn't overlap with F (col " f-col "). "
+               "G should be at same row as F. G row=" g-row ", F row=" f-row)))))

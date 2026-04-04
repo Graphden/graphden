@@ -712,10 +712,12 @@
         regular-and-shared (concat direct-shared without-targets)
         sorted-regular (sort-by (fn [c] [(get type-order (:type c) 2) (:original-idx c)]) regular-and-shared)
 
-        ;; Shared-path children: group by target, longer paths first within group
+        ;; Shared-path children: group by target, PRESERVE original order within group
+        ;; This ensures siblings maintain their relative positions even when expanded
+        ;; (e.g., entity-form-create-route stays above entity-form-edit-route)
         by-target (group-by :primary-target with-targets)
         sorted-groups (mapcat (fn [[_target group]]
-                                (sort-by (fn [c] [(- (:path-len c)) (:original-idx c)]) group))
+                                (sort-by :original-idx group))
                               (sort-by first by-target))]
 
     ;; Regular (including direct shared) FIRST, path-to-shared children LAST

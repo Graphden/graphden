@@ -166,9 +166,25 @@
 
         add-fn-node
         (fn [original-fn-id is-root expansion-root]
-          ;; expansion-root: when processing refs inside an expansion, use this to create unique IDs
-          ;; If nil, this is the expansion root itself or a top-level non-expanded fn
-          (let [node-id (if expansion-root
+          ;; Node ID logic for correct sharing behavior:
+          ;;
+          ;; 1. Root nodes and expanded roots: use canonical ID (fn-{id})
+          ;;    - These are the main nodes user sees and expands
+          ;;
+          ;; 2. Nodes inside expansion (expansion-root is set, not root):
+          ;;    - Use expansion-prefixed ID: fn-{expansion-root}-{id}
+          ;;    - This ensures each expansion has its own "copy" of ancestor structure
+          ;;    - Example: metrics-route and api-entities-route both expand to route,
+          ;;      each gets own method-map with own bindings
+          ;;
+          ;; 3. Nodes at level 0 (no expansion): use canonical ID
+          ;;    - These are direct refs from non-expanded fns
+          ;;    - Example: entity-form-handler referenced by multiple routes at level 0
+          ;;
+          ;; Key insight: expansion-root being nil means we're NOT inside an expansion
+          ;; (either this is the expansion root itself, or it's a level-0 fn)
+          (let [use-expansion-prefix (and expansion-root (not is-root))
+                node-id (if use-expansion-prefix
                           (str "fn-" expansion-root "-" original-fn-id)
                           (str "fn-" original-fn-id))]
             (when-not (contains? @added-node-ids node-id)
@@ -246,11 +262,14 @@
                                                      (when-let [sid (:source-id arg)]
                                                        (get bindings sid))))]
                                    (cond
+                                     ;; Binding ref - these come from bindings map, should use canonical ID
+                                     ;; Mark with :is-binding true so process-fn knows to use nil expansion-root
                                      binding
                                      (cond
                                        (:ref-id binding)
                                        {:type :ref :arg-name (:arg-name binding)
-                                        :ref-id (:ref-id binding) :arg-id (:arg-id binding)}
+                                        :ref-id (:ref-id binding) :arg-id (:arg-id binding)
+                                        :is-binding true}
 
                                        (some? (:value binding))
                                        {:type :value :arg-name (:arg-name binding)
@@ -258,9 +277,11 @@
 
                                        :else nil)
 
+                                     ;; Direct ref - structural, uses expansion context
                                      has-ref
                                      {:type :ref :arg-name arg-name
-                                      :ref-id (:ref-id arg) :arg-id (:id arg)}
+                                      :ref-id (:ref-id arg) :arg-id (:id arg)
+                                      :is-binding false}
 
                                      has-value
                                      {:type :value :arg-name arg-name
@@ -337,7 +358,9 @@
                         ;; that ref-fn's arg and should be shown inside, not as direct child
                         binds-to-ref-fn (and (:source-id arg)
                                              (source-chain-binds-to-ref-fn (:source-id arg)))]
-                    (when (and (not already-covered) (not binds-to-ref-fn))
+                    ;; TEMPORARILY disable binds-to-ref-fn check - it's too aggressive
+                    ;; TODO: fix the logic to only exclude args that bind to DISPLAYED ref-fn args
+                    (when (not already-covered)
                       ;; Mark as covered (including all sources in chain)
                       (loop [sid source-id]
                         (when sid
@@ -380,6 +403,12 @@
                 (swap! chain-level inc)))
             @result))]
 
+    ;; Track bindings for EACH expanded function
+    ;; Key: expanded-fn-id, Value: {:refs #{ref-ids}, :values #{arg-ids}}
+    ;; When processing refs from ancestors of an expanded fn, skip bindings that
+    ;; were already shown at the expanded fn itself
+    (let [expansion-bindings (atom {})]
+
     ;; Declare process-any-fn before using it
     ;; expansion-root: the original-fn-id of the expanded function we're inside (nil if not in expansion)
     (letfn [(process-fn [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root]
@@ -404,12 +433,15 @@
                                      :argName (when edge-arg-name (name edge-arg-name))}}))))
 
                 ;; Process children
-                ;; For ref args, DON'T pass expansion-root - ref functions should use global IDs
-                ;; expansion-root is only for structural nodes (values, unsets from ancestor args)
+                ;; When inside an expansion context (expansion-root is set),
+                ;; we WANT to show bindings - they should appear here, not at the root
                 (let [all-args (collect-fn-args display-fn-id bindings)]
                   (doseq [arg all-args]
                     (case (:type arg)
-                      :ref (process-any-fn (:ref-id arg) node-id (:arg-name arg) false bindings (:arg-id arg) nil)
+                      ;; For refs: binding refs use canonical ID (nil expansion-root)
+                      ;; structural refs use expansion context
+                      :ref (let [ref-expansion-root (if (:is-binding arg) nil expansion-root)]
+                             (process-any-fn (:ref-id arg) node-id (:arg-name arg) false bindings (:arg-id arg) ref-expansion-root))
                       :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
                       :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
                       nil)))
@@ -425,6 +457,7 @@
                     chain-bindings (merge base-chain-bindings parent-bindings)
                     ;; Add the node - expansion root is nil because this IS the expansion root
                     node-id (add-fn-node original-fn-id is-root nil)]
+
 
                 ;; Add edge from parent
                 (when (and source-node-id edge-arg-name)
@@ -446,16 +479,89 @@
                                      :argName (when edge-arg-name (name edge-arg-name))}}))))
 
                 ;; For expanded mode, collect args from entire chain [0..level]
-                ;; Use expansion-root only for args from ancestors (from-ancestor = true)
-                ;; Args from level 0 (the function itself) should use global node IDs
-                (let [all-args (collect-expanded-args chain level chain-bindings)]
-                  (doseq [arg all-args]
-                    (let [exp-root (when (:from-ancestor arg) original-fn-id)]
-                      (case (:type arg)
-                        :ref (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) exp-root)
-                        :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
-                        :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
-                        nil))))
+                ;;
+                ;; KEY INSIGHT: When expanding, bindings flow to ancestor refs.
+                ;; Level-0 refs that point to the SAME target as bindings in ancestor refs
+                ;; should NOT be shown at root - they'll appear at the ancestor ref.
+                ;;
+                ;; Example for delete-entity-route at level 2:
+                ;; - handler -> api-handler: assoc-handler has handler arg, binding flows there
+                ;; - key -> "delete": method-map has key arg, binding flows there
+                ;; - path -> "/api/...": NO ancestor ref uses path, show at root
+                ;;
+                ;; Strategy:
+                ;; 1. Collect all ref-ids that will be shown by ancestor refs
+                ;;    (by simulating what bindings they'll resolve)
+                ;; 2. Level-0 refs pointing to those targets are hidden at root
+                ;; 3. Level-0 refs pointing to OTHER targets are shown at root
+                (let [all-args (collect-expanded-args chain level chain-bindings)
+                      ;; Separate by type and origin
+                      ancestor-refs (filter #(and (:from-ancestor %) (= (:type %) :ref)) all-args)
+                      ancestor-values (filter #(and (:from-ancestor %) (= (:type %) :value)) all-args)
+                      ancestor-unsets (filter #(and (:from-ancestor %) (= (:type %) :unset)) all-args)
+                      level-0-args (filter #(not (:from-ancestor %)) all-args)
+                      level-0-refs (filter #(= (:type %) :ref) level-0-args)
+                      level-0-values (filter #(= (:type %) :value) level-0-args)
+                      level-0-unsets (filter #(= (:type %) :unset) level-0-args)
+
+                      has-ancestor-refs (seq ancestor-refs)]
+
+                  ;; Store info for deduplication
+                  (swap! expansion-bindings assoc original-fn-id
+                         {:has-ancestor-refs has-ancestor-refs})
+
+                  ;; Show ancestor refs (structural expansion)
+                  ;; These will show bindings as their children
+                  (doseq [arg ancestor-refs]
+                    (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) original-fn-id))
+
+                  ;; For bindings (level-0 refs/values and ancestor values):
+                  ;; Show at root ONLY if they DON'T flow to ancestor refs
+                  ;;
+                  ;; How to know if a binding flows to an ancestor ref?
+                  ;; The binding's source chain must lead to an arg of one of the ancestor ref fns
+                  ;;
+                  ;; For simplicity: track which arg sources are "covered" by ancestor refs
+                  ;; Then show uncovered bindings at root
+                  (let [;; Collect all arg-ids that ancestor refs will resolve
+                        ;; (by looking at their inheritance chains)
+                        ancestor-ref-arg-sources
+                        (into #{}
+                              (mapcat (fn [ref]
+                                        (let [ref-chain (get-inheritance-chain (:ref-id ref) fn-map)]
+                                          (mapcat (fn [fn-id]
+                                                    (map :id (get args-by-fn fn-id [])))
+                                                  ref-chain)))
+                                      ancestor-refs))
+
+                        ;; Check if a binding's source chain leads to ancestor ref args
+                        binding-covered?
+                        (fn [arg]
+                          (loop [sid (:arg-id arg)]
+                            (when sid
+                              (if (contains? ancestor-ref-arg-sources sid)
+                                true
+                                (let [src-arg (get arg-map sid)]
+                                  (recur (:source-id src-arg)))))))]
+
+                    ;; Level-0 refs: show if not covered by ancestor refs
+                    (doseq [arg level-0-refs]
+                      (when-not (binding-covered? arg)
+                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) nil)))
+
+                    ;; Level-0 values: show if not covered
+                    (doseq [arg level-0-values]
+                      (when-not (binding-covered? arg)
+                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)))
+
+                    ;; Ancestor values: show if not covered
+                    (doseq [arg ancestor-values]
+                      (when-not (binding-covered? arg)
+                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id))))
+
+                  ;; Show all unsets (free args)
+                  (doseq [arg (concat level-0-unsets ancestor-unsets)]
+                    (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)))
 
                 node-id))
 
@@ -472,7 +578,7 @@
                     (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root)))))]
 
       ;; Start processing from root - no expansion-root initially
-      (process-any-fn root-fn-id nil nil true nil nil nil))
+      (process-any-fn root-fn-id nil nil true nil nil nil)))
 
     {:nodes @nodes
      :edges @edges}))

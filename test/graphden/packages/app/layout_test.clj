@@ -727,3 +727,223 @@
           (is (not (< a-row f-row x-row))
               (str "F at col " f-col " row " f-row " is between A (row " a-row ") and X (row " x-row "). "
                    "This means F is ON the edge path from A to X - EDGE CROSSING!")))))))
+
+
+;; =============================================================================
+;; DIVERGENCE ROOTS AND PATH SORTING TESTS
+;; =============================================================================
+
+(deftest divergence-roots-stay-adjacent-test
+  (testing "RULE: Divergence roots must stay adjacent, neutral siblings not between them"
+    ;; Structure:
+    ;;   A -> B (neutral)
+    ;;   A -> C -> F (shared)
+    ;;   A -> D -> F (shared)
+    ;;   A -> E (neutral)
+    ;;
+    ;; C and D are divergence roots (both lead to shared F).
+    ;; They must be adjacent in sorted order - B and E cannot be between them.
+    ;;
+    ;; Valid orderings: [B, C, D, E], [C, D, B, E], [B, E, C, D], etc.
+    ;; Invalid ordering: [B, C, E, D] or [C, B, D, E] (neutral between divergence roots)
+    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
+                 (make-node "D") (make-node "E") (make-node "F")]
+          edges [(make-edge "A" "B") (make-edge "A" "C") (make-edge "A" "D") (make-edge "A" "E")
+                 (make-edge "C" "F") (make-edge "D" "F")]
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          b-row (:row (get-pos result "B"))
+          c-row (:row (get-pos result "C"))
+          d-row (:row (get-pos result "D"))
+          e-row (:row (get-pos result "E"))
+          ;; Rows for A's children: lower row = earlier in sorted order
+          child-rows [[b-row "B"] [c-row "C"] [d-row "D"] [e-row "E"]]
+          sorted-children (map second (sort-by first child-rows))
+          c-idx (.indexOf (vec sorted-children) "C")
+          d-idx (.indexOf (vec sorted-children) "D")]
+      ;; C and D must be adjacent (indices differ by exactly 1)
+      (is (= 1 (Math/abs (- c-idx d-idx)))
+          (str "Divergence roots C and D must be adjacent. "
+               "Sorted order: " (vec sorted-children)
+               ", C idx=" c-idx ", D idx=" d-idx)))))
+
+
+(deftest lower-path-forms-horizontal-branch-test
+  (testing "RULE: Lower path to shared node forms horizontal branch"
+    ;; Structure:
+    ;;   A -> B -> S (shared)
+    ;;   A -> C -> E -> S (shared)
+    ;;
+    ;; B and C are divergence roots. C has longer path (via E).
+    ;; C is on lower path (last parent path).
+    ;; For C, path-to-shared child (E) should go FIRST to form horizontal branch.
+    ;;
+    ;; Expected layout:
+    ;;   row 0: A  B  S
+    ;;   row 1:    C  E
+    ;; Wait, that's wrong. S should be on lower path horizontal.
+    ;;
+    ;; Let me reconsider. If C is on lower path:
+    ;; - Lower path = C -> E -> S
+    ;; - This should form horizontal branch: C, E, S on same row
+    ;;
+    ;; B is on upper path:
+    ;; - B should have S removed (upper parent)
+    ;; - B just placed, no S attached
+    ;;
+    ;; Expected:
+    ;;   row 0: A  B
+    ;;   row 1:    C  E  S
+    ;;
+    ;; Or with divergence root grouping (B and C adjacent):
+    ;;   row 0: A  B
+    ;;   row 1:    C  E  S
+    ;; B at row 0 (first child of A, same row)
+    ;; C at row 1 (second child of A)
+    ;; E at row 1 (first child of C, same row)
+    ;; S at row 1 (first child of E, same row)
+    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
+                 (make-node "E") (make-node "S")]
+          edges [(make-edge "A" "B") (make-edge "A" "C")
+                 (make-edge "B" "S") (make-edge "C" "E") (make-edge "E" "S")]
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          c-row (:row (get-pos result "C"))
+          e-row (:row (get-pos result "E"))
+          s-row (:row (get-pos result "S"))]
+      ;; C, E, S should all be on the same row (lower path horizontal branch)
+      (is (= c-row e-row s-row)
+          (str "Lower path C -> E -> S should be horizontal branch. "
+               "C row=" c-row ", E row=" e-row ", S row=" s-row)))))
+
+
+(deftest upper-path-children-go-last-test
+  (testing "RULE: Upper path nodes have path-to-shared children sorted LAST"
+    ;; Structure:
+    ;;   A -> B -> X (neutral child of B)
+    ;;   A -> B -> S (shared, B is upper path parent)
+    ;;   A -> C -> S (shared, C is lower path parent)
+    ;;
+    ;; B is on upper path to S. Its children are X (neutral) and S (shared).
+    ;; For upper path: path-to-shared (S) goes LAST.
+    ;; So X should be first child of B (horizontal branch), S below.
+    ;;
+    ;; Expected:
+    ;;   row 0: A  B  X
+    ;;   row 1:    C  S
+    ;;
+    ;; B is row 0 (first child of A), X is row 0 (first child of B)
+    ;; C is row 1 (second child of A), S is row 1 (first/only child of C after S removed from B)
+    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
+                 (make-node "X") (make-node "S")]
+          edges [(make-edge "A" "B") (make-edge "A" "C")
+                 (make-edge "B" "X") (make-edge "B" "S")
+                 (make-edge "C" "S")]
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          b-row (:row (get-pos result "B"))
+          x-row (:row (get-pos result "X"))
+          c-row (:row (get-pos result "C"))
+          s-row (:row (get-pos result "S"))]
+      ;; B and X on same row (X is first child of B on upper path)
+      (is (= b-row x-row)
+          (str "B and X should be on same row (upper path, neutral child first). "
+               "B row=" b-row ", X row=" x-row))
+      ;; C and S on same row (lower path horizontal branch)
+      (is (= c-row s-row)
+          (str "C and S should be on same row (lower path horizontal). "
+               "C row=" c-row ", S row=" s-row))
+      ;; S should be below B (not same row)
+      (is (> s-row b-row)
+          (str "S should be below B (shared on lower path). "
+               "B row=" b-row ", S row=" s-row)))))
+
+
+(deftest lower-path-children-go-first-test
+  (testing "RULE: Lower path nodes have path-to-shared children sorted FIRST"
+    ;; Structure:
+    ;;   A -> B -> S (shared, B is upper path)
+    ;;   A -> C -> E -> S (shared, C is lower path)
+    ;;   A -> C -> X (neutral child of C)
+    ;;
+    ;; C is on lower path to S. Its children are E (path-to-shared) and X (neutral).
+    ;; For lower path: path-to-shared (E) goes FIRST.
+    ;; So E should be first child of C (horizontal branch), X below.
+    ;;
+    ;; Expected:
+    ;;   row 0: A  B
+    ;;   row 1:    C  E  S
+    ;;   row 2:       X
+    (let [nodes [(make-node "A") (make-node "B") (make-node "C")
+                 (make-node "E") (make-node "X") (make-node "S")]
+          edges [(make-edge "A" "B") (make-edge "A" "C")
+                 (make-edge "B" "S")
+                 (make-edge "C" "E") (make-edge "C" "X")
+                 (make-edge "E" "S")]
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          c-row (:row (get-pos result "C"))
+          e-row (:row (get-pos result "E"))
+          x-row (:row (get-pos result "X"))
+          s-row (:row (get-pos result "S"))]
+      ;; C and E on same row (E is first child, path-to-shared on lower path)
+      (is (= c-row e-row)
+          (str "C and E should be on same row (lower path, path-to-shared first). "
+               "C row=" c-row ", E row=" e-row))
+      ;; E and S on same row (horizontal branch continues)
+      (is (= e-row s-row)
+          (str "E and S should be on same row (horizontal branch). "
+               "E row=" e-row ", S row=" s-row))
+      ;; X should be below E (neutral child goes last on lower path)
+      (is (> x-row e-row)
+          (str "X should be below E (neutral child last on lower path). "
+               "E row=" e-row ", X row=" x-row)))))
+
+
+(deftest divergence-roots-preserve-position-test
+  (testing "RULE: Divergence roots stay at their original position, not pushed to top/bottom"
+    ;; Structure:
+    ;;   A -> N1 (neutral, original idx 0)
+    ;;   A -> C -> S (shared, original idx 1)
+    ;;   A -> D -> S (shared, original idx 2)
+    ;;   A -> N2 (neutral, original idx 3)
+    ;;
+    ;; C and D are divergence roots at indices 1 and 2.
+    ;; They should stay adjacent at approximately their original position.
+    ;; N1 should stay at idx 0 (above C,D), N2 at idx 3 (below C,D).
+    ;;
+    ;; Expected sorted order: [N1, C, D, N2] or [N1, D, C, N2]
+    ;; NOT: [C, D, N1, N2] (pushed to top) or [N1, N2, C, D] (pushed to bottom)
+    (let [nodes [(make-node "A") (make-node "N1") (make-node "C")
+                 (make-node "D") (make-node "N2") (make-node "S")]
+          edges [(make-edge "A" "N1") (make-edge "A" "C") (make-edge "A" "D") (make-edge "A" "N2")
+                 (make-edge "C" "S") (make-edge "D" "S")]
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          n1-row (:row (get-pos result "N1"))
+          c-row (:row (get-pos result "C"))
+          d-row (:row (get-pos result "D"))
+          n2-row (:row (get-pos result "N2"))
+          ;; Get sorted order
+          child-rows [[n1-row "N1"] [c-row "C"] [d-row "D"] [n2-row "N2"]]
+          sorted-children (vec (map second (sort-by first child-rows)))]
+      ;; N1 should be first (index 0)
+      (is (= "N1" (first sorted-children))
+          (str "N1 should be first. Sorted order: " sorted-children))
+      ;; N2 should be last (index 3)
+      (is (= "N2" (last sorted-children))
+          (str "N2 should be last. Sorted order: " sorted-children))
+      ;; C and D should be in the middle, adjacent
+      (let [c-idx (.indexOf sorted-children "C")
+            d-idx (.indexOf sorted-children "D")]
+        (is (and (> c-idx 0) (< c-idx 3))
+            (str "C should be in middle. Sorted order: " sorted-children))
+        (is (and (> d-idx 0) (< d-idx 3))
+            (str "D should be in middle. Sorted order: " sorted-children))
+        (is (= 1 (Math/abs (- c-idx d-idx)))
+            (str "C and D must be adjacent. Sorted order: " sorted-children))))))

@@ -109,20 +109,70 @@ paths-to-shared[node-id] = set of shared-node-ids reachable from node-id
 
 Uses memoized recursive traversal.
 
-#### 3.3 Find Divergence Roots
+#### 3.3 Node Classification by Relation to Shared Nodes
 
-**Divergence roots:** Siblings (same parent) that both lead to the same shared node.
+All paths in the graph start from a single root node. Paths to a shared node eventually
+**diverge** — split among children of some common ancestor. This divergence can happen
+at multiple levels. Based on their relation to paths leading to shared nodes, all nodes
+fall into one of these categories:
 
-Example:
+**Category 1: Neutral nodes**
+Nodes that do NOT lie on any path to any shared node.
 ```
-editor-routes
-  ├── entity-form-create-route ──→ entity-form-handler (shared)
-  └── entity-form-edit-route ───→ entity-form-handler (shared)
+Example: A has children B, C, D. C and D lead to shared F. B does not.
+B is a neutral node.
 ```
 
-Both `entity-form-create-route` and `entity-form-edit-route` are divergence roots.
+**Category 2: Pre-divergence nodes**
+Nodes that lie on ALL paths to a shared node, BEFORE the divergence point.
+This always includes the graph root. There may be additional nodes between
+root and the divergence point.
+```
+Example: A → X → {C, D} → F (shared)
+A and X are pre-divergence nodes for F.
+```
 
-**Purpose:** Divergence roots must be grouped together in child lists and maintain stable positions.
+**Category 3: Divergence roots**
+Siblings (children of the same parent) where the path to a shared node diverges.
+These are the "roots" of upper and lower paths. Their relative position among
+siblings determines which path becomes upper and which becomes lower.
+
+**CRITICAL:** Divergence roots must be placed **adjacent to each other** in the
+sorted children list. Neutral siblings must NOT be placed between them.
+However, divergence roots do NOT necessarily move to the top or bottom of the
+list — they stay at approximately their original position, just grouped together.
+
+```
+Example: A has children [B, C, D, E]. C and D both lead to shared F.
+C and D are divergence roots. They must be adjacent: [B, C, D, E] or [B, D, C, E]
+but NOT [B, C, E, D] (E between C and D is forbidden).
+```
+
+**Category 4: Path nodes (descendants of divergence roots)**
+Nodes that lie on the path from a divergence root to the shared node, but are
+NOT the divergence root itself. These have siblings that may be neutral.
+
+Sorting rule for path nodes depends on whether they are on upper or lower path:
+- **Upper path:** Path-to-shared children go LAST (pushed to higher row numbers)
+- **Lower path:** Path-to-shared children go FIRST (stay at lower row numbers)
+
+This ensures the lower path forms a horizontal branch leading directly to the
+shared node, while upper paths curve down to meet it.
+
+**Category 5: The shared node itself**
+Removed from children lists of all parents EXCEPT the bottom (last) parent.
+This ensures it is placed only once, at the end of the lower path's horizontal branch.
+
+**Category 6: Secondary divergence (special case)**
+When a path that already diverged (upper or lower) diverges again for the SAME
+shared node (shared node has 3+ parents):
+
+- If secondary divergence happens on **upper path**: Both sub-paths become upper.
+  Children are sorted by upper-path rules.
+- If secondary divergence happens on **lower path**: One sub-path becomes upper,
+  one remains lower (standard divergence rules apply).
+
+**Rule:** There can be multiple upper paths, but only ONE lower path to each shared node.
 
 #### 3.4 Compute Path Positions
 
@@ -132,10 +182,6 @@ For each node, determine if it's on "upper" or "lower" path:
 - **Lower path:** Bottom parent and all its ancestors leading to shared
 - **Upper path:** All other nodes leading to shared
 
-**Purpose:** Child ordering differs based on path position:
-- Lower path: path-to-shared children go FIRST (top)
-- Upper path: path-to-shared children go LAST (bottom)
-
 ### Stage 4: Sort Children Lists
 
 For each node, sort its children for optimal layout.
@@ -143,23 +189,43 @@ For each node, sort its children for optimal layout.
 #### 4.1 Classification
 
 Each child is classified as:
+- **Neutral:** Does not lead to any shared node
+- **Divergence root:** One of multiple siblings that lead to the same shared node
+- **Path-to-shared:** Leads to shared node (not a divergence root)
 - **Direct shared:** The child IS a shared node
-- **Divergence root:** Child leads to shared but is a divergence point
-- **Path-to-shared:** Child leads to shared (not divergence root)
-- **Regular:** Child doesn't lead to shared
 
 #### 4.2 Sorting Rules
 
-**Goal:** Shared nodes should end up at the BOTTOM so all edges go DOWN (or right) to reach them.
+**Goal:** The lower path from divergence root to shared node should form a single
+horizontal branch. All edges to the shared node should go DOWN or RIGHT, never up.
 
-**Priority order:**
-1. **Path position** (highest):
-   - Lower path → path-to-shared children go LAST (larger rows, shared node at bottom)
-   - Upper path → path-to-shared children go FIRST (smaller rows)
-2. **Divergence grouping:** Divergence roots grouped together. Within a group on lower path, the lower-path member goes LAST.
-3. **Type** (lowest): fn > fixed-arg > free-arg
+**Rules by parent category:**
 
-**Within groups:** Preserve original order (by original-idx)
+**Rule 1: Pre-divergence and neutral parents**
+Sort children by: type (fn > fixed-arg > free-arg), then by original index.
+Divergence roots are grouped together at their original position but not moved.
+
+**Rule 2: Divergence root parents (on lower path)**
+- Path-to-shared children go **FIRST** (lower row numbers)
+- Neutral children go **LAST**
+- This makes the path-to-shared child the first child → horizontal branch → shared node at end
+
+**Rule 3: Divergence root parents (on upper path)**
+- Path-to-shared children go **LAST** (higher row numbers)
+- Neutral children go **FIRST**
+- This pushes the path-to-shared subtree down, making room for the lower path above
+
+**Rule 4: Path node parents (on lower path)**
+Same as Rule 2: path-to-shared children FIRST.
+
+**Rule 5: Path node parents (on upper path)**
+Same as Rule 3: path-to-shared children LAST.
+
+**Rule 6: Divergence roots grouping**
+When sorting children of a pre-divergence node, divergence roots targeting the same
+shared node must be adjacent. The lower-path divergence root comes LAST in the group.
+
+**Within any group:** Preserve original order (by original-idx), then sort by type.
 
 ### Stage 5: Compute Column Offsets
 

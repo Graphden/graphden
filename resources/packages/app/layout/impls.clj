@@ -783,137 +783,110 @@
 (defn- order-children
   "Order children for layout placement.
 
-   Rules depend on whether parent is on lower or upper path to shared:
+   See docs/LAYOUT.md Section 3.3 and 4.2 for full specification.
 
-   LOWER path (last parent of shared):
-   - Path-to-shared children go FIRST (at top)
-   - This keeps the shared node close to this branch
+   Key rules:
+   1. Divergence roots stay ADJACENT at their original position (not pushed to top/bottom)
+   2. Within divergence group: lower-path root goes LAST
+   3. Path nodes on LOWER path: path-to-shared children go FIRST (horizontal branch)
+   4. Path nodes on UPPER path: path-to-shared children go LAST (pushed down)
+   5. Direct shared children: included in output (handled by remove-shared-from-upper-parents separately)
 
-   UPPER path (not last parent):
-   - Path-to-shared children go LAST (at bottom)
-   - This pushes the shared node away from this branch
-
-   IMPORTANT: Divergence roots (siblings that both lead to same shared node)
-   must be GROUPED TOGETHER. They appear at the position of the earliest
-   divergence root in the original order.
-
-   WITHIN a divergence group: if parent is on lower path, the divergence root
-   that is ALSO on lower path comes first. This ensures the lower-path route
-   gets placed first, keeping its subtree closer to the shared node.
-
-   Within each group, sort by: type (fn > fixed > free), then original-idx"
+   This ensures the lower path forms a horizontal branch to the shared node."
   [parent-id children-map paths-to-shared shared-nodes graph-children node-data-map path-position divergence-roots all-path-positions]
   (let [child-ids (get children-map parent-id [])
-        type-order {:fn 0 :fixed 1 :free 2}
-        ;; Is this parent on the lower path?
-        is-lower-path (= path-position :lower)
 
         classify-child
         (fn [child-id idx]
           (let [targets (get paths-to-shared child-id #{})
                 child-type (get-child-type child-id node-data-map)
-                ;; Check if this child IS a shared node (direct shared child)
                 is-shared-node (contains? shared-nodes child-id)
-                ;; Check if this child is a divergence root - should NOT be treated as path-to-shared
-                is-divergence-root (contains? divergence-roots child-id)]
+                is-divergence-root (contains? divergence-roots child-id)
+                is-path-to-shared (and (seq targets) (not is-divergence-root) (not is-shared-node))]
             {:id child-id
              :type child-type
              :original-idx idx
              :targets targets
              :is-shared-node is-shared-node
              :is-divergence-root is-divergence-root
-             :primary-target (first (sort targets))
-             :path-len (if (seq targets)
-                         (apply min (map #(or (path-length-to-shared child-id % graph-children) 999) targets))
-                         0)}))
+             :is-path-to-shared is-path-to-shared
+             :primary-target (first (sort targets))}))
 
         classified (map-indexed (fn [idx id] (classify-child id idx)) child-ids)
 
-        ;; Separate into groups:
-        ;; 1. Direct shared children - the shared node itself (treat as regular)
-        ;; 2. Divergence roots - siblings that lead to shared but are the divergence point
-        ;; 3. Regular children - not leading to shared
-        ;; 4. Path-to-shared children - leading to shared, not divergence root
-        direct-shared (filter :is-shared-node classified)
-        not-direct-shared (filter (complement :is-shared-node) classified)
-        divergence-roots-children (filter :is-divergence-root not-direct-shared)
-        not-divergence (filter (complement :is-divergence-root) not-direct-shared)
-        with-targets (filter #(seq (:targets %)) not-divergence)
-        without-targets (filter #(empty? (:targets %)) not-divergence)
+        ;; Separate children into categories
+        divergence-children (filter :is-divergence-root classified)
+        path-children (filter :is-path-to-shared classified)
+        direct-shared-children (filter :is-shared-node classified)
+        neutral-children (filter #(and (not (:is-divergence-root %))
+                                       (not (:is-path-to-shared %))
+                                       (not (:is-shared-node %)))
+                                 classified)
 
         ;; Group divergence roots by their shared target
-        ;; Each group will be placed together at the position of its earliest member
-        divergence-by-target (group-by :primary-target divergence-roots-children)
-        ;; For each divergence group, compute min-idx (position of earliest member)
-        ;; IMPORTANT: Sort members within group so that lower-path comes first (if parent is on lower path)
-        divergence-groups (map (fn [[target members]]
-                                 (let [;; Sort by path position: lower path first when parent is on lower path
-                                       ;; Otherwise sort by original-idx to preserve stability
-                                       sorted-members
-                                       (if is-lower-path
-                                         ;; On lower path: lower-path divergence root should be LAST
-                                         ;; This ensures shared node ends up at bottom
-                                         (sort-by (fn [m]
-                                                    ;; Lower path = 1 (last), otherwise 0 (first)
-                                                    (if (= :lower (get all-path-positions (:id m)))
-                                                      1
-                                                      0))
-                                                  members)
-                                         ;; On upper path (or no path): original order
-                                         (sort-by :original-idx members))
-                                       min-idx (:original-idx (first (sort-by :original-idx members)))]
-                                   {:target target
-                                    :min-idx min-idx
-                                    :members sorted-members}))
-                               divergence-by-target)
+        divergence-by-target (group-by :primary-target divergence-children)
 
-        ;; Merge divergence groups with regular children (direct-shared + without-targets)
-        ;; We'll create a unified list where divergence groups are treated as single units
-        ;; at their min-idx position
-        regular-items (concat direct-shared without-targets)
-        ;; Convert regular items to same format
-        regular-with-idx (map (fn [c] {:type :single :min-idx (:original-idx c) :child c}) regular-items)
-        ;; Convert divergence groups to same format
-        divergence-with-idx (map (fn [g] {:type :group :min-idx (:min-idx g) :members (:members g)}) divergence-groups)
-        ;; Combine and sort by min-idx
-        all-regular-units (sort-by :min-idx (concat regular-with-idx divergence-with-idx))
-        ;; Flatten back to child list (preserving group ordering)
-        sorted-regular-ids (mapcat (fn [unit]
-                                     (case (:type unit)
-                                       :single [(:id (:child unit))]
-                                       :group (map :id (:members unit))))
-                                   all-regular-units)
+        ;; Build unified list preserving positions:
+        ;; - Divergence groups: insert at min-idx of the group, sorted internally (lower-path LAST)
+        ;; - Neutral children: stay at original position
+        ;; - Direct shared children: stay at original position
+        ;; - Path-to-shared: moved based on path-position rule
+        divergence-groups
+        (map (fn [[target members]]
+               (let [min-idx (apply min (map :original-idx members))
+                     ;; Within group: lower-path member goes LAST
+                     sorted-members (sort-by (fn [m]
+                                               (if (= :lower (get all-path-positions (:id m)))
+                                                 1  ; Lower path = sort last within group
+                                                 0))
+                                             members)]
+                 {:type :divergence-group
+                  :min-idx min-idx
+                  :target target
+                  :members sorted-members}))
+             divergence-by-target)
 
-        ;; Shared-path children (excluding divergence roots): group by target, PRESERVE original order
-        by-target (group-by :primary-target with-targets)
-        sorted-groups (mapcat (fn [[_target group]]
-                                (sort-by :original-idx group))
-                              (sort-by first by-target))
+        ;; Is this parent on lower or upper path?
+        is-lower-path (= path-position :lower)
+        is-upper-path (= path-position :upper)
 
-        ;; Extract divergence root IDs (grouped by target, sorted by original-idx within group)
-        ;; These are path-to-shared but need to stay grouped together
-        divergence-ids (mapcat (fn [g] (map :id (:members g)))
-                               (sort-by :min-idx divergence-groups))
+        ;; Build sorted list:
+        ;; 1. Create position slots for neutral, direct-shared, and divergence groups
+        neutral-items (map (fn [c] {:type :neutral :idx (:original-idx c) :child c}) neutral-children)
+        shared-items (map (fn [c] {:type :shared :idx (:original-idx c) :child c}) direct-shared-children)
+        divergence-items (map (fn [g] {:type :divergence :idx (:min-idx g) :group g}) divergence-groups)
 
-        ;; True regular children (direct-shared + without-targets, NOT including divergence roots)
-        true-regular-ids (mapcat (fn [unit]
-                                   (when (= (:type unit) :single)
-                                     [(:id (:child unit))]))
-                                 (sort-by :min-idx regular-with-idx))]
+        ;; Sort all positional items by index
+        positional-items (sort-by :idx (concat neutral-items shared-items divergence-items))
 
-    ;; Order depends on path position:
-    ;; The goal: shared node should be at the BOTTOM so all edges go DOWN to reach it.
-    ;; - Lower path (bottom parent's path): put path-to-shared children LAST (larger rows)
-    ;;   so the shared node ends up at the bottom
-    ;; - Upper path: put path-to-shared children FIRST (smaller rows)
-    ;;   so their path eventually leads DOWN to the shared node
-    (if is-lower-path
-      (vec (concat true-regular-ids              ; regular first (smaller rows)
-                   (map :id sorted-groups)       ; then other path-to-shared
-                   divergence-ids))              ; divergence roots last (they lead to shared, larger rows)
-      (vec (concat divergence-ids                ; divergence roots first (smaller rows)
-                   (map :id sorted-groups)       ; then other path-to-shared
-                   true-regular-ids)))))         ; regular last           ; then divergence roots
+        ;; Extract IDs from positional items
+        positional-ids (mapcat (fn [item]
+                                 (case (:type item)
+                                   :neutral [(:id (:child item))]
+                                   :shared [(:id (:child item))]
+                                   :divergence (map :id (:members (:group item)))))
+                               positional-items)
+
+        ;; Path-to-shared children IDs (sorted by original-idx within each target group)
+        path-ids (->> path-children
+                      (group-by :primary-target)
+                      (mapcat (fn [[_target group]] (sort-by :original-idx group)))
+                      (map :id))]
+
+    ;; Final ordering based on parent's path position
+    (cond
+      ;; Lower path parent: path-to-shared children FIRST (forms horizontal branch)
+      is-lower-path
+      (vec (concat path-ids positional-ids))
+
+      ;; Upper path parent: path-to-shared children LAST (pushed down)
+      is-upper-path
+      (vec (concat positional-ids path-ids))
+
+      ;; Not on any path (pre-divergence or neutral): preserve original order
+      ;; with divergence roots grouped at their position
+      :else
+      (vec positional-ids))))         ; regular last           ; then divergence roots
 
 
 ;; Matrix operations

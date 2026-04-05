@@ -1097,6 +1097,17 @@
                 matrix
                 branch))
 
+            ;; Reserve vertical edge cells from parent to child
+            ;; When child is placed below parent, the edge goes through intermediate rows
+            (reserve-vertical-edge [matrix parent-row child-row child-col]
+              (if (<= child-row (inc parent-row))
+                matrix  ; Adjacent rows, no intermediate cells to reserve
+                (reduce (fn [m edge-row]
+                          (assoc-in m [:grid [edge-row child-col]]
+                                    {:vertical-edge true}))
+                        matrix
+                        (range (inc parent-row) child-row))))
+
             ;; Get max row used by a subtree (for computing next sibling's start row)
             (subtree-max-row [matrix node-id]
               (let [pos (get-node-pos matrix node-id)]
@@ -1113,22 +1124,23 @@
 
             ;; Main recursive placement function
             ;; Places node-id and its entire subtree, returns [matrix max-row-used]
-            (place-subtree [matrix node-id target-row target-col]
+            ;; parent-row is the row of the parent node (for reserving vertical edges)
+            (place-subtree [matrix node-id target-row target-col parent-row]
               (let [;; Build horizontal branch from this node
                     branch (build-branch node-id target-col)
                     ;; Find row where branch fits (checks only cells in branch's column range)
                     actual-row (find-row-for-branch matrix branch target-row)
                     ;; Place the branch
-                    matrix (place-branch matrix branch actual-row)]
+                    matrix (place-branch matrix branch actual-row)
+                    ;; Reserve vertical edge from parent to this branch's first node
+                    ;; The edge goes from parent (at parent-row) down to node-id (at actual-row)
+                    ;; through the child's column (target-col)
+                    matrix (if parent-row
+                             (reserve-vertical-edge matrix parent-row actual-row target-col)
+                             matrix)]
 
                 ;; Process non-first children of each node in branch
                 ;; RIGHT-TO-LEFT order (deepest first) for depth-first placement
-                ;;
-                ;; KEY INSIGHT: All children use column-aware compaction via find-row-for-branch.
-                ;; Each child's branch is placed starting from (inc actual-row), and
-                ;; find-row-for-branch finds the first row where the branch fits
-                ;; by checking ONLY the columns that branch will occupy.
-                ;; This allows branches at different columns to share rows.
                 (loop [branch-nodes (reverse branch)
                        matrix matrix
                        global-max-row actual-row]
@@ -1137,12 +1149,14 @@
                     (let [{:keys [id col]} (first branch-nodes)
                           kids (get-sorted-children id)
                           rest-kids (rest kids)  ; skip first (in horizontal branch)
-                          child-col (inc col)]
+                          child-col (inc col)
+                          ;; Parent row for children is the row where this node was placed
+                          ;; (which is actual-row for all nodes in the horizontal branch)
+                          this-node-row actual-row]
 
                       ;; Place this node's remaining children
                       ;; Each starts search from (inc actual-row), find-row-for-branch
                       ;; will find where it actually fits based on column occupancy.
-                      ;; All siblings start from the same min-row; compaction finds actual fit.
                       (let [min-child-row (inc actual-row)
                             [matrix local-max-row]
                             (loop [remaining rest-kids
@@ -1153,7 +1167,8 @@
                                 (let [child-id (first remaining)
                                       ;; Each child starts from min-child-row
                                       ;; find-row-for-branch (inside place-subtree) will find actual row
-                                      [matrix child-max-row] (place-subtree matrix child-id min-child-row child-col)]
+                                      ;; Pass parent's row for vertical edge reservation
+                                      [matrix child-max-row] (place-subtree matrix child-id min-child-row child-col this-node-row)]
                                   (recur (rest remaining)
                                          matrix
                                          (max max-row-so-far child-max-row)))))]
@@ -1163,7 +1178,7 @@
                                ;; Track overall max for return value
                                (max global-max-row local-max-row))))))))]
 
-      (let [[matrix _] (place-subtree (empty-matrix) root-id 0 0)]
+      (let [[matrix _] (place-subtree (empty-matrix) root-id 0 0 nil)]
         matrix))))
 
 

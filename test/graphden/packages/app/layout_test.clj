@@ -501,3 +501,229 @@
       (is (= g-row f-row)
           (str "G's branch (cols " g-col "-" h-col ") doesn't overlap with F (col " f-col "). "
                "G should be at same row as F. G row=" g-row ", F row=" f-row)))))
+
+
+;; =============================================================================
+;; EDGE CROSSING TESTS
+;; =============================================================================
+
+(deftest rule-no-edge-crossing-inner-child-test
+  (testing "RULE: No edge crossings - inner node's second child vs sibling's branch"
+    ;; Structure that causes edge crossing:
+    ;;   R -> A -> B -> C    (horizontal branch)
+    ;;             B -> D    (B's second child, should be placed first)
+    ;;   R -> E -> F         (R's second child)
+    ;;
+    ;; Processing order (right-to-left along branch, then siblings):
+    ;; 1. Place horizontal branch: R(0,0) A(0,1) B(0,2) C(0,3)
+    ;; 2. Process C: no more children
+    ;; 3. Process B: place D at (1, 3)  <-- B's second child
+    ;; 4. Process A: no more children
+    ;; 5. Process R: place E's branch
+    ;;
+    ;; If E is placed at row 1, cols 1-2, then:
+    ;; - Edge B(0,2) -> D(1,3) goes right-down
+    ;; - Edge R(0,0) -> E(1,1) goes right-down
+    ;; - Edge E(1,1) -> F(1,2) is horizontal
+    ;;
+    ;; The crossing happens because E's branch (row 1, cols 1-2) is placed
+    ;; BEFORE checking if it would cross the edge from B to D.
+    ;;
+    ;; Edge B->D occupies: vertical segment at col 3 from row 0 to row 1
+    ;; Edge R->E occupies: vertical segment at col 1 from row 0 to row 1
+    ;; These don't cross.
+    ;;
+    ;; But if D is at row 2 (because row 1 col 3 is blocked), and E is at row 1:
+    ;; Edge B->D: col 3, rows 0-2
+    ;; Edge E->F: row 1, col 2
+    ;; Still no crossing.
+    ;;
+    ;; The REAL problem is when inner node (like A) has a second child X
+    ;; that needs to be placed, but the sibling (E) is placed BEFORE X.
+    ;;
+    ;; Let's construct the exact problematic case:
+    ;;   R -> A -> B       (horizontal branch at row 0)
+    ;;        A -> X -> Y  (A's second child, branch uses cols 2-3)
+    ;;   R -> E -> F       (R's second child, branch uses cols 1-2)
+    ;;
+    ;; If E is placed at row 1 before X:
+    ;; - E at (1,1), F at (1,2)
+    ;; Then X tries to fit:
+    ;; - X needs cols 2-3
+    ;; - Row 1: col 2 occupied by F!
+    ;; - X goes to row 2
+    ;;
+    ;; Now edges:
+    ;; - Edge A(0,1) -> X(2,2): vertical at col 2 from row 0 to row 2
+    ;; - Edge E(1,1) -> F(1,2): horizontal at row 1 from col 1 to col 2
+    ;;
+    ;; Does the edge A->X cross through (1,2)? YES!
+    ;; A is at (0,1), X is at (2,2).
+    ;; Edge goes: down from (0,1) to (1,1), then right to (1,2), then down to (2,2)?
+    ;; No - edges go to child's column first, then down.
+    ;; Edge A->X: right from (0,1) to (0,2), then down from (0,2) to (2,2)
+    ;; That's a vertical line at col 2 from row 0 to row 2.
+    ;; Does it pass through (1,2)? YES - F is at (1,2)!
+    ;;
+    ;; This is node collision, not edge crossing!
+    ;; The edge A->X passes through cell (1,2) which has node F.
+    ;;
+    ;; Hmm, let me reconsider. The edges are visual lines between nodes.
+    ;; With column-aware compaction, we're only checking node positions.
+    ;; We're not reserving cells for edge paths.
+    ;;
+    ;; The actual problem from the user:
+    ;; - delete-entity-route -> pair-1: vertical edge at col 2, rows 0-2
+    ;; - entity-form-create-route -> "/partials/...": horizontal edge at row 1, cols 1-2
+    ;;
+    ;; These edges CROSS at (1, 2) if drawn as orthogonal lines!
+    ;;
+    ;; Actually wait - entity-form-create-route is at (1,1) and its child
+    ;; "/partials/..." is at (1,2). That's a horizontal edge on the same row.
+    ;; delete-entity-route is at (0,1) and pair-1 is at (2,2).
+    ;; The edge from delete-entity-route to pair-1:
+    ;; - Starts at (0,1), ends at (2,2)
+    ;; - Visual path: right from (0,1) to (0,2), then down from (0,2) to (2,2)
+    ;; - This passes through cells: (0,1)->(0,2) horizontal, then (0,2)->(1,2)->(2,2) vertical
+    ;;
+    ;; Cell (1,2) is on the path of edge delete-entity-route -> pair-1
+    ;; But node "/partials/..." is AT (1,2)!
+    ;;
+    ;; This is an edge-through-node collision, not edge-edge crossing.
+    ;; The edge path reservation should prevent placing F at (1,2) if
+    ;; that cell is already reserved for an edge.
+    ;;
+    ;; Simplified test case:
+    ;;   R -> A -> B        (row 0: R(0,0) A(0,1) B(0,2))
+    ;;        A -> X        (A's second child at col 2)
+    ;;   R -> E -> F        (R's second child, branch cols 1-2)
+    ;;
+    ;; If X is placed at row 2 (below the horizontal branch):
+    ;; - Edge A->X goes through col 2, rows 0-2, passing through (1,2)
+    ;; If E's branch is placed at row 1:
+    ;; - E at (1,1), F at (1,2)
+    ;; - F occupies (1,2) which is on edge A->X path!
+    ;;
+    ;; The fix: when placing a branch at row N, check that no edge from
+    ;; higher rows passes through the branch's cells.
+    ;;
+    ;; Or simpler: siblings of branch nodes must wait until all children
+    ;; of that branch node are placed. (subtree containment rule)
+    (let [nodes [(make-node "R") (make-node "A") (make-node "B")
+                 (make-node "X")
+                 (make-node "E") (make-node "F")]
+          edges [(make-edge "R" "A") (make-edge "A" "B")
+                 (make-edge "A" "X")  ; A's second child
+                 (make-edge "R" "E") (make-edge "E" "F")]  ; R's second child
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          a-pos (get-pos result "A")
+          x-pos (get-pos result "X")
+          e-pos (get-pos result "E")
+          f-pos (get-pos result "F")]
+      ;; X is A's second child, should be at col 2 (A's col + 1)
+      (is (= 2 (:col x-pos)) (str "X should be at col 2, got " (:col x-pos)))
+      ;; E's branch starts at col 1, F at col 2
+      (is (= 1 (:col e-pos)) (str "E should be at col 1, got " (:col e-pos)))
+      (is (= 2 (:col f-pos)) (str "F should be at col 2, got " (:col f-pos)))
+
+      ;; The key test: if X is below row 0, then E's branch cannot be
+      ;; between A and X (would cross the edge A->X)
+      ;;
+      ;; If A is at row 0 and X is at row N > 0, then:
+      ;; - Edge A->X passes through col 2, rows 0 to N
+      ;; - F cannot be at any row between 0 and N at col 2
+      ;;
+      ;; So either:
+      ;; 1. X is at row 1, F is at row 2 or later
+      ;; 2. F is at row 1, X is at row 1 (same row = no edge crossing)
+      ;; 3. F is at row >= X's row
+      ;;
+      ;; The invariant: F's row must NOT be strictly between A's row and X's row
+      (let [a-row (:row a-pos)
+            x-row (:row x-pos)
+            f-row (:row f-pos)]
+        (is (not (< a-row f-row x-row))
+            (str "F cannot be between A and X (would cross edge A->X). "
+                 "A row=" a-row ", F row=" f-row ", X row=" x-row
+                 ". F is at col 2, same as X, so edge A->X passes through (F's row, 2)."))))))
+
+
+(deftest rule-no-edge-crossing-sibling-branch-test
+  (testing "RULE: Sibling's branch must not cross edges from horizontal branch nodes"
+    ;; This is the exact structure from the bug report:
+    ;;   R -> A -> B -> C    (horizontal branch at row 0)
+    ;;        A -> X -> Y    (A's second child, X at col 2)
+    ;;   R -> E -> F         (R's second child)
+    ;;
+    ;; Processing order (right-to-left, depth-first):
+    ;; 1. Place branch: R(0,0) A(0,1) B(0,2) C(0,3)
+    ;; 2. C: no children
+    ;; 3. B: no second child
+    ;; 4. A: place X->Y subtree - X at col 2, Y at col 3
+    ;;    X should be at row 1 (first available)
+    ;; 5. R: place E->F branch - E at col 1, F at col 2
+    ;;
+    ;; The BUG: if E's branch is placed at row 1:
+    ;; - F would be at (1,2)
+    ;; - But edge A->X goes from (0,1) to (1,2), passing through... wait
+    ;; - Actually edge A->X goes: horizontal (0,1)->(0,2), then vertical (0,2)->(1,2)
+    ;; - So cell (1,2) is the END of the edge, which is X itself
+    ;;
+    ;; If X is pushed to row 2 (because row 1 col 3 is occupied by something):
+    ;; - Edge A->X goes through col 2, rows 0-2
+    ;; - F at (1,2) would be ON the edge path!
+    ;;
+    ;; Let's force X to row 2 by making B have a child at col 3, row 1:
+    ;;   R -> A -> B -> C    (horizontal branch at row 0)
+    ;;             B -> D    (B's second child at (1,3))
+    ;;        A -> X -> Y    (A's second child at col 2, row 2 because D is blocking row 1 col 3)
+    ;;   R -> E -> F         (R's second child)
+    ;;
+    ;; Wait, X's branch is cols 2-3. D is at col 3, row 1.
+    ;; So X tries row 1: col 2 free, col 3 occupied by D -> X goes to row 2.
+    ;; X at (2,2), Y at (2,3).
+    ;; Edge A->X: from (0,1) horizontal to (0,2), vertical to (2,2)
+    ;; Edge path at col 2: rows 0,1,2 (passes through (1,2))
+    ;;
+    ;; Now E's branch at row 1:
+    ;; - E at (1,1), F at (1,2)
+    ;; - F is at (1,2) which is ON the edge A->X!
+    ;;
+    ;; This is the bug we need to test.
+    (let [nodes [(make-node "R") (make-node "A") (make-node "B") (make-node "C")
+                 (make-node "D")  ; B's second child that blocks row 1 col 3
+                 (make-node "X") (make-node "Y")  ; A's second child subtree
+                 (make-node "E") (make-node "F")]  ; R's second child
+          edges [(make-edge "R" "A") (make-edge "A" "B") (make-edge "B" "C")
+                 (make-edge "B" "D")  ; B's second child, will be at (1,3)
+                 (make-edge "A" "X") (make-edge "X" "Y")  ; A's second child subtree
+                 (make-edge "R" "E") (make-edge "E" "F")]  ; R's second child
+          result (layout-elements nodes edges)
+          _ (is (:valid (:validation result))
+                (str "Layout should be valid: " (:validation result)))
+          a-pos (get-pos result "A")
+          d-pos (get-pos result "D")
+          x-pos (get-pos result "X")
+          f-pos (get-pos result "F")]
+
+      ;; First verify our setup: D should be at (1,3), blocking X
+      (is (= {:row 1 :col 3} d-pos)
+          (str "D should be at (1,3) to block X. Got: " d-pos))
+
+      ;; X should be pushed to row 2 because D blocks row 1
+      (is (= 2 (:row x-pos))
+          (str "X should be at row 2 (blocked by D at row 1). Got: " (:row x-pos)))
+
+      (let [a-row (:row a-pos)
+            x-row (:row x-pos)
+            f-row (:row f-pos)
+            f-col (:col f-pos)
+            x-col (:col x-pos)]
+        ;; The key test: edge A->X passes through col 2 from row 0 to row 2
+        ;; F should NOT be at (1,2) because that's on the edge path
+        (when (= f-col x-col)  ; F is at same column as X (col 2)
+          (is (not (< a-row f-row x-row))
+              (str "F at col " f-col " row " f-row " is between A (row " a-row ") and X (row " x-row "). "
+                   "This means F is ON the edge path from A to X - EDGE CROSSING!")))))))

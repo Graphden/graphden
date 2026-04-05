@@ -342,32 +342,39 @@ Result:
 
 **Note:** C tries row 1 but col 2 is occupied by E, so it moves to row 2.
 
-#### 6.5 Example Trace (Successful Compaction)
+#### 6.5 Example Trace (Vertical Edge Reservation)
 
 ```
-Graph (showing compaction when columns don't overlap):
+Graph (showing edge reservation preventing crossing):
   A
-  ├── B → C → D → E (horizontal branch at row 0, cols 1-4)
-  │            └── F (child of D at row 1, col 3)
+  ├── B → C → D (horizontal branch at row 0, cols 1-3)
+  │        └── E (child of C at col 3)
+  │        └── F (child of C at col 3, pushed to row 2)
   └── G (sibling of B)
       └── H (horizontal branch at row ?, cols 1-2)
 
 Processing:
-1. Place horizontal branch: A, B, C, D, E at row 0
+1. Place horizontal branch: A, B, C, D at row 0
 2. Process children right-to-left:
-   - D has child F → place at row 1, col 3
+   - C has child E → min_row = 1, place at (1,3)
+   - C has child F → min_row = 1, col 3 occupied, place at (2,3)
+     - Reserve vertical edge: col 3, rows 1-2 (from C at row 0 to F at row 2)
+   - B has no second child
    - A has sibling G:
      - min_row = 1 (A's row + 1)
      - Branch = [G, H], uses cols 1-2
-     - Check row 1, cols 1-2 → both free! (F is at col 3)
+     - Check row 1, cols 1-2 → both free! (E is at col 3)
      - Place G(1,1) H(1,2)
 
 Result:
-  col:  0   1   2   3   4
-  row 0: A   B   C   D   E
-  row 1:     G   H   F
+  col:  0   1   2   3
+  row 0: A   B   C   D
+  row 1:     G   H   E
+  row 2:             F
 
-G can share row 1 with F because their columns don't overlap (G uses 1-2, F at 3).
+G can share row 1 with E because their columns don't overlap (G uses 1-2, E at 3).
+The vertical edge reservation from C to F occupies row 1 col 3, preventing any
+branch from using that cell.
 ```
 
 ### Stage 7: Build Response

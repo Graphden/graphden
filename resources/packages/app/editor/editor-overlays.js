@@ -94,13 +94,15 @@ function createFnOverlay(node, container) {
   const originalFnId = node.data('originalFnId');
   if (!originalFnId) return;
 
+  const nodeId = node.id();  // Full node ID including expansion context
   const chain = getInheritanceChain(originalFnId);
   const items = buildAncestorItems(chain);
-  const currentLevel = expansionLevel.get(originalFnId) || 0;
+  const currentLevel = expansionLevel.get(nodeId) || 0;  // Use nodeId for expansion lookup
   const visibleItems = items.slice(0, MAX_VISIBLE_ANCESTORS + 1);
 
-  const overlay = createOverlay(node.id());
+  const overlay = createOverlay(nodeId);
   overlay.dataset.originalFnId = originalFnId;
+  overlay.dataset.nodeId = nodeId;  // Store nodeId for expansion
   overlay.style.cursor = 'default';
 
   // Group items by groupId for hover highlighting
@@ -157,7 +159,7 @@ function createFnOverlay(node, container) {
       // Only trigger preview if hovering on level > currentLevel
       // (i.e., expanding to a deeper ancestor)
       if (hoverLevel > currentLevel) {
-        setPreviewLevel(originalFnId, hoverLevel);
+        setPreviewLevel(nodeId, hoverLevel);
       }
     });
 
@@ -179,20 +181,21 @@ function createFnOverlay(node, container) {
     // - If clicking on level > currentLevel: expand to that level
     // - If clicking on level <= currentLevel: collapse to that level
     //   (but clicking on level 0 when currentLevel > 0 collapses to 0)
+    // Use nodeId (not originalFnId) so each expansion context is independent
     line.addEventListener('click', (e) => {
       e.stopPropagation();
       const clickLevel = item.groupLevel;
 
       if (clickLevel > currentLevel) {
         // Expanding to deeper ancestor
-        setExpansionLevel(originalFnId, clickLevel);
+        setExpansionLevel(nodeId, clickLevel);
       } else if (clickLevel < currentLevel) {
         // Collapsing to younger ancestor
-        setExpansionLevel(originalFnId, clickLevel);
+        setExpansionLevel(nodeId, clickLevel);
       } else {
         // Clicking on current level - collapse one step
         // If at level 0, stay at 0
-        setExpansionLevel(originalFnId, Math.max(0, clickLevel - 1));
+        setExpansionLevel(nodeId, Math.max(0, clickLevel - 1));
       }
     });
 
@@ -214,7 +217,7 @@ function createFnOverlay(node, container) {
     // 2. User is dragging (isGrabbing flag)
     // 3. Overlay was removed from DOM (happens during rebuild, mouseleave fires async)
     if (!rebuildingOverlays && !isGrabbing && overlay.isConnected) {
-      setPreviewLevel(originalFnId, null);
+      setPreviewLevel(nodeId, null);
     }
   });
 

@@ -1,127 +1,160 @@
-const puppeteer = require('puppeteer');
+const http = require('http');
 
-(async () => {
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ['--no-sandbox']
-  });
+// User's exact scenario:
+// 1. Have metrics-route visible (select it)
+// 2. Expand "route" on metrics-route - shows method-map
+// 3. Expand "assoc-empty" on method-map - shows assoc-handler
+// 4. Check: key: "get" should appear ONLY on assoc-handler, NOT on method-map
 
-  const page = await browser.newPage();
+const metricsRouteId = '5079fbc4-76bb-4d77-88b7-ba77add388bf';
 
-  await page.goto('http://localhost:9002/#editor-routes', { waitUntil: 'networkidle0' });
-  await new Promise(r => setTimeout(r, 2000));
-
-  // Find both routes
-  const routeIds = await page.evaluate(() => {
-    const result = {};
-    cy.nodes().forEach(n => {
-      const lbl = n.data('label') || '';
-      if (lbl.includes('entity-form-create-route')) {
-        result.create = n.data('originalFnId');
-      }
-      if (lbl.includes('entity-form-edit-route')) {
-        result.edit = n.data('originalFnId');
-      }
+function makeRequest(rootId, expansions) {
+  return new Promise((resolve, reject) => {
+    const data = JSON.stringify({
+      'root-id': rootId,
+      'expansions': expansions
     });
-    return result;
-  });
 
-  console.log('entity-form-create-route:', routeIds.create);
-  console.log('entity-form-edit-route:', routeIds.edit);
-
-  // Before expand - show children order
-  console.log('\n=== BEFORE EXPAND ===');
-  let state = await page.evaluate((ids) => {
-    const getChildren = (fnId) => {
-      const nodeId = 'fn-' + fnId;
-      const children = [];
-      cy.edges().forEach(e => {
-        if (e.source().id() === nodeId) {
-          children.push({
-            argName: e.data('argName'),
-            label: (e.target().data('label') || '').substring(0, 30).replace(/\n/g, '|')
-          });
+    const req = http.request({
+      hostname: 'localhost',
+      port: 9002,
+      path: '/api/graph/layout',
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data)
+      }
+    }, (res) => {
+      let body = '';
+      res.on('data', c => body += c);
+      res.on('end', () => {
+        try {
+          resolve(JSON.parse(body));
+        } catch (e) {
+          reject(e);
         }
       });
-      return children;
-    };
-    return {
-      create: getChildren(ids.create),
-      edit: getChildren(ids.edit)
-    };
-  }, routeIds);
-
-  console.log('entity-form-create-route children:');
-  state.create.forEach((c, i) => console.log('  ' + i + '. ' + c.argName + ': ' + c.label));
-  console.log('entity-form-edit-route children:');
-  state.edit.forEach((c, i) => console.log('  ' + i + '. ' + c.argName + ': ' + c.label));
-
-  // Expand entity-form-create-route to level 2
-  console.log('\n=== EXPAND entity-form-create-route TO LEVEL 2 ===');
-  await page.evaluate((fnId) => {
-    setExpansionLevel(fnId, 2);
-  }, routeIds.create);
-  await new Promise(r => setTimeout(r, 1500));
-
-  state = await page.evaluate((ids) => {
-    const getChildren = (fnId) => {
-      const nodeId = 'fn-' + fnId;
-      const children = [];
-      cy.edges().forEach(e => {
-        if (e.source().id() === nodeId) {
-          children.push({
-            argName: e.data('argName'),
-            label: (e.target().data('label') || '').substring(0, 30).replace(/\n/g, '|'),
-            targetId: e.target().id()
-          });
-        }
-      });
-      return children;
-    };
-    
-    // Find entity-form-handler position
-    let handlerPos = null;
-    cy.nodes().forEach(n => {
-      const lbl = n.data('label') || '';
-      if (lbl.includes('entity-form-handler')) {
-        const pos = n.position();
-        handlerPos = { x: Math.round(pos.x), y: Math.round(pos.y) };
-      }
     });
-    
-    return {
-      create: getChildren(ids.create),
-      edit: getChildren(ids.edit),
-      handlerPos
-    };
-  }, routeIds);
+    req.on('error', reject);
+    req.write(data);
+    req.end();
+  });
+}
 
-  console.log('entity-form-create-route children:');
-  state.create.forEach((c, i) => console.log('  ' + i + '. ' + c.argName + ': ' + c.label));
-  console.log('entity-form-edit-route children:');
-  state.edit.forEach((c, i) => console.log('  ' + i + '. ' + c.argName + ': ' + c.label));
-  console.log('entity-form-handler position:', state.handlerPos);
+async function main() {
+  console.log('=== User scenario: expand route, then assoc-empty ===\n');
 
-  // Show positions of edit-route children
-  const positions = await page.evaluate((editId) => {
-    const nodeId = 'fn-' + editId;
-    const children = [];
-    cy.edges().forEach(e => {
-      if (e.source().id() === nodeId) {
-        const target = e.target();
-        const pos = target.position();
-        children.push({
-          argName: e.data('argName'),
-          label: (target.data('label') || '').substring(0, 25).replace(/\n/g, '|'),
-          y: Math.round(pos.y)
-        });
-      }
-    });
-    return children.sort((a, b) => a.y - b.y);
-  }, routeIds.edit);
+  // Step 1: Initial state - metrics-route at level 0
+  console.log('Step 1: Initial state (level 0)');
+  let result = await makeRequest(metricsRouteId, {});
+  console.log('Nodes:', result.nodes.map(n => n.data.label?.split('\n')[0]).join(', '));
 
-  console.log('\nentity-form-edit-route children sorted by Y:');
-  positions.forEach(c => console.log('  y=' + c.y + ': ' + c.argName + ' - ' + c.label));
+  // Step 2: Expand metrics-route to level 1 (shows direct refs)
+  console.log('\nStep 2: Expand metrics-route to level 1');
+  result = await makeRequest(metricsRouteId, {
+    ['fn-' + metricsRouteId]: 1
+  });
 
-  await browser.close();
-})();
+  console.log('Nodes:');
+  result.nodes.forEach(n => {
+    const label = n.data.label?.split('\n')[0] || '(value)';
+    console.log('  ' + label + ' (' + n.data.id.substring(0, 40) + '...)');
+  });
+
+  // Check for key edges
+  let keyEdges = result.edges.filter(e => e.data.argName === 'key');
+  console.log('\nEdges with argName "key":');
+  keyEdges.forEach(e => {
+    const srcNode = result.nodes.find(n => n.data.id === e.data.source);
+    const tgtNode = result.nodes.find(n => n.data.id === e.data.target);
+    console.log('  ' + (srcNode?.data.label?.split('\n')[0] || e.data.source) +
+                ' --[key]--> ' + (tgtNode?.data.label || e.data.target));
+  });
+
+  // Step 3: Expand to level 2 (shows method-map)
+  console.log('\n\nStep 3: Expand metrics-route to level 2');
+  result = await makeRequest(metricsRouteId, {
+    ['fn-' + metricsRouteId]: 2
+  });
+
+  console.log('Nodes:');
+  result.nodes.filter(n => n.data.type === 'fn').forEach(n => {
+    const label = n.data.label?.split('\n')[0];
+    console.log('  ' + label + ' (' + n.data.id.substring(0, 40) + '...)');
+  });
+
+  keyEdges = result.edges.filter(e => e.data.argName === 'key');
+  console.log('\nEdges with argName "key":');
+  if (keyEdges.length === 0) {
+    console.log('  (none)');
+  }
+  keyEdges.forEach(e => {
+    const srcNode = result.nodes.find(n => n.data.id === e.data.source);
+    const tgtNode = result.nodes.find(n => n.data.id === e.data.target);
+    console.log('  ' + (srcNode?.data.label?.split('\n')[0] || e.data.source) +
+                ' --[key]--> ' + (tgtNode?.data.label || e.data.target));
+  });
+
+  // Find method-map to expand it
+  const methodMapNode = result.nodes.find(n =>
+    n.data.label && n.data.label.startsWith('method-map'));
+
+  if (!methodMapNode) {
+    console.log('ERROR: method-map not found at level 2');
+    return;
+  }
+
+  // Step 4: Expand method-map to show assoc-handler
+  console.log('\n\nStep 4: Expand method-map to level 1 (shows assoc-handler)');
+  const methodMapNodeId = methodMapNode.data.id;
+
+  result = await makeRequest(metricsRouteId, {
+    ['fn-' + metricsRouteId]: 2,
+    [methodMapNodeId]: 1
+  });
+
+  console.log('Nodes:');
+  result.nodes.filter(n => n.data.type === 'fn').forEach(n => {
+    const label = n.data.label?.split('\n')[0];
+    console.log('  ' + label + ' (' + n.data.id.substring(0, 40) + '...)');
+  });
+
+  keyEdges = result.edges.filter(e => e.data.argName === 'key');
+  console.log('\nEdges with argName "key":');
+  if (keyEdges.length === 0) {
+    console.log('  (none)');
+  }
+  keyEdges.forEach(e => {
+    const srcNode = result.nodes.find(n => n.data.id === e.data.source);
+    const tgtNode = result.nodes.find(n => n.data.id === e.data.target);
+    console.log('  ' + (srcNode?.data.label?.split('\n')[0] || e.data.source) +
+                ' --[key]--> ' + (tgtNode?.data.label || e.data.target));
+  });
+
+  // Verification
+  console.log('\n=== VERIFICATION ===');
+
+  // Check if method-map has a key edge
+  const methodMapKeyEdges = keyEdges.filter(e => {
+    const srcNode = result.nodes.find(n => n.data.id === e.data.source);
+    return srcNode?.data.label?.startsWith('method-map');
+  });
+
+  // Check if assoc-handler has a key edge
+  const assocHandlerKeyEdges = keyEdges.filter(e => {
+    const srcNode = result.nodes.find(n => n.data.id === e.data.source);
+    return srcNode?.data.label?.startsWith('assoc-handler');
+  });
+
+  if (methodMapKeyEdges.length === 0 && assocHandlerKeyEdges.length === 1) {
+    console.log('PASS: key: "get" shows ONLY on assoc-handler (correct!)');
+  } else if (methodMapKeyEdges.length > 0 && assocHandlerKeyEdges.length > 0) {
+    console.log('FAIL: key: "get" shows on BOTH method-map AND assoc-handler (duplicate!)');
+  } else if (methodMapKeyEdges.length > 0 && assocHandlerKeyEdges.length === 0) {
+    console.log('FAIL: key: "get" shows ONLY on method-map (should be on assoc-handler)');
+  } else {
+    console.log('INFO: No key edges found - need deeper expansion?');
+  }
+}
+
+main().catch(console.error);

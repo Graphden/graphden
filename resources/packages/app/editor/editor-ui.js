@@ -73,8 +73,10 @@ function selectFnByName(name, updateHistory = true) {
 
 /**
  * Set expansion level for a node (click)
+ * @param {string} nodeId - The Cytoscape node ID (e.g., "fn-uuid" or "fn-uuid1_uuid2")
+ * @param {number} level - Expansion level
  */
-function setExpansionLevel(originalFnId, level) {
+function setExpansionLevel(nodeId, level) {
   // Clear any pending preview debounce timer to prevent race condition:
   // If user clicks while preview debounce is pending, the debounced callback
   // would fire AFTER this render, causing the old overlay to be preserved
@@ -83,15 +85,20 @@ function setExpansionLevel(originalFnId, level) {
     previewDebounceTimer = null;
   }
 
+  // Extract originalFnId from nodeId for anchor (last UUID in the node ID)
+  // Node IDs are either "fn-{uuid}" or "fn-{uuid1}_{uuid2}"
+  const parts = nodeId.replace('fn-', '').split('_');
+  const originalFnId = parts[parts.length - 1];
+
   // Set this node as anchor so it stays stationary during layout
   anchorFnId = originalFnId;
 
   if (level === 0) {
-    expansionLevel.delete(originalFnId);
+    expansionLevel.delete(nodeId);
   } else {
-    expansionLevel.set(originalFnId, level);
+    expansionLevel.set(nodeId, level);
   }
-  previewLevel.delete(originalFnId);
+  previewLevel.delete(nodeId);
   renderGraph(false);
 
   // Clear anchor after render
@@ -100,13 +107,15 @@ function setExpansionLevel(originalFnId, level) {
 
 /**
  * Set preview level (hover)
+ * @param {string} nodeId - The Cytoscape node ID (e.g., "fn-uuid" or "fn-uuid1_uuid2")
+ * @param {number|null} level - Preview level or null to clear
  *
  * Uses debouncing to prevent flickering when:
  * 1. Mouse moves between overlay lines (level changes within same overlay)
  * 2. Overlays are rebuilt (mouseleave fires on removed overlays)
  */
-function setPreviewLevel(originalFnId, level) {
-  const oldLevel = previewLevel.get(originalFnId);
+function setPreviewLevel(nodeId, level) {
+  const oldLevel = previewLevel.get(nodeId);
 
   // Clear any pending debounce timer
   if (previewDebounceTimer) {
@@ -115,17 +124,17 @@ function setPreviewLevel(originalFnId, level) {
   }
 
   if (level === null) {
-    // Only process if there was actually a preview set for this fnId
+    // Only process if there was actually a preview set for this nodeId
     if (oldLevel === undefined) {
-      return; // No preview was set for this fnId
+      return; // No preview was set for this nodeId
     }
 
     // Debounce the clear to allow mouseenter on new overlay to cancel it
     previewDebounceTimer = setTimeout(() => {
       // Re-check: if preview level changed (mouse entered another overlay), don't clear
-      const currentLevel = previewLevel.get(originalFnId);
+      const currentLevel = previewLevel.get(nodeId);
       if (currentLevel === oldLevel) {
-        previewLevel.delete(originalFnId);
+        previewLevel.delete(nodeId);
         renderGraph(false);
       }
     }, PREVIEW_DEBOUNCE_MS);
@@ -138,9 +147,9 @@ function setPreviewLevel(originalFnId, level) {
     // Debounce the preview change
     previewDebounceTimer = setTimeout(() => {
       // Re-check in case state changed during debounce
-      const currentLevel = previewLevel.get(originalFnId);
+      const currentLevel = previewLevel.get(nodeId);
       if (currentLevel !== level) {
-        previewLevel.set(originalFnId, level);
+        previewLevel.set(nodeId, level);
         renderGraph(false);
       }
     }, PREVIEW_DEBOUNCE_MS);

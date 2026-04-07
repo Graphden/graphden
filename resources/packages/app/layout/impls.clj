@@ -165,8 +165,14 @@
         max-visible-ancestors 4
 
         get-effective-level
-        (fn [fn-id]
-          (get expansions fn-id 0))
+        ;; Get expansion level for a fn, considering its context
+        ;; First try [expansion-root fn-id], then fall back to [nil fn-id] (canonical)
+        ;; Also support legacy format {fn-id level} for tests
+        (fn [fn-id expansion-root]
+          (or (get expansions [expansion-root fn-id])
+              (get expansions [nil fn-id])
+              (get expansions fn-id)  ;; Legacy format support
+              0))
 
         add-fn-node
         (fn [original-fn-id is-root expansion-root]
@@ -188,8 +194,10 @@
           ;; Key insight: expansion-root being nil means we're NOT inside an expansion
           ;; (either this is the expansion root itself, or it's a level-0 fn)
           (let [use-expansion-prefix (and expansion-root (not is-root))
+                ;; Use underscore as separator between expansion-root and fn-id
+                ;; This allows parsing: fn-{uuid} or fn-{uuid1}_{uuid2}
                 node-id (if use-expansion-prefix
-                          (str "fn-" expansion-root "-" original-fn-id)
+                          (str "fn-" expansion-root "_" original-fn-id)
                           (str "fn-" original-fn-id))]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
@@ -252,25 +260,101 @@
                              :argName (when arg-name (name arg-name))
                              :isUnset true}}))))
 
+        ;; Compute sources covered by child refs of a fn
+        ;; Returns set of source-ids that child refs will handle (for binding deduplication)
+        child-covered-sources-for-fn
+        (fn [fn-id]
+          (let [fn-args (get args-by-fn fn-id [])
+                child-ref-ids (keep :ref-id fn-args)]
+            (into #{}
+                  (mapcat (fn [child-ref-id]
+                            (let [child-chain (get-inheritance-chain child-ref-id fn-map)]
+                              (mapcat (fn [child-fn-id]
+                                        (keep :source-id (get args-by-fn child-fn-id [])))
+                                      child-chain)))
+                          child-ref-ids))))
+
         collect-fn-args
         ;; is-structural: true when collecting args for a structural node inside expansion
         ;; For structural nodes, unbound refs (no binding) should be shown as unset, not as direct refs
         ;; This prevents false sharing with other fns that happen to have the same ancestor ref-id
-        (fn [fn-id bindings & {:keys [is-structural] :or {is-structural false}}]
+        ;; displayed-ref-arg-ids: set of arg-ids belonging to fns that are displayed as nodes in current expansion
+        ;;   If a binding's source chain leads to one of these arg-ids, the binding should be shown there, not here
+        (fn [fn-id bindings & {:keys [is-structural displayed-ref-arg-ids]
+                               :or {is-structural false displayed-ref-arg-ids #{}}}]
           (let [args (get args-by-fn fn-id [])
+                ;; Collect sources that child refs will handle (static)
+                ;; This catches direct children of this fn
+                child-sources (child-covered-sources-for-fn fn-id)
+                ;; Combined set: both static child sources AND dynamically displayed ref arg-ids
+                all-covered-sources (into child-sources displayed-ref-arg-ids)
+                ;; Check if a binding's source chain leads to covered sources
+                binding-goes-to-child?
+                (fn [binding-key]
+                  (loop [sid binding-key]
+                    (when sid
+                      (if (contains? all-covered-sources sid)
+                        true
+                        (let [src-arg (get arg-map sid)]
+                          (recur (:source-id src-arg)))))))
                 all-args (mapv (fn [arg]
                                  (let [arg-name (resolve-arg-name arg arg-map)
                                        has-value (some? (:value arg))
                                        has-ref (some? (:ref-id arg))
+                                       ;; Check if this fn DEFINES the ref (source has no ref)
+                                       ;; vs INHERITS the ref (source also has ref)
+                                       ;; Only structural nodes with INHERITED unbound refs should be unset
+                                       source-has-ref (when-let [sid (:source-id arg)]
+                                                        (let [source-arg (get arg-map sid)]
+                                                          (some? (:ref-id source-arg))))
+                                       defines-own-ref (and has-ref (not source-has-ref))
                                        ;; Check for binding - applies to UNSET args
                                        ;; For structural nodes, also check binding for args with ref
-                                       binding (or (get bindings (:id arg))
-                                                   (when-let [sid (:source-id arg)]
-                                                     (get bindings sid)))]
+                                       binding-key (or (:id arg) (:source-id arg))
+                                       raw-binding (or (get bindings (:id arg))
+                                                       (when-let [sid (:source-id arg)]
+                                                         (get bindings sid)))
+                                       ;; If binding goes to a child ref, don't use it here
+                                       binding (when (and raw-binding
+                                                          (not (binding-goes-to-child? binding-key)))
+                                                 raw-binding)]
                                    (cond
-                                     ;; Binding ref - these come from bindings map, should use canonical ID
-                                     ;; Mark with :is-binding true so process-fn knows to use nil expansion-root
-                                     (and binding (:ref-id binding))
+                                     ;; CRITICAL: Any node with ref DEFINED HERE takes precedence
+                                     ;; over any binding! The arg's own ref-id is what matters, not
+                                     ;; an ancestor binding that has a DIFFERENT ref-id.
+                                     ;; Example: list-10.coll -> list-10-9 (defines own ref)
+                                     ;;   binding from list-11.coll -> list-10 should NOT override
+                                     ;; Example: editor-scripts.item1 -> dagre-script (defines own ref)
+                                     ;;   binding from editor-routes.item1 -> favicon-route should NOT override
+                                     ;; NOTE: This applies to BOTH structural AND canonical nodes!
+                                     (and has-ref defines-own-ref)
+                                     {:type :ref :arg-name arg-name
+                                      :ref-id (:ref-id arg) :arg-id (:id arg)
+                                      :is-binding false}
+
+                                     ;; Binding ref that equals arg's ref - "structural" ref
+                                     ;; The function itself defines this ref, binding just repeats it
+                                     ;; NOT treated as binding - keep chain-bindings flowing to children
+                                     (and binding (:ref-id binding) (= (:ref-id binding) (:ref-id arg)))
+                                     {:type :ref :arg-name arg-name
+                                      :ref-id (:ref-id arg) :arg-id (:id arg)
+                                      :is-binding false}
+
+                                     ;; Binding ref that OVERRIDES an existing ref (arg has ref, binding has different ref)
+                                     ;; Mark with :is-binding true so process-fn uses canonical mode
+                                     ;; This is a real override - external fn replaces what this arg refs
+                                     ;; NOTE: Only applies when NOT (is-structural AND defines-own-ref) - checked above
+                                     (and binding (:ref-id binding) has-ref (not= (:ref-id binding) (:ref-id arg)))
+                                     {:type :ref :arg-name (:arg-name binding)
+                                      :ref-id (:ref-id binding) :arg-id (:arg-id binding)
+                                      :is-binding true}
+
+                                     ;; Binding ref for a truly UNSET arg (no ref AND no value)
+                                     ;; This IS an external binding - use canonical mode for the target!
+                                     ;; Example: entity-form-handler binding for handler arg in assoc-handler
+                                     ;; When inside expansion, handler should stay canonical (shared)
+                                     ;; CRITICAL: arg with value should NOT be overridden by binding ref
+                                     (and binding (:ref-id binding) (not has-ref) (not has-value))
                                      {:type :ref :arg-name (:arg-name binding)
                                       :ref-id (:ref-id binding) :arg-id (:arg-id binding)
                                       :is-binding true}
@@ -279,21 +363,26 @@
                                      {:type :value :arg-name (:arg-name binding)
                                       :value (:value binding) :arg-id (:arg-id binding)}
 
-                                     ;; Direct ref - but for structural nodes WITHOUT binding, treat as unset
-                                     ;; This prevents pair-1.item1 from pointing to favicon-route
+                                     ;; Direct ref - non-structural always shows as ref
                                      (and has-ref (not is-structural))
                                      {:type :ref :arg-name arg-name
                                       :ref-id (:ref-id arg) :arg-id (:id arg)
                                       :is-binding false}
 
-                                     ;; Structural node with unbound ref - treat as unset
-                                     (and has-ref is-structural)
+                                     ;; Structural node with INHERITED unbound ref - treat as unset
+                                     ;; Example: if parent has ref to X and child inherits it without binding
+                                     (and has-ref is-structural (not defines-own-ref))
                                      {:type :unset :arg-name arg-name
                                       :arg-type (:type arg) :arg-id (:id arg)}
 
                                      has-value
                                      {:type :value :arg-name arg-name
                                       :value (:value arg) :arg-id (:id arg)}
+
+                                     ;; Binding existed but went to child - hide this arg entirely
+                                     ;; Like Clojure function inlining: args are REPLACED at point of use
+                                     raw-binding
+                                     nil
 
                                      :else
                                      {:type :unset :arg-name arg-name
@@ -365,10 +454,11 @@
                         ;; leads to an arg inside a displayed ref-fn, this arg is a binding for
                         ;; that ref-fn's arg and should be shown inside, not as direct child
                         binds-to-ref-fn (and (:source-id arg)
-                                             (source-chain-binds-to-ref-fn (:source-id arg)))]
-                    ;; TEMPORARILY disable binds-to-ref-fn check - it's too aggressive
-                    ;; TODO: fix the logic to only exclude args that bind to DISPLAYED ref-fn args
-                    (when (not already-covered)
+                                             (source-chain-binds-to-ref-fn (:source-id arg)))
+                        ;; Skip if: already covered OR (has binding AND binds to ref-fn)
+                        ;; The binding will appear on the ref-fn instead
+                        skip-binding-to-ref (and binding binds-to-ref-fn)]
+                    (when (and (not already-covered) (not skip-binding-to-ref))
                       ;; Mark as covered (including all sources in chain)
                       (loop [sid source-id]
                         (when sid
@@ -450,22 +540,52 @@
                   ;; When inside an expansion context (expansion-root is set),
                   ;; we WANT to show bindings - they should appear here, not at the root
                   ;; Mark as structural when inside expansion - prevents false refs to other fns
-                  (let [all-args (collect-fn-args display-fn-id bindings :is-structural (some? expansion-root))]
+                  ;;
+                  ;; Compute displayed-ref-arg-ids: arg-ids of fns that will be displayed as child nodes
+                  ;; This is used to hide bindings that will appear on child nodes instead
+                  (let [displayed-ref-arg-ids
+                        (when (some? expansion-root)
+                          ;; Collect all ref-ids from this fn's args and bindings
+                          (let [fn-args (get args-by-fn display-fn-id [])
+                                ref-fn-ids (into #{}
+                                                 (concat
+                                                  (keep :ref-id fn-args)
+                                                  (keep (fn [arg]
+                                                          (when-let [b (get bindings (:id arg))]
+                                                            (:ref-id b)))
+                                                        fn-args)))]
+                            ;; Get all arg-ids from these ref-fns (including inheritance chains)
+                            (into #{}
+                                  (mapcat (fn [ref-fn-id]
+                                            (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
+                                              (mapcat (fn [rfn-id]
+                                                        (map :id (get args-by-fn rfn-id [])))
+                                                      ref-chain)))
+                                          ref-fn-ids))))
+                        all-args (collect-fn-args display-fn-id bindings
+                                                  :is-structural (some? expansion-root)
+                                                  :displayed-ref-arg-ids (or displayed-ref-arg-ids #{}))]
                     (doseq [arg all-args]
                       (case (:type arg)
                         ;; For refs: binding refs use canonical ID (nil expansion-root)
                         ;; structural refs use expansion context
-                        ;; IMPORTANT: when switching to canonical mode (nil expansion-root),
-                        ;; don't pass expansion bindings - they don't apply to canonical nodes
+                        ;; is-binding flag controls node identity:
+                        ;; - is-binding=true: external binding (e.g. handler), use canonical ID
+                        ;; - is-binding=false: structural ref, use expansion prefix
+                        ;; IMPORTANT: bindings should still flow to children in both cases!
+                        ;; The handler's children need the bindings from chain.
                         :ref (let [ref-expansion-root (if (:is-binding arg) nil expansion-root)
-                                   ref-bindings (if (:is-binding arg) {} bindings)]
+                                   ;; Keep bindings flowing - they're needed for handler's children
+                                   ref-bindings bindings]
                                (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root))
                         :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
                         :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
                         nil))))
                 node-id))
 
-            (process-expanded-fn [original-fn-id level source-node-id edge-arg-name is-root source-arg-id parent-bindings]
+            (process-expanded-fn [original-fn-id level source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root]
+              ;; parent-expansion-root: if we're nested inside another expansion, keep that context
+              ;; Otherwise, this fn becomes its own expansion root
               (let [chain (get-inheritance-chain original-fn-id fn-map)
                     display-fn-id (nth chain (min level (dec (count chain))) original-fn-id)
                     ;; Build chain bindings to pass to nested fns
@@ -473,8 +593,15 @@
                     ;; Merge with parent-bindings (parent takes precedence)
                     base-chain-bindings (build-chain-bindings chain (inc level) args-by-fn arg-map)
                     chain-bindings (merge base-chain-bindings parent-bindings)
-                    ;; Add the node - expansion root is nil because this IS the expansion root
-                    node-id (add-fn-node original-fn-id is-root nil)]
+                    ;; Determine expansion root for this node and its children:
+                    ;; - If we're already inside an expansion (parent-expansion-root set),
+                    ;;   keep that context to avoid merging nodes from different expansions
+                    ;; - If this is a top-level expansion (parent-expansion-root is nil),
+                    ;;   this fn becomes the expansion root
+                    effective-expansion-root (or parent-expansion-root original-fn-id)
+                    ;; Add the node with appropriate expansion root
+                    ;; Only use nil (canonical) if this is truly a top-level expansion
+                    node-id (add-fn-node original-fn-id is-root parent-expansion-root)]
 
 
                 ;; Add edge from parent
@@ -530,8 +657,10 @@
 
                   ;; Show ancestor refs (structural expansion)
                   ;; These will show bindings as their children
+                  ;; Pass ALL chain-bindings - deduplication happens in collect-fn-args
+                  ;; Use effective-expansion-root to maintain context through nested expansions
                   (doseq [arg ancestor-refs]
-                    (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) original-fn-id))
+                    (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root))
 
                   ;; For bindings (level-0 refs/values and ancestor values):
                   ;; Show at root ONLY if they DON'T flow to ancestor refs
@@ -562,10 +691,15 @@
                                 (let [src-arg (get arg-map sid)]
                                   (recur (:source-id src-arg)))))))]
 
-                    ;; Level-0 refs: show if not covered by ancestor refs
+                    ;; Level-0 refs: determine expansion-root based on context
+                    ;; - If we're nested inside another expansion (parent-expansion-root set),
+                    ;;   level-0 refs are STRUCTURAL children of this nested expansion
+                    ;;   and should use parent-expansion-root to stay isolated per-context
+                    ;; - If we're at top-level (parent-expansion-root nil),
+                    ;;   level-0 refs are potentially SHARED and should use nil (canonical IDs)
                     (doseq [arg level-0-refs]
                       (when-not (binding-covered? arg)
-                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) nil)))
+                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root)))
 
                     ;; Level-0 values: show if not covered
                     (doseq [arg level-0-values]
@@ -584,10 +718,14 @@
                 node-id))
 
             (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root]
-              (let [level (get-effective-level fn-id)]
+              ;; Get expansion level for this fn in its context
+              ;; expansion-root is the parent expansion context (nil for top-level)
+              (let [level (get-effective-level fn-id expansion-root)]
                 (if (> level 0)
-                  ;; Expanded mode - process-expanded-fn will set its own expansion-root
-                  (process-expanded-fn fn-id level source-node-id edge-arg-name is-root source-arg-id parent-bindings)
+                  ;; Expanded mode - pass parent expansion-root to maintain context
+                  ;; If we're already inside an expansion (expansion-root is set),
+                  ;; nested expansions should stay in that context
+                  (process-expanded-fn fn-id level source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root)
                   (let [bindings (build-arg-bindings fn-id args-by-fn arg-map)
                         ;; Merge parent bindings - parent takes precedence
                         bindings (if parent-bindings
@@ -924,9 +1062,12 @@
 
    Logic:
    1. Find all parents of shared node
-   2. Compute their column depths (distance from root)
-   3. Find max depth (rightmost parent)
-   4. For each parent, offset = max_depth - their_depth
+   2. The parent closest to root (min depth) is the 'keeper' - NO offset needed
+   3. Other parents need offset = keeper_depth - their_depth (to align columns)
+
+   Note: This works with remove-shared-from-upper-parents which keeps the shared
+   child only for the min-depth parent. Other parents don't have the shared child
+   but still need edges drawn TO the shared node, hence the offset.
 
    Returns map: parent-id -> offset (number of extra columns to shift right)"
   [shared-nodes parents-map column-depths]
@@ -934,12 +1075,15 @@
     (fn [offsets shared-id]
       (let [parent-ids (get parents-map shared-id [])
             parent-depths (map (fn [pid] [pid (get column-depths pid 0)]) parent-ids)
-            max-depth (if (seq parent-depths)
-                        (apply max (map second parent-depths))
+            ;; Find min depth - this is the "keeper" parent (no offset needed)
+            min-depth (if (seq parent-depths)
+                        (apply min (map second parent-depths))
                         0)]
         (reduce
           (fn [offs [pid depth]]
-            (let [needed-offset (- max-depth depth)]
+            ;; Only parents DEEPER than min need offset (to reach the shared node)
+            ;; The keeper (min-depth parent) gets offset=0
+            (let [needed-offset (- depth min-depth)]
               (if (> needed-offset 0)
                 ;; Take max if parent already has an offset from another shared node
                 (update offs pid (fn [old] (max (or old 0) needed-offset)))
@@ -951,22 +1095,39 @@
 
 
 (defn- remove-shared-from-upper-parents
-  "For each shared node, remove it from children lists of all parents EXCEPT the last one.
+  "For each shared node, remove it from children lists of parents that should NOT place it.
+
+   Algorithm:
+   1. Sort parents by column depth ASCENDING (shallowest/closest to root first)
+   2. The SHALLOWEST parent keeps the shared child (ensures reachability from root)
+   3. When depths are equal, the LATER parent in original order keeps it (for horizontal branch)
+   4. All other (deeper) parents have the shared child removed
 
    This ensures:
-   - Upper parents don't process the shared node at all
-   - Shared node is placed only in the branch of the bottom parent
+   - Shared node is reachable from root (shallowest parent places it)
+   - Deterministic ordering (not dependent on arbitrary edge map order)
+   - When depths equal, last parent wins (original butlast semantics for horizontal branch)
    - Edges still exist for drawing (edges are separate from children-map)"
-  [children-map parents-map shared-nodes]
+  [children-map parents-map shared-nodes column-depths]
   (reduce
     (fn [cm shared-id]
       (let [parent-ids (get parents-map shared-id [])
-            upper-parents (butlast parent-ids)]
+            ;; Create indexed entries: [parent-id depth index]
+            ;; Sort by depth ASC (shallowest first), then by index DESC (later wins in ties)
+            indexed-parents (map-indexed (fn [idx pid]
+                                           [pid (get column-depths pid Integer/MAX_VALUE) idx])
+                                         parent-ids)
+            ;; Sort: min depth first; within same depth, max index first
+            sorted-parents (sort-by (fn [[_pid depth idx]] [depth (- idx)]) indexed-parents)
+            ;; The first entry after sorting (shallowest, or latest if same depth) is the "keeper"
+            ;; All others should have shared child removed
+            keeper (first (first sorted-parents))
+            parents-to-remove (remove #(= % keeper) parent-ids)]
         (reduce
           (fn [cm2 parent-id]
             (update cm2 parent-id (fn [kids] (vec (remove #(= % shared-id) kids)))))
           cm
-          upper-parents)))
+          parents-to-remove)))
     children-map
     shared-nodes))
 
@@ -992,6 +1153,9 @@
         path-positions (compute-path-positions children parents shared-nodes)
 
         ;; Pre-calculate sorted children for each node
+        ;; Compute column depths FIRST - needed for determining which parent keeps shared nodes
+        column-depths (compute-column-depths root-id children)
+
         sorted-children-map
         (into {}
               (map (fn [node-id]
@@ -1002,12 +1166,12 @@
                                               path-positions)])
                    (keys node-data-map)))
 
-        ;; Remove shared nodes from upper parents' children lists
+        ;; Remove shared nodes from deeper parents' children lists
+        ;; Parent closest to root (min depth) keeps the shared child
         sorted-children-map (remove-shared-from-upper-parents
-                              sorted-children-map parents shared-nodes)
+                              sorted-children-map parents shared-nodes column-depths)
 
-        ;; Compute column offsets for upper parents of shared nodes
-        column-depths (compute-column-depths root-id children)
+        ;; Compute column offsets for parents that need to align with shared nodes
         parent-offsets (compute-parent-offsets shared-nodes parents column-depths)]
 
     (letfn [(get-sorted-children [node-id]
@@ -1217,10 +1381,25 @@
     (let [;; Parse root-id
           root-id (java.util.UUID/fromString root-id-str)
 
-          ;; Parse expansions: {"uuid-string": level} -> {uuid: level}
+          ;; Parse expansions: {"fn-uuid-string": level} or {"fn-uuid1_uuid2": level}
+          ;; Keys have "fn-" prefix from node IDs
+          ;; For structural nodes inside expansion: "fn-{expansion-root}_{fn-id}" format
+          ;; Store as: {[expansion-root fn-id] level} or {[nil fn-id] level} for canonical
           expansions (into {}
                            (map (fn [[k v]]
-                                  [(java.util.UUID/fromString (name k)) v])
+                                  (let [k-str (name k)
+                                        ;; Remove "fn-" prefix
+                                        stripped (if (str/starts-with? k-str "fn-")
+                                                   (subs k-str 3)
+                                                   k-str)
+                                        ;; Parse: either "uuid" or "uuid1_uuid2"
+                                        [expansion-root fn-id]
+                                        (if (str/includes? stripped "_")
+                                          (let [parts (str/split stripped #"_")]
+                                            [(java.util.UUID/fromString (first parts))
+                                             (java.util.UUID/fromString (second parts))])
+                                          [nil (java.util.UUID/fromString stripped)])]
+                                    [[expansion-root fn-id] v]))
                                 expansions-raw))
 
           ;; Load data from storage

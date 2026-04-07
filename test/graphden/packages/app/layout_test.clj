@@ -5,6 +5,7 @@
    These tests load the layout impls dynamically since they're in resources/packages/."
   (:require
     [clojure.java.io :as io]
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]))
 
 
@@ -770,39 +771,28 @@
 
 
 (deftest lower-path-forms-horizontal-branch-test
-  (testing "RULE: Lower path to shared node forms horizontal branch"
+  (testing "RULE: Shallowest parent keeps shared node for reachability"
     ;; Structure:
     ;;   A -> B -> S (shared)
     ;;   A -> C -> E -> S (shared)
     ;;
-    ;; B and C are divergence roots. C has longer path (via E).
-    ;; C is on lower path (last parent path).
-    ;; For C, path-to-shared child (E) should go FIRST to form horizontal branch.
+    ;; B (depth 1) and E (depth 2) are parents of S.
+    ;; With "shallowest parent keeps" rule:
+    ;; - B keeps S (closer to root)
+    ;; - E loses S from children list
+    ;;
+    ;; This ensures reachability: S is always reachable from root via shallowest path.
+    ;; If deepest parent kept S, and that parent was in a disconnected subtree,
+    ;; S would not be placed.
     ;;
     ;; Expected layout:
     ;;   row 0: A  B  S
     ;;   row 1:    C  E
-    ;; Wait, that's wrong. S should be on lower path horizontal.
     ;;
-    ;; Let me reconsider. If C is on lower path:
-    ;; - Lower path = C -> E -> S
-    ;; - This should form horizontal branch: C, E, S on same row
-    ;;
-    ;; B is on upper path:
-    ;; - B should have S removed (upper parent)
-    ;; - B just placed, no S attached
-    ;;
-    ;; Expected:
-    ;;   row 0: A  B
-    ;;   row 1:    C  E  S
-    ;;
-    ;; Or with divergence root grouping (B and C adjacent):
-    ;;   row 0: A  B
-    ;;   row 1:    C  E  S
-    ;; B at row 0 (first child of A, same row)
+    ;; A, B at row 0 (horizontal branch)
+    ;; S at row 0 (first child of B, same row)
     ;; C at row 1 (second child of A)
     ;; E at row 1 (first child of C, same row)
-    ;; S at row 1 (first child of E, same row)
     (let [nodes [(make-node "A") (make-node "B") (make-node "C")
                  (make-node "E") (make-node "S")]
           edges [(make-edge "A" "B") (make-edge "A" "C")
@@ -810,13 +800,13 @@
           result (layout-elements nodes edges)
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
-          c-row (:row (get-pos result "C"))
-          e-row (:row (get-pos result "E"))
+          a-row (:row (get-pos result "A"))
+          b-row (:row (get-pos result "B"))
           s-row (:row (get-pos result "S"))]
-      ;; C, E, S should all be on the same row (lower path horizontal branch)
-      (is (= c-row e-row s-row)
-          (str "Lower path C -> E -> S should be horizontal branch. "
-               "C row=" c-row ", E row=" e-row ", S row=" s-row)))))
+      ;; A, B, S should all be on the same row (shallowest path horizontal branch)
+      (is (= a-row b-row s-row)
+          (str "Shallowest path A -> B -> S should be horizontal branch. "
+               "A row=" a-row ", B row=" b-row ", S row=" s-row)))))
 
 
 (deftest upper-path-children-go-last-test
@@ -863,20 +853,24 @@
 
 
 (deftest lower-path-children-go-first-test
-  (testing "RULE: Lower path nodes have path-to-shared children sorted FIRST"
+  (testing "RULE: Shallowest parent keeps shared node - path-to-shared behavior"
     ;; Structure:
-    ;;   A -> B -> S (shared, B is upper path)
-    ;;   A -> C -> E -> S (shared, C is lower path)
+    ;;   A -> B -> S (shared, B is shallowest parent of S)
+    ;;   A -> C -> E -> S (shared, E is deeper parent of S)
     ;;   A -> C -> X (neutral child of C)
     ;;
-    ;; C is on lower path to S. Its children are E (path-to-shared) and X (neutral).
-    ;; For lower path: path-to-shared (E) goes FIRST.
-    ;; So E should be first child of C (horizontal branch), X below.
+    ;; With "shallowest parent keeps" rule:
+    ;; - B (depth 1) keeps S as child
+    ;; - E (depth 2) loses S from children
     ;;
-    ;; Expected:
-    ;;   row 0: A  B
-    ;;   row 1:    C  E  S
+    ;; Expected layout:
+    ;;   row 0: A  B  S
+    ;;   row 1:    C  E
     ;;   row 2:       X
+    ;;
+    ;; B and S on same row (B keeps S, horizontal branch)
+    ;; C and E on same row (E is first child of C)
+    ;; X below E (second child of C)
     (let [nodes [(make-node "A") (make-node "B") (make-node "C")
                  (make-node "E") (make-node "X") (make-node "S")]
           edges [(make-edge "A" "B") (make-edge "A" "C")
@@ -886,22 +880,24 @@
           result (layout-elements nodes edges)
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
+          a-row (:row (get-pos result "A"))
+          b-row (:row (get-pos result "B"))
           c-row (:row (get-pos result "C"))
           e-row (:row (get-pos result "E"))
           x-row (:row (get-pos result "X"))
           s-row (:row (get-pos result "S"))]
-      ;; C and E on same row (E is first child, path-to-shared on lower path)
+      ;; A, B, S on same row (shallowest path horizontal branch)
+      (is (= a-row b-row s-row)
+          (str "A, B, S should be on same row (shallowest keeps S). "
+               "A row=" a-row ", B row=" b-row ", S row=" s-row))
+      ;; C and E on same row (E is first child of C)
       (is (= c-row e-row)
-          (str "C and E should be on same row (lower path, path-to-shared first). "
+          (str "C and E should be on same row. "
                "C row=" c-row ", E row=" e-row))
-      ;; E and S on same row (horizontal branch continues)
-      (is (= e-row s-row)
-          (str "E and S should be on same row (horizontal branch). "
-               "E row=" e-row ", S row=" s-row))
-      ;; X should be below E (neutral child goes last on lower path)
-      (is (> x-row e-row)
-          (str "X should be below E (neutral child last on lower path). "
-               "E row=" e-row ", X row=" x-row)))))
+      ;; X should be below C (second child of C)
+      (is (> x-row c-row)
+          (str "X should be below C. "
+               "C row=" c-row ", X row=" x-row)))))
 
 
 (deftest divergence-roots-preserve-position-test
@@ -947,3 +943,519 @@
             (str "D should be in middle. Sorted order: " sorted-children))
         (is (= 1 (Math/abs (- c-idx d-idx)))
             (str "C and D must be adjacent. Sorted order: " sorted-children))))))
+
+
+;; =============================================================================
+;; BINDING PROPAGATION TESTS
+;; =============================================================================
+
+;; Resolve private functions for testing binding propagation
+(def ^:private build-graph-elements
+  (when layout-ns
+    @(ns-resolve layout-ns 'build-graph-elements)))
+
+(def ^:private build-lookups
+  (when layout-ns
+    @(ns-resolve layout-ns 'build-lookups)))
+
+(def ^:private add-bindings-from-fn
+  (when layout-ns
+    @(ns-resolve layout-ns 'add-bindings-from-fn)))
+
+
+(deftest bindings-propagate-through-coll-chain-test
+  (testing "Bindings from root should propagate through coll ref chain"
+    ;; This test verifies the bug fix for:
+    ;; When expanding editor-routes, bindings (item1->favicon-route, etc.)
+    ;; should propagate through the coll chain (list-10 -> list-10-9 -> ... -> pair-1)
+    ;;
+    ;; Structure simulating the bug:
+    ;;   root (binds item1=child1, item2=child2)
+    ;;     inherits from: parent (has coll ref -> container)
+    ;;       container (has item1, item2 args)
+    ;;
+    ;; When expanding root level 1:
+    ;; - parent's coll arg refs container
+    ;; - container's item1/item2 should show bindings from root (child1, child2)
+    ;; - NOT show as unset "any"
+    ;;
+    ;; The bug was: container.coll was classified as "binding ref" because
+    ;; build-arg-bindings created a binding for it from its own ref_id.
+    ;; This caused ref-bindings={} to be passed, losing the chain bindings.
+    (let [;; Mock data structure
+          container-id (random-uuid)
+          parent-id (random-uuid)
+          root-id (random-uuid)
+          child1-id (random-uuid)
+          child2-id (random-uuid)
+
+          ;; Args
+          container-item1-arg-id (random-uuid)
+          container-item2-arg-id (random-uuid)
+          parent-coll-arg-id (random-uuid)
+          root-item1-arg-id (random-uuid)
+          root-item2-arg-id (random-uuid)
+
+          ;; Functions
+          fns [{:id container-id :name :container :parent-id nil}
+               {:id parent-id :name :parent :parent-id container-id}
+               {:id root-id :name :root :parent-id parent-id}
+               {:id child1-id :name :child1 :parent-id nil}
+               {:id child2-id :name :child2 :parent-id nil}]
+
+          ;; Arguments
+          args [;; container's args (no values - these are primary args)
+                {:id container-item1-arg-id :fn-id container-id :name :item1 :source-id nil}
+                {:id container-item2-arg-id :fn-id container-id :name :item2 :source-id nil}
+                ;; parent's coll arg - refs container (structural ref)
+                {:id parent-coll-arg-id :fn-id parent-id :name :coll :source-id nil :ref-id container-id}
+                ;; root's bindings for item1/item2 (via source chain to container args)
+                {:id root-item1-arg-id :fn-id root-id :source-id container-item1-arg-id :ref-id child1-id}
+                {:id root-item2-arg-id :fn-id root-id :source-id container-item2-arg-id :ref-id child2-id}]
+
+          lookups (build-lookups {:fns fns :args args})
+          expansions {root-id 1}  ;; Expand root to level 1
+
+          result (build-graph-elements root-id expansions lookups)
+          nodes (:nodes result)
+          edges (:edges result)]
+
+      ;; Find edges from container to its children
+      ;; Container should be a structural node inside the expansion
+      (let [container-node (some #(when (and (= "fn" (get-in % [:data :type]))
+                                              (.contains (str (get-in % [:data :id])) (str container-id)))
+                                    %)
+                                  nodes)
+            container-node-id (get-in container-node [:data :id])
+
+            ;; Edges from container
+            container-edges (filter #(= container-node-id (get-in % [:data :source])) edges)
+
+            ;; Find child1 and child2 nodes
+            child1-node (some #(when (.contains (str (get-in % [:data :id])) (str child1-id)) %) nodes)
+            child2-node (some #(when (.contains (str (get-in % [:data :id])) (str child2-id)) %) nodes)]
+
+        ;; Verify container node exists
+        (is container-node
+            "Container should be present as a node")
+
+        ;; Verify child1 and child2 are referenced (bindings applied)
+        (is child1-node
+            "child1 should be present - binding from root should propagate through coll chain")
+        (is child2-node
+            "child2 should be present - binding from root should propagate through coll chain")
+
+        ;; Verify edges exist from container to children
+        (when (and container-node-id child1-node child2-node)
+          (let [edge-targets (set (map #(get-in % [:data :target]) container-edges))]
+            (is (contains? edge-targets (get-in child1-node [:data :id]))
+                (str "Container should have edge to child1. Edges: " (pr-str container-edges)))
+            (is (contains? edge-targets (get-in child2-node [:data :id]))
+                (str "Container should have edge to child2. Edges: " (pr-str container-edges)))))))))
+
+
+;; =============================================================================
+;; EXPANSION NODE IDENTITY TESTS (Bug fix tests)
+;; =============================================================================
+
+;; These tests verify correct handling of node identity during expansions:
+;; 1. Structural nodes inside different expansion contexts should NOT merge
+;; 2. True shared nodes should remain shared when parent is expanded
+
+(deftest structural-nodes-should-not-merge-test
+  (testing "Structural nodes inside different expansion contexts should NOT merge"
+    ;; This test reproduces the bug:
+    ;; - Two routes (route1, route2) both inherit from route
+    ;; - route has method-map ref, which has assoc-handler ref
+    ;; - When BOTH routes are expanded to level 2 (shows method-map)
+    ;;   AND BOTH method-maps are expanded to level 1 (shows assoc-handler)
+    ;; - Each route should have its OWN assoc-handler node
+    ;; - BUG: assoc-handler nodes were merging into one shared node
+    ;;
+    ;; Inheritance chain:
+    ;;   assoc-handler (base)
+    ;;     method-map (refs assoc-handler)
+    ;;       route (refs method-map)
+    ;;         route1 (binds specific value)
+    ;;         route2 (binds specific value)
+    ;;
+    ;; When expanding:
+    ;;   route1 at level 2: shows fn-route1 -> fn-route1_method-map
+    ;;   route2 at level 2: shows fn-route2 -> fn-route2_method-map
+    ;;   Then expanding method-maps:
+    ;;   fn-route1_method-map at level 1: should show fn-route1_method-map -> fn-route1_assoc-handler
+    ;;   fn-route2_method-map at level 1: should show fn-route2_method-map -> fn-route2_assoc-handler
+    ;;
+    ;; Key: assoc-handler must be STRUCTURAL (per-context), not canonical (shared)
+
+    (let [;; IDs
+          assoc-handler-id (random-uuid)
+          method-map-id (random-uuid)
+          route-id (random-uuid)
+          route1-id (random-uuid)
+          route2-id (random-uuid)
+
+          ;; Args
+          assoc-handler-key-arg-id (random-uuid)  ;; assoc-handler has :key arg
+          method-map-handler-arg-id (random-uuid) ;; method-map has :handler -> assoc-handler
+          route-method-arg-id (random-uuid)       ;; route has :method -> method-map
+          route1-value-arg-id (random-uuid)       ;; route1 binds :key to "get"
+          route2-value-arg-id (random-uuid)       ;; route2 binds :key to "post"
+
+          fns [{:id assoc-handler-id :name :assoc-handler :parent-id nil}
+               {:id method-map-id :name :method-map :parent-id nil}
+               {:id route-id :name :route :parent-id nil}
+               {:id route1-id :name :route1 :parent-id route-id}
+               {:id route2-id :name :route2 :parent-id route-id}]
+
+          args [;; assoc-handler has :key arg (primary, unset)
+                {:id assoc-handler-key-arg-id :fn-id assoc-handler-id :name :key :source-id nil}
+                ;; method-map refs assoc-handler via :handler arg
+                {:id method-map-handler-arg-id :fn-id method-map-id :name :handler :source-id nil :ref-id assoc-handler-id}
+                ;; route refs method-map via :method arg
+                {:id route-method-arg-id :fn-id route-id :name :method :source-id nil :ref-id method-map-id}
+                ;; route1 binds :key to "get" (via source chain to assoc-handler-key)
+                {:id route1-value-arg-id :fn-id route1-id :source-id assoc-handler-key-arg-id :value "get"}
+                ;; route2 binds :key to "post" (via source chain to assoc-handler-key)
+                {:id route2-value-arg-id :fn-id route2-id :source-id assoc-handler-key-arg-id :value "post"}]
+
+          lookups (build-lookups {:fns fns :args args})
+
+          ;; Simulate the browser expansion state:
+          ;; 1. Select some parent that shows both routes (here we use route1-id as root for simplicity)
+          ;;    In real scenario, there would be a parent list containing both routes
+          ;; 2. Expand route1 to level 2 (shows method-map)
+          ;; 3. Expand route2 to level 2 (shows method-map)
+          ;; 4. Expand both method-maps to level 1 (shows assoc-handler)
+          ;;
+          ;; Key insight: expansions use [expansion-root fn-id] format
+          ;; - route1's method-map has expansion-root = route1-id
+          ;; - route2's method-map has expansion-root = route2-id
+          ;; When method-map is expanded, it should preserve its parent expansion-root
+
+          ;; First test: just route1 expanded
+          ;; Both routes need to be visible - let's create a parent that refs both
+          parent-id (random-uuid)
+          parent-route1-arg-id (random-uuid)
+          parent-route2-arg-id (random-uuid)
+          fns-with-parent (conj fns {:id parent-id :name :parent :parent-id nil})
+          args-with-parent (concat args
+                                   [{:id parent-route1-arg-id :fn-id parent-id :name :r1 :source-id nil :ref-id route1-id}
+                                    {:id parent-route2-arg-id :fn-id parent-id :name :r2 :source-id nil :ref-id route2-id}])
+          lookups-with-parent (build-lookups {:fns fns-with-parent :args args-with-parent})
+
+          ;; Expansions: expand both routes to level 2, then expand their method-maps
+          ;; Note: method-map nodes inside route1 expansion have ID "fn-route1_method-map"
+          ;;       method-map nodes inside route2 expansion have ID "fn-route2_method-map"
+          ;; Their expansion keys in the map should be:
+          ;;   [route1-id method-map-id] -> level for method-map in route1's context
+          ;;   [route2-id method-map-id] -> level for method-map in route2's context
+          expansions {[nil route1-id] 2     ;; Expand route1 to level 2 (shows method-map ancestor)
+                      [nil route2-id] 2     ;; Expand route2 to level 2 (shows method-map ancestor)
+                      [route1-id method-map-id] 1  ;; Expand method-map inside route1's context
+                      [route2-id method-map-id] 1} ;; Expand method-map inside route2's context
+
+          result (build-graph-elements parent-id expansions lookups-with-parent)
+          nodes (:nodes result)
+
+          ;; Find assoc-handler FN nodes (not arg nodes)
+          assoc-handler-nodes (filter #(and (= "fn" (get-in % [:data :type]))
+                                            (str/includes? (str (get-in % [:data :id])) (str assoc-handler-id)))
+                                      nodes)]
+
+      ;; THE KEY TEST: There should be TWO assoc-handler nodes, not one!
+      ;; One for route1's expansion context, one for route2's
+      (is (= 2 (count assoc-handler-nodes))
+          (str "Should have 2 separate assoc-handler nodes (one per route context). "
+               "Found: " (count assoc-handler-nodes)
+               ", IDs: " (mapv #(get-in % [:data :id]) assoc-handler-nodes)
+               ", All node IDs: " (mapv #(get-in % [:data :id]) nodes))))))
+
+
+(deftest true-shared-nodes-should-remain-shared-test
+  (testing "True shared nodes should remain shared when BOTH parents are expanded"
+    ;; This test reproduces the bug:
+    ;; - Two routes (route1, route2) both use the SAME handler (shared-handler)
+    ;; - shared-handler is a DIRECT ref at level 0 (not structural/ancestor)
+    ;; - When BOTH routes are expanded (showing their ancestors), shared-handler should:
+    ;;   - Still be a SINGLE node (canonical ID: fn-{shared-handler-id})
+    ;;   - Have edges from BOTH route1 and route2
+    ;; - BUG: shared-handler was being duplicated (one per route expansion context)
+    ;;
+    ;; Structure:
+    ;;   shared-handler (base fn)
+    ;;   ancestor (base fn, has :method arg)
+    ;;   route1 inherits from ancestor, refs shared-handler
+    ;;   route2 inherits from ancestor, refs shared-handler
+    ;;   parent refs both routes
+    ;;
+    ;; Key difference from test 1: shared-handler is a level-0 ref (binding),
+    ;; NOT a structural ref from ancestor chain. It should remain shared.
+
+    (let [;; IDs
+          shared-handler-id (random-uuid)
+          ancestor-id (random-uuid)
+          route1-id (random-uuid)
+          route2-id (random-uuid)
+          parent-id (random-uuid)
+          method-map-id (random-uuid)  ;; an ancestor ref that routes expand to
+
+          ;; Args
+          ancestor-method-arg-id (random-uuid)  ;; ancestor has :method -> method-map
+          route1-handler-arg-id (random-uuid)   ;; route1 binds :handler -> shared-handler
+          route2-handler-arg-id (random-uuid)   ;; route2 binds :handler -> shared-handler
+          parent-r1-arg-id (random-uuid)
+          parent-r2-arg-id (random-uuid)
+
+          fns [{:id shared-handler-id :name :shared-handler :parent-id nil}
+               {:id method-map-id :name :method-map :parent-id nil}
+               {:id ancestor-id :name :ancestor :parent-id nil}
+               {:id route1-id :name :route1 :parent-id ancestor-id}
+               {:id route2-id :name :route2 :parent-id ancestor-id}
+               {:id parent-id :name :parent :parent-id nil}]
+
+          args [;; ancestor has :method -> method-map (structural ref)
+                {:id ancestor-method-arg-id :fn-id ancestor-id :name :method :source-id nil :ref-id method-map-id}
+                ;; route1 has handler -> shared-handler (level-0 binding)
+                {:id route1-handler-arg-id :fn-id route1-id :name :handler :source-id nil :ref-id shared-handler-id}
+                ;; route2 has handler -> shared-handler (level-0 binding, same target!)
+                {:id route2-handler-arg-id :fn-id route2-id :name :handler :source-id nil :ref-id shared-handler-id}
+                ;; parent refs both routes
+                {:id parent-r1-arg-id :fn-id parent-id :name :r1 :source-id nil :ref-id route1-id}
+                {:id parent-r2-arg-id :fn-id parent-id :name :r2 :source-id nil :ref-id route2-id}]
+
+          lookups (build-lookups {:fns fns :args args})
+
+          ;; Expand BOTH routes to level 1 (shows ancestor with method-map)
+          ;; The level-0 shared-handler should remain ONE node with edges from both
+          expansions {[nil route1-id] 1
+                      [nil route2-id] 1}
+
+          result (build-graph-elements parent-id expansions lookups)
+          nodes (:nodes result)
+          edges (:edges result)
+
+          ;; Find shared-handler FN nodes (not arg nodes)
+          shared-handler-nodes (filter #(and (= "fn" (get-in % [:data :type]))
+                                              (str/includes? (str (get-in % [:data :id])) (str shared-handler-id)))
+                                       nodes)
+
+          ;; Find edges pointing to shared-handler
+          shared-handler-node-ids (set (map #(get-in % [:data :id]) shared-handler-nodes))
+          edges-to-handler (filter #(contains? shared-handler-node-ids (get-in % [:data :target])) edges)]
+
+      ;; THE KEY TEST: There should be exactly ONE shared-handler node
+      ;; (Canonical ID, not expansion-prefixed)
+      ;; BUG: When both routes are expanded, shared-handler gets duplicated
+      (is (= 1 (count shared-handler-nodes))
+          (str "Should have exactly 1 shared-handler node (true shared). "
+               "Found: " (count shared-handler-nodes)
+               ", IDs: " (mapv #(get-in % [:data :id]) shared-handler-nodes)
+               ", All FN nodes: " (mapv #(get-in % [:data :id])
+                                        (filter #(= "fn" (get-in % [:data :type])) nodes))))
+
+      ;; AND: There should be TWO edges pointing to it (from route1 and route2)
+      (is (= 2 (count edges-to-handler))
+          (str "Should have 2 edges pointing to shared-handler (from both routes). "
+               "Found: " (count edges-to-handler)
+               ", Sources: " (mapv #(get-in % [:data :source]) edges-to-handler))))))
+
+
+(deftest external-binding-for-unset-arg-should-be-canonical-test
+  (testing "External binding for unset arg should create canonical node, not prefixed"
+    ;; This test reproduces the exact bug:
+    ;;
+    ;; Structure like entity-form-handler:
+    ;;   shared-handler (base fn)
+    ;;   assoc-handler (has :handler arg with source pointing to :value)
+    ;;   method-map refs assoc-handler
+    ;;   route refs method-map
+    ;;   route1 inherits route, binds :handler -> shared-handler
+    ;;   route2 inherits route, binds :handler -> shared-handler
+    ;;   parent refs both routes
+    ;;
+    ;; When route1 is expanded (shows route ancestor with method-map ref):
+    ;; - method-map is processed with expansion-root = route1
+    ;; - method-map refs assoc-handler
+    ;; - assoc-handler has :handler arg (unset, no ref-id)
+    ;; - Binding from route1 provides shared-handler for :handler
+    ;;
+    ;; The bug: collect-fn-args marks binding for unset arg as is-binding=false
+    ;; because the condition checks (not has-ref) but doesn't distinguish
+    ;; between local refs (structural) and external refs (from chain-bindings)
+    ;;
+    ;; Expected: shared-handler should be canonical (no prefix)
+    ;; Bug: shared-handler gets prefixed with route1's ID
+
+    (let [;; IDs
+          shared-handler-id (random-uuid)
+          assoc-handler-id (random-uuid)
+          method-map-id (random-uuid)
+          route-id (random-uuid)
+          route1-id (random-uuid)
+          route2-id (random-uuid)
+          parent-id (random-uuid)
+
+          ;; Args
+          ;; assoc-handler has :handler arg (unset - no ref-id, no value)
+          assoc-handler-handler-arg-id (random-uuid)
+          ;; method-map refs assoc-handler
+          method-map-value-arg-id (random-uuid)
+          ;; route refs method-map
+          route-item2-arg-id (random-uuid)
+          ;; route1 binds :handler -> shared-handler
+          ;; This binding flows through chain: route1 -> route -> method-map -> assoc-handler
+          route1-handler-arg-id (random-uuid)
+          ;; route2 binds :handler -> shared-handler (same target!)
+          route2-handler-arg-id (random-uuid)
+          ;; parent refs both routes
+          parent-r1-arg-id (random-uuid)
+          parent-r2-arg-id (random-uuid)
+
+          fns [{:id shared-handler-id :name :shared-handler :parent-id nil}
+               {:id assoc-handler-id :name :assoc-handler :parent-id nil}
+               {:id method-map-id :name :method-map :parent-id nil}
+               {:id route-id :name :route :parent-id nil}
+               {:id route1-id :name :route1 :parent-id route-id}
+               {:id route2-id :name :route2 :parent-id route-id}
+               {:id parent-id :name :parent :parent-id nil}]
+
+          args [;; assoc-handler has :handler arg (unset - primary arg)
+                {:id assoc-handler-handler-arg-id :fn-id assoc-handler-id :name :handler :source-id nil}
+                ;; method-map refs assoc-handler
+                {:id method-map-value-arg-id :fn-id method-map-id :name :value :source-id nil :ref-id assoc-handler-id}
+                ;; route refs method-map
+                {:id route-item2-arg-id :fn-id route-id :name :item2 :source-id nil :ref-id method-map-id}
+                ;; route1 binds :handler via source chain (source points to assoc-handler's arg)
+                {:id route1-handler-arg-id :fn-id route1-id :source-id assoc-handler-handler-arg-id :ref-id shared-handler-id}
+                ;; route2 binds :handler via source chain (same structure, same target!)
+                {:id route2-handler-arg-id :fn-id route2-id :source-id assoc-handler-handler-arg-id :ref-id shared-handler-id}
+                ;; parent refs both routes
+                {:id parent-r1-arg-id :fn-id parent-id :name :r1 :source-id nil :ref-id route1-id}
+                {:id parent-r2-arg-id :fn-id parent-id :name :r2 :source-id nil :ref-id route2-id}]
+
+          lookups (build-lookups {:fns fns :args args})
+
+          ;; Expand only route1 to level 1 (shows route ancestor with method-map ref)
+          ;; shared-handler appears as binding for assoc-handler's :handler arg
+          expansions {[nil route1-id] 1}
+
+          result (build-graph-elements parent-id expansions lookups)
+          nodes (:nodes result)
+          edges (:edges result)
+
+          ;; Find shared-handler nodes
+          shared-handler-nodes (filter #(and (= "fn" (get-in % [:data :type]))
+                                              (str/includes? (str (get-in % [:data :id])) (str shared-handler-id)))
+                                       nodes)
+
+          ;; Find edges pointing to shared-handler
+          shared-handler-node-ids (set (map #(get-in % [:data :id]) shared-handler-nodes))
+          edges-to-handler (filter #(contains? shared-handler-node-ids (get-in % [:data :target])) edges)]
+
+      ;; THE KEY TEST: shared-handler should be canonical (fn-{id}), not prefixed
+      (is (= 1 (count shared-handler-nodes))
+          (str "Should have exactly 1 shared-handler node. "
+               "Found: " (count shared-handler-nodes)
+               ", IDs: " (mapv #(get-in % [:data :id]) shared-handler-nodes)))
+
+      ;; Verify it's canonical (no underscore = no prefix)
+      (when (= 1 (count shared-handler-nodes))
+        (let [node-id (get-in (first shared-handler-nodes) [:data :id])]
+          (is (not (str/includes? node-id "_"))
+              (str "shared-handler should have canonical ID (no underscore). "
+                   "Got: " node-id)))))))
+
+
+(deftest structural-coll-ref-keeps-bindings-test
+  (testing "Structural coll ref should NOT be treated as binding ref"
+    ;; This test reproduces the exact bug structure:
+    ;;
+    ;; Database structure (like editor-routes -> list-11 -> list-10 chain):
+    ;;
+    ;; Inheritance:
+    ;;   conj-any (base)
+    ;;     list-10 (has coll ref to list-10-9, item10 unset)
+    ;;       list-11 (has coll ref to list-10, item11 unset)
+    ;;         editor-routes (binds item10 to metrics-route via source chain)
+    ;;
+    ;; The bug:
+    ;; 1. When expanding editor-routes level 1, process-expanded-fn shows list-10 as ancestor ref
+    ;; 2. Structural list-10 is processed via process-any-fn -> process-fn
+    ;; 3. process-any-fn calls build-arg-bindings(list-10) which creates:
+    ;;    bindings[base-coll-arg-id] = {ref-id: list-10-9}
+    ;;    (because list-10.coll has source=base-coll and ref=list-10-9)
+    ;; 4. Then merge with parent-bindings (chain-bindings from editor-routes)
+    ;; 5. collect-fn-args(list-10, merged-bindings, :is-structural true) runs
+    ;; 6. For list-10.coll: finds binding from step 3, marks :is-binding true
+    ;; 7. Because :is-binding true, ref-bindings={} is passed to list-10-9
+    ;; 8. list-10-9 loses all chain-bindings, its children show as unset
+    ;;
+    ;; The fix: refs that exist in the original fn (not from chain-bindings)
+    ;; should NOT be treated as "binding refs" - they should pass chain-bindings.
+
+    (let [;; Simulate: conj-any -> list-10-9 -> list-10 -> list-11 -> root
+          ;;           with root binding list-10-9.item9 to child-fn
+
+          conj-any-id (random-uuid)
+          list-10-9-id (random-uuid)
+          list-10-id (random-uuid)
+          list-11-id (random-uuid)
+          root-id (random-uuid)
+          child-fn-id (random-uuid)
+
+          ;; Args
+          conj-any-coll-arg-id (random-uuid)
+          conj-any-item-arg-id (random-uuid)
+
+          list-10-9-coll-arg-id (random-uuid)  ;; source=conj-any-coll, ref=nil (empty coll)
+          list-10-9-item9-arg-id (random-uuid) ;; source=conj-any-item, ref=nil (unset)
+
+          list-10-coll-arg-id (random-uuid)    ;; source=conj-any-coll, ref=list-10-9
+          list-10-item10-arg-id (random-uuid)  ;; source=conj-any-item, ref=nil (unset)
+
+          list-11-coll-arg-id (random-uuid)    ;; source=conj-any-coll, ref=list-10
+          list-11-item11-arg-id (random-uuid)  ;; source=conj-any-item, ref=nil (unset)
+
+          root-item9-arg-id (random-uuid)      ;; source=list-10-9-item9, ref=child-fn
+
+          fns [{:id conj-any-id :name :conj-any :parent-id nil}
+               {:id list-10-9-id :name :list-10-9 :parent-id conj-any-id}
+               {:id list-10-id :name :list-10 :parent-id conj-any-id}
+               {:id list-11-id :name :list-11 :parent-id conj-any-id}
+               {:id root-id :name :root :parent-id list-11-id}
+               {:id child-fn-id :name :child-fn :parent-id nil}]
+
+          args [;; conj-any args (primary)
+                {:id conj-any-coll-arg-id :fn-id conj-any-id :name :coll :source-id nil}
+                {:id conj-any-item-arg-id :fn-id conj-any-id :name :item :source-id nil}
+
+                ;; list-10-9: empty coll, item9 unset
+                {:id list-10-9-coll-arg-id :fn-id list-10-9-id :source-id conj-any-coll-arg-id}
+                {:id list-10-9-item9-arg-id :fn-id list-10-9-id :name :item9 :source-id conj-any-item-arg-id}
+
+                ;; list-10: coll refs list-10-9, item10 unset
+                {:id list-10-coll-arg-id :fn-id list-10-id :source-id conj-any-coll-arg-id :ref-id list-10-9-id}
+                {:id list-10-item10-arg-id :fn-id list-10-id :name :item10 :source-id conj-any-item-arg-id}
+
+                ;; list-11: coll refs list-10, item11 unset
+                {:id list-11-coll-arg-id :fn-id list-11-id :source-id conj-any-coll-arg-id :ref-id list-10-id}
+                {:id list-11-item11-arg-id :fn-id list-11-id :name :item11 :source-id conj-any-item-arg-id}
+
+                ;; root: binds item9 to child-fn
+                ;; The binding goes via source chain: root-item9 -> list-10-9-item9 -> conj-any-item
+                {:id root-item9-arg-id :fn-id root-id :source-id list-10-9-item9-arg-id :ref-id child-fn-id}]
+
+          lookups (build-lookups {:fns fns :args args})
+          expansions {root-id 1}  ;; Expand root to level 1 (shows list-11 ancestor)
+
+          result (build-graph-elements root-id expansions lookups)
+          nodes (:nodes result)
+          edges (:edges result)]
+
+      ;; The bug: child-fn would NOT appear because bindings were lost at list-10 -> list-10-9 step
+      ;; The fix: child-fn should appear, connected from list-10-9's item9 arg
+      (let [child-fn-node (some #(when (.contains (str (get-in % [:data :id])) (str child-fn-id)) %) nodes)]
+        (is child-fn-node
+            (str "child-fn should be in graph - binding should propagate through coll chain. "
+                 "Node IDs: " (mapv #(get-in % [:data :id]) nodes)))))))

@@ -77,6 +77,24 @@ When processing add-10:
 - Bindings do NOT apply to canonical nodes (refs at level 0)
 - This prevents false edges like `favicon-route → metrics-handler`
 
+**Defines-own-ref rule (critical for coll chains):**
+When a structural node has an arg that DEFINES its own ref (the source arg has no ref),
+that arg's ref-id takes precedence over any ancestor binding with a different ref-id.
+
+```
+Example: editor-routes → list-11 → list-10 → list-10-9
+         (where list-11.coll → list-10, list-10.coll → list-10-9)
+
+When processing structural list-10:
+- list-10.coll has ref-id = list-10-9 (defines own ref - source has no ref)
+- Binding from list-11.coll has ref-id = list-10 (different from list-10-9)
+- Because list-10 DEFINES its own coll ref, use list-10-9, NOT the binding's list-10
+- This ensures the coll chain continues: list-10 → list-10-9 → list-10-8 → ...
+```
+
+Without this rule, the binding would incorrectly override the structural ref,
+breaking the coll chain and hiding all nested items.
+
 #### 2.4 Output
 
 ```clojure

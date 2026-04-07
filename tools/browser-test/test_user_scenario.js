@@ -1,0 +1,150 @@
+const { chromium } = require('playwright');
+
+// User's exact scenario:
+// 1. Select metrics-route
+// 2. Expand route (click + button on metrics-route) - shows method-map
+// 3. Expand assoc-empty (click + button on method-map node) - shows assoc-handler
+// 4. Check: key: "get" should appear ONLY on assoc-handler, NOT on method-map
+
+(async () => {
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  await page.setViewportSize({ width: 1400, height: 900 });
+
+  console.log('Loading metrics-route...');
+  await page.goto('http://localhost:9002/#metrics-route');
+  await page.waitForTimeout(2000);
+
+  // Step 1: Check initial state
+  console.log('\n=== Step 1: Initial state ===');
+  let edges = await page.evaluate(() => {
+    const result = [];
+    cy.edges().forEach(e => {
+      if (e.data('argName') === 'key') {
+        const src = e.source();
+        const tgt = e.target();
+        result.push({
+          source: src.data('label')?.split('\n')[0] || src.id(),
+          target: tgt.data('label') || tgt.id()
+        });
+      }
+    });
+    return result;
+  });
+  console.log('key edges:', edges.length === 0 ? 'none' : edges.map(e => `${e.source} --[key]--> ${e.target}`).join(', '));
+
+  // Step 2: Expand root to level 1
+  console.log('\n=== Step 2: Expand metrics-route to level 1 ===');
+  await page.evaluate(() => {
+    const rootId = cy.nodes().filter(n => n.data('isRoot')).first().data('originalFnId');
+    setExpansionLevel(rootId, 1);
+  });
+  await page.waitForTimeout(1500);
+
+  edges = await page.evaluate(() => {
+    const result = [];
+    cy.edges().forEach(e => {
+      if (e.data('argName') === 'key') {
+        const src = e.source();
+        const tgt = e.target();
+        result.push({
+          source: src.data('label')?.split('\n')[0] || src.id(),
+          target: tgt.data('label') || tgt.id()
+        });
+      }
+    });
+    return result;
+  });
+  console.log('key edges:', edges.map(e => `${e.source} --[key]--> ${e.target}`).join(', '));
+
+  // Step 3: Expand root to level 2 (shows method-map and assoc-handler)
+  console.log('\n=== Step 3: Expand metrics-route to level 2 ===');
+  await page.evaluate(() => {
+    const rootId = cy.nodes().filter(n => n.data('isRoot')).first().data('originalFnId');
+    setExpansionLevel(rootId, 2);
+  });
+  await page.waitForTimeout(1500);
+
+  edges = await page.evaluate(() => {
+    const result = [];
+    cy.edges().forEach(e => {
+      if (e.data('argName') === 'key') {
+        const src = e.source();
+        const tgt = e.target();
+        result.push({
+          source: src.data('label')?.split('\n')[0] || src.id(),
+          target: tgt.data('label') || tgt.id()
+        });
+      }
+    });
+    return result;
+  });
+  console.log('key edges:', edges.map(e => `${e.source} --[key]--> ${e.target}`).join(', '));
+
+  // Find method-map node
+  const methodMapInfo = await page.evaluate(() => {
+    let result = null;
+    cy.nodes().forEach(n => {
+      const label = n.data('label') || '';
+      if (label.startsWith('method-map')) {
+        result = {
+          id: n.id(),
+          originalFnId: n.data('originalFnId'),
+          label: label.split('\n')[0]
+        };
+      }
+    });
+    return result;
+  });
+
+  if (!methodMapInfo) {
+    console.log('ERROR: method-map node not found');
+    await page.screenshot({ path: '/tmp/editor-screenshot.png' });
+    await browser.close();
+    return;
+  }
+  console.log('Found method-map:', methodMapInfo.id);
+
+  // Step 4: Expand method-map to level 1
+  console.log('\n=== Step 4: Expand method-map to level 1 ===');
+  await page.evaluate((fnId) => {
+    setExpansionLevel(fnId, 1);
+  }, methodMapInfo.originalFnId);
+  await page.waitForTimeout(1500);
+
+  edges = await page.evaluate(() => {
+    const result = [];
+    cy.edges().forEach(e => {
+      if (e.data('argName') === 'key') {
+        const src = e.source();
+        const tgt = e.target();
+        result.push({
+          source: src.data('label')?.split('\n')[0] || src.id(),
+          target: tgt.data('label') || tgt.id()
+        });
+      }
+    });
+    return result;
+  });
+  console.log('key edges:', edges.map(e => `${e.source} --[key]--> ${e.target}`).join(', '));
+
+  // Verification
+  console.log('\n=== VERIFICATION ===');
+  const methodMapKeyEdges = edges.filter(e => e.source === 'method-map');
+  const assocHandlerKeyEdges = edges.filter(e => e.source === 'assoc-handler');
+
+  if (methodMapKeyEdges.length === 0 && assocHandlerKeyEdges.length === 1) {
+    console.log('PASS: key shows ONLY on assoc-handler');
+  } else if (methodMapKeyEdges.length > 0 && assocHandlerKeyEdges.length > 0) {
+    console.log('FAIL: key shows on BOTH method-map AND assoc-handler (DUPLICATE!)');
+  } else if (methodMapKeyEdges.length > 0) {
+    console.log('FAIL: key shows on method-map but NOT on assoc-handler');
+  } else {
+    console.log('INFO: Unexpected state - edges:', JSON.stringify(edges));
+  }
+
+  await page.screenshot({ path: '/tmp/editor-screenshot.png' });
+  console.log('\nScreenshot saved: /tmp/editor-screenshot.png');
+
+  await browser.close();
+})();

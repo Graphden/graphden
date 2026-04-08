@@ -9,8 +9,9 @@
    1. Children of a node are placed RIGHT of parent, never above
    2. First child is on SAME ROW as parent, others are BELOW (each on own row)
    3. Horizontal branch = chain of first children
-   4. Shared nodes (multiple parents) go in horizontal branch of LAST parent
-   5. Splitting siblings (leading to same shared node) must be adjacent in child list"
+   4. Shared nodes (multiple parents) are placed by SHALLOWEST parent (min column depth)
+   5. Splitting siblings (leading to same shared node) must be adjacent in child list
+   6. Parents of shared nodes are aligned via column offsets (shallower parents shift right)"
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]

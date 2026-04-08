@@ -52,7 +52,7 @@ Critical for correct sharing behavior:
 |---------|----------------|---------|
 | Root node | `fn-{original-fn-id}` | Canonical ID |
 | Expanded root | `fn-{original-fn-id}` | Same - expansion doesn't change ID |
-| Inside expansion | `fn-{expansion-root}-{ancestor-fn-id}` | Scoped to expansion context |
+| Inside expansion | `fn-{expansion-root}_{ancestor-fn-id}` | Scoped to expansion context (underscore separator) |
 | Canonical ref (level 0) | `fn-{ref-fn-id}` | Shared across all references |
 
 **Key insight:** Nodes inside an expansion context get prefixed IDs. This ensures:
@@ -178,8 +178,9 @@ This ensures the lower path forms a horizontal branch leading directly to the
 shared node, while upper paths curve down to meet it.
 
 **Category 5: The shared node itself**
-Removed from children lists of all parents EXCEPT the bottom (last) parent.
-This ensures it is placed only once, at the end of the lower path's horizontal branch.
+Removed from children lists of all parents EXCEPT the **shallowest** parent (min column depth;
+when depths are equal, the later parent in edge order wins).
+This ensures it is placed only once, by the parent closest to root.
 
 **Category 6: Secondary divergence (special case)**
 When a path that already diverged (upper or lower) diverges again for the SAME
@@ -232,12 +233,16 @@ Divergence roots are grouped together at their original position but not moved.
 - Path-to-shared children go **LAST** (higher row numbers)
 - Neutral children go **FIRST**
 - This pushes the path-to-shared subtree down, making room for the lower path above
+- **Exception:** If the node is an **expansion root** (has expansion children with
+  IDs like `fn-{parent-id}_{child-id}`), path-to-shared children go **FIRST** instead.
+  This ensures expansion chains (e.g., method-map → assoc-handler) form horizontal
+  branches that reach the correct column depth for alignment with the other parent.
 
 **Rule 4: Path node parents (on lower path)**
 Same as Rule 2: path-to-shared children FIRST.
 
 **Rule 5: Path node parents (on upper path)**
-Same as Rule 3: path-to-shared children LAST.
+Same as Rule 3: path-to-shared children LAST (with same expansion root exception).
 
 **Rule 6: Divergence roots grouping**
 When sorting children of a pre-divergence node, divergence roots targeting the same
@@ -247,15 +252,25 @@ shared node must be adjacent. The lower-path divergence root comes LAST in the g
 
 ### Stage 5: Compute Column Offsets
 
-For shared nodes, parents at different column depths need alignment.
+For shared nodes, direct parents at different column depths need alignment so that the
+shared node (placed at keeper's col+1) is always to the RIGHT of all its parents,
+eliminating backward edges.
 
-**Problem:** If parent A is at column 2 and parent B is at column 4, their edges to the shared child would cross.
+**Problem:** If parent A is at column 3 and parent B is at column 5, an edge from B to
+the shared node at column 4 (placed by A) would go LEFT — a backward edge.
 
-**Solution:** Compute offsets to shift parent A right so both align at column 4.
+**Solution:** Compute offsets using **column-depths** (BFS distance from root).
+The deepest parent stays as-is; shallower parents shift right by the difference:
 
 ```clojure
-parent-offsets[parent-id] = max-parent-depth - parent-depth
+;; For each shared node:
+max-depth = max(column-depth(parent) for parent in parents)
+parent-offsets[parent-id] = max-depth - column-depth(parent-id)
+;; Multiple shared nodes: take max offset per parent
 ```
+
+**Effect:** All direct parents end up at the same column. The shared node goes one
+column to the right, guaranteeing no backward edges.
 
 ### Stage 6: Place Nodes (THE CRITICAL ALGORITHM)
 
@@ -478,6 +493,26 @@ After placement, verify:
 1. All nodes have positions
 2. No position collisions (multiple nodes at same cell)
 3. No edge crossings (check reservations)
+
+## Frontend: Anchor Node Mechanism
+
+When layout changes (expansion, preview), the **anchor node** stays stationary while
+all other nodes move relative to it. This prevents disorienting jumps.
+
+**Anchor selection priority:**
+1. Explicit `anchorFnId` — set by expansion click or preview hover/clear
+2. Preview node — first key in `previewLevel` map
+3. None — graph fits to viewport
+
+**Critical timing:** `anchorFnId` and old position must be captured BEFORE the async
+`fetchBackendLayout()` call, because callers clear `anchorFnId` synchronously after
+calling `renderGraph()` (which is async). After fetch completes, the saved anchor
+position is used to compute the offset applied to all new positions.
+
+**Preview anchor:** Both `setPreviewLevel` (hover) and its clear (mouseleave) set
+`anchorFnId` before calling `renderGraph`. Without this, clearing a preview would
+cause the graph to jump back to unanchored position, then the node re-enters focus,
+re-triggering preview — creating an infinite animation loop.
 
 ## Debugging Layout Issues
 

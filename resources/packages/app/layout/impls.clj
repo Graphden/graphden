@@ -268,14 +268,30 @@
         ;; Compute sources covered by child refs of a fn
         ;; Returns set of source-ids that child refs will handle (for binding deduplication)
         child-covered-sources-for-fn
-        (fn [fn-id]
+        ;; expansion-root-chain: set of fn-ids in expansion root's inheritance chain
+        ;; Used to exclude source-ids that point to args owned by shared ancestors
+        (fn [fn-id & {:keys [expansion-root-chain] :or {expansion-root-chain #{}}}]
           (let [fn-args (get args-by-fn fn-id [])
-                child-ref-ids (keep :ref-id fn-args)]
+                child-ref-ids (keep :ref-id fn-args)
+                ;; Collect arg-ids that belong to fns in expansion-root-chain
+                ;; These are "shared ancestor args" that shouldn't be treated as covered
+                expansion-chain-arg-ids (when (seq expansion-root-chain)
+                                          (into #{}
+                                                (mapcat (fn [eid]
+                                                          (map :id (get args-by-fn eid [])))
+                                                        expansion-root-chain)))]
             (into #{}
                   (mapcat (fn [child-ref-id]
                             (let [child-chain (get-inheritance-chain child-ref-id fn-map)]
                               (mapcat (fn [child-fn-id]
-                                        (keep :source-id (get args-by-fn child-fn-id [])))
+                                        ;; Collect source-ids from args, but exclude those pointing
+                                        ;; to shared ancestor args (they're not "owned" by the child)
+                                        (keep (fn [arg]
+                                                (when-let [sid (:source-id arg)]
+                                                  (when-not (and expansion-chain-arg-ids
+                                                                 (contains? expansion-chain-arg-ids sid))
+                                                    sid)))
+                                              (get args-by-fn child-fn-id [])))
                                       child-chain)))
                           child-ref-ids))))
 
@@ -285,12 +301,12 @@
         ;; This prevents false sharing with other fns that happen to have the same ancestor ref-id
         ;; displayed-ref-arg-ids: set of arg-ids belonging to fns that are displayed as nodes in current expansion
         ;;   If a binding's source chain leads to one of these arg-ids, the binding should be shown there, not here
-        (fn [fn-id bindings & {:keys [is-structural displayed-ref-arg-ids]
-                               :or {is-structural false displayed-ref-arg-ids #{}}}]
+        (fn [fn-id bindings & {:keys [is-structural displayed-ref-arg-ids expansion-root-chain]
+                               :or {is-structural false displayed-ref-arg-ids #{} expansion-root-chain #{}}}]
           (let [args (get args-by-fn fn-id [])
                 ;; Collect sources that child refs will handle (static)
                 ;; This catches direct children of this fn
-                child-sources (child-covered-sources-for-fn fn-id)
+                child-sources (child-covered-sources-for-fn fn-id :expansion-root-chain expansion-root-chain)
                 ;; Combined set: both static child sources AND dynamically displayed ref arg-ids
                 all-covered-sources (into child-sources displayed-ref-arg-ids)
                 ;; Check if a binding's source chain leads to covered sources
@@ -422,13 +438,18 @@
                           (when-let [ref-id (:ref-id binding)]
                             (swap! ref-fn-ids conj ref-id))))))
                 ;; Collect all arg-ids that belong to displayed ref-fns (including inheritance)
+                ;; EXCLUDE args from fns that are also in the expansion root's inheritance chain.
+                ;; This prevents shared ancestors (e.g., conj-any shared by list-11 and list-10)
+                ;; from causing items to be filtered as "belonging inside ref-fn".
+                expansion-chain-fns (set chain)
                 ref-fn-arg-ids (atom #{})
                 _ (doseq [ref-fn-id @ref-fn-ids]
                     (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
                       (doseq [rfn-id ref-chain]
-                        (let [ref-args (get args-by-fn rfn-id [])]
-                          (doseq [ra ref-args]
-                            (swap! ref-fn-arg-ids conj (:id ra)))))))
+                        (when-not (contains? expansion-chain-fns rfn-id)
+                          (let [ref-args (get args-by-fn rfn-id [])]
+                            (doseq [ra ref-args]
+                              (swap! ref-fn-arg-ids conj (:id ra))))))))
                 result (atom [])
                 chain-level (atom 0)
                 ;; Helper: check if any arg in the source chain is in ref-fn-arg-ids
@@ -558,18 +579,27 @@
                                                   (keep (fn [arg]
                                                           (when-let [b (get bindings (:id arg))]
                                                             (:ref-id b)))
-                                                        fn-args)))]
-                            ;; Get all arg-ids from these ref-fns (including inheritance chains)
+                                                        fn-args)))
+                                ;; Exclude fns in expansion root's chain to prevent
+                                ;; shared ancestors (e.g., conj-any) from filtering out
+                                ;; bindings that should flow to structural nodes
+                                expansion-chain-fns (set (get-inheritance-chain expansion-root fn-map))]
+                            ;; Get all arg-ids from these ref-fns, excluding shared ancestors
                             (into #{}
                                   (mapcat (fn [ref-fn-id]
                                             (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
                                               (mapcat (fn [rfn-id]
-                                                        (map :id (get args-by-fn rfn-id [])))
+                                                        (when-not (contains? expansion-chain-fns rfn-id)
+                                                          (map :id (get args-by-fn rfn-id []))))
                                                       ref-chain)))
                                           ref-fn-ids))))
+                        exp-root-chain (when expansion-root
+                                        (set (get-inheritance-chain expansion-root fn-map)))
                         all-args (collect-fn-args display-fn-id bindings
                                                   :is-structural (some? expansion-root)
-                                                  :displayed-ref-arg-ids (or displayed-ref-arg-ids #{}))]
+                                                  :displayed-ref-arg-ids (or displayed-ref-arg-ids #{})
+                                                  :expansion-root-chain (or exp-root-chain #{}))
+]
                     (doseq [arg all-args]
                       (case (:type arg)
                         ;; For refs: binding refs use canonical ID (nil expansion-root)
@@ -677,14 +707,37 @@
                   ;; Then show uncovered bindings at root
                   (let [;; Collect all arg-ids that ancestor refs will resolve
                         ;; (by looking at their inheritance chains)
+                        ;; Collect arg-ids from ancestor ref-fns, EXCLUDING fns
+                        ;; that are also in the expansion root's inheritance chain.
+                        ;; This prevents shared ancestors (e.g., conj-any) from causing
+                        ;; items to be incorrectly filtered as "covered by ancestor ref".
+                        expansion-chain-fns (set chain)
+
+                        ;; Recursively collect all fn-ids reachable from ancestor refs
+                        ;; This walks the composition tree (following ref-ids in args)
+                        ;; so that items deep in coll chains are also covered
+                        all-ancestor-ref-fn-ids
+                        (let [result (atom #{})]
+                          (letfn [(walk [fn-id visited]
+                                    (when-not (contains? visited fn-id)
+                                      (swap! result conj fn-id)
+                                      (let [fn-args (get args-by-fn fn-id [])
+                                            child-refs (keep :ref-id fn-args)]
+                                        (doseq [cr child-refs]
+                                          (walk cr (conj visited fn-id))))))]
+                            (doseq [ref ancestor-refs]
+                              (walk (:ref-id ref) #{})))
+                          @result)
+
                         ancestor-ref-arg-sources
                         (into #{}
-                              (mapcat (fn [ref]
-                                        (let [ref-chain (get-inheritance-chain (:ref-id ref) fn-map)]
-                                          (mapcat (fn [fn-id]
-                                                    (map :id (get args-by-fn fn-id [])))
-                                                  ref-chain)))
-                                      ancestor-refs))
+                              (mapcat (fn [fn-id]
+                                        (let [fn-chain (get-inheritance-chain fn-id fn-map)]
+                                          (mapcat (fn [chain-fn-id]
+                                                    (when-not (contains? expansion-chain-fns chain-fn-id)
+                                                      (map :id (get args-by-fn chain-fn-id []))))
+                                                  fn-chain)))
+                                      all-ancestor-ref-fn-ids))
 
                         ;; Check if a binding's source chain leads to ancestor ref args
                         binding-covered?

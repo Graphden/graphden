@@ -251,8 +251,19 @@ shared node (shared node has 3+ parents):
 For each node, determine if it's on "upper" or "lower" path:
 
 - **Bottom parent:** Last parent in parent list of shared node
-- **Lower path:** Bottom parent and all its ancestors leading to shared
-- **Upper path:** All other nodes leading to shared
+- **Lower path:** Bottom parent and ancestors leading to shared, **up to but NOT including
+  the divergence point** (the node whose children split into upper/lower paths)
+- **Upper path:** Non-bottom parents and their ancestors leading to shared, same stopping rule
+- **Pre-divergence nodes** (divergence point and above): get NO path position (nil).
+  Their children are sorted by default rules (fn > fixed > free), not by path rules.
+- **Divergence roots** (the siblings where paths split): DO get path position.
+  This determines how their own children are sorted.
+
+**Propagation algorithm:** Starting from bottom parent (or upper parents), walk upward
+through the `parents` map. At each step, filter eligible parents (leads to shared,
+not a divergence point, not already marked), mark them, then continue with newly marked
+nodes. Critical: filter BEFORE marking to avoid cutting off propagation when a parent
+is marked and then immediately filtered out of the continuation set.
 
 ### Stage 4: Sort Children Lists
 

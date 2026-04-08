@@ -22,6 +22,10 @@
 
 
 ;; =============================================================================
+;; NODE ID UTILITIES
+;; =============================================================================
+
+;; =============================================================================
 ;; DATA LOADING FROM STORAGE
 ;; =============================================================================
 
@@ -1009,20 +1013,31 @@
         path-ids (->> path-children
                       (group-by :primary-target)
                       (mapcat (fn [[_target group]] (sort-by :original-idx group)))
-                      (map :id))]
+                      (map :id))
+
+        ;; Check if this node is an expansion root (has expansion children)
+        ;; Expansion children have IDs like "fn-{parent-id}_{child-fn-id}"
+        is-expansion-root (some (fn [cid]
+                                  (str/starts-with? cid (str parent-id "_")))
+                                child-ids)]
 
     ;; Final ordering based on parent's path position
     (cond
-      ;; Lower path parent: path-to-shared children FIRST (forms horizontal branch)
+      ;; Lower path: path-to-shared children FIRST (forms horizontal branch)
       is-lower-path
       (vec (concat path-ids positional-ids))
 
-      ;; Upper path parent: path-to-shared children LAST (pushed down)
+      ;; Upper path expansion root: path-to-shared children FIRST
+      ;; Expansion chains (e.g. method-map -> assoc-handler) need horizontal branch
+      ;; to reach correct column depth for alignment with the other parent
+      (and is-upper-path is-expansion-root)
+      (vec (concat path-ids positional-ids))
+
+      ;; Upper path (non-expansion): path-to-shared children LAST
       is-upper-path
       (vec (concat positional-ids path-ids))
 
-      ;; Not on any path (pre-divergence or neutral): preserve original order
-      ;; with divergence roots grouped at their position
+      ;; Not on any path: preserve original order
       :else
       (vec positional-ids))))         ; regular last           ; then divergence roots
 
@@ -1058,35 +1073,29 @@
 
 
 (defn- compute-parent-offsets
-  "For each shared node, compute how much each parent needs to be shifted right.
+  "For each shared node, compute offsets so all direct parents end up at the same column.
 
-   Logic:
-   1. Find all parents of shared node
-   2. The parent closest to root (min depth) is the 'keeper' - NO offset needed
-   3. Other parents need offset = keeper_depth - their_depth (to align columns)
+   Uses column-depths directly: the deepest parent stays as-is,
+   shallower parents get shifted right by the difference.
 
-   Note: This works with remove-shared-from-upper-parents which keeps the shared
-   child only for the min-depth parent. Other parents don't have the shared child
-   but still need edges drawn TO the shared node, hence the offset.
+   This ensures the shared node (placed at keeper's col+1) is always
+   to the RIGHT of all parents, eliminating backward edges.
 
-   Returns map: parent-id -> offset (number of extra columns to shift right)"
+   Returns map: node-id -> offset (number of extra columns to shift right)"
   [shared-nodes parents-map column-depths]
   (reduce
     (fn [offsets shared-id]
       (let [parent-ids (get parents-map shared-id [])
-            parent-depths (map (fn [pid] [pid (get column-depths pid 0)]) parent-ids)
-            ;; Find min depth - this is the "keeper" parent (no offset needed)
-            min-depth (if (seq parent-depths)
-                        (apply min (map second parent-depths))
+            parent-depths (map (fn [pid] {:id pid :depth (get column-depths pid 0)}) parent-ids)
+            max-depth (if (seq parent-depths)
+                        (apply max (map :depth parent-depths))
                         0)]
         (reduce
-          (fn [offs [pid depth]]
-            ;; Only parents DEEPER than min need offset (to reach the shared node)
-            ;; The keeper (min-depth parent) gets offset=0
-            (let [needed-offset (- depth min-depth)]
-              (if (> needed-offset 0)
-                ;; Take max if parent already has an offset from another shared node
-                (update offs pid (fn [old] (max (or old 0) needed-offset)))
+          (fn [offs {:keys [id depth]}]
+            (let [needed (- max-depth depth)]
+              (if (> needed 0)
+                ;; Take max if parent already has offset from another shared node
+                (update offs id (fn [old] (max (or old 0) needed)))
                 offs)))
           offsets
           parent-depths)))
@@ -1171,7 +1180,8 @@
         sorted-children-map (remove-shared-from-upper-parents
                               sorted-children-map parents shared-nodes column-depths)
 
-        ;; Compute column offsets for parents that need to align with shared nodes
+        ;; Compute column offsets: align direct parents of shared nodes
+        ;; Shallower parents get shifted right so all parents end up at same column
         parent-offsets (compute-parent-offsets shared-nodes parents column-depths)]
 
     (letfn [(get-sorted-children [node-id]
@@ -1196,19 +1206,14 @@
                       (recur first-child (inc actual-col) branch)
                       branch)))))
 
-            ;; Calculate branch length including offsets
-            (branch-length [branch]
-              (if (empty? branch)
-                0
-                (let [last-node (last branch)]
-                  (inc (:col last-node)))))
-
-            ;; Check if branch fits at row (all cells from row down must be free)
-            ;; We check that the entire horizontal span is free at this row
-            ;; and that we can extend down for children
+            ;; Check if branch fits at row (including reserved edge cells for offsets)
             (branch-fits-at-row? [matrix branch row]
-              (every? (fn [{:keys [col]}]
-                        (not (cell-occupied? matrix row col)))
+              (every? (fn [{:keys [col offset]}]
+                        (let [offset (or offset 0)]
+                          ;; Check the node cell AND any offset-reserved cells
+                          (and (not (cell-occupied? matrix row col))
+                               (every? #(not (cell-occupied? matrix row %))
+                                       (range (- col offset) col)))))
                       branch))
 
             ;; Find row where branch fits
@@ -1222,12 +1227,13 @@
             (place-branch [matrix branch row]
               (reduce
                 (fn [m {:keys [id col offset]}]
-                  (let [m (place-node-in-matrix m id row col)]
-                    ;; Reserve cells for horizontal edge if offset > 0
+                  (let [m (place-node-in-matrix m id row col)
+                        offset (or offset 0)]
+                    ;; Reserve cells for horizontal edge gap when offset > 0
                     (if (> offset 0)
                       (reduce (fn [m2 edge-col]
                                 (assoc-in m2 [:grid [row edge-col]]
-                                          {:edge-from (- col offset 1) :edge-to id}))
+                                          {:edge-reserve true}))
                               m
                               (range (- col offset) col))
                       m)))

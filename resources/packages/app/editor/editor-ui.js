@@ -134,8 +134,12 @@ function setPreviewLevel(nodeId, level) {
       // Re-check: if preview level changed (mouse entered another overlay), don't clear
       const currentLevel = previewLevel.get(nodeId);
       if (currentLevel === oldLevel) {
+        // Set anchor to keep the node stationary during un-preview
+        const parts = nodeId.replace('fn-', '').split('_');
+        anchorFnId = parts[parts.length - 1];
         previewLevel.delete(nodeId);
         renderGraph(false);
+        anchorFnId = null;
       }
     }, PREVIEW_DEBOUNCE_MS);
   } else {
@@ -149,8 +153,12 @@ function setPreviewLevel(nodeId, level) {
       // Re-check in case state changed during debounce
       const currentLevel = previewLevel.get(nodeId);
       if (currentLevel !== level) {
+        // Set anchor to keep the node stationary during preview
+        const parts = nodeId.replace('fn-', '').split('_');
+        anchorFnId = parts[parts.length - 1];
         previewLevel.set(nodeId, level);
         renderGraph(false);
+        anchorFnId = null;
       }
     }, PREVIEW_DEBOUNCE_MS);
   }

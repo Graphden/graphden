@@ -154,6 +154,29 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
  * Fetches nodes, edges, and layout from backend in single request
  */
 async function renderGraph(shouldFit = true) {
+  // Capture anchor BEFORE await - anchorFnId may be cleared by caller after async yield
+  const capturedAnchorFnId = anchorFnId;
+  let anchorNodeId = null;
+  let anchorOldPos = null;
+
+  if (cy) {
+    // Determine anchor node
+    if (capturedAnchorFnId) {
+      anchorNodeId = 'fn-' + capturedAnchorFnId;
+    } else if (previewLevel.size > 0) {
+      // previewLevel keys are already full node IDs (e.g., "fn-uuid")
+      anchorNodeId = previewLevel.keys().next().value;
+    }
+
+    // Save anchor position BEFORE fetch (before any async yield)
+    if (anchorNodeId) {
+      const anchorNode = cy.getElementById(anchorNodeId);
+      if (anchorNode.length) {
+        anchorOldPos = { ...anchorNode.position() };
+      }
+    }
+  }
+
   // Fetch everything from backend
   const result = await fetchBackendLayout();
   if (!result) {
@@ -169,27 +192,6 @@ async function renderGraph(shouldFit = true) {
       await createCytoscape(nodes, edges, layout, shouldFit);
     }
     return;
-  }
-
-  // Find the anchor node - the node that should stay stationary during layout
-  // Priority: 1. Explicit anchorFnId (from click/expansion)
-  //           2. Preview node (from hover)
-  let anchorNodeId = null;
-  let anchorOldPos = null;
-
-  if (anchorFnId) {
-    anchorNodeId = 'fn-' + anchorFnId;
-  } else if (previewLevel.size > 0) {
-    const previewFnId = previewLevel.keys().next().value;
-    anchorNodeId = 'fn-' + previewFnId;
-  }
-
-  // Save anchor node's current position before any changes
-  if (anchorNodeId) {
-    const anchorNode = cy.getElementById(anchorNodeId);
-    if (anchorNode.length) {
-      anchorOldPos = { ...anchorNode.position() };
-    }
   }
 
   // Stop any running animations

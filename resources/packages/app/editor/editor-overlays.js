@@ -20,40 +20,53 @@ function createDragHandle(overlay, cyNode) {
   dragHandle.style.justifyContent = 'center';
   dragHandle.innerHTML = '<span style="color:#999;font-size:8px;">⋮⋮⋮</span>';
 
-  dragHandle.addEventListener('mousedown', (e) => {
-    e.stopPropagation();
-    e.preventDefault();
-
+  // Shared drag logic for mouse and touch
+  const startDrag = (startX, startY, moveEvent, endEvent, getXY) => {
     if (!cyNode.length) return;
 
     isGrabbing = true;
     dragHandle.style.cursor = 'grabbing';
     userMovedNodes.add(cyNode.id());
 
-    let lastX = e.clientX;
-    let lastY = e.clientY;
+    let lastX = startX;
+    let lastY = startY;
 
-    const onMouseMove = (moveE) => {
-      const dx = (moveE.clientX - lastX) / cy.zoom();
-      const dy = (moveE.clientY - lastY) / cy.zoom();
-      lastX = moveE.clientX;
-      lastY = moveE.clientY;
+    const onMove = (moveE) => {
+      const [mx, my] = getXY(moveE);
+      const dx = (mx - lastX) / cy.zoom();
+      const dy = (my - lastY) / cy.zoom();
+      lastX = mx;
+      lastY = my;
 
       const pos = cyNode.position();
       cyNode.position({ x: pos.x + dx, y: pos.y + dy });
       updateOverlayPositions();
     };
 
-    const onMouseUp = () => {
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
+    const onEnd = () => {
+      document.removeEventListener(moveEvent, onMove);
+      document.removeEventListener(endEvent, onEnd);
       isGrabbing = false;
       dragHandle.style.cursor = 'grab';
     };
 
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
+    document.addEventListener(moveEvent, onMove);
+    document.addEventListener(endEvent, onEnd);
+  };
+
+  dragHandle.addEventListener('mousedown', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    startDrag(e.clientX, e.clientY, 'mousemove', 'mouseup', (e) => [e.clientX, e.clientY]);
   });
+
+  dragHandle.addEventListener('touchstart', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const touch = e.touches[0];
+    startDrag(touch.clientX, touch.clientY, 'touchmove', 'touchend',
+              (e) => [e.touches[0].clientX, e.touches[0].clientY]);
+  }, { passive: false });
 
   overlay.appendChild(dragHandle);
 }
@@ -78,7 +91,10 @@ function createOverlay(nodeId, options = {}) {
     borderRadius: options.borderRadius || '8px',
     overflow: 'hidden',
     fontFamily: 'SF Mono, Monaco, monospace',
-    fontSize: options.fontSize || '11px'
+    fontSize: options.fontSize || '11px',
+    touchAction: 'none',         // Prevent browser gestures on overlay
+    userSelect: 'none',
+    WebkitUserSelect: 'none'
   });
   return overlay;
 }
@@ -122,7 +138,10 @@ function createFnOverlay(node, container) {
     Object.assign(line.style, {
       padding: '4px 8px',
       cursor: 'pointer',
-      borderBottom: showSeparator ? '1px solid #eee' : 'none'
+      borderBottom: showSeparator ? '1px solid #eee' : 'none',
+      touchAction: 'none',       // Prevent browser scroll on touch
+      userSelect: 'none',        // Prevent text selection on long press
+      WebkitUserSelect: 'none'
     });
     line.textContent = item.name;
 
@@ -177,27 +196,27 @@ function createFnOverlay(node, container) {
       });
     });
 
-    // Click: toggle expansion
+    // Click/tap: toggle expansion
     // - If clicking on level > currentLevel: expand to that level
     // - If clicking on level <= currentLevel: collapse to that level
     //   (but clicking on level 0 when currentLevel > 0 collapses to 0)
     // Use nodeId (not originalFnId) so each expansion context is independent
-    line.addEventListener('click', (e) => {
+    const handleExpansionClick = (e) => {
       e.stopPropagation();
+      e.preventDefault();
       const clickLevel = item.groupLevel;
 
       if (clickLevel > currentLevel) {
-        // Expanding to deeper ancestor
         setExpansionLevel(nodeId, clickLevel);
       } else if (clickLevel < currentLevel) {
-        // Collapsing to younger ancestor
         setExpansionLevel(nodeId, clickLevel);
       } else {
-        // Clicking on current level - collapse one step
-        // If at level 0, stay at 0
         setExpansionLevel(nodeId, Math.max(0, clickLevel - 1));
       }
-    });
+    };
+    line.addEventListener('click', handleExpansionClick);
+    // Touch support: touchend triggers expansion directly (bypasses iOS hover emulation)
+    line.addEventListener('touchend', handleExpansionClick);
 
     overlay.appendChild(line);
   });
@@ -324,18 +343,20 @@ function updateOverlayPositions() {
 
     const pos = node.position();
     // Use width()/height() (content size, no padding) to match calculateNodeSize
-    // outerWidth() includes cytoscape padding which differs per node type
     const width = node.width();
     const height = node.height();
 
-    const screenX = pos.x * zoom + pan.x;
-    const screenY = pos.y * zoom + pan.y;
+    // Position overlay's top-left at node's screen top-left
+    // Using transformOrigin 'top left' so scale doesn't shift the overlay
+    // (with 'center center', overlay content taller than node causes drift)
+    const screenLeft = (pos.x - width / 2) * zoom + pan.x;
+    const screenTop = (pos.y - height / 2) * zoom + pan.y;
 
-    overlay.style.left = (screenX - width / 2) + 'px';
-    overlay.style.top = (screenY - height / 2) + 'px';
+    overlay.style.left = screenLeft + 'px';
+    overlay.style.top = screenTop + 'px';
     overlay.style.width = width + 'px';
     overlay.style.minHeight = height + 'px';
     overlay.style.transform = 'scale(' + zoom + ')';
-    overlay.style.transformOrigin = 'center center';
+    overlay.style.transformOrigin = 'top left';
   });
 }

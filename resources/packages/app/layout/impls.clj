@@ -942,18 +942,14 @@
                   (loop [to-check [bottom-parent]]
                     (when (seq to-check)
                       (let [node-id (first to-check)
-                            node-parents (get parents node-id [])]
-                        (doseq [parent-id node-parents]
-                          (when (and (contains? (get paths-to-shared parent-id #{}) shared-id)
-                                     ;; STOP: don't mark divergence points or their ancestors
-                                     (not (contains? div-points parent-id)))
-                            (when-not (contains? @lower-path-nodes parent-id)
-                              (swap! lower-path-nodes conj parent-id))))
-                        (recur (into (vec (rest to-check))
-                                     (filter #(and (contains? (get paths-to-shared % #{}) shared-id)
-                                                   (not (contains? @lower-path-nodes %))
-                                                   (not (contains? div-points %)))
-                                             node-parents))))))))))
+                            node-parents (get parents node-id [])
+                            eligible (filter #(and (contains? (get paths-to-shared % #{}) shared-id)
+                                                   (not (contains? div-points %))
+                                                   (not (contains? @lower-path-nodes %)))
+                                             node-parents)]
+                        (doseq [parent-id eligible]
+                          (swap! lower-path-nodes conj parent-id))
+                        (recur (into (vec (rest to-check)) eligible)))))))))
 
         ;; Similarly compute upper-path nodes: non-bottom parents up to divergence point
         upper-path-nodes (atom #{})
@@ -969,17 +965,17 @@
                     (loop [to-check [up]]
                       (when (seq to-check)
                         (let [node-id (first to-check)
-                              node-parents (get parents node-id [])]
-                          (doseq [parent-id node-parents]
-                            (when (and (contains? (get paths-to-shared parent-id #{}) shared-id)
-                                       (not (contains? div-points parent-id)))
-                              (when-not (contains? @upper-path-nodes parent-id)
-                                (swap! upper-path-nodes conj parent-id))))
-                          (recur (into (vec (rest to-check))
-                                       (filter #(and (contains? (get paths-to-shared % #{}) shared-id)
-                                                     (not (contains? @upper-path-nodes %))
-                                                     (not (contains? div-points %)))
-                                               node-parents)))))))))))]
+                              node-parents (get parents node-id [])
+                              ;; Filter eligible parents BEFORE marking them
+                              eligible (filter #(and (contains? (get paths-to-shared % #{}) shared-id)
+                                                     (not (contains? div-points %))
+                                                     (not (contains? @upper-path-nodes %)))
+                                               node-parents)]
+                          ;; Mark eligible parents
+                          (doseq [parent-id eligible]
+                            (swap! upper-path-nodes conj parent-id))
+                          ;; Continue propagation with newly marked parents
+                          (recur (into (vec (rest to-check)) eligible))))))))))]
 
     ;; Build result map - only nodes AFTER divergence get positions
     (reduce (fn [m node-id]
@@ -1098,21 +1094,15 @@
                       (mapcat (fn [[_target group]] (sort-by :original-idx group)))
                       (map :id))
 
-        ;; Check if this node is an expansion root (has expansion children)
-        ;; Expansion children have IDs like "fn-{parent-id}_{child-fn-id}"
-        is-expansion-root (some (fn [cid]
-                                  (str/starts-with? cid (str parent-id "_")))
-                                child-ids)]
+]
 
     ;; Final ordering based on parent's path position
     (cond
-      ;; Lower path or upper path expansion root: path-to-shared children FIRST (forms horizontal branch)
-      ;; Expansion chains (e.g. method-map -> assoc-handler) need horizontal branch
-      ;; to reach correct column depth for alignment with the other parent
-      (or is-lower-path (and is-upper-path is-expansion-root))
+      ;; Lower path: path-to-shared children FIRST (forms horizontal branch)
+      is-lower-path
       (vec (concat path-ids positional-ids))
 
-      ;; Upper path (non-expansion): path-to-shared children LAST
+      ;; Upper path: path-to-shared children LAST (pushed down)
       is-upper-path
       (vec (concat positional-ids path-ids))
 

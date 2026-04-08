@@ -286,16 +286,12 @@ Divergence roots are grouped together at their original position but not moved.
 - Path-to-shared children go **LAST** (higher row numbers)
 - Neutral children go **FIRST**
 - This pushes the path-to-shared subtree down, making room for the lower path above
-- **Exception:** If the node is an **expansion root** (has expansion children with
-  IDs like `fn-{parent-id}_{child-id}`), path-to-shared children go **FIRST** instead.
-  This ensures expansion chains (e.g., method-map → assoc-handler) form horizontal
-  branches that reach the correct column depth for alignment with the other parent.
 
 **Rule 4: Path node parents (on lower path)**
 Same as Rule 2: path-to-shared children FIRST.
 
 **Rule 5: Path node parents (on upper path)**
-Same as Rule 3: path-to-shared children LAST (with same expansion root exception).
+Same as Rule 3: path-to-shared children LAST.
 
 **Rule 6: Divergence roots grouping**
 When sorting children of a pre-divergence node, divergence roots targeting the same

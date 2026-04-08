@@ -29,9 +29,16 @@ function calculateNodeSize(nodeData) {
       height: 28 + DRAG_HANDLE_HEIGHT
     };
   } else if (isPlaceholder) {
+    // Placeholder has type="fn" in cytoscape, so use fn width formula to match
+    const lines = label.split('\n');
+    const maxLineLen = 30;
+    const maxLen = Math.max(...lines.map(l => {
+      const cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
+      return Math.min(cleanLen, maxLineLen);
+    }));
     return {
-      width: Math.max(40, label.length * 6 + 16),
-      height: 28 + DRAG_HANDLE_HEIGHT
+      width: Math.max(80, maxLen * 7 + 24),
+      height: Math.max(30, lines.length * 16 + 16) + DRAG_HANDLE_HEIGHT
     };
   } else {
     const lines = label.split('\n');
@@ -181,6 +188,9 @@ async function fetchBackendLayout() {
     }
 
     // Build final layout
+    // Left-align all nodes: x = leftX + nodeWidth/2
+    // Overlay positions as: left = x*zoom + pan.x - nodeWidth/2*zoom = leftX*zoom + pan.x
+    // This gives same left edge for all nodes in column regardless of width
     const layout = new Map();
     Object.entries(gridPos).forEach(([nodeId, pos]) => {
       const size = sizes.get(nodeId);

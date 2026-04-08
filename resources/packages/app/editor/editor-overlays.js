@@ -323,8 +323,10 @@ function updateOverlayPositions() {
     if (!node.length) return;
 
     const pos = node.position();
-    const width = node.outerWidth();
-    const height = node.outerHeight();
+    // Use width()/height() (content size, no padding) to match calculateNodeSize
+    // outerWidth() includes cytoscape padding which differs per node type
+    const width = node.width();
+    const height = node.height();
 
     const screenX = pos.x * zoom + pan.x;
     const screenY = pos.y * zoom + pan.y;

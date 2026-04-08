@@ -19,7 +19,7 @@ const CYTOSCAPE_STYLES = [
     'border-width': 2,
     'border-color': '#000000',
     'color': '#000000',
-    'padding': '10px',
+    'padding': '0px',
     'width': function(node) {
       var label = node.data('label') || '';
       var lines = label.split('\n');
@@ -46,13 +46,15 @@ const CYTOSCAPE_STYLES = [
   { selector: 'node[?isPlaceholder]', style: {
     'label': '',
     'background-opacity': 0,
-    'border-width': 0
+    'border-width': 0,
+    'padding': '0px'
   }},
   // Arg value node - hide, overlay shows content with drag handle
   { selector: 'node[type="arg"]', style: {
     'label': '',
     'background-opacity': 0,
     'border-width': 0,
+    'padding': '0px',
     'width': function(node) {
       var label = node.data('label') || '';
       var maxLen = 30;

@@ -78,8 +78,7 @@
   (loop [current arg
          depth 0]
     (cond
-      (nil? current) nil
-      (> depth 100) nil
+      (or (nil? current) (> depth 100)) nil
       (:name current) (:name current)
       (:source-id current) (recur (get arg-map (:source-id current)) (inc depth))
       :else nil)))
@@ -276,12 +275,10 @@
                 ;; Collect arg-ids that belong to fns in expansion-root-chain
                 ;; These are "shared ancestor args" that shouldn't be treated as covered
                 expansion-chain-arg-ids (when (seq expansion-root-chain)
-                                          (into #{}
-                                                (mapcat (fn [eid]
-                                                          (map :id (get args-by-fn eid [])))
-                                                        expansion-root-chain)))]
-            (into #{}
-                  (mapcat (fn [child-ref-id]
+                                          (set (mapcat (fn [eid]
+                                                         (map :id (get args-by-fn eid [])))
+                                                       expansion-root-chain)))]
+            (set (mapcat (fn [child-ref-id]
                             (let [child-chain (get-inheritance-chain child-ref-id fn-map)]
                               (mapcat (fn [child-fn-id]
                                         ;; Collect source-ids from args, but exclude those pointing
@@ -348,34 +345,19 @@
                                      ;; Example: editor-scripts.item1 -> dagre-script (defines own ref)
                                      ;;   binding from editor-routes.item1 -> favicon-route should NOT override
                                      ;; NOTE: This applies to BOTH structural AND canonical nodes!
-                                     (and has-ref defines-own-ref)
+                                     ;; Own ref takes precedence, OR binding matches own ref (structural)
+                                     (or (and has-ref defines-own-ref)
+                                         (and binding (:ref-id binding) (= (:ref-id binding) (:ref-id arg))))
                                      {:type :ref :arg-name arg-name
                                       :ref-id (:ref-id arg) :arg-id (:id arg)
                                       :is-binding false}
 
-                                     ;; Binding ref that equals arg's ref - "structural" ref
-                                     ;; The function itself defines this ref, binding just repeats it
-                                     ;; NOT treated as binding - keep chain-bindings flowing to children
-                                     (and binding (:ref-id binding) (= (:ref-id binding) (:ref-id arg)))
-                                     {:type :ref :arg-name arg-name
-                                      :ref-id (:ref-id arg) :arg-id (:id arg)
-                                      :is-binding false}
-
-                                     ;; Binding ref that OVERRIDES an existing ref (arg has ref, binding has different ref)
+                                     ;; Binding ref: overrides existing ref OR fills unset arg
                                      ;; Mark with :is-binding true so process-fn uses canonical mode
-                                     ;; This is a real override - external fn replaces what this arg refs
-                                     ;; NOTE: Only applies when NOT (is-structural AND defines-own-ref) - checked above
-                                     (and binding (:ref-id binding) has-ref (not= (:ref-id binding) (:ref-id arg)))
-                                     {:type :ref :arg-name (:arg-name binding)
-                                      :ref-id (:ref-id binding) :arg-id (:arg-id binding)
-                                      :is-binding true}
-
-                                     ;; Binding ref for a truly UNSET arg (no ref AND no value)
-                                     ;; This IS an external binding - use canonical mode for the target!
-                                     ;; Example: entity-form-handler binding for handler arg in assoc-handler
-                                     ;; When inside expansion, handler should stay canonical (shared)
                                      ;; CRITICAL: arg with value should NOT be overridden by binding ref
-                                     (and binding (:ref-id binding) (not has-ref) (not has-value))
+                                     (and binding (:ref-id binding)
+                                          (or (and has-ref (not= (:ref-id binding) (:ref-id arg)))
+                                              (and (not has-ref) (not has-value))))
                                      {:type :ref :arg-name (:arg-name binding)
                                       :ref-id (:ref-id binding) :arg-id (:arg-id binding)
                                       :is-binding true}
@@ -493,7 +475,7 @@
                             (recur (:source-id source-arg)))))
                       ;; Classify the arg - add :from-ancestor flag
                       (let [arg-name (resolve-arg-name arg arg-map)
-                            from-ancestor (> current-level 0)]
+                            from-ancestor (pos? current-level)]
                         (cond
                           binding
                           (cond
@@ -573,8 +555,7 @@
                         (when (some? expansion-root)
                           ;; Collect all ref-ids from this fn's args and bindings
                           (let [fn-args (get args-by-fn display-fn-id [])
-                                ref-fn-ids (into #{}
-                                                 (concat
+                                ref-fn-ids (set (concat
                                                   (keep :ref-id fn-args)
                                                   (keep (fn [arg]
                                                           (when-let [b (get bindings (:id arg))]
@@ -585,8 +566,7 @@
                                 ;; bindings that should flow to structural nodes
                                 expansion-chain-fns (set (get-inheritance-chain expansion-root fn-map))]
                             ;; Get all arg-ids from these ref-fns, excluding shared ancestors
-                            (into #{}
-                                  (mapcat (fn [ref-fn-id]
+                            (set (mapcat (fn [ref-fn-id]
                                             (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
                                               (mapcat (fn [rfn-id]
                                                         (when-not (contains? expansion-chain-fns rfn-id)
@@ -609,7 +589,7 @@
                         ;; - is-binding=false: structural ref, use expansion prefix
                         ;; IMPORTANT: bindings should still flow to children in both cases!
                         ;; The handler's children need the bindings from chain.
-                        :ref (let [ref-expansion-root (if (:is-binding arg) nil expansion-root)
+                        :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
                                    ;; Keep bindings flowing - they're needed for handler's children
                                    ref-bindings bindings]
                                (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root))
@@ -679,7 +659,7 @@
                       ancestor-refs (filter #(and (:from-ancestor %) (= (:type %) :ref)) all-args)
                       ancestor-values (filter #(and (:from-ancestor %) (= (:type %) :value)) all-args)
                       ancestor-unsets (filter #(and (:from-ancestor %) (= (:type %) :unset)) all-args)
-                      level-0-args (filter #(not (:from-ancestor %)) all-args)
+                      level-0-args (remove :from-ancestor all-args)
                       level-0-refs (filter #(= (:type %) :ref) level-0-args)
                       level-0-values (filter #(= (:type %) :value) level-0-args)
                       level-0-unsets (filter #(= (:type %) :unset) level-0-args)
@@ -730,8 +710,7 @@
                           @result)
 
                         ancestor-ref-arg-sources
-                        (into #{}
-                              (mapcat (fn [fn-id]
+                        (set (mapcat (fn [fn-id]
                                         (let [fn-chain (get-inheritance-chain fn-id fn-map)]
                                           (mapcat (fn [chain-fn-id]
                                                     (when-not (contains? expansion-chain-fns chain-fn-id)
@@ -779,7 +758,7 @@
               ;; Get expansion level for this fn in its context
               ;; expansion-root is the parent expansion context (nil for top-level)
               (let [level (get-effective-level fn-id expansion-root)]
-                (if (> level 0)
+                (if (pos? level)
                   ;; Expanded mode - pass parent expansion-root to maintain context
                   ;; If we're already inside an expansion (expansion-root is set),
                   ;; nested expansions should stay in that context
@@ -825,7 +804,7 @@
 (defn- find-root-node
   "Find root node (no incoming edges)."
   [nodes edges]
-  (let [has-parent (into #{} (map #(get-in % [:data :target]) edges))]
+  (let [has-parent (set (map #(get-in % [:data :target]) edges))]
     (first (filter #(not (contains? has-parent (get-in % [:data :id]))) nodes))))
 
 
@@ -872,8 +851,7 @@
   [child-id node-data-map]
   (let [data (get node-data-map child-id)]
     (cond
-      (nil? data) :free
-      (:isPlaceholder data) :free
+      (or (nil? data) (:isPlaceholder data)) :free
       (= (:type data) "fn") :fn
       (= (:type data) "arg") :fixed
       :else :free)))
@@ -1005,10 +983,10 @@
 
     ;; Build result map - only nodes AFTER divergence get positions
     (reduce (fn [m node-id]
-              (cond
-                (contains? @lower-path-nodes node-id) (assoc m node-id :lower)
-                (contains? @upper-path-nodes node-id) (assoc m node-id :upper)
-                :else m))
+              (condp contains? node-id
+                @lower-path-nodes (assoc m node-id :lower)
+                @upper-path-nodes (assoc m node-id :upper)
+                m))
             {}
             (keys children))))
 
@@ -1128,14 +1106,10 @@
 
     ;; Final ordering based on parent's path position
     (cond
-      ;; Lower path: path-to-shared children FIRST (forms horizontal branch)
-      is-lower-path
-      (vec (concat path-ids positional-ids))
-
-      ;; Upper path expansion root: path-to-shared children FIRST
+      ;; Lower path or upper path expansion root: path-to-shared children FIRST (forms horizontal branch)
       ;; Expansion chains (e.g. method-map -> assoc-handler) need horizontal branch
       ;; to reach correct column depth for alignment with the other parent
-      (and is-upper-path is-expansion-root)
+      (or is-lower-path (and is-upper-path is-expansion-root))
       (vec (concat path-ids positional-ids))
 
       ;; Upper path (non-expansion): path-to-shared children LAST
@@ -1199,7 +1173,7 @@
         (reduce
           (fn [offs {:keys [id depth]}]
             (let [needed (- max-depth depth)]
-              (if (> needed 0)
+              (if (pos? needed)
                 ;; Take max if parent already has offset from another shared node
                 (update offs id (fn [old] (max (or old 0) needed)))
                 offs)))
@@ -1236,7 +1210,7 @@
             sorted-parents (sort-by (fn [[_pid depth idx]] [depth (- idx)]) indexed-parents)
             ;; The first entry after sorting (shallowest, or latest if same depth) is the "keeper"
             ;; All others should have shared child removed
-            keeper (first (first sorted-parents))
+            keeper (ffirst sorted-parents)
             parents-to-remove (remove #(= % keeper) parent-ids)]
         (reduce
           (fn [cm2 parent-id]
@@ -1336,7 +1310,7 @@
                   (let [m (place-node-in-matrix m id row col)
                         offset (or offset 0)]
                     ;; Reserve cells for horizontal edge gap when offset > 0
-                    (if (> offset 0)
+                    (if (pos? offset)
                       (reduce (fn [m2 edge-col]
                                 (assoc-in m2 [:grid [row edge-col]]
                                           {:edge-reserve true}))
@@ -1359,8 +1333,8 @@
 
             ;; Get max row used by a subtree (for computing next sibling's start row)
             (subtree-max-row [matrix node-id]
-              (let [pos (get-node-pos matrix node-id)]
-                (if pos (:row pos) 0)))
+              (if-let [pos (get-node-pos matrix node-id)]
+                (:row pos) 0))
 
             ;; Recursively find max row in entire subtree rooted at node-id
             (find-subtree-max-row [matrix node-id]
@@ -1401,31 +1375,30 @@
                           child-col (inc col)
                           ;; Parent row for children is the row where this node was placed
                           ;; (which is actual-row for all nodes in the horizontal branch)
-                          this-node-row actual-row]
+                          this-node-row actual-row
+                          ;; Place this node's remaining children
+                          ;; Each starts search from (inc actual-row), find-row-for-branch
+                          ;; will find where it actually fits based on column occupancy.
+                          min-child-row (inc actual-row)
+                          [matrix local-max-row]
+                          (loop [remaining rest-kids
+                                 matrix matrix
+                                 max-row-so-far actual-row]
+                            (if (empty? remaining)
+                              [matrix max-row-so-far]
+                              (let [child-id (first remaining)
+                                    ;; Each child starts from min-child-row
+                                    ;; find-row-for-branch (inside place-subtree) will find actual row
+                                    ;; Pass parent's row for vertical edge reservation
+                                    [matrix child-max-row] (place-subtree matrix child-id min-child-row child-col this-node-row)]
+                                (recur (rest remaining)
+                                       matrix
+                                       (max max-row-so-far child-max-row)))))]
 
-                      ;; Place this node's remaining children
-                      ;; Each starts search from (inc actual-row), find-row-for-branch
-                      ;; will find where it actually fits based on column occupancy.
-                      (let [min-child-row (inc actual-row)
-                            [matrix local-max-row]
-                            (loop [remaining rest-kids
-                                   matrix matrix
-                                   max-row-so-far actual-row]
-                              (if (empty? remaining)
-                                [matrix max-row-so-far]
-                                (let [child-id (first remaining)
-                                      ;; Each child starts from min-child-row
-                                      ;; find-row-for-branch (inside place-subtree) will find actual row
-                                      ;; Pass parent's row for vertical edge reservation
-                                      [matrix child-max-row] (place-subtree matrix child-id min-child-row child-col this-node-row)]
-                                  (recur (rest remaining)
-                                         matrix
-                                         (max max-row-so-far child-max-row)))))]
-
-                        (recur (rest branch-nodes)
-                               matrix
-                               ;; Track overall max for return value
-                               (max global-max-row local-max-row))))))))]
+                      (recur (rest branch-nodes)
+                             matrix
+                             ;; Track overall max for return value
+                             (max global-max-row local-max-row)))))))]
 
       (let [[matrix _] (place-subtree (empty-matrix) root-id 0 0 nil)]
         matrix))))

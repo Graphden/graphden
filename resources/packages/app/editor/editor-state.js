@@ -1,6 +1,6 @@
 // Editor State - Global variables, constants, and configuration
 // Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-08 04:10';
+const BUILD_TIMESTAMP = '2026-04-08 04:20';
 console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================
@@ -45,9 +45,9 @@ const DRAG_HANDLE_HEIGHT = 14;    // Height of drag handle at bottom of nodes
 (function() {
   const originalWarn = console.warn;
   console.warn = function(...args) {
-    if (suppressEdgeWarnings && args[0] && typeof args[0] === 'string' &&
+    if (args[0] && typeof args[0] === 'string' &&
         args[0].includes('invalid endpoints')) {
-      return; // Suppress Cytoscape edge warnings during drag
+      return; // Suppress Cytoscape edge warnings (source/target overlap)
     }
     originalWarn.apply(console, args);
   };

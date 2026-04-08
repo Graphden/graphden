@@ -6,7 +6,7 @@
   (:require
     [clojure.java.io :as io]
     [clojure.string :as str]
-    [clojure.test :refer [deftest is testing use-fixtures]]))
+    [clojure.test :refer [deftest is testing]]))
 
 
 ;; =============================================================================
@@ -17,8 +17,9 @@
 (def ^:private layout-ns
   (let [impls-file (io/resource "packages/app/layout/impls.clj")]
     (when impls-file
-      (load-file (.getPath (io/file impls-file))))
+      (load-file (java.io.File/.getPath (io/file impls-file))))
     (find-ns 'graphden.packages.app.layout.impls)))
+
 
 (def ^:private compute-layout-matrix
   (when layout-ns
@@ -32,7 +33,7 @@
 (defn make-node
   "Create a node for testing."
   ([id] (make-node id "fn"))
-  ([id type] {:id id :type type}))
+  ([id node-type] {:id id :type node-type}))
 
 
 (defn make-edge
@@ -66,9 +67,9 @@
       (is (:valid (:validation result)))
       (is (= 3 (count (:grid-pos result))))
       ;; All on same row
-      (is (= 0 (:row (get-pos result "A"))))
-      (is (= 0 (:row (get-pos result "B"))))
-      (is (= 0 (:row (get-pos result "C"))))
+      (is (zero? (:row (get-pos result "A"))))
+      (is (zero? (:row (get-pos result "B"))))
+      (is (zero? (:row (get-pos result "C"))))
       ;; Columns increase
       (is (< (:col (get-pos result "A"))
              (:col (get-pos result "B"))
@@ -83,7 +84,7 @@
       (is (:valid (:validation result)))
       (is (= 3 (count (:grid-pos result))))
       ;; A is root at col 0
-      (is (= 0 (:col (get-pos result "A"))))
+      (is (zero? (:col (get-pos result "A"))))
       ;; B and C are in next column
       (is (= 1 (:col (get-pos result "B"))))
       (is (= 1 (:col (get-pos result "C"))))
@@ -761,8 +762,9 @@
           ;; Rows for A's children: lower row = earlier in sorted order
           child-rows [[b-row "B"] [c-row "C"] [d-row "D"] [e-row "E"]]
           sorted-children (map second (sort-by first child-rows))
-          c-idx (.indexOf (vec sorted-children) "C")
-          d-idx (.indexOf (vec sorted-children) "D")]
+          sorted-vec (vec sorted-children)
+          c-idx (java.util.List/.indexOf sorted-vec "C")
+          d-idx (java.util.List/.indexOf sorted-vec "D")]
       ;; C and D must be adjacent (indices differ by exactly 1)
       (is (= 1 (Math/abs (- c-idx d-idx)))
           (str "Divergence roots C and D must be adjacent. "
@@ -935,11 +937,11 @@
       (is (= "N2" (last sorted-children))
           (str "N2 should be last. Sorted order: " sorted-children))
       ;; C and D should be in the middle, adjacent
-      (let [c-idx (.indexOf sorted-children "C")
-            d-idx (.indexOf sorted-children "D")]
-        (is (and (> c-idx 0) (< c-idx 3))
+      (let [c-idx (java.util.List/.indexOf sorted-children "C")
+            d-idx (java.util.List/.indexOf sorted-children "D")]
+        (is (and (pos? c-idx) (< c-idx 3))
             (str "C should be in middle. Sorted order: " sorted-children))
-        (is (and (> d-idx 0) (< d-idx 3))
+        (is (and (pos? d-idx) (< d-idx 3))
             (str "D should be in middle. Sorted order: " sorted-children))
         (is (= 1 (Math/abs (- c-idx d-idx)))
             (str "C and D must be adjacent. Sorted order: " sorted-children))))))
@@ -954,13 +956,10 @@
   (when layout-ns
     @(ns-resolve layout-ns 'build-graph-elements)))
 
+
 (def ^:private build-lookups
   (when layout-ns
     @(ns-resolve layout-ns 'build-lookups)))
-
-(def ^:private add-bindings-from-fn
-  (when layout-ns
-    @(ns-resolve layout-ns 'add-bindings-from-fn)))
 
 
 (deftest bindings-propagate-through-coll-chain-test
@@ -1014,44 +1013,44 @@
                 {:id root-item2-arg-id :fn-id root-id :source-id container-item2-arg-id :ref-id child2-id}]
 
           lookups (build-lookups {:fns fns :args args})
-          expansions {root-id 1}  ;; Expand root to level 1
+          expansions {root-id 1}  ; Expand root to level 1
 
           result (build-graph-elements root-id expansions lookups)
           nodes (:nodes result)
-          edges (:edges result)]
+          edges (:edges result)
 
-      ;; Find edges from container to its children
-      ;; Container should be a structural node inside the expansion
-      (let [container-node (some #(when (and (= "fn" (get-in % [:data :type]))
-                                              (.contains (str (get-in % [:data :id])) (str container-id)))
-                                    %)
-                                  nodes)
-            container-node-id (get-in container-node [:data :id])
+          ;; Find edges from container to its children
+          ;; Container should be a structural node inside the expansion
+          container-node (some #(when (and (= "fn" (get-in % [:data :type]))
+                                           (str/includes? (str (get-in % [:data :id])) (str container-id)))
+                                  %)
+                               nodes)
+          container-node-id (get-in container-node [:data :id])
 
-            ;; Edges from container
-            container-edges (filter #(= container-node-id (get-in % [:data :source])) edges)
+          ;; Edges from container
+          container-edges (filter #(= container-node-id (get-in % [:data :source])) edges)
 
-            ;; Find child1 and child2 nodes
-            child1-node (some #(when (.contains (str (get-in % [:data :id])) (str child1-id)) %) nodes)
-            child2-node (some #(when (.contains (str (get-in % [:data :id])) (str child2-id)) %) nodes)]
+          ;; Find child1 and child2 nodes
+          child1-node (some #(when (str/includes? (str (get-in % [:data :id])) (str child1-id)) %) nodes)
+          child2-node (some #(when (str/includes? (str (get-in % [:data :id])) (str child2-id)) %) nodes)]
 
-        ;; Verify container node exists
-        (is container-node
-            "Container should be present as a node")
+      ;; Verify container node exists
+      (is container-node
+          "Container should be present as a node")
 
-        ;; Verify child1 and child2 are referenced (bindings applied)
-        (is child1-node
-            "child1 should be present - binding from root should propagate through coll chain")
-        (is child2-node
-            "child2 should be present - binding from root should propagate through coll chain")
+      ;; Verify child1 and child2 are referenced (bindings applied)
+      (is child1-node
+          "child1 should be present - binding from root should propagate through coll chain")
+      (is child2-node
+          "child2 should be present - binding from root should propagate through coll chain")
 
-        ;; Verify edges exist from container to children
-        (when (and container-node-id child1-node child2-node)
-          (let [edge-targets (set (map #(get-in % [:data :target]) container-edges))]
-            (is (contains? edge-targets (get-in child1-node [:data :id]))
-                (str "Container should have edge to child1. Edges: " (pr-str container-edges)))
-            (is (contains? edge-targets (get-in child2-node [:data :id]))
-                (str "Container should have edge to child2. Edges: " (pr-str container-edges)))))))))
+      ;; Verify edges exist from container to children
+      (when (and container-node-id child1-node child2-node)
+        (let [edge-targets (set (map #(get-in % [:data :target]) container-edges))]
+          (is (contains? edge-targets (get-in child1-node [:data :id]))
+              (str "Container should have edge to child1. Edges: " (pr-str container-edges)))
+          (is (contains? edge-targets (get-in child2-node [:data :id]))
+              (str "Container should have edge to child2. Edges: " (pr-str container-edges))))))))
 
 
 ;; =============================================================================
@@ -1096,11 +1095,11 @@
           route2-id (random-uuid)
 
           ;; Args
-          assoc-handler-key-arg-id (random-uuid)  ;; assoc-handler has :key arg
-          method-map-handler-arg-id (random-uuid) ;; method-map has :handler -> assoc-handler
-          route-method-arg-id (random-uuid)       ;; route has :method -> method-map
-          route1-value-arg-id (random-uuid)       ;; route1 binds :key to "get"
-          route2-value-arg-id (random-uuid)       ;; route2 binds :key to "post"
+          assoc-handler-key-arg-id (random-uuid)  ; assoc-handler has :key arg
+          method-map-handler-arg-id (random-uuid) ; method-map has :handler -> assoc-handler
+          route-method-arg-id (random-uuid)       ; route has :method -> method-map
+          route1-value-arg-id (random-uuid)       ; route1 binds :key to "get"
+          route2-value-arg-id (random-uuid)       ; route2 binds :key to "post"
 
           fns [{:id assoc-handler-id :name :assoc-handler :parent-id nil}
                {:id method-map-id :name :method-map :parent-id nil}
@@ -1119,7 +1118,7 @@
                 ;; route2 binds :key to "post" (via source chain to assoc-handler-key)
                 {:id route2-value-arg-id :fn-id route2-id :source-id assoc-handler-key-arg-id :value "post"}]
 
-          lookups (build-lookups {:fns fns :args args})
+          _lookups (build-lookups {:fns fns :args args})
 
           ;; Simulate the browser expansion state:
           ;; 1. Select some parent that shows both routes (here we use route1-id as root for simplicity)
@@ -1150,10 +1149,10 @@
           ;; Their expansion keys in the map should be:
           ;;   [route1-id method-map-id] -> level for method-map in route1's context
           ;;   [route2-id method-map-id] -> level for method-map in route2's context
-          expansions {[nil route1-id] 2     ;; Expand route1 to level 2 (shows method-map ancestor)
-                      [nil route2-id] 2     ;; Expand route2 to level 2 (shows method-map ancestor)
-                      [route1-id method-map-id] 1  ;; Expand method-map inside route1's context
-                      [route2-id method-map-id] 1} ;; Expand method-map inside route2's context
+          expansions {[nil route1-id] 2     ; Expand route1 to level 2 (shows method-map ancestor)
+                      [nil route2-id] 2     ; Expand route2 to level 2 (shows method-map ancestor)
+                      [route1-id method-map-id] 1  ; Expand method-map inside route1's context
+                      [route2-id method-map-id] 1} ; Expand method-map inside route2's context
 
           result (build-graph-elements parent-id expansions lookups-with-parent)
           nodes (:nodes result)
@@ -1198,12 +1197,12 @@
           route1-id (random-uuid)
           route2-id (random-uuid)
           parent-id (random-uuid)
-          method-map-id (random-uuid)  ;; an ancestor ref that routes expand to
+          method-map-id (random-uuid)  ; an ancestor ref that routes expand to
 
           ;; Args
-          ancestor-method-arg-id (random-uuid)  ;; ancestor has :method -> method-map
-          route1-handler-arg-id (random-uuid)   ;; route1 binds :handler -> shared-handler
-          route2-handler-arg-id (random-uuid)   ;; route2 binds :handler -> shared-handler
+          ancestor-method-arg-id (random-uuid)  ; ancestor has :method -> method-map
+          route1-handler-arg-id (random-uuid)   ; route1 binds :handler -> shared-handler
+          route2-handler-arg-id (random-uuid)   ; route2 binds :handler -> shared-handler
           parent-r1-arg-id (random-uuid)
           parent-r2-arg-id (random-uuid)
 
@@ -1237,7 +1236,7 @@
 
           ;; Find shared-handler FN nodes (not arg nodes)
           shared-handler-nodes (filter #(and (= "fn" (get-in % [:data :type]))
-                                              (str/includes? (str (get-in % [:data :id])) (str shared-handler-id)))
+                                             (str/includes? (str (get-in % [:data :id])) (str shared-handler-id)))
                                        nodes)
 
           ;; Find edges pointing to shared-handler
@@ -1346,12 +1345,12 @@
 
           ;; Find shared-handler nodes
           shared-handler-nodes (filter #(and (= "fn" (get-in % [:data :type]))
-                                              (str/includes? (str (get-in % [:data :id])) (str shared-handler-id)))
+                                             (str/includes? (str (get-in % [:data :id])) (str shared-handler-id)))
                                        nodes)
 
           ;; Find edges pointing to shared-handler
           shared-handler-node-ids (set (map #(get-in % [:data :id]) shared-handler-nodes))
-          edges-to-handler (filter #(contains? shared-handler-node-ids (get-in % [:data :target])) edges)]
+          _edges-to-handler (filter #(contains? shared-handler-node-ids (get-in % [:data :target])) edges)]
 
       ;; THE KEY TEST: shared-handler should be canonical (fn-{id}), not prefixed
       (is (= 1 (count shared-handler-nodes))
@@ -1408,16 +1407,16 @@
           conj-any-coll-arg-id (random-uuid)
           conj-any-item-arg-id (random-uuid)
 
-          list-10-9-coll-arg-id (random-uuid)  ;; source=conj-any-coll, ref=nil (empty coll)
-          list-10-9-item9-arg-id (random-uuid) ;; source=conj-any-item, ref=nil (unset)
+          list-10-9-coll-arg-id (random-uuid)  ; source=conj-any-coll, ref=nil (empty coll)
+          list-10-9-item9-arg-id (random-uuid) ; source=conj-any-item, ref=nil (unset)
 
-          list-10-coll-arg-id (random-uuid)    ;; source=conj-any-coll, ref=list-10-9
-          list-10-item10-arg-id (random-uuid)  ;; source=conj-any-item, ref=nil (unset)
+          list-10-coll-arg-id (random-uuid)    ; source=conj-any-coll, ref=list-10-9
+          list-10-item10-arg-id (random-uuid)  ; source=conj-any-item, ref=nil (unset)
 
-          list-11-coll-arg-id (random-uuid)    ;; source=conj-any-coll, ref=list-10
-          list-11-item11-arg-id (random-uuid)  ;; source=conj-any-item, ref=nil (unset)
+          list-11-coll-arg-id (random-uuid)    ; source=conj-any-coll, ref=list-10
+          list-11-item11-arg-id (random-uuid)  ; source=conj-any-item, ref=nil (unset)
 
-          root-item9-arg-id (random-uuid)      ;; source=list-10-9-item9, ref=child-fn
+          root-item9-arg-id (random-uuid)      ; source=list-10-9-item9, ref=child-fn
 
           fns [{:id conj-any-id :name :conj-any :parent-id nil}
                {:id list-10-9-id :name :list-10-9 :parent-id conj-any-id}
@@ -1447,15 +1446,14 @@
                 {:id root-item9-arg-id :fn-id root-id :source-id list-10-9-item9-arg-id :ref-id child-fn-id}]
 
           lookups (build-lookups {:fns fns :args args})
-          expansions {root-id 1}  ;; Expand root to level 1 (shows list-11 ancestor)
+          expansions {root-id 1}  ; Expand root to level 1 (shows list-11 ancestor)
 
           result (build-graph-elements root-id expansions lookups)
           nodes (:nodes result)
-          edges (:edges result)]
+          child-fn-node (some #(when (str/includes? (str (get-in % [:data :id])) (str child-fn-id)) %) nodes)]
 
       ;; The bug: child-fn would NOT appear because bindings were lost at list-10 -> list-10-9 step
       ;; The fix: child-fn should appear, connected from list-10-9's item9 arg
-      (let [child-fn-node (some #(when (.contains (str (get-in % [:data :id])) (str child-fn-id)) %) nodes)]
-        (is child-fn-node
-            (str "child-fn should be in graph - binding should propagate through coll chain. "
-                 "Node IDs: " (mapv #(get-in % [:data :id]) nodes)))))))
+      (is child-fn-node
+          (str "child-fn should be in graph - binding should propagate through coll chain. "
+               "Node IDs: " (mapv #(get-in % [:data :id]) nodes))))))

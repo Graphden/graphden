@@ -919,58 +919,95 @@
 
    Returns map: node-id -> :upper | :lower | nil
 
-   A node is on a 'lower' path if it IS the bottom parent of a shared node,
-   OR if it is an ANCESTOR of the bottom parent that leads to the shared node.
+   Key insight: path positions only apply to nodes AFTER the divergence point.
+   Pre-divergence nodes (including the divergence point itself) are on BOTH paths
+   and should NOT be marked upper or lower.
 
-   This is used to determine child ordering:
-   - Lower path: path-to-shared children go FIRST (at top)
-   - Upper path: path-to-shared children go LAST (at bottom)
+   Divergence point = parent of divergence roots (siblings where paths split).
+   Propagation of lower/upper stops at the divergence point.
 
-   NOTE: Divergence roots DO get path-position (for ordering their own children),
-   but they are handled specially in order-children (grouped together, not sorted
-   by path-position relative to siblings)."
+   Rules:
+   - Bottom parent of shared node → :lower
+   - Ancestors of bottom parent up to (but NOT including) divergence point → :lower
+   - Other parents and their ancestors up to divergence point → :upper
+   - Divergence roots themselves get path-position for ordering their own children
+   - Pre-divergence nodes (divergence point and above) → nil (no position)"
   [children parents shared-nodes]
   (let [paths-to-shared (find-paths-to-shared children shared-nodes)
 
-        ;; For each shared node, find the 'bottom' parent (last in list)
-        ;; and trace the path UPWARD to find all ancestors on the lower path
+        ;; Find divergence points for each shared node
+        ;; A divergence point is a node whose children include 2+ siblings
+        ;; that both lead to the same shared node
+        divergence-points-per-shared
+        (into {}
+              (map (fn [shared-id]
+                     (let [;; Find all nodes that have children leading to this shared node
+                           points (filter
+                                    (fn [node-id]
+                                      (let [kids (get children node-id [])
+                                            kids-leading (filter #(contains? (get paths-to-shared % #{}) shared-id) kids)]
+                                        (> (count kids-leading) 1)))
+                                    (keys children))]
+                       [shared-id (set points)]))
+                   shared-nodes))
+
         lower-path-nodes (atom #{})
 
-        ;; For each shared node, mark its bottom parent AND all ancestors
-        ;; that lead to it as 'lower path'
+        ;; For each shared node, mark bottom parent and ancestors up to divergence point
         _ (doseq [shared-id shared-nodes]
-            (let [parent-ids (get parents shared-id [])]
+            (let [parent-ids (get parents shared-id [])
+                  div-points (get divergence-points-per-shared shared-id #{})]
               (when (seq parent-ids)
                 (let [bottom-parent (last parent-ids)]
-                  ;; The bottom parent is on lower path
                   (swap! lower-path-nodes conj bottom-parent)
-                  ;; Propagate UP: mark all ancestors that lead to this shared node
-                  ;; An ancestor is on lower path if it has a child that leads to shared
-                  ;; and that child is on the lower path
+                  ;; Propagate UP but STOP at divergence points
                   (loop [to-check [bottom-parent]]
                     (when (seq to-check)
                       (let [node-id (first to-check)
                             node-parents (get parents node-id [])]
-                        ;; For each parent of this node
                         (doseq [parent-id node-parents]
-                          ;; Check if parent leads to this shared node
-                          (when (contains? (get paths-to-shared parent-id #{}) shared-id)
-                            ;; Parent is on lower path
+                          (when (and (contains? (get paths-to-shared parent-id #{}) shared-id)
+                                     ;; STOP: don't mark divergence points or their ancestors
+                                     (not (contains? div-points parent-id)))
                             (when-not (contains? @lower-path-nodes parent-id)
                               (swap! lower-path-nodes conj parent-id))))
-                        ;; Continue with parents
                         (recur (into (vec (rest to-check))
                                      (filter #(and (contains? (get paths-to-shared % #{}) shared-id)
-                                                   (not (contains? @lower-path-nodes %)))
-                                             node-parents))))))))))]
+                                                   (not (contains? @lower-path-nodes %))
+                                                   (not (contains? div-points %)))
+                                             node-parents))))))))))
 
-    ;; Build result map
+        ;; Similarly compute upper-path nodes: non-bottom parents up to divergence point
+        upper-path-nodes (atom #{})
+        _ (doseq [shared-id shared-nodes]
+            (let [parent-ids (get parents shared-id [])
+                  div-points (get divergence-points-per-shared shared-id #{})]
+              (when (> (count parent-ids) 1)
+                (let [bottom-parent (last parent-ids)
+                      upper-parents (butlast parent-ids)]
+                  (doseq [up upper-parents]
+                    (swap! upper-path-nodes conj up)
+                    ;; Propagate UP but STOP at divergence points
+                    (loop [to-check [up]]
+                      (when (seq to-check)
+                        (let [node-id (first to-check)
+                              node-parents (get parents node-id [])]
+                          (doseq [parent-id node-parents]
+                            (when (and (contains? (get paths-to-shared parent-id #{}) shared-id)
+                                       (not (contains? div-points parent-id)))
+                              (when-not (contains? @upper-path-nodes parent-id)
+                                (swap! upper-path-nodes conj parent-id))))
+                          (recur (into (vec (rest to-check))
+                                       (filter #(and (contains? (get paths-to-shared % #{}) shared-id)
+                                                     (not (contains? @upper-path-nodes %))
+                                                     (not (contains? div-points %)))
+                                               node-parents)))))))))))]
+
+    ;; Build result map - only nodes AFTER divergence get positions
     (reduce (fn [m node-id]
               (cond
-                ;; On lower path (bottom parent or ancestor leading to shared via bottom)
                 (contains? @lower-path-nodes node-id) (assoc m node-id :lower)
-                ;; On path to shared but not lower = upper
-                (seq (get paths-to-shared node-id #{})) (assoc m node-id :upper)
+                (contains? @upper-path-nodes node-id) (assoc m node-id :upper)
                 :else m))
             {}
             (keys children))))
@@ -1047,21 +1084,35 @@
         is-upper-path (= path-position :upper)
 
         ;; Build sorted list:
-        ;; 1. Create position slots for neutral, direct-shared, and divergence groups
+        ;; 1. Create position slots for neutral, direct-shared, path, and divergence groups
         neutral-items (map (fn [c] {:type :neutral :idx (:original-idx c) :child c}) neutral-children)
         shared-items (map (fn [c] {:type :shared :idx (:original-idx c) :child c}) direct-shared-children)
+        path-items (map (fn [c] {:type :path :idx (:original-idx c) :child c}) path-children)
         divergence-items (map (fn [g] {:type :divergence :idx (:min-idx g) :group g}) divergence-groups)
 
-        ;; Sort all positional items by index
+        ;; Sort all positional items by index (includes path-children for the :else case)
         positional-items (sort-by :idx (concat neutral-items shared-items divergence-items))
+
+        ;; All items including path (for pre-divergence nodes where no special ordering needed)
+        all-positional-items (sort-by :idx (concat neutral-items shared-items path-items divergence-items))
 
         ;; Extract IDs from positional items
         positional-ids (mapcat (fn [item]
                                  (case (:type item)
                                    :neutral [(:id (:child item))]
                                    :shared [(:id (:child item))]
+                                   :path [(:id (:child item))]
                                    :divergence (map :id (:members (:group item)))))
                                positional-items)
+
+        ;; All IDs including path-children at their original positions
+        all-positional-ids (mapcat (fn [item]
+                                     (case (:type item)
+                                       :neutral [(:id (:child item))]
+                                       :shared [(:id (:child item))]
+                                       :path [(:id (:child item))]
+                                       :divergence (map :id (:members (:group item)))))
+                                   all-positional-items)
 
         ;; Path-to-shared children IDs (sorted by original-idx within each target group)
         path-ids (->> path-children
@@ -1091,9 +1142,10 @@
       is-upper-path
       (vec (concat positional-ids path-ids))
 
-      ;; Not on any path: preserve original order
+      ;; Not on any path (pre-divergence or neutral): include all children
+      ;; at their original positions, no special path ordering
       :else
-      (vec positional-ids))))         ; regular last           ; then divergence roots
+      (vec all-positional-ids))))         ; regular last           ; then divergence roots
 
 
 ;; Matrix operations

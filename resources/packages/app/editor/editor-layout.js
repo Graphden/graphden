@@ -26,7 +26,7 @@ function calculateNodeSize(nodeData) {
     const effectiveLen = Math.min(label.length, maxLen);
     return {
       width: Math.max(40, effectiveLen * 6 + 16),
-      height: 28 + DRAG_HANDLE_HEIGHT
+      height: 22 + DRAG_HANDLE_HEIGHT  // content (padding 4+4 + line 14) + drag handle
     };
   } else if (isPlaceholder) {
     // Placeholder has type="fn" in cytoscape, so use fn width formula to match

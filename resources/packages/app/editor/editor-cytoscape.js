@@ -61,7 +61,7 @@ const CYTOSCAPE_STYLES = [
       var effectiveLen = Math.min(label.length, maxLen);
       return Math.max(40, effectiveLen * 6 + 16);
     },
-    'height': 28 + 14  // content + drag handle
+    'height': 22 + 14  // content (padding 4+4 + line 14) + drag handle
   }},
   // Edge - taxi style
   { selector: 'edge', style: {

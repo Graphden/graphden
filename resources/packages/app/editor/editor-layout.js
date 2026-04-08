@@ -127,14 +127,33 @@ async function fetchBackendLayout() {
       }
     });
 
-    // Calculate X positions
+    // Calculate per-column gap based on longest edge label crossing each column boundary
+    // Edge labels (argName) sit between source and target nodes
+    const colGaps = new Map(); // col -> extra gap needed for edge labels
+    const CHAR_WIDTH = 9;
+    const LABEL_PADDING = 30;
+    edges.forEach(e => {
+      const srcPos = gridPos[e.data.source];
+      const tgtPos = gridPos[e.data.target];
+      if (srcPos && tgtPos && e.data.argName) {
+        // Edge goes from srcPos.col to tgtPos.col
+        // Label sits after the source column
+        const labelCol = Math.min(srcPos.col, tgtPos.col);
+        const labelWidth = e.data.argName.length * CHAR_WIDTH + LABEL_PADDING;
+        const currentGap = colGaps.get(labelCol) || GRID_GAP_X;
+        colGaps.set(labelCol, Math.max(currentGap, labelWidth));
+      }
+    });
+
+    // Calculate X positions with per-column gaps
     const colLeftX = new Map();
     const maxColKey = Math.max(...Array.from(colWidths.keys()), 0);
     let currentX = 0;
     for (let c = 0; c <= maxColKey; c++) {
       colLeftX.set(c, currentX);
       const width = colWidths.get(c) || 80;
-      currentX += width + GRID_GAP_X;
+      const gap = colGaps.get(c) || GRID_GAP_X;
+      currentX += width + gap;
     }
 
     // Calculate Y positions

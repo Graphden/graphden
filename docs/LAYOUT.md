@@ -95,7 +95,60 @@ When processing structural list-10:
 Without this rule, the binding would incorrectly override the structural ref,
 breaking the coll chain and hiding all nested items.
 
-#### 2.4 Output
+#### 2.4 Shared Ancestor Exclusion (critical for list/coll chains)
+
+When determining which bindings "belong inside" a structural ref-fn vs should be shown
+at the expansion root, the algorithm collects arg-ids from the ref-fn's inheritance chain.
+If a binding's source chain leads to one of these arg-ids, it's considered "covered" by
+the structural ref — shown there, not at the root.
+
+**Problem:** When the expansion root and the ref-fn share a common ancestor (e.g., both
+inherit from `conj-any`), the shared ancestor's args appear in BOTH chains. This causes
+ALL bindings whose source chains pass through the shared ancestor to be incorrectly
+filtered as "covered."
+
+```
+Example: editor-routes → list-11 → conj-any (expansion chain)
+         list-10 → conj-any (ref-fn chain)
+
+conj-any has args: coll (9bee1b2f), item (6a08596a)
+
+Without exclusion:
+  6a08596a is in ref-fn-arg-ids (from list-10's chain including conj-any)
+  ALL editor-routes' items have source chains ending at 6a08596a
+  → ALL items filtered as "covered" → items disappear from graph!
+```
+
+**Solution: Shared ancestor exclusion.** When collecting arg-ids from ref-fn chains,
+EXCLUDE fns that also appear in the expansion root's full inheritance chain.
+
+This rule applies in **four places** in the code:
+
+| Location | What it collects | Effect of exclusion |
+|----------|-----------------|---------------------|
+| `collect-expanded-args` → `ref-fn-arg-ids` | Args from displayed ref-fns | Items not filtered as "belonging inside ref" |
+| `process-expanded-fn` → `ancestor-ref-arg-sources` | Args from ancestor ref subtree | Level-0 items not filtered as "covered by ancestor" |
+| `process-fn` → `displayed-ref-arg-ids` | Args from displayed child ref-fns | Item bindings not filtered inside structural nodes |
+| `child-covered-sources-for-fn` | Source-ids from child ref chains | Item source-ids not mistakenly "covered by coll child" |
+
+**Recursive subtree walk for ancestor-ref-arg-sources:**
+The ancestor ref may have a deep composition tree (e.g., list-10 → list-10-9 → ... → pair-1).
+Bindings flow to ALL nodes in this tree, not just the direct ref. So `ancestor-ref-arg-sources`
+must recursively walk the entire subtree (following ref-ids in args), collecting arg-ids from
+all reachable nodes — while still applying the shared ancestor exclusion.
+
+```
+Example: editor-routes expanded to list-11 level.
+  ancestor ref = list-10 (coll chain root)
+  Recursive walk: list-10 → list-10-9 → ... → pair-1
+  Each has item slot: item10, item9, ..., item1
+  
+  ancestor-ref-arg-sources includes ALL these item arg-ids
+  → editor-routes' items 1-10 are "covered" (shown on coll nodes)
+  → only item11 (list-11's own slot) shown at editor-routes level
+```
+
+#### 2.5 Output
 
 ```clojure
 {:nodes [{:data {:id "fn-xxx" :label "name" :type "fn" ...}} ...]

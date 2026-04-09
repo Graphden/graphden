@@ -5,14 +5,13 @@
      (go)    - start system with :dev profile
      (halt)  - stop system
      (reset) - stop, reload config, restart
-     (clear) - remove all component state
 
    System state is available via:
-     (system) - returns the running system map
-     (config) - returns the prepared config"
+     integrant.repl.state/system - the running system map
+     integrant.repl.state/config - the prepared config"
   (:require
     [graphden.system.interface :as sys]
-    [integrant.repl :refer [clear halt go init prep reset reset-all]]
+    [integrant.repl :refer [go halt reset]]
     [integrant.repl.state :refer [config system]]))
 
 

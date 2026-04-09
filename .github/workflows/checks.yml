@@ -21,7 +21,7 @@ jobs:
           clj-kondo: latest
 
       - name: Run clj-kondo
-        run: clj-kondo --lint components bases development
+        run: clj-kondo --lint src test development
 
   splint:
     name: splint
@@ -62,7 +62,7 @@ jobs:
           cljstyle: latest
 
       - name: Check formatting
-        run: cljstyle check components bases development
+        run: cljstyle check src test development
 
   test:
     name: tests

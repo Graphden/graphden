@@ -3,13 +3,18 @@
 
    Covers:
    - StorageCRUD protocol (create, read, update, delete, query)
-   - StorageBatchCRUD protocol (batch create, read, delete)
-   - Required field validation"
+   - StorageBatchCRUD protocol (batch create, read, update, upsert, delete)
+   - Required field validation
+   - Where-clause processing (IS NULL, IN clause, equality)
+   - Batch edge cases (only-id updates, unique violations, count mismatches)
+   - Arg descendant validation on update/delete"
   (:require
+    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.storage.postgres.test-setup :as setup]
     [graphden.storage.protocol.core :as sp]
-    [graphden.storage.protocol.test-helpers :as th]))
+    [graphden.storage.protocol.test-helpers :as th]
+    [next.jdbc :as jdbc]))
 
 
 (use-fixtures :once (setup/container-fixture))
@@ -580,5 +585,444 @@
               updated (sp/update-entity storage :user (:id user) {:bio nil})]
           (is (= "Alice" (:name updated)))
           (is (nil? (:bio updated))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Query where-clause IN clause tests ===
+
+(deftest query-entities-in-clause-test
+  (testing "query-entities with vector value generates IN clause"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"})
+          _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"})
+          _ (sp/create-entity storage :user {:id #uuid "33333333-3333-3333-3333-333333333333" :name "Charlie"})
+          result (sp/query-entities storage :user {:name ["Alice" "Charlie"]})]
+      (try
+        (is (= 2 (count result)))
+        (is (= #{"Alice" "Charlie"} (set (map :name result))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "query-entities with set value generates IN clause"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"})
+          _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"})
+          result (sp/query-entities storage :user {:name #{"Alice" "Bob"}})]
+      (try
+        (is (= 2 (count result)))
+        (is (= #{"Alice" "Bob"} (set (map :name result))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "query-entities with single-element vector IN clause"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"})
+          _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"})
+          result (sp/query-entities storage :user {:name ["Alice"]})]
+      (try
+        (is (= 1 (count result)))
+        (is (= "Alice" (:name (first result))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "query-entities with IN clause matching no records returns empty"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"})
+          result (sp/query-entities storage :user {:name ["Nonexistent" "Missing"]})]
+      (try
+        (is (empty? result))
+        (finally
+          (sp/close storage)))))
+
+  (testing "query-entities with IN clause on UUID field"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          id3 #uuid "33333333-3333-3333-3333-333333333333"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+          _ (sp/create-entity storage :user {:id id2 :name "Bob"})
+          _ (sp/create-entity storage :user {:id id3 :name "Charlie"})
+          result (sp/query-entities storage :user {:id [id1 id3]})]
+      (try
+        (is (= 2 (count result)))
+        (is (= #{"Alice" "Charlie"} (set (map :name result))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Query with nil where returns all ===
+
+(deftest query-entities-nil-where-test
+  (testing "query-entities with nil where returns all entities"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"})
+          _ (sp/create-entity storage :user {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"})
+          result (sp/query-entities storage :user nil)]
+      (try
+        (is (= 2 (count result)))
+        (is (= #{"Alice" "Bob"} (set (map :name result))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Update-entities: only-id records (no update columns) ===
+
+(deftest batch-update-entities-only-id-test
+  (testing "update-entities with only :id verifies existence and returns current records"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+          _ (sp/create-entity storage :user {:id id2 :name "Bob"})
+          results (sp/update-entities storage :user [{:id id1} {:id id2}])]
+      (try
+        (is (= 2 (count results)))
+        ;; Records should be returned unchanged
+        (is (= "Alice" (:name (first (filter #(= id1 (:id %)) results)))))
+        (is (= "Bob" (:name (first (filter #(= id2 (:id %)) results)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entities with only :id throws for non-existent entity"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+          missing-id #uuid "99999999-9999-9999-9999-999999999999"]
+      (try
+        (let [ex (try
+                   (sp/update-entities storage :user [{:id id1} {:id missing-id}])
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex))
+          (is (= :not-found (:type (ex-data ex))))
+          (is (= [missing-id] (:missing-ids (ex-data ex)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Update-entities with boolean field (type inference) ===
+
+(deftest batch-update-entities-boolean-field-test
+  (testing "update-entities correctly handles boolean fields"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :active {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                   :type :bool}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice" :active true})
+          _ (sp/create-entity storage :user {:id id2 :name "Bob" :active true})
+          results (sp/update-entities storage :user
+                                      [{:id id1 :active false}
+                                       {:id id2 :active false}])]
+      (try
+        (is (= 2 (count results)))
+        (is (false? (:active (sp/read-entity storage :user id1))))
+        (is (false? (:active (sp/read-entity storage :user id2))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Create-entities unique violation wrapping ===
+
+(deftest batch-create-entities-unique-violation-test
+  (testing "create-entities wraps unique violation with batch context"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}}
+                                 :constraints [{:type :unique :fields [:name]}])
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:name "Alice"})]
+      (try
+        (let [ex (try
+                   (sp/create-entities storage :user
+                                       [{:name "Bob"}
+                                        {:name "Alice"}])  ; duplicate
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex))
+          (is (= :unique-violation (:type (ex-data ex))))
+          ;; Should have batch context
+          (is (contains? (ex-data ex) :batch-size)))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Update-entities unique violation wrapping ===
+
+(deftest batch-update-entities-unique-violation-test
+  (testing "update-entities wraps unique violation with batch context"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}}
+                                 :constraints [{:type :unique :fields [:name]}])
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice"})
+          _ (sp/create-entity storage :user {:id id2 :name "Bob"})]
+      (try
+        (let [ex (try
+                   (sp/update-entities storage :user
+                                       [{:id id2 :name "Alice"}])  ; conflicts with id1
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex))
+          (is (= :unique-violation (:type (ex-data ex))))
+          (is (contains? (ex-data ex) :batch-size)))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Upsert-entities count mismatch ===
+
+(deftest batch-upsert-count-mismatch-test
+  (testing "throws batch-upsert-mismatch when returned rows don't match input count"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})
+          _ (sp/initialize storage schema)]
+      (try
+        (let [original-execute jdbc/execute!]
+          (with-redefs [jdbc/execute! (fn [ds query & args]
+                                        (let [result (apply original-execute ds query args)]
+                                          ;; If this is an INSERT ON CONFLICT (upsert), drop one row
+                                          (if (and (vector? query)
+                                                   (string? (first query))
+                                                   (str/includes? (first query) "ON CONFLICT"))
+                                            (drop-last result)
+                                            result)))]
+            (let [ex (try
+                       (sp/upsert-entities storage :user
+                                           [{:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"}
+                                            {:id #uuid "22222222-2222-2222-2222-222222222222" :name "Bob"}
+                                            {:id #uuid "33333333-3333-3333-3333-333333333333" :name "Charlie"}])
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+              (is (some? ex))
+              (is (= :batch-upsert-mismatch (:type (ex-data ex))))
+              (is (= 3 (:expected-count (ex-data ex))))
+              (is (= 2 (:actual-count (ex-data ex)))))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Upsert-entities unique violation wrapping ===
+
+(deftest batch-upsert-entities-sql-error-wrapping-test
+  (testing "upsert-entities wraps SQL errors with batch context"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}})]
+      (try
+        (sp/initialize storage schema)
+        ;; Force a SQL error by using with-redefs to throw a SQLException
+        (let [original-execute jdbc/execute!]
+          (with-redefs [jdbc/execute! (fn [ds query & args]
+                                        (if (and (vector? query)
+                                                 (string? (first query))
+                                                 (str/includes? (first query) "ON CONFLICT"))
+                                          (throw (java.sql.SQLException. "simulated error" "23505"))
+                                          (apply original-execute ds query args)))]
+            (let [ex (try
+                       (sp/upsert-entities storage :user
+                                           [{:id #uuid "11111111-1111-1111-1111-111111111111" :name "Alice"}])
+                       nil
+                       (catch clojure.lang.ExceptionInfo e e))]
+              (is (some? ex))
+              (is (contains? (ex-data ex) :batch-size)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Arg descendant validation on update/delete ===
+
+(deftest arg-descendant-validation-test
+  (testing "update-entity on arg with descendants throws constraint-violation"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)]
+      (try
+        ;; Create base fn and arg
+        (let [base-fn (setup/create-base-fn! storage "base-fn" :int)
+              parent-arg (setup/create-arg! storage (:id base-fn)
+                                            {:name "x" :type :integer :required true :is-fn false
+                                             :value 10})
+              composed-fn (setup/create-composed-fn! storage "composed" (:id base-fn))
+              _child-arg (setup/create-arg! storage (:id composed-fn)
+                                            {:name "x" :type :integer :required true :is-fn false
+                                             :source-id (:id parent-arg)
+                                             :value 42})
+              ex (try
+                   (sp/update-entity storage :arg (:id parent-arg) {:value 999})
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex))
+          (is (= :constraint-violation/has-descendants (:type (ex-data ex)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "delete-entity on arg with descendants throws constraint-violation"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)]
+      (try
+        (let [base-fn (setup/create-base-fn! storage "base-fn2" :int)
+              parent-arg (setup/create-arg! storage (:id base-fn)
+                                            {:name "x" :type :integer :required true :is-fn false
+                                             :value 10})
+              composed-fn (setup/create-composed-fn! storage "composed2" (:id base-fn))
+              _child-arg (setup/create-arg! storage (:id composed-fn)
+                                            {:name "x" :type :integer :required true :is-fn false
+                                             :source-id (:id parent-arg)
+                                             :value 42})
+              ex (try
+                   (sp/delete-entity storage :arg (:id parent-arg))
+                   nil
+                   (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? ex))
+          (is (= :constraint-violation/has-descendants (:type (ex-data ex)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "update-entity on arg without descendants succeeds"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)]
+      (try
+        (let [base-fn (setup/create-base-fn! storage "base-fn3" :int)
+              arg (setup/create-arg! storage (:id base-fn)
+                                     {:name "x" :type :integer :required true :is-fn false
+                                      :value 42})
+              updated (sp/update-entity storage :arg (:id arg) {:value 99})]
+          (is (= 99 (:value updated))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "delete-entity on non-arg entity skips descendant validation"
+    (let [storage (setup/create-test-storage)
+          schema (setup/make-graph-schema)
+          _ (sp/initialize storage schema)]
+      (try
+        (let [base-fn (setup/create-base-fn! storage "deletable-fn" :int)
+              result (sp/delete-entity storage :fn (:id base-fn))]
+          (is (true? result)))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Create-entities with heterogeneous fields (different records have different fields) ===
+
+(deftest batch-create-entities-heterogeneous-fields-test
+  (testing "create-entities handles records with different field sets"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                :type :text :nullable? true}})
+          _ (sp/initialize storage schema)]
+      (try
+        ;; One record has bio, the other doesn't
+        (let [results (sp/create-entities storage :user
+                                          [{:name "Alice" :bio "Hello"}
+                                           {:name "Bob"}])]
+          (is (= 2 (count results)))
+          (let [alice (first (filter #(= "Alice" (:name %)) results))
+                bob (first (filter #(= "Bob" (:name %)) results))]
+            (is (= "Hello" (:bio alice)))
+            (is (nil? (:bio bob)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Update-entities with heterogeneous fields ===
+
+(deftest batch-update-entities-heterogeneous-fields-test
+  (testing "update-entities handles records updating same nullable field"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                :type :text :nullable? true}})
+          _ (sp/initialize storage schema)
+          id1 #uuid "11111111-1111-1111-1111-111111111111"
+          id2 #uuid "22222222-2222-2222-2222-222222222222"
+          _ (sp/create-entity storage :user {:id id1 :name "Alice" :bio "old1"})
+          _ (sp/create-entity storage :user {:id id2 :name "Bob" :bio "old2"})]
+      (try
+        ;; Both update bio field
+        (let [results (sp/update-entities storage :user
+                                          [{:id id1 :bio "new1"}
+                                           {:id id2 :bio "new2"}])]
+          (is (= 2 (count results)))
+          (is (= "new1" (:bio (sp/read-entity storage :user id1))))
+          (is (= "new2" (:bio (sp/read-entity storage :user id2)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; === Query with multiple where conditions ===
+
+(deftest query-entities-multiple-conditions-test
+  (testing "query-entities with multiple where conditions uses AND"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                :type :text :nullable? true}})
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:name "Alice" :bio "dev"})
+          _ (sp/create-entity storage :user {:name "Bob" :bio "dev"})
+          _ (sp/create-entity storage :user {:name "Alice" :bio "mgr"})]
+      (try
+        ;; Both conditions must match
+        (let [result (sp/query-entities storage :user {:name "Alice" :bio "dev"})]
+          (is (= 1 (count result)))
+          (is (= "Alice" (:name (first result))))
+          (is (= "dev" (:bio (first result)))))
+        (finally
+          (sp/close storage)))))
+
+  (testing "query-entities with equality and nil conditions combined"
+    (let [storage (setup/create-test-storage)
+          schema (th/make-schema :fields {:name {:uuid #uuid "00000000-0000-0000-0000-000000000002"
+                                                 :type :text}
+                                          :bio {:uuid #uuid "00000000-0000-0000-0000-000000000003"
+                                                :type :text :nullable? true}})
+          _ (sp/initialize storage schema)
+          _ (sp/create-entity storage :user {:name "Alice" :bio nil})
+          _ (sp/create-entity storage :user {:name "Bob" :bio "dev"})
+          _ (sp/create-entity storage :user {:name "Charlie" :bio nil})]
+      (try
+        (let [result (sp/query-entities storage :user {:name "Alice" :bio nil})]
+          (is (= 1 (count result)))
+          (is (= "Alice" (:name (first result)))))
         (finally
           (sp/close storage))))))

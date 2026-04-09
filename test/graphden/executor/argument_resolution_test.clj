@@ -565,3 +565,280 @@
     (testing "is-fn=true arg passes fn-id directly without executing"
       (let [result (arg-res/build-arg-delays ctx fn-data {} execute-ref-fn)]
         (is (= ref-target-fn-id @(get (:by-name result) :f)))))))
+
+
+;; === Additional branch coverage tests ===
+
+(deftest build-ref-delay-nil-exec-fn-test
+  (testing "throws closure-capture-issue when execute-ref-fn is nil in captured vector"
+    ;; This tests the (when (nil? exec-fn) ...) branch inside the delay
+    (let [fn-id (random-uuid)
+          ;; Pass nil as execute-ref-fn — captured vector will contain nil at exec-fn position
+          result (#'arg-res/build-ref-delay {} fn-id "test-arg" false
+                                            nil {} (atom {}) (random-uuid))]
+      (is (delay? result))
+      (try
+        @result
+        (is false "Should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          ;; The nil exec-fn throw is wrapped by the outer catch into arg-evaluation-failed
+          (is (= :execution-error/arg-evaluation-failed (:type (ex-data e))))
+          (is (= "test-arg" (:arg-name (ex-data e)))))))))
+
+
+(deftest build-ref-delay-nil-delays-atom-test
+  (testing "uses empty map when delays-atom is nil"
+    (let [fn-id (random-uuid)
+          exec-fn (fn [_ctx _fn-id _args delays]
+                    (is (= {} delays))
+                    55)
+          result (#'arg-res/build-ref-delay {} fn-id "a" false
+                                            exec-fn {} nil (random-uuid))]
+      (is (= 55 @result)))))
+
+
+(deftest realize-lazy-value-list-seqable-test
+  (testing "realizes a list (seqable, non-lazy-seq, non-vector, non-set, non-string, non-map)"
+    ;; This hits the 4th cond branch in realize-lazy-value (line 76-80)
+    (let [result (#'arg-res/realize-lazy-value (list 1 2 3))]
+      (is (= [1 2 3] result))
+      (is (vector? result)))))
+
+
+(deftest arg-belongs-to-current-fn-root-not-base-test
+  (testing "returns false when root arg does not belong to base-fn"
+    ;; This tests the root-belongs-to-base? = false branch
+    (let [base-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          other-fn-id (random-uuid)
+          ;; Root arg belongs to other-fn, not base-fn
+          other-arg-id (random-uuid)
+          inherited-arg-id (random-uuid)
+
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}
+               other-fn-id {:id other-fn-id :parent-id nil}}
+
+          other-arg {:id other-arg-id :fn-id other-fn-id :name "x"
+                     :type :int :source-id nil}
+          ;; Arg on composed-fn but source points to other-fn's arg (not in parent chain)
+          inherited-arg {:id inherited-arg-id :fn-id composed-fn-id :name nil
+                         :type :int :source-id other-arg-id}
+
+          all-args [other-arg inherited-arg]
+          exec-graph (make-execution-graph fns all-args)]
+
+      (is (false? (#'arg-res/arg-belongs-to-current-fn? exec-graph inherited-arg composed-fn-id))))))
+
+
+(deftest arg-belongs-to-current-fn-own-arg-missing-source-test
+  (testing "returns false when own arg's source points to missing arg (root != base-fn)"
+    ;; own-arg.source-id -> missing -> root = own-arg itself
+    ;; own-arg.fn-id = composed-fn-id != base-fn-id -> root-belongs-to-base? = false
+    (let [base-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          own-arg-id (random-uuid)
+          missing-source-id (random-uuid)
+
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}}
+
+          base-arg {:id base-arg-id :fn-id base-fn-id :name "a"
+                    :type :int :source-id nil}
+          own-arg {:id own-arg-id :fn-id composed-fn-id :name nil
+                   :type :int :source-id missing-source-id}
+
+          all-args [base-arg own-arg]
+          exec-graph (make-execution-graph fns all-args)]
+      (is (false? (#'arg-res/arg-belongs-to-current-fn? exec-graph own-arg composed-fn-id))))))
+
+
+(deftest arg-belongs-to-current-fn-inherited-with-ref-test
+  (testing "inherited arg with ref-id belongs to composed fn"
+    ;; Tests the inherited (not own) arg branch with ref-id set
+    (let [base-fn-id (random-uuid)
+          mid-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          mid-arg-id (random-uuid)
+          inherited-arg-id (random-uuid)
+          ref-target-id (random-uuid)
+
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               mid-fn-id {:id mid-fn-id :parent-id base-fn-id}
+               composed-fn-id {:id composed-fn-id :parent-id mid-fn-id}}
+
+          base-arg {:id base-arg-id :fn-id base-fn-id :name "a"
+                    :type :int :source-id nil}
+          mid-arg {:id mid-arg-id :fn-id mid-fn-id :name nil
+                   :type :int :source-id base-arg-id}
+          ;; Inherited arg from mid-fn (not own to composed-fn) with ref-id
+          inherited-arg {:id inherited-arg-id :fn-id mid-fn-id :name nil
+                         :type :int :source-id base-arg-id :ref-id ref-target-id}
+
+          all-args [base-arg mid-arg inherited-arg]
+          exec-graph (make-execution-graph fns all-args)]
+
+      ;; inherited-arg.fn-id = mid-fn-id ≠ composed-fn-id
+      ;; Root = base-arg (belongs to base-fn) ✓
+      ;; Has ref-id → included
+      (is (true? (#'arg-res/arg-belongs-to-current-fn? exec-graph inherited-arg composed-fn-id))))))
+
+
+(deftest arg-belongs-to-current-fn-inherited-no-name-no-value-test
+  (testing "inherited arg with no name, no value, no ref-id returns false"
+    ;; Tests the inherited arg branch where all three checks are false
+    (let [base-fn-id (random-uuid)
+          mid-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          ;; Inherited arg with nothing set
+          inherited-arg-id (random-uuid)
+
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               mid-fn-id {:id mid-fn-id :parent-id base-fn-id}
+               composed-fn-id {:id composed-fn-id :parent-id mid-fn-id}}
+
+          base-arg {:id base-arg-id :fn-id base-fn-id :name "a"
+                    :type :int :source-id nil}
+          ;; Inherited arg: no name, no value, no ref-id
+          inherited-arg {:id inherited-arg-id :fn-id mid-fn-id :name nil
+                         :type :int :source-id base-arg-id
+                         :value nil :ref-id nil}
+
+          all-args [base-arg inherited-arg]
+          exec-graph (make-execution-graph fns all-args)]
+
+      ;; Root = base-arg (belongs to base-fn) ✓
+      ;; Inherited: name=nil, value=nil, ref-id=nil → false
+      (is (false? (#'arg-res/arg-belongs-to-current-fn? exec-graph inherited-arg composed-fn-id))))))
+
+
+(deftest arg-belongs-to-current-fn-own-arg-source-in-parent-no-names-test
+  (testing "own arg where source is in parent chain but has no name on arg or source - only value/ref-id"
+    ;; Tests the own-arg branch where source is in parent chain
+    ;; and arg has no name, source has no name, but has value → true
+    (let [base-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          own-arg-id (random-uuid)
+
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}}
+
+          ;; Base arg without name (unusual but tests the branch)
+          base-arg {:id base-arg-id :fn-id base-fn-id :name nil
+                    :type :int :source-id nil}
+          ;; Own arg with source in parent chain, no names, but has value
+          own-arg {:id own-arg-id :fn-id composed-fn-id :name nil
+                   :type :int :source-id base-arg-id :value 42}
+
+          all-args [base-arg own-arg]
+          exec-graph (make-execution-graph fns all-args)]
+
+      ;; Root = base-arg (fn-id = base-fn-id, source-id = nil) ✓
+      ;; Own arg, source in parent chain
+      ;; name=nil, source name=nil, but value=42 → true
+      (is (true? (#'arg-res/arg-belongs-to-current-fn? exec-graph own-arg composed-fn-id)))))
+
+  (testing "own arg where source is in parent chain, no names, no value, no ref-id → false"
+    (let [base-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          own-arg-id (random-uuid)
+
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}}
+
+          base-arg {:id base-arg-id :fn-id base-fn-id :name nil
+                    :type :int :source-id nil}
+          own-arg {:id own-arg-id :fn-id composed-fn-id :name nil
+                   :type :int :source-id base-arg-id}
+
+          all-args [base-arg own-arg]
+          exec-graph (make-execution-graph fns all-args)]
+
+      ;; Root = base-arg, belongs to base ✓
+      ;; Own arg, source in parent chain
+      ;; name=nil, source name=nil, value=nil, ref-id=nil → false
+      (is (false? (#'arg-res/arg-belongs-to-current-fn? exec-graph own-arg composed-fn-id)))))
+
+  (testing "own arg where source is in parent chain, source has name → true"
+    (let [base-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          own-arg-id (random-uuid)
+
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}}
+
+          base-arg {:id base-arg-id :fn-id base-fn-id :name "x"
+                    :type :int :source-id nil}
+          own-arg {:id own-arg-id :fn-id composed-fn-id :name nil
+                   :type :int :source-id base-arg-id}
+
+          all-args [base-arg own-arg]
+          exec-graph (make-execution-graph fns all-args)]
+
+      ;; Own arg, source in parent chain
+      ;; name=nil but source name="x" → true
+      (is (true? (#'arg-res/arg-belongs-to-current-fn? exec-graph own-arg composed-fn-id))))))
+
+
+(deftest build-arg-delays-collision-handling-test
+  (testing "provided value beats existing stored value in by-name collision"
+    ;; When two args share the same root name, provided value should win
+    (let [base-fn-id (random-uuid)
+          composed-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          arg1-id (random-uuid)
+          arg2-id (random-uuid)
+
+          fns {base-fn-id {:id base-fn-id :parent-id nil :name "base"}
+               composed-fn-id {:id composed-fn-id :parent-id base-fn-id :name "composed"}}
+
+          base-arg {:id base-arg-id :fn-id base-fn-id :name "x"
+                    :type :int :required false :source-id nil}
+          ;; First arg: stored value
+          arg1 {:id arg1-id :fn-id composed-fn-id :name nil
+                :type :int :required false :source-id base-arg-id :value 10}
+          ;; Second arg: no stored value, will get provided
+          arg2 {:id arg2-id :fn-id composed-fn-id :name nil
+                :type :int :required false :source-id base-arg-id}
+
+          all-args [base-arg arg1 arg2]
+          exec-graph (make-execution-graph fns all-args)
+          ctx (assoc (th/create-test-context)
+                     :execution-graph exec-graph)
+          fn-data {:fn (get fns composed-fn-id)
+                   :args [arg1 arg2]}
+          execute-ref-fn (fn [_ _ _ _] nil)
+          ;; Provide a value for arg2
+          provided {arg2-id 99}
+          result (arg-res/build-arg-delays ctx fn-data provided execute-ref-fn)]
+
+      ;; arg2 has provided value → has-provided-value? = true → should replace arg1's stored value
+      (is (= 99 @(get (:by-name result) :x))))))
+
+
+(deftest realize-lazy-value-depth-zero-map-test
+  (testing "realizes map at depth 0 with nested lazy seq"
+    (binding [config/*max-nested-collection-depth* 2]
+      (let [result (#'arg-res/realize-lazy-value {:a (map inc [1 2])})]
+        (is (= {:a [2 3]} result))))))
+
+
+(deftest build-delay-value-with-is-fn-test
+  (testing "builds delay for literal UUID string with is-fn=true"
+    (let [uuid (random-uuid)
+          uuid-str (str uuid)
+          arg {:id (random-uuid)
+               :name "f"
+               :type :fn
+               :value uuid-str
+               :is-fn true}
+          result (#'arg-res/build-delay {} arg nil nil nil)]
+      (is (delay? result))
+      (is (uuid? @result))
+      (is (= uuid @result)))))

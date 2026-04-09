@@ -1259,3 +1259,160 @@
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"Parent chain exceeds maximum depth"
               (#'queue/get-fn-args-with-inheritance graph id1 1)))))))
+
+
+;; =============================================================================
+;; Branch Coverage Tests - trace-source-to-fn arg-id not in args-by-id
+;; =============================================================================
+
+(deftest trace-source-to-fn-arg-not-in-graph
+  (testing "returns nil when arg-id is not found in args-by-id"
+    (let [graph {:args-by-id {}}
+          missing-arg-id (random-uuid)]
+      ;; when-let [arg (get args-by-id arg-id)] returns nil -> whole form returns nil
+      (is (nil? (#'queue/trace-source-to-fn graph missing-arg-id (random-uuid) #{} 0))))))
+
+
+;; =============================================================================
+;; Branch Coverage Tests - collect-propagated-args existing literal wins over new ref
+;; =============================================================================
+
+(deftest collect-propagated-args-existing-literal-wins-over-new-ref
+  (testing "existing entry with literal value is NOT replaced by new entry with ref-id"
+    (let [target-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          lit-arg-id (random-uuid)
+          ref-arg-id (random-uuid)
+          some-ref (random-uuid)
+          args-by-id {base-arg-id {:id base-arg-id :fn-id target-fn-id :name "x"}
+                      lit-arg-id {:id lit-arg-id :source-id base-arg-id :value 10}
+                      ref-arg-id {:id ref-arg-id :source-id base-arg-id :ref-id some-ref}}
+          graph {:args-by-id args-by-id}
+          ;; Literal arg processes first, then ref arg tries to replace it
+          caller-args [{:id lit-arg-id :source-id base-arg-id :value 10}
+                       {:id ref-arg-id :source-id base-arg-id :ref-id some-ref}]
+          result (#'queue/collect-propagated-args graph caller-args target-fn-id)]
+      ;; Literal should win: existing has literal, new has ref -> don't replace
+      (is (= 10 (get-in result [base-arg-id :arg :value]))))))
+
+
+;; =============================================================================
+;; Branch Coverage Tests - fn-in-parent-chain? depth exceeds 100
+;; =============================================================================
+
+(deftest fn-in-parent-chain-depth-limit
+  (testing "returns false when depth exceeds 100 before finding match"
+    (let [target-id (random-uuid)
+          ids (repeatedly 102 random-uuid)
+          ;; Build chain: id0 -> id1 -> ... -> id101 -> nil
+          fns-map (into {}
+                        (map-indexed
+                          (fn [i id]
+                            [id {:id id :parent-id (when (< i 101) (nth ids (inc i)))}])
+                          ids))]
+      ;; Search for target-id that is NOT in chain; depth will exceed 100
+      (is (false? (#'queue/fn-in-parent-chain? fns-map target-id (first ids)))))))
+
+
+;; =============================================================================
+;; Branch Coverage Tests - arg-belongs-to-current-fn? own arg no binding
+;; =============================================================================
+
+(deftest arg-belongs-own-arg-no-value-no-ref-no-name-no-source-name
+  (testing "own arg with source in parent chain but no value/ref/name returns false"
+    (let [base-fn-id (random-uuid)
+          child-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          child-arg-id (random-uuid)
+          ;; base-arg has NO name (unusual but possible)
+          base-arg {:id base-arg-id :fn-id base-fn-id :type :int}
+          ;; child-arg has source, no value, no ref-id, no name
+          child-arg {:id child-arg-id :fn-id child-fn-id :source-id base-arg-id}
+          args-by-id {base-arg-id base-arg
+                      child-arg-id child-arg}
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          graph {:args-by-id args-by-id :fns fns}]
+      ;; own arg, source in parent chain, but no value/ref/name and source has no name -> falsy
+      (is (not (#'queue/arg-belongs-to-current-fn? graph child-arg child-fn-id))))))
+
+
+(deftest arg-belongs-inherited-with-ref-id-no-name
+  (testing "inherited arg with ref-id but no name belongs"
+    (let [base-fn-id (random-uuid)
+          child-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          mid-arg-id (random-uuid)
+          some-ref (random-uuid)
+          base-arg {:id base-arg-id :fn-id base-fn-id :name "x" :type :int}
+          ;; mid-arg: belongs to base-fn (inherited), has source -> base, has ref-id but no name
+          mid-arg {:id mid-arg-id :fn-id base-fn-id :source-id base-arg-id :ref-id some-ref}
+          args-by-id {base-arg-id base-arg
+                      mid-arg-id mid-arg}
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          graph {:args-by-id args-by-id :fns fns}]
+      ;; inherited (not own), has ref-id -> should belong (hits the :else branch with ref-id)
+      (is (true? (#'queue/arg-belongs-to-current-fn? graph mid-arg child-fn-id))))))
+
+
+;; =============================================================================
+;; Branch Coverage Tests - arg-belongs-to-current-fn? broken source chain
+;; =============================================================================
+
+(deftest arg-belongs-own-arg-source-not-found-in-args-by-id
+  (testing "own arg whose source-id points to missing arg still returns truthy if root has base-fn"
+    (let [base-fn-id (random-uuid)
+          child-fn-id (random-uuid)
+          base-arg-id (random-uuid)
+          child-arg-id (random-uuid)
+          missing-source-id (random-uuid)
+          base-arg {:id base-arg-id :fn-id base-fn-id :name "x" :type :int}
+          ;; child-arg sources from missing-source-id which doesn't exist in args-by-id
+          ;; root-arg loop: source-id exists but get returns nil -> returns current arg (child-arg)
+          ;; root-arg is child-arg, fn-id is child-fn-id != base-fn-id -> root-belongs-to-base? is false
+          child-arg {:id child-arg-id :fn-id child-fn-id :source-id missing-source-id :value 10}
+          args-by-id {base-arg-id base-arg
+                      child-arg-id child-arg}
+          fns {base-fn-id {:id base-fn-id :parent-id nil}
+               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          graph {:args-by-id args-by-id :fns fns}]
+      ;; Root arg is child-arg (source not found), fn-id=child-fn-id != base-fn-id -> false
+      (is (false? (#'queue/arg-belongs-to-current-fn? graph child-arg child-fn-id))))))
+
+
+;; =============================================================================
+;; Branch Coverage Tests - isRealized when exec-state is nil
+;; =============================================================================
+
+(deftest smart-delay-isRealized-nil-exec-state
+  (testing "isRealized short-circuits on realized-flag=true even with nil exec-state"
+    ;; smart-delay-realized creates SmartDelay with exec-state=nil
+    (let [sd (queue/smart-delay-realized 42)]
+      ;; realized-flag is true so (or true ...) short-circuits
+      (is (realized? sd))))
+
+  (testing "isRealized returns false via realized-flag=false when value-map is empty"
+    ;; Exercises the fallthrough path where realized-flag is false and neither
+    ;; value-map nor result-cache contain the key
+    (let [exec-state (queue/->ExecutionState (atom {}) (atom {}) (atom {}) {})
+          sd (queue/->SmartDelay :k exec-state (atom {:task true}) nil false)]
+      (is (not (realized? sd))))))
+
+
+;; =============================================================================
+;; Branch Coverage Tests - value-map non-sentinel value
+;; =============================================================================
+
+(deftest smart-delay-value-map-non-sentinel
+  (testing "value-map with actual (non-sentinel) value returns it directly"
+    (let [cache-key :k
+          exec-state (queue/->ExecutionState
+                       (atom {cache-key 999})
+                       (atom {})
+                       (atom {}) {})
+          sd (queue/smart-delay cache-key exec-state {:task true})]
+      ;; when-not (= v ::nil-sentinel) returns v
+      (is (= 999 @sd))
+      ;; Second deref hits realized-flag path
+      (is (= 999 @sd)))))

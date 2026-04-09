@@ -112,6 +112,41 @@
         (is (= :invalid-config (:type (ex-data e))))
         (is (= :port (:missing-key (ex-data e))))
         ;; Password should be redacted
+        (is (= "[REDACTED]" (get-in (ex-data e) [:config :password]))))))
+
+  (testing "passes with multiple required keys all present"
+    ;; Exercises full doseq iteration over required-keys without short-circuit
+    (is (nil? (tpl/validate-config! {:host "localhost" :port 6379 :db 0}
+                                    #{:host :port :db}
+                                    {}))))
+
+  (testing "passes with multiple validators all passing"
+    ;; Exercises full doseq iteration over validators without short-circuit
+    (is (nil? (tpl/validate-config! {:host "localhost" :port 6379 :db 0}
+                                    #{:host :port :db}
+                                    {:port pos?
+                                     :db #(>= % 0)
+                                     :host string?}))))
+
+  (testing "throws when second validator fails"
+    ;; Exercises validator doseq with mixed pass/fail across multiple entries
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Invalid config value for:"
+          (tpl/validate-config! {:host "localhost" :port -1 :db 0}
+                                #{:host :port :db}
+                                {:host string?
+                                 :port pos?
+                                 :db #(>= % 0)}))))
+
+  (testing "error from failed validator includes redacted config"
+    (try
+      (tpl/validate-config! {:host "localhost" :port -1 :password "secret"}
+                            #{:host :port}
+                            {:port pos?})
+      (is false "should have thrown")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-config (:type (ex-data e))))
+        (is (= :port (:key (ex-data e))))
         (is (= "[REDACTED]" (get-in (ex-data e) [:config :password])))))))
 
 
@@ -324,7 +359,21 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"data must be a map"
           (tpl/create-entity-with-validation (atom nil) :user "not a map"
-                                             (fn [_ _ _] nil))))))
+                                             (fn [_ _ _] nil)))))
+
+  (testing "passes nil fields when schema is non-nil"
+    ;; Exercises the (when schema ...) branch with a non-nil schema-atom.
+    ;; The current implementation always returns nil for fields,
+    ;; but the branch is entered when schema is truthy.
+    (let [schema-atom (atom {:some "schema"})
+          received-fields (atom :not-called)
+          create-fn (fn [_entity-name _data fields]
+                      (reset! received-fields fields)
+                      {:id 2})]
+      (is (= {:id 2}
+             (tpl/create-entity-with-validation schema-atom :user {:name "test"} create-fn)))
+      ;; Fields is still nil because the when body returns nil
+      (is (nil? @received-fields)))))
 
 
 ;; === run-basic-contract-tests tests ===

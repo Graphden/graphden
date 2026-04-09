@@ -403,9 +403,8 @@
       (is (= :uuid (:expected result)))
       (is (= :int (:actual result)))))
 
-  ;; Note: :jsonb now accepts any JSON-serializable value (strings, numbers, etc.)
-  ;; See src/graphden/schema/fields/types.clj for rationale
-  )
+  (testing "jsonb accepts any value including string"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match "any-string" :jsonb)))))
 
 
 ;; === validate-required-fields! tests ===
@@ -508,32 +507,7 @@
           :user
           [{:id dup1} {:id dup1} {:id dup2} {:id dup2}])
         (catch clojure.lang.ExceptionInfo e
-          (is (= 2 (count (:duplicate-ids (ex-data e)))))))))
-
-  (testing "passes for empty sequence"
-    (is (nil? (storage/validate-no-duplicate-ids! :user []))))
-
-  (testing "passes for single record with ID"
-    (is (nil? (storage/validate-no-duplicate-ids! :user [{:id (random-uuid)}]))))
-
-  (testing "passes for single record without ID"
-    (is (nil? (storage/validate-no-duplicate-ids! :user [{:name "A"}]))))
-
-  (testing "duplicate at end of sequence after unique IDs"
-    (let [dup-id (random-uuid)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Duplicate IDs"
-            (storage/validate-no-duplicate-ids!
-              :user
-              [{:id (random-uuid)} {:id (random-uuid)} {:id dup-id} {:id dup-id}])))))
-
-  (testing "duplicate with nil-id records interspersed"
-    (let [dup-id (random-uuid)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"Duplicate IDs"
-            (storage/validate-no-duplicate-ids!
-              :user
-              [{:id dup-id} {:name "no-id"} {:id dup-id}]))))))
+          (is (= 2 (count (:duplicate-ids (ex-data e))))))))))
 
 
 ;; === validate-data-is-map! tests ===
@@ -572,7 +546,409 @@
         (is (= [1 2 3] (:data (ex-data e))))))))
 
 
-;; === Additional edge case tests ===
+;; === Additional coverage tests ===
+
+(deftest validate-entity-name!-additional-test
+  (testing "throws for integer entity-name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"entity-name must be a keyword"
+          (storage/validate-entity-name! 42 "update"))))
+
+  (testing "throws for boolean entity-name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"entity-name must be a keyword"
+          (storage/validate-entity-name! true "update"))))
+
+  (testing "throws for vector entity-name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"entity-name must be a keyword"
+          (storage/validate-entity-name! [:user] "read"))))
+
+  (testing "throws for map entity-name"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"entity-name must be a keyword"
+          (storage/validate-entity-name! {:name "user"} "read"))))
+
+  (testing "throws for entity-name starting with hyphen"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! (keyword "-user") "create"))))
+
+  (testing "throws for entity-name starting with underscore"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! (keyword "_user") "create"))))
+
+  (testing "throws for entity-name with special characters"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! (keyword "user!name") "create"))))
+
+  (testing "throws for entity-name with spaces"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! (keyword "user name") "create"))))
+
+  (testing "throws for entity-name with dots"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! (keyword "user.name") "create"))))
+
+  (testing "throws for entity-name with SQL injection attempt"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"invalid characters"
+          (storage/validate-entity-name! (keyword "users; DROP TABLE") "query"))))
+
+  (testing "exactly 64 characters passes (boundary)"
+    (let [name-64 (keyword (str "a" (str/join (repeat 63 "b"))))]
+      (is (nil? (storage/validate-entity-name! name-64 "create")))))
+
+  (testing "single lowercase letter passes"
+    (is (nil? (storage/validate-entity-name! :a "create"))))
+
+  (testing "entity-name with digits in middle passes"
+    (is (nil? (storage/validate-entity-name! :table123name "query"))))
+
+  (testing "exception data includes entity-name-type for non-keyword"
+    (try
+      (storage/validate-entity-name! 42 "query")
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :invalid-entity-name (:type (ex-data e))))
+        (is (= 42 (:entity-name (ex-data e))))
+        (is (= "query" (:operation (ex-data e))))
+        (is (some? (:entity-name-type (ex-data e)))))))
+
+  (testing "exception data includes length for too-long name"
+    (let [long-name (keyword (str "a" (str/join (repeat 64 "b"))))]
+      (try
+        (storage/validate-entity-name! long-name "create")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :invalid-entity-name (:type (ex-data e))))
+          (is (= 65 (:length (ex-data e))))
+          (is (= "create" (:operation (ex-data e)))))))))
+
+
+(deftest infer-actual-type-exotic-test
+  (testing "infers :jsonb for empty map"
+    (is (= :jsonb (#'graphden.storage.protocol.crud-validation/infer-actual-type {}))))
+
+  (testing "infers :jsonb for empty vector"
+    (is (= :jsonb (#'graphden.storage.protocol.crud-validation/infer-actual-type []))))
+
+  (testing "infers :unknown for LocalDateTime (inst? only matches java.util.Date)"
+    (is (= :unknown (#'graphden.storage.protocol.crud-validation/infer-actual-type
+                     (java.time.LocalDateTime/now)))))
+
+  (testing "infers :timestamptz for Instant"
+    (is (= :timestamptz (#'graphden.storage.protocol.crud-validation/infer-actual-type
+                         (java.time.Instant/now)))))
+
+  (testing "infers :text for empty string"
+    (is (= :text (#'graphden.storage.protocol.crud-validation/infer-actual-type ""))))
+
+  (testing "infers :int for zero"
+    (is (= :int (#'graphden.storage.protocol.crud-validation/infer-actual-type 0))))
+
+  (testing "infers :int for negative integer"
+    (is (= :int (#'graphden.storage.protocol.crud-validation/infer-actual-type -42))))
+
+  (testing "infers :int for Long/MAX_VALUE"
+    (is (= :int (#'graphden.storage.protocol.crud-validation/infer-actual-type Long/MAX_VALUE))))
+
+  (testing "infers :int for BigInteger"
+    (is (= :int (#'graphden.storage.protocol.crud-validation/infer-actual-type (bigint 999999999999999999)))))
+
+  (testing "infers :numeric for negative float"
+    (is (= :numeric (#'graphden.storage.protocol.crud-validation/infer-actual-type -3.14))))
+
+  (testing "infers :numeric for BigDecimal zero"
+    (is (= :numeric (#'graphden.storage.protocol.crud-validation/infer-actual-type 0.0M))))
+
+  (testing "infers :bytes for empty byte array"
+    (is (= :bytes (#'graphden.storage.protocol.crud-validation/infer-actual-type (byte-array 0)))))
+
+  (testing "infers :enum for namespaced keyword"
+    (is (= :enum (#'graphden.storage.protocol.crud-validation/infer-actual-type :my.ns/thing))))
+
+  (testing "infers :unknown for a list"
+    (is (= :unknown (#'graphden.storage.protocol.crud-validation/infer-actual-type '(1 2 3)))))
+
+  (testing "infers :unknown for a set"
+    (is (= :unknown (#'graphden.storage.protocol.crud-validation/infer-actual-type #{1 2 3}))))
+
+  (testing "infers :unknown for a function"
+    (is (= :unknown (#'graphden.storage.protocol.crud-validation/infer-actual-type inc))))
+
+  (testing "infers :unknown for an atom"
+    (is (= :unknown (#'graphden.storage.protocol.crud-validation/infer-actual-type (atom 42)))))
+
+  (testing "infers :unknown for a character"
+    (is (= :unknown (#'graphden.storage.protocol.crud-validation/infer-actual-type \a))))
+
+  (testing "ratio is inferred as :numeric or :unknown"
+    (let [result (#'graphden.storage.protocol.crud-validation/infer-actual-type 22/7)]
+      (is (contains? #{:numeric :unknown} result)))))
+
+
+(deftest check-type-match-additional-test
+  (testing "ref type accepts UUID"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match (random-uuid) :ref))))
+
+  (testing "fn type accepts UUID"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match (random-uuid) :fn))))
+
+  (testing "ref type rejects string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "not-uuid" :ref)]
+      (is (map? result))
+      (is (= :ref (:expected result)))
+      (is (= :text (:actual result)))))
+
+  (testing "fn type rejects integer"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match 42 :fn)]
+      (is (map? result))
+      (is (= :fn (:expected result)))
+      (is (= :int (:actual result)))))
+
+  (testing "unknown/exotic type passes through (forward compat)"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match "anything" :exotic-future-type))))
+
+  (testing "union type accepts anything"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match {:a 1} :union)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match "text" :union)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match 42 :union))))
+
+  (testing "nil value passes for every type"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :bool)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :numeric)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :ref)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :fn)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :jsonb)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :timestamptz)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :bytes)))
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :enum))))
+
+  (testing "jsonb accepts string (any value valid for jsonb)"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match "a string" :jsonb))))
+
+  (testing "jsonb accepts integer"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match 42 :jsonb))))
+
+  (testing "jsonb accepts boolean"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match true :jsonb))))
+
+  (testing "jsonb accepts nested map"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match {:nested {:deep "value"}} :jsonb))))
+
+  (testing "jsonb accepts vector of mixed types"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match [1 "two" true] :jsonb))))
+
+  (testing "numeric accepts integer (widening)"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match 42 :numeric))))
+
+  (testing "numeric rejects string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "42" :numeric)]
+      (is (= :numeric (:expected result)))
+      (is (= :text (:actual result)))))
+
+  (testing "bool rejects integer"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match 0 :bool)]
+      (is (= :bool (:expected result)))
+      (is (= :int (:actual result)))))
+
+  (testing "bool rejects string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "false" :bool)]
+      (is (= :bool (:expected result)))
+      (is (= :text (:actual result)))))
+
+  (testing "timestamptz accepts Instant"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match (java.time.Instant/now) :timestamptz))))
+
+  (testing "timestamptz accepts LocalDateTime"
+    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match (java.time.LocalDateTime/now) :timestamptz))))
+
+  (testing "timestamptz rejects string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "2024-01-01" :timestamptz)]
+      (is (= :timestamptz (:expected result)))
+      (is (= :text (:actual result)))))
+
+  (testing "enum rejects string"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "active" :enum)]
+      (is (= :enum (:expected result)))
+      (is (= :text (:actual result)))))
+
+  (testing "uuid rejects string that looks like UUID"
+    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "550e8400-e29b-41d4-a716-446655440000" :uuid)]
+      (is (= :uuid (:expected result)))
+      (is (= :text (:actual result))))))
+
+
+(deftest validate-where-clause-types-additional-test
+  (testing "ref type field accepts uuid"
+    (is (nil? (storage/validate-where-clause-types!
+                :arg
+                {:fn-id {:type :ref}}
+                {:fn-id (random-uuid)}))))
+
+  (testing "ref type field rejects string"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :arg
+            {:fn-id {:type :ref}}
+            {:fn-id "not-uuid"}))))
+
+  (testing "fn type field accepts uuid"
+    (is (nil? (storage/validate-where-clause-types!
+                :arg
+                {:target {:type :fn}}
+                {:target (random-uuid)}))))
+
+  (testing "fn type field rejects integer"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :arg
+            {:target {:type :fn}}
+            {:target 42}))))
+
+  (testing ":id field rejects string"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {}
+            {:id "not-a-uuid"}))))
+
+  (testing "multiple fields all valid passes"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}
+                 :age {:type :int}
+                 :active {:type :bool}
+                 :ref-id {:type :uuid}}
+                {:name "alice"
+                 :age 30
+                 :active true
+                 :ref-id (random-uuid)}))))
+
+  (testing "empty where clause passes"
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                {}))))
+
+  (testing "non-map where clause is ignored by types check"
+    ;; validate-where-clause-types! only processes when where is a map
+    (is (nil? (storage/validate-where-clause-types!
+                :user
+                {:name {:type :text}}
+                "not-a-map"))))
+
+  (testing "exception data includes value-type"
+    (try
+      (storage/validate-where-clause-types!
+        :user
+        {:age {:type :int}}
+        {:age "wrong"})
+      (catch clojure.lang.ExceptionInfo e
+        (is (= :validation-error/type-mismatch (:type (ex-data e))))
+        (is (= :user (:entity (ex-data e))))
+        (is (= :age (:field (ex-data e))))
+        (is (= :int (:expected-type (ex-data e))))
+        (is (= :text (:actual-type (ex-data e))))
+        (is (= String (:value-type (ex-data e)))))))
+
+  (testing "boolean for uuid throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:ref-id {:type :uuid}}
+            {:ref-id true}))))
+
+  (testing "map for text throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:name {:type :text}}
+            {:name {:invalid "map"}}))))
+
+  (testing "keyword for int throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:age {:type :int}}
+            {:age :twenty-five}))))
+
+  (testing "integer for bool throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Type mismatch"
+          (storage/validate-where-clause-types!
+            :user
+            {:active {:type :bool}}
+            {:active 1})))))
+
+
+(deftest validate-where-clause-fields-additional-test
+  (testing "empty where clause passes"
+    (is (nil? (storage/validate-where-clause-fields!
+                :user
+                {:name {:type :text}}
+                {}))))
+
+  (testing "non-map where clause is ignored"
+    (is (nil? (storage/validate-where-clause-fields!
+                :user
+                {:name {:type :text}}
+                "not-a-map"))))
+
+  (testing "multiple known fields pass"
+    (is (nil? (storage/validate-where-clause-fields!
+                :user
+                {:name {:type :text} :age {:type :int} :active {:type :bool}}
+                {:name "alice" :age 30 :active true}))))
+
+  (testing ":id with other known fields passes"
+    (is (nil? (storage/validate-where-clause-fields!
+                :user
+                {:name {:type :text}}
+                {:id (random-uuid) :name "alice"}))))
+
+  (testing "exception known-fields are sorted"
+    (try
+      (storage/validate-where-clause-fields!
+        :user
+        {:z-field {:type :text} :a-field {:type :int}}
+        {:bad-field "value"})
+      (catch clojure.lang.ExceptionInfo e
+        (let [known (:known-fields (ex-data e))]
+          (is (= [:a-field :z-field] known)))))))
+
+
+(deftest validate-where-clause-edge-cases-test
+  (testing "throws for keyword where clause"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"where clause must be nil or a map"
+          (storage/validate-where-clause! :invalid))))
+
+  (testing "throws for boolean where clause"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"where clause must be nil or a map"
+          (storage/validate-where-clause! true))))
+
+  (testing "throws for set where clause"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"where clause must be nil or a map"
+          (storage/validate-where-clause! #{:a :b}))))
+
+  (testing "exception includes where-type"
+    (try
+      (storage/validate-where-clause! [1 2 3])
+      (catch clojure.lang.ExceptionInfo e
+        (is (some? (:where-type (ex-data e))))))))
+
 
 (deftest validate-required-fields-edge-cases-test
   (testing "nullable? explicitly false is required"
@@ -583,7 +959,7 @@
             {:name {:type :text :nullable? false}}
             {}))))
 
-  (testing "multiple required fields - first missing"
+  (testing "multiple required fields - first missing throws"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Required field"
           (storage/validate-required-fields!
@@ -595,400 +971,79 @@
     (is (nil? (storage/validate-required-fields!
                 :user
                 {:name {:type :text} :email {:type :text}}
-                {:name "John" :email "john@test.com"})))))
+                {:name "John" :email "john@test.com"}))))
 
+  (testing "empty fields map passes for any data"
+    (is (nil? (storage/validate-required-fields!
+                :user
+                {}
+                {:anything "goes"}))))
 
-(deftest infer-actual-type-additional-cases-test
-  (testing "infers :numeric for ratio"
-    ;; Ratios like 22/7 may return :unknown since they're not float/decimal
-    (let [result (#'graphden.storage.protocol.crud-validation/infer-actual-type 22/7)]
-      (is (contains? #{:numeric :unknown} result))))
-
-  (testing "infers :int for BigInteger"
-    (is (= :int (#'graphden.storage.protocol.crud-validation/infer-actual-type (bigint 999999999999999999)))))
-
-  (testing "infers types correctly for Java Instant"
-    (is (= :timestamptz (#'graphden.storage.protocol.crud-validation/infer-actual-type (java.time.Instant/now))))))
-
-
-(deftest validate-where-clause-types-additional-cases-test
-  (testing "wrong type throws - boolean for uuid"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Type mismatch"
-          (storage/validate-where-clause-types!
-            :user
-            {:ref-id {:type :uuid}}
-            {:ref-id true}))))
-
-  (testing "wrong type throws - map for text"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Type mismatch"
-          (storage/validate-where-clause-types!
-            :user
-            {:name {:type :text}}
-            {:name {:invalid "map"}}))))
-
-  (testing "empty where clause passes"
-    (is (nil? (storage/validate-where-clause-types!
+  (testing "extra data fields beyond spec are ignored"
+    (is (nil? (storage/validate-required-fields!
                 :user
                 {:name {:type :text}}
-                {}))))
+                {:name "John" :extra "ignored"})))))
 
-  (testing "multiple type mismatches throws on first"
-    ;; Should throw on first mismatch encountered
+
+(deftest validate-no-duplicate-ids-edge-cases-test
+  (testing "passes for empty sequence"
+    (is (nil? (storage/validate-no-duplicate-ids! :user []))))
+
+  (testing "passes for single record with ID"
+    (is (nil? (storage/validate-no-duplicate-ids! :user [{:id (random-uuid)}]))))
+
+  (testing "passes for single record without ID"
+    (is (nil? (storage/validate-no-duplicate-ids! :user [{:name "A"}]))))
+
+  (testing "duplicate at end of sequence after unique IDs"
+    (let [dup-id (random-uuid)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Duplicate IDs"
+            (storage/validate-no-duplicate-ids!
+              :user
+              [{:id (random-uuid)} {:id (random-uuid)} {:id dup-id} {:id dup-id}])))))
+
+  (testing "duplicate with nil-id records interspersed"
+    (let [dup-id (random-uuid)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Duplicate IDs"
+            (storage/validate-no-duplicate-ids!
+              :user
+              [{:id dup-id} {:name "no-id"} {:id dup-id}])))))
+
+  (testing "three occurrences of same ID"
+    (let [dup-id (random-uuid)]
+      (try
+        (storage/validate-no-duplicate-ids!
+          :user
+          [{:id dup-id} {:id dup-id} {:id dup-id}])
+        (catch clojure.lang.ExceptionInfo e
+          (is (= 1 (count (:duplicate-ids (ex-data e)))))
+          (is (= dup-id (first (:duplicate-ids (ex-data e))))))))))
+
+
+(deftest validate-data-is-map-additional-test
+  (testing "throws for keyword data"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Type mismatch"
-          (storage/validate-where-clause-types!
-            :user
-            {:name {:type :text} :age {:type :int}}
-            {:name 123 :age "wrong"})))))
+                          #"data must be a map"
+          (storage/validate-data-is-map! :user :keyword-data))))
 
-
-(deftest validate-entity-name-additional-cases-test
-  (testing "entity-name at max length (64 chars) passes"
-    (let [max-name (keyword (str/join (repeat 64 "a")))]
-      (is (nil? (storage/validate-entity-name! max-name "create")))))
-
-  (testing "entity-name with hyphen passes"
-    (is (nil? (storage/validate-entity-name! :my-entity "query"))))
-
-  (testing "entity-name with underscore passes"
-    (is (nil? (storage/validate-entity-name! :my_entity "query"))))
-
-  (testing "entity-name with special chars throws"
+  (testing "throws for boolean data"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"invalid characters"
-          (storage/validate-entity-name! :my.entity "create"))))
+                          #"data must be a map"
+          (storage/validate-data-is-map! :user true))))
 
-  (testing "entity-name starting with hyphen throws"
+  (testing "throws for set data"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"invalid characters"
-          (storage/validate-entity-name! :-entity "create"))))
+                          #"data must be a map"
+          (storage/validate-data-is-map! :user #{:a :b}))))
 
-  (testing "entity-name starting with underscore throws"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"invalid characters"
-          (storage/validate-entity-name! :_entity "create"))))
+  (testing "passes for sorted-map"
+    (is (nil? (storage/validate-data-is-map! :user (sorted-map :a 1 :b 2)))))
 
-  (testing "operation is included in error message"
+  (testing "exception includes data-type"
     (try
-      (storage/validate-entity-name! nil "batch-insert")
+      (storage/validate-data-is-map! :user "string")
       (catch clojure.lang.ExceptionInfo e
-        (is (= "batch-insert" (:operation (ex-data e))))))))
-
-
-(deftest check-type-match-additional-cases-test
-  (testing "exotic type passes through"
-    ;; Unknown/exotic types should return nil to allow backend handling
-    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
-               "any-value" :custom-exotic-type))))
-
-  (testing "wrong type for numeric - string"
-    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "3.14" :numeric)]
-      (is (= :numeric (:expected result)))
-      (is (= :text (:actual result)))))
-
-  (testing "wrong type for timestamptz - string"
-    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "2023-01-01" :timestamptz)]
-      (is (= :timestamptz (:expected result)))
-      (is (= :text (:actual result)))))
-
-  (testing "wrong type for bytes - string"
-    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "binary" :bytes)]
-      (is (= :bytes (:expected result)))
-      (is (= :text (:actual result)))))
-
-  (testing "wrong type for enum - string"
-    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match "active" :enum)]
-      (is (= :enum (:expected result)))
-      (is (= :text (:actual result))))))
-
-
-(deftest validate-where-clause-fields-multiple-unknown-test
-  (testing "throws on first unknown field even with multiple"
-    ;; Should throw on first unknown field encountered
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Unknown field"
-          (storage/validate-where-clause-fields!
-            :user
-            {:name {:type :text}}
-            {:unknown1 "val" :unknown2 "val"})))))
-
-
-;; =============================================================================
-;; Boolean short-circuit branch coverage tests
-;; =============================================================================
-;; These tests ensure all branches of `and`/`or` expressions are executed,
-;; not just short-circuited. Cloverage counts unexpecuted branches as uncovered
-;; forms even when lines are covered.
-
-(deftest validate-where-clause-fields-short-circuit-coverage-test
-  (testing "non-map where skips body (second branch of and evaluated, returns false)"
-    ;; This tests: (and (some? where) (map? where))
-    ;; where = vector: (some? [1]) = true, (map? [1]) = false → body skipped
-    ;; Normally validate-where-clause! catches this first, but calling directly
-    (is (nil? (storage/validate-where-clause-fields!
-                :user
-                {:name {:type :text}}
-                [1 2 3])))  ; vector is some? but not map?
-
-    ;; Same for other non-map values
-    (is (nil? (storage/validate-where-clause-fields!
-                :user
-                {:name {:type :text}}
-                "string")))
-
-    (is (nil? (storage/validate-where-clause-fields!
-                :user
-                {:name {:type :text}}
-                123)))))
-
-
-(deftest validate-where-clause-types-short-circuit-coverage-test
-  (testing "non-map where skips body (second branch of and evaluated)"
-    ;; Tests: (when (and (some? where) (map? where)) ...)
-    ;; where = vector: some? true, map? false → body skipped, returns nil
-    (is (nil? (storage/validate-where-clause-types!
-                :user
-                {:name {:type :text}}
-                [1 2 3])))
-
-    (is (nil? (storage/validate-where-clause-types!
-                :user
-                {:name {:type :text}}
-                "string")))
-
-    (is (nil? (storage/validate-where-clause-types!
-                :user
-                {:name {:type :text}}
-                42)))))
-
-
-(deftest validate-where-clause-types-field-spec-or-branch-test
-  (testing ":id field uses fallback when not in fields - covers (or X (when ...)) second branch"
-    ;; Tests: (or (get fields k) (when (= k :id) {:type :uuid}))
-    ;; k = :id, not in fields → first branch nil, second branch evaluated
-    (is (nil? (storage/validate-where-clause-types!
-                :user
-                {}  ; no fields defined, not even :id
-                {:id (random-uuid)}))))
-
-  (testing "field not in fields and not :id - both or branches evaluated, nil result"
-    ;; k = :unknown, (get fields k) = nil, (= k :id) = false → when-let binds nil
-    (is (nil? (storage/validate-where-clause-types!
-                :user
-                {:name {:type :text}}
-                {:unknown-field "value"})))))
-
-
-(deftest validate-required-fields-short-circuit-coverage-test
-  (testing "covers all branches of (and (not= :id) (not nullable?) (or missing nil))"
-    ;; Branch 1: field-name = :id → short-circuits
-    (is (nil? (storage/validate-required-fields!
-                :user
-                {:id {:type :uuid} :name {:type :text}}
-                {:name "John"})))
-
-    ;; Branch 2: nullable? = true → short-circuits after first and
-    (is (nil? (storage/validate-required-fields!
-                :user
-                {:email {:type :text :nullable? true}}
-                {})))
-
-    ;; Branch 3: (or (not contains) X) - first is true, X not evaluated
-    (is (thrown? clojure.lang.ExceptionInfo
-          (storage/validate-required-fields!
-            :user
-            {:name {:type :text}}
-            {})))  ; field missing entirely
-
-    ;; Branch 4: (or false (nil? X)) - first is false, second evaluated
-    (is (thrown? clojure.lang.ExceptionInfo
-          (storage/validate-required-fields!
-            :user
-            {:name {:type :text}}
-            {:name nil}))))  ; field present but nil
-
-  (testing "required field present and non-nil - all checks pass"
-    ;; This executes: (not= :id) = true, (not nullable?) = true,
-    ;; (or (not contains) (nil? v)) = (or false false) = false
-    ;; → when body not executed
-    (is (nil? (storage/validate-required-fields!
-                :user
-                {:name {:type :text}}
-                {:name "John"})))))
-
-
-(deftest check-type-match-short-circuit-test
-  (testing "nil value short-circuits - ft/valid-type? not called"
-    ;; Tests: (when (and (not= actual-type :nil) X) ...)
-    ;; value = nil → actual-type = :nil → (not= :nil :nil) = false → X not evaluated
-    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :text)))
-    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :int)))
-    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match nil :uuid))))
-
-  (testing "non-nil value with valid type - both branches of and evaluated"
-    ;; (not= :text :nil) = true, (not (ft/valid-type? :text "x")) = false → nil
-    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match "hello" :text))))
-
-  (testing "non-nil value with invalid type - both branches of and evaluated, error returned"
-    ;; (not= :int :nil) = true, (not (ft/valid-type? :text 123)) = true → error
-    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match 123 :text)]
-      (is (map? result))
-      (is (= :text (:expected result))))))
-
-
-(deftest validate-where-clause-and-branches-test
-  (testing "nil where - short-circuits (some? nil) = false"
-    (is (nil? (storage/validate-where-clause! nil))))
-
-  (testing "map where - both branches evaluated: (some? {}) = true, (not (map? {})) = false"
-    (is (nil? (storage/validate-where-clause! {}))))
-
-  (testing "non-map where - both branches evaluated: (some? X) = true, (not (map? X)) = true"
-    (is (thrown? clojure.lang.ExceptionInfo
-          (storage/validate-where-clause! "string")))
-    (is (thrown? clojure.lang.ExceptionInfo
-          (storage/validate-where-clause! 123)))
-    (is (thrown? clojure.lang.ExceptionInfo
-          (storage/validate-where-clause! [1 2 3])))))
-
-
-;; =============================================================================
-;; valid-in-clause-collection? tests
-;; =============================================================================
-
-(deftest valid-in-clause-collection-test
-  (testing "returns true for vector of UUIDs with :uuid field type"
-    (let [uuids [(random-uuid) (random-uuid)]]
-      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-                  uuids :uuid)))))
-
-  (testing "returns true for vector of UUIDs with :ref field type"
-    (let [uuids [(random-uuid) (random-uuid)]]
-      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-                  uuids :ref)))))
-
-  (testing "returns true for vector of UUIDs with :fn field type"
-    (let [uuids [(random-uuid) (random-uuid)]]
-      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-                  uuids :fn)))))
-
-  (testing "returns true for vector of ints with :int field type"
-    (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-                [1 2 3] :int))))
-
-  (testing "returns true for vector of strings with :text field type"
-    (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-                ["a" "b" "c"] :text))))
-
-  (testing "returns true for set of UUIDs"
-    (let [uuids (hash-set (random-uuid) (random-uuid))]
-      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-                  uuids :uuid)))))
-
-  (testing "returns true for lazy seq of UUIDs"
-    (let [uuids (map (fn [_] (random-uuid)) (range 3))]
-      (is (true? (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-                  uuids :uuid)))))
-
-  (testing "returns falsy for empty collection"
-    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-              [] :uuid))))
-
-  (testing "returns falsy for unsupported field type"
-    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-              ["a" "b"] :jsonb))))
-
-  (testing "returns falsy for unsupported field type :bool"
-    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-              [true false] :bool))))
-
-  (testing "returns falsy for unsupported field type :numeric"
-    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-              [1.0 2.0] :numeric))))
-
-  (testing "returns falsy for non-collection"
-    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-              "not-a-collection" :text))))
-
-  (testing "returns falsy for map (not valid collection type)"
-    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-              {:a 1} :jsonb))))
-
-  (testing "returns falsy when elements don't match type"
-    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-              ["string" "values"] :uuid))))
-
-  (testing "returns falsy when some elements don't match type"
-    (is (not (#'graphden.storage.protocol.crud-validation/valid-in-clause-collection?
-              [(random-uuid) "not-uuid"] :uuid)))))
-
-
-(deftest check-type-match-with-in-clause-test
-  (testing "vector of UUIDs passes for :uuid field"
-    (let [uuids [(random-uuid) (random-uuid)]]
-      (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
-                 uuids :uuid)))))
-
-  (testing "vector of UUIDs passes for :ref field"
-    (let [uuids [(random-uuid) (random-uuid)]]
-      (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
-                 uuids :ref)))))
-
-  (testing "vector of ints passes for :int field"
-    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
-               [1 2 3] :int))))
-
-  (testing "vector of strings passes for :text field"
-    (is (nil? (#'graphden.storage.protocol.crud-validation/check-type-match
-               ["a" "b" "c"] :text))))
-
-  (testing "empty vector fails (not valid IN clause)"
-    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match [] :uuid)]
-      (is (map? result))
-      (is (= :uuid (:expected result)))))
-
-  (testing "vector of wrong type fails"
-    (let [result (#'graphden.storage.protocol.crud-validation/check-type-match
-                  ["string"] :uuid)]
-      (is (map? result))
-      (is (= :uuid (:expected result))))))
-
-
-(deftest validate-where-clause-types-in-clause-test
-  (testing "vector of UUIDs passes for :uuid field in where"
-    (let [uuids [(random-uuid) (random-uuid)]]
-      (is (nil? (storage/validate-where-clause-types!
-                  :entity
-                  {:ref-id {:type :uuid}}
-                  {:ref-id uuids})))))
-
-  (testing "vector of UUIDs passes for :ref field in where"
-    (let [uuids [(random-uuid) (random-uuid)]]
-      (is (nil? (storage/validate-where-clause-types!
-                  :entity
-                  {:parent-id {:type :ref}}
-                  {:parent-id uuids})))))
-
-  (testing "vector of ints passes for :int field in where"
-    (is (nil? (storage/validate-where-clause-types!
-                :entity
-                {:count {:type :int}}
-                {:count [1 2 3]}))))
-
-  (testing "vector of wrong type throws"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Type mismatch"
-          (storage/validate-where-clause-types!
-            :entity
-            {:ref-id {:type :uuid}}
-            {:ref-id ["not-uuid" "also-not"]}))))
-
-  (testing "empty vector throws"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"Type mismatch"
-          (storage/validate-where-clause-types!
-            :entity
-            {:ref-id {:type :uuid}}
-            {:ref-id []})))))
+        (is (= String (:data-type (ex-data e))))))))

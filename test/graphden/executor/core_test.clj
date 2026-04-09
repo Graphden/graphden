@@ -944,6 +944,276 @@
 
 
 ;; =============================================================================
+;; make-optional-arg-callable Tests
+;; =============================================================================
+
+(deftest make-optional-arg-callable-zero-args-test
+  (testing "callable ignores input when function has 0 required args"
+    (let [storage (setup/create-test-storage)
+          _ (exec/register-base-fn!
+              :constant-fn
+              (fn [_args _ctx] 99))
+          ;; Create base fn with no required args (only optional)
+          const-base (setup/create-base-fn! storage "constant-fn" :int)
+          _ (setup/create-arg! storage (:id const-base)
+                               {:name "opt" :type :int :required false :is-fn false})
+          ;; Create composed fn instance
+          const-fn (setup/create-composed-fn! storage "my-const" (:id const-base))
+          ctx (exec/create-context {:storage storage})
+          ;; Resolve execution graph and attach to context
+          execution-graph (sp/resolve-execution-graph storage (:id const-fn))
+          ctx-with-graph (assoc ctx :execution-graph execution-graph)
+          callable (exec/make-optional-arg-callable ctx-with-graph (:id const-fn))]
+      (try
+        ;; Callable should ignore the input value
+        (is (= 99 (callable "ignored-value")))
+        (is (= 99 (callable nil)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest make-optional-arg-callable-one-arg-test
+  (testing "callable passes input to the single required arg"
+    (let [storage (setup/create-test-storage)
+          _ (exec/register-base-fn!
+              :double
+              (fn [{:keys [x]} _ctx] (* 2 @x)))
+          ;; Create base fn with 1 required arg
+          double-base (setup/create-base-fn! storage "double" :int)
+          _double-arg (setup/create-arg! storage (:id double-base)
+                                         {:name "x" :type :int :required true :is-fn false})
+          ;; Create composed fn instance (x is free)
+          double-fn (setup/create-composed-fn! storage "my-double" (:id double-base))
+          ctx (exec/create-context {:storage storage})
+          execution-graph (sp/resolve-execution-graph storage (:id double-fn))
+          ctx-with-graph (assoc ctx :execution-graph execution-graph)
+          callable (exec/make-optional-arg-callable ctx-with-graph (:id double-fn))]
+      (try
+        (is (= 10 (callable 5)))
+        (is (zero? (callable 0)))
+        (finally
+          (sp/close storage))))))
+
+
+(deftest make-optional-arg-callable-too-many-args-test
+  (testing "throws when function has more than 1 required argument"
+    (let [storage (setup/create-test-storage)
+          {:keys [base-fn]} (setup/setup-add-function! storage)
+          ;; Create composed fn with 2 free required args (a, b)
+          add-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
+          ctx (exec/create-context {:storage storage})
+          execution-graph (sp/resolve-execution-graph storage (:id add-fn))
+          ctx-with-graph (assoc ctx :execution-graph execution-graph)]
+      (try
+        (let [e (try
+                  (exec/make-optional-arg-callable ctx-with-graph (:id add-fn))
+                  nil
+                  (catch clojure.lang.ExceptionInfo e e))]
+          (is (some? e))
+          (is (= :execution-error/invalid-handler-function (:type (ex-data e))))
+          (is (= 2 (:required-arg-count (ex-data e)))))
+        (finally
+          (sp/close storage))))))
+
+
+;; =============================================================================
+;; get-single-required-arg error data Tests
+;; =============================================================================
+
+(deftest get-single-required-arg-error-data-test
+  (testing "error includes fn-id and required-arg-count when 0 args"
+    (let [storage (setup/create-test-storage)
+          _ (exec/register-base-fn!
+              :no-req-args (fn [_ _] 0))
+          base-fn (setup/create-base-fn! storage "no-req-args" :int)
+          _ (setup/create-arg! storage (:id base-fn)
+                               {:name "opt" :type :int :required false :is-fn false})
+          composed-fn (setup/create-composed-fn! storage "my-fn" (:id base-fn))
+          ctx (exec/create-context {:storage storage})
+          execution-graph (sp/resolve-execution-graph storage (:id composed-fn))
+          ctx-with-graph (assoc ctx :execution-graph execution-graph)]
+      (try
+        (exec/get-single-required-arg ctx-with-graph (:id composed-fn))
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/invalid-hof-function (:type (ex-data e))))
+          (is (zero? (:required-arg-count (ex-data e))))
+          (is (= (:id composed-fn) (:fn-id (ex-data e))))))
+      (sp/close storage)))
+
+  (testing "error includes required-args details when >1 args"
+    (let [storage (setup/create-test-storage)
+          {:keys [base-fn]} (setup/setup-add-function! storage)
+          add-fn (setup/create-composed-fn! storage "my-add" (:id base-fn))
+          ctx (exec/create-context {:storage storage})
+          execution-graph (sp/resolve-execution-graph storage (:id add-fn))
+          ctx-with-graph (assoc ctx :execution-graph execution-graph)]
+      (try
+        (exec/get-single-required-arg ctx-with-graph (:id add-fn))
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/invalid-hof-function (:type (ex-data e))))
+          (is (= 2 (:required-arg-count (ex-data e))))
+          (is (= 2 (count (:required-args (ex-data e)))))))
+      (sp/close storage))))
+
+
+;; =============================================================================
+;; execute with nil args Tests
+;; =============================================================================
+
+(deftest execute-nil-args-test
+  (testing "execute with nil args works for fully-bound function"
+    (let [storage (setup/create-test-storage)
+          {:keys [arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "a" :type :int :required true :is-fn false
+                                :source-id (:id arg-a) :value 4})
+          _ (setup/create-arg! storage (:id composed-fn)
+                               {:name "b" :type :int :required true :is-fn false
+                                :source-id (:id arg-b) :value 6})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id composed-fn) nil)]
+      (is (= 10 result))
+      (sp/close storage))))
+
+
+;; =============================================================================
+;; execute args type validation ex-data Tests
+;; =============================================================================
+
+(deftest execute-args-type-error-data-test
+  (testing "args validation error includes type info"
+    (let [storage (setup/create-test-storage)
+          {:keys [composed-fn]} (setup/setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (exec/execute ctx (:id composed-fn) "bad-args")
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/invalid-args (:type (ex-data e))))
+          (is (= "bad-args" (:args (ex-data e))))
+          (is (= java.lang.String (:args-type (ex-data e))))))
+      (sp/close storage)))
+
+  (testing "named-args validation error includes type info"
+    (let [storage (setup/create-test-storage)
+          {:keys [composed-fn]} (setup/setup-add-function! storage)
+          ctx (exec/create-context {:storage storage})]
+      (try
+        (exec/execute-with-named-args ctx (:id composed-fn) 42)
+        (is false "should have thrown")
+        (catch clojure.lang.ExceptionInfo e
+          (is (= :execution-error/invalid-args (:type (ex-data e))))
+          (is (= 42 (:args (ex-data e))))
+          (is (= java.lang.Long (:args-type (ex-data e))))))
+      (sp/close storage))))
+
+
+;; =============================================================================
+;; get-required-args with inherited args (via parent-id recur)
+;; =============================================================================
+
+(deftest get-required-args-inherited-test
+  (testing "make-single-arg-callable follows parent-id when composed fn has no own args"
+    (let [storage (setup/create-test-storage)
+          _ (exec/register-base-fn!
+              :double (fn [{:keys [x]} _ctx] (* 2 @x)))
+          ;; Create base fn with 1 required arg
+          double-base (setup/create-base-fn! storage "double" :int)
+          _double-arg (setup/create-arg! storage (:id double-base)
+                                         {:name "x" :type :int :required true :is-fn false})
+          ;; Create composed fn with NO args of its own - should inherit from parent
+          double-fn (setup/create-composed-fn! storage "my-double" (:id double-base))
+          ;; HOF function
+          _ (exec/register-base-fn!
+              :apply-fn
+              (fn [{:keys [f value]} ctx]
+                (let [callable (exec/make-single-arg-callable ctx @f)]
+                  (callable @value))))
+          apply-base (setup/create-base-fn! storage "apply-fn" :int)
+          apply-f-arg (setup/create-arg! storage (:id apply-base)
+                                         {:name "f" :type :fn :required true :is-fn true})
+          apply-value-arg (setup/create-arg! storage (:id apply-base)
+                                             {:name "value" :type :int :required true :is-fn false})
+          ;; Create apply-fn instance
+          apply-fn (setup/create-composed-fn! storage "my-apply" (:id apply-base))
+          _ (setup/create-arg! storage (:id apply-fn)
+                               {:name "f" :type :fn :required true :is-fn true
+                                :source-id (:id apply-f-arg) :ref-id (:id double-fn)})
+          _ (setup/create-arg! storage (:id apply-fn)
+                               {:name "value" :type :int :required true :is-fn false
+                                :source-id (:id apply-value-arg) :value 7})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id apply-fn) {})]
+      (is (= 14 result))
+      (sp/close storage))))
+
+
+;; =============================================================================
+;; make-optional-arg-callable integration tests
+;; =============================================================================
+
+(deftest make-optional-arg-callable-integration-test
+  (testing "zero-arg callable via HOF integration"
+    (let [storage (setup/create-test-storage)
+          _ (exec/register-base-fn!
+              :handler-caller
+              (fn [{:keys [f]} ctx]
+                (let [callable (exec/make-optional-arg-callable ctx @f)]
+                  (callable "request-data"))))
+          _ (exec/register-base-fn!
+              :constant-42
+              (fn [_args _ctx] 42))
+          ;; Create handler-caller base
+          hc-base (setup/create-base-fn! storage "handler-caller" :int)
+          hc-f-arg (setup/create-arg! storage (:id hc-base)
+                                      {:name "f" :type :fn :required true :is-fn true})
+          ;; Create constant-42 base (no required args)
+          c42-base (setup/create-base-fn! storage "constant-42" :int)
+          c42-fn (setup/create-composed-fn! storage "const-42" (:id c42-base))
+          ;; Create handler-caller instance
+          hc-fn (setup/create-composed-fn! storage "my-handler-caller" (:id hc-base))
+          _ (setup/create-arg! storage (:id hc-fn)
+                               {:name "f" :type :fn :required true :is-fn true
+                                :source-id (:id hc-f-arg) :ref-id (:id c42-fn)})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id hc-fn) {})]
+      ;; constant-42 ignores input, returns 42
+      (is (= 42 result))
+      (sp/close storage)))
+
+  (testing "one-arg callable via HOF integration"
+    (let [storage (setup/create-test-storage)
+          _ (exec/register-base-fn!
+              :handler-caller
+              (fn [{:keys [f]} ctx]
+                (let [callable (exec/make-optional-arg-callable ctx @f)]
+                  (callable 5))))
+          _ (exec/register-base-fn!
+              :double
+              (fn [{:keys [x]} _ctx] (* 2 @x)))
+          ;; Create handler-caller base
+          hc-base (setup/create-base-fn! storage "handler-caller" :int)
+          hc-f-arg (setup/create-arg! storage (:id hc-base)
+                                      {:name "f" :type :fn :required true :is-fn true})
+          ;; Create double base (1 required arg)
+          double-base (setup/create-base-fn! storage "double" :int)
+          _double-arg (setup/create-arg! storage (:id double-base)
+                                         {:name "x" :type :int :required true :is-fn false})
+          double-fn (setup/create-composed-fn! storage "my-double" (:id double-base))
+          ;; Create handler-caller instance
+          hc-fn (setup/create-composed-fn! storage "my-handler-caller" (:id hc-base))
+          _ (setup/create-arg! storage (:id hc-fn)
+                               {:name "f" :type :fn :required true :is-fn true
+                                :source-id (:id hc-f-arg) :ref-id (:id double-fn)})
+          ctx (exec/create-context {:storage storage})
+          result (exec/execute ctx (:id hc-fn) {})]
+      (is (= 10 result))
+      (sp/close storage))))
+
+
+;; =============================================================================
 ;; Direct arg match tests (trace-arg-source-id)
 ;; =============================================================================
 

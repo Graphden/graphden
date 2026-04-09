@@ -75,10 +75,6 @@
   #uuid "23242526-2728-4123-0e1f-2a3b4c5d6e7f")
 
 
-(def ^:private fn-version-parent-id-field-uuid
-  #uuid "24252627-2829-4234-1f2a-3b4c5d6e7f8a")
-
-
 (def ^:private fn-version-return-type-field-uuid
   #uuid "25262728-2930-4345-2a3b-4c5d6e7f8a9b")
 
@@ -199,9 +195,6 @@
                       :name {:uuid fn-version-name-field-uuid
                              :type :text
                              :nullable? true}
-                      :parent-id {:uuid fn-version-parent-id-field-uuid
-                                  :type :uuid
-                                  :nullable? true}
                       :return-type {:uuid fn-version-return-type-field-uuid
                                     :type :enum :enum-name :value-kind
                                     :nullable? true}

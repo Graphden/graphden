@@ -70,10 +70,10 @@
                      #uuid "00000000-0000-0000-0000-000000000010"
                      {:name {:uuid #uuid "00000000-0000-0000-0000-000000000011"
                              :type :text}
-                      :parent-id {:uuid #uuid "00000000-0000-0000-0000-000000000012"
-                                  :type :ref
-                                  :ref-entity :fn
-                                  :nullable? true}
+                      :parent-ids {:uuid #uuid "00000000-0000-0000-0000-000000000012"
+                                   :type :ref-many
+                                   :ref-entity :fn
+                                   :nullable? true}
                       :return-type {:uuid #uuid "00000000-0000-0000-0000-000000000013"
                                     :type :text
                                     :nullable? true}

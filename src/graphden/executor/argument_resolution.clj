@@ -212,17 +212,27 @@
 
 
 (defn- fn-in-parent-chain?
-  "Checks if fn-id is in the direct parent chain starting from start-fn-id.
-   The parent chain follows parent-id links (inheritance), NOT ref-id links."
+  "Checks if fn-id is reachable from start-fn-id via any parent chain.
+   The parent chain follows parent-ids links (inheritance), NOT ref-id links.
+   With multiple inheritance, walks all parents in BFS order."
   [fns fn-id start-fn-id]
-  (loop [current-fn-id start-fn-id
-         depth 0]
+  (loop [queue (if (nil? start-fn-id) [] [start-fn-id])
+         visited #{}
+         iter 0]
     (cond
-      (or (> depth 100) (nil? current-fn-id)) false
-      (= current-fn-id fn-id) true
+      (or (> iter 1000) (empty? queue)) false
       :else
-      (let [fn-rec (get fns current-fn-id)]
-        (recur (:parent-id fn-rec) (inc depth))))))
+      (let [current-fn-id (first queue)
+            rest-q (rest queue)]
+        (cond
+          (= current-fn-id fn-id) true
+          (contains? visited current-fn-id) (recur rest-q visited (inc iter))
+          :else
+          (let [fn-rec (get fns current-fn-id)
+                parent-ids (:parent-ids fn-rec)]
+            (recur (into (vec rest-q) parent-ids)
+                   (conj visited current-fn-id)
+                   (inc iter))))))))
 
 
 (defn- arg-belongs-to-current-fn?
@@ -259,17 +269,18 @@
   (let [args-by-id (:args-by-id execution-graph)
         fns (:fns execution-graph)
         current-fn-rec (get fns current-fn-id)
-        parent-fn-id (:parent-id current-fn-rec)
+        ;; For multiple inheritance, use first parent as primary chain.
+        parent-fn-id (first (:parent-ids current-fn-rec))
         arg-fn-id (:fn-id arg)
-        ;; Find the base-fn (end of parent chain)
+        ;; Find the base-fn by walking first parent (leaf with no parents)
         base-fn-id (loop [fn-id current-fn-id
                           depth 0]
                      (when-not (or (nil? fn-id) (> depth 100))
                        (let [fn-rec (get fns fn-id)
-                             parent-id (:parent-id fn-rec)]
-                         (if (nil? parent-id)
+                             parent-ids (:parent-ids fn-rec)]
+                         (if (empty? parent-ids)
                            fn-id  ; This is the base-fn
-                           (recur parent-id (inc depth))))))
+                           (recur (first parent-ids) (inc depth))))))
         ;; Follow source-id chain to find root arg
         root-arg (loop [current-arg arg
                         depth 0]

@@ -59,15 +59,17 @@
 ;; =============================================================================
 
 (defn- get-inheritance-chain
-  "Get inheritance chain: [fn-id, parent-id, grandparent-id, ...]"
+  "Get inheritance chain: [fn-id, parent-id, grandparent-id, ...].
+   For multiple inheritance, follows the FIRST parent at each level (primary chain)."
   [fn-id fn-map]
   (loop [current fn-id
          chain []
          visited #{}]
     (if (or (nil? current) (contains? visited current))
       chain
-      (let [f (get fn-map current)]
-        (recur (:parent-id f)
+      (let [f (get fn-map current)
+            parent-ids (:parent-ids f)]
+        (recur (first parent-ids)
                (conj chain current)
                (conj visited current))))))
 

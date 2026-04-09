@@ -15,8 +15,9 @@
 
    The executor works with a simplified schema:
    - fn: function entity (base or composed)
-     - parent-id=nil → base-fn (has Clojure implementation)
-     - parent-id set → composed fn (inherits from parent)
+     - parent-ids=nil/[] → base-fn (has Clojure implementation)
+     - parent-ids=[id] → single inheritance (most common)
+     - parent-ids=[id1 id2 ...] → multiple inheritance
    - arg: argument entity
      - value → literal JSONB value
      - ref-id → FK to fn (execute and use result)
@@ -56,10 +57,14 @@
 ;; === Graph Data Helpers ===
 
 (defn- get-fn-args-with-inheritance
-  "Collects args from entire parent chain, merging by source-id.
+  "Collects args from entire parent graph (supports multiple inheritance).
    Child args override parent args they inherit from (via source-id).
    Returns vector of all args needed to execute the base-fn.
-   Note: arg names are resolved via arg-roots index at usage time, not here."
+   Note: arg names are resolved via arg-roots index at usage time, not here.
+
+   With multiple inheritance, walks all parents in order (first parent has
+   highest precedence for arg name conflicts). Args are merged by source-id
+   chain: if an arg is inherited from a parent arg, that parent arg is excluded."
   [execution-graph fn-id depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain exceeds maximum depth while resolving args"
@@ -69,15 +74,29 @@
   (let [fns (sp/get-graph-fns execution-graph)
         fn-rec (get fns fn-id)
         own-args (sp/graph-get-args execution-graph fn-id)
-        parent-id (:parent-id fn-rec)]
-    (if parent-id
-      ;; Merge with parent args - own args override args they inherit from (via source-id)
-      (let [parent-args (get-fn-args-with-inheritance execution-graph parent-id (inc depth))
-            ;; Collect all source-ids that own args inherit from (transitively)
+        parent-ids (:parent-ids fn-rec)]
+    (if (seq parent-ids)
+      ;; Merge with args from ALL parents - own args override args they inherit from (via source-id)
+      ;; Walk each parent in order; deduplicate resulting args by id
+      (let [all-parent-args (into []
+                                  (mapcat (fn [pid]
+                                            (get-fn-args-with-inheritance
+                                              execution-graph pid (inc depth))))
+                                  parent-ids)
+            ;; Deduplicate parent args by id (in case same arg appears via multiple parents)
+            dedup-parent-args (->> all-parent-args
+                                   (reduce (fn [{:keys [seen result]} a]
+                                             (if (contains? seen (:id a))
+                                               {:seen seen :result result}
+                                               {:seen (conj seen (:id a))
+                                                :result (conj result a)}))
+                                           {:seen #{} :result []})
+                                   :result)
+            ;; Collect all source-ids that own args inherit from
             ;; This ensures that if route.path inherits from pair.first, pair.first is excluded
             own-source-ids (into #{} (keep :source-id) own-args)
             ;; Keep parent args that are NOT the source of any own arg
-            filtered-parent-args (remove #(own-source-ids (:id %)) parent-args)]
+            filtered-parent-args (remove #(own-source-ids (:id %)) dedup-parent-args)]
         (vec (concat own-args filtered-parent-args)))
       ;; Base fn - just return own args
       (vec own-args))))
@@ -85,16 +104,18 @@
 
 (defn- get-required-args
   "Returns a sequence of required args for a function.
-   For HOF: if fn has no args, checks parent fn's args (via parent-id).
-   This allows composed fns with 'free' args (no value/ref-id) to be used in HOF."
+   For HOF: if fn has no args, checks parent fns' args (via parent-ids).
+   This allows composed fns with 'free' args (no value/ref-id) to be used in HOF.
+   With multiple inheritance, collects required args from all parents in order."
   [execution-graph fn-id]
   (let [args (sp/graph-get-args execution-graph fn-id)]
     (if (seq args)
       (filter #(:required % true) args)
-      ;; If no args on this fn, check parent fn
-      (let [fn-rec (get (sp/get-graph-fns execution-graph) fn-id)]
-        (when-let [parent-id (:parent-id fn-rec)]
-          (recur execution-graph parent-id))))))
+      ;; If no args on this fn, check parent fns (collect from all in order)
+      (let [fn-rec (get (sp/get-graph-fns execution-graph) fn-id)
+            parent-ids (:parent-ids fn-rec)]
+        (when (seq parent-ids)
+          (mapcat #(get-required-args execution-graph %) parent-ids))))))
 
 
 (defn get-single-required-arg

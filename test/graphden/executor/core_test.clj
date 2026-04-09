@@ -790,7 +790,7 @@
               invalid-parent-id (random-uuid)
               composed-fn {:id (random-uuid)
                            :name "bad-composed"
-                           :parent-id invalid-parent-id  ; points to nothing!
+                           :parent-ids [invalid-parent-id]  ; points to nothing!
                            :return-type :int}
               _ (sp/create-entity storage :fn composed-fn)
               ctx (exec/create-context {:storage storage})]

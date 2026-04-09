@@ -102,9 +102,9 @@
         ;; Use graph schema which has unique constraints on names
         (sp/initialize storage (setup/make-graph-schema))
         (let [fn-id #uuid "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"]
-          (sp/create-entity storage :fn {:id fn-id :name "fn1" :parent-id nil :return-type "int"})
+          (sp/create-entity storage :fn {:id fn-id :name "fn1" :parent-ids nil :return-type "int"})
           (sp/create-entity storage :fn {:id #uuid "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
-                                         :name "fn2" :parent-id nil :return-type "int"})
+                                         :name "fn2" :parent-ids nil :return-type "int"})
           ;; Try to update fn2's name to conflict with fn1
           ;; Note: This requires a unique constraint on name, which we have.
           ;; Test that update works and returns properly typed errors when they occur.
@@ -125,7 +125,7 @@
           (jdbc/execute! pool ["ALTER TABLE \"arg\" ADD CONSTRAINT fk_arg_fn
                                 FOREIGN KEY (\"fn_id\") REFERENCES \"fn\"(\"id\")"])
           ;; Create base fn
-          (sp/create-entity storage :fn {:id base-fn-id :name "test" :parent-id nil :return-type "int"})
+          (sp/create-entity storage :fn {:id base-fn-id :name "test" :parent-ids nil :return-type "int"})
           ;; Create arg that references fn
           (sp/create-entity storage :arg {:id arg-id :fn-id base-fn-id :name "x"
                                           :type "int" :required true :is-fn false})
@@ -151,7 +151,7 @@
           (jdbc/execute! pool ["ALTER TABLE \"arg\" ADD CONSTRAINT fk_arg_fn
                                 FOREIGN KEY (\"fn_id\") REFERENCES \"fn\"(\"id\")"])
           ;; Create base fn
-          (sp/create-entity storage :fn {:id base-fn-id :name "test" :parent-id nil :return-type "int"})
+          (sp/create-entity storage :fn {:id base-fn-id :name "test" :parent-ids nil :return-type "int"})
           ;; Create arg that references fn
           (sp/create-entity storage :arg {:id arg-id :fn-id base-fn-id :name "x"
                                           :type "int" :required true :is-fn false})

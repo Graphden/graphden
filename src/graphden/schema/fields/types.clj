@@ -76,6 +76,11 @@
    :bytes       {:postgres "BYTEA"       :datomic :db.type/bytes   :memory :any}
    ;; Special types for references
    :ref         {:postgres "UUID"        :datomic :db.type/ref     :memory :any}
+   ;; :ref-many = many-to-many relationship.
+   ;; Stored as junction table in PostgreSQL, db.cardinality/many in Datomic, vector in memory.
+   ;; The field-spec MUST include :ref-entity. Backends materialize the relationship differently
+   ;; but the public API always returns a vector of UUIDs for the field.
+   :ref-many    {:postgres :junction     :datomic :db.cardinality/many :memory :any}
    :enum        {:postgres :custom       :datomic :db.type/ref     :memory :any}
    :union       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}})
 
@@ -120,6 +125,7 @@
    Used for validating user-provided arguments at runtime."
   {:uuid        uuid?
    :ref         uuid?
+   :ref-many    #(and (sequential? %) (every? uuid? %))
    :fn          uuid?
    :int         int?
    :bool        boolean?

@@ -418,7 +418,7 @@
     (let [fn-id (random-uuid)
           arg {:id (random-uuid) :fn-id fn-id :name "x" :type :int}
           graph (graph/->execution-graph
-                  {:fns {fn-id {:id fn-id :parent-id nil}}
+                  {:fns {fn-id {:id fn-id :parent-ids nil}}
                    :args [arg]})]
       (is (= [arg] (#'queue/get-fn-args-with-inheritance graph fn-id 0)))))
 
@@ -428,8 +428,8 @@
           base-arg {:id (random-uuid) :fn-id base-id :name "x" :type :int}
           child-arg {:id (random-uuid) :fn-id child-id :source-id (:id base-arg) :value 10}
           graph (graph/->execution-graph
-                  {:fns {base-id {:id base-id :parent-id nil}
-                         child-id {:id child-id :parent-id base-id}}
+                  {:fns {base-id {:id base-id :parent-ids nil}
+                         child-id {:id child-id :parent-ids [base-id]}}
                    :args [base-arg child-arg]})
           result (#'queue/get-fn-args-with-inheritance graph child-id 0)]
       (is (= 1 (count result)))
@@ -443,8 +443,8 @@
           ;; Child only overrides arg-x
           child-arg {:id (random-uuid) :fn-id child-id :source-id (:id arg-x) :value 10}
           graph (graph/->execution-graph
-                  {:fns {base-id {:id base-id :parent-id nil}
-                         child-id {:id child-id :parent-id base-id}}
+                  {:fns {base-id {:id base-id :parent-ids nil}
+                         child-id {:id child-id :parent-ids [base-id]}}
                    :args [arg-x arg-y child-arg]})
           result (#'queue/get-fn-args-with-inheritance graph child-id 0)
           result-ids (set (map :id result))]
@@ -469,16 +469,16 @@
 (deftest resolve-base-fn-test
   (testing "returns base-fn when parent-id is nil"
     (let [fn-id (random-uuid)
-          fns {fn-id {:id fn-id :parent-id nil :name "my-fn"}}]
-      (is (= {:id fn-id :parent-id nil :name "my-fn"}
+          fns {fn-id {:id fn-id :parent-ids nil :name "my-fn"}}]
+      (is (= {:id fn-id :parent-ids nil :name "my-fn"}
              (#'queue/resolve-base-fn fns fn-id 0)))))
 
   (testing "follows parent chain to find base-fn"
     (let [base-id (random-uuid)
           child-id (random-uuid)
-          fns {base-id {:id base-id :parent-id nil :name "base"}
-               child-id {:id child-id :parent-id base-id}}]
-      (is (= {:id base-id :parent-id nil :name "base"}
+          fns {base-id {:id base-id :parent-ids nil :name "base"}
+               child-id {:id child-id :parent-ids [base-id]}}]
+      (is (= {:id base-id :parent-ids nil :name "base"}
              (#'queue/resolve-base-fn fns child-id 0)))))
 
   (testing "throws when fn not found"
@@ -494,9 +494,9 @@
             id3 (random-uuid)
             ;; Create chain longer than max-depth: id1->id2->id3->nil
             ;; but starting at depth 2 means depth check triggers
-            fns {id1 {:id id1 :parent-id id2}
-                 id2 {:id id2 :parent-id id3}
-                 id3 {:id id3 :parent-id nil}}]
+            fns {id1 {:id id1 :parent-ids [id2]}
+                 id2 {:id id2 :parent-ids [id3]}
+                 id3 {:id id3 :parent-ids nil}}]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"Parent chain exceeds maximum depth"
               (#'queue/resolve-base-fn fns id1 2)))))))
@@ -505,23 +505,23 @@
 (deftest fn-in-parent-chain-test
   (testing "returns true when fn-id is start-fn-id"
     (let [fn-id (random-uuid)
-          fns {fn-id {:id fn-id :parent-id nil}}]
+          fns {fn-id {:id fn-id :parent-ids nil}}]
       (is (true? (#'queue/fn-in-parent-chain? fns fn-id fn-id)))))
 
   (testing "returns true when fn-id is in parent chain"
     (let [base-id (random-uuid)
           child-id (random-uuid)
-          fns {base-id {:id base-id :parent-id nil}
-               child-id {:id child-id :parent-id base-id}}]
+          fns {base-id {:id base-id :parent-ids nil}
+               child-id {:id child-id :parent-ids [base-id]}}]
       (is (true? (#'queue/fn-in-parent-chain? fns base-id child-id)))))
 
   (testing "returns false when fn-id is NOT in parent chain"
     (let [base-id (random-uuid)
           other-id (random-uuid)
           child-id (random-uuid)
-          fns {base-id {:id base-id :parent-id nil}
-               other-id {:id other-id :parent-id nil}
-               child-id {:id child-id :parent-id base-id}}]
+          fns {base-id {:id base-id :parent-ids nil}
+               other-id {:id other-id :parent-ids nil}
+               child-id {:id child-id :parent-ids [base-id]}}]
       (is (false? (#'queue/fn-in-parent-chain? fns other-id child-id)))))
 
   (testing "returns false for nil start-fn-id"
@@ -598,7 +598,7 @@
 (deftest build-deep-cache-key-test
   (testing "returns fn-id when no propagated args"
     (let [fn-id (random-uuid)
-          graph {:args-by-id {} :args-by-fn {} :fns {fn-id {:id fn-id :parent-id nil}}}
+          graph {:args-by-id {} :args-by-fn {} :fns {fn-id {:id fn-id :parent-ids nil}}}
           result (#'queue/build-deep-cache-key graph [] fn-id 0 #{})]
       (is (= fn-id result))))
 
@@ -619,7 +619,7 @@
                       caller-arg-id {:id caller-arg-id :source-id base-arg-id :value 42}}
           graph {:args-by-id args-by-id
                  :args-by-fn {target-fn-id [{:id base-arg-id :fn-id target-fn-id :name "x"}]}
-                 :fns {target-fn-id {:id target-fn-id :parent-id nil}}}
+                 :fns {target-fn-id {:id target-fn-id :parent-ids nil}}}
           caller-args [{:id caller-arg-id :source-id base-arg-id :value 42}]
           result (#'queue/build-deep-cache-key graph caller-args target-fn-id 0 #{})]
       ;; Result should be [fn-id {base-arg-id [:lit 42]}]
@@ -634,7 +634,7 @@
           arg-id (random-uuid)
           arg {:id arg-id :fn-id base-fn-id :name "x" :type :int}
           args-by-id {arg-id arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}}
           graph {:args-by-id args-by-id :fns fns}]
       (is (true? (#'queue/arg-belongs-to-current-fn? graph arg base-fn-id)))))
 
@@ -644,8 +644,8 @@
           base-arg-id (random-uuid)
           arg {:id base-arg-id :fn-id base-fn-id :name "x" :type :int}
           args-by-id {base-arg-id arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               child-fn-id {:id child-fn-id :parent-ids [base-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       (is (true? (#'queue/arg-belongs-to-current-fn? graph arg child-fn-id)))))
 
@@ -658,8 +658,8 @@
           child-arg {:id child-arg-id :fn-id child-fn-id :source-id base-arg-id :value 10}
           args-by-id {base-arg-id base-arg
                       child-arg-id child-arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               child-fn-id {:id child-fn-id :parent-ids [base-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       (is (true? (#'queue/arg-belongs-to-current-fn? graph child-arg child-fn-id)))))
 
@@ -670,8 +670,8 @@
           ;; Arg's root belongs to other-fn, not base-fn
           arg {:id arg-id :fn-id other-fn-id :name "x" :type :int}
           args-by-id {arg-id arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               other-fn-id {:id other-fn-id :parent-id nil}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               other-fn-id {:id other-fn-id :parent-ids nil}}
           graph {:args-by-id args-by-id :fns fns}]
       (is (false? (#'queue/arg-belongs-to-current-fn? graph arg base-fn-id)))))
 
@@ -689,9 +689,9 @@
           args-by-id {base-arg-id base-arg
                       other-arg-id other-arg
                       child-arg-id child-arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               other-fn-id {:id other-fn-id :parent-id nil}
-               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               other-fn-id {:id other-fn-id :parent-ids nil}
+               child-fn-id {:id child-fn-id :parent-ids [base-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       ;; Root of child-arg goes to other-arg -> other-fn, not base-fn
       (is (false? (#'queue/arg-belongs-to-current-fn? graph child-arg child-fn-id))))))
@@ -984,7 +984,7 @@
                       caller-arg-id {:id caller-arg-id :source-id base-arg-id :ref-id ref-fn-id :is-fn true}}
           graph {:args-by-id args-by-id
                  :args-by-fn {target-fn-id [{:id base-arg-id :fn-id target-fn-id :name "f"}]}
-                 :fns {target-fn-id {:id target-fn-id :parent-id nil}}}
+                 :fns {target-fn-id {:id target-fn-id :parent-ids nil}}}
           caller-args [{:id caller-arg-id :source-id base-arg-id :ref-id ref-fn-id :is-fn true}]
           result (#'queue/build-deep-cache-key graph caller-args target-fn-id 0 #{})]
       (is (vector? result))
@@ -1002,7 +1002,7 @@
                       caller-arg-id {:id caller-arg-id :fn-id target-fn-id :source-id base-arg-id}}
           graph {:args-by-id args-by-id
                  :args-by-fn {target-fn-id [{:id base-arg-id :fn-id target-fn-id :name "x"}]}
-                 :fns {target-fn-id {:id target-fn-id :parent-id nil}}}
+                 :fns {target-fn-id {:id target-fn-id :parent-ids nil}}}
           ;; Direct match: arg belongs to target fn AND has value - but here no value
           ;; so it won't direct-match. Use ref-id on caller-arg for it to match via trace
           other-fn-id (random-uuid)
@@ -1027,8 +1027,8 @@
           base-arg {:id base-arg-id :fn-id target-fn-id :name "x"}
           caller-arg {:id caller-arg-id :source-id base-arg-id :ref-id inner-fn-id}
           graph (graph/->execution-graph
-                  {:fns {target-fn-id {:id target-fn-id :parent-id nil}
-                         inner-fn-id {:id inner-fn-id :parent-id nil}}
+                  {:fns {target-fn-id {:id target-fn-id :parent-ids nil}
+                         inner-fn-id {:id inner-fn-id :parent-ids nil}}
                    :args [base-arg caller-arg]})
           caller-args [caller-arg]
           result (#'queue/build-deep-cache-key graph caller-args target-fn-id 0 #{})]
@@ -1082,9 +1082,9 @@
           mid-arg {:id mid-arg-id :fn-id mid-fn-id :source-id base-arg-id :value 42}
           args-by-id {base-arg-id base-arg
                       mid-arg-id mid-arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               mid-fn-id {:id mid-fn-id :parent-id base-fn-id}
-               child-fn-id {:id child-fn-id :parent-id mid-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               mid-fn-id {:id mid-fn-id :parent-ids [base-fn-id]}
+               child-fn-id {:id child-fn-id :parent-ids [mid-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       ;; mid-arg is inherited (not own), has value -> should belong
       (is (true? (#'queue/arg-belongs-to-current-fn? graph mid-arg child-fn-id))))))
@@ -1102,8 +1102,8 @@
           child-arg {:id child-arg-id :fn-id child-fn-id :source-id base-arg-id}
           args-by-id {base-arg-id base-arg
                       child-arg-id child-arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               child-fn-id {:id child-fn-id :parent-ids [base-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       ;; own arg, source in parent chain, source has name -> belongs (returns truthy)
       (is (#'queue/arg-belongs-to-current-fn? graph child-arg child-fn-id)))))
@@ -1120,8 +1120,8 @@
           mid-arg {:id mid-arg-id :fn-id base-fn-id :source-id base-arg-id}
           args-by-id {base-arg-id base-arg
                       mid-arg-id mid-arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               child-fn-id {:id child-fn-id :parent-ids [base-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       ;; inherited, no name, no value, no ref -> doesn't belong
       (is (false? (#'queue/arg-belongs-to-current-fn? graph mid-arg child-fn-id))))))
@@ -1252,9 +1252,9 @@
             id2 (random-uuid)
             id3 (random-uuid)
             graph (graph/->execution-graph
-                    {:fns {id1 {:id id1 :parent-id id2}
-                           id2 {:id id2 :parent-id id3}
-                           id3 {:id id3 :parent-id nil}}
+                    {:fns {id1 {:id id1 :parent-ids [id2]}
+                           id2 {:id id2 :parent-ids [id3]}
+                           id3 {:id id3 :parent-ids nil}}
                      :args []})]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo
                               #"Parent chain exceeds maximum depth"
@@ -1308,7 +1308,7 @@
           fns-map (into {}
                         (map-indexed
                           (fn [i id]
-                            [id {:id id :parent-id (when (< i 101) (nth ids (inc i)))}])
+                            [id {:id id :parent-ids (when (< i 101) [(nth ids (inc i))])}])
                           ids))]
       ;; Search for target-id that is NOT in chain; depth will exceed 100
       (is (false? (#'queue/fn-in-parent-chain? fns-map target-id (first ids)))))))
@@ -1330,8 +1330,8 @@
           child-arg {:id child-arg-id :fn-id child-fn-id :source-id base-arg-id}
           args-by-id {base-arg-id base-arg
                       child-arg-id child-arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               child-fn-id {:id child-fn-id :parent-ids [base-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       ;; own arg, source in parent chain, but no value/ref/name and source has no name -> falsy
       (is (not (#'queue/arg-belongs-to-current-fn? graph child-arg child-fn-id))))))
@@ -1349,8 +1349,8 @@
           mid-arg {:id mid-arg-id :fn-id base-fn-id :source-id base-arg-id :ref-id some-ref}
           args-by-id {base-arg-id base-arg
                       mid-arg-id mid-arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               child-fn-id {:id child-fn-id :parent-ids [base-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       ;; inherited (not own), has ref-id -> should belong (hits the :else branch with ref-id)
       (is (true? (#'queue/arg-belongs-to-current-fn? graph mid-arg child-fn-id))))))
@@ -1374,8 +1374,8 @@
           child-arg {:id child-arg-id :fn-id child-fn-id :source-id missing-source-id :value 10}
           args-by-id {base-arg-id base-arg
                       child-arg-id child-arg}
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               child-fn-id {:id child-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               child-fn-id {:id child-fn-id :parent-ids [base-fn-id]}}
           graph {:args-by-id args-by-id :fns fns}]
       ;; Root arg is child-arg (source not found), fn-id=child-fn-id != base-fn-id -> false
       (is (false? (#'queue/arg-belongs-to-current-fn? graph child-arg child-fn-id))))))

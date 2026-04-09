@@ -8,7 +8,7 @@
    ## 2-Entity Schema
 
    Uses simplified schema:
-   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - fn: parent-ids=nil/[] for base-fn, parent-ids=[...] for composed fn (multiple inheritance)
    - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
 
    Usage:

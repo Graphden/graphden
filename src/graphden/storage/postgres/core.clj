@@ -207,7 +207,8 @@
 
   (read-entity
     [_this entity-name id]
-    (crud/read-entity pool entity-name id))
+    (crud/read-entity pool entity-name id
+                      (get-entity-fields pool metadata-cache rw-lock entity-name)))
 
 
   (update-entity
@@ -237,7 +238,8 @@
 
   (read-entities
     [_this entity-name ids]
-    (crud/read-entities pool entity-name ids))
+    (crud/read-entities pool entity-name ids
+                        (get-entity-fields pool metadata-cache rw-lock entity-name)))
 
 
   (update-entities

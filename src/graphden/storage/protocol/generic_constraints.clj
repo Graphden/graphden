@@ -28,7 +28,7 @@
     [_this owner-fn-id]
     (constraints/collect-dependency-chain-impl
       (fn [current-id]
-        ;; Get fn record to check parent-id
+        ;; Get fn record to check parent-ids
         (let [fn-rec (sp/read-entity storage :fn current-id)
               ;; Get args for current fn
               args (sp/query-entities storage :arg {:fn-id current-id})
@@ -40,10 +40,9 @@
                                         (and (:value arg) (uuid? (:value arg))) (conj (:value arg)))))
                             (remove nil?)
                             set)
-              ;; Add parent-id if present
-              all-refs (if-let [parent-id (:parent-id fn-rec)]
-                         (conj arg-refs parent-id)
-                         arg-refs)]
+              ;; Add all parent-ids if present
+              parent-ids (remove nil? (:parent-ids fn-rec))
+              all-refs (into arg-refs parent-ids)]
           ;; Verify these are actual fn-ids
           (if (empty? all-refs)
             #{}

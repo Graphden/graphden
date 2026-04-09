@@ -258,7 +258,7 @@
           free-arg {:id (random-uuid) :fn-id parent-id :value nil :ref-id nil}
           args-data {:by-fn {parent-id [free-arg]}
                      :by-id {(:id free-arg) free-arg}}
-          result (#'core/collect-parent-free-args {} args-data parent-id 0)]
+          result (#'core/collect-parent-free-args {} args-data [parent-id] 0)]
       (is (= [free-arg] result))))
 
   (testing "collects free args from refs in parent's bound args"
@@ -272,13 +272,13 @@
                              ref-fn-id [ref-free]}
                      :by-id {(:id bound-arg) bound-arg
                              (:id ref-free) ref-free}}
-          result (#'core/collect-parent-free-args {} args-data parent-id 0)]
+          result (#'core/collect-parent-free-args {} args-data [parent-id] 0)]
       (is (= [ref-free] result))))
 
   (testing "throws when depth exceeded"
     (binding [sp/*max-graph-iterations* 2]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too deep"
-            (#'core/collect-parent-free-args {} {:by-fn {}} (random-uuid) 10))))))
+            (#'core/collect-parent-free-args {} {:by-fn {}} [(random-uuid)] 10))))))
 
 
 ;; === parse-arg-value-spec ===
@@ -557,39 +557,39 @@
   (testing "finds arg by name on first fn"
     (let [fn-id (random-uuid)
           arg {:id (random-uuid) :fn-id fn-id :name "x"}
-          fn-cache {fn-id {:id fn-id :parent-id nil}}
+          fn-cache {fn-id {:id fn-id :parent-ids nil}}
           args-data {:by-fn {fn-id [arg]}
                      :by-id {(:id arg) arg}}]
-      (is (= arg (#'core/get-parent-arg-cached fn-cache args-data fn-id :x)))))
+      (is (= arg (#'core/get-parent-arg-cached fn-cache args-data [fn-id] :x)))))
 
   (testing "follows parent-id chain to find arg"
     (let [grandparent-id (random-uuid)
           parent-id (random-uuid)
           arg {:id (random-uuid) :fn-id grandparent-id :name "deep-arg"}
-          fn-cache {parent-id {:id parent-id :parent-id grandparent-id}
-                    grandparent-id {:id grandparent-id :parent-id nil}}
+          fn-cache {parent-id {:id parent-id :parent-ids [grandparent-id]}
+                    grandparent-id {:id grandparent-id :parent-ids nil}}
           args-data {:by-fn {parent-id []
                              grandparent-id [arg]}
                      :by-id {(:id arg) arg}}]
-      (is (= arg (#'core/get-parent-arg-cached fn-cache args-data parent-id :deep-arg)))))
+      (is (= arg (#'core/get-parent-arg-cached fn-cache args-data [parent-id] :deep-arg)))))
 
   (testing "throws when arg not found in chain"
     (let [fn-id (random-uuid)
-          fn-cache {fn-id {:id fn-id :parent-id nil}}
+          fn-cache {fn-id {:id fn-id :parent-ids nil}}
           args-data {:by-fn {fn-id []}
                      :by-id {}}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Argument not found"
-            (#'core/get-parent-arg-cached fn-cache args-data fn-id :nonexistent)))))
+            (#'core/get-parent-arg-cached fn-cache args-data [fn-id] :nonexistent)))))
 
   (testing "throws when chain too deep"
     (binding [sp/*max-graph-iterations* 2]
       (let [ids (repeatedly 5 random-uuid)
             fn-cache (into {} (map-indexed (fn [i id]
-                                             [id {:id id :parent-id (get (vec ids) (inc i))}])
+                                             [id {:id id :parent-ids [(get (vec ids) (inc i))]}])
                                            (butlast ids)))
             args-data {:by-fn {} :by-id {}}]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too deep"
-              (#'core/get-parent-arg-cached fn-cache args-data (first ids) :x)))))))
+              (#'core/get-parent-arg-cached fn-cache args-data [(first ids)] :x)))))))
 
 
 ;; === find-available-arg ===
@@ -598,10 +598,10 @@
   (testing "finds arg in direct parent chain first"
     (let [parent-id (random-uuid)
           arg {:id (random-uuid) :fn-id parent-id :name "x"}
-          fn-cache {parent-id {:id parent-id :parent-id nil}}
+          fn-cache {parent-id {:id parent-id :parent-ids nil}}
           args-data {:by-fn {parent-id [arg]}
                      :by-id {(:id arg) arg}}]
-      (is (= arg (#'core/find-available-arg fn-cache args-data parent-id :x)))))
+      (is (= arg (#'core/find-available-arg fn-cache args-data [parent-id] :x)))))
 
   (testing "finds arg in propagated free args when not in parent chain"
     (let [parent-id (random-uuid)
@@ -610,21 +610,21 @@
           bound-arg {:id (random-uuid) :fn-id parent-id :value nil :ref-id ref-fn-id :name "f"}
           ;; ref-fn has free arg named "target"
           free-arg {:id (random-uuid) :fn-id ref-fn-id :value nil :ref-id nil :name "target"}
-          fn-cache {parent-id {:id parent-id :parent-id nil}
-                    ref-fn-id {:id ref-fn-id :parent-id nil}}
+          fn-cache {parent-id {:id parent-id :parent-ids nil}
+                    ref-fn-id {:id ref-fn-id :parent-ids nil}}
           args-data {:by-fn {parent-id [bound-arg]
                              ref-fn-id [free-arg]}
                      :by-id {(:id bound-arg) bound-arg
                              (:id free-arg) free-arg}}]
-      (is (= free-arg (#'core/find-available-arg fn-cache args-data parent-id :target)))))
+      (is (= free-arg (#'core/find-available-arg fn-cache args-data [parent-id] :target)))))
 
   (testing "throws when arg not found anywhere"
     (let [parent-id (random-uuid)
-          fn-cache {parent-id {:id parent-id :parent-id nil}}
+          fn-cache {parent-id {:id parent-id :parent-ids nil}}
           args-data {:by-fn {parent-id []}
                      :by-id {}}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found in available args"
-            (#'core/find-available-arg fn-cache args-data parent-id :nonexistent))))))
+            (#'core/find-available-arg fn-cache args-data [parent-id] :nonexistent))))))
 
 
 ;; === prepare-propagated-arg-record ===
@@ -666,7 +666,7 @@
                    (#'core/prepare-fn-record fn-name-cache fn-id-cache created-fns fn-def))]
       (is (some? (:new result)))
       (is (= "new-fn" (:name (:new result))))
-      (is (= parent-id (:parent-id (:new result))))))
+      (is (= [parent-id] (:parent-ids (:new result))))))
 
   (testing "returns existing fn when in name cache"
     (let [existing-fn {:id (random-uuid) :name "existing-fn"}
@@ -695,7 +695,7 @@
                                (fn [_] nil)]
                    (#'core/prepare-fn-record {} {} {:parent-fn parent-id} fn-def))]
       (is (some? (:new result)))
-      (is (= parent-id (:parent-id (:new result))))))
+      (is (= [parent-id] (:parent-ids (:new result))))))
 
   (testing "throws when parent not found"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"

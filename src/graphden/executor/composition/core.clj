@@ -4,7 +4,7 @@
    ## 2-Entity Schema
 
    Composed functions are stored as:
-   - fn entity with parent-id set (inherits from parent base-fn)
+   - fn entity with parent-ids set (inherits from one or more parent fns)
    - arg entities with source-id set (inherits from parent's arg) + value/ref-id
 
    ## Format
@@ -73,19 +73,19 @@
 ;; === Dependency Analysis ===
 
 (defn- extract-dependencies
-  "Extracts fn names that this fn-def depends on (from args and parent).
+  "Extracts fn names that this fn-def depends on (from args and parents).
    Returns set of keywords."
   [fn-def fn-names-in-set]
   (let [args (:args fn-def {})
-        parent (:parent fn-def)
+        parent-names (concat (when-let [p (:parent fn-def)] [p])
+                             (:parents fn-def))
         arg-deps (->> (vals args)
                       (keep parse-fn-ref)
                       (filter fn-names-in-set)
                       set)
-        ;; If parent is a composed fn (in fn-names-in-set), it's a dependency
-        parent-dep (when (and parent (fn-names-in-set parent))
-                     #{parent})]
-    (into arg-deps parent-dep)))
+        ;; Parents that are composed fns in our set are dependencies
+        parent-deps (into #{} (filter fn-names-in-set) parent-names)]
+    (into arg-deps parent-deps)))
 
 
 (defn- build-dependency-graph
@@ -176,7 +176,7 @@
 
 (defn- validate-fn-def!
   "Validates a single fn definition."
-  [{:keys [parent args] :as fn-def}]
+  [{parent :parent parent-list :parents args :args :as fn-def}]
   (let [fn-name (:name fn-def)]
     (when-not fn-name
       (throw (ex-info "fn-def must have :name"
@@ -186,8 +186,12 @@
       (throw (ex-info "fn-def :name must be a keyword"
                       {:type :fn-composition/invalid-def
                        :name fn-name})))
-    (when-not parent
-      (throw (ex-info (str "fn-def " fn-name " must have :parent (base-fn name)")
+    (when-not (or parent (seq parent-list))
+      (throw (ex-info (str "fn-def " fn-name " must have :parent (single) or :parents (vector)")
+                      {:type :fn-composition/invalid-def
+                       :fn-def fn-def})))
+    (when (and parent-list (not (sequential? parent-list)))
+      (throw (ex-info (str "fn-def " fn-name " :parents must be a vector/list of keywords")
                       {:type :fn-composition/invalid-def
                        :fn-def fn-def})))
     (when (and args (not (map? args)))
@@ -310,15 +314,8 @@
             bound-args))))
 
 
-(defn- collect-parent-free-args
-  "Collects free args from the parent fn chain.
-   Returns vector of arg entities that are free in the parent chain.
-
-   Free args come from:
-   1. Parent fn's direct free args
-   2. Free args from fns referenced in parent's bound args (via ref-id)
-
-   args-data contains :by-fn and :by-id indexes."
+(defn- collect-parent-free-args-for-one
+  "Collects free args from a single parent fn (internal helper)."
   [fn-cache args-data parent-fn-id depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain too deep while collecting free args"
@@ -333,6 +330,25 @@
                                   (collect-free-args-from-fn fn-cache args-data ref-fn-id #{} (inc depth))))
                               bound-args)]
     (into free-args ref-free-args)))
+
+
+(defn- collect-parent-free-args
+  "Collects free args from all parent fns.
+   Returns vector of arg entities that are free in the parents (deduped by id).
+
+   Accepts a collection of parent fn-ids (multiple inheritance).
+   args-data contains :by-fn and :by-id indexes."
+  [fn-cache args-data parent-fn-ids depth]
+  (let [seen (atom #{})]
+    (into []
+          (comp
+            (mapcat (fn [pid]
+                      (collect-parent-free-args-for-one fn-cache args-data pid depth)))
+            (remove (fn [a]
+                      (if (contains? @seen (:id a))
+                        true
+                        (do (swap! seen conj (:id a)) false)))))
+          (remove nil? parent-fn-ids))))
 
 
 (defn- preload-all-args
@@ -356,35 +372,46 @@
 
 (defn- get-parent-arg-cached
   "Gets the parent's arg entity for an arg name using cache.
-   Follows inheritance chain (via parent-id) to find the arg.
+   Follows inheritance graph (via parent-ids) to find the arg.
    Resolves arg names via source-id chain if arg.name is nil.
    Returns the arg entity or throws if not found.
 
+   Accepts a collection of parent fn-ids. With multiple inheritance, walks all
+   parents in BFS order (first parent has precedence for arg name conflicts).
+
    args-data contains :by-fn and :by-id indexes."
-  [fn-cache args-data parent-fn-id arg-name]
-  (let [args-by-id (:by-id args-data)]
-    (loop [fn-id parent-fn-id
-           depth 0]
-      (when (> depth sp/*max-graph-iterations*)
+  [fn-cache args-data parent-fn-ids arg-name]
+  (let [args-by-id (:by-id args-data)
+        arg-name-str (name arg-name)
+        start (vec (remove nil? parent-fn-ids))]
+    (loop [queue start
+           visited #{}
+           iter 0]
+      (when (> iter sp/*max-graph-iterations*)
         (throw (ex-info "Parent chain too deep while resolving arg"
                         {:type :fn-composition/parent-chain-too-deep
                          :arg-name arg-name
                          :max-depth sp/*max-graph-iterations*})))
-      (let [fn-args (get (:by-fn args-data) fn-id [])
-            arg-name-str (name arg-name)
-            ;; Match by resolved name using O(1) by-id lookup
-            found (some #(when (= (resolve-arg-name-cached args-by-id % 0) arg-name-str) %)
-                        fn-args)]
-        (or found
-            ;; Not found on this fn, check parent
-            (let [fn-entity (get fn-cache fn-id)]
-              (if-let [next-parent-id (:parent-id fn-entity)]
-                (recur next-parent-id (inc depth))
-                ;; No more parents - arg not found
-                (throw (ex-info (str "Argument not found in parent chain: " arg-name)
-                                {:type :fn-composition/unresolved-arg
-                                 :parent-fn-id parent-fn-id
-                                 :arg-name arg-name})))))))))
+      (if (empty? queue)
+        (throw (ex-info (str "Argument not found in parent chain: " arg-name)
+                        {:type :fn-composition/unresolved-arg
+                         :parent-fn-ids start
+                         :arg-name arg-name}))
+        (let [fn-id (first queue)
+              rest-q (rest queue)]
+          (if (contains? visited fn-id)
+            (recur rest-q visited (inc iter))
+            (let [fn-args (get (:by-fn args-data) fn-id [])
+                  ;; Match by resolved name using O(1) by-id lookup
+                  found (some #(when (= (resolve-arg-name-cached args-by-id % 0) arg-name-str) %)
+                              fn-args)]
+              (or found
+                  ;; Not found on this fn, enqueue all parent fns
+                  (let [fn-entity (get fn-cache fn-id)
+                        next-parent-ids (:parent-ids fn-entity)]
+                    (recur (into (vec rest-q) next-parent-ids)
+                           (conj visited fn-id)
+                           (inc iter)))))))))))
 
 
 (defn- find-available-arg
@@ -394,18 +421,19 @@
    from a nested fn (via ref-id chain), not directly from parent chain.
 
    Search order:
-   1. Parent's own args (via parent-id chain)
+   1. Parents' own args (via parent-ids chain, BFS over multiple inheritance)
    2. Propagated free args from refs (via ref-id chains)
 
+   Accepts a collection of parent fn-ids (multiple inheritance).
    Resolves arg names via source-id chain if arg.name is nil.
    args-data contains :by-fn and :by-id indexes.
    Returns the arg entity or throws if not found."
-  [fn-cache args-data parent-fn-id arg-name]
+  [fn-cache args-data parent-fn-ids arg-name]
   (let [arg-name-str (name arg-name)
         args-by-id (:by-id args-data)
         ;; First try direct parent chain lookup
         direct-result (try
-                        (get-parent-arg-cached fn-cache args-data parent-fn-id arg-name)
+                        (get-parent-arg-cached fn-cache args-data parent-fn-ids arg-name)
                         (catch clojure.lang.ExceptionInfo e
                           (when-not (= :fn-composition/unresolved-arg (:type (ex-data e)))
                             (throw e))
@@ -414,7 +442,7 @@
         ;; Not in parent chain - search in propagated free args from refs
         ;; Single pass: find free-arg match first, else first any-match
         ;; Use resolved names for matching with O(1) by-id lookup
-        (let [parent-free-args (collect-parent-free-args fn-cache args-data parent-fn-id 0)
+        (let [parent-free-args (collect-parent-free-args fn-cache args-data parent-fn-ids 0)
               found (reduce (fn [first-match arg]
                               (let [resolved-name (resolve-arg-name-cached args-by-id arg 0)]
                                 (if (= resolved-name arg-name-str)
@@ -428,7 +456,7 @@
               (throw (ex-info (str "Argument not found in available args: " arg-name
                                    ". Checked parent chain and propagated free args.")
                               {:type :fn-composition/unresolved-arg
-                               :parent-fn-id parent-fn-id
+                               :parent-fn-ids parent-fn-ids
                                :arg-name arg-name
                                :available-args (mapv #(resolve-arg-name-cached args-by-id % 0)
                                                      parent-free-args)})))))))
@@ -468,9 +496,21 @@
                      :available-fns (keys created-fns)}))))
 
 
+(defn- fn-def-parent-names
+  "Returns a vector of parent names from a fn-def.
+   Supports both :parent (single keyword) and :parents (vector of keywords)."
+  [fn-def]
+  (let [parent-list (:parents fn-def)
+        parent (:parent fn-def)]
+    (cond
+      (seq parent-list) (vec parent-list)
+      parent [parent]
+      :else [])))
+
+
 (defn- prepare-fn-record
   "Prepares a fn record for batch upsert.
-   Returns {:id :name :parent-id} or nil if already exists.
+   Returns {:id :name :parent-ids} or nil if already exists.
 
    Local fns (names starting with _) are stored with name=nil in DB.
    They can only be referenced within the same package by their local name."
@@ -485,14 +525,15 @@
       ;; Already exists (only for non-local fns)
       {:existing (get fn-name-cache fn-name-str)}
       ;; Need to create
-      (let [parent (:parent fn-def)
-            parent-fn-id (resolve-parent-fn-id-cached
-                           fn-name-cache fn-id-cache created-fns parent)
+      (let [parent-names (fn-def-parent-names fn-def)
+            parent-ids (mapv #(resolve-parent-fn-id-cached
+                                fn-name-cache fn-id-cache created-fns %)
+                             parent-names)
             ;; Local fns get name=nil in DB
             db-name (when-not is-local? fn-name-str)]
         {:new {:id (random-uuid)
                :name db-name
-               :parent-id parent-fn-id}}))))
+               :parent-ids (when (seq parent-ids) parent-ids)}}))))
 
 
 (defn- prepare-propagated-arg-record
@@ -555,16 +596,16 @@
    - Map with :as: {:as :new-name} to rename, optionally with :value or :ref
 
    args-data contains :by-fn, :by-id, and :by-fn-source indexes."
-  [fn-cache args-data fn-name-cache created-fns fn-id parent-fn-id arg-name arg-value]
+  [fn-cache args-data fn-name-cache created-fns fn-id parent-fn-ids arg-name arg-value]
   (when-not fn-id
     (throw (ex-info "fn-id cannot be nil when preparing arg record"
                     {:type :fn-composition/internal-error
                      :arg-name arg-name
-                     :parent-fn-id parent-fn-id})))
+                     :parent-fn-ids parent-fn-ids})))
   (let [;; Parse arg value spec (supports {:as :new-name ...})
         {:keys [rename value-spec is-fn]} (parse-arg-value-spec arg-value)
         ;; Use find-available-arg which searches both parent chain AND propagated free args
-        parent-arg (find-available-arg fn-cache args-data parent-fn-id arg-name)
+        parent-arg (find-available-arg fn-cache args-data parent-fn-ids arg-name)
         ;; Validate: cannot override already-bound argument
         parent-has-value (or (some? (:value parent-arg))
                              (some? (:ref-id parent-arg)))
@@ -696,7 +737,7 @@
                       fn-entity (or (:existing result) (:new result))
                       fn-id (:id fn-entity)
                       new-created (assoc created (:name fn-def) fn-id)
-                      ;; Track full entity for parent-id lookup
+                      ;; Track full entity for parent-ids lookup
                       new-created-entities (assoc created-entities fn-id fn-entity)
                       new-fns' (if (:new result)
                                  (conj new-fns (:new result))
@@ -712,7 +753,7 @@
                                        (into {}
                                              (map (fn [[k v]] (let [n (name k)] [n {:id v :name n}])))
                                              created-fns))
-            ;; Include full fn-entities with parent-id for parent chain lookup
+            ;; Include full fn-entities with parent-ids for parent chain lookup
             fn-id-cache-final (merge fn-id-cache created-fn-entities)
 
             ;; Phase 3: Process each fn-def's args sequentially, updating cache as we go
@@ -731,9 +772,10 @@
                 (let [fn-def (first remaining)
                       fn-name (:name fn-def)
                       fn-id (get created-fns fn-name)
-                      parent (:parent fn-def)
-                      parent-fn-id (resolve-parent-fn-id-cached
-                                     fn-name-cache-final fn-id-cache-final created-fns parent)
+                      parent-names (fn-def-parent-names fn-def)
+                      parent-fn-ids (mapv #(resolve-parent-fn-id-cached
+                                             fn-name-cache-final fn-id-cache-final created-fns %)
+                                          parent-names)
 
                       ;; 3a: Explicit args from fn-def :args
                       ;; Single pass: collect source-id CHAINS, new args, and update args together
@@ -744,7 +786,7 @@
                       (reduce (fn [acc [arg-name arg-value]]
                                 (if-let [record (prepare-arg-record
                                                   fn-id-cache-final args-data fn-name-cache-final
-                                                  created-fns fn-id parent-fn-id arg-name arg-value)]
+                                                  created-fns fn-id parent-fn-ids arg-name arg-value)]
                                   (let [source-id (or (:source-id (:new record))
                                                       (:source-id (:update record)))
                                         ;; Collect FULL source-id chain to shadow transitive args
@@ -767,13 +809,13 @@
                                :explicit-arg-names #{}}
                               (:args fn-def {}))
 
-                      ;; 3b: Propagated free args from parent fn
+                      ;; 3b: Propagated free args from parent fns
                       ;; NOTE: We don't recursively collect from refs in explicit args (removed step 3c).
                       ;; The executor handles transitive arg propagation at runtime via trace-source-to-fn.
                       ;; This prevents internal free args (like html-response.status) from leaking
                       ;; through bound refs (like editor-route.handler).
                       parent-free-args (collect-parent-free-args
-                                         fn-id-cache-final args-data parent-fn-id 0)
+                                         fn-id-cache-final args-data parent-fn-ids 0)
 
                       ;; Use parent-free-args directly (no combination with explicit-ref-free-args)
                       all-free-args parent-free-args

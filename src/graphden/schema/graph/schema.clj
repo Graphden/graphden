@@ -6,8 +6,8 @@
    - arg: argument (primary or inherited)
 
    Design principles:
-   - fn without parent-id = base-fn (Clojure implementation)
-   - fn with parent-id = composed fn (inherits behavior)
+   - fn with empty parent-ids = base-fn (Clojure implementation)
+   - fn with parent-ids = composed fn (inherits behavior, supports multiple inheritance)
    - fn with name=nil = local fn (scoped, not globally visible)
    - arg without source-id = primary argument (defines interface)
    - arg with source-id = inherited/forwarded argument
@@ -52,8 +52,8 @@
   #uuid "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f")
 
 
-(def ^:private fn-parent-id-field-uuid
-  #uuid "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f8a")
+(def ^:private fn-parent-ids-field-uuid
+  #uuid "1a2b3c4d-5e6f-4a7b-8c9d-0e1f2a3b4c5d")
 
 
 (def ^:private fn-return-type-field-uuid
@@ -117,17 +117,18 @@
       (ds/add-enum :value-kind value-kind-enum-uuid (value-kind-enum-values))
 
       ;; fn: function entity
-      ;; parent-id=nil → base-fn, has Clojure implementation
-      ;; parent-id set → composed fn, inherits from parent
+      ;; parent-ids=nil/[] → base-fn, has Clojure implementation
+      ;; parent-ids=[id] → single inheritance (most common)
+      ;; parent-ids=[id1,id2] → multiple inheritance (parents define disjoint args)
       ;; name=nil → local fn (scoped, not globally visible)
       (ds/add-entity :fn fn-entity-uuid
                      {:name {:uuid fn-name-field-uuid
                              :type :text
                              :nullable? true}
-                      :parent-id {:uuid fn-parent-id-field-uuid
-                                  :type :ref
-                                  :ref-entity :fn
-                                  :nullable? true}
+                      :parent-ids {:uuid fn-parent-ids-field-uuid
+                                   :type :ref-many
+                                   :ref-entity :fn
+                                   :nullable? true}
                       :return-type {:uuid fn-return-type-field-uuid
                                     :type :enum
                                     :enum-name :value-kind

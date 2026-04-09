@@ -34,9 +34,9 @@
   (testing "fn has expected fields for 2-entity schema"
     (let [fields (ds/entity-fields example-schema :fn)]
       (is (= :text (get-in fields [:name :type])))
-      (is (= :ref (get-in fields [:parent-id :type])))
-      (is (= :fn (get-in fields [:parent-id :ref-entity])))
-      (is (true? (get-in fields [:parent-id :nullable?])))
+      (is (= :ref-many (get-in fields [:parent-ids :type])))
+      (is (= :fn (get-in fields [:parent-ids :ref-entity])))
+      (is (true? (get-in fields [:parent-ids :nullable?])))
       (is (= :enum (get-in fields [:return-type :type])))
       (is (= :value-kind (get-in fields [:return-type :enum-name])))
       (is (= :text (get-in fields [:impl-hash :type])))))

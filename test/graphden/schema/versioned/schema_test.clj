@@ -75,10 +75,9 @@
       (is (= :branch (:ref-entity (:branch-id fields))))
 
       ;; fn data fields (versioned snapshot)
+      ;; Note: parent-ids is NOT versioned (it's a :ref-many junction table on the live fn entity)
       (is (= :text (:type (:name fields))))
       (is (true? (:nullable? (:name fields))))
-      (is (= :uuid (:type (:parent-id fields))))
-      (is (true? (:nullable? (:parent-id fields))))
       (is (= :enum (:type (:return-type fields))))
       (is (true? (:nullable? (:return-type fields))))
       (is (= :text (:type (:impl-hash fields))))

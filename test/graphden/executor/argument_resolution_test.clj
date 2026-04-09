@@ -235,10 +235,10 @@
         child-id (random-uuid)
         grandchild-id (random-uuid)
         unrelated-id (random-uuid)
-        fns {base-id {:id base-id :parent-id nil}
-             child-id {:id child-id :parent-id base-id}
-             grandchild-id {:id grandchild-id :parent-id child-id}
-             unrelated-id {:id unrelated-id :parent-id nil}}]
+        fns {base-id {:id base-id :parent-ids nil}
+             child-id {:id child-id :parent-ids [base-id]}
+             grandchild-id {:id grandchild-id :parent-ids [child-id]}
+             unrelated-id {:id unrelated-id :parent-ids nil}}]
 
     (testing "returns true when fn-id equals start-fn-id"
       (is (true? (#'arg-res/fn-in-parent-chain? fns base-id base-id))))
@@ -275,9 +275,9 @@
         ref-arg-id (random-uuid)
         propagated-arg-id (random-uuid)
 
-        fns {base-fn-id {:id base-fn-id :parent-id nil}
-             composed-fn-id {:id composed-fn-id :parent-id base-fn-id}
-             ref-fn-id {:id ref-fn-id :parent-id nil}}
+        fns {base-fn-id {:id base-fn-id :parent-ids nil}
+             composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id]}
+             ref-fn-id {:id ref-fn-id :parent-ids nil}}
 
         base-arg-a {:id base-arg-a-id :fn-id base-fn-id :name "a"
                     :type :int :source-id nil}
@@ -381,8 +381,8 @@
         inherited-a-id (random-uuid)
         inherited-b-id (random-uuid)
 
-        fns {base-fn-id {:id base-fn-id :parent-id nil :name "add"}
-             composed-fn-id {:id composed-fn-id :parent-id base-fn-id :name "add-10"}}
+        fns {base-fn-id {:id base-fn-id :parent-ids nil :name "add"}
+             composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id] :name "add-10"}}
 
         base-arg-a {:id base-arg-a-id :fn-id base-fn-id :name "a"
                     :type :int :required true :source-id nil}
@@ -434,8 +434,8 @@
         base-arg-id (random-uuid)
         inherited-arg-id (random-uuid)
 
-        fns {base-fn-id {:id base-fn-id :parent-id nil :name "base"}
-             composed-fn-id {:id composed-fn-id :parent-id base-fn-id :name "composed"}}
+        fns {base-fn-id {:id base-fn-id :parent-ids nil :name "base"}
+             composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id] :name "composed"}}
 
         base-arg {:id base-arg-id :fn-id base-fn-id :name "x"
                   :type :int :required true :source-id nil}
@@ -463,8 +463,8 @@
         base-arg-id (random-uuid)
         inherited-arg-id (random-uuid)
 
-        fns {base-fn-id {:id base-fn-id :parent-id nil :name "base"}
-             composed-fn-id {:id composed-fn-id :parent-id base-fn-id :name "composed"}}
+        fns {base-fn-id {:id base-fn-id :parent-ids nil :name "base"}
+             composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id] :name "composed"}}
 
         base-arg {:id base-arg-id :fn-id base-fn-id :name "x"
                   :type :int :required true :source-id nil}
@@ -511,9 +511,9 @@
         base-arg-id (random-uuid)
         inherited-arg-id (random-uuid)
 
-        fns {base-fn-id {:id base-fn-id :parent-id nil :name "base"}
-             composed-fn-id {:id composed-fn-id :parent-id base-fn-id :name "composed"}
-             ref-target-fn-id {:id ref-target-fn-id :parent-id nil :name "ref-target"}}
+        fns {base-fn-id {:id base-fn-id :parent-ids nil :name "base"}
+             composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id] :name "composed"}
+             ref-target-fn-id {:id ref-target-fn-id :parent-ids nil :name "ref-target"}}
 
         base-arg {:id base-arg-id :fn-id base-fn-id :name "x"
                   :type :int :required true :source-id nil :is-fn false}
@@ -543,9 +543,9 @@
         base-arg-id (random-uuid)
         inherited-arg-id (random-uuid)
 
-        fns {base-fn-id {:id base-fn-id :parent-id nil :name "base"}
-             composed-fn-id {:id composed-fn-id :parent-id base-fn-id :name "composed"}
-             ref-target-fn-id {:id ref-target-fn-id :parent-id nil :name "ref-target"}}
+        fns {base-fn-id {:id base-fn-id :parent-ids nil :name "base"}
+             composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id] :name "composed"}
+             ref-target-fn-id {:id ref-target-fn-id :parent-ids nil :name "ref-target"}}
 
         base-arg {:id base-arg-id :fn-id base-fn-id :name "f"
                   :type :fn :required true :source-id nil :is-fn true}
@@ -615,9 +615,9 @@
           other-arg-id (random-uuid)
           inherited-arg-id (random-uuid)
 
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}
-               other-fn-id {:id other-fn-id :parent-id nil}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id]}
+               other-fn-id {:id other-fn-id :parent-ids nil}}
 
           other-arg {:id other-arg-id :fn-id other-fn-id :name "x"
                      :type :int :source-id nil}
@@ -641,8 +641,8 @@
           own-arg-id (random-uuid)
           missing-source-id (random-uuid)
 
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id]}}
 
           base-arg {:id base-arg-id :fn-id base-fn-id :name "a"
                     :type :int :source-id nil}
@@ -665,9 +665,9 @@
           inherited-arg-id (random-uuid)
           ref-target-id (random-uuid)
 
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               mid-fn-id {:id mid-fn-id :parent-id base-fn-id}
-               composed-fn-id {:id composed-fn-id :parent-id mid-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               mid-fn-id {:id mid-fn-id :parent-ids [base-fn-id]}
+               composed-fn-id {:id composed-fn-id :parent-ids [mid-fn-id]}}
 
           base-arg {:id base-arg-id :fn-id base-fn-id :name "a"
                     :type :int :source-id nil}
@@ -696,9 +696,9 @@
           ;; Inherited arg with nothing set
           inherited-arg-id (random-uuid)
 
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               mid-fn-id {:id mid-fn-id :parent-id base-fn-id}
-               composed-fn-id {:id composed-fn-id :parent-id mid-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               mid-fn-id {:id mid-fn-id :parent-ids [base-fn-id]}
+               composed-fn-id {:id composed-fn-id :parent-ids [mid-fn-id]}}
 
           base-arg {:id base-arg-id :fn-id base-fn-id :name "a"
                     :type :int :source-id nil}
@@ -724,8 +724,8 @@
           base-arg-id (random-uuid)
           own-arg-id (random-uuid)
 
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id]}}
 
           ;; Base arg without name (unusual but tests the branch)
           base-arg {:id base-arg-id :fn-id base-fn-id :name nil
@@ -748,8 +748,8 @@
           base-arg-id (random-uuid)
           own-arg-id (random-uuid)
 
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id]}}
 
           base-arg {:id base-arg-id :fn-id base-fn-id :name nil
                     :type :int :source-id nil}
@@ -770,8 +770,8 @@
           base-arg-id (random-uuid)
           own-arg-id (random-uuid)
 
-          fns {base-fn-id {:id base-fn-id :parent-id nil}
-               composed-fn-id {:id composed-fn-id :parent-id base-fn-id}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil}
+               composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id]}}
 
           base-arg {:id base-arg-id :fn-id base-fn-id :name "x"
                     :type :int :source-id nil}
@@ -795,8 +795,8 @@
           arg1-id (random-uuid)
           arg2-id (random-uuid)
 
-          fns {base-fn-id {:id base-fn-id :parent-id nil :name "base"}
-               composed-fn-id {:id composed-fn-id :parent-id base-fn-id :name "composed"}}
+          fns {base-fn-id {:id base-fn-id :parent-ids nil :name "base"}
+               composed-fn-id {:id composed-fn-id :parent-ids [base-fn-id] :name "composed"}}
 
           base-arg {:id base-arg-id :fn-id base-fn-id :name "x"
                     :type :int :required false :source-id nil}

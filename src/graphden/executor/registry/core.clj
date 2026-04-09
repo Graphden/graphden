@@ -4,7 +4,7 @@
    ## 2-Entity Schema
 
    Base functions are synced as:
-   - fn entity with parent-id=nil (marks it as base-fn)
+   - fn entity with parent-ids=nil (marks it as base-fn)
    - arg entities with source-id=nil (marks them as primary arguments)
 
    Deterministic UUID generation ensures idempotent sync.
@@ -237,13 +237,14 @@
 
 (defn- prepare-fn-record
   "Prepares a fn record for batch upsert.
-   Base fn = fn entity with parent-id=nil."
+   Base fn = fn entity with parent-ids=nil."
   [fn-name fn-def]
   (let [{:keys [return-type]} fn-def
         id (fn-uuid fn-name)
         impl-hash (compute-impl-hash fn-def)]
     {:id id
      :name (name fn-name)
+     :parent-ids nil
      :return-type return-type
      :impl-hash impl-hash}))
 

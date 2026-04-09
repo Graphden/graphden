@@ -17,8 +17,8 @@
   (let [fn-id (random-uuid)
         parent-id (random-uuid)
         arg-id (random-uuid)
-        valid-fns {fn-id {:id fn-id :name "test-fn" :parent-id parent-id}
-                   parent-id {:id parent-id :name "base-fn" :parent-id nil}}
+        valid-fns {fn-id {:id fn-id :name "test-fn" :parent-ids [parent-id]}
+                   parent-id {:id parent-id :name "base-fn" :parent-ids nil}}
         valid-args [{:id arg-id :fn-id fn-id :name "x" :type "int" :required true :is-fn false}]]
 
     (testing "creates valid result with all required fields"
@@ -82,14 +82,14 @@
           arg-1-id (random-uuid)
           arg-2-id (random-uuid)
           graph (storage/->execution-graph
-                  {:fns {fn-id {:id fn-id :name "test-fn" :parent-id parent-id}
-                         parent-id {:id parent-id :name "base-fn" :parent-id nil}}
+                  {:fns {fn-id {:id fn-id :name "test-fn" :parent-ids [parent-id]}
+                         parent-id {:id parent-id :name "base-fn" :parent-ids nil}}
                    :args [{:id arg-1-id :fn-id fn-id :name "a" :type "int" :value 1}
                           {:id arg-2-id :fn-id fn-id :name "b" :type "int" :value 2}]})]
       ;; Test graph-get-fn
-      (is (= {:id fn-id :name "test-fn" :parent-id parent-id}
+      (is (= {:id fn-id :name "test-fn" :parent-ids [parent-id]}
              (storage/graph-get-fn graph fn-id)))
-      (is (= {:id parent-id :name "base-fn" :parent-id nil}
+      (is (= {:id parent-id :name "base-fn" :parent-ids nil}
              (storage/graph-get-fn graph parent-id)))
       ;; Test graph-get-args - returns vector of args for fn-id
       (let [args (storage/graph-get-args graph fn-id)]

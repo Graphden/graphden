@@ -40,7 +40,18 @@
   (let [fields (ds/entity-fields schema entity-name)]
     (ddl/create-table! ds entity-name fields)
     (ddl/create-entity-constraints! ds schema entity-name)
-    (ddl/create-ref-indexes! ds entity-name fields)))
+    (ddl/create-ref-indexes! ds entity-name fields)
+    ;; Junction tables for :ref-many fields (must be created AFTER all entity tables exist
+    ;; to satisfy FK constraints; deferred via second pass below)
+    nil))
+
+
+(defn- create-entity-junction-tables!
+  "Creates junction tables for an entity's :ref-many fields.
+   Must be called after all entity tables exist."
+  [ds schema entity-name]
+  (let [fields (ds/entity-fields schema entity-name)]
+    (ddl/create-junction-tables! ds entity-name fields)))
 
 
 (defn do-first-init!
@@ -49,8 +60,10 @@
   ;; Create enums first (tables may reference them)
   (run! (fn [[enum-name enum-def]] (create-single-enum! tx enum-name enum-def))
         (ds/enums schema))
-  ;; Create tables
+  ;; Create tables (entity tables first, junction tables in second pass)
   (run! #(create-single-entity! tx schema %) (ds/entities schema))
+  ;; Junction tables (require entity tables to exist for FKs)
+  (run! #(create-entity-junction-tables! tx schema %) (ds/entities schema))
   ;; Save metadata
   (metadata/save-metadata-in-tx! tx schema)
   ;; Return changes
@@ -75,15 +88,17 @@
   {:make-field-verifier
    (fn [_old-metadata old-entity-name]
      (let [old-db-fields (introspection/current-columns tx (util/kw->snake-case old-entity-name))]
-       (fn [entity-name field-name _field-spec old-field-info]
-         (let [old-field-name (:field old-field-info)
-               old-db-field (get old-db-fields old-field-name)]
-           (when (and (seq old-db-fields) (nil? old-db-field))
-             (throw (ex-info "Metadata/DB inconsistency: field exists in metadata but not in database"
-                             {:type :metadata-error/inconsistency
-                              :entity entity-name
-                              :field field-name
-                              :expected-column (util/kw->snake-case old-field-name)})))))))
+       (fn [entity-name field-name field-spec old-field-info]
+         ;; :ref-many fields are stored in junction tables, not as columns - skip column check
+         (when-not (= :ref-many (:type field-spec))
+           (let [old-field-name (:field old-field-info)
+                 old-db-field (get old-db-fields old-field-name)]
+             (when (and (seq old-db-fields) (nil? old-db-field))
+               (throw (ex-info "Metadata/DB inconsistency: field exists in metadata but not in database"
+                               {:type :metadata-error/inconsistency
+                                :entity entity-name
+                                :field field-name
+                                :expected-column (util/kw->snake-case old-field-name)}))))))))
 
    :on-create-enum!
    (fn [_ctx enum-name values]
@@ -105,9 +120,16 @@
 
    :on-create-field!
    (fn [_ctx entity-name field-name field-spec]
-     (ddl/add-column! tx entity-name field-name field-spec)
-     (when (= :ref (:type field-spec))
-       (ddl/create-ref-index! tx entity-name field-name)))
+     (cond
+       (= :ref-many (:type field-spec))
+       ;; M2M field: create junction table instead of a column
+       (ddl/create-junction-table! tx entity-name field-name field-spec)
+
+       :else
+       (do
+         (ddl/add-column! tx entity-name field-name field-spec)
+         (when (= :ref (:type field-spec))
+           (ddl/create-ref-index! tx entity-name field-name)))))
 
    :on-rename-entity!
    (fn [_ctx old-name new-name]

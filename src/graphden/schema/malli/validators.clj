@@ -139,6 +139,16 @@
                      (conj base-allowed-keys :ref-entity)))
 
 
+(defn- validate-ref-many-type!
+  "Validates :ref-many field type requirements (m2m relationship)."
+  [entity-name field-name field-spec base-allowed-keys]
+  (when-not (:ref-entity field-spec)
+    (throw (ex-info "Field type :ref-many requires :ref-entity"
+                    {:entity entity-name :field field-name :spec field-spec})))
+  (check-extra-keys! entity-name field-name :ref-many field-spec
+                     (conj base-allowed-keys :ref-entity)))
+
+
 (defn- validate-enum-type!
   "Validates :enum field type requirements."
   [entity-name field-name field-spec base-allowed-keys]
@@ -177,6 +187,7 @@
      (validate-nullable! entity-name field-name field-spec in-variant?)
      (case field-type
        :ref (validate-ref-type! entity-name field-name field-spec base-allowed-keys)
+       :ref-many (validate-ref-many-type! entity-name field-name field-spec base-allowed-keys)
        :enum (validate-enum-type! entity-name field-name field-spec base-allowed-keys)
        :union (validate-union-type! entity-name field-name field-spec base-allowed-keys)
        (check-extra-keys! entity-name field-name field-type field-spec base-allowed-keys)))))
@@ -207,6 +218,7 @@
          field-type :type} field-spec]
     (case field-type
       :ref [{:ref-type :entity :ref-name ref-entity}]
+      :ref-many [{:ref-type :entity :ref-name ref-entity}]
       :enum [{:ref-type :enum :ref-name enum-name}]
       :union (mapcat collect-field-refs variants)
       [])))

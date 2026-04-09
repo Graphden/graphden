@@ -326,12 +326,11 @@
   (if-let [fn-rec (load-fn-record current-fn-id)]
     (let [fn-args (load-args-for-fn current-fn-id)
           new-fn-refs (extract-fn-refs-from-args fn-args)
-          ;; Also check parent-id reference
-          parent-ref (when-let [parent-id (:parent-id fn-rec)]
-                       #{parent-id})]
+          ;; parent-ids is :ref-many (vector of UUIDs from junction table)
+          parent-refs (into #{} (remove nil?) (:parent-ids fn-rec))]
       {:fns (assoc fns current-fn-id fn-rec)
        :args (into args fn-args)
-       :new-fn-refs (set/union new-fn-refs (or parent-ref #{}))})
+       :new-fn-refs (set/union new-fn-refs parent-refs)})
     {:fns fns :args args :new-fn-refs #{}}))
 
 

@@ -11,7 +11,7 @@
    ## 2-Entity Schema
 
    Only two entities are versioned:
-   - fn: function entity (parent-id for inheritance)
+   - fn: function entity (parent-ids for inheritance)
    - arg: argument entity (source-id for inheritance, value/ref-id for data)
 
    ## Usage
@@ -20,7 +20,7 @@
    (def storage (vs/wrap-with-versioning base))
 
    ;; CRUD works like normal storage, but is branch-aware
-   (sp/create-entity storage :fn {:name \"foo\" :parent-id id})
+   (sp/create-entity storage :fn {:name \"foo\" :parent-ids [id]})
 
    ;; Create branch and switch
    (def branch (vs/create-branch! storage \"feature\"))

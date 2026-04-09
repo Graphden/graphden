@@ -40,6 +40,7 @@ function buildLookups(data) {
 // ============================================================================
 
 // Get inheritance chain: [fnId, parentId, grandparentId, ...]
+// For multiple inheritance, follows the FIRST parent at each level (primary chain).
 function getInheritanceChain(fnId) {
   const chain = [];
   let current = fnId;
@@ -48,7 +49,8 @@ function getInheritanceChain(fnId) {
     visited.add(current);
     chain.push(current);
     const fn = lookups.fnMap.get(current);
-    current = fn ? fn['parent-id'] : null;
+    const parentIds = fn ? fn['parent-ids'] : null;
+    current = (parentIds && parentIds.length > 0) ? parentIds[0] : null;
   }
   return chain;
 }

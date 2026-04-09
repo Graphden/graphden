@@ -11,7 +11,7 @@
    ## 2-Entity Schema
 
    Only two entities are versioned:
-   - fn: function entity (parent-id for inheritance)
+   - fn: function entity (parent-ids for inheritance)
    - arg: argument entity (source-id for inheritance, value/ref-id for data)"
   (:require
     [clojure.set :as set]
@@ -41,10 +41,14 @@
 
 (def entity-config
   "Configuration for versioned entities.
-   Maps base entity name to version table metadata."
+   Maps base entity name to version table metadata.
+
+   Note: :parent-ids is NOT in fn version-data-fields because it is a
+   :ref-many field stored in a junction table (fn_parent_ids), not as a
+   column on the fn entity. Junction rows are not versioned currently."
   {:fn {:version-entity :fn-version
         :version-id-field :fn-id
-        :version-data-fields #{:name :parent-id :return-type :impl-hash}}
+        :version-data-fields #{:name :return-type :impl-hash}}
 
    :arg {:version-entity :arg-version
          :version-id-field :arg-id
@@ -417,9 +421,9 @@
                      (if-let [fn-rec (get all-fns current-fn-id)]
                        (let [fn-args (get args-by-fn current-fn-id [])
                              new-fn-refs (extract-fn-refs-from-args fn-args)
-                             parent-ref (when-let [parent-id (:parent-id fn-rec)]
-                                          #{parent-id})
-                             all-refs (set/union new-fn-refs (or parent-ref #{}))
+                             parent-refs (when-let [parent-ids (seq (:parent-ids fn-rec))]
+                                           (set parent-ids))
+                             all-refs (set/union new-fn-refs (or parent-refs #{}))
                              new-to-visit (set/difference all-refs visited)
                              new-visited (set/union visited new-to-visit)]
                          (recur (set/union rest-to-visit new-to-visit)

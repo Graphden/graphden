@@ -45,10 +45,10 @@
                     {:uuid (uuid) :value :any}
                     {:uuid (uuid) :value :fn}])
 
-      ;; fn: function entity with parent-id for composition
+      ;; fn: function entity with parent-ids for composition (multiple inheritance)
       (ds/add-entity :fn (uuid)
                      {:name {:uuid (uuid) :type :text}
-                      :parent-id {:uuid (uuid) :type :ref :ref-entity :fn :nullable? true}
+                      :parent-ids {:uuid (uuid) :type :ref-many :ref-entity :fn :nullable? true}
                       :return-type {:uuid (uuid) :type :enum :enum-name :value-kind :nullable? true}
                       :impl-hash {:uuid (uuid) :type :text :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:name]})

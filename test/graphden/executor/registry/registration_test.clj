@@ -143,7 +143,7 @@
               ;; Create composed fn with parent-id = add-fn
               my-fn (sp/create-entity storage :fn
                                       {:name "test-add"
-                                       :parent-id add-fn-id})
+                                       :parent-ids [add-fn-id]})
               ;; Create arg with source-id and value
               _ (sp/create-entity storage :arg
                                   {:fn-id (:id my-fn)

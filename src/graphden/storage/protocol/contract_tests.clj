@@ -7,7 +7,7 @@
    ## 2-Entity Schema
 
    Uses simplified schema:
-   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - fn: parent-ids=nil/[] for base-fn, parent-ids=[...] for composed fn
    - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
 
    Usage in storage implementation tests:
@@ -30,13 +30,13 @@
   "Schema for graph constraint testing.
    Uses 2-entity schema: fn + arg."
   (-> (mds/create-builder)
-      ;; fn entity (base-fns have parent-id=nil, composed fns have parent-id set)
+      ;; fn entity (base-fns have parent-ids=[]/nil, composed fns have parent-ids set)
       (ds/add-entity :fn #uuid "10000000-0000-0000-0000-000000000001"
                      {:name {:uuid #uuid "10000000-0000-0000-0000-000000000002"
                              :type :text}
-                      :parent-id {:uuid #uuid "10000000-0000-0000-0000-000000000003"
-                                  :type :uuid
-                                  :nullable? true}
+                      :parent-ids {:uuid #uuid "10000000-0000-0000-0000-000000000003"
+                                   :type :jsonb
+                                   :nullable? true}
                       :return-type {:uuid #uuid "10000000-0000-0000-0000-000000000004"
                                     :type :text
                                     :nullable? true}})
@@ -92,7 +92,7 @@
           (sp/initialize storage graph-schema)
           (let [base-fn (sp/create-entity storage :fn
                                           {:name "test-fn"
-                                           :parent-id nil
+                                           :parent-ids nil
                                            :return-type "int"})]
             ;; Should allow nil ref-id (literal value, not a fn reference)
             (is (nil? (sp/validate-no-dependency-cycle! storage (:id base-fn) nil))))
@@ -105,7 +105,7 @@
           (sp/initialize storage graph-schema)
           (let [base-fn (sp/create-entity storage :fn
                                           {:name "test-fn"
-                                           :parent-id nil
+                                           :parent-ids nil
                                            :return-type "int"})]
             ;; Self-reference is a cycle at storage level
             ;; Recursion is handled at executor level via lazy evaluation
@@ -122,11 +122,11 @@
           (sp/initialize storage graph-schema)
           (let [fn-a (sp/create-entity storage :fn
                                        {:name "fn-a"
-                                        :parent-id nil
+                                        :parent-ids nil
                                         :return-type "int"})
                 fn-b (sp/create-entity storage :fn
                                        {:name "fn-b"
-                                        :parent-id nil
+                                        :parent-ids nil
                                         :return-type "int"})]
             ;; Should allow reference to a different fn
             (is (nil? (sp/validate-no-dependency-cycle! storage (:id fn-a) (:id fn-b)))))
@@ -145,7 +145,7 @@
         (let [;; Create initial fn
               fn-record (sp/create-entity storage :fn
                                           {:name "concurrent-fn"
-                                           :parent-id nil
+                                           :parent-ids nil
                                            :return-type "int"})
               fn-id (:id fn-record)
               ;; Run concurrent reads while updating
@@ -185,7 +185,7 @@
               (try
                 (let [fns (for [i (range fns-per-thread)]
                             {:name (str "batch-fn-" t "-" i)
-                             :parent-id nil
+                             :parent-ids nil
                              :return-type "int"})]
                   (swap! results concat (sp/create-entities storage :fn fns)))
                 (finally

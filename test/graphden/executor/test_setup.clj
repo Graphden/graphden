@@ -70,7 +70,7 @@
   [storage entity-name return-type]
   (sp/create-entity storage :fn
                     {:name entity-name
-                     :parent-id nil
+                     :parent-ids nil
                      :return-type return-type}))
 
 
@@ -80,7 +80,7 @@
   [storage entity-name parent-id]
   (sp/create-entity storage :fn
                     {:name entity-name
-                     :parent-id parent-id}))
+                     :parent-ids [parent-id]}))
 
 
 (defn create-arg!

@@ -996,11 +996,11 @@
           root-item2-arg-id (random-uuid)
 
           ;; Functions
-          fns [{:id container-id :name :container :parent-id nil}
-               {:id parent-id :name :parent :parent-id container-id}
-               {:id root-id :name :root :parent-id parent-id}
-               {:id child1-id :name :child1 :parent-id nil}
-               {:id child2-id :name :child2 :parent-id nil}]
+          fns [{:id container-id :name :container :parent-ids nil}
+               {:id parent-id :name :parent :parent-ids [container-id]}
+               {:id root-id :name :root :parent-ids [parent-id]}
+               {:id child1-id :name :child1 :parent-ids nil}
+               {:id child2-id :name :child2 :parent-ids nil}]
 
           ;; Arguments
           args [;; container's args (no values - these are primary args)
@@ -1101,11 +1101,11 @@
           route1-value-arg-id (random-uuid)       ; route1 binds :key to "get"
           route2-value-arg-id (random-uuid)       ; route2 binds :key to "post"
 
-          fns [{:id assoc-handler-id :name :assoc-handler :parent-id nil}
-               {:id method-map-id :name :method-map :parent-id nil}
-               {:id route-id :name :route :parent-id nil}
-               {:id route1-id :name :route1 :parent-id route-id}
-               {:id route2-id :name :route2 :parent-id route-id}]
+          fns [{:id assoc-handler-id :name :assoc-handler :parent-ids nil}
+               {:id method-map-id :name :method-map :parent-ids nil}
+               {:id route-id :name :route :parent-ids nil}
+               {:id route1-id :name :route1 :parent-ids [route-id]}
+               {:id route2-id :name :route2 :parent-ids [route-id]}]
 
           args [;; assoc-handler has :key arg (primary, unset)
                 {:id assoc-handler-key-arg-id :fn-id assoc-handler-id :name :key :source-id nil}
@@ -1137,7 +1137,7 @@
           parent-id (random-uuid)
           parent-route1-arg-id (random-uuid)
           parent-route2-arg-id (random-uuid)
-          fns-with-parent (conj fns {:id parent-id :name :parent :parent-id nil})
+          fns-with-parent (conj fns {:id parent-id :name :parent :parent-ids nil})
           args-with-parent (concat args
                                    [{:id parent-route1-arg-id :fn-id parent-id :name :r1 :source-id nil :ref-id route1-id}
                                     {:id parent-route2-arg-id :fn-id parent-id :name :r2 :source-id nil :ref-id route2-id}])
@@ -1206,12 +1206,12 @@
           parent-r1-arg-id (random-uuid)
           parent-r2-arg-id (random-uuid)
 
-          fns [{:id shared-handler-id :name :shared-handler :parent-id nil}
-               {:id method-map-id :name :method-map :parent-id nil}
-               {:id ancestor-id :name :ancestor :parent-id nil}
-               {:id route1-id :name :route1 :parent-id ancestor-id}
-               {:id route2-id :name :route2 :parent-id ancestor-id}
-               {:id parent-id :name :parent :parent-id nil}]
+          fns [{:id shared-handler-id :name :shared-handler :parent-ids nil}
+               {:id method-map-id :name :method-map :parent-ids nil}
+               {:id ancestor-id :name :ancestor :parent-ids nil}
+               {:id route1-id :name :route1 :parent-ids [ancestor-id]}
+               {:id route2-id :name :route2 :parent-ids [ancestor-id]}
+               {:id parent-id :name :parent :parent-ids nil}]
 
           args [;; ancestor has :method -> method-map (structural ref)
                 {:id ancestor-method-arg-id :fn-id ancestor-id :name :method :source-id nil :ref-id method-map-id}
@@ -1311,13 +1311,13 @@
           parent-r1-arg-id (random-uuid)
           parent-r2-arg-id (random-uuid)
 
-          fns [{:id shared-handler-id :name :shared-handler :parent-id nil}
-               {:id assoc-handler-id :name :assoc-handler :parent-id nil}
-               {:id method-map-id :name :method-map :parent-id nil}
-               {:id route-id :name :route :parent-id nil}
-               {:id route1-id :name :route1 :parent-id route-id}
-               {:id route2-id :name :route2 :parent-id route-id}
-               {:id parent-id :name :parent :parent-id nil}]
+          fns [{:id shared-handler-id :name :shared-handler :parent-ids nil}
+               {:id assoc-handler-id :name :assoc-handler :parent-ids nil}
+               {:id method-map-id :name :method-map :parent-ids nil}
+               {:id route-id :name :route :parent-ids nil}
+               {:id route1-id :name :route1 :parent-ids [route-id]}
+               {:id route2-id :name :route2 :parent-ids [route-id]}
+               {:id parent-id :name :parent :parent-ids nil}]
 
           args [;; assoc-handler has :handler arg (unset - primary arg)
                 {:id assoc-handler-handler-arg-id :fn-id assoc-handler-id :name :handler :source-id nil}
@@ -1418,12 +1418,12 @@
 
           root-item9-arg-id (random-uuid)      ; source=list-10-9-item9, ref=child-fn
 
-          fns [{:id conj-any-id :name :conj-any :parent-id nil}
-               {:id list-10-9-id :name :list-10-9 :parent-id conj-any-id}
-               {:id list-10-id :name :list-10 :parent-id conj-any-id}
-               {:id list-11-id :name :list-11 :parent-id conj-any-id}
-               {:id root-id :name :root :parent-id list-11-id}
-               {:id child-fn-id :name :child-fn :parent-id nil}]
+          fns [{:id conj-any-id :name :conj-any :parent-ids nil}
+               {:id list-10-9-id :name :list-10-9 :parent-ids [conj-any-id]}
+               {:id list-10-id :name :list-10 :parent-ids [conj-any-id]}
+               {:id list-11-id :name :list-11 :parent-ids [conj-any-id]}
+               {:id root-id :name :root :parent-ids [list-11-id]}
+               {:id child-fn-id :name :child-fn :parent-ids nil}]
 
           args [;; conj-any args (primary)
                 {:id conj-any-coll-arg-id :fn-id conj-any-id :name :coll :source-id nil}

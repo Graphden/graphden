@@ -39,9 +39,9 @@
   (testing "fn has expected fields"
     (let [fields (ds/entity-fields schema :fn)]
       (is (= :text (get-in fields [:name :type])))
-      (is (= :ref (get-in fields [:parent-id :type])))
-      (is (= :fn (get-in fields [:parent-id :ref-entity])))
-      (is (true? (get-in fields [:parent-id :nullable?])))
+      (is (= :ref-many (get-in fields [:parent-ids :type])))
+      (is (= :fn (get-in fields [:parent-ids :ref-entity])))
+      (is (true? (get-in fields [:parent-ids :nullable?])))
       (is (= :enum (get-in fields [:return-type :type])))
       (is (= :text (get-in fields [:impl-hash :type])))))
 
@@ -68,14 +68,14 @@
     (is (nil? (ds/validate-entity schema :fn
                                   {:id (random-uuid)
                                    :name "add"
-                                   :parent-id nil
+                                   :parent-ids nil
                                    :return-type :int}))))
 
   (testing "valid composed fn (parent-id set)"
     (is (nil? (ds/validate-entity schema :fn
                                   {:id (random-uuid)
                                    :name "my-add"
-                                   :parent-id (random-uuid)
+                                   :parent-ids [(random-uuid)]
                                    :return-type :int}))))
 
   ;; Note: fn.name is nullable (for local fns), so missing name is valid

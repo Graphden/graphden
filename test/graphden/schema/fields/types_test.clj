@@ -40,11 +40,11 @@
       (is (contains? (get ft/type-mappings t) :datomic) (str "Missing :datomic for " t))
       (is (contains? (get ft/type-mappings t) :memory) (str "Missing :memory for " t))))
 
-  (testing "postgres mappings are strings or :custom"
+  (testing "postgres mappings are strings, :custom, or :junction"
     (doseq [[t mapping] ft/type-mappings]
       (let [pg-type (:postgres mapping)]
-        (is (or (string? pg-type) (= :custom pg-type))
-            (str "Postgres mapping for " t " should be string or :custom")))))
+        (is (or (string? pg-type) (= :custom pg-type) (= :junction pg-type))
+            (str "Postgres mapping for " t " should be string, :custom, or :junction")))))
 
   (testing "datomic mappings are keywords"
     (doseq [[t mapping] ft/type-mappings]

@@ -115,6 +115,9 @@
 ;; =============================================================================
 
 (defn- resolve-base-fn
+  "Resolves the base-fn (leaf with no parents) for a fn-id.
+   With multiple inheritance, walks the FIRST parent at each level.
+   Assumes all parent chains in multiple inheritance resolve to the same base-fn."
   [fns fn-id depth]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain exceeds maximum depth"
@@ -123,7 +126,9 @@
     (when-not fn-rec
       (throw (ex-info "Function not found in execution graph"
                       {:type :execution-error/fn-not-found :fn-id fn-id})))
-    (if-let [pid (:parent-id fn-rec)] (recur fns pid (inc depth)) fn-rec)))
+    (if-let [pid (first (:parent-ids fn-rec))]
+      (recur fns pid (inc depth))
+      fn-rec)))
 
 
 (defn- get-fn-args-with-inheritance
@@ -134,11 +139,24 @@
   (let [fns (sp/get-graph-fns execution-graph)
         fn-rec (get fns fn-id)
         own-args (sp/graph-get-args execution-graph fn-id)
-        parent-id (:parent-id fn-rec)]
-    (if parent-id
-      (let [parent-args (get-fn-args-with-inheritance execution-graph parent-id (inc depth))
+        parent-ids (:parent-ids fn-rec)]
+    (if (seq parent-ids)
+      ;; Collect args from all parents, deduplicate by id, then filter by source-id chain
+      (let [all-parent-args (into []
+                                  (mapcat (fn [pid]
+                                            (get-fn-args-with-inheritance
+                                              execution-graph pid (inc depth))))
+                                  parent-ids)
+            dedup-parent-args (->> all-parent-args
+                                   (reduce (fn [{:keys [seen result]} a]
+                                             (if (contains? seen (:id a))
+                                               {:seen seen :result result}
+                                               {:seen (conj seen (:id a))
+                                                :result (conj result a)}))
+                                           {:seen #{} :result []})
+                                   :result)
             own-source-ids (into #{} (keep :source-id) own-args)]
-        (vec (concat own-args (remove #(own-source-ids (:id %)) parent-args))))
+        (vec (concat own-args (remove #(own-source-ids (:id %)) dedup-parent-args))))
       (vec own-args))))
 
 
@@ -245,11 +263,23 @@
 ;; =============================================================================
 
 (defn- fn-in-parent-chain?
+  "Returns true if fn-id is reachable from start-fn-id via any parent chain.
+   With multiple inheritance, walks all parents in BFS order."
   [fns fn-id start-fn-id]
-  (loop [curr start-fn-id, d 0]
-    (cond (or (> d 100) (nil? curr)) false
+  (loop [queue (if (nil? start-fn-id) [] [start-fn-id])
+         visited #{}
+         iter 0]
+    (cond
+      (or (> iter 1000) (empty? queue)) false
+      :else
+      (let [curr (first queue)
+            rest-q (rest queue)]
+        (cond
           (= curr fn-id) true
-          :else (recur (:parent-id (get fns curr)) (inc d)))))
+          (contains? visited curr) (recur rest-q visited (inc iter))
+          :else
+          (let [pids (:parent-ids (get fns curr))]
+            (recur (into (vec rest-q) pids) (conj visited curr) (inc iter))))))))
 
 
 (defn- arg-belongs-to-current-fn?
@@ -261,13 +291,17 @@
   (let [args-by-id (:args-by-id execution-graph)
         fns (:fns execution-graph)
         current-fn-rec (get fns current-fn-id)
-        parent-fn-id (:parent-id current-fn-rec)
+        ;; For multiple inheritance, we pick the first parent for parent-chain checks.
+        ;; The arg-belongs check is fundamentally about whether this arg flows into
+        ;; the base-fn execution, so we use the first parent as the primary chain.
+        parent-fn-id (first (:parent-ids current-fn-rec))
         arg-fn-id (:fn-id arg)
-        ;; Find the base-fn (end of parent chain)
+        ;; Find the base-fn by walking first parents (leaf with no parents)
         base-fn-id (loop [fid current-fn-id, d 0]
                      (when-not (or (nil? fid) (> d 100))
-                       (let [fr (get fns fid)]
-                         (if (nil? (:parent-id fr)) fid (recur (:parent-id fr) (inc d))))))
+                       (let [fr (get fns fid)
+                             pids (:parent-ids fr)]
+                         (if (empty? pids) fid (recur (first pids) (inc d))))))
         ;; Follow source-id chain to find root arg
         root-arg (loop [a arg, d 0]
                    (when-not (> d 100)

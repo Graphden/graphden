@@ -37,9 +37,9 @@
   (testing "resolves a simple function with no dependencies"
     (let [storage (create-test-storage)
           ;; Create base fn (parent-id=nil)
-          base-fn (sp/create-entity storage :fn {:name "add" :parent-id nil :return-type "int"})
+          base-fn (sp/create-entity storage :fn {:name "add" :parent-ids nil :return-type "int"})
           ;; Create composed fn
-          fn-rec (sp/create-entity storage :fn {:name "my-add" :parent-id (:id base-fn) :return-type "int"})
+          fn-rec (sp/create-entity storage :fn {:name "my-add" :parent-ids [(:id base-fn)] :return-type "int"})
           ;; Create arg with literal value
           _ (sp/create-entity storage :arg {:fn-id (:id fn-rec) :name "x" :type "int" :value 42})
           graph (gg/resolve-execution-graph storage (:id fn-rec))]
@@ -55,11 +55,11 @@
   (testing "resolves a chain of dependent functions"
     (let [storage (create-test-storage)
           ;; Create base fn
-          base-fn (sp/create-entity storage :fn {:name "identity" :parent-id nil :return-type "int"})
+          base-fn (sp/create-entity storage :fn {:name "identity" :parent-ids nil :return-type "int"})
           ;; Create chain of composed functions: fn-a -> fn-b -> fn-c
-          fn-c (sp/create-entity storage :fn {:name "fn-c" :parent-id (:id base-fn)})
-          fn-b (sp/create-entity storage :fn {:name "fn-b" :parent-id (:id base-fn)})
-          fn-a (sp/create-entity storage :fn {:name "fn-a" :parent-id (:id base-fn)})
+          fn-c (sp/create-entity storage :fn {:name "fn-c" :parent-ids [(:id base-fn)]})
+          fn-b (sp/create-entity storage :fn {:name "fn-b" :parent-ids [(:id base-fn)]})
+          fn-a (sp/create-entity storage :fn {:name "fn-a" :parent-ids [(:id base-fn)]})
           ;; fn-c has literal value
           _ (sp/create-entity storage :arg {:fn-id (:id fn-c) :name "x" :type "int" :value 99})
           ;; fn-b references fn-c
@@ -80,9 +80,9 @@
   (testing "resolves function with no args"
     (let [storage (create-test-storage)
           ;; Create base fn with no args
-          base-fn (sp/create-entity storage :fn {:name "noop" :parent-id nil :return-type "int"})
+          base-fn (sp/create-entity storage :fn {:name "noop" :parent-ids nil :return-type "int"})
           ;; Create composed fn with no args
-          fn-rec (sp/create-entity storage :fn {:name "my-noop" :parent-id (:id base-fn)})
+          fn-rec (sp/create-entity storage :fn {:name "my-noop" :parent-ids [(:id base-fn)]})
           graph (gg/resolve-execution-graph storage (:id fn-rec))]
       (is (sp/execution-graph? graph))
       (is (= 2 (count (:fns graph)))) ; fn-rec + base-fn

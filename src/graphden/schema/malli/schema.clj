@@ -22,6 +22,10 @@
                       :ref
                       :uuid
 
+                      :ref-many
+                      ;; M2M relationship - vector of UUIDs
+                      [:vector :uuid]
+
                       :enum
                       ;; enum existence validated by validate-refs during build
                       (into [:enum] (keys (:values (get enums (:enum-name field-spec)))))

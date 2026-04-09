@@ -6,6 +6,7 @@
     [clojure.tools.logging :as log]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.errors :as errors]
+    [graphden.storage.postgres.junction :as junction]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.constraints :as constraints]
     [graphden.storage.protocol.core :as sp]
@@ -45,13 +46,17 @@
    Returns the created record with generated id if not provided.
    Validates required fields if fields metadata is provided.
    Throws with :unique-violation type if unique constraint violated.
-   Throws with :invalid-data type if data is not a map."
+   Throws with :invalid-data type if data is not a map.
+
+   For :ref-many fields: writes to junction tables after entity row is created."
   [ds entity-name data fields]
   (sp/standard-crud-validations! entity-name data fields)
   (let [table-name (keyword (util/kw->snake-case entity-name))
         id (or (:id data) (random-uuid))
         record (assoc data :id id)
-        row (entity->row record fields)
+        ;; Split off ref-many fields - they go into junction tables
+        [columnar-data ref-many-data] (junction/extract-ref-many-data record fields)
+        row (entity->row columnar-data fields)
         columns (keys row)
         values (vals row)
         query (sql/format {:insert-into table-name
@@ -60,22 +65,35 @@
                            :returning [:*]}
                           {:quoted true})]
     (util/with-sql-error-handling "Database error" :create-entity {:entity-name entity-name :id id}
-                                  (-> (jdbc/execute-one! ds query (util/query-opts))
-                                      codec/row->entity))))
+                                  (let [created (-> (jdbc/execute-one! ds query (util/query-opts))
+                                                    codec/row->entity)]
+                                    (when (seq ref-many-data)
+                                      (junction/write-ref-many-fields! ds entity-name (:id created) ref-many-data))
+                                    ;; Merge back the ref-many fields so the returned record
+                                    ;; reflects what was written.
+                                    (merge created ref-many-data)))))
 
 
 (defn read-entity
   "Reads an entity by id. Returns nil if not found.
-   Throws with :table-not-found if entity table doesn't exist."
-  [ds entity-name id]
-  (let [table-name (keyword (util/kw->snake-case entity-name))
-        query (sql/format {:select [:*]
-                           :from [table-name]
-                           :where [:= :id id]}
-                          {:quoted true})]
-    (util/with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
-                                  (-> (jdbc/execute-one! ds query (util/query-opts))
-                                      codec/row->entity))))
+   Throws with :table-not-found if entity table doesn't exist.
+
+   For :ref-many fields: loads from junction tables and populates the field as
+   a vector of UUIDs. Pass `fields` (the entity field specs) to enable this."
+  ([ds entity-name id]
+   (read-entity ds entity-name id nil))
+  ([ds entity-name id fields]
+   (let [table-name (keyword (util/kw->snake-case entity-name))
+         query (sql/format {:select [:*]
+                            :from [table-name]
+                            :where [:= :id id]}
+                           {:quoted true})]
+     (util/with-sql-error-handling "Database error" :read-entity {:entity-name entity-name :id id}
+                                   (when-let [row (jdbc/execute-one! ds query (util/query-opts))]
+                                     (let [record (codec/row->entity row)]
+                                       (if (and fields (junction/has-ref-many? fields))
+                                         (first (junction/populate-ref-many-fields ds entity-name [record] fields))
+                                         record)))))))
 
 
 (defn update-entity
@@ -83,10 +101,12 @@
    Throws :not-found if entity doesn't exist.
    Throws :unique-violation if update violates unique constraint.
    Throws :constraint-violation/has-descendants if arg has descendants.
-   Validates required fields if fields metadata is provided."
+   Validates required fields if fields metadata is provided.
+
+   For :ref-many fields: replaces junction rows (delete + insert)."
   [ds entity-name id data fields]
   (let [table-name (keyword (util/kw->snake-case entity-name))
-        existing (read-entity ds entity-name id)]
+        existing (read-entity ds entity-name id fields)]
     (when-not existing
       (throw (ex-info "Entity not found"
                       {:type :not-found
@@ -98,15 +118,25 @@
     (let [updated (merge existing data {:id id})]
       (when fields
         (sp/validate-required-fields! entity-name fields updated))
-      (let [row (entity->row (dissoc updated :id) fields)
-            query (sql/format {:update table-name
-                               :set row
-                               :where [:= :id id]
-                               :returning [:*]}
-                              {:quoted true})]
+      (let [[columnar-data ref-many-data] (junction/extract-ref-many-data updated fields)
+            row (entity->row (dissoc columnar-data :id) fields)
+            ;; If only ref-many fields changed, columnar row may be empty
+            do-column-update? (seq row)
+            query (when do-column-update?
+                    (sql/format {:update table-name
+                                 :set row
+                                 :where [:= :id id]
+                                 :returning [:*]}
+                                {:quoted true}))]
         (util/with-sql-error-handling "Database error" :update-entity {:entity-name entity-name :id id}
-                                      (-> (jdbc/execute-one! ds query (util/query-opts))
-                                          codec/row->entity))))))
+                                      (let [updated-row (if do-column-update?
+                                                          (-> (jdbc/execute-one! ds query (util/query-opts))
+                                                              codec/row->entity)
+                                                          (dissoc columnar-data nil))]
+                                        ;; Replace junction rows for any ref-many fields actually present in the update
+                                        (when (and (seq ref-many-data) fields)
+                                          (junction/replace-ref-many-fields! ds entity-name id ref-many-data fields))
+                                        (merge updated-row ref-many-data)))))))
 
 
 (defn delete-entity
@@ -164,8 +194,11 @@
     (when-not where-clause
       (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
     (util/with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where}
-                                  (let [rows (jdbc/execute! ds query (util/query-opts))]
-                                    (map codec/row->entity rows)))))
+                                  (let [rows (jdbc/execute! ds query (util/query-opts))
+                                        records (mapv codec/row->entity rows)]
+                                    (if (and fields (junction/has-ref-many? fields))
+                                      (junction/populate-ref-many-fields ds entity-name records fields)
+                                      records)))))
 
 
 ;; === Batch CRUD operations ===
@@ -196,8 +229,12 @@
                           data-seq)
             batch-size (count records)
             batch-ids (mapv :id records)
-            ;; Convert to rows using codec (mapv to realize once)
-            rows (mapv #(entity->row % fields) records)
+            ;; Split off ref-many fields for junction inserts
+            split-records (mapv #(junction/extract-ref-many-data % fields) records)
+            columnar-records (mapv first split-records)
+            ref-many-records (mapv second split-records)
+            ;; Convert columnar parts to rows using codec
+            rows (mapv #(entity->row % fields) columnar-records)
             ;; Get ALL unique columns from ALL rows - different records may have different fields
             ;; (e.g., some args have :name set, others don't). Using only first row's keys
             ;; would silently drop fields present only in other rows.
@@ -232,24 +269,40 @@
                            :entity-name entity-name
                            :expected-count expected-count
                            :actual-count actual-count})))
-        (map codec/row->entity result-rows)))))
+        ;; Insert junction rows for :ref-many fields
+        (when (junction/has-ref-many? fields)
+          (doseq [[id rm-data] (map vector batch-ids ref-many-records)
+                  :when (seq rm-data)]
+            (junction/write-ref-many-fields! ds entity-name id rm-data)))
+        (mapv (fn [row rm-data]
+                (merge (codec/row->entity row) rm-data))
+              result-rows
+              ref-many-records)))))
 
 
 (defn read-entities
   "Reads multiple entities by ids. Returns {id -> record} for found records.
-   Throws :table-not-found if entity table doesn't exist."
-  [ds entity-name ids]
-  (if (empty? ids)
-    {}
-    (let [table-name (keyword (util/kw->snake-case entity-name))
-          query (sql/format {:select [:*]
-                             :from [table-name]
-                             :where [:in :id (vec ids)]}
-                            {:quoted true})]
-      (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
-                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
-                                      ;; Single pass: decode + build map in one traversal
-                                      (into {} (map #(let [e (codec/row->entity %)] [(:id e) e])) rows))))))
+   Throws :table-not-found if entity table doesn't exist.
+
+   For :ref-many fields: loads from junction tables and populates fields as
+   vectors of UUIDs. Pass `fields` (the entity field specs) to enable this."
+  ([ds entity-name ids]
+   (read-entities ds entity-name ids nil))
+  ([ds entity-name ids fields]
+   (if (empty? ids)
+     {}
+     (let [table-name (keyword (util/kw->snake-case entity-name))
+           query (sql/format {:select [:*]
+                              :from [table-name]
+                              :where [:in :id (vec ids)]}
+                             {:quoted true})]
+       (util/with-sql-error-handling "Database error" :read-entities {:entity-name entity-name :count (count ids)}
+                                     (let [rows (jdbc/execute! ds query (util/query-opts))
+                                           records (mapv codec/row->entity rows)
+                                           populated (if (and fields (junction/has-ref-many? fields))
+                                                       (junction/populate-ref-many-fields ds entity-name records fields)
+                                                       records)]
+                                       (into {} (map (fn [e] [(:id e) e])) populated)))))))
 
 
 (defn update-entities
@@ -274,8 +327,12 @@
         (let [records (vec data-seq)
               batch-size (count records)
               batch-ids (mapv :id records)
-              ;; Convert to rows using codec
-              rows (mapv #(entity->row % fields) records)
+              ;; Split off ref-many fields (junction tables)
+              split-records (mapv #(junction/extract-ref-many-data % fields) records)
+              columnar-records (mapv first split-records)
+              ref-many-records (mapv second split-records)
+              ;; Convert columnar parts to rows
+              rows (mapv #(entity->row % fields) columnar-records)
               ;; Get ALL unique columns from ALL rows (including :id for matching)
               columns (vec (into #{} (mapcat keys) rows))
               update-columns (vec (remove #{:id} columns))]
@@ -362,7 +419,15 @@
                                    :missing-ids missing
                                    :expected-count batch-size
                                    :actual-count actual-count}))))
-              (map codec/row->entity result-rows))))))))
+              ;; Replace junction rows for :ref-many fields
+              (when (junction/has-ref-many? fields)
+                (doseq [[id rm-data] (map vector batch-ids ref-many-records)
+                        :when (seq rm-data)]
+                  (junction/replace-ref-many-fields! ds entity-name id rm-data fields)))
+              (mapv (fn [row rm-data]
+                      (merge (codec/row->entity row) rm-data))
+                    result-rows
+                    ref-many-records))))))))
 
 
 (defn upsert-entities
@@ -386,8 +451,12 @@
             records (vec data-seq)
             batch-size (count records)
             batch-ids (mapv :id records)
-            ;; Convert to rows using codec (mapv to realize once)
-            rows (mapv #(entity->row % fields) records)
+            ;; Split off ref-many fields (junction tables)
+            split-records (mapv #(junction/extract-ref-many-data % fields) records)
+            columnar-records (mapv first split-records)
+            ref-many-records (mapv second split-records)
+            ;; Convert columnar parts to rows using codec
+            rows (mapv #(entity->row % fields) columnar-records)
             ;; Get ALL unique columns from ALL rows - different records may have different fields
             ;; (e.g., some args have :name set, others don't). Using only first row's keys
             ;; would silently drop fields present only in other rows.
@@ -424,7 +493,15 @@
                            :entity-name entity-name
                            :expected-count expected-count
                            :actual-count actual-count})))
-        (map codec/row->entity result-rows)))))
+        ;; Replace junction rows for :ref-many fields
+        (when (junction/has-ref-many? fields)
+          (doseq [[id rm-data] (map vector batch-ids ref-many-records)
+                  :when (seq rm-data)]
+            (junction/replace-ref-many-fields! ds entity-name id rm-data fields)))
+        (mapv (fn [row rm-data]
+                (merge (codec/row->entity row) rm-data))
+              result-rows
+              ref-many-records)))))
 
 
 (defn delete-entities

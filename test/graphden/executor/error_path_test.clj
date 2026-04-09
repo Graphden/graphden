@@ -35,7 +35,7 @@
                          (graph/->execution-graph
                            {:fns {fn-id {:id fn-id
                                          :name "dummy"
-                                         :parent-id nil}}
+                                         :parent-ids nil}}
                             :args []}))
           ctx (exec/create-context {:storage mock-storage})]
       ;; Execute with wrong fn-id
@@ -54,7 +54,7 @@
                          (graph/->execution-graph
                            {:fns {fn-id {:id fn-id
                                          :name "dummy"
-                                         :parent-id nil}}
+                                         :parent-ids nil}}
                             :args [{:id arg-id
                                     :fn-id fn-id
                                     :name "x"
@@ -79,7 +79,7 @@
                          (graph/->execution-graph
                            {:fns {fn-id {:id fn-id
                                          :name "counting-fn"
-                                         :parent-id nil}}
+                                         :parent-ids nil}}
                             :args []}))
           ;; Create context with very small cache limit
           ctx (exec/create-context {:storage mock-storage
@@ -109,10 +109,10 @@
                          (graph/->execution-graph
                            {:fns {fn-id {:id fn-id
                                          :name "const-fn"
-                                         :parent-id nil}
+                                         :parent-ids nil}
                                   ref-fn-id {:id ref-fn-id
                                              :name "const-fn"
-                                             :parent-id nil}}
+                                             :parent-ids nil}}
                             :args [{:id arg-id
                                     :fn-id fn-id
                                     :name "x"
@@ -143,7 +143,7 @@
                          (graph/->execution-graph
                            {:fns {fn-id {:id fn-id
                                          :name "identity-fn"
-                                         :parent-id nil}}
+                                         :parent-ids nil}}
                             ;; arg has ref-id pointing to missing fn
                             :args [{:id arg-id
                                     :fn-id fn-id
@@ -172,7 +172,7 @@
                          (fn [i fid]
                            [fid {:id fid
                                  :name (if (= i (dec num-fns)) "chain-fn" "chain-step")
-                                 :parent-id nil}])
+                                 :parent-ids nil}])
                          fn-ids))
           ;; Create args: chain-step fns have one arg "next-val" pointing to next fn
           ;; Each fn[i] has arg with ref-id = fn[i+1]
@@ -205,7 +205,7 @@
                          (fn [i fid]
                            [fid {:id fid
                                  :name (if (= i (dec num-fns)) "chain-fn" "chain-step")
-                                 :parent-id nil}])
+                                 :parent-ids nil}])
                          fn-ids))
           args (vec
                  (for [i (range (dec num-fns))]
@@ -240,7 +240,7 @@
                                       42))
           mock-storage (create-mock-storage
                          (graph/->execution-graph
-                           {:fns {fn-id {:id fn-id :name "timed-fn" :parent-id nil}}
+                           {:fns {fn-id {:id fn-id :name "timed-fn" :parent-ids nil}}
                             :args []}))
           ctx (exec/create-context {:storage mock-storage
                                     :timeout-ms 1000
@@ -258,8 +258,8 @@
           _ (exec/register-base-fn! :timeout-fn (fn [{:keys [x]} _ctx] @x))
           mock-storage (create-mock-storage
                          (graph/->execution-graph
-                           {:fns {fn-id {:id fn-id :name "timeout-fn" :parent-id nil}
-                                  child-fn-id {:id child-fn-id :name "timeout-fn" :parent-id nil}}
+                           {:fns {fn-id {:id fn-id :name "timeout-fn" :parent-ids nil}
+                                  child-fn-id {:id child-fn-id :name "timeout-fn" :parent-ids nil}}
                             :args [{:id arg-id
                                     :fn-id fn-id
                                     :name "x"

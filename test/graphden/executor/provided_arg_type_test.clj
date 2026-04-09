@@ -32,7 +32,7 @@
           ;; Create base fn (parent-id=nil)
           base-fn (sp/create-entity storage :fn
                                     {:name "apply-fn"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           ;; Create arg directly on the fn
           f-arg (sp/create-entity storage :arg
@@ -68,7 +68,7 @@
                 (if @flag "yes" "no")))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-bool"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :text})
           flag-arg (sp/create-entity storage :arg
                                      {:fn-id (:id base-fn)
@@ -90,7 +90,7 @@
                 (str "Message: " @msg)))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-text"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :text})
           msg-arg (sp/create-entity storage :arg
                                     {:fn-id (:id base-fn)
@@ -123,7 +123,7 @@
                 @n))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-numeric"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :numeric})
           n-arg (sp/create-entity storage :arg
                                   {:fn-id (:id base-fn)

@@ -5,7 +5,7 @@
    in the documentation (CLAUDE.md, ARCHITECTURE.md):
 
    1. 2-Entity Graph Model (fn + arg)
-   2. Function inheritance via parent-id
+   2. Function inheritance via parent-ids
    3. Argument inheritance via source-id
    4. HOF support via is-fn flag
    5. Value binding (value, ref-id)
@@ -73,12 +73,12 @@
                                           :return-type :int
                                           :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
 
-        ;; Verify base functions are stored as fn entities with parent-id=nil
+        ;; Verify base functions are stored as fn entities with parent-ids=nil
         (let [const-fn (first (sp/query-entities storage :fn {:name "const"}))
               add-fn (first (sp/query-entities storage :fn {:name "add"}))]
-          (testing "base functions have parent-id=nil"
-            (is (nil? (:parent-id const-fn)))
-            (is (nil? (:parent-id add-fn))))
+          (testing "base functions have parent-ids=nil"
+            (is (empty? (:parent-ids const-fn)))
+            (is (empty? (:parent-ids add-fn))))
 
           ;; Verify args are stored as arg entities with source-id=nil
           (let [const-args (sp/query-entities storage :arg {:fn-id (:id const-fn)})
@@ -94,13 +94,13 @@
                                           [{:name :five :parent :const :args {:x 5}}
                                            {:name :sum :parent :add :args {:a :five :b :five}}])
 
-        ;; Verify composed functions have parent-id set
+        ;; Verify composed functions have parent-ids set
         (let [five-fn (first (sp/query-entities storage :fn {:name "five"}))
               sum-fn (first (sp/query-entities storage :fn {:name "sum"}))
               const-fn (first (sp/query-entities storage :fn {:name "const"}))]
-          (testing "composed functions have parent-id set"
-            (is (= (:id const-fn) (:parent-id five-fn)))
-            (is (some? (:parent-id sum-fn))))
+          (testing "composed functions have parent-ids set"
+            (is (= [(:id const-fn)] (:parent-ids five-fn)))
+            (is (seq (:parent-ids sum-fn))))
 
           ;; Verify composed function args reference parent args via source-id
           (let [five-args (sp/query-entities storage :arg {:fn-id (:id five-fn)})]
@@ -113,12 +113,12 @@
 
 
 ;; =============================================================================
-;; Test 2: Function Inheritance via parent-id
+;; Test 2: Function Inheritance via parent-ids
 ;; =============================================================================
 ;;
-;; Functions inherit from other functions using parent-id:
-;; - Base function: parent-id=nil (has impl-hash linking to Clojure impl)
-;; - Composed function: parent-id points to another fn
+;; Functions inherit from other functions using parent-ids:
+;; - Base function: parent-ids=nil (has impl-hash linking to Clojure impl)
+;; - Composed function: parent-ids contains one or more parent fn IDs
 
 (deftest function-inheritance-test
   (testing "function inheritance: composed fn inherits from base fn"
@@ -141,7 +141,7 @@
         (let [multiply-fn (first (sp/query-entities storage :fn {:name "multiply"}))
               double-fn (first (sp/query-entities storage :fn {:name "double"}))]
           (testing "double inherits from multiply"
-            (is (= (:id multiply-fn) (:parent-id double-fn))))
+            (is (= [(:id multiply-fn)] (:parent-ids double-fn))))
 
           ;; Execute: double(4) = 2 * 4 = 8
           (let [ctx (exec/create-context {:storage storage})
@@ -405,7 +405,7 @@
 ;; =============================================================================
 ;;
 ;; resolve-execution-graph builds the complete dependency tree:
-;; - Follows parent-id chain for inheritance
+;; - Follows parent-ids chain for inheritance
 ;; - Follows ref-id chain for value dependencies
 ;; - Returns ExecutionGraphResult with all fns and args needed
 
@@ -750,7 +750,7 @@
               const-fn (first (sp/query-entities storage :fn {:name "const"}))
               ;; Create local fn (no name)
               local-five (sp/create-entity storage :fn
-                                           {:parent-id (:id const-fn)
+                                           {:parent-ids [(:id const-fn)]
                                             :return-type :int})
               const-args (sp/query-entities storage :arg {:fn-id (:id const-fn)})
               x-arg (first (filter #(= "x" (:name %)) const-args))
@@ -762,7 +762,7 @@
               ;; Create named fn using the local fn
               add-local-fives (sp/create-entity storage :fn
                                                 {:name "add-local-fives"
-                                                 :parent-id (:id add-fn)
+                                                 :parent-ids [(:id add-fn)]
                                                  :return-type :int})
               add-args (sp/query-entities storage :arg {:fn-id (:id add-fn)})
               a-arg (first (filter #(= "a" (:name %)) add-args))

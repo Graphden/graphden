@@ -15,14 +15,15 @@
    ## Schema Design
 
    Simplified 2-entity model:
-   - fn: function entity (base or composed via parent-id)
+   - fn: function entity (base or composed via parent-ids JSONB array)
    - arg: argument entity (owns value or references fn via ref-id)
 
    Dependencies are found via:
    - arg.ref-id: direct fn reference (execute and use result)
-   - fn.parent-id: inheritance from parent fn
+   - fn.parent-ids: inheritance from parent fns (JSONB array of UUIDs)
    - arg.value with UUID: fn-id passed as value (for HOF)"
   (:require
+    [clojure.string :as str]
     [graphden.storage.postgres.codec :as codec]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp]
@@ -40,34 +41,40 @@
   "Builds raw SQL for recursive CTE graph discovery.
 
    Structure:
-   1. fn_graph: recursively find all fn-ids via arg.ref-id and fn.parent-id
+   1. fn_graph: recursively find all fn-ids via arg.ref-id and fn.parent-ids
 
    Three paths to find dependent fns:
    - arg.ref-id: FK to fn (for computed values)
-   - fn.parent-id: FK to parent fn (for inheritance)
+   - fn.parent-ids: JSONB array of parent fn UUIDs (for multiple inheritance)
    - arg.value with UUID: extract UUID from value JSONB (for HOF references)
 
-   Uses LATERAL UNNEST to generate multiple rows when a fn has multiple
-   references (e.g., both ref-id and parent-id), ensuring all paths are followed."
+   Uses LATERAL UNION to generate multiple rows when a fn has multiple
+   references (ref-id, multiple parents, or UUID value), ensuring all paths are followed."
   [root-fn-id max-depth]
   [(str "WITH RECURSIVE fn_graph AS ("
         ;; Base case: root function
         "  SELECT id, 0 AS depth FROM fn WHERE id = ?"
         "  UNION ALL"
-        ;; Recursive term: LATERAL UNNEST expands multiple refs into rows
+        ;; Recursive term: LATERAL collects all refs from args + parent_ids junction table
         "  SELECT DISTINCT refs.ref_id, g.depth + 1"
         "  FROM fn_graph g"
-        "  JOIN fn fn_current ON fn_current.id = g.id"
         "  LEFT JOIN arg a ON a.fn_id = g.id,"
-        "  LATERAL (SELECT unnest(ARRAY["
-        "    a.ref_id,"
-        "    fn_current.parent_id,"
-        "    CASE WHEN a.value IS NOT NULL"
-        "         AND jsonb_typeof(a.value) = 'string'"
-        "         AND (a.value #>> '{}') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'"
-        "         THEN CAST(a.value #>> '{}' AS uuid)"
-        "         ELSE NULL END"
-        "  ]) AS ref_id) refs"
+        "  LATERAL ("
+        ;;   arg.ref_id
+        "    SELECT a.ref_id AS ref_id"
+        "    UNION ALL"
+        ;;   UUID-valued args (for HOF references)
+        "    SELECT CASE WHEN a.value IS NOT NULL"
+        "                AND jsonb_typeof(a.value) = 'string'"
+        "                AND (a.value #>> '{}') ~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'"
+        "                THEN CAST(a.value #>> '{}' AS uuid)"
+        "                ELSE NULL END"
+        "    UNION ALL"
+        ;;   parent_ids junction table (multiple inheritance)
+        "    SELECT fp.target_id"
+        "    FROM fn_parent_ids fp"
+        "    WHERE fp.owner_id = g.id"
+        "  ) AS refs"
         "  WHERE g.depth < ? AND refs.ref_id IS NOT NULL"
         ") SELECT DISTINCT id FROM fn_graph")
    root-fn-id max-depth])
@@ -80,7 +87,7 @@
    This is a SINGLE database query that traverses the entire graph.
    The CTE follows:
    - arg.ref-id FK references
-   - fn.parent-id inheritance
+   - fn.parent-ids JSONB array (multiple inheritance)
    - UUID values in arg.value"
   [ds root-fn-id]
   (let [query (build-graph-discovery-sql root-fn-id sp/*max-graph-iterations*)]
@@ -106,9 +113,30 @@
 
 
 (defn- load-fns-batch
-  "Loads multiple fns by id. Returns {fn-id -> fn-record}."
+  "Loads multiple fns by id. Returns {fn-id -> fn-record}.
+   Also loads parent-ids from the fn_parent_ids junction table."
   [ds fn-ids]
-  (load-entities-batch ds :fn :id fn-ids))
+  (let [fns (load-entities-batch ds :fn :id fn-ids)]
+    (if (empty? fns)
+      fns
+      ;; Batch load parent-ids junction rows for all fns
+      (let [owner-ids (vec (keys fns))
+            placeholders (str/join "," (repeat (count owner-ids) "?"))
+            query (into [(str "SELECT owner_id, target_id FROM fn_parent_ids "
+                              "WHERE owner_id IN (" placeholders ") "
+                              "ORDER BY owner_id, ord")]
+                        owner-ids)
+            rows (util/with-sql-error-handling "Database error" :load-parent-ids-batch
+                                               {:count (count owner-ids)}
+                                               (jdbc/execute! ds query (util/query-opts)))
+            parent-ids-by-owner (reduce (fn [acc row]
+                                          (update acc (:owner_id row) (fnil conj []) (:target_id row)))
+                                        {}
+                                        rows)]
+        (into {}
+              (map (fn [[fid frec]]
+                     [fid (assoc frec :parent-ids (get parent-ids-by-owner fid []))]))
+              fns)))))
 
 
 (defn- load-args-for-fns-batch

@@ -32,7 +32,7 @@
           ;; Create base fn (parent-id=nil)
           base-fn (sp/create-entity storage :fn
                                     {:name "use-numeric"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :numeric})
           n-arg (sp/create-entity storage :arg
                                   {:fn-id (:id base-fn)
@@ -54,7 +54,7 @@
                 @n))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-numeric"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :numeric})
           n-arg (sp/create-entity storage :arg
                                   {:fn-id (:id base-fn)
@@ -78,7 +78,7 @@
                 @data))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-jsonb"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :jsonb})
           data-arg (sp/create-entity storage :arg
                                      {:fn-id (:id base-fn)
@@ -99,7 +99,7 @@
                 @data))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-jsonb"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :jsonb})
           data-arg (sp/create-entity storage :arg
                                      {:fn-id (:id base-fn)
@@ -119,7 +119,7 @@
                 @data))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-jsonb"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :jsonb})
           data-arg (sp/create-entity storage :arg
                                      {:fn-id (:id base-fn)
@@ -141,7 +141,7 @@
                 @data))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-bytes"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :bytes})
           data-arg (sp/create-entity storage :arg
                                      {:fn-id (:id base-fn)
@@ -163,7 +163,7 @@
                 (vec @data)))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-bytes"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :jsonb})
           data-arg (sp/create-entity storage :arg
                                      {:fn-id (:id base-fn)
@@ -185,7 +185,7 @@
                 @ts))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-timestamp"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :timestamptz})
           ts-arg (sp/create-entity storage :arg
                                    {:fn-id (:id base-fn)
@@ -207,7 +207,7 @@
                 @ts))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-timestamp"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :timestamptz})
           ts-arg (sp/create-entity storage :arg
                                    {:fn-id (:id base-fn)
@@ -228,7 +228,7 @@
                 @ts))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-timestamp"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :timestamptz})
           ts-arg (sp/create-entity storage :arg
                                    {:fn-id (:id base-fn)
@@ -251,7 +251,7 @@
                 @id))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-uuid"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :uuid})
           id-arg (sp/create-entity storage :arg
                                    {:fn-id (:id base-fn)
@@ -273,7 +273,7 @@
                 @id))
           base-fn (sp/create-entity storage :fn
                                     {:name "use-uuid"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :uuid})
           id-arg (sp/create-entity storage :arg
                                    {:fn-id (:id base-fn)

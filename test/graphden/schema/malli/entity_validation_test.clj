@@ -20,14 +20,14 @@
       (is (nil? (ds/validate-entity example-schema :fn
                                     {:id (random-uuid)
                                      :name "add"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int}))))
 
     (testing "valid fn entity (composed fn with parent-id)"
       (is (nil? (ds/validate-entity example-schema :fn
                                     {:id (random-uuid)
                                      :name "my-add"
-                                     :parent-id valid-fn-id
+                                     :parent-ids [valid-fn-id]
                                      :return-type :int}))))
 
     (testing "invalid fn - missing required field"

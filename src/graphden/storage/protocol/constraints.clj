@@ -39,7 +39,7 @@
 
    Arguments:
    - get-fn-dependencies-fn: function (fn [fn-id] -> #{dep-fn-ids})
-     Returns immediate fn dependencies for a given fn-id (via ref-id and parent-id).
+     Returns immediate fn dependencies for a given fn-id (via ref-id and parent-ids).
    - fn-id: starting fn UUID
 
    Throws if total visited nodes exceed default-max-dependency-chain-depth."

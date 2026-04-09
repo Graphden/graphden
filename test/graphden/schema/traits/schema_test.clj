@@ -4,7 +4,7 @@
    ## 2-Entity Schema
 
    Uses simplified schema:
-   - fn: parent-id=nil for base-fn, parent-id set for composed fn
+   - fn: parent-ids=nil for base-fn, parent-ids set for composed fn
    - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)
 
    Traits entities:
@@ -78,7 +78,7 @@
           ;; Create base fn
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :text})
           ;; Create arg with value
           arg (sp/create-entity storage :arg
@@ -102,7 +102,7 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :text})
           arg (sp/create-entity storage :arg
                                 {:fn-id (:id base-fn)
@@ -125,7 +125,7 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "test-fn"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :text})
           arg (sp/create-entity storage :arg
                                 {:fn-id (:id base-fn)

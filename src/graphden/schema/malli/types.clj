@@ -32,10 +32,11 @@
 (def known-field-types
   "All valid field types.
    Includes storage types from field-types plus semantic types:
-   - :ref, :enum, :union - structural types
+   - :ref, :ref-many - reference types (single / many-to-many)
+   - :enum, :union - structural types
    - :any - polymorphic type (accepts any value)
    - :fn - function reference type (stored as UUID)"
-  (into #{:ref :enum :union :any :fn} ft/supported-types))
+  (into #{:ref :ref-many :enum :union :any :fn} ft/supported-types))
 
 
 (def known-constraint-types

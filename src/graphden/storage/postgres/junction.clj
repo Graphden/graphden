@@ -1,0 +1,146 @@
+(ns graphden.storage.postgres.junction
+  "Junction table operations for :ref-many fields.
+
+   Each :ref-many field on an entity is materialized as a separate junction table:
+     CREATE TABLE {entity}_{field} (
+       owner_id  UUID NOT NULL REFERENCES {entity}(id) ON DELETE CASCADE,
+       target_id UUID NOT NULL,
+       ord       INT  NOT NULL,
+       PRIMARY KEY (owner_id, ord),
+       UNIQUE (owner_id, target_id)
+     )
+
+   The user-facing API treats the field as a vector of UUIDs - this namespace
+   handles the translation between vector form and junction rows."
+  (:require
+    [clojure.string :as str]
+    [graphden.storage.postgres.ddl :as ddl]
+    [graphden.storage.postgres.util :as util]
+    [next.jdbc :as jdbc]))
+
+
+(defn ref-many-fields
+  "Returns sequence of [field-name field-spec] for :ref-many fields in fields map."
+  [fields]
+  (filter (fn [[_ fspec]] (= :ref-many (:type fspec))) fields))
+
+
+(defn has-ref-many?
+  "Returns true if any field is :ref-many."
+  [fields]
+  (boolean (seq (ref-many-fields fields))))
+
+
+(defn extract-ref-many-data
+  "Splits entity data into [columnar-data ref-many-data].
+   - columnar-data: map without :ref-many fields (goes into main entity row)
+   - ref-many-data: map of {field-name [uuid ...]} for junction inserts"
+  [data fields]
+  (let [rm-field-names (set (map first (ref-many-fields fields)))]
+    [(into {} (remove (fn [[k _]] (contains? rm-field-names k))) data)
+     (select-keys data rm-field-names)]))
+
+
+(defn- normalize-uuid
+  [v]
+  (cond
+    (uuid? v) v
+    (string? v) (java.util.UUID/fromString v)
+    :else (throw (ex-info "Expected UUID or UUID string"
+                          {:type :invalid-data :value v}))))
+
+
+(defn insert-junction-rows!
+  "Inserts rows into the junction table for one entity row.
+   targets is a sequence of UUIDs (or strings); ord is the position (0-indexed)."
+  [ds entity-name field-name owner-id targets]
+  (when (seq targets)
+    (let [jt (ddl/junction-table-name entity-name field-name)
+          rows (map-indexed
+                 (fn [idx target]
+                   [owner-id (normalize-uuid target) idx])
+                 targets)]
+      (util/with-sql-error-handling "Database error" :insert-junction
+                                    {:entity-name entity-name :field-name field-name :owner-id owner-id}
+                                    (jdbc/execute-batch! ds
+                                                         (str "INSERT INTO \"" jt "\" (owner_id, target_id, ord) VALUES (?, ?, ?)")
+                                                         rows
+                                                         {})))))
+
+
+(defn delete-junction-rows!
+  "Deletes all junction rows for an owner-id."
+  [ds entity-name field-name owner-id]
+  (let [jt (ddl/junction-table-name entity-name field-name)]
+    (util/with-sql-error-handling "Database error" :delete-junction
+                                  {:entity-name entity-name :field-name field-name :owner-id owner-id}
+                                  (jdbc/execute! ds [(str "DELETE FROM \"" jt "\" WHERE owner_id = ?") owner-id]))))
+
+
+(defn read-junction-rows
+  "Returns vector of target UUIDs for an owner-id, ordered by ord."
+  [ds entity-name field-name owner-id]
+  (let [jt (ddl/junction-table-name entity-name field-name)]
+    (util/with-sql-error-handling "Database error" :read-junction
+                                  {:entity-name entity-name :field-name field-name :owner-id owner-id}
+                                  (let [rows (jdbc/execute! ds
+                                                            [(str "SELECT target_id FROM \"" jt "\" WHERE owner_id = ? ORDER BY ord") owner-id]
+                                                            (util/query-opts))]
+                                    ;; query-opts uses :as-unqualified-lower-maps which converts underscore to underscore
+                                    ;; (NOT to kebab-case), so column "target_id" becomes :target_id
+                                    (mapv :target_id rows)))))
+
+
+(defn read-junction-rows-batch
+  "Returns map of {owner-id [target-uuids...]} for multiple owner-ids in one query.
+   Used for batch reads to avoid N+1."
+  [ds entity-name field-name owner-ids]
+  (if (empty? owner-ids)
+    {}
+    (let [jt (ddl/junction-table-name entity-name field-name)
+          placeholders (str/join "," (repeat (count owner-ids) "?"))
+          query (into [(str "SELECT owner_id, target_id FROM \"" jt
+                            "\" WHERE owner_id IN (" placeholders ") ORDER BY owner_id, ord")]
+                      owner-ids)]
+      (util/with-sql-error-handling "Database error" :read-junction-batch
+                                    {:entity-name entity-name :field-name field-name}
+                                    (let [rows (jdbc/execute! ds query (util/query-opts))]
+                                      (reduce (fn [acc row]
+                                                (update acc (:owner_id row) (fnil conj []) (:target_id row)))
+                                              {}
+                                              rows))))))
+
+
+(defn populate-ref-many-fields
+  "Loads junction data for all :ref-many fields and merges into entity records.
+   - records: sequence of entity records (each must have :id)
+   - fields: entity field specs
+
+   Returns records with :ref-many fields populated as vectors of UUIDs."
+  [ds entity-name records fields]
+  (let [rm-fields (ref-many-fields fields)]
+    (if (or (empty? records) (empty? rm-fields))
+      records
+      (let [ids (mapv :id records)]
+        (reduce (fn [recs [field-name _]]
+                  (let [batch (read-junction-rows-batch ds entity-name field-name ids)]
+                    (mapv (fn [r] (assoc r field-name (or (get batch (:id r)) []))) recs)))
+                records
+                rm-fields)))))
+
+
+(defn write-ref-many-fields!
+  "Inserts junction rows for all :ref-many fields after creating an entity."
+  [ds entity-name owner-id ref-many-data]
+  (doseq [[field-name targets] ref-many-data]
+    (insert-junction-rows! ds entity-name field-name owner-id targets)))
+
+
+(defn replace-ref-many-fields!
+  "For update: deletes existing junction rows then inserts new ones."
+  [ds entity-name owner-id ref-many-data fields]
+  (let [rm-fields (ref-many-fields fields)]
+    (doseq [[field-name _] rm-fields
+            :when (contains? ref-many-data field-name)]
+      (delete-junction-rows! ds entity-name field-name owner-id)
+      (insert-junction-rows! ds entity-name field-name owner-id (get ref-many-data field-name)))))

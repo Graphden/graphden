@@ -73,15 +73,59 @@
 ;; === Table operations ===
 
 (defn create-table!
-  "Creates a PostgreSQL table with id as primary key."
+  "Creates a PostgreSQL table with id as primary key.
+   Skips :ref-many fields - those are stored in separate junction tables."
   [ds table-name fields]
   (util/with-sql-error-handling "DDL error" :create-table {:table-name table-name}
-                                (let [columns (into [[:id :uuid [:primary-key] [:default [:raw "gen_random_uuid()"]]]]
-                                                    (map (fn [[fname fspec]] (build-column-spec fname fspec)) fields))]
+                                (let [columnar-fields (remove (fn [[_ fspec]] (= :ref-many (:type fspec))) fields)
+                                      columns (into [[:id :uuid [:primary-key] [:default [:raw "gen_random_uuid()"]]]]
+                                                    (map (fn [[fname fspec]] (build-column-spec fname fspec)) columnar-fields))]
                                   (jdbc/execute! ds
                                                  (sql/format {:create-table (keyword (util/kw->snake-case table-name))
                                                               :with-columns columns}
                                                              {:quoted true})))))
+
+
+;; === Junction tables for :ref-many fields ===
+
+(defn junction-table-name
+  "Returns the junction table name for a :ref-many field.
+   Format: {entity-name}_{field-name}"
+  [entity-name field-name]
+  (str (util/kw->snake-case entity-name) "_" (util/kw->snake-case field-name)))
+
+
+(defn create-junction-table!
+  "Creates a junction table for a :ref-many relationship.
+   Schema: (owner_id UUID, target_id UUID, ord INT)
+   - owner_id FK to entity-name
+   - target_id FK to ref-entity (from field-spec)
+   - ord for ordered membership / priority"
+  [ds entity-name field-name _field-spec]
+  (let [jt-name (junction-table-name entity-name field-name)
+        owner-table (util/kw->snake-case entity-name)]
+    (util/with-sql-error-handling "DDL error" :create-junction-table
+                                  {:entity-name entity-name :field-name field-name}
+                                  (jdbc/execute! ds
+                                                 [(str "CREATE TABLE \"" jt-name "\" ("
+                                                       "owner_id UUID NOT NULL REFERENCES \"" owner-table "\"(id) ON DELETE CASCADE,"
+                                                       "target_id UUID NOT NULL,"
+                                                       "ord INT NOT NULL,"
+                                                       "PRIMARY KEY (owner_id, ord),"
+                                                       "UNIQUE (owner_id, target_id))")])
+                                  ;; Index for reverse lookup (find owners pointing at a target)
+                                  (jdbc/execute! ds
+                                                 [(str "CREATE INDEX \"idx_" jt-name "_target\" "
+                                                       "ON \"" jt-name "\" (target_id)")]))))
+
+
+(defn create-junction-tables!
+  "Creates junction tables for all :ref-many fields in an entity."
+  [ds entity-name fields]
+  (run! (fn [[field-name field-spec]]
+          (when (= :ref-many (:type field-spec))
+            (create-junction-table! ds entity-name field-name field-spec)))
+        fields))
 
 
 (defn rename-table!

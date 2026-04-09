@@ -53,7 +53,7 @@
           ;; Create base fn (parent-id=nil)
           base-fn (sp/create-entity storage :fn
                                     {:name "schema"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           ;; Create arg directly on fn
           arg (sp/create-entity storage :arg
@@ -71,7 +71,7 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "schema"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           arg (sp/create-entity storage :arg
                                 {:fn-id (:id base-fn)
@@ -95,7 +95,7 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "schema"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           arg (sp/create-entity storage :arg
                                 {:fn-id (:id base-fn)
@@ -117,11 +117,11 @@
           ;; Create base fn and composed fn on main
           base-fn (sp/create-entity storage :fn
                                     {:name "base"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           main-fn (sp/create-entity storage :fn
                                     {:name "main-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           _main-arg (sp/create-entity storage :arg
                                       {:fn-id (:id main-fn)
                                        :name "x"
@@ -132,7 +132,7 @@
           feature (vs/switch-branch storage (:id branch))
           feat-fn (sp/create-entity feature :fn
                                     {:name "feat-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           _feat-arg (sp/create-entity feature :arg
                                       {:fn-id (:id feat-fn)
                                        :name "y"
@@ -149,7 +149,7 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "base"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           ;; Create feature branch
           branch (vs/create-branch! storage "feature")
@@ -157,7 +157,7 @@
           ;; Create protected arg on feature branch
           feat-fn (sp/create-entity feature :fn
                                     {:name "feat-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           secret-arg (sp/create-entity feature :arg
                                        {:fn-id (:id feat-fn)
                                         :name "password"
@@ -179,14 +179,14 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "base"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           ;; Create feature branch with protected arg
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           feat-fn (sp/create-entity feature :fn
                                     {:name "feat-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           arg (sp/create-entity feature :arg
                                 {:fn-id (:id feat-fn)
                                  :name "creds"
@@ -206,13 +206,13 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "base"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           feat-fn (sp/create-entity feature :fn
                                     {:name "feat-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           arg (sp/create-entity feature :arg
                                 {:fn-id (:id feat-fn)
                                  :name "secret"
@@ -230,13 +230,13 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "base"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           feat-fn (sp/create-entity feature :fn
                                     {:name "feat-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           arg (sp/create-entity feature :arg
                                 {:fn-id (:id feat-fn)
                                  :name "secret"
@@ -256,13 +256,13 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "base"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           branch (vs/create-branch! storage "feature")
           feature (vs/switch-branch storage (:id branch))
           feat-fn (sp/create-entity feature :fn
                                     {:name "feat-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           _arg (sp/create-entity feature :arg
                                  {:fn-id (:id feat-fn)
                                   :name "normal"
@@ -283,12 +283,12 @@
     (let [storage (create-test-storage)
           base-fn (sp/create-entity storage :fn
                                     {:name "base"
-                                     :parent-id nil
+                                     :parent-ids nil
                                      :return-type :int})
           ;; Create protected arg on main
           main-fn (sp/create-entity storage :fn
                                     {:name "main-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           protected-arg (sp/create-entity storage :arg
                                           {:fn-id (:id main-fn)
                                            :name "main-secret"
@@ -300,7 +300,7 @@
           feature (vs/switch-branch storage (:id branch))
           feat-fn (sp/create-entity feature :fn
                                     {:name "feat-fn"
-                                     :parent-id (:id base-fn)})
+                                     :parent-ids [(:id base-fn)]})
           _feat-arg (sp/create-entity feature :arg
                                       {:fn-id (:id feat-fn)
                                        :name "feat-value"

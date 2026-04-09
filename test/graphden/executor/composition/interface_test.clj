@@ -286,7 +286,7 @@
           const-fn-id (registry/fn-uuid :const)
           _ (sp/create-entity storage :fn
                               {:name "existing-fn"
-                               :parent-id const-fn-id})
+                               :parent-ids [const-fn-id]})
           ;; Now sync a new fn that references the existing one
           result (fn-composition/sync-fns-to-storage! storage
                                                       [{:name :wrapper-fn
@@ -448,7 +448,7 @@
                                                  :impl (fn [_ _] nil)}}])
           ;; Create a target fn to reference
           target-fn-id (random-uuid)
-          _ (sp/create-entity storage :fn {:id target-fn-id :name "target-fn" :parent-id (registry/fn-uuid :ref-fn)})
+          _ (sp/create-entity storage :fn {:id target-fn-id :name "target-fn" :parent-ids [(registry/fn-uuid :ref-fn)]})
           ;; Sync with UUID directly
           result (fn-composition/sync-fns-to-storage! storage
                                                       [{:name :wrapper :parent :ref-fn :args {:ref target-fn-id}}])

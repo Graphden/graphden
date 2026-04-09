@@ -12,7 +12,7 @@
    ## 2-Entity Schema
 
    Detects conflicts in versioned entities:
-   - fn: function entity (parent-id for inheritance)
+   - fn: function entity (parent-ids for inheritance)
    - arg: argument entity (source-id for inheritance, value/ref-id for data)"
   (:require
     [clojure.set :as set]

@@ -194,8 +194,8 @@
         arg-id (random-uuid)]
     (testing "creates valid ExecutionGraphResult"
       (let [result (graph/->execution-graph
-                     {:fns {fn-id {:id fn-id :name "test" :parent-id parent-id}
-                            parent-id {:id parent-id :name "base" :parent-id nil}}
+                     {:fns {fn-id {:id fn-id :name "test" :parent-ids [parent-id]}
+                            parent-id {:id parent-id :name "base" :parent-ids nil}}
                       :args [{:id arg-id :fn-id fn-id :name "x" :type :int}]})]
         (is (graph/execution-graph? result))
         (is (= 2 (count (:fns result))))
@@ -320,7 +320,7 @@
         (is (= #{} (:new-fn-refs result)))))
 
     (testing "adds fn to graph when found"
-      (let [fn-rec {:id fn-id :name "test" :parent-id parent-id}
+      (let [fn-rec {:id fn-id :name "test" :parent-ids [parent-id]}
             load-fn (fn [id] (when (= id fn-id) fn-rec))
             load-args (constantly [])
             result (graph/process-fn-node load-fn load-args fn-id {} [])]
@@ -328,7 +328,7 @@
         (is (contains? (:new-fn-refs result) parent-id))))
 
     (testing "includes args in result"
-      (let [fn-rec {:id fn-id :name "test" :parent-id nil}
+      (let [fn-rec {:id fn-id :name "test" :parent-ids nil}
             arg-1 {:id (random-uuid) :fn-id fn-id :name "a"}
             arg-2 {:id (random-uuid) :fn-id fn-id :name "b"}
             load-fn (fn [id] (when (= id fn-id) fn-rec))
@@ -339,7 +339,7 @@
 
     (testing "extracts ref-id references"
       (let [ref-fn-id (random-uuid)
-            fn-rec {:id fn-id :name "test" :parent-id nil}
+            fn-rec {:id fn-id :name "test" :parent-ids nil}
             args [{:id (random-uuid) :fn-id fn-id :name "x" :ref-id ref-fn-id}]
             load-fn (fn [id] (when (= id fn-id) fn-rec))
             load-args (fn [id] (when (= id fn-id) args))
@@ -349,7 +349,7 @@
     (testing "accumulates with existing state"
       (let [existing-fn {:id parent-id :name "existing"}
             existing-arg {:id (random-uuid) :fn-id parent-id :name "y"}
-            fn-rec {:id fn-id :name "test" :parent-id nil}
+            fn-rec {:id fn-id :name "test" :parent-ids nil}
             new-arg {:id (random-uuid) :fn-id fn-id :name "x"}
             load-fn (fn [id] (when (= id fn-id) fn-rec))
             load-args (fn [id] (when (= id fn-id) [new-arg]))
@@ -368,7 +368,7 @@
         parent-id (random-uuid)]
 
     (testing "resolves single function"
-      (let [fn-rec {:id fn-id :name "test" :parent-id nil}
+      (let [fn-rec {:id fn-id :name "test" :parent-ids nil}
             load-fn (fn [id] (when (= id fn-id) fn-rec))
             load-args (constantly [])
             result (graph/resolve-execution-graph-bfs load-fn load-args fn-id)]
@@ -376,8 +376,8 @@
         (is (= fn-rec (get (:fns result) fn-id)))))
 
     (testing "follows parent-id references"
-      (let [fn-rec {:id fn-id :name "composed" :parent-id parent-id}
-            parent-rec {:id parent-id :name "base" :parent-id nil}
+      (let [fn-rec {:id fn-id :name "composed" :parent-ids [parent-id]}
+            parent-rec {:id parent-id :name "base" :parent-ids nil}
             fns {fn-id fn-rec parent-id parent-rec}
             load-fn #(get fns %)
             load-args (constantly [])
@@ -387,8 +387,8 @@
 
     (testing "follows ref-id references"
       (let [ref-fn-id (random-uuid)
-            fn-rec {:id fn-id :name "test" :parent-id nil}
-            ref-fn-rec {:id ref-fn-id :name "referenced" :parent-id nil}
+            fn-rec {:id fn-id :name "test" :parent-ids nil}
+            ref-fn-rec {:id ref-fn-id :name "referenced" :parent-ids nil}
             fns {fn-id fn-rec ref-fn-id ref-fn-rec}
             args {fn-id [{:id (random-uuid) :fn-id fn-id :name "x" :ref-id ref-fn-id}]}
             load-fn #(get fns %)
@@ -398,8 +398,8 @@
         (is (contains? (:fns result) ref-fn-id))))
 
     (testing "collects all args"
-      (let [fn-rec {:id fn-id :name "test" :parent-id parent-id}
-            parent-rec {:id parent-id :name "base" :parent-id nil}
+      (let [fn-rec {:id fn-id :name "test" :parent-ids [parent-id]}
+            parent-rec {:id parent-id :name "base" :parent-ids nil}
             fns {fn-id fn-rec parent-id parent-rec}
             fn-args [{:id (random-uuid) :fn-id fn-id :name "a"}
                      {:id (random-uuid) :fn-id fn-id :name "b"}]
@@ -416,10 +416,10 @@
             fn-b (random-uuid)
             fn-c (random-uuid)
             fn-d (random-uuid)
-            fns {fn-a {:id fn-a :name "a" :parent-id nil}
-                 fn-b {:id fn-b :name "b" :parent-id nil}
-                 fn-c {:id fn-c :name "c" :parent-id nil}
-                 fn-d {:id fn-d :name "d" :parent-id nil}}
+            fns {fn-a {:id fn-a :name "a" :parent-ids nil}
+                 fn-b {:id fn-b :name "b" :parent-ids nil}
+                 fn-c {:id fn-c :name "c" :parent-ids nil}
+                 fn-d {:id fn-d :name "d" :parent-ids nil}}
             args-map {fn-a [{:id (random-uuid) :fn-id fn-a :name "x" :ref-id fn-b}
                             {:id (random-uuid) :fn-id fn-a :name "y" :ref-id fn-c}]
                       fn-b [{:id (random-uuid) :fn-id fn-b :name "z" :ref-id fn-d}]

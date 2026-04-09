@@ -76,9 +76,10 @@
       (ds/add-entity :fn #uuid "00000000-0000-0000-0001-000000000001"
                      {:name {:uuid #uuid "00000000-0000-0000-0001-000000000002"
                              :type :text}
-                      :parent-id {:uuid #uuid "00000000-0000-0000-0001-000000000003"
-                                  :type :uuid
-                                  :nullable? true}
+                      :parent-ids {:uuid #uuid "00000000-0000-0000-0001-000000000003"
+                                   :type :ref-many
+                                   :ref-entity :fn
+                                   :nullable? true}
                       :return-type {:uuid #uuid "00000000-0000-0000-0001-000000000004"
                                     :type :text
                                     :nullable? true}})
@@ -114,7 +115,7 @@
   [storage entity-name return-type]
   (sp/create-entity storage :fn
                     {:name entity-name
-                     :parent-id nil
+                     :parent-ids nil
                      :return-type (clojure.core/name return-type)}))
 
 
@@ -124,7 +125,7 @@
   [storage entity-name parent-id]
   (sp/create-entity storage :fn
                     {:name entity-name
-                     :parent-id parent-id}))
+                     :parent-ids [parent-id]}))
 
 
 (defn create-arg!

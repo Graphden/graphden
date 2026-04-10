@@ -1,6 +1,6 @@
 // Editor State - Global variables, constants, and configuration
 // Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-09 13:30';
+const BUILD_TIMESTAMP = '2026-04-10 06:30';
 console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================
@@ -12,9 +12,19 @@ let selectedFnId = null;          // Currently selected function ID
 let graphData = null;             // Raw graph data from API
 let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
 
-// Expansion state
-let expansionLevel = new Map();   // originalFnId -> number of ancestors to show
-let previewLevel = new Map();     // originalFnId -> preview level (hover)
+// Expansion state — per node, holds an expansion spec.
+// spec: {fullDepth: number, partialFns: Set<fnId>}
+//   fullDepth: BFS depths 1..fullDepth are FULLY expanded (cascade)
+//   partialFns: at depth fullDepth+1, additional fns individually expanded
+//
+// Click semantics on an fn at depth L:
+//   L <= fullDepth          → collapse: fullDepth = L - 1, partial empty
+//   L === fullDepth + 1     → toggle this fn in partial
+//                              (when partial covers all fns at L,
+//                              promote to fullDepth = L, partial empty)
+//   L > fullDepth + 1       → cascade: fullDepth = L - 1, partial = {fn}
+let expansionState = new Map();  // nodeId -> {fullDepth, partialFns}
+let previewState = new Map();    // nodeId -> {fullDepth, partialFns}
 let anchorFnId = null;            // fnId that should stay stationary during layout
 
 // UI state flags
@@ -24,6 +34,23 @@ let suppressEdgeWarnings = false; // Suppresses Cytoscape edge warnings during d
 
 // User-moved nodes (won't be auto-positioned by layout)
 let userMovedNodes = new Set();
+
+// Pointer position tracker for hover-preview suppression — see comment in
+// editor-overlays.js mouseenter handler. After a click, the overlay is
+// rebuilt and a synthetic mouseenter fires on the new line at the SAME
+// pointer position. We compare the event's clientX/Y against the last
+// position that triggered a preview; if unchanged, the user hasn't really
+// moved the mouse and we skip the preview.
+let lastPreviewPointerX = -1;
+let lastPreviewPointerY = -1;
+
+function pointerMovedSinceLastPreview(clientX, clientY) {
+  return clientX !== lastPreviewPointerX || clientY !== lastPreviewPointerY;
+}
+function recordPreviewPointer(clientX, clientY) {
+  lastPreviewPointerX = clientX;
+  lastPreviewPointerY = clientY;
+}
 
 // ============================================================================
 // CONSTANTS

@@ -116,12 +116,26 @@
   :args {:key "patch"}}
 
  ;; =============================================================================
- ;; RESPONSE STATUS HIERARCHY
+ ;; RESPONSE MATRIX (status × content-type via multiple inheritance)
+ ;;
+ ;; Two orthogonal axes inherit from :ring-response and bind one arg each:
+ ;;   STATUS axis     binds :status
+ ;;   CONTENT-TYPE    binds :headers
+ ;;
+ ;; Concrete responses combine one of each via :parents [<ct> <status>].
+ ;; Diamond inheritance from :ring-response is OK: each axis binds a
+ ;; different arg, the remaining :body propagates to the child.
  ;; =============================================================================
+
+ ;; --- STATUS axis ---
 
  {:name :ok-response
   :parent :ring-response
   :args {:status 200}}
+
+ {:name :bad-request-response
+  :parent :ring-response
+  :args {:status 400}}
 
  {:name :not-found-response
   :parent :ring-response
@@ -131,71 +145,49 @@
   :parent :ring-response
   :args {:status 500}}
 
- ;; =============================================================================
- ;; CONTENT-TYPE RESPONSE HIERARCHY
- ;; =============================================================================
+ ;; --- CONTENT-TYPE axis ---
 
- ;; JSON responses
- {:name :json-ok-response
-  :parent :ok-response
-  :args {:headers {"Content-Type" "application/json"}}}
-
- ;; HTML responses
- {:name :html-ok-response
-  :parent :ok-response
-  :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
-
- ;; Plain text responses
- {:name :text-ok-response
-  :parent :ok-response
-  :args {:headers {"Content-Type" "text/plain"}}}
-
- {:name :text-not-found-response
-  :parent :not-found-response
-  :args {:headers {"Content-Type" "text/plain"}}}
-
- {:name :text-error-response
-  :parent :error-response
-  :args {:headers {"Content-Type" "text/plain"}}}
-
- ;; JSON error/not-found responses
- {:name :json-error-response
-  :parent :error-response
-  :args {:headers {"Content-Type" "application/json"}}}
-
- {:name :json-not-found-response
-  :parent :not-found-response
-  :args {:headers {"Content-Type" "application/json"}}}
-
- ;; HTML error/not-found responses
- {:name :html-error-response
-  :parent :error-response
-  :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
-
- {:name :html-not-found-response
-  :parent :not-found-response
-  :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
-
- ;; HTML with bad request status
- {:name :bad-request-response
+ {:name :json-content-type
   :parent :ring-response
-  :args {:status 400}}
+  :args {:headers {"Content-Type" "application/json"}}}
 
- {:name :html-bad-request-response
-  :parent :bad-request-response
+ {:name :html-content-type
+  :parent :ring-response
   :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
 
- ;; SVG responses
- {:name :svg-ok-response
-  :parent :ok-response
+ {:name :text-content-type
+  :parent :ring-response
+  :args {:headers {"Content-Type" "text/plain"}}}
+
+ {:name :svg-content-type
+  :parent :ring-response
   :args {:headers {"Content-Type" "image/svg+xml"}}}
 
- ;; Cached SVG (for static assets like favicon)
- ;; Inherits from ok-response directly to avoid header override
- {:name :cached-svg-ok-response
-  :parent :ok-response
+ ;; Cached SVG: one extra header beyond :svg-content-type, so it gets its
+ ;; own content-type fn (the :headers map cannot be merged via MI — it is a
+ ;; single arg, so the whole map must be set in one place).
+ {:name :cached-svg-content-type
+  :parent :ring-response
   :args {:headers {"Content-Type" "image/svg+xml"
                    "Cache-Control" "public, max-age=86400"}}}
+
+ ;; --- MATRIX (status × content-type) ---
+
+ {:name :json-ok-response          :parents [:json-content-type :ok-response]}
+ {:name :html-ok-response          :parents [:html-content-type :ok-response]}
+ {:name :text-ok-response          :parents [:text-content-type :ok-response]}
+ {:name :svg-ok-response           :parents [:svg-content-type  :ok-response]}
+ {:name :cached-svg-ok-response    :parents [:cached-svg-content-type :ok-response]}
+
+ {:name :html-bad-request-response :parents [:html-content-type :bad-request-response]}
+
+ {:name :json-not-found-response   :parents [:json-content-type :not-found-response]}
+ {:name :html-not-found-response   :parents [:html-content-type :not-found-response]}
+ {:name :text-not-found-response   :parents [:text-content-type :not-found-response]}
+
+ {:name :json-error-response       :parents [:json-content-type :error-response]}
+ {:name :html-error-response       :parents [:html-content-type :error-response]}
+ {:name :text-error-response       :parents [:text-content-type :error-response]}
 
  ;; =============================================================================
  ;; HEALTH STATUS COMPOSITION

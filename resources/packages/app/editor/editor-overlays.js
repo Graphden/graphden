@@ -100,128 +100,203 @@ function createOverlay(nodeId, options = {}) {
 }
 
 /**
- * Create overlay for fn node with ancestor list
- * Groups "empty" ancestors (no args set) with previous "real" ancestor:
- * - No separator line between items in same group
- * - Hover highlights entire group
- * - Click on any item in group activates the group's level
+ * Create overlay for fn node with ancestor list.
+ * Each line is one BFS level — multiple parents at the same level are
+ * joined on a single line (multiple inheritance).
+ *
+ * Levels are GROUPED: levels whose fns set no args are grouped with the
+ * previous "real" level. Within a group there is no separator line and
+ * hover/click on any line in the group acts on the whole group.
+ *
+ * Hover/click model: pointing at depth L means "expand exactly to L"
+ * (everything at depths ≤ L expanded, deeper collapsed). Hover shows the
+ * preview, click commits it.
+ *
+ * Click handlers fire on `mousedown` so the action is committed BEFORE any
+ * pending hover-render can shift the layout under the cursor.
  */
 function createFnOverlay(node, container) {
   const originalFnId = node.data('originalFnId');
   if (!originalFnId) return;
 
   const nodeId = node.id();  // Full node ID including expansion context
-  const chain = getInheritanceChain(originalFnId);
-  const items = buildAncestorItems(chain);
-  const currentLevel = expansionLevel.get(nodeId) || 0;  // Use nodeId for expansion lookup
-  const visibleItems = items.slice(0, MAX_VISIBLE_ANCESTORS + 1);
+  const levels = getInheritanceLevels(originalFnId);
+  const ancestorLevels = buildAncestorLevels(levels);
+  const spec = expansionState.get(nodeId) || { fullDepth: 0, partialFns: new Set() };
+  const fullDepth = spec.fullDepth;
+  const partialFns = spec.partialFns;
+  const visibleLevels = ancestorLevels.slice(0, MAX_VISIBLE_ANCESTORS + 1);
 
   const overlay = createOverlay(nodeId);
   overlay.dataset.originalFnId = originalFnId;
-  overlay.dataset.nodeId = nodeId;  // Store nodeId for expansion
+  overlay.dataset.nodeId = nodeId;
   overlay.style.cursor = 'default';
 
-  // Group items by groupId for hover highlighting
-  const linesByGroup = new Map();
+  // Preview/committed states share the SAME visual style so the click is
+  // visually invisible — hovering shows a preview, clicking commits it but
+  // the visual stays the same; only when the user leaves and re-enters
+  // does the new state become visible.
+  const HIGHLIGHT_BG = '#f0f0f0';
+  // Each visible BFS level becomes one line; for MI levels each parent is
+  // a span inside that line (separated by a vertical bar), individually
+  // clickable. We need to repaint both the line backgrounds and the
+  // individual span highlights when previewing/restoring.
+  const linesByDepth = new Map();   // depth -> { line, spansByFnId }
 
-  visibleItems.forEach((item, idx) => {
-    const line = document.createElement('div');
-    line.className = 'ancestor-line';
-    line.dataset.level = item.level;
-    line.dataset.groupId = item.groupId;
-    line.dataset.groupLevel = item.groupLevel;
+  // Returns true if a particular fn at a given depth would be highlighted
+  // under the given preview/committed spec.
+  const fnIsHighlighted = (depth, fnId, sFull, sPartial) => {
+    if (depth <= sFull) return true;
+    if (depth === sFull + 1 && sPartial.has(fnId)) return true;
+    return false;
+  };
 
-    // Check if next item is in different group (show separator)
-    const nextItem = visibleItems[idx + 1];
-    const showSeparator = nextItem && nextItem.groupId !== item.groupId;
-
-    Object.assign(line.style, {
-      padding: '4px 8px',
-      cursor: 'pointer',
-      borderBottom: showSeparator ? '1px solid #eee' : 'none',
-      touchAction: 'none',       // Prevent browser scroll on touch
-      userSelect: 'none',        // Prevent text selection on long press
-      WebkitUserSelect: 'none'
-    });
-    line.textContent = item.name;
-
-    // Current expansion level highlighting
-    // All items in group up to and including current level are bold
-    if (item.groupLevel <= currentLevel) {
-      line.style.fontWeight = 'bold';
-      line.style.background = '#f0f0f0';
-    }
-
-    // Track lines by group for hover highlighting
-    if (!linesByGroup.has(item.groupId)) {
-      linesByGroup.set(item.groupId, []);
-    }
-    linesByGroup.get(item.groupId).push(line);
-
-    // Hover: highlight entire group AND all groups above (younger ancestors)
-    // If already expanded to this level or beyond, don't trigger preview
-    line.addEventListener('mouseenter', () => {
-      if (isGrabbing) return;
-
-      const hoverLevel = item.groupLevel;
-
-      // Highlight this group and all groups with lower level (younger ancestors)
-      linesByGroup.forEach((lines, groupId) => {
-        const groupLevel = parseInt(lines[0].dataset.groupLevel);
-        if (groupLevel <= hoverLevel) {
-          lines.forEach(l => {
-            l.style.background = '#e8e8e8';
-          });
-        }
-      });
-
-      // Only trigger preview if hovering on level > currentLevel
-      // (i.e., expanding to a deeper ancestor)
-      if (hoverLevel > currentLevel) {
-        setPreviewLevel(nodeId, hoverLevel);
-      }
-    });
-
-    line.addEventListener('mouseleave', () => {
-      // Restore all lines to their proper state based on current expansion
-      linesByGroup.forEach((lines, groupId) => {
-        const groupLevel = parseInt(lines[0].dataset.groupLevel);
-        lines.forEach(l => {
-          if (groupLevel <= currentLevel) {
-            l.style.background = '#f0f0f0';
+  const paintWithSpec = (sFull, sPartial) => {
+    linesByDepth.forEach(({ line, spansByFnId }, depth) => {
+      const lvl = ancestorLevels[depth];
+      if (!lvl) return;
+      if (spansByFnId) {
+        // MI line: per-fn highlight (no whole-line background — only individual spans)
+        line.style.fontWeight = 'normal';
+        line.style.background = '';
+        spansByFnId.forEach((span, fnId) => {
+          if (fnIsHighlighted(depth, fnId, sFull, sPartial)) {
+            span.style.fontWeight = 'bold';
+            span.style.background = HIGHLIGHT_BG;
           } else {
-            l.style.background = '';
+            span.style.fontWeight = 'normal';
+            span.style.background = '';
           }
         });
-      });
+      } else {
+        // Single-fn line: highlight the whole line
+        const fn = lvl.fns[0];
+        if (fn && fnIsHighlighted(depth, fn.fnId, sFull, sPartial)) {
+          line.style.fontWeight = 'bold';
+          line.style.background = HIGHLIGHT_BG;
+        } else {
+          line.style.fontWeight = 'normal';
+          line.style.background = '';
+        }
+      }
+    });
+  };
+  const applyPreviewStyle = (previewSpec) => {
+    const sFull = previewSpec ? previewSpec.fullDepth : fullDepth;
+    const sPartial = previewSpec ? previewSpec.partialFns : partialFns;
+    paintWithSpec(sFull, sPartial);
+  };
+  const restoreStyles = () => paintWithSpec(fullDepth, partialFns);
+
+  visibleLevels.forEach((levelInfo, idx) => {
+    const line = document.createElement('div');
+    line.className = 'ancestor-line';
+    line.dataset.level = levelInfo.depth;
+    line.dataset.groupId = levelInfo.groupId;
+
+    // No separator if next level is in the same group
+    const nextLevel = visibleLevels[idx + 1];
+    const isLastInGroup = !nextLevel || nextLevel.groupId !== levelInfo.groupId;
+    const isLast = idx === visibleLevels.length - 1;
+    const lineBorderBottom = (isLast || !isLastInGroup) ? 'none' : '1px solid #eee';
+    Object.assign(line.style, {
+      borderBottom: lineBorderBottom,
+      touchAction: 'none',
+      userSelect: 'none',
+      WebkitUserSelect: 'none'
     });
 
-    // Click/tap: toggle expansion
-    // - If clicking on level > currentLevel: expand to that level
-    // - If clicking on level <= currentLevel: collapse to that level
-    //   (but clicking on level 0 when currentLevel > 0 collapses to 0)
-    // Use nodeId (not originalFnId) so each expansion context is independent
-    const handleExpansionClick = (e) => {
-      e.stopPropagation();
-      e.preventDefault();
-      const clickLevel = item.groupLevel;
+    let spansByFnId = null;
+    if (levelInfo.isMI) {
+      // Multi-fn level — each parent becomes a flex "cell" with its own
+      // border-right (= vertical separator running from the top horizontal
+      // line to the bottom one). Hovering fills the entire cell area, not
+      // just the text. The line itself has no padding — padding lives on
+      // the cells so the cell area covers the full row height.
+      // Cells use flex:1 so they share the line width equally and there
+      // is no white gap on the right when MI line is narrower than the
+      // widest line of the overlay.
+      line.style.display = 'flex';
+      line.style.padding = '0';
 
-      if (clickLevel > currentLevel) {
-        setExpansionLevel(nodeId, clickLevel);
-      } else if (clickLevel < currentLevel) {
-        setExpansionLevel(nodeId, clickLevel);
-      } else {
-        setExpansionLevel(nodeId, Math.max(0, clickLevel - 1));
+      spansByFnId = new Map();
+      const allFnsAtDepth = levelInfo.fns.map(f => f.fnId);
+      levelInfo.fns.forEach((f, i) => {
+        const span = document.createElement('span');
+        span.textContent = f.name;
+        span.style.cursor = 'pointer';
+        span.style.padding = '4px 8px';
+        span.style.flex = '1 1 0';
+        span.style.minWidth = '0';
+        if (i < levelInfo.fns.length - 1) {
+          span.style.borderRight = '1px solid #eee';
+        }
+        // Initial highlight (committed state) — per-fn
+        if (fnIsHighlighted(levelInfo.depth, f.fnId, fullDepth, partialFns)) {
+          span.style.fontWeight = 'bold';
+          span.style.background = HIGHLIGHT_BG;
+        }
+        spansByFnId.set(f.fnId, span);
+
+        // MI per-fn click: cascade to depth-1 + partial = {this fn}
+        const onMouseDown = (e) => {
+          e.stopPropagation();
+          e.preventDefault();
+          applyClickSpec(nodeId, levelInfo.depth, f.fnId, allFnsAtDepth);
+        };
+        span.addEventListener('mousedown', onMouseDown);
+        span.addEventListener('touchend', onMouseDown);
+        span.addEventListener('mouseenter', (e) => {
+          if (isGrabbing) return;
+          if (!pointerMovedSinceLastPreview(e.clientX, e.clientY)) return;
+          recordPreviewPointer(e.clientX, e.clientY);
+          const preview = computeSpecAfterClick(
+            { fullDepth, partialFns }, levelInfo.depth, f.fnId, allFnsAtDepth);
+          applyPreviewStyle(preview);
+          applyHoverSpec(nodeId, levelInfo.depth, f.fnId, allFnsAtDepth);
+        });
+        span.addEventListener('mouseleave', () => restoreStyles());
+        line.appendChild(span);
+      });
+    } else {
+      // Non-MI line: padding on the line itself
+      line.style.padding = '4px 8px';
+      // Single-fn level — whole-line click cascading to groupMaxDepth
+      // (so empty grouped levels expand together).
+      line.style.cursor = 'pointer';
+      line.textContent = levelInfo.fns[0].name;
+      const fnIdForLine = levelInfo.fns[0].fnId;
+      const allFnsAtDepth = [fnIdForLine];
+      const targetDepth = levelInfo.groupMaxDepth;
+      // Initial highlight (committed state) for single-fn line
+      if (fnIsHighlighted(levelInfo.depth, fnIdForLine, fullDepth, partialFns)) {
+        line.style.fontWeight = 'bold';
+        line.style.background = HIGHLIGHT_BG;
       }
-    };
-    line.addEventListener('click', handleExpansionClick);
-    // Touch support: touchend triggers expansion directly (bypasses iOS hover emulation)
-    line.addEventListener('touchend', handleExpansionClick);
+      const onMouseDown = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        applyClickSpec(nodeId, targetDepth, fnIdForLine, allFnsAtDepth);
+      };
+      line.addEventListener('mousedown', onMouseDown);
+      line.addEventListener('touchend', onMouseDown);
+      line.addEventListener('mouseenter', (e) => {
+        if (isGrabbing) return;
+        if (!pointerMovedSinceLastPreview(e.clientX, e.clientY)) return;
+        recordPreviewPointer(e.clientX, e.clientY);
+        const preview = computeSpecAfterClick(
+          { fullDepth, partialFns }, targetDepth, fnIdForLine, allFnsAtDepth);
+        applyPreviewStyle(preview);
+        applyHoverSpec(nodeId, targetDepth, fnIdForLine, allFnsAtDepth);
+      });
+      line.addEventListener('mouseleave', () => restoreStyles());
+    }
 
+    linesByDepth.set(levelInfo.depth, { line, spansByFnId });
     overlay.appendChild(line);
   });
 
-  if (items.length > MAX_VISIBLE_ANCESTORS + 1) {
+  if (ancestorLevels.length > MAX_VISIBLE_ANCESTORS + 1) {
     const more = document.createElement('div');
     Object.assign(more.style, { padding: '2px 8px', color: '#999', fontSize: '10px' });
     more.textContent = '...';
@@ -236,7 +311,7 @@ function createFnOverlay(node, container) {
     // 2. User is dragging (isGrabbing flag)
     // 3. Overlay was removed from DOM (happens during rebuild, mouseleave fires async)
     if (!rebuildingOverlays && !isGrabbing && overlay.isConnected) {
-      setPreviewLevel(nodeId, null);
+      clearPreview(nodeId);
     }
   });
 
@@ -284,9 +359,9 @@ function createNodeOverlays() {
   // Find the node that has active preview - we should NOT remove its overlay
   // to prevent mouseleave events during rebuild
   let preservedOverlayId = null;
-  if (previewLevel.size > 0) {
-    const previewFnId = previewLevel.keys().next().value;
-    preservedOverlayId = 'fn-' + previewFnId;
+  if (previewState.size > 0) {
+    // previewState keys are full node IDs (e.g., "fn-uuid")
+    preservedOverlayId = previewState.keys().next().value;
   }
 
   // Remove overlays except the preserved one

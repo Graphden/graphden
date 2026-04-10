@@ -43,8 +43,8 @@ function updateEntityList(data) {
  */
 function selectFn(fnId, updateHistory = true) {
   selectedFnId = fnId;
-  expansionLevel.clear();
-  previewLevel.clear();
+  expansionState.clear();
+  previewState.clear();
   userMovedNodes.clear();
 
   document.querySelectorAll('.entity-item').forEach(el => el.classList.remove('selected'));
@@ -72,104 +72,155 @@ function selectFnByName(name, updateHistory = true) {
 // ============================================================================
 
 /**
- * Set expansion level for a node (click)
- * @param {string} nodeId - The Cytoscape node ID (e.g., "fn-uuid" or "fn-uuid1_uuid2")
- * @param {number} level - Expansion level
+ * Get the current spec for a node, defaulting to empty (no expansion).
  */
-function setExpansionLevel(nodeId, level) {
-  // Clear any pending preview debounce timer to prevent race condition:
-  // If user clicks while preview debounce is pending, the debounced callback
-  // would fire AFTER this render, causing the old overlay to be preserved
+function getSpec(nodeId) {
+  return expansionState.get(nodeId) || { fullDepth: 0, partialFns: new Set() };
+}
+
+/**
+ * Apply a click/hover on an ancestor row.
+ *
+ * SINGLE-FN at depth L → spec = {fullDepth: L, partial: empty}
+ *   "expand exactly to L" (always set, no toggle)
+ *
+ * MULTI-FN parent (MI) → toggle membership in partial:
+ *   - Currently NOT in expansion: ADD this fn (cascade through shallower
+ *     levels first if needed). If after adding, partial covers ALL MI fns
+ *     at that depth, auto-promote to fullDepth = depth (clear partial).
+ *   - Currently IS in expansion: REMOVE this fn. If was fully expanded,
+ *     unpromote to {fullDepth: depth - 1, partial: (other MI fns)}.
+ *     Also collapses anything deeper than this depth (since deeper required
+ *     this fn as part of its cascade).
+ *
+ * This lets the user select ONE OR SEVERAL MI parents but not all.
+ * Selecting a deeper non-MI level cascades (auto-includes all MI).
+ *
+ * Depth 0 → null (collapse all).
+ */
+function computeSpecAfterClick(currentSpec, depth, fnId, allFnsAtDepth) {
+  if (depth <= 0) return null;
+  const isMI = allFnsAtDepth && allFnsAtDepth.length > 1;
+
+  if (!isMI) {
+    return { fullDepth: depth, partialFns: new Set() };
+  }
+
+  const fullDepth = currentSpec.fullDepth || 0;
+  const partial = new Set(currentSpec.partialFns || []);
+
+  // Is this fn already part of the committed expansion?
+  const fullyExpandedHere = depth <= fullDepth;
+  const inPartialHere = depth === fullDepth + 1 && partial.has(fnId);
+  const currentlyExpanded = fullyExpandedHere || inPartialHere;
+
+  if (currentlyExpanded) {
+    // TOGGLE OFF: remove this fn from the expansion.
+    if (fullyExpandedHere) {
+      // Was fully expanded at this depth — keep all OTHER MI fns at this
+      // depth as partial; collapse anything deeper than this depth.
+      const others = allFnsAtDepth.filter(f => f !== fnId);
+      const newFull = depth - 1;
+      if (newFull <= 0 && others.length === 0) return null;
+      return { fullDepth: newFull, partialFns: new Set(others) };
+    }
+    // depth === fullDepth + 1 and fnId in partial: just remove from partial
+    partial.delete(fnId);
+    if (partial.size === 0 && fullDepth === 0) return null;
+    return { fullDepth, partialFns: partial };
+  }
+
+  // TOGGLE ON: add this fn.
+  if (depth > fullDepth + 1) {
+    // Cascade: fully expand intermediate levels, then add this MI fn
+    return { fullDepth: depth - 1, partialFns: new Set([fnId]) };
+  }
+  // depth === fullDepth + 1: add to existing partial
+  partial.add(fnId);
+  // Auto-promote when all MI fns at this depth are now selected
+  if (allFnsAtDepth.every(f => partial.has(f))) {
+    return { fullDepth: depth, partialFns: new Set() };
+  }
+  return { fullDepth, partialFns: partial };
+}
+
+/**
+ * Apply spec change for click on a fn at a depth.
+ */
+function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
   if (previewDebounceTimer) {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = null;
   }
-
-  // Extract originalFnId from nodeId for anchor (last UUID in the node ID)
-  // Node IDs are either "fn-{uuid}" or "fn-{uuid1}_{uuid2}"
   const parts = nodeId.replace('fn-', '').split('_');
-  const originalFnId = parts[parts.length - 1];
+  anchorFnId = parts[parts.length - 1];
 
-  // Set this node as anchor so it stays stationary during layout
-  anchorFnId = originalFnId;
-
-  if (level === 0) {
-    expansionLevel.delete(nodeId);
+  const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
+  if (newSpec === null) {
+    expansionState.delete(nodeId);
   } else {
-    expansionLevel.set(nodeId, level);
+    expansionState.set(nodeId, newSpec);
   }
-  previewLevel.delete(nodeId);
+  previewState.delete(nodeId);
   renderGraph(false);
-
-  // Clear anchor after render
   anchorFnId = null;
 }
 
 /**
- * Set preview level (hover)
- * @param {string} nodeId - The Cytoscape node ID (e.g., "fn-uuid" or "fn-uuid1_uuid2")
- * @param {number|null} level - Preview level or null to clear
+ * Set preview spec (hover). Uses debouncing to avoid flicker.
  *
- * Uses debouncing to prevent flickering when:
- * 1. Mouse moves between overlay lines (level changes within same overlay)
- * 2. Overlays are rebuilt (mouseleave fires on removed overlays)
+ * IMPORTANT: clicks are bound to `mousedown` (not `click`) so that the
+ * click action fires BEFORE any pending hover render can shift the layout.
+ * This keeps clicks reliable even with hover preview active.
  */
-function setPreviewLevel(nodeId, level) {
-  const oldLevel = previewLevel.get(nodeId);
-
-  // Clear any pending debounce timer
+function applyHoverSpec(nodeId, depth, fnId, allFnsAtDepth) {
+  const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
+  const oldPreview = previewState.get(nodeId);
   if (previewDebounceTimer) {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = null;
   }
-
-  if (level === null) {
-    // Only process if there was actually a preview set for this nodeId
-    if (oldLevel === undefined) {
-      return; // No preview was set for this nodeId
-    }
-
-    // Debounce the clear to allow mouseenter on new overlay to cancel it
-    previewDebounceTimer = setTimeout(() => {
-      // Re-check: if preview level changed (mouse entered another overlay), don't clear
-      const currentLevel = previewLevel.get(nodeId);
-      if (currentLevel === oldLevel) {
-        // Set anchor to keep the node stationary during un-preview
-        const parts = nodeId.replace('fn-', '').split('_');
-        anchorFnId = parts[parts.length - 1];
-        previewLevel.delete(nodeId);
-        renderGraph(false);
-        anchorFnId = null;
-      }
-    }, PREVIEW_DEBOUNCE_MS);
-  } else {
-    // Check if this is the same level as currently set - skip entirely
-    if (oldLevel === level) {
-      return; // No change needed
-    }
-
-    // Debounce the preview change
-    previewDebounceTimer = setTimeout(() => {
-      // Re-check in case state changed during debounce
-      const currentLevel = previewLevel.get(nodeId);
-      if (currentLevel !== level) {
-        // Set anchor to keep the node stationary during preview
-        const parts = nodeId.replace('fn-', '').split('_');
-        anchorFnId = parts[parts.length - 1];
-        previewLevel.set(nodeId, level);
-        renderGraph(false);
-        anchorFnId = null;
-      }
-    }, PREVIEW_DEBOUNCE_MS);
+  // Skip if preview unchanged
+  if (oldPreview && newSpec
+      && oldPreview.fullDepth === newSpec.fullDepth
+      && oldPreview.partialFns.size === newSpec.partialFns.size
+      && [...oldPreview.partialFns].every(f => newSpec.partialFns.has(f))) {
+    return;
   }
+  previewDebounceTimer = setTimeout(() => {
+    const parts = nodeId.replace('fn-', '').split('_');
+    anchorFnId = parts[parts.length - 1];
+    if (newSpec === null) {
+      previewState.delete(nodeId);
+    } else {
+      previewState.set(nodeId, newSpec);
+    }
+    renderGraph(false);
+    anchorFnId = null;
+  }, PREVIEW_DEBOUNCE_MS);
+}
+
+function clearPreview(nodeId) {
+  if (previewDebounceTimer) {
+    clearTimeout(previewDebounceTimer);
+    previewDebounceTimer = null;
+  }
+  if (!previewState.has(nodeId)) return;
+  previewDebounceTimer = setTimeout(() => {
+    const parts = nodeId.replace('fn-', '').split('_');
+    anchorFnId = parts[parts.length - 1];
+    previewState.delete(nodeId);
+    renderGraph(false);
+    anchorFnId = null;
+  }, PREVIEW_DEBOUNCE_MS);
 }
 
 /**
  * Clear all preview state
  */
 function clearPreviewState() {
-  if (previewLevel.size > 0) {
-    previewLevel.clear();
+  if (previewState.size > 0) {
+    previewState.clear();
     renderGraph(false);
   }
 }

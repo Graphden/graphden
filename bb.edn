@@ -175,9 +175,8 @@
            (println "2. Building uberjar...")
            (p/shell "clojure -T:build uber")
 
-           (println "3. Truncating database...")
-           (p/shell {:continue true}
-                    "docker exec graphden-age psql -U graphden -d graphden -c \"TRUNCATE TABLE fn_version, fn_arg_version, arg_value, fn_usage, fn_arg, fn, fn_schema, arg_schema CASCADE;\"")
+           (println "3. Resetting database schema...")
+           (p/shell "docker exec graphden-postgres psql -U graphden -d graphden -c \"DROP SCHEMA public CASCADE; CREATE SCHEMA public;\"")
 
            (println "4. Rebuilding docker image...")
            (p/shell "docker-compose build --no-cache executor")

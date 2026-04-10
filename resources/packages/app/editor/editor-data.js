@@ -39,20 +39,36 @@ function buildLookups(data) {
 // INHERITANCE CHAIN
 // ============================================================================
 
-// Get inheritance chain: [fnId, parentId, grandparentId, ...]
-// For multiple inheritance, follows the FIRST parent at each level (primary chain).
-function getInheritanceChain(fnId) {
-  const chain = [];
-  let current = fnId;
-  const visited = new Set();
-  while (current && !visited.has(current)) {
-    visited.add(current);
-    chain.push(current);
-    const fn = lookups.fnMap.get(current);
-    const parentIds = fn ? fn['parent-ids'] : null;
-    current = (parentIds && parentIds.length > 0) ? parentIds[0] : null;
+// Get inheritance as BFS layers: [[fnId], [parent1, parent2, ...], [gp1, gp2, ...], ...]
+// Each layer holds all fns reachable in exactly N parent-hops, deduped so each
+// fn appears only at its shallowest depth.
+function getInheritanceLevels(fnId) {
+  const levels = [];
+  let currentLevel = [fnId];
+  const visited = new Set([fnId]);
+  while (currentLevel.length > 0) {
+    levels.push(currentLevel);
+    const nextLevel = [];
+    for (const id of currentLevel) {
+      const fn = lookups.fnMap.get(id);
+      const parentIds = fn ? fn['parent-ids'] : null;
+      if (!parentIds) continue;
+      for (const pid of parentIds) {
+        if (!visited.has(pid)) {
+          visited.add(pid);
+          nextLevel.push(pid);
+        }
+      }
+    }
+    currentLevel = nextLevel;
   }
-  return chain;
+  return levels;
+}
+
+// Flat BFS-ordered list of all reachable ancestors (including fnId itself).
+// Use getInheritanceLevels when you need the per-level structure.
+function getInheritanceChain(fnId) {
+  return getInheritanceLevels(fnId).flat();
 }
 
 // ============================================================================
@@ -82,42 +98,61 @@ function fnSetsArgs(fnId) {
 }
 
 // ============================================================================
-// ANCESTOR ITEMS (for overlay display)
+// ANCESTOR LEVELS (for overlay display)
 // ============================================================================
 
-// Build ancestor items for display in node overlay
-// Groups consecutive non-arg-setting ancestors with previous "real" ancestor
-// A "real" ancestor is one that sets args (has value or ref-id)
-// Empty ancestors (no args set) are grouped with the previous real one
-function buildAncestorItems(chain) {
-  const items = [];
-  let currentGroupId = 0;       // Unique group identifier
-  let currentGroupLevel = 0;    // Level of the "real" ancestor in this group
-
-  chain.forEach((fnId, idx) => {
-    const fn = lookups.fnMap.get(fnId);
-    if (!fn) return;
-
-    const name = fn.name || '(anonymous)';
-    const setsArgs = fnSetsArgs(fnId);
-
-    if (setsArgs) {
-      // This is a "real" ancestor - start new group
-      currentGroupId++;
-      currentGroupLevel = idx;
-    }
-    // else: empty ancestor - stays in current group with previous real ancestor
-
-    items.push({
-      fnId,
-      name,
-      level: idx,
-      groupId: currentGroupId,           // Which group this belongs to
-      groupLevel: currentGroupLevel,     // Level of the "real" ancestor in this group
-      setsArgs,
-      isGroupStart: setsArgs             // Is this the start of a group (real ancestor)?
+// Build ancestor levels for display in node overlay.
+// Each BFS level is rendered as ONE visual line. Multi-fn levels (multiple
+// inheritance) display every parent on the same line, separated by a
+// vertical bar; each parent is individually clickable.
+//
+// Grouping: an "empty" level (whose fns set no args) joins the previous
+// "real" level — no separator between them. Multi-fn levels (MI) ALWAYS
+// start a new group, and the empty level immediately after an MI also
+// starts a new group, so MI never visually merges with neighbours.
+//
+// Returns: [{
+//   depth: number,
+//   fns: [{fnId, name, setsArgs}],
+//   isMI: bool,
+//   anySets: bool,
+//   groupId, groupMaxDepth
+// }]
+function buildAncestorLevels(levels) {
+  const enriched = levels.map((fnIds, depth) => {
+    const fns = fnIds.map(fnId => {
+      const fn = lookups.fnMap.get(fnId);
+      return {
+        fnId,
+        name: (fn && fn.name) || '(anonymous)',
+        setsArgs: fnSetsArgs(fnId)
+      };
     });
+    return {
+      depth,
+      fns,
+      isMI: fns.length > 1,
+      anySets: fns.some(f => f.setsArgs)
+    };
   });
 
-  return items;
+  let groupId = -1;
+  enriched.forEach((lv, idx) => {
+    const prev = enriched[idx - 1];
+    const startsNew =
+      idx === 0 ||
+      lv.anySets ||         // real level
+      lv.isMI ||            // every MI level starts its own group
+      (prev && prev.isMI);  // empty level after MI also starts a new group
+    if (startsNew) groupId++;
+    lv.groupId = groupId;
+  });
+
+  const maxDepthByGroup = new Map();
+  enriched.forEach(lv => {
+    const cur = maxDepthByGroup.get(lv.groupId);
+    if (cur === undefined || lv.depth > cur) maxDepthByGroup.set(lv.groupId, lv.depth);
+  });
+  enriched.forEach(lv => { lv.groupMaxDepth = maxDepthByGroup.get(lv.groupId); });
+  return enriched;
 }

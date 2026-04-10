@@ -152,9 +152,10 @@
 ;; =============================================================================
 
 (defn- base-fn?
-  "Returns true if this is a base function (no :parent key)."
+  "Returns true if this is a base function (no :parent / :parents key)."
   [fn-def]
-  (not (contains? fn-def :parent)))
+  (and (not (contains? fn-def :parent))
+       (not (contains? fn-def :parents))))
 
 
 (defn- deref-args

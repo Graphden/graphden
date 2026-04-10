@@ -1,5 +1,5 @@
 // Editor Layout - Backend API client for graph layout
-// Depends on: editor-state.js (GRID_GAP_X, GRID_GAP_Y, DRAG_HANDLE_HEIGHT, selectedFnId, expansionLevel, previewLevel)
+// Depends on: editor-state.js (GRID_GAP_X, GRID_GAP_Y, DRAG_HANDLE_HEIGHT, selectedFnId, expansionState, previewState)
 //
 // Layout is computed on the backend via POST /api/graph/layout
 // Backend handles:
@@ -71,14 +71,19 @@ async function fetchBackendLayout() {
   }
 
   try {
-    // Build expansions map: merge expansionLevel and previewLevel
-    // previewLevel takes priority
+    // Build expansions map: merge expansionState and previewState
+    // previewState takes priority
+    // Each entry is a spec: {full-depth: number, partial-fns: [fnId, ...]}
     const expansions = {};
-    expansionLevel.forEach((level, fnId) => {
-      expansions[fnId] = level;
+    const specToWire = (spec) => ({
+      'full-depth': spec.fullDepth,
+      'partial-fns': Array.from(spec.partialFns || [])
     });
-    previewLevel.forEach((level, fnId) => {
-      expansions[fnId] = level;
+    expansionState.forEach((spec, nodeId) => {
+      expansions[nodeId] = specToWire(spec);
+    });
+    previewState.forEach((spec, nodeId) => {
+      expansions[nodeId] = specToWire(spec);
     });
 
     const requestBody = {

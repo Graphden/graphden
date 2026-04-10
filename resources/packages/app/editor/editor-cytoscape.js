@@ -40,14 +40,16 @@ const CYTOSCAPE_STYLES = [
   { selector: 'node[type="fn"][!isPlaceholder]', style: {
     'label': '',
     'background-opacity': 0,
-    'border-width': 0
+    'border-width': 0,
+    'overlay-opacity': 0    // suppress cytoscape's default click/select highlight
   }},
   // Placeholder (unset arg) - hide, overlay shows content with drag handle
   { selector: 'node[?isPlaceholder]', style: {
     'label': '',
     'background-opacity': 0,
     'border-width': 0,
-    'padding': '0px'
+    'padding': '0px',
+    'overlay-opacity': 0
   }},
   // Arg value node - hide, overlay shows content with drag handle
   { selector: 'node[type="arg"]', style: {
@@ -55,6 +57,7 @@ const CYTOSCAPE_STYLES = [
     'background-opacity': 0,
     'border-width': 0,
     'padding': '0px',
+    'overlay-opacity': 0,
     'width': function(node) {
       var label = node.data('label') || '';
       var maxLen = 30;
@@ -131,7 +134,9 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     layout: { name: 'preset' },
     minZoom: 0.1,
     maxZoom: 3,
-    autoungrabify: true  // Disable direct node dragging - only drag via overlay handle
+    autoungrabify: true,    // Disable direct node dragging - only drag via overlay handle
+    autounselectify: true,  // Disable selection — clicks are handled via overlays only
+    boxSelectionEnabled: false
   });
 
   if (shouldFit && cy.nodes().length > 0) {
@@ -165,9 +170,9 @@ async function renderGraph(shouldFit = true) {
     // Determine anchor node
     if (capturedAnchorFnId) {
       anchorNodeId = 'fn-' + capturedAnchorFnId;
-    } else if (previewLevel.size > 0) {
-      // previewLevel keys are already full node IDs (e.g., "fn-uuid")
-      anchorNodeId = previewLevel.keys().next().value;
+    } else if (previewState.size > 0) {
+      // previewState keys are already full node IDs (e.g., "fn-uuid")
+      anchorNodeId = previewState.keys().next().value;
     }
 
     // Save anchor position BEFORE fetch (before any async yield)

@@ -58,20 +58,36 @@
 ;; INHERITANCE & ARG RESOLUTION
 ;; =============================================================================
 
-(defn- get-inheritance-chain
-  "Get inheritance chain: [fn-id, parent-id, grandparent-id, ...].
-   For multiple inheritance, follows the FIRST parent at each level (primary chain)."
+(defn- get-inheritance-levels
+  "Get inheritance as BFS layers from fn-id.
+   Returns a vector of vectors: [[fn-id] [parent1 parent2 ...] [gp1 gp2 ...] ...]
+   Each layer contains all fns reachable in exactly N parent-hops, deduped
+   so each fn appears only at its shallowest level. Stops when no new fns
+   are discovered."
   [fn-id fn-map]
-  (loop [current fn-id
-         chain []
-         visited #{}]
-    (if (or (nil? current) (contains? visited current))
-      chain
-      (let [f (get fn-map current)
-            parent-ids (:parent-ids f)]
-        (recur (first parent-ids)
-               (conj chain current)
-               (conj visited current))))))
+  (loop [current-level [fn-id]
+         visited #{fn-id}
+         levels []]
+    (if (empty? current-level)
+      levels
+      (let [next-level (->> current-level
+                            (mapcat (fn [fid]
+                                      (when-let [f (get fn-map fid)]
+                                        (:parent-ids f))))
+                            (remove nil?)
+                            (remove visited)
+                            distinct
+                            vec)
+            new-visited (into visited next-level)]
+        (recur next-level new-visited (conj levels current-level))))))
+
+
+(defn- get-inheritance-chain
+  "Flat list of all ancestor fn-ids reachable from fn-id (including fn-id itself).
+   Order is BFS, with each fn appearing exactly once at its shallowest depth.
+   Use get-inheritance-levels when you need the per-level structure."
+  [fn-id fn-map]
+  (vec (mapcat identity (get-inheritance-levels fn-id fn-map))))
 
 
 (defn- resolve-arg-name
@@ -127,22 +143,39 @@
 
 
 (defn- build-chain-bindings
-  "Build bindings for inheritance chain up to target level.
-   Chain is [self, parent, grandparent, ...].
-   We want bindings from descendant fns (those that override ancestor args).
-   So we take fns [0..target-level) from the chain (without reverse)."
-  [chain target-level args-by-fn arg-map]
-  (reduce
-    (fn [bindings fn-id]
-      (add-bindings-from-fn fn-id bindings args-by-fn arg-map))
-    {}
-    (take target-level chain)))
+  "Build bindings from ALL fns in the BFS inheritance closure.
+   levels is [[self] [parent1 parent2 ...] [gp1 gp2 ...] ...].
+
+   target-depth used to be a limit but with multiple inheritance + diamond,
+   bindings can live on any ancestor (one parent binds X while a sibling
+   parent has X free). We always walk every level so the lookup finds the
+   binding wherever it is. Descendants are visited first; their bindings
+   override deeper ancestors via reduce ordering."
+  [levels _target-depth args-by-fn arg-map]
+  (let [all-fns (mapcat identity levels)]
+    (reduce
+      (fn [bindings fn-id]
+        (add-bindings-from-fn fn-id bindings args-by-fn arg-map))
+      {}
+      all-fns)))
 
 
 (defn- build-arg-bindings
-  "Build bindings just from the fn itself."
-  [fn-id args-by-fn arg-map]
-  (add-bindings-from-fn fn-id {} args-by-fn arg-map))
+  "Build bindings for a fn by walking ALL ancestors (BFS via parent-ids).
+   This matches the executor's behavior — with multiple inheritance, an arg
+   may be bound on one parent while another parent has it free, so we must
+   collect bindings from every reachable ancestor.
+
+   Bindings from descendants override bindings from deeper ancestors
+   (descendant wins; reduce processes self first, then ancestors)."
+  [fn-id fn-map args-by-fn arg-map]
+  (let [levels (get-inheritance-levels fn-id fn-map)
+        all-fns (mapcat identity levels)]
+    (reduce
+      (fn [bindings ancestor-id]
+        (add-bindings-from-fn ancestor-id bindings args-by-fn arg-map))
+      {}
+      all-fns)))
 
 
 ;; =============================================================================
@@ -170,15 +203,48 @@
         processed-fn-nodes (atom #{})
         max-visible-ancestors 4
 
-        get-effective-level
-        ;; Get expansion level for a fn, considering its context
-        ;; First try [expansion-root fn-id], then fall back to [nil fn-id] (canonical)
-        ;; Also support legacy format {fn-id level} for tests
+        get-effective-spec
+        ;; Get expansion spec for a fn in its context.
+        ;; Lookup order: [expansion-root fn-id], [nil fn-id], fn-id (legacy).
+        ;;
+        ;; Returns one of:
+        ;;   integer N            — legacy: full cascade through BFS depth N
+        ;;   {:full-depth N       — depths 1..N fully expanded
+        ;;    :partial-fns #{...}}  plus these specific fn-ids at depth N+1
+        ;;   nil/0                — no expansion
         (fn [fn-id expansion-root]
           (or (get expansions [expansion-root fn-id])
               (get expansions [nil fn-id])
-              (get expansions fn-id)  ;; Legacy format support
+              (get expansions fn-id)
               0))
+
+        ;; Convert any expansion spec into a set of fn-ids that should be
+        ;; "merged into" the focus fn's display (always includes fn-id itself).
+        spec->expand-set
+        (fn [fn-id spec]
+          (let [levels (get-inheritance-levels fn-id fn-map)
+                full-depth (cond
+                             (integer? spec) spec
+                             (map? spec) (or (:full-depth spec) 0)
+                             :else 0)
+                partial-fns (when (map? spec)
+                              (set (map (fn [id]
+                                          (if (uuid? id)
+                                            id
+                                            (parse-uuid (str id))))
+                                        (:partial-fns spec))))
+                cascade-fns (set (mapcat identity
+                                         (take (inc full-depth) levels)))]
+            (cond-> cascade-fns
+              (seq partial-fns) (into partial-fns))))
+
+        spec-trivial?
+        (fn [spec]
+          (cond
+            (integer? spec) (zero? spec)
+            (map? spec) (and (zero? (or (:full-depth spec) 0))
+                             (empty? (:partial-fns spec)))
+            :else true))
 
         add-fn-node
         (fn [original-fn-id is-root expansion-root]
@@ -207,14 +273,17 @@
                           (str "fn-" original-fn-id))]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
-              (let [chain (get-inheritance-chain original-fn-id fn-map)
-                    label-lines (mapv (fn [fid]
-                                        (let [f (get fn-map fid)]
-                                          (if (:name f)
-                                            (name (:name f))
-                                            "(anonymous)")))
-                                      (take (inc max-visible-ancestors) chain))
-                    label-lines (if (> (count chain) (inc max-visible-ancestors))
+              (let [levels (get-inheritance-levels original-fn-id fn-map)
+                    fn-name-of (fn [fid]
+                                 (let [f (get fn-map fid)]
+                                   (if (:name f)
+                                     (name (:name f))
+                                     "(anonymous)")))
+                    visible-levels (take (inc max-visible-ancestors) levels)
+                    label-lines (mapv (fn [level-fn-ids]
+                                        (str/join ", " (map fn-name-of level-fn-ids)))
+                                      visible-levels)
+                    label-lines (if (> (count levels) (inc max-visible-ancestors))
                                   (conj label-lines "...")
                                   label-lines)
                     label (str/join "\n" label-lines)]
@@ -331,9 +400,16 @@
                                        ;; Check for binding - applies to UNSET args
                                        ;; For structural nodes, also check binding for args with ref
                                        binding-key (or (:id arg) (:source-id arg))
-                                       raw-binding (or (get bindings (:id arg))
-                                                       (when-let [sid (:source-id arg)]
-                                                         (get bindings sid)))
+                                       ;; Walk the FULL source-id chain to find a binding.
+                                       ;; With multiple inheritance the bound arg may be on a
+                                       ;; sibling parent, so the binding ends up keyed by an
+                                       ;; ancestor source-id deep in the chain.
+                                       raw-binding (loop [sid (:id arg)]
+                                                     (if-let [b (get bindings sid)]
+                                                       b
+                                                       (when-let [src-arg (get arg-map sid)]
+                                                         (when-let [next-sid (:source-id src-arg)]
+                                                           (recur next-sid)))))
                                        ;; If binding goes to a child ref, don't use it here
                                        binding (when (and raw-binding
                                                           (not (binding-goes-to-child? binding-key)))
@@ -398,17 +474,22 @@
                 sorted-args (sort-by #(get type-order (:type %) 3) all-args)]
             (filterv some? sorted-args)))
 
-        ;; Collect args from chain [0..level] with proper ordering:
-        ;; For each fn in chain (from original to display-fn):
+        ;; Collect args from a set of expand-fns with proper ordering:
+        ;; For each fn in expand-set (descendants first by BFS order):
         ;;   - refs first, then values, then unset
-        ;; Args covered by earlier fns in chain are skipped
-        ;; Returns args with :from-ancestor flag indicating if arg came from ancestor (level > 0)
+        ;; Args covered by earlier fns are skipped
+        ;; Returns args with :from-ancestor flag indicating if arg came from
+        ;; an fn at BFS depth > 0
         ;;
         ;; Key insight: when a ref-fn is shown, value args that bind TO that ref-fn's args
         ;; should not be shown as direct children - they become part of the ref-fn's display
         collect-expanded-args
-        (fn [chain level bindings]
-          (let [active-fns (take (inc level) chain)
+        (fn [levels expand-set bindings]
+          ;; Order active fns by BFS depth (descendants first)
+          (let [active-fns (vec (filter expand-set (mapcat identity levels)))
+                ;; Full chain (all reachable ancestors) — used as set for excluding
+                ;; ref-fn-arg-ids (so shared ancestors don't get filtered)
+                full-chain-fns (set (mapcat identity levels))
                 covered-sources (atom #{})
                 ;; First pass: collect all refs to know which fns will be displayed
                 ref-fn-ids (atom #{})
@@ -425,7 +506,7 @@
                 ;; EXCLUDE args from fns that are also in the expansion root's inheritance chain.
                 ;; This prevents shared ancestors (e.g., conj-any shared by list-11 and list-10)
                 ;; from causing items to be filtered as "belonging inside ref-fn".
-                expansion-chain-fns (set chain)
+                expansion-chain-fns full-chain-fns
                 ref-fn-arg-ids (atom #{})
                 _ (doseq [ref-fn-id @ref-fn-ids]
                     (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
@@ -458,7 +539,16 @@
                         already-covered (contains? @covered-sources source-id)
                         has-value (some? (:value arg))
                         has-ref (some? (:ref-id arg))
-                        binding (get bindings arg-id)
+                        ;; Walk the FULL source-id chain to find a binding.
+                        ;; With multiple inheritance the bound arg may be on a
+                        ;; sibling parent so the binding is keyed by an
+                        ;; ancestor source-id deep in the chain.
+                        binding (loop [sid arg-id]
+                                  (if-let [b (get bindings sid)]
+                                    b
+                                    (when-let [src-arg (get arg-map sid)]
+                                      (when-let [next-sid (:source-id src-arg)]
+                                        (recur next-sid)))))
                         ;; Check if ANY arg in the source chain is an arg of a displayed ref-fn
                         ;; This applies to BOTH value and ref args - if the arg's source chain
                         ;; leads to an arg inside a displayed ref-fn, this arg is a binding for
@@ -600,16 +690,26 @@
                         nil))))
                 node-id))
 
-            (process-expanded-fn [original-fn-id level source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root]
+            (process-expanded-fn [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root]
               ;; parent-expansion-root: if we're nested inside another expansion, keep that context
               ;; Otherwise, this fn becomes its own expansion root
-              (let [chain (get-inheritance-chain original-fn-id fn-map)
-                    display-fn-id (nth chain (min level (dec (count chain))) original-fn-id)
-                    ;; Build chain bindings to pass to nested fns
-                    ;; This allows ref-fns to know about bindings from the ancestor chain
-                    ;; Merge with parent-bindings (parent takes precedence)
-                    base-chain-bindings (build-chain-bindings chain (inc level) args-by-fn arg-map)
-                    chain-bindings (merge base-chain-bindings parent-bindings)
+              ;;
+              ;; spec is an expansion spec (integer N for full cascade, or
+              ;; {:full-depth N :partial-fns #{...}} for cascade + per-fn).
+              ;; The spec is converted to a set of fn-ids that are "merged in".
+              (let [levels (get-inheritance-levels original-fn-id fn-map)
+                    chain (vec (mapcat identity levels))  ; flat for set ops
+                    expand-set (spec->expand-set original-fn-id spec)
+                    ;; Build bindings from ALL fns in the inheritance closure;
+                    ;; with diamond inheritance bindings can live on any branch.
+                    base-chain-bindings (build-chain-bindings levels nil args-by-fn arg-map)
+                    ;; Merge order: parent FIRST, base WINS for collisions.
+                    ;; The local fn's own/inherited bindings must override anything
+                    ;; coming from a caller's context — otherwise propagated args
+                    ;; in a deep cascade (e.g. editor-routes.item2 → editor-route)
+                    ;; would shadow a sibling fn's own binding (route.item2 →
+                    ;; method-map) when their source-id chains share an ancestor key.
+                    chain-bindings (merge parent-bindings base-chain-bindings)
                     ;; Determine expansion root for this node and its children:
                     ;; - If we're already inside an expansion (parent-expansion-root set),
                     ;;   keep that context to avoid merging nodes from different expansions
@@ -656,7 +756,7 @@
                 ;;    (by simulating what bindings they'll resolve)
                 ;; 2. Level-0 refs pointing to those targets are hidden at root
                 ;; 3. Level-0 refs pointing to OTHER targets are shown at root
-                (let [all-args (collect-expanded-args chain level chain-bindings)
+                (let [all-args (collect-expanded-args levels expand-set chain-bindings)
                       ;; Separate by type and origin
                       ancestor-refs (filter #(and (:from-ancestor %) (= (:type %) :ref)) all-args)
                       ancestor-values (filter #(and (:from-ancestor %) (= (:type %) :value)) all-args)
@@ -757,20 +857,19 @@
                 node-id))
 
             (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root]
-              ;; Get expansion level for this fn in its context
+              ;; Get expansion spec for this fn in its context
               ;; expansion-root is the parent expansion context (nil for top-level)
-              (let [level (get-effective-level fn-id expansion-root)]
-                (if (pos? level)
-                  ;; Expanded mode - pass parent expansion-root to maintain context
-                  ;; If we're already inside an expansion (expansion-root is set),
-                  ;; nested expansions should stay in that context
-                  (process-expanded-fn fn-id level source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root)
-                  (let [bindings (build-arg-bindings fn-id args-by-fn arg-map)
-                        ;; Merge parent bindings - parent takes precedence
+              (let [spec (get-effective-spec fn-id expansion-root)]
+                (if (spec-trivial? spec)
+                  (let [bindings (build-arg-bindings fn-id fn-map args-by-fn arg-map)
+                        ;; Merge order: parent first, local (base) WINS.
+                        ;; See process-expanded-fn comment for rationale.
                         bindings (if parent-bindings
-                                   (merge bindings parent-bindings)
+                                   (merge parent-bindings bindings)
                                    bindings)]
-                    (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root)))))]
+                    (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root))
+                  ;; Expanded mode - pass parent expansion-root to maintain context
+                  (process-expanded-fn fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root))))]
 
       ;; Start processing from root - no expansion-root initially
       (process-any-fn root-fn-id nil nil true nil nil nil)))
@@ -1461,7 +1560,19 @@
           ;; Parse expansions: {"fn-uuid-string": level} or {"fn-uuid1_uuid2": level}
           ;; Keys have "fn-" prefix from node IDs
           ;; For structural nodes inside expansion: "fn-{expansion-root}_{fn-id}" format
-          ;; Store as: {[expansion-root fn-id] level} or {[nil fn-id] level} for canonical
+          ;; Store as: {[expansion-root fn-id] spec} or {[nil fn-id] spec}
+          ;; spec is either an integer (legacy) or
+          ;; {:full-depth N :partial-fns #{uuid ...}}
+          parse-spec (fn [v]
+                       (cond
+                         (integer? v) v
+                         (map? v) {:full-depth (or (:full-depth v) 0)
+                                   :partial-fns (set (map (fn [s]
+                                                            (if (uuid? s)
+                                                              s
+                                                              (java.util.UUID/fromString (str s))))
+                                                          (:partial-fns v)))}
+                         :else 0))
           expansions (into {}
                            (map (fn [[k v]]
                                   (let [k-str (name k)
@@ -1476,7 +1587,7 @@
                                             [(java.util.UUID/fromString (first parts))
                                              (java.util.UUID/fromString (second parts))])
                                           [nil (java.util.UUID/fromString stripped)])]
-                                    [[expansion-root fn-id] v]))
+                                    [[expansion-root fn-id] (parse-spec v)]))
                                 expansions-raw))
 
           ;; Load data from storage

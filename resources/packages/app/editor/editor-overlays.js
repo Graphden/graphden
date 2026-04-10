@@ -136,12 +136,16 @@ function createFnOverlay(node, container) {
   // visually invisible — hovering shows a preview, clicking commits it but
   // the visual stays the same; only when the user leaves and re-enters
   // does the new state become visible.
+  // Visual model:
+  //   Depth 0 (root name): black bg, white text — ALWAYS.
+  //   Non-clickable levels merge with the level above: same bg, no separator.
+  //   If the non-clickable chain reaches depth 0, the level is ALSO black bg.
+  //   Clickable levels: white bg normally, #f0f0f0 when expanded/previewed.
+  //   MI: each parent's cell is independently styled.
+  const ROOT_BG = '#000';
+  const ROOT_FG = '#fff';
   const HIGHLIGHT_BG = '#f0f0f0';
-  // Each visible BFS level becomes one line; for MI levels each parent is
-  // a span inside that line (separated by a vertical bar), individually
-  // clickable. We need to repaint both the line backgrounds and the
-  // individual span highlights when previewing/restoring.
-  const linesByDepth = new Map();   // depth -> { line, spansByFnId }
+  const linesByDepth = new Map();   // depth -> { line, spansByFnId, levelInfo }
 
   // Returns true if a particular fn at a given depth would be highlighted
   // under the given preview/committed spec.
@@ -151,32 +155,53 @@ function createFnOverlay(node, container) {
     return false;
   };
 
+  // Apply styles for a given spec. Handles both root-block styling and
+  // expansion highlighting.
   const paintWithSpec = (sFull, sPartial) => {
-    linesByDepth.forEach(({ line, spansByFnId }, depth) => {
-      const lvl = ancestorLevels[depth];
-      if (!lvl) return;
+    linesByDepth.forEach(({ line, spansByFnId, levelInfo }, depth) => {
+      if (!levelInfo) return;
+      const isRoot = levelInfo.blockIsRoot;
+
       if (spansByFnId) {
-        // MI line: per-fn highlight (no whole-line background — only individual spans)
+        // MI line: per-fn styling
         line.style.fontWeight = 'normal';
         line.style.background = '';
-        spansByFnId.forEach((span, fnId) => {
-          if (fnIsHighlighted(depth, fnId, sFull, sPartial)) {
+        line.style.color = '';
+        spansByFnId.forEach(({ span, fn }, fnId) => {
+          const highlighted = fnIsHighlighted(depth, fnId, sFull, sPartial);
+          // Non-clickable MI parents that are in the root block
+          const fnInRootBlock = isRoot && !fn.isClickable;
+          if (fnInRootBlock) {
+            span.style.background = ROOT_BG;
+            span.style.color = ROOT_FG;
             span.style.fontWeight = 'bold';
+          } else if (highlighted) {
             span.style.background = HIGHLIGHT_BG;
+            span.style.color = '';
+            span.style.fontWeight = 'bold';
           } else {
-            span.style.fontWeight = 'normal';
             span.style.background = '';
+            span.style.color = '';
+            span.style.fontWeight = 'normal';
           }
         });
       } else {
-        // Single-fn line: highlight the whole line
-        const fn = lvl.fns[0];
-        if (fn && fnIsHighlighted(depth, fn.fnId, sFull, sPartial)) {
+        // Single-fn line
+        const fn = levelInfo.fns[0];
+        const highlighted = fn && fnIsHighlighted(depth, fn.fnId, sFull, sPartial);
+        if (isRoot) {
+          // Root block: black bg, white text
+          line.style.background = ROOT_BG;
+          line.style.color = ROOT_FG;
           line.style.fontWeight = 'bold';
+        } else if (highlighted) {
           line.style.background = HIGHLIGHT_BG;
+          line.style.color = '';
+          line.style.fontWeight = 'bold';
         } else {
-          line.style.fontWeight = 'normal';
           line.style.background = '';
+          line.style.color = '';
+          line.style.fontWeight = 'normal';
         }
       }
     });
@@ -231,12 +256,17 @@ function createFnOverlay(node, container) {
         if (i < levelInfo.fns.length - 1) {
           span.style.borderRight = '1px solid #eee';
         }
-        // Initial highlight (committed state) — per-fn
-        if (fnIsHighlighted(levelInfo.depth, f.fnId, fullDepth, partialFns)) {
+        // Initial styling: root-block or highlighted
+        const fnInRootBlock = levelInfo.blockIsRoot && !f.isClickable;
+        if (fnInRootBlock) {
+          span.style.background = ROOT_BG;
+          span.style.color = ROOT_FG;
+          span.style.fontWeight = 'bold';
+        } else if (fnIsHighlighted(levelInfo.depth, f.fnId, fullDepth, partialFns)) {
           span.style.fontWeight = 'bold';
           span.style.background = HIGHLIGHT_BG;
         }
-        spansByFnId.set(f.fnId, span);
+        spansByFnId.set(f.fnId, { span, fn: f });
 
         // MI per-fn click: cascade to depth-1 + partial = {this fn}
         const onMouseDown = (e) => {
@@ -268,8 +298,12 @@ function createFnOverlay(node, container) {
       const fnIdForLine = levelInfo.fns[0].fnId;
       const allFnsAtDepth = [fnIdForLine];
       const targetDepth = levelInfo.groupMaxDepth;
-      // Initial highlight (committed state) for single-fn line
-      if (fnIsHighlighted(levelInfo.depth, fnIdForLine, fullDepth, partialFns)) {
+      // Initial styling: root-block or highlighted
+      if (levelInfo.blockIsRoot) {
+        line.style.background = ROOT_BG;
+        line.style.color = ROOT_FG;
+        line.style.fontWeight = 'bold';
+      } else if (fnIsHighlighted(levelInfo.depth, fnIdForLine, fullDepth, partialFns)) {
         line.style.fontWeight = 'bold';
         line.style.background = HIGHLIGHT_BG;
       }
@@ -292,7 +326,7 @@ function createFnOverlay(node, container) {
       line.addEventListener('mouseleave', () => restoreStyles());
     }
 
-    linesByDepth.set(levelInfo.depth, { line, spansByFnId });
+    linesByDepth.set(levelInfo.depth, { line, spansByFnId, levelInfo });
     overlay.appendChild(line);
   });
 

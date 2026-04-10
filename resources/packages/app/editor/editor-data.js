@@ -97,6 +97,15 @@ function fnSetsArgs(fnId) {
   });
 }
 
+// Check if fn has any ref-id args (references to other fns).
+// A fn with refs is "clickable" — expanding it produces new graph nodes.
+// A fn with only value/free args is "non-clickable" — its values are
+// discoverable via inheritance without expanding.
+function fnHasRefArgs(fnId) {
+  const args = lookups.argsByFn.get(fnId) || [];
+  return args.some(arg => !!arg['ref-id']);
+}
+
 // ============================================================================
 // ANCESTOR LEVELS (for overlay display)
 // ============================================================================
@@ -125,25 +134,31 @@ function buildAncestorLevels(levels) {
       return {
         fnId,
         name: (fn && fn.name) || '(anonymous)',
-        setsArgs: fnSetsArgs(fnId)
+        setsArgs: fnSetsArgs(fnId),
+        isClickable: fnHasRefArgs(fnId)  // has ref-id args → produces nodes
       };
     });
     return {
       depth,
       fns,
       isMI: fns.length > 1,
-      anySets: fns.some(f => f.setsArgs)
+      anySets: fns.some(f => f.setsArgs),
+      anyClickable: fns.some(f => f.isClickable)
     };
   });
 
+  // Grouping: a level starts a new visual group if it has at least one
+  // CLICKABLE fn.  Non-clickable levels merge with the predecessor block
+  // (they share its bg and have no separator).  MI always starts a new
+  // group (individual parents will be styled per-cell inside the group).
   let groupId = -1;
   enriched.forEach((lv, idx) => {
     const prev = enriched[idx - 1];
     const startsNew =
       idx === 0 ||
-      lv.anySets ||         // real level
-      lv.isMI ||            // every MI level starts its own group
-      (prev && prev.isMI);  // empty level after MI also starts a new group
+      lv.anyClickable ||    // at least one clickable fn
+      lv.isMI ||            // MI always starts its own group
+      (prev && prev.isMI);  // level after MI also starts a new group
     if (startsNew) groupId++;
     lv.groupId = groupId;
   });
@@ -154,5 +169,26 @@ function buildAncestorLevels(levels) {
     if (cur === undefined || lv.depth > cur) maxDepthByGroup.set(lv.groupId, lv.depth);
   });
   enriched.forEach(lv => { lv.groupMaxDepth = maxDepthByGroup.get(lv.groupId); });
+
+  // Compute visual block assignment.  A "block" is a contiguous set of
+  // levels that share a visual style.  Block 0 is always the root (black
+  // bg).  Each clickable level starts a new block.  Non-clickable levels
+  // join the predecessor's block, inheriting its bg.
+  //
+  // blockIsRoot: true for levels that belong to the root's block (should
+  // be rendered with black bg + white text).
+  let currentBlockIsRoot = true;
+  enriched.forEach((lv, idx) => {
+    if (idx === 0) {
+      lv.blockIsRoot = true;
+    } else {
+      if (lv.anyClickable || lv.isMI) {
+        // Clickable level (or MI) → leaves the root block
+        currentBlockIsRoot = false;
+      }
+      lv.blockIsRoot = currentBlockIsRoot;
+    }
+  });
+
   return enriched;
 }

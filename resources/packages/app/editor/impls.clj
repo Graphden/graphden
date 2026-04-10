@@ -52,7 +52,19 @@
      [:div {:id "entity-list"}]]
     ;; Graph container
     [:div {:id "graph-container"}
-     [:div {:id "cy"}]]]])
+     [:div {:id "cy"}]
+     ;; Navigation controls (map-like)
+     [:div {:id "nav-controls"}
+      [:button {:class "nav-btn nav-up" :onclick "navPan(0,-1)" :title "Pan up"} "▲"]
+      [:button {:class "nav-btn nav-left" :onclick "navPan(-1,0)" :title "Pan left"} "◀"]
+      [:button {:class "nav-btn nav-right" :onclick "navPan(1,0)" :title "Pan right"} "▶"]
+      [:button {:class "nav-btn nav-down" :onclick "navPan(0,1)" :title "Pan down"} "▼"]
+      [:div {:class "nav-zoom"}
+       [:button {:class "nav-btn" :onclick "navZoom(1)" :title "Zoom in"} "+"]
+       [:input {:id "zoom-slider" :type "range" :min "10" :max "300" :value "100"
+                :oninput "navZoomTo(this.value/100)" :title "Zoom"}]
+       [:button {:class "nav-btn" :onclick "navZoom(-1)" :title "Zoom out"} "−"]]
+      [:button {:class "nav-btn nav-reset" :onclick "navReset()" :title "Reset node positions"} "⟲"]]]]])
 
 
 (defn editor-style-element

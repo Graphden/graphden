@@ -146,6 +146,7 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   // Event handlers for pan/zoom
   cy.on('pan zoom', function() {
     updateOverlayPositions();
+    updateZoomSlider();
   });
 
   // Create overlays
@@ -212,10 +213,12 @@ async function renderGraph(shouldFit = true) {
     }
   });
 
-  // Calculate offset to keep anchor node stationary
+  // Calculate offset to keep anchor node stationary.
+  // SKIP if the anchor is a user-moved node — otherwise the offset shifts
+  // all nodes to match the user's drag, visually "undoing" the drag.
   let offsetX = 0;
   let offsetY = 0;
-  if (anchorNodeId && anchorOldPos) {
+  if (anchorNodeId && anchorOldPos && !userMovedNodes.has(anchorNodeId)) {
     const anchorNewPos = layout.get(anchorNodeId);
     if (anchorNewPos) {
       offsetX = anchorOldPos.x - anchorNewPos.x;

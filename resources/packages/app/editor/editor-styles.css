@@ -23,3 +23,40 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 /* Node overlay for interactive ancestor list */
 .node-overlay { pointer-events: auto; z-index: 10; }
 .node-overlay .ancestor-line { transition: color 0.1s, font-weight 0.1s; }
+
+/* Navigation controls */
+#nav-controls {
+  position: absolute; bottom: 16px; right: 16px; z-index: 100;
+  display: grid;
+  grid-template-columns: 32px 32px 32px;
+  grid-template-rows: 32px 32px 32px auto 32px;
+  gap: 2px;
+  pointer-events: auto;
+}
+.nav-btn {
+  width: 32px; height: 32px;
+  border: 1px solid #ccc; border-radius: 4px;
+  background: #fff; color: #000;
+  font-size: 14px; cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  padding: 0; user-select: none;
+}
+.nav-btn:hover { background: #f0f0f0; }
+.nav-btn:active { background: #ddd; }
+.nav-up    { grid-column: 2; grid-row: 1; }
+.nav-left  { grid-column: 1; grid-row: 2; }
+.nav-right { grid-column: 3; grid-row: 2; }
+.nav-down  { grid-column: 2; grid-row: 3; }
+.nav-zoom  {
+  grid-column: 1 / 4; grid-row: 4;
+  display: flex; align-items: center; gap: 2px;
+  margin: 4px 0;
+}
+.nav-zoom input[type="range"] {
+  flex: 1; height: 4px; cursor: pointer;
+  accent-color: #000;
+}
+.nav-reset {
+  grid-column: 1 / 4; grid-row: 5;
+  width: 100%; font-size: 18px;
+}

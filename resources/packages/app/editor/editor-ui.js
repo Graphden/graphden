@@ -235,3 +235,50 @@ function clearPreviewState() {
     renderGraph(false);
   }
 }
+
+
+// ============================================================================
+// NAVIGATION CONTROLS
+// ============================================================================
+
+const PAN_STEP = 150;
+const ZOOM_STEP = 0.15;
+
+/** Pan the graph by (dx, dy) in screen units. */
+function navPan(dx, dy) {
+  if (!cy) return;
+  const pan = cy.pan();
+  cy.pan({ x: pan.x - dx * PAN_STEP, y: pan.y - dy * PAN_STEP });
+  updateOverlayPositions();
+}
+
+/** Zoom in (dir=1) or out (dir=-1) relative to viewport center. */
+function navZoom(dir) {
+  if (!cy) return;
+  const newZoom = Math.max(0.1, Math.min(3, cy.zoom() + dir * ZOOM_STEP));
+  cy.zoom({ level: newZoom, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+  updateOverlayPositions();
+  updateZoomSlider();
+}
+
+/** Zoom to an absolute level (from the slider). */
+function navZoomTo(level) {
+  if (!cy) return;
+  const clamped = Math.max(0.1, Math.min(3, level));
+  cy.zoom({ level: clamped, renderedPosition: { x: cy.width() / 2, y: cy.height() / 2 } });
+  updateOverlayPositions();
+}
+
+/** Sync the slider thumb with the current zoom level. */
+function updateZoomSlider() {
+  const slider = document.getElementById('zoom-slider');
+  if (slider && cy) slider.value = Math.round(cy.zoom() * 100);
+}
+
+/** Reset all user-moved nodes to their layout positions. */
+function navReset() {
+  if (!cy) return;
+  userMovedNodes.clear();
+  savedUserPositions.clear();
+  renderGraph(true);  // shouldFit=true → re-fits the viewport
+}

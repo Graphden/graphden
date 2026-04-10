@@ -204,6 +204,14 @@ async function renderGraph(shouldFit = true) {
   // Stop any running animations
   cy.nodes().forEach(node => node.stop(true, true));
 
+  // Save positions of user-moved nodes BEFORE render. During preview,
+  // nodes may be removed and re-added; we restore their positions after.
+  cy.nodes().forEach(node => {
+    if (userMovedNodes.has(node.id())) {
+      savedUserPositions.set(node.id(), { ...node.position() });
+    }
+  });
+
   // Calculate offset to keep anchor node stationary
   let offsetX = 0;
   let offsetY = 0;
@@ -245,21 +253,33 @@ async function renderGraph(shouldFit = true) {
   function completeUpdate() {
     suppressEdgeWarnings = true;
 
-    // Remove old elements
+    // Remove old elements.
+    // During preview, keep userMovedNodes entries (positions are saved).
+    // On commit, entries are cleared via savedUserPositions.clear().
+    const isPreview = previewState.size > 0;
     nodesToRemove.forEach(node => {
       const overlay = document.querySelector('.node-overlay[data-original-fn-id="' + node.data('originalFnId') + '"]');
       if (overlay) overlay.remove();
-      userMovedNodes.delete(node.id());
+      if (!isPreview) {
+        userMovedNodes.delete(node.id());
+        savedUserPositions.delete(node.id());
+      }
     });
     cy.remove(nodesToRemove);
     cy.remove(edgesToRemove);
 
-    // Add new nodes with initial position
+    // Add new nodes with initial position.
+    // If a node was user-moved (has a saved position), use that instead of layout.
     if (nodesToAdd.length > 0) {
       nodesToAdd.forEach(n => {
-        const pos = layout.get(n.data.id);
-        if (pos) {
-          n.position = { x: pos.x, y: pos.y };
+        const saved = savedUserPositions.get(n.data.id);
+        if (saved && userMovedNodes.has(n.data.id)) {
+          n.position = { x: saved.x, y: saved.y };
+        } else {
+          const pos = layout.get(n.data.id);
+          if (pos) {
+            n.position = { x: pos.x, y: pos.y };
+          }
         }
       });
       cy.add(nodesToAdd);

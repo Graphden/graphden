@@ -1,6 +1,6 @@
 // Editor State - Global variables, constants, and configuration
 // Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-10 11:00';
+const BUILD_TIMESTAMP = '2026-04-10 12:00';
 console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================
@@ -34,6 +34,11 @@ let suppressEdgeWarnings = false; // Suppresses Cytoscape edge warnings during d
 
 // User-moved nodes (won't be auto-positioned by layout)
 let userMovedNodes = new Set();
+
+// Saved positions of user-moved nodes — preserved across preview renders
+// so that when a preview removes a node and restoring brings it back, the
+// user's manual position is retained. Cleared only on click (commit).
+let savedUserPositions = new Map();  // nodeId -> {x, y}
 
 // Hover-preview suppression after click. After a click commits a state
 // change, the overlay rebuilds and a synthetic mouseenter fires on the new

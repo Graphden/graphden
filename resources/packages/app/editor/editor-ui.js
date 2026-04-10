@@ -172,6 +172,9 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
   // Suppress preview until cursor leaves the element. This prevents the
   // "ghost preview" where committed state is immediately reversed.
   suppressPreviewOnClick();
+  // Commit clears saved user positions — nodes that disappeared in the
+  // committed state lose their manual position.
+  savedUserPositions.clear();
   renderGraph(false);
   anchorFnId = null;
 }

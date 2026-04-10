@@ -376,6 +376,7 @@ function createFnOverlay(node, container) {
           if (spec === null) { expansionState.delete(nodeId); }
           else { expansionState.set(nodeId, spec); }
           suppressPreviewOnClick();
+          savedUserPositions.clear();
           previewState.delete(nodeId);
           const parts = nodeId.replace('fn-', '').split('_');
           anchorFnId = parts[parts.length - 1];

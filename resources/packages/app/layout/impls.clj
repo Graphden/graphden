@@ -161,21 +161,13 @@
 
 
 (defn- build-arg-bindings
-  "Build bindings for a fn by walking ALL ancestors (BFS via parent-ids).
-   This matches the executor's behavior — with multiple inheritance, an arg
-   may be bound on one parent while another parent has it free, so we must
-   collect bindings from every reachable ancestor.
-
-   Bindings from descendants override bindings from deeper ancestors
-   (descendant wins; reduce processes self first, then ancestors)."
-  [fn-id fn-map args-by-fn arg-map]
-  (let [levels (get-inheritance-levels fn-id fn-map)
-        all-fns (mapcat identity levels)]
-    (reduce
-      (fn [bindings ancestor-id]
-        (add-bindings-from-fn ancestor-id bindings args-by-fn arg-map))
-      {}
-      all-fns)))
+  "Build bindings from the fn's OWN args only (level-0, non-expanded mode).
+   Ancestor bindings are NOT included — they appear only when the user
+   explicitly expands to those depths (via build-chain-bindings in expanded
+   mode). This keeps the level-0 display clean: only the fn's own bindings
+   are visible, deeper values require explicit navigation."
+  [fn-id _fn-map args-by-fn arg-map]
+  (add-bindings-from-fn fn-id {} args-by-fn arg-map))
 
 
 ;; =============================================================================
@@ -671,18 +663,41 @@
                                                   :is-structural (some? expansion-root)
                                                   :displayed-ref-arg-ids (or displayed-ref-arg-ids #{})
                                                   :expansion-root-chain (or exp-root-chain #{}))
-]
-                    (doseq [arg all-args]
+                        ;; Filter out :unset args that are BOUND BY ANCESTORS.
+                        ;; These aren't truly free — a parent in the inheritance chain
+                        ;; already sets their value/ref. They should be hidden at level 0
+                        ;; and only become visible when expanding to the ancestor level.
+                        ;; We compute ancestor-bindings by walking all parents of the
+                        ;; display-fn (excluding itself) and collecting their bindings.
+                        ancestor-bindings
+                        (when-not (some? expansion-root)
+                          ;; Only filter in non-structural (level-0) mode.
+                          ;; In structural mode the expanded chain already handles this.
+                          (let [all-levels (get-inheritance-levels display-fn-id fn-map)
+                                ancestor-fns (rest (mapcat identity all-levels))]
+                            (reduce
+                              (fn [b fid] (add-bindings-from-fn fid b args-by-fn arg-map))
+                              {} ancestor-fns)))
+
+                        ancestor-bound?
+                        (fn [arg-id]
+                          (when ancestor-bindings
+                            (loop [sid arg-id]
+                              (when sid
+                                (if (get ancestor-bindings sid)
+                                  true
+                                  (when-let [src-arg (get arg-map sid)]
+                                    (recur (:source-id src-arg))))))))
+
+                        filtered-args
+                        (filterv (fn [arg]
+                                   (if (= :unset (:type arg))
+                                     (not (ancestor-bound? (:arg-id arg)))
+                                     true))
+                                 all-args)]
+                    (doseq [arg filtered-args]
                       (case (:type arg)
-                        ;; For refs: binding refs use canonical ID (nil expansion-root)
-                        ;; structural refs use expansion context
-                        ;; is-binding flag controls node identity:
-                        ;; - is-binding=true: external binding (e.g. handler), use canonical ID
-                        ;; - is-binding=false: structural ref, use expansion prefix
-                        ;; IMPORTANT: bindings should still flow to children in both cases!
-                        ;; The handler's children need the bindings from chain.
                         :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
-                                   ;; Keep bindings flowing - they're needed for handler's children
                                    ref-bindings bindings]
                                (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root))
                         :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
@@ -700,16 +715,19 @@
               (let [levels (get-inheritance-levels original-fn-id fn-map)
                     chain (vec (mapcat identity levels))  ; flat for set ops
                     expand-set (spec->expand-set original-fn-id spec)
-                    ;; Build bindings from ALL fns in the inheritance closure;
-                    ;; with diamond inheritance bindings can live on any branch.
-                    base-chain-bindings (build-chain-bindings levels nil args-by-fn arg-map)
-                    ;; Merge order: parent FIRST, base WINS for collisions.
-                    ;; The local fn's own/inherited bindings must override anything
-                    ;; coming from a caller's context — otherwise propagated args
-                    ;; in a deep cascade (e.g. editor-routes.item2 → editor-route)
-                    ;; would shadow a sibling fn's own binding (route.item2 →
-                    ;; method-map) when their source-id chains share an ancestor key.
-                    chain-bindings (merge parent-bindings base-chain-bindings)
+                    ;; TWO binding maps:
+                    ;; 1. display-bindings: from EXPAND-SET fns only. Used for
+                    ;;    collect-expanded-args to render values/refs. Only shows
+                    ;;    bindings from fns the user explicitly expanded.
+                    ;; 2. all-bindings: from ALL ancestors. Used for filtering —
+                    ;;    hides :unset args that are bound by non-expanded ancestors
+                    ;;    (they're not truly free, just not yet visible).
+                    display-bindings (reduce
+                                      (fn [b fid] (add-bindings-from-fn fid b args-by-fn arg-map))
+                                      {} expand-set)
+                    all-bindings (build-chain-bindings levels nil args-by-fn arg-map)
+                    ;; Merge order: parent FIRST, display WINS for collisions.
+                    chain-bindings (merge parent-bindings display-bindings)
                     ;; Determine expansion root for this node and its children:
                     ;; - If we're already inside an expansion (parent-expansion-root set),
                     ;;   keep that context to avoid merging nodes from different expansions
@@ -756,7 +774,34 @@
                 ;;    (by simulating what bindings they'll resolve)
                 ;; 2. Level-0 refs pointing to those targets are hidden at root
                 ;; 3. Level-0 refs pointing to OTHER targets are shown at root
-                (let [all-args (collect-expanded-args levels expand-set chain-bindings)
+                (let [raw-args (collect-expanded-args levels expand-set chain-bindings)
+                      ;; Filter out :unset args bound by NON-EXPANDED ancestors.
+                      ;; Uses all-bindings (every ancestor) vs display-bindings
+                      ;; (only expanded fns). An unset arg is hidden if
+                      ;; all-bindings has a binding (some ancestor sets it) but
+                      ;; display-bindings does NOT (that ancestor isn't expanded).
+                      non-expanded-bound?
+                      (fn [arg-id]
+                        (let [found-in-all
+                              (loop [sid arg-id]
+                                (when sid
+                                  (if (get all-bindings sid)
+                                    true
+                                    (when-let [src-arg (get arg-map sid)]
+                                      (recur (:source-id src-arg))))))
+                              found-in-display
+                              (loop [sid arg-id]
+                                (when sid
+                                  (if (get display-bindings sid)
+                                    true
+                                    (when-let [src-arg (get arg-map sid)]
+                                      (recur (:source-id src-arg))))))]
+                          (and found-in-all (not found-in-display))))
+                      all-args (filterv (fn [arg]
+                                          (if (= :unset (:type arg))
+                                            (not (non-expanded-bound? (:arg-id arg)))
+                                            true))
+                                        raw-args)
                       ;; Separate by type and origin
                       ancestor-refs (filter #(and (:from-ancestor %) (= (:type %) :ref)) all-args)
                       ancestor-values (filter #(and (:from-ancestor %) (= (:type %) :value)) all-args)

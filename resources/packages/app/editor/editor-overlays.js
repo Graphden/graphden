@@ -308,8 +308,8 @@ function createFnOverlay(node, container) {
         applyHoverSpec(nodeId, td, fnIdForLine, allFnsAtDepth);
       };
       line.addEventListener('mouseenter', triggerPreview);
-      // mousemove picks up where mouseenter was suppressed (after click)
       line.addEventListener('mousemove', triggerPreview);
+      line.addEventListener('mouseleave', () => restoreStyles());
       line.addEventListener('mouseleave', () => restoreStyles());
     } else if (levelInfo.isMI) {
       // Multi-fn level — each parent becomes a flex "cell" with its own
@@ -325,6 +325,14 @@ function createFnOverlay(node, container) {
 
       spansByFnId = new Map();
       const allFnsAtDepth = levelInfo.fns.map(f => f.fnId);
+      // Compute effective MI expand depth: MI depth + non-clickable followers.
+      // When auto-promoting from all MI parents, cascade through them.
+      let miEffectiveDepth = levelInfo.depth;
+      for (let k = idx + 1; k < visibleLevels.length; k++) {
+        if (!visibleLevels[k].anyClickable && !visibleLevels[k].isMI) {
+          miEffectiveDepth = visibleLevels[k].depth;
+        } else break;
+      }
       levelInfo.fns.forEach((f, i) => {
         const span = document.createElement('span');
         span.textContent = f.name;
@@ -348,20 +356,47 @@ function createFnOverlay(node, container) {
         }
         spansByFnId.set(f.fnId, { span, fn: f });
 
-        // MI per-fn click: cascade to depth-1 + partial = {this fn}
+        // Post-process: when auto-promote from MI fills the level,
+        // cascade through non-clickable followers (e.g. ring-response).
+        const cascadePromoted = (spec) => {
+          if (!spec) return spec;
+          if (spec.fullDepth === levelInfo.depth && spec.partialFns.size === 0
+              && miEffectiveDepth > levelInfo.depth) {
+            return { fullDepth: miEffectiveDepth, partialFns: new Set() };
+          }
+          return spec;
+        };
+        // MI per-fn click
         const onMouseDown = (e) => {
           e.stopPropagation();
           e.preventDefault();
-          applyClickSpec(nodeId, levelInfo.depth, f.fnId, allFnsAtDepth);
+          // Compute spec, cascade through followers if promoted
+          const raw = computeSpecAfterClick(getSpec(nodeId), levelInfo.depth, f.fnId, allFnsAtDepth);
+          const spec = cascadePromoted(raw);
+          if (spec === null) { expansionState.delete(nodeId); }
+          else { expansionState.set(nodeId, spec); }
+          suppressPreviewBriefly();
+          previewState.delete(nodeId);
+          const parts = nodeId.replace('fn-', '').split('_');
+          anchorFnId = parts[parts.length - 1];
+          renderGraph(false);
+          anchorFnId = null;
+          setTimeout(() => {
+            const el = document.elementFromPoint(lastPreviewPointerX, lastPreviewPointerY);
+            if (el) { const t = el.closest('.ancestor-line') || el; t.dispatchEvent(new MouseEvent('mousemove', {clientX: lastPreviewPointerX, clientY: lastPreviewPointerY, bubbles: true})); }
+          }, 350);
         };
         span.addEventListener('mousedown', onMouseDown);
         span.addEventListener('touchend', onMouseDown);
         const triggerSpanPreview = () => {
           if (isGrabbing || shouldSuppressPreview()) return;
-          const preview = computeSpecAfterClick(
+          const raw = computeSpecAfterClick(
             { fullDepth, partialFns }, levelInfo.depth, f.fnId, allFnsAtDepth);
+          const preview = cascadePromoted(raw);
           applyPreviewStyle(preview || { fullDepth: 0, partialFns: new Set() });
-          applyHoverSpec(nodeId, levelInfo.depth, f.fnId, allFnsAtDepth);
+          // Use effective depth so the backend render matches the cascaded spec
+          const hoverDepth = (preview && preview.fullDepth === miEffectiveDepth) ? miEffectiveDepth : levelInfo.depth;
+          applyHoverSpec(nodeId, hoverDepth, f.fnId, allFnsAtDepth);
         };
         span.addEventListener('mouseenter', triggerSpanPreview);
         span.addEventListener('mousemove', triggerSpanPreview);

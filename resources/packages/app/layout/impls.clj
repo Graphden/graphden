@@ -1320,33 +1320,36 @@
 
 
 (defn- remove-shared-from-upper-parents
-  "For each shared node, remove it from children lists of parents that should NOT place it.
+  "For each shared node, remove it from children lists of all parents except
+   the one that should place it on its horizontal branch (the 'keeper').
 
-   Algorithm:
-   1. Sort parents by column depth ASCENDING (shallowest/closest to root first)
-   2. The SHALLOWEST parent keeps the shared child (ensures reachability from root)
-   3. When depths are equal, the LATER parent in original order keeps it (for horizontal branch)
-   4. All other (deeper) parents have the shared child removed
+   Keeper selection:
+   1. If any parent is on the LOWER path to this shared node, that parent
+      keeps it. The lower path forms the horizontal branch; the shared node
+      belongs there. Upper-path parents have it removed entirely so their
+      edge simply points down to the shared node on the lower branch.
+   2. Otherwise (no path info), fall back to shallowest-parent rule:
+      sort by column depth ASC, index DESC; first wins.
 
-   This ensures:
-   - Shared node is reachable from root (shallowest parent places it)
-   - Deterministic ordering (not dependent on arbitrary edge map order)
-   - When depths equal, last parent wins (original butlast semantics for horizontal branch)
-   - Edges still exist for drawing (edges are separate from children-map)"
-  [children-map parents-map shared-nodes column-depths]
+   Edges still exist for drawing — removing from children-map only affects
+   placement, not connectivity."
+  [children-map parents-map shared-nodes column-depths path-positions]
   (reduce
     (fn [cm shared-id]
       (let [parent-ids (get parents-map shared-id [])
-            ;; Create indexed entries: [parent-id depth index]
-            ;; Sort by depth ASC (shallowest first), then by index DESC (later wins in ties)
-            indexed-parents (map-indexed (fn [idx pid]
+            ;; Try to find a parent on the lower path to this shared node
+            lower-parent (first (filter (fn [pid]
+                                          (= :lower (get path-positions pid)))
+                                        parent-ids))
+            ;; Fall back: shallowest parent (min column depth), latest index wins ties
+            fallback-keeper
+            (when-not lower-parent
+              (let [indexed (map-indexed (fn [idx pid]
                                            [pid (get column-depths pid Integer/MAX_VALUE) idx])
                                          parent-ids)
-            ;; Sort: min depth first; within same depth, max index first
-            sorted-parents (sort-by (fn [[_pid depth idx]] [depth (- idx)]) indexed-parents)
-            ;; The first entry after sorting (shallowest, or latest if same depth) is the "keeper"
-            ;; All others should have shared child removed
-            keeper (ffirst sorted-parents)
+                    sorted (sort-by (fn [[_pid depth idx]] [depth (- idx)]) indexed)]
+                (ffirst sorted)))
+            keeper (or lower-parent fallback-keeper)
             parents-to-remove (remove #(= % keeper) parent-ids)]
         (reduce
           (fn [cm2 parent-id]
@@ -1391,10 +1394,11 @@
                                               path-positions)])
                    (keys node-data-map)))
 
-        ;; Remove shared nodes from deeper parents' children lists
-        ;; Parent closest to root (min depth) keeps the shared child
+        ;; Remove shared nodes from non-keeper parents' children lists.
+        ;; Lower-path parent keeps the shared child (for horizontal branch).
         sorted-children-map (remove-shared-from-upper-parents
-                              sorted-children-map parents shared-nodes column-depths)
+                              sorted-children-map parents shared-nodes
+                              column-depths path-positions)
 
         ;; Compute column offsets: align direct parents of shared nodes
         ;; Shallower parents get shifted right so all parents end up at same column

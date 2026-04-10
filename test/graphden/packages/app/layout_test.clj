@@ -773,28 +773,21 @@
 
 
 (deftest lower-path-forms-horizontal-branch-test
-  (testing "RULE: Shallowest parent keeps shared node for reachability"
+  (testing "RULE: Lower-path parent keeps shared node (horizontal branch)"
     ;; Structure:
-    ;;   A -> B -> S (shared)
-    ;;   A -> C -> E -> S (shared)
+    ;;   A -> B -> S (shared, B is upper path)
+    ;;   A -> C -> E -> S (shared, E is lower path — bottom parent)
     ;;
     ;; B (depth 1) and E (depth 2) are parents of S.
-    ;; With "shallowest parent keeps" rule:
-    ;; - B keeps S (closer to root)
-    ;; - E loses S from children list
-    ;;
-    ;; This ensures reachability: S is always reachable from root via shallowest path.
-    ;; If deepest parent kept S, and that parent was in a disconnected subtree,
-    ;; S would not be placed.
+    ;; Lower-path parent (E) keeps S.  B (upper path) loses S from children.
+    ;; S is placed on the lower path's horizontal branch.
     ;;
     ;; Expected layout:
-    ;;   row 0: A  B  S
-    ;;   row 1:    C  E
+    ;;   row 0: A  B
+    ;;   row 1:    C  E  S
     ;;
-    ;; A, B at row 0 (horizontal branch)
-    ;; S at row 0 (first child of B, same row)
-    ;; C at row 1 (second child of A)
-    ;; E at row 1 (first child of C, same row)
+    ;; A, B at row 0 (horizontal branch, B has no children after S removed)
+    ;; C, E, S at row 1 (lower path horizontal branch)
     (let [nodes [(make-node "A") (make-node "B") (make-node "C")
                  (make-node "E") (make-node "S")]
           edges [(make-edge "A" "B") (make-edge "A" "C")
@@ -802,13 +795,13 @@
           result (layout-elements nodes edges)
           _ (is (:valid (:validation result))
                 (str "Layout should be valid: " (:validation result)))
-          a-row (:row (get-pos result "A"))
-          b-row (:row (get-pos result "B"))
+          c-row (:row (get-pos result "C"))
+          e-row (:row (get-pos result "E"))
           s-row (:row (get-pos result "S"))]
-      ;; A, B, S should all be on the same row (shallowest path horizontal branch)
-      (is (= a-row b-row s-row)
-          (str "Shallowest path A -> B -> S should be horizontal branch. "
-               "A row=" a-row ", B row=" b-row ", S row=" s-row)))))
+      ;; C, E, S should all be on the same row (lower path horizontal branch)
+      (is (= c-row e-row s-row)
+          (str "Lower path C -> E -> S should be horizontal branch. "
+               "C row=" c-row ", E row=" e-row ", S row=" s-row)))))
 
 
 (deftest upper-path-children-go-last-test
@@ -855,24 +848,21 @@
 
 
 (deftest lower-path-children-go-first-test
-  (testing "RULE: Shallowest parent keeps shared node - path-to-shared behavior"
+  (testing "RULE: Lower-path parent keeps shared node"
     ;; Structure:
-    ;;   A -> B -> S (shared, B is shallowest parent of S)
-    ;;   A -> C -> E -> S (shared, E is deeper parent of S)
+    ;;   A -> B -> S (shared, B is upper path)
+    ;;   A -> C -> E -> S (shared, E is lower path — bottom parent)
     ;;   A -> C -> X (neutral child of C)
     ;;
-    ;; With "shallowest parent keeps" rule:
-    ;; - B (depth 1) keeps S as child
-    ;; - E (depth 2) loses S from children
+    ;; Lower-path parent (E) keeps S. B (upper) loses S.
     ;;
     ;; Expected layout:
-    ;;   row 0: A  B  S
-    ;;   row 1:    C  E
+    ;;   row 0: A  B
+    ;;   row 1:    C  E  S
     ;;   row 2:       X
     ;;
-    ;; B and S on same row (B keeps S, horizontal branch)
-    ;; C and E on same row (E is first child of C)
-    ;; X below E (second child of C)
+    ;; E and S on same row (lower path horizontal branch)
+    ;; X below (other child of C)
     (let [nodes [(make-node "A") (make-node "B") (make-node "C")
                  (make-node "E") (make-node "X") (make-node "S")]
           edges [(make-edge "A" "B") (make-edge "A" "C")
@@ -888,9 +878,9 @@
           e-row (:row (get-pos result "E"))
           x-row (:row (get-pos result "X"))
           s-row (:row (get-pos result "S"))]
-      ;; A, B, S on same row (shallowest path horizontal branch)
-      (is (= a-row b-row s-row)
-          (str "A, B, S should be on same row (shallowest keeps S). "
+      ;; E and S on same row (lower path horizontal branch)
+      (is (= e-row s-row)
+          (str "E and S should be on same row (lower path keeps S). "
                "A row=" a-row ", B row=" b-row ", S row=" s-row))
       ;; C and E on same row (E is first child of C)
       (is (= c-row e-row)

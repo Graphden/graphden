@@ -375,16 +375,12 @@ function createFnOverlay(node, container) {
           const spec = cascadePromoted(raw);
           if (spec === null) { expansionState.delete(nodeId); }
           else { expansionState.set(nodeId, spec); }
-          suppressPreviewBriefly();
+          suppressPreviewOnClick();
           previewState.delete(nodeId);
           const parts = nodeId.replace('fn-', '').split('_');
           anchorFnId = parts[parts.length - 1];
           renderGraph(false);
           anchorFnId = null;
-          setTimeout(() => {
-            const el = document.elementFromPoint(lastPreviewPointerX, lastPreviewPointerY);
-            if (el) { const t = el.closest('.ancestor-line') || el; t.dispatchEvent(new MouseEvent('mousemove', {clientX: lastPreviewPointerX, clientY: lastPreviewPointerY, bubbles: true})); }
-          }, 350);
         };
         span.addEventListener('mousedown', onMouseDown);
         span.addEventListener('touchend', onMouseDown);

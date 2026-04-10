@@ -151,6 +151,9 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
 
   // Create overlays
   createNodeOverlays();
+
+  // Sync slider with actual zoom after initial fit
+  updateZoomSlider();
 }
 
 // ============================================================================
@@ -340,6 +343,7 @@ async function renderGraph(shouldFit = true) {
       updateOverlayPositions();
       if (shouldFit && cy.nodes().length > 0) {
         cy.fit(50);
+        updateZoomSlider();
       }
     });
   }

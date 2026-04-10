@@ -1,6 +1,6 @@
 // Editor State - Global variables, constants, and configuration
 // Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-10 10:00';
+const BUILD_TIMESTAMP = '2026-04-10 11:00';
 console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================
@@ -41,19 +41,20 @@ let userMovedNodes = new Set();
 // shows a "ghost" collapse-preview. We suppress preview for a brief window
 // after click so the committed state is visible. After the window, hover
 // preview works normally.
-let suppressPreviewUntil = 0;
-let lastPreviewPointerX = 0;
-let lastPreviewPointerY = 0;
-window.addEventListener('mousemove', (e) => {
-  lastPreviewPointerX = e.clientX;
-  lastPreviewPointerY = e.clientY;
-}, true);
+// After a click commits a state change, suppress hover-preview until the
+// cursor LEAVES the element. This prevents the "ghost preview" where the
+// committed expansion is immediately hidden by a reverse-preview.
+// The flag is global (survives overlay rebuild) and cleared by mouseleave.
+let suppressPreviewUntilLeave = false;
 
 function shouldSuppressPreview() {
-  return Date.now() < suppressPreviewUntil;
+  return suppressPreviewUntilLeave;
 }
-function suppressPreviewBriefly() {
-  suppressPreviewUntil = Date.now() + 300;
+function suppressPreviewOnClick() {
+  suppressPreviewUntilLeave = true;
+}
+function onPreviewLeave() {
+  suppressPreviewUntilLeave = false;
 }
 
 // ============================================================================

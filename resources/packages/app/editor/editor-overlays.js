@@ -309,8 +309,8 @@ function createFnOverlay(node, container) {
       };
       line.addEventListener('mouseenter', triggerPreview);
       line.addEventListener('mousemove', triggerPreview);
-      line.addEventListener('mouseleave', () => restoreStyles());
-      line.addEventListener('mouseleave', () => restoreStyles());
+      line.addEventListener('mouseleave', () => { onPreviewLeave(); restoreStyles(); });
+      line.addEventListener('mouseleave', () => { onPreviewLeave(); restoreStyles(); });
     } else if (levelInfo.isMI) {
       // Multi-fn level — each parent becomes a flex "cell" with its own
       // border-right (= vertical separator running from the top horizontal
@@ -400,7 +400,7 @@ function createFnOverlay(node, container) {
         };
         span.addEventListener('mouseenter', triggerSpanPreview);
         span.addEventListener('mousemove', triggerSpanPreview);
-        span.addEventListener('mouseleave', () => restoreStyles());
+        span.addEventListener('mouseleave', () => { onPreviewLeave(); restoreStyles(); });
         line.appendChild(span);
       });
     } else {
@@ -439,7 +439,7 @@ function createFnOverlay(node, container) {
       };
       line.addEventListener('mouseenter', triggerLinePreview);
       line.addEventListener('mousemove', triggerLinePreview);
-      line.addEventListener('mouseleave', () => restoreStyles());
+      line.addEventListener('mouseleave', () => { onPreviewLeave(); restoreStyles(); });
     }
 
     if (!linesByDepth.has(levelInfo.depth)) {
@@ -468,6 +468,7 @@ function createFnOverlay(node, container) {
     // 2. User is dragging (isGrabbing flag)
     // 3. Overlay was removed from DOM (happens during rebuild, mouseleave fires async)
     if (!rebuildingOverlays && !isGrabbing && overlay.isConnected) {
+      onPreviewLeave();
       clearPreview(nodeId);
     }
   });

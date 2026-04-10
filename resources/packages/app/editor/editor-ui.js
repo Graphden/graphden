@@ -169,26 +169,11 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
     expansionState.set(nodeId, newSpec);
   }
   previewState.delete(nodeId);
-  // Brief suppression so the committed state is visible before the
-  // synthetic mouseenter (from overlay rebuild) triggers a ghost preview.
-  suppressPreviewBriefly();
+  // Suppress preview until cursor leaves the element. This prevents the
+  // "ghost preview" where committed state is immediately reversed.
+  suppressPreviewOnClick();
   renderGraph(false);
   anchorFnId = null;
-
-  // After suppression ends, re-trigger preview for whatever element is
-  // under the pointer. This fires on the NEW overlay (not the stale one).
-  setTimeout(() => {
-    const el = document.elementFromPoint(lastPreviewPointerX, lastPreviewPointerY);
-    if (!el) return;
-    const target = el.closest('.ancestor-line') || el.closest('span[style*="cursor: pointer"]');
-    if (target) {
-      target.dispatchEvent(new MouseEvent('mousemove', {
-        clientX: lastPreviewPointerX,
-        clientY: lastPreviewPointerY,
-        bubbles: true
-      }));
-    }
-  }, 350);
 }
 
 /**

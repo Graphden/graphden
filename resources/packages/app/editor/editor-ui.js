@@ -101,12 +101,19 @@ function getSpec(nodeId) {
 function computeSpecAfterClick(currentSpec, depth, fnId, allFnsAtDepth) {
   if (depth <= 0) return null;
   const isMI = allFnsAtDepth && allFnsAtDepth.length > 1;
+  const fullDepth = currentSpec.fullDepth || 0;
 
   if (!isMI) {
+    // Toggle: if already expanded to this depth or deeper → collapse.
+    // Otherwise → expand to this depth.
+    if (depth <= fullDepth) {
+      const newFull = depth - 1;
+      if (newFull <= 0) return null;
+      return { fullDepth: newFull, partialFns: new Set() };
+    }
     return { fullDepth: depth, partialFns: new Set() };
   }
 
-  const fullDepth = currentSpec.fullDepth || 0;
   const partial = new Set(currentSpec.partialFns || []);
 
   // Is this fn already part of the committed expansion?
@@ -162,6 +169,11 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
     expansionState.set(nodeId, newSpec);
   }
   previewState.delete(nodeId);
+  // Brief suppression so the committed state is visible before the
+  // synthetic mouseenter (from overlay rebuild) triggers a ghost preview.
+  // The user's next mouse movement over the overlay will trigger the
+  // preview via mousemove handlers (see editor-overlays.js).
+  suppressPreviewBriefly();
   renderGraph(false);
   anchorFnId = null;
 }
@@ -190,11 +202,9 @@ function applyHoverSpec(nodeId, depth, fnId, allFnsAtDepth) {
   previewDebounceTimer = setTimeout(() => {
     const parts = nodeId.replace('fn-', '').split('_');
     anchorFnId = parts[parts.length - 1];
-    if (newSpec === null) {
-      previewState.delete(nodeId);
-    } else {
-      previewState.set(nodeId, newSpec);
-    }
+    // null spec means "collapse everything" — use {fullDepth:0} so the
+    // preview render shows the collapsed graph (not the committed state).
+    previewState.set(nodeId, newSpec || { fullDepth: 0, partialFns: new Set() });
     renderGraph(false);
     anchorFnId = null;
   }, PREVIEW_DEBOUNCE_MS);

@@ -1,6 +1,6 @@
 // Editor State - Global variables, constants, and configuration
 // Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-10 07:30';
+const BUILD_TIMESTAMP = '2026-04-10 09:00';
 console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================
@@ -35,21 +35,25 @@ let suppressEdgeWarnings = false; // Suppresses Cytoscape edge warnings during d
 // User-moved nodes (won't be auto-positioned by layout)
 let userMovedNodes = new Set();
 
-// Pointer position tracker for hover-preview suppression — see comment in
-// editor-overlays.js mouseenter handler. After a click, the overlay is
-// rebuilt and a synthetic mouseenter fires on the new line at the SAME
-// pointer position. We compare the event's clientX/Y against the last
-// position that triggered a preview; if unchanged, the user hasn't really
-// moved the mouse and we skip the preview.
-let lastPreviewPointerX = -1;
-let lastPreviewPointerY = -1;
+// Hover-preview suppression after click. After a click commits a state
+// change, the overlay rebuilds and a synthetic mouseenter fires on the new
+// line at the SAME pointer position. Without suppression, this immediately
+// shows a "ghost" collapse-preview. We suppress preview for a brief window
+// after click so the committed state is visible. After the window, hover
+// preview works normally.
+let suppressPreviewUntil = 0;
+let lastPreviewPointerX = 0;
+let lastPreviewPointerY = 0;
+window.addEventListener('mousemove', (e) => {
+  lastPreviewPointerX = e.clientX;
+  lastPreviewPointerY = e.clientY;
+}, true);
 
-function pointerMovedSinceLastPreview(clientX, clientY) {
-  return clientX !== lastPreviewPointerX || clientY !== lastPreviewPointerY;
+function shouldSuppressPreview() {
+  return Date.now() < suppressPreviewUntil;
 }
-function recordPreviewPointer(clientX, clientY) {
-  lastPreviewPointerX = clientX;
-  lastPreviewPointerY = clientY;
+function suppressPreviewBriefly() {
+  suppressPreviewUntil = Date.now() + 300;
 }
 
 // ============================================================================

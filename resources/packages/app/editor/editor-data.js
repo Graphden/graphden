@@ -135,7 +135,7 @@ function buildAncestorLevels(levels) {
         fnId,
         name: (fn && fn.name) || '(anonymous)',
         setsArgs: fnSetsArgs(fnId),
-        isClickable: fnHasRefArgs(fnId)  // has ref-id args → produces nodes
+        isClickable: fnSetsArgs(fnId)  // has value or ref-id → produces new nodes on expand
       };
     });
     return {
@@ -170,23 +170,34 @@ function buildAncestorLevels(levels) {
   });
   enriched.forEach(lv => { lv.groupMaxDepth = maxDepthByGroup.get(lv.groupId); });
 
-  // Compute visual block assignment.  A "block" is a contiguous set of
-  // levels that share a visual style.  Block 0 is always the root (black
-  // bg).  Each clickable level starts a new block.  Non-clickable levels
-  // join the predecessor's block, inheriting its bg.
+  // Compute visual block assignment and column-below-MI flag.
   //
-  // blockIsRoot: true for levels that belong to the root's block (should
-  // be rendered with black bg + white text).
+  // blockIsRoot: true for levels that belong to the root's black-bg block.
+  // followsMI: index of the MI level this non-clickable level sits below
+  //            (for column-split background), or -1 if not applicable.
   let currentBlockIsRoot = true;
+  let lastMIIdx = -1;
   enriched.forEach((lv, idx) => {
     if (idx === 0) {
       lv.blockIsRoot = true;
     } else {
-      if (lv.anyClickable || lv.isMI) {
-        // Clickable level (or MI) → leaves the root block
+      // Only a CLICKABLE level breaks out of the root block.
+      // MI with all-non-clickable parents stays in root block.
+      if (lv.anyClickable) {
         currentBlockIsRoot = false;
       }
       lv.blockIsRoot = currentBlockIsRoot;
+    }
+    // Track column-below-MI: a non-clickable, non-MI level immediately
+    // after (or chaining from) an MI level gets column-split rendering.
+    if (lv.isMI) {
+      lastMIIdx = idx;
+      lv.followsMI = -1;
+    } else if (!lv.anyClickable && lastMIIdx >= 0) {
+      lv.followsMI = lastMIIdx;  // index of the MI level to inherit columns from
+    } else {
+      lv.followsMI = -1;
+      lastMIIdx = -1;  // clickable level breaks the MI column chain
     }
   });
 

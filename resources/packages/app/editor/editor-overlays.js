@@ -157,40 +157,49 @@ function createFnOverlay(node, container) {
 
   // Apply styles for a given spec. Handles both root-block styling and
   // expansion highlighting.
+  // Determine the visual bg for an MI parent given the current spec.
+  const miFnBg = (miFn, miDepth, isRoot, sFull, sPartial) => {
+    const fnInRootBlock = isRoot && !miFn.isClickable;
+    const highlighted = fnIsHighlighted(miDepth, miFn.fnId, sFull, sPartial);
+    if (fnInRootBlock) return { bg: ROOT_BG, fg: ROOT_FG };
+    if (highlighted)   return { bg: HIGHLIGHT_BG, fg: '' };
+    return { bg: '', fg: '' };
+  };
+
   const paintWithSpec = (sFull, sPartial) => {
-    linesByDepth.forEach(({ line, spansByFnId, levelInfo }, depth) => {
+    linesByDepth.forEach(({ line, spansByFnId, levelInfo, colDivs, textOverlay }, depth) => {
       if (!levelInfo) return;
       const isRoot = levelInfo.blockIsRoot;
 
-      if (spansByFnId) {
+      if (colDivs) {
+        // Column-below-MI: paint each column with its MI parent's bg
+        const miLevel = visibleLevels[levelInfo.followsMI];
+        const miIsRoot = miLevel ? miLevel.blockIsRoot : false;
+        colDivs.forEach(({ col, miFn }) => {
+          const { bg, fg } = miFnBg(miFn, miLevel.depth, miIsRoot, sFull, sPartial);
+          col.style.background = bg;
+        });
+        // Text overlay: use the color from the first column (or black if mixed)
+        const firstBg = miFnBg(colDivs[0].miFn, miLevel.depth, miIsRoot, sFull, sPartial);
+        textOverlay.style.color = firstBg.bg === ROOT_BG ? ROOT_FG : '';
+        textOverlay.style.fontWeight = isRoot ? 'bold' : 'normal';
+      } else if (spansByFnId) {
         // MI line: per-fn styling
         line.style.fontWeight = 'normal';
         line.style.background = '';
         line.style.color = '';
         spansByFnId.forEach(({ span, fn }, fnId) => {
-          const highlighted = fnIsHighlighted(depth, fnId, sFull, sPartial);
-          // Non-clickable MI parents that are in the root block
-          const fnInRootBlock = isRoot && !fn.isClickable;
-          if (fnInRootBlock) {
-            span.style.background = ROOT_BG;
-            span.style.color = ROOT_FG;
-            span.style.fontWeight = 'bold';
-          } else if (highlighted) {
-            span.style.background = HIGHLIGHT_BG;
-            span.style.color = '';
-            span.style.fontWeight = 'bold';
-          } else {
-            span.style.background = '';
-            span.style.color = '';
-            span.style.fontWeight = 'normal';
-          }
+          const { bg, fg } = miFnBg(fn, depth, isRoot, sFull, sPartial);
+          span.style.background = bg;
+          span.style.color = fg;
+          span.style.fontWeight = (bg === ROOT_BG || fnIsHighlighted(depth, fnId, sFull, sPartial))
+            ? 'bold' : 'normal';
         });
       } else {
         // Single-fn line
         const fn = levelInfo.fns[0];
         const highlighted = fn && fnIsHighlighted(depth, fn.fnId, sFull, sPartial);
         if (isRoot) {
-          // Root block: black bg, white text
           line.style.background = ROOT_BG;
           line.style.color = ROOT_FG;
           line.style.fontWeight = 'bold';
@@ -219,11 +228,14 @@ function createFnOverlay(node, container) {
     line.dataset.level = levelInfo.depth;
     line.dataset.groupId = levelInfo.groupId;
 
-    // No separator if next level is in the same group
+    // No separator if next level is in the same group, OR if the next level
+    // is a column-below-MI (the vertical borders continue, horizontal removed)
     const nextLevel = visibleLevels[idx + 1];
     const isLastInGroup = !nextLevel || nextLevel.groupId !== levelInfo.groupId;
     const isLast = idx === visibleLevels.length - 1;
-    const lineBorderBottom = (isLast || !isLastInGroup) ? 'none' : '1px solid #eee';
+    const nextIsColumnBelow = nextLevel && nextLevel.followsMI >= 0;
+    const lineBorderBottom = (isLast || !isLastInGroup || nextIsColumnBelow)
+      ? 'none' : '1px solid #eee';
     Object.assign(line.style, {
       borderBottom: lineBorderBottom,
       touchAction: 'none',
@@ -232,7 +244,74 @@ function createFnOverlay(node, container) {
     });
 
     let spansByFnId = null;
-    if (levelInfo.isMI) {
+    const miLevelAbove = levelInfo.followsMI >= 0 ? visibleLevels[levelInfo.followsMI] : null;
+
+    if (miLevelAbove && !levelInfo.isMI) {
+      // Column-below-MI: non-clickable level below MI parents.
+      // Render as flex columns matching the MI parents above, with vertical
+      // border continuing down and per-column bg inheriting the MI parent's
+      // visual state. The text is positioned absolutely over the columns.
+      line.style.display = 'flex';
+      line.style.padding = '0';
+      line.style.position = 'relative';
+      // The fn name floats over the column backgrounds
+      const textOverlay = document.createElement('span');
+      textOverlay.textContent = levelInfo.fns[0].name;
+      Object.assign(textOverlay.style, {
+        position: 'absolute', left: '0', right: '0', top: '4px',
+        textAlign: 'center',
+        pointerEvents: 'none', zIndex: '1'
+      });
+      // Create invisible column divs for bg + vertical border
+      const colDivs = [];
+      miLevelAbove.fns.forEach((miFn, i) => {
+        const col = document.createElement('div');
+        col.style.flex = '1 1 0';
+        col.style.minWidth = '0';
+        col.style.padding = '4px 8px';
+        col.innerHTML = '&nbsp;';  // non-empty so it has height
+        // NO visible border — columns are invisible, only for per-column
+        // background behavior (left half follows left MI parent's state,
+        // right half follows right MI parent's state).
+        colDivs.push({ col, miFn });
+        line.appendChild(col);
+      });
+      line.appendChild(textOverlay);
+      // Store column info for paintWithSpec
+      linesByDepth.set(levelInfo.depth, { line, spansByFnId: null, levelInfo, colDivs, textOverlay });
+
+      // Column-below-MI click/hover: when expanding, use the group's max
+      // depth (cascade through MI + this level). When collapsing (already
+      // expanded), collapse the WHOLE group by targeting the MI level's
+      // depth — so toggle goes to miDepth - 1, removing MI too.
+      line.style.cursor = 'pointer';
+      const fnIdForLine = levelInfo.fns[0].fnId;
+      const allFnsAtDepth = [fnIdForLine];
+      const expandDepth = levelInfo.groupMaxDepth;
+      const collapseDepth = miLevelAbove.depth;  // collapse whole group
+      const getTargetDepth = () => expandDepth <= fullDepth ? collapseDepth : expandDepth;
+      const onMouseDown = (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        const currentFull = (expansionState.get(nodeId) || {}).fullDepth || 0;
+        const td = expandDepth <= currentFull ? collapseDepth : expandDepth;
+        applyClickSpec(nodeId, td, fnIdForLine, allFnsAtDepth);
+      };
+      line.addEventListener('mousedown', onMouseDown);
+      line.addEventListener('touchend', onMouseDown);
+      const triggerPreview = () => {
+        if (isGrabbing || shouldSuppressPreview()) return;
+        const td = getTargetDepth();
+        const preview = computeSpecAfterClick(
+          { fullDepth, partialFns }, td, fnIdForLine, allFnsAtDepth);
+        applyPreviewStyle(preview || { fullDepth: 0, partialFns: new Set() });
+        applyHoverSpec(nodeId, td, fnIdForLine, allFnsAtDepth);
+      };
+      line.addEventListener('mouseenter', triggerPreview);
+      // mousemove picks up where mouseenter was suppressed (after click)
+      line.addEventListener('mousemove', triggerPreview);
+      line.addEventListener('mouseleave', () => restoreStyles());
+    } else if (levelInfo.isMI) {
       // Multi-fn level — each parent becomes a flex "cell" with its own
       // border-right (= vertical separator running from the top horizontal
       // line to the bottom one). Hovering fills the entire cell area, not
@@ -253,6 +332,7 @@ function createFnOverlay(node, container) {
         span.style.padding = '4px 8px';
         span.style.flex = '1 1 0';
         span.style.minWidth = '0';
+        span.style.textAlign = 'center';
         if (i < levelInfo.fns.length - 1) {
           span.style.borderRight = '1px solid #eee';
         }
@@ -276,21 +356,22 @@ function createFnOverlay(node, container) {
         };
         span.addEventListener('mousedown', onMouseDown);
         span.addEventListener('touchend', onMouseDown);
-        span.addEventListener('mouseenter', (e) => {
-          if (isGrabbing) return;
-          if (!pointerMovedSinceLastPreview(e.clientX, e.clientY)) return;
-          recordPreviewPointer(e.clientX, e.clientY);
+        const triggerSpanPreview = () => {
+          if (isGrabbing || shouldSuppressPreview()) return;
           const preview = computeSpecAfterClick(
             { fullDepth, partialFns }, levelInfo.depth, f.fnId, allFnsAtDepth);
-          applyPreviewStyle(preview);
+          applyPreviewStyle(preview || { fullDepth: 0, partialFns: new Set() });
           applyHoverSpec(nodeId, levelInfo.depth, f.fnId, allFnsAtDepth);
-        });
+        };
+        span.addEventListener('mouseenter', triggerSpanPreview);
+        span.addEventListener('mousemove', triggerSpanPreview);
         span.addEventListener('mouseleave', () => restoreStyles());
         line.appendChild(span);
       });
     } else {
       // Non-MI line: padding on the line itself
       line.style.padding = '4px 8px';
+      line.style.textAlign = 'center';
       // Single-fn level — whole-line click cascading to groupMaxDepth
       // (so empty grouped levels expand together).
       line.style.cursor = 'pointer';
@@ -314,21 +395,28 @@ function createFnOverlay(node, container) {
       };
       line.addEventListener('mousedown', onMouseDown);
       line.addEventListener('touchend', onMouseDown);
-      line.addEventListener('mouseenter', (e) => {
-        if (isGrabbing) return;
-        if (!pointerMovedSinceLastPreview(e.clientX, e.clientY)) return;
-        recordPreviewPointer(e.clientX, e.clientY);
+      const triggerLinePreview = () => {
+        if (isGrabbing || shouldSuppressPreview()) return;
         const preview = computeSpecAfterClick(
           { fullDepth, partialFns }, targetDepth, fnIdForLine, allFnsAtDepth);
-        applyPreviewStyle(preview);
+        applyPreviewStyle(preview || { fullDepth: 0, partialFns: new Set() });
         applyHoverSpec(nodeId, targetDepth, fnIdForLine, allFnsAtDepth);
-      });
+      };
+      line.addEventListener('mouseenter', triggerLinePreview);
+      line.addEventListener('mousemove', triggerLinePreview);
       line.addEventListener('mouseleave', () => restoreStyles());
     }
 
-    linesByDepth.set(levelInfo.depth, { line, spansByFnId, levelInfo });
+    if (!linesByDepth.has(levelInfo.depth)) {
+      linesByDepth.set(levelInfo.depth, { line, spansByFnId, levelInfo });
+    }
     overlay.appendChild(line);
   });
+
+  // Paint all lines/columns with the committed state. This is needed
+  // because column-below-MI divs don't set their initial bg in the
+  // constructor — it's computed dynamically from the MI parents' state.
+  restoreStyles();
 
   if (ancestorLevels.length > MAX_VISIBLE_ANCESTORS + 1) {
     const more = document.createElement('div');

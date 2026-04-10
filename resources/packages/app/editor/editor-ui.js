@@ -241,16 +241,7 @@ function clearPreviewState() {
 // NAVIGATION CONTROLS
 // ============================================================================
 
-const PAN_STEP = 150;
 const ZOOM_STEP = 0.15;
-
-/** Pan the graph by (dx, dy) in screen units. */
-function navPan(dx, dy) {
-  if (!cy) return;
-  const pan = cy.pan();
-  cy.pan({ x: pan.x - dx * PAN_STEP, y: pan.y - dy * PAN_STEP });
-  updateOverlayPositions();
-}
 
 /** Zoom in (dir=1) or out (dir=-1) relative to viewport center. */
 function navZoom(dir) {
@@ -275,10 +266,33 @@ function updateZoomSlider() {
   if (slider && cy) slider.value = Math.round(cy.zoom() * 100);
 }
 
+/** Reset zoom to fit all nodes in viewport. */
+function navResetZoom() {
+  if (!cy || cy.nodes().length === 0) return;
+  cy.fit(50);
+  updateOverlayPositions();
+  updateZoomSlider();
+}
+
+/** Pan to center the root node in the viewport. */
+function navGoToRoot() {
+  if (!cy) return;
+  // Root = node with selectedFnId as originalFnId
+  let rootNode = null;
+  cy.nodes().forEach(n => {
+    if (n.data('isRoot')) rootNode = n;
+  });
+  if (!rootNode) rootNode = cy.nodes().first();
+  if (rootNode && rootNode.length) {
+    cy.animate({ center: { eles: rootNode }, duration: 200 });
+    setTimeout(() => { updateOverlayPositions(); updateZoomSlider(); }, 250);
+  }
+}
+
 /** Reset all user-moved nodes to their layout positions. */
-function navReset() {
+function navResetPositions() {
   if (!cy) return;
   userMovedNodes.clear();
   savedUserPositions.clear();
-  renderGraph(true);  // shouldFit=true → re-fits the viewport
+  renderGraph(false);
 }

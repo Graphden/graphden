@@ -53,18 +53,20 @@
     ;; Graph container
     [:div {:id "graph-container"}
      [:div {:id "cy"}]
-     ;; Navigation controls (map-like)
+     ;; Navigation controls
      [:div {:id "nav-controls"}
-      [:button {:class "nav-btn nav-up" :onclick "navPan(0,-1)" :title "Pan up"} "▲"]
-      [:button {:class "nav-btn nav-left" :onclick "navPan(-1,0)" :title "Pan left"} "◀"]
-      [:button {:class "nav-btn nav-right" :onclick "navPan(1,0)" :title "Pan right"} "▶"]
-      [:button {:class "nav-btn nav-down" :onclick "navPan(0,1)" :title "Pan down"} "▼"]
-      [:div {:class "nav-zoom"}
+      ;; Zoom slider (vertical): + on top, slider, − on bottom
+      [:div {:class "nav-zoom-col"}
        [:button {:class "nav-btn" :onclick "navZoom(1)" :title "Zoom in"} "+"]
        [:input {:id "zoom-slider" :type "range" :min "10" :max "300" :value "100"
+                :orient "vertical"
                 :oninput "navZoomTo(this.value/100)" :title "Zoom"}]
        [:button {:class "nav-btn" :onclick "navZoom(-1)" :title "Zoom out"} "−"]]
-      [:button {:class "nav-btn nav-reset" :onclick "navReset()" :title "Reset node positions"} "⟲"]]]]])
+      ;; Bottom row: [go to root] [reset positions] [reset zoom]
+      [:div {:class "nav-bottom-row"}
+       [:button {:class "nav-btn" :onclick "navGoToRoot()" :title "Go to root node"} "⌂"]
+       [:button {:class "nav-btn" :onclick "navResetPositions()" :title "Reset all node positions"} "⟲"]
+       [:button {:class "nav-btn" :onclick "navResetZoom()" :title "Reset zoom"} "⊙"]]]]]])
 
 
 (defn editor-style-element

@@ -12,26 +12,125 @@ const PREVIEW_DEBOUNCE_MS = 100;
 // SIDEBAR / ENTITY LIST
 // ============================================================================
 
+// Expanded namespace state (persisted across updateEntityList calls).
+// By default all namespaces are collapsed; only explicitly opened ones are expanded.
+let expandedNamespaces = new Set();
+
 /**
- * Update the entity list in sidebar
+ * Build a tree from fns grouped by namespace path.
+ * Returns: { children: Map<string, subtree>, fns: [fn, ...] }
+ */
+function buildNsTree(data) {
+  const root = { children: new Map(), fns: [] };
+
+  (data.fns || []).forEach(fn => {
+    const qname = getQualifiedFnName(fn);
+    const parts = qname.split('.');
+    const fnName = parts.pop();
+    let node = root;
+    for (const part of parts) {
+      if (!node.children.has(part)) {
+        node.children.set(part, { children: new Map(), fns: [] });
+      }
+      node = node.children.get(part);
+    }
+    node.fns.push({ ...fn, displayName: fnName });
+  });
+
+  return root;
+}
+
+/**
+ * Render a namespace tree node recursively into the container.
+ */
+function renderNsNode(container, name, node, path) {
+  const nsPath = path ? path + '.' + name : name;
+  const hasFns = node.fns.length > 0;
+  const hasChildren = node.children.size > 0;
+  const isCollapsed = !expandedNamespaces.has(nsPath);
+
+  // Namespace header
+  const header = document.createElement('div');
+  header.className = 'ns-header';
+  header.dataset.nsPath = nsPath;
+
+  const arrow = document.createElement('span');
+  arrow.className = 'ns-arrow' + (isCollapsed ? ' collapsed' : '');
+  arrow.textContent = isCollapsed ? '\u25B6' : '\u25BC';
+  header.appendChild(arrow);
+
+  const label = document.createElement('span');
+  label.className = 'ns-label';
+  label.textContent = name;
+  header.appendChild(label);
+
+  header.onclick = (e) => {
+    e.stopPropagation();
+    if (isCollapsed) {
+      expandedNamespaces.add(nsPath);
+    } else {
+      expandedNamespaces.delete(nsPath);
+    }
+    updateEntityList(graphData);
+  };
+
+  container.appendChild(header);
+
+  if (isCollapsed) return;
+
+  // Child namespaces (sorted)
+  const childGroup = document.createElement('div');
+  childGroup.className = 'ns-children';
+
+  const sortedChildren = [...node.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [childName, childNode] of sortedChildren) {
+    renderNsNode(childGroup, childName, childNode, nsPath);
+  }
+
+  // Fn items (sorted)
+  const sortedFns = [...node.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  for (const fn of sortedFns) {
+    const item = document.createElement('div');
+    item.className = 'entity-item';
+    if (fn.id === selectedFnId) item.className += ' selected';
+    item.dataset.fnId = fn.id;
+    item.innerHTML = '<span class="name">' + fn.displayName + '</span>';
+    item.onclick = () => selectFn(fn.id);
+    childGroup.appendChild(item);
+  }
+
+  container.appendChild(childGroup);
+}
+
+/**
+ * Update the entity list in sidebar as a namespace tree
  */
 function updateEntityList(data) {
   const list = document.getElementById('entity-list');
   list.innerHTML = '';
 
-  (data.fns || []).forEach(fn => {
-    const li = document.createElement('li');
-    li.className = 'entity-item';
-    if (fn.id === selectedFnId) li.className += ' selected';
-    li.dataset.fnId = fn.id;
-    const qname = getQualifiedFnName(fn);
-    li.innerHTML = '<div class="name">' + qname + '</div>';
-    li.onclick = () => selectFn(fn.id);
-    list.appendChild(li);
-  });
+  const tree = buildNsTree(data);
+
+  // Render top-level namespaces (sorted)
+  const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  for (const [name, node] of sortedNs) {
+    renderNsNode(list, name, node, '');
+  }
+
+  // Top-level fns without namespace
+  const sortedFns = [...tree.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
+  for (const fn of sortedFns) {
+    const item = document.createElement('div');
+    item.className = 'entity-item';
+    if (fn.id === selectedFnId) item.className += ' selected';
+    item.dataset.fnId = fn.id;
+    item.innerHTML = '<span class="name">' + fn.displayName + '</span>';
+    item.onclick = () => selectFn(fn.id);
+    list.appendChild(item);
+  }
 
   if (list.children.length === 0) {
-    list.innerHTML = '<li class="loading">No functions found</li>';
+    list.innerHTML = '<div class="loading">No functions found</div>';
   }
 }
 
@@ -48,11 +147,25 @@ function selectFn(fnId, updateHistory = true) {
   previewState.clear();
   userMovedNodes.clear();
 
-  document.querySelectorAll('.entity-item').forEach(el => el.classList.remove('selected'));
-  const item = document.querySelector('[data-fn-id="' + fnId + '"]');
-  if (item) item.classList.add('selected');
-
+  // Ensure the fn's namespace is expanded in the sidebar tree
   const fn = lookups.fnMap.get(fnId);
+  if (fn) {
+    const qname = getQualifiedFnName(fn);
+    const parts = qname.split('.');
+    parts.pop(); // remove fn name
+    let nsPath = '';
+    for (const part of parts) {
+      nsPath = nsPath ? nsPath + '.' + part : part;
+      expandedNamespaces.add(nsPath);
+    }
+  }
+
+  updateEntityList(graphData);
+
+  // Scroll selected item into view
+  const item = document.querySelector('[data-fn-id="' + fnId + '"]');
+  if (item) item.scrollIntoView({ block: 'nearest' });
+
   if (fn && updateHistory) {
     window.history.pushState(null, '', '#' + getQualifiedFnName(fn));
   }

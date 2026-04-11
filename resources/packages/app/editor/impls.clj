@@ -49,6 +49,10 @@
     [:div {:id "side-menu"}
      [:div {:class "menu-header"}
       [:h2 "Graphden"]]
+     [:div {:id "search-bar"}
+      [:input {:id "search-input" :type "text" :placeholder "Filter..."
+               :oninput "onSearchInput(this.value)"}]
+      [:button {:id "search-clear" :onclick "clearSearch()"} "\u00D7"]]
      [:div {:id "entity-list"}]]
     ;; Graph container
     [:div {:id "graph-container"}

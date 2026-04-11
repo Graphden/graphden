@@ -16,6 +16,9 @@ const PREVIEW_DEBOUNCE_MS = 100;
 // By default all namespaces are collapsed; only explicitly opened ones are expanded.
 let expandedNamespaces = new Set();
 
+// Current search/filter text (lowercase)
+let searchFilter = '';
+
 /**
  * Build a tree from fns grouped by namespace path.
  * Returns: { children: Map<string, subtree>, fns: [fn, ...] }
@@ -41,12 +44,40 @@ function buildNsTree(data) {
 }
 
 /**
+ * Filter a tree node, keeping only branches that contain matches.
+ * A fn matches if its displayName contains the filter.
+ * A ns matches if its name contains the filter OR any descendant matches.
+ * When a ns name itself matches, all its descendants are included.
+ * Returns null if nothing matches.
+ */
+function filterNsNode(node, filter, nsName) {
+  const nsMatches = nsName && nsName.toLowerCase().includes(filter);
+
+  // If the namespace name matches, include the entire subtree unfiltered
+  if (nsMatches) return node;
+
+  // Filter children recursively
+  const filteredChildren = new Map();
+  for (const [childName, childNode] of node.children) {
+    const filtered = filterNsNode(childNode, filter, childName);
+    if (filtered) filteredChildren.set(childName, filtered);
+  }
+
+  // Filter fns
+  const filteredFns = node.fns.filter(fn =>
+    fn.displayName.toLowerCase().includes(filter)
+  );
+
+  if (filteredChildren.size === 0 && filteredFns.length === 0) return null;
+
+  return { children: filteredChildren, fns: filteredFns };
+}
+
+/**
  * Render a namespace tree node recursively into the container.
  */
 function renderNsNode(container, name, node, path) {
   const nsPath = path ? path + '.' + name : name;
-  const hasFns = node.fns.length > 0;
-  const hasChildren = node.children.size > 0;
   const isCollapsed = !expandedNamespaces.has(nsPath);
 
   // Namespace header
@@ -103,13 +134,33 @@ function renderNsNode(container, name, node, path) {
 }
 
 /**
+ * Search input handler
+ */
+function onSearchInput(value) {
+  searchFilter = value.trim().toLowerCase();
+  updateEntityList(graphData);
+}
+
+function clearSearch() {
+  searchFilter = '';
+  const input = document.getElementById('search-input');
+  if (input) input.value = '';
+  updateEntityList(graphData);
+}
+
+/**
  * Update the entity list in sidebar as a namespace tree
  */
 function updateEntityList(data) {
   const list = document.getElementById('entity-list');
   list.innerHTML = '';
 
-  const tree = buildNsTree(data);
+  let tree = buildNsTree(data);
+
+  // Apply search filter
+  if (searchFilter) {
+    tree = filterNsNode(tree, searchFilter, null) || { children: new Map(), fns: [] };
+  }
 
   // Render top-level namespaces (sorted)
   const sortedNs = [...tree.children.entries()].sort((a, b) => a[0].localeCompare(b[0]));
@@ -130,7 +181,7 @@ function updateEntityList(data) {
   }
 
   if (list.children.length === 0) {
-    list.innerHTML = '<div class="loading">No functions found</div>';
+    list.innerHTML = '<div class="loading">No matches</div>';
   }
 }
 

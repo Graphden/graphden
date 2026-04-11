@@ -277,7 +277,7 @@
                      (assoc-in [:db/postgres :jdbc-url] jdbc-url))
           system (ig/init config [:db/schema :db/postgres :db/versioned :exec/base-fns])]
       (try
-        (is (= :registered (:exec/base-fns system)))
+        (is (= :registered (:status (:exec/base-fns system))))
         (finally
           (ig/halt! system))))))
 

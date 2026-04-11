@@ -20,8 +20,8 @@
 
 
 (deftest entities-test
-  (testing "schema contains only fn and arg entities"
-    (is (= #{:fn :arg}
+  (testing "schema contains ns, fn, and arg entities"
+    (is (= #{:ns :fn :arg}
            (set (ds/entities schema))))))
 
 

@@ -1,6 +1,9 @@
 ;; HTTP server base functions using http-kit
 ;; http-server, http-stop
 
+
+{:namespace "web.http"
+ :fns
 [{:name :http-server
   :args {:handler :any  ; Receives Clojure fn from router
          :port :int}
@@ -8,4 +11,4 @@
 
  {:name :http-stop
   :args {:server :any}
-  :return-type :any}]
+  :return-type :any}]}

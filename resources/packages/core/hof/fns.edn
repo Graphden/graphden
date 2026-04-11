@@ -1,6 +1,9 @@
 ;; Higher-order functions
 ;; Functions with :fn type args require special handling by loader
 
+
+{:namespace "core.hof"
+ :fns
 [{:name :map
   :args {:func :fn
          :coll {:type :jsonb :required false}}
@@ -53,4 +56,4 @@
          :reducer :fn
          :init :any
          :coll :jsonb}
-  :return-type :any}]
+  :return-type :any}]}

@@ -24,7 +24,8 @@ function updateEntityList(data) {
     li.className = 'entity-item';
     if (fn.id === selectedFnId) li.className += ' selected';
     li.dataset.fnId = fn.id;
-    li.innerHTML = '<div class="name">' + fn.name + '</div>';
+    const qname = getQualifiedFnName(fn);
+    li.innerHTML = '<div class="name">' + qname + '</div>';
     li.onclick = () => selectFn(fn.id);
     list.appendChild(li);
   });
@@ -53,7 +54,7 @@ function selectFn(fnId, updateHistory = true) {
 
   const fn = lookups.fnMap.get(fnId);
   if (fn && updateHistory) {
-    window.history.pushState(null, '', '#' + fn.name);
+    window.history.pushState(null, '', '#' + getQualifiedFnName(fn));
   }
 
   renderGraph(true);
@@ -63,7 +64,12 @@ function selectFn(fnId, updateHistory = true) {
  * Select a function by name
  */
 function selectFnByName(name, updateHistory = true) {
-  const fn = (graphData.fns || []).find(f => f.name === name);
+  // Try exact simple name match first
+  let fn = (graphData.fns || []).find(f => f.name === name);
+  // Try qualified name match (e.g. "core.arithmetic.add")
+  if (!fn && lookups) {
+    fn = (graphData.fns || []).find(f => getQualifiedFnName(f) === name);
+  }
   if (fn) selectFn(fn.id, updateHistory);
 }
 

@@ -1,6 +1,9 @@
 ;; Storage CRUD base functions for web UI
 ;; Context-aware functions (marked with :ctx true) require storage in execution context
 
+
+{:namespace "web.crud"
+ :fns
 [;; Query functions (context-aware)
  {:name :list-entities
   :args {:entity-type :text
@@ -172,4 +175,4 @@
  ;; Uses :make-html-action-handler to wrap :process-delete-entity
  {:name :delete-entity-api-handler
   :parent :make-html-action-handler
-  :args {:action-fn :process-delete-entity}}]
+  :args {:action-fn :process-delete-entity}}]}

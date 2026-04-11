@@ -107,11 +107,13 @@
 
 (defmethod ig/init-key :exec/base-fns [_ {:keys [storage packages]}]
   (log/info "Registering base functions...")
-  (let [base-fn-defs (:base-fn-defs packages)]
+  (let [base-fn-defs (:base-fn-defs packages)
+        ;; Sync namespace entities first (creates ns hierarchy in DB)
+        ns-id-map (pkg/sync-namespaces! storage (:namespaces packages))]
     (registry/register-base-fns! base-fn-defs)
-    (registry/sync-defs-to-storage! storage base-fn-defs)
+    (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map)
     (log/info "Base functions registered:" (count base-fn-defs))
-    :registered))
+    {:status :registered :ns-id-map ns-id-map}))
 
 
 ;; No halt needed - registry is global state
@@ -121,10 +123,11 @@
 ;; Fn Entities
 ;; =============================================================================
 
-(defmethod ig/init-key :exec/fn-entities [_ {:keys [storage packages]}]
+(defmethod ig/init-key :exec/fn-entities [_ {:keys [storage packages base-fns]}]
   (log/info "Creating fn entities...")
   (let [fn-defs (:fn-defs packages)
-        fns (fn-composition/sync-fns-to-storage! storage fn-defs)]
+        ns-id-map (or (:ns-id-map base-fns) {})
+        fns (fn-composition/sync-fns-to-storage! storage fn-defs ns-id-map)]
     (log/info "Fn entities created:" (count fns))
     fns))
 

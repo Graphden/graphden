@@ -12,6 +12,9 @@
 ;;   POST /api/graph/layout (JSON)
 ;;   DELETE /api/entities/:type/:id (JSON)
 
+
+{:namespace "app.server"
+ :fns
 [;; =============================================================================
  ;; HEALTH ROUTE (Dynamic JSON)
  ;; =============================================================================
@@ -85,4 +88,4 @@
  {:name :web-server
   :parent :http-server
   :args {:handler :router-fn
-         :port 8080}}]
+         :port 8080}}]}

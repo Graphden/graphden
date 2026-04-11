@@ -1,6 +1,9 @@
 ;; System information and Ring response primitives
 ;; ring-response, make-handler, to-json-string, jvm-info, current-time-ms
 
+
+{:namespace "core.system"
+ :fns
 [{:name :ring-response
   :args {:status :int
          :headers :jsonb
@@ -79,4 +82,4 @@
  ;; Read file from classpath resources
  {:name :read-resource
   :args {:path :text}
-  :return-type :text}]
+  :return-type :text}]}

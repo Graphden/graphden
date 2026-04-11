@@ -23,7 +23,8 @@
 
  :exec/fn-entities
  {:storage #ig/ref :db/versioned
-  :packages #ig/ref :app/packages}
+  :packages #ig/ref :app/packages
+  :base-fns #ig/ref :exec/base-fns}
 
  :exec/context
  {:storage #ig/ref :db/versioned

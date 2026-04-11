@@ -1,6 +1,9 @@
 ;; Logic and conditional base functions
 ;; All functions require implementations in impls.clj
 
+
+{:namespace "core.logic"
+ :fns
 [;; === Logic ===
  {:name :and
   :args {:values :jsonb}
@@ -52,4 +55,4 @@
 
  {:name :identity
   :args {:value :any}
-  :return-type :any}]
+  :return-type :any}]}

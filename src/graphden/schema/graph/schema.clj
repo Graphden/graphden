@@ -39,6 +39,10 @@
 
 
 ;; Entity UUIDs
+(def ^:private ns-entity-uuid
+  #uuid "d4e5f6a7-b8c9-4d0e-1f2a-3b4c5d6e7f80")
+
+
 (def ^:private fn-entity-uuid
   #uuid "a1b2c3d4-e5f6-4a7b-8c9d-0e1f2a3b4c5d")
 
@@ -47,9 +51,22 @@
   #uuid "b2c3d4e5-f6a7-4b8c-9d0e-1f2a3b4c5d6e")
 
 
+;; Field UUIDs for :ns
+(def ^:private ns-name-field-uuid
+  #uuid "e5f6a7b8-1234-4c9d-0e1f-aabbccddeeff")
+
+
+(def ^:private ns-parent-id-field-uuid
+  #uuid "f6a7b8c9-2345-4d0e-1f2a-aabbccddeeff")
+
+
 ;; Field UUIDs for :fn
 (def ^:private fn-name-field-uuid
   #uuid "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f")
+
+
+(def ^:private fn-namespace-id-field-uuid
+  #uuid "a7b8c9d0-3456-4e1f-2a3b-aabbccddeeff")
 
 
 (def ^:private fn-parent-ids-field-uuid
@@ -116,15 +133,33 @@
   (-> builder
       (ds/add-enum :value-kind value-kind-enum-uuid (value-kind-enum-values))
 
+      ;; ns: namespace entity
+      ;; Groups fns by purpose, avoids name collisions.
+      ;; parent-id=nil → root namespace
+      ;; parent-id set → nested namespace
+      (ds/add-entity :ns ns-entity-uuid
+                     {:name {:uuid ns-name-field-uuid
+                             :type :text}
+                      :parent-id {:uuid ns-parent-id-field-uuid
+                                  :type :ref
+                                  :ref-entity :ns
+                                  :nullable? true}})
+      (ds/add-constraint :ns {:type :unique :fields [:parent-id :name]})
+
       ;; fn: function entity
       ;; parent-ids=nil/[] → base-fn, has Clojure implementation
       ;; parent-ids=[id] → single inheritance (most common)
       ;; parent-ids=[id1,id2] → multiple inheritance (parents define disjoint args)
       ;; name=nil → local fn (scoped, not globally visible)
+      ;; namespace-id → groups fn under a namespace for organization
       (ds/add-entity :fn fn-entity-uuid
                      {:name {:uuid fn-name-field-uuid
                              :type :text
                              :nullable? true}
+                      :namespace-id {:uuid fn-namespace-id-field-uuid
+                                     :type :ref
+                                     :ref-entity :ns
+                                     :nullable? true}
                       :parent-ids {:uuid fn-parent-ids-field-uuid
                                    :type :ref-many
                                    :ref-entity :fn
@@ -136,7 +171,7 @@
                       :impl-hash {:uuid fn-impl-hash-field-uuid
                                   :type :text
                                   :nullable? true}})
-      (ds/add-constraint :fn {:type :unique :fields [:name]})
+      (ds/add-constraint :fn {:type :unique :fields [:namespace-id :name]})
 
       ;; arg: argument entity
       ;; source-id=nil → primary argument (defines interface)

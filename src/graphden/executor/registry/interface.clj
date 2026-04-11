@@ -79,8 +79,10 @@
    Returns a map with counts:
    {:fns {:created n :updated m}
     :args {:created n :updated m}}"
-  [storage defs]
-  (core/sync-defs-to-storage! storage defs))
+  ([storage defs]
+   (core/sync-defs-to-storage! storage defs {}))
+  ([storage defs ns-id-map]
+   (core/sync-defs-to-storage! storage defs ns-id-map)))
 
 
 ;; === Storage Initialization Helper ===

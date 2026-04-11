@@ -2,6 +2,9 @@
 ;; str, subs, str-len, str-upper, str-lower, str-trim, str-split, str-join,
 ;; str-to-keyword, keyword-to-str
 
+
+{:namespace "core.strings"
+ :fns
 [{:name :str
   :args {:parts :jsonb}
   :return-type :text}
@@ -51,4 +54,4 @@
 
  {:name :to-str
   :args {:value :any}
-  :return-type :text}]
+  :return-type :text}]}

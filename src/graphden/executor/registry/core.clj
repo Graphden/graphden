@@ -237,16 +237,20 @@
 
 (defn- prepare-fn-record
   "Prepares a fn record for batch upsert.
-   Base fn = fn entity with parent-ids=nil."
-  [fn-name fn-def]
+   Base fn = fn entity with parent-ids=nil.
+   ns-id-map: {ns-path-string → ns-entity-uuid} for resolving namespace-id."
+  [fn-name fn-def ns-id-map]
   (let [{:keys [return-type]} fn-def
         id (fn-uuid fn-name)
-        impl-hash (compute-impl-hash fn-def)]
-    {:id id
-     :name (name fn-name)
-     :parent-ids nil
-     :return-type return-type
-     :impl-hash impl-hash}))
+        impl-hash (compute-impl-hash fn-def)
+        ns-id (when-let [ns-path (:namespace fn-def)]
+                (get ns-id-map ns-path))]
+    (cond-> {:id id
+             :name (name fn-name)
+             :parent-ids nil
+             :return-type return-type
+             :impl-hash impl-hash}
+      ns-id (assoc :namespace-id ns-id))))
 
 
 (defn- prepare-arg-records
@@ -295,36 +299,37 @@
 
    Returns counts:
    {:fns {:created n :updated m} :args {:created n :updated m}}"
-  [storage defs]
-  (when (> (count defs) max-sync-batch-size)
-    (throw (ex-info (str "Too many function definitions to sync: " (count defs)
-                         " (max " max-sync-batch-size ")")
-                    {:type :batch-error/batch-too-large
-                     :batch-size (count defs)
-                     :max-batch-size max-sync-batch-size
-                     :operation :sync-defs-to-storage})))
-  (validate-all-defs! defs)
-  ;; Prepare all fn records
-  (let [fn-records (mapv (fn [[fn-name fn-def]]
-                           (prepare-fn-record fn-name fn-def))
-                         defs)
-        ;; Prepare all arg records
-        arg-records (into [] (mapcat (fn [[fn-name fn-def]]
-                                       (let [fn-id (fn-uuid fn-name)]
-                                         (prepare-arg-records fn-name fn-id (:args fn-def)))))
+  ([storage defs] (sync-defs-to-storage! storage defs {}))
+  ([storage defs ns-id-map]
+   (when (> (count defs) max-sync-batch-size)
+     (throw (ex-info (str "Too many function definitions to sync: " (count defs)
+                          " (max " max-sync-batch-size ")")
+                     {:type :batch-error/batch-too-large
+                      :batch-size (count defs)
+                      :max-batch-size max-sync-batch-size
+                      :operation :sync-defs-to-storage})))
+   (validate-all-defs! defs)
+   ;; Prepare all fn records
+   (let [fn-records (mapv (fn [[fn-name fn-def]]
+                            (prepare-fn-record fn-name fn-def ns-id-map))
                           defs)
-        ;; Count existing records (for created/updated stats)
-        fn-ids (mapv :id fn-records)
-        arg-ids (mapv :id arg-records)
-        existing-fn-count (count-existing-ids storage :fn fn-ids)
-        existing-arg-count (count-existing-ids storage :arg arg-ids)]
-    ;; Batch upsert fns (single SQL statement)
-    (when (seq fn-records)
-      (sp/upsert-entities storage :fn fn-records))
-    ;; Batch upsert args (single SQL statement)
-    (when (seq arg-records)
-      (sp/upsert-entities storage :arg arg-records))
-    {:fns {:created (- (count fn-records) existing-fn-count)
-           :updated existing-fn-count}
-     :args {:created (- (count arg-records) existing-arg-count)
-            :updated existing-arg-count}}))
+         ;; Prepare all arg records
+         arg-records (into [] (mapcat (fn [[fn-name fn-def]]
+                                        (let [fn-id (fn-uuid fn-name)]
+                                          (prepare-arg-records fn-name fn-id (:args fn-def)))))
+                           defs)
+         ;; Count existing records (for created/updated stats)
+         fn-ids (mapv :id fn-records)
+         arg-ids (mapv :id arg-records)
+         existing-fn-count (count-existing-ids storage :fn fn-ids)
+         existing-arg-count (count-existing-ids storage :arg arg-ids)]
+     ;; Batch upsert fns (single SQL statement)
+     (when (seq fn-records)
+       (sp/upsert-entities storage :fn fn-records))
+     ;; Batch upsert args (single SQL statement)
+     (when (seq arg-records)
+       (sp/upsert-entities storage :arg arg-records))
+     {:fns {:created (- (count fn-records) existing-fn-count)
+            :updated existing-fn-count}
+      :args {:created (- (count arg-records) existing-arg-count)
+             :updated existing-arg-count}})))

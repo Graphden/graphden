@@ -1,6 +1,9 @@
 ;; Common fn-def building blocks shared between web components
 ;; Route composition, response status, content-type responses, health status
 
+
+{:namespace "app.common"
+ :fns
 [;; =============================================================================
  ;; COLLECTION BUILDING BLOCKS
  ;; =============================================================================
@@ -208,4 +211,4 @@
  {:name :health-status
   :parent :assoc-timestamp
   :args {:map :health-status-base
-         :value :current-time-ms}}]
+         :value :current-time-ms}}]}

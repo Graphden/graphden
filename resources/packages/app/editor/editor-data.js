@@ -21,6 +21,8 @@ function buildLookups(data) {
   const fnMap = new Map();
   const argMap = new Map();
   const argsByFn = new Map();
+  const nsMap = new Map();    // ns-id → ns entity
+  const nsPathMap = new Map(); // ns-id → full dotted path (e.g. "core.arithmetic")
 
   (data.fns || []).forEach(f => fnMap.set(f.id, f));
   (data.args || []).forEach(a => {
@@ -31,8 +33,32 @@ function buildLookups(data) {
       argsByFn.get(fnId).push(a);
     }
   });
+  // Build namespace maps
+  (data.namespaces || []).forEach(ns => nsMap.set(ns.id, ns));
+  // Compute full paths for each ns (walk parent chain)
+  nsMap.forEach((ns, id) => {
+    const parts = [];
+    let cur = ns;
+    for (let i = 0; i < 20 && cur; i++) {
+      parts.unshift(cur.name);
+      cur = cur['parent-id'] ? nsMap.get(cur['parent-id']) : null;
+    }
+    nsPathMap.set(id, parts.join('.'));
+  });
 
-  return { fnMap, argMap, argsByFn };
+  return { fnMap, argMap, argsByFn, nsMap, nsPathMap };
+}
+
+// Get the qualified name for a fn (ns.path.name or just name if no ns)
+function getQualifiedFnName(fn) {
+  if (!fn) return '(anonymous)';
+  const name = fn.name || '(anonymous)';
+  const nsId = fn['namespace-id'];
+  if (nsId && lookups && lookups.nsPathMap) {
+    const nsPath = lookups.nsPathMap.get(nsId);
+    if (nsPath) return nsPath + '.' + name;
+  }
+  return name;
 }
 
 // ============================================================================

@@ -2,6 +2,9 @@
 ;; Base functions load CSS/JS from files, body is defined inline
 ;; Fn-defs compose them into pages, handlers, routes
 
+
+{:namespace "app.editor"
+ :fns
 [;; =============================================================================
  ;; BASE FUNCTIONS (implementations in impls.clj load from resource files)
  ;; =============================================================================
@@ -134,4 +137,4 @@
   :parent :delete-route
   :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
 
-]
+]}

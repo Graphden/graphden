@@ -28,7 +28,8 @@
   (testing "rejects identifiers with special chars"
     (is (not (#'core/valid-identifier? "hello world")))
     (is (not (#'core/valid-identifier? "fn@name")))
-    (is (not (#'core/valid-identifier? "a.b")))
+    (is (#'core/valid-identifier? "a.b"))
+    (is (#'core/valid-identifier? "core.arithmetic.add"))
     (is (not (#'core/valid-identifier? "a/b")))
     (is (not (#'core/valid-identifier? ">")))
     (is (not (#'core/valid-identifier? "+"))))
@@ -663,7 +664,7 @@
           ;; Mock registry to return parent-id for :base-fn
           result (with-redefs [registry/fn-uuid
                                (fn [n] (when (= n :base-fn) parent-id))]
-                   (#'core/prepare-fn-record fn-name-cache fn-id-cache created-fns fn-def))]
+                   (#'core/prepare-fn-record fn-name-cache fn-id-cache created-fns fn-def {}))]
       (is (some? (:new result)))
       (is (= "new-fn" (:name (:new result))))
       (is (= [parent-id] (:parent-ids (:new result))))))
@@ -672,7 +673,7 @@
     (let [existing-fn {:id (random-uuid) :name "existing-fn"}
           fn-name-cache {"existing-fn" existing-fn}
           fn-def {:name :existing-fn :parent :base}
-          result (#'core/prepare-fn-record fn-name-cache {} {} fn-def)]
+          result (#'core/prepare-fn-record fn-name-cache {} {} fn-def {})]
       (is (= existing-fn (:existing result)))))
 
   (testing "local fn (underscore prefix) is always created fresh"
@@ -682,7 +683,7 @@
           fn-def {:name :_local :parent :base-fn}
           result (with-redefs [registry/fn-uuid
                                (fn [n] (when (= n :base-fn) parent-id))]
-                   (#'core/prepare-fn-record fn-name-cache fn-id-cache {} fn-def))]
+                   (#'core/prepare-fn-record fn-name-cache fn-id-cache {} fn-def {}))]
       ;; Should create new, not return existing
       (is (some? (:new result)))
       ;; Local fns get name=nil in DB
@@ -693,7 +694,7 @@
           fn-def {:name :child :parent :parent-fn}
           result (with-redefs [registry/fn-uuid
                                (fn [_] nil)]
-                   (#'core/prepare-fn-record {} {} {:parent-fn parent-id} fn-def))]
+                   (#'core/prepare-fn-record {} {} {:parent-fn parent-id} fn-def {}))]
       (is (some? (:new result)))
       (is (= [parent-id] (:parent-ids (:new result))))))
 
@@ -701,7 +702,7 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
           (with-redefs [registry/fn-uuid
                         (fn [_] nil)]
-            (#'core/prepare-fn-record {} {} {} {:name :orphan :parent :missing}))))))
+            (#'core/prepare-fn-record {} {} {} {:name :orphan :parent :missing} {}))))))
 
 
 ;; === resolve-fn-id-cached ===

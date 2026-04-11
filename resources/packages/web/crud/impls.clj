@@ -79,10 +79,12 @@
   [_args ctx]
   (if-let [storage (:storage ctx)]
     ;; Use optimized batch query for VersionedStorage
-    (if (instance? VersionedStorage storage)
-      (vs/query-all-graph-entities storage)
-      {:fns (vec (sp/query-entities storage :fn {}))
-       :args (vec (sp/query-entities storage :arg {}))})
+    (let [base (if (instance? VersionedStorage storage)
+                 (vs/query-all-graph-entities storage)
+                 {:fns (vec (sp/query-entities storage :fn {}))
+                  :args (vec (sp/query-entities storage :arg {}))})]
+      ;; Also include namespace entities for frontend display
+      (assoc base :namespaces (vec (sp/query-entities storage :ns {}))))
     (throw (ex-info "Storage not available in context"
                     {:type :execution-error/missing-storage}))))
 

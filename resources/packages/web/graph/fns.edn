@@ -1,6 +1,9 @@
 ;; Graph visualization base functions for Cytoscape.js
 ;; entities-to-cytoscape, cytoscape-init-script, cytoscape-update-script
 
+
+{:namespace "web.graph"
+ :fns
 [{:name :entities-to-cytoscape
   :args {:entities :jsonb}
   :return-type :jsonb}
@@ -16,4 +19,4 @@
  {:name :cytoscape-update-script
   :args {:elements :jsonb
          :layout {:type :bool :required false}}
-  :return-type :text}]
+  :return-type :text}]}

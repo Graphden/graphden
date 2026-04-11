@@ -4,6 +4,9 @@
 ;; Input: {root-id: uuid-string, expansions: {fn-id: level, ...}}
 ;; Output: {nodes: [...], edges: [...], grid-pos: {...}, validation: {...}}
 
+
+{:namespace "app.layout"
+ :fns
 [;; Layout data function - fetches from DB, builds graph, computes layout
  ;; Context-aware: receives storage from ctx
  {:name :get-layout-data
@@ -23,4 +26,4 @@
  ;; POST /api/graph/layout - accepts root-id and expansions
  {:name :layout-api-route
   :parent :post-route
-  :args {:path "/api/graph/layout" :handler :layout-api-handler}}]
+  :args {:path "/api/graph/layout" :handler :layout-api-handler}}]}

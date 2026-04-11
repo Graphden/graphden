@@ -2,6 +2,9 @@
 ;; render-hiccup, html-response, html-page, with-htmx, with-cytoscape,
 ;; cytoscape-container, form-input, form-select, button
 
+
+{:namespace "web.html"
+ :fns
 [{:name :render-hiccup
   :args {:hiccup :jsonb}
   :return-type :text}
@@ -93,4 +96,4 @@
  {:name :button-row
   :args {:buttons :jsonb
          :style {:type :jsonb :required false}}
-  :return-type :jsonb}]
+  :return-type :jsonb}]}

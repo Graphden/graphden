@@ -3,6 +3,9 @@
 ;; contains?, keys, vals, merge, into, range, repeat, take, drop,
 ;; reverse, sort, concat, flatten, distinct
 
+
+{:namespace "core.collections"
+ :fns
 [{:name :first
   :args {:coll :jsonb}
   :return-type :any}
@@ -109,4 +112,4 @@
 
  {:name :distinct
   :args {:coll :jsonb}
-  :return-type :jsonb}]
+  :return-type :jsonb}]}

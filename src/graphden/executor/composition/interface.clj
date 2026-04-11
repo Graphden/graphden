@@ -57,5 +57,7 @@
    - Circular dependencies
 
    See namespace docstring for definition format."
-  [storage fn-defs]
-  (core/sync-fns-to-storage! storage fn-defs))
+  ([storage fn-defs]
+   (core/sync-fns-to-storage! storage fn-defs {}))
+  ([storage fn-defs ns-id-map]
+   (core/sync-fns-to-storage! storage fn-defs ns-id-map)))

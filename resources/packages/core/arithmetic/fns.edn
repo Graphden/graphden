@@ -1,6 +1,9 @@
 ;; Arithmetic and comparison base functions
 ;; All functions require implementations in impls.clj
 
+
+{:namespace "core.arithmetic"
+ :fns
 [;; === Arithmetic ===
  {:name :add
   :args {:nums :jsonb}
@@ -53,4 +56,4 @@
 
  {:name :gte
   :args {:nums :jsonb}
-  :return-type :bool}]
+  :return-type :bool}]}

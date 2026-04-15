@@ -27,6 +27,7 @@ function buildNsTree(data) {
   const root = { children: new Map(), fns: [] };
 
   (data.fns || []).forEach(fn => {
+    if (!fn.name) return; // skip anonymous/local fns
     const qname = getQualifiedFnName(fn);
     const parts = qname.split('.');
     const fnName = parts.pop();

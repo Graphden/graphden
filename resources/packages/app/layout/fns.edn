@@ -19,11 +19,11 @@
  ;; =============================================================================
 
  ;; Layout handler using make-json-response-handler pattern
- {:name :layout-api-handler
+ {:name :_layout-api-handler
   :parent :make-json-response-handler
   :args {:data-fn :get-layout-data}}
 
  ;; POST /api/graph/layout - accepts root-id and expansions
  {:name :layout-api-route
   :parent :post-route
-  :args {:path "/api/graph/layout" :handler :layout-api-handler}}]}
+  :args {:path "/api/graph/layout" :handler :_layout-api-handler}}]}

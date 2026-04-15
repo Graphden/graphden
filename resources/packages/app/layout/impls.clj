@@ -902,19 +902,42 @@
                 node-id))
 
             (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root]
-              ;; Get expansion spec for this fn in its context
-              ;; expansion-root is the parent expansion context (nil for top-level)
-              (let [spec (get-effective-spec fn-id expansion-root)]
-                (if (spec-trivial? spec)
-                  (let [bindings (build-arg-bindings fn-id fn-map args-by-fn arg-map)
-                        ;; Merge order: parent first, local (base) WINS.
-                        ;; See process-expanded-fn comment for rationale.
-                        bindings (if parent-bindings
-                                   (merge parent-bindings bindings)
-                                   bindings)]
-                    (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root))
-                  ;; Expanded mode - pass parent expansion-root to maintain context
-                  (process-expanded-fn fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root))))]
+              ;; Named fns (with name in DB) are "boundaries" — their implementation
+              ;; is hidden by default. Only the root fn and anonymous (name=nil) fns
+              ;; are expanded automatically. Named fns show as leaf nodes unless
+              ;; the user explicitly requests expansion.
+              (let [fn-entity (get fn-map fn-id)
+                    is-named (and fn-entity (:name fn-entity))
+                    spec (get-effective-spec fn-id expansion-root)
+                    ;; A named non-root fn with no expansion spec → show as leaf
+                    show-as-leaf (and is-named (not is-root) (spec-trivial? spec)
+                                      ;; Inside an expansion, don't collapse named refs
+                                      ;; — they are part of the expanded view
+                                      (nil? expansion-root))]
+                (if show-as-leaf
+                  ;; Just add the node + edge, don't recurse into children
+                  (let [node-id (add-fn-node fn-id false nil)]
+                    (when (and source-node-id edge-arg-name)
+                      (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
+                        (when-not (contains? @added-node-ids edge-id)
+                          (swap! added-node-ids conj edge-id)
+                          (swap! edges conj
+                                 {:data {:id edge-id
+                                         :source source-node-id
+                                         :target node-id
+                                         :argName (when edge-arg-name (name edge-arg-name))}}))))
+                    node-id)
+                  ;; Normal processing
+                  (if (spec-trivial? spec)
+                    (let [bindings (build-arg-bindings fn-id fn-map args-by-fn arg-map)
+                          ;; Merge order: parent first, local (base) WINS.
+                          ;; See process-expanded-fn comment for rationale.
+                          bindings (if parent-bindings
+                                     (merge parent-bindings bindings)
+                                     bindings)]
+                      (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root))
+                    ;; Expanded mode - pass parent expansion-root to maintain context
+                    (process-expanded-fn fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root)))))]
 
       ;; Start processing from root - no expansion-root initially
       (process-any-fn root-fn-id nil nil true nil nil nil)))

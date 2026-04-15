@@ -1,71 +1,83 @@
-;; Web server fn-defs - combines editor UI with health/metrics endpoints
-;; Endpoints:
-;;   GET / (Editor HTML)
-;;   GET /favicon.ico (SVG)
-;;   GET /health (JSON)
-;;   GET /metrics (JSON)
-;;   GET /api/graph/entities (JSON)
-;;   GET /partials/entity-details/:type/:id (HTML partial)
-;;   GET /partials/entity-form/:type (HTML partial)
-;;   GET /partials/entity-form/:type/:id (HTML partial)
-;;   POST /api/entities/:type (JSON)
-;;   POST /api/graph/layout (JSON)
-;;   DELETE /api/entities/:type/:id (JSON)
+;; Web server fn-defs - combines UI, API, and monitoring routes
+;;
+;; Route groups:
+;;   UI:         GET / (Editor), GET /favicon.ico
+;;   Entity API: GET/POST/DELETE /api/entities/*, GET /partials/*
+;;   Graph API:  GET /api/graph/entities, POST /api/graph/layout
+;;   Monitoring: GET /health, GET /metrics
 
 
 {:namespace "app.server"
  :fns
 [;; =============================================================================
- ;; HEALTH ROUTE (Dynamic JSON)
+ ;; MONITORING: Health & Metrics
  ;; =============================================================================
 
- {:name :health-json-body-fn
+ {:name :_health-json-body
   :parent :to-json-string
   :args {:data :health-status}}
 
- {:name :health-response-fn
+ {:name :_health-response
   :parent :json-ok-response
-  :args {:body :health-json-body-fn}}
+  :args {:body :_health-json-body}}
 
- {:name :health-handler-fn
+ {:name :_health-handler
   :parent :make-handler
-  :args {:response :health-response-fn}}
+  :args {:response :_health-response}}
 
- ;; GET /health
  {:name :health-route
   :parent :get-route
-  :args {:path "/health" :handler :health-handler-fn}}
+  :args {:path "/health" :handler :_health-handler}}
 
- ;; =============================================================================
- ;; METRICS ROUTE (JVM Info)
- ;; =============================================================================
-
- {:name :metrics-json-body-fn
+ {:name :_metrics-json-body
   :parent :to-json-string
   :args {:data :jvm-info}}
 
- {:name :metrics-response-fn
+ {:name :_metrics-response
   :parent :json-ok-response
-  :args {:body :metrics-json-body-fn}}
+  :args {:body :_metrics-json-body}}
 
- {:name :metrics-handler-fn
+ {:name :_metrics-handler
   :parent :make-handler
-  :args {:response :metrics-response-fn}}
+  :args {:response :_metrics-response}}
 
- ;; GET /metrics
  {:name :metrics-route
   :parent :get-route
-  :args {:path "/metrics" :handler :metrics-handler-fn}}
+  :args {:path "/metrics" :handler :_metrics-handler}}
 
  ;; =============================================================================
- ;; ROUTES COLLECTION & SERVER
+ ;; ROUTES — organized by responsibility
  ;; =============================================================================
 
- ;; All routes - uses list-11 which hides the conj cascade inside
- ;; When viewing editor-routes, you see 11 route arguments, not the cascade
- ;; The cascade (list-11 -> list-10 -> ... -> triple -> pair -> conj-any)
- ;; is only visible when you expand list-11
- {:name :editor-routes
+ ;; UI routes: pages served to browser
+ {:name :ui-routes
+  :parent :pair
+  :args {:item1 :favicon-route
+         :item2 :editor-route}}
+
+ ;; Entity CRUD routes: partials + create/delete API
+ {:name :entity-crud-routes
+  :parent :list-10-5
+  :args {:item1 :entity-details-route
+         :item2 :entity-form-create-route
+         :item3 :entity-form-edit-route
+         :item4 :create-entity-route
+         :item5 :delete-entity-route}}
+
+ ;; Graph API routes: entity listing + layout computation
+ {:name :graph-api-routes
+  :parent :pair
+  :args {:item1 :api-entities-route
+         :item2 :layout-api-route}}
+
+ ;; Monitoring routes: health + metrics
+ {:name :monitoring-routes
+  :parent :pair
+  :args {:item1 :health-route
+         :item2 :metrics-route}}
+
+ ;; All routes — combines all groups
+ {:name :all-routes
   :parent :list-11
   :args {:item1 :favicon-route
          :item2 :editor-route
@@ -79,17 +91,19 @@
          :item10 :metrics-route
          :item11 :layout-api-route}}
 
- ;; Router receives routes vector
- {:name :router-fn
+ ;; =============================================================================
+ ;; SERVER
+ ;; =============================================================================
+
+ {:name :_router
   :parent :router
-  :args {:routes :editor-routes
+  :args {:routes :all-routes
          :not-found-response :default-404-response
          :method-not-allowed-response :default-405-response
          :error-response :default-500-response}}
 
- ;; Server receives router as handler
  {:name :web-server
   :parent :http-server
-  :args {:handler :router-fn
+  :args {:handler :_router
          :port 8080
          :default-headers :security-headers}}]}

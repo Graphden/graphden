@@ -152,9 +152,19 @@
   :parent :make-html-response-handler
   :args {:render-fn :render-entity-details-view}}
 
- {:name :entity-form-handler
+ {:name :_entity-form-create-view
+  :parent :render-entity-form-view}
+
+ {:name :entity-form-create-handler
   :parent :make-html-response-handler
-  :args {:render-fn :render-entity-form-view}}
+  :args {:render-fn :_entity-form-create-view}}
+
+ {:name :_entity-form-edit-view
+  :parent :render-entity-form-view}
+
+ {:name :entity-form-edit-handler
+  :parent :make-html-response-handler
+  :args {:render-fn :_entity-form-edit-view}}
 
  {:name :create-entity-api-handler
   :parent :make-html-action-handler

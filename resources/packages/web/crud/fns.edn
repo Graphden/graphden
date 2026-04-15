@@ -42,7 +42,6 @@
   :ctx true}
 
  ;; Action functions (context-aware, return {:status :headers :body} response map)
- ;; These perform actions and return result for make-html-action-handler (dynamic-response)
  {:name :process-create-entity
   :args {:request :jsonb}
   :return-type :jsonb
@@ -78,7 +77,6 @@
   :return-type :uuid}
 
  ;; Render functions (context-aware, return hiccup)
- ;; These extract data from request and render to hiccup
  {:name :render-entity-details-view
   :args {:request :jsonb}
   :return-type :jsonb
@@ -89,8 +87,23 @@
   :return-type :jsonb
   :ctx true}
 
+ ;; Renders action buttons (Edit/Delete) for entity
+ {:name :render-entity-actions
+  :args {:entity-type :text
+         :entity-id :text}
+  :return-type :jsonb}
+
+ ;; Form data parsing helpers
+ {:name :parse-fn-from-form
+  :args {:form-data :jsonb}
+  :return-type :jsonb}
+
+ {:name :parse-arg-from-form
+  :args {:form-data :jsonb}
+  :return-type :jsonb}
+
  ;; =============================================================================
- ;; FN-DEFS: Pure render functions composed from entity-field-rows
+ ;; FN-DEFS: Constants and composed functions
  ;; =============================================================================
 
  ;; Field specs for fn entity details
@@ -108,7 +121,7 @@
   :args {:field-specs :fn-field-specs
          :entity {:as :entity}}}
 
- ;; Field specs for arg entity details (basic fields always shown)
+ ;; Field specs for arg entity details
  {:name :arg-field-specs
   :parent :const
   :args {:value [["ID" :id]
@@ -127,52 +140,26 @@
   :args {:field-specs :arg-field-specs
          :entity {:as :entity}}}
 
- ;; Renders action buttons (Edit/Delete) for entity - still a base-fn
- ;; because it generates dynamic URLs and htmx attributes
- {:name :render-entity-actions
-  :args {:entity-type :text
-         :entity-id :text}
-  :return-type :jsonb}
-
- ;; Form data parsing helpers
- {:name :parse-fn-from-form
-  :args {:form-data :jsonb}
-  :return-type :jsonb}
-
- {:name :parse-arg-from-form
-  :args {:form-data :jsonb}
-  :return-type :jsonb}
-
  ;; =============================================================================
  ;; FN-DEFS: Response handlers composed from base functions
  ;; =============================================================================
 
- ;; all-entities-json-handler using fn-def composition
- ;; Uses :make-json-response-handler to wrap :list-all-graph-entities
  {:name :all-entities-json-handler
   :parent :make-json-response-handler
   :args {:data-fn :list-all-graph-entities}}
 
- ;; entity-details-handler using fn-def composition
- ;; Uses :make-html-response-handler to wrap :render-entity-details-view
  {:name :entity-details-handler
   :parent :make-html-response-handler
   :args {:render-fn :render-entity-details-view}}
 
- ;; entity-form-handler using fn-def composition
- ;; Uses :make-html-response-handler to wrap :render-entity-form-view
  {:name :entity-form-handler
   :parent :make-html-response-handler
   :args {:render-fn :render-entity-form-view}}
 
- ;; create-entity-api-handler using fn-def composition
- ;; Uses :make-html-action-handler to wrap :process-create-entity
  {:name :create-entity-api-handler
   :parent :make-html-action-handler
   :args {:action-fn :process-create-entity}}
 
- ;; delete-entity-api-handler using fn-def composition
- ;; Uses :make-html-action-handler to wrap :process-delete-entity
  {:name :delete-entity-api-handler
   :parent :make-html-action-handler
   :args {:action-fn :process-delete-entity}}]}

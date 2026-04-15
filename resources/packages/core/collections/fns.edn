@@ -112,4 +112,8 @@
 
  {:name :distinct
   :args {:coll :jsonb}
+  :return-type :jsonb}
+
+ {:name :stringify-map-keys
+  :args {:m :jsonb}
   :return-type :jsonb}]}

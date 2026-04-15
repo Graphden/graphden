@@ -128,27 +128,21 @@
 
 (defn with-htmx
   [{:keys [head version]}]
-  (let [htmx-version (or version "2.0.4")
-        htmx-script [:script {:src (str "https://unpkg.com/htmx.org@" htmx-version)}]
+  (let [htmx-script [:script {:src (str "https://unpkg.com/htmx.org@" version)}]
         head-elements (normalize-head head)]
     (conj head-elements htmx-script)))
 
 
 (defn with-cytoscape
   [{:keys [head version]}]
-  (let [cy-version (or version "3.30.4")
-        cy-script [:script {:src (str "https://unpkg.com/cytoscape@" cy-version "/dist/cytoscape.min.js")}]
+  (let [cy-script [:script {:src (str "https://unpkg.com/cytoscape@" version "/dist/cytoscape.min.js")}]
         head-elements (normalize-head head)]
     (conj head-elements cy-script)))
 
 
 (defn cytoscape-container
   [{:keys [id style]}]
-  (let [default-style {:width "100%"
-                       :height "600px"
-                       :border "1px solid #ccc"}
-        merged-style (merge default-style (or style {}))]
-    [:div {:id id :style merged-style}]))
+  [:div {:id id :style style}])
 
 
 (defn form-input
@@ -266,9 +260,7 @@
 (defn button-row
   "Creates a horizontal flex container for buttons."
   [{:keys [buttons style]}]
-  (let [default-style {:margin-top "16px" :display "flex" :gap "8px"}
-        merged-style (merge default-style (or style {}))]
-    (into [:div {:style merged-style}] buttons)))
+  (into [:div {:style style}] buttons))
 
 
 ;; === Registry ===

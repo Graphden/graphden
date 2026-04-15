@@ -1583,83 +1583,77 @@
              :validation validation}))))))
 
 
+(defn- parse-spec
+  "Parse a single expansion spec value.
+   Returns integer level or {:full-depth N :partial-fns #{uuid ...}}."
+  [v]
+  (cond
+    (integer? v) v
+    (map? v) {:full-depth (or (:full-depth v) 0)
+              :partial-fns (set (map (fn [s]
+                                       (if (uuid? s)
+                                         s
+                                         (java.util.UUID/fromString (str s))))
+                                     (:partial-fns v)))}
+    :else 0))
+
+(defn- parse-expansions
+  "Parse raw expansions map from request.
+   Keys have 'fn-' prefix from node IDs; structural nodes use 'fn-{root}_{fn-id}' format.
+   Returns map of {[expansion-root fn-id] spec} or {[nil fn-id] spec}."
+  [expansions-raw]
+  (into {}
+        (map (fn [[k v]]
+               (let [k-str (name k)
+                     stripped (if (str/starts-with? k-str "fn-")
+                                (subs k-str 3)
+                                k-str)
+                     [expansion-root fn-id]
+                     (if (str/includes? stripped "_")
+                       (let [parts (str/split stripped #"_")]
+                         [(java.util.UUID/fromString (first parts))
+                          (java.util.UUID/fromString (second parts))])
+                       [nil (java.util.UUID/fromString stripped)])]
+                 [[expansion-root fn-id] (parse-spec v)]))
+             expansions-raw)))
+
+(defn- parse-layout-request
+  "Parse request body into {:root-id UUID, :expansions parsed-map}.
+   Throws on missing root-id."
+  [request]
+  (let [body-str (:body request)
+        body (when (and body-str (not (str/blank? body-str)))
+               (json/parse-string body-str true))
+        root-id-str (:root-id body)]
+    (when-not root-id-str
+      (throw (ex-info "Request body must contain 'root-id'"
+                      {:type :execution-error/invalid-args})))
+    {:root-id (java.util.UUID/fromString root-id-str)
+     :expansions (parse-expansions (:expansions body {}))}))
+
 (defn get-layout-data
   "Compute layout from root-id and expansions.
    Input (from request body): {root-id: uuid-string, expansions: {fn-id: level, ...}}
    Output: {nodes: [...], edges: [...], grid-pos: {...}, validation: {...}}"
   [{:keys [request]} ctx]
-  (let [storage (:storage ctx)
-        body-str (:body request)
-        body (when (and body-str (not (str/blank? body-str)))
-               (json/parse-string body-str true))
-        root-id-str (:root-id body)
-        expansions-raw (:expansions body {})]
-
+  (let [storage (:storage ctx)]
     (when-not storage
       (throw (ex-info "Storage not available in context"
                       {:type :execution-error/missing-storage})))
-
-    (when-not root-id-str
-      (throw (ex-info "Request body must contain 'root-id'"
-                      {:type :execution-error/invalid-args})))
-
-    (let [;; Parse root-id
-          root-id (java.util.UUID/fromString root-id-str)
-
-          ;; Parse expansions: {"fn-uuid-string": level} or {"fn-uuid1_uuid2": level}
-          ;; Keys have "fn-" prefix from node IDs
-          ;; For structural nodes inside expansion: "fn-{expansion-root}_{fn-id}" format
-          ;; Store as: {[expansion-root fn-id] spec} or {[nil fn-id] spec}
-          ;; spec is either an integer (legacy) or
-          ;; {:full-depth N :partial-fns #{uuid ...}}
-          parse-spec (fn [v]
-                       (cond
-                         (integer? v) v
-                         (map? v) {:full-depth (or (:full-depth v) 0)
-                                   :partial-fns (set (map (fn [s]
-                                                            (if (uuid? s)
-                                                              s
-                                                              (java.util.UUID/fromString (str s))))
-                                                          (:partial-fns v)))}
-                         :else 0))
-          expansions (into {}
-                           (map (fn [[k v]]
-                                  (let [k-str (name k)
-                                        ;; Remove "fn-" prefix
-                                        stripped (if (str/starts-with? k-str "fn-")
-                                                   (subs k-str 3)
-                                                   k-str)
-                                        ;; Parse: either "uuid" or "uuid1_uuid2"
-                                        [expansion-root fn-id]
-                                        (if (str/includes? stripped "_")
-                                          (let [parts (str/split stripped #"_")]
-                                            [(java.util.UUID/fromString (first parts))
-                                             (java.util.UUID/fromString (second parts))])
-                                          [nil (java.util.UUID/fromString stripped)])]
-                                    [[expansion-root fn-id] (parse-spec v)]))
-                                expansions-raw))
-
-          ;; Load data from storage
+    (let [{:keys [root-id expansions]} (parse-layout-request request)
           raw-data (load-graph-entities storage)
           lookups (build-lookups raw-data)
-
-          ;; Verify root exists
           _ (when-not (get (:fn-map lookups) root-id)
               (throw (ex-info "Root function not found"
                               {:type :execution-error/not-found
                                :root-id root-id})))
-
-          ;; Build graph elements
           {:keys [nodes edges]} (build-graph-elements root-id expansions lookups)
-
-          ;; Compute layout
           graph-info (build-graph-info nodes edges)
           root-node (find-root-node nodes edges)
           matrix (if root-node
                    (layout-graph (get-in root-node [:data :id]) graph-info)
                    (empty-matrix))
           validation (validate-layout matrix)]
-
       {:nodes nodes
        :edges edges
        :grid-pos (:positions matrix)

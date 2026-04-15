@@ -160,6 +160,18 @@
   (str value))
 
 
+(defn parse-query-string-fn
+  "Parses a URL query string or form-urlencoded body into a map.
+   Splits by & then = and URL-decodes values."
+  [{:keys [string]}]
+  (when (and string (not (str/blank? string)))
+    (into {}
+          (for [pair (str/split string #"&")
+                :let [[k v] (str/split pair #"=" 2)]
+                :when k]
+            [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
+
+
 ;; === Registry ===
 
 (def impls
@@ -174,4 +186,5 @@
    :str-to-keyword str-to-keyword-fn
    :keyword-to-str keyword-to-str-fn
    :pr-str pr-str-fn
-   :to-str to-str-fn})
+   :to-str to-str-fn
+   :parse-query-string parse-query-string-fn})

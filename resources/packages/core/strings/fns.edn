@@ -54,4 +54,8 @@
 
  {:name :to-str
   :args {:value :any}
-  :return-type :text}]}
+  :return-type :text}
+
+ {:name :parse-query-string
+  :args {:string :text}
+  :return-type :jsonb}]}

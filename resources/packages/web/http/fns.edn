@@ -6,9 +6,18 @@
  :fns
 [{:name :http-server
   :args {:handler :any  ; Receives Clojure fn from router
-         :port :int}
+         :port :int
+         :default-headers {:type :jsonb :required false}}
   :return-type :any}
 
  {:name :http-stop
   :args {:server :any}
-  :return-type :any}]}
+  :return-type :any}
+
+ ;; Default security headers for HTTP responses
+ {:name :security-headers
+  :parent :const
+  :args {:value {"X-Content-Type-Options" "nosniff"
+                 "X-Frame-Options" "DENY"
+                 "X-XSS-Protection" "1; mode=block"
+                 "Referrer-Policy" "strict-origin-when-cross-origin"}}}]}

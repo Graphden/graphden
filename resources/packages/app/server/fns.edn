@@ -82,10 +82,14 @@
  ;; Router receives routes vector
  {:name :router-fn
   :parent :router
-  :args {:routes :editor-routes}}
+  :args {:routes :editor-routes
+         :not-found-response :default-404-response
+         :method-not-allowed-response :default-405-response
+         :error-response :default-500-response}}
 
  ;; Server receives router as handler
  {:name :web-server
   :parent :http-server
   :args {:handler :router-fn
-         :port 8080}}]}
+         :port 8080
+         :default-headers :security-headers}}]}

@@ -23,17 +23,17 @@
 
  {:name :with-htmx
   :args {:head {:type :jsonb :required false}
-         :version {:type :text :required false}}
+         :version :text}
   :return-type :jsonb}
 
  {:name :with-cytoscape
   :args {:head {:type :jsonb :required false}
-         :version {:type :text :required false}}
+         :version :text}
   :return-type :jsonb}
 
  {:name :cytoscape-container
   :args {:id :text
-         :style {:type :jsonb :required false}}
+         :style :jsonb}
   :return-type :jsonb}
 
  {:name :form-input
@@ -95,5 +95,28 @@
  ;; Horizontal flex container for buttons
  {:name :button-row
   :args {:buttons :jsonb
-         :style {:type :jsonb :required false}}
-  :return-type :jsonb}]}
+         :style :jsonb}
+  :return-type :jsonb}
+
+ ;; =============================================================================
+ ;; FN-DEFS: Default values extracted from base-fn implementations
+ ;; =============================================================================
+
+ ;; Default CDN versions
+ {:name :htmx-default-version
+  :parent :const
+  :args {:value "2.0.4"}}
+
+ {:name :cytoscape-default-version
+  :parent :const
+  :args {:value "3.30.4"}}
+
+ ;; Default cytoscape container style
+ {:name :cytoscape-default-style
+  :parent :const
+  :args {:value {:width "100%" :height "600px" :border "1px solid #ccc"}}}
+
+ ;; Default button-row style
+ {:name :button-row-default-style
+  :parent :const
+  :args {:value {:margin-top "16px" :display "flex" :gap "8px"}}}]}

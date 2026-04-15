@@ -1,6 +1,6 @@
 ;; Graph Editor fn-defs
-;; Base functions load CSS/JS from files, body is defined inline
-;; Fn-defs compose them into pages, handlers, routes
+;; Base functions load CSS/JS from files
+;; Everything else is fn-def composition
 
 
 {:namespace "app.editor"
@@ -17,18 +17,49 @@
   :args {}
   :return-type :text}
 
- {:name :editor-body
-  :args {}
-  :return-type :jsonb}
+ ;; =============================================================================
+ ;; FN-DEFS: Editor UI structure
+ ;; =============================================================================
 
- ;; Pre-wrapped elements
+ ;; Editor body — HTML structure as hiccup constant
+ {:name :editor-body
+  :parent :const
+  :args {:value
+   [:div {:id "app"}
+    [:div {:id "main-container"}
+     ;; Side menu
+     [:div {:id "side-menu"}
+      [:div {:class "menu-header"}
+       [:h2 "Graphden"]]
+      [:div {:id "search-bar"}
+       [:input {:id "search-input" :type "text" :placeholder "Filter..."
+                :oninput "onSearchInput(this.value)"}]
+       [:button {:id "search-clear" :onclick "clearSearch()"} "\u00D7"]]
+      [:div {:id "entity-list"}]]
+     ;; Graph container
+     [:div {:id "graph-container"}
+      [:div {:id "cy"}]
+      ;; Navigation controls
+      [:div {:id "nav-controls"}
+       [:div {:class "nav-zoom-col"}
+        [:button {:class "nav-btn" :onclick "navZoom(1)" :title "Zoom in"} "+"]
+        [:input {:id "zoom-slider" :type "range" :min "10" :max "300" :value "100"
+                 :orient "vertical"
+                 :oninput "navZoomTo(this.value/100)" :title "Zoom"}]
+        [:button {:class "nav-btn" :onclick "navZoom(-1)" :title "Zoom out"} "\u2212"]]
+       [:div {:class "nav-bottom-row"}
+        [:button {:class "nav-btn" :onclick "navGoToRoot()" :title "Go to root node"} "\u2302"]
+        [:button {:class "nav-btn" :onclick "navResetPositions()" :title "Reset all node positions"} "\u27F2"]
+        [:button {:class "nav-btn" :onclick "navResetZoom()" :title "Reset zoom"} "\u2299"]]]]]]}}
+
+ ;; Wrapped elements — fn-defs using wrap-style/wrap-script
  {:name :editor-style-element
-  :args {}
-  :return-type :jsonb}
+  :parent :wrap-style
+  :args {:content :editor-styles}}
 
  {:name :editor-script-element
-  :args {}
-  :return-type :jsonb}
+  :parent :wrap-script
+  :args {:content :editor-script}}
 
  ;; =============================================================================
  ;; PAGE COMPOSITION (fn-defs)
@@ -42,12 +73,14 @@
  ;; Head elements for Cytoscape (adds cytoscape scripts)
  {:name :editor-cytoscape-head
   :parent :with-cytoscape
-  :args {:head :editor-head-elements-0}}
+  :args {:head :editor-head-elements-0
+         :version :cytoscape-default-version}}
 
  ;; Head elements with HTMX (adds htmx script)
  {:name :editor-head
   :parent :with-htmx
-  :args {:head :editor-cytoscape-head}}
+  :args {:head :editor-cytoscape-head
+         :version :htmx-default-version}}
 
  ;; External scripts (dagre layout)
  {:name :dagre-script
@@ -102,7 +135,6 @@
  ;; ROUTES
  ;; =============================================================================
 
- ;; GET routes
  {:name :favicon-route
   :parent :get-route
   :args {:path "/favicon.ico" :handler :favicon-handler}}
@@ -127,12 +159,10 @@
   :parent :get-route
   :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-handler}}
 
- ;; POST route
  {:name :create-entity-route
   :parent :post-route
   :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
 
- ;; DELETE route
  {:name :delete-entity-route
   :parent :delete-route
   :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}

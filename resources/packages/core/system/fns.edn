@@ -71,6 +71,11 @@
   :args {:data :any}
   :return-type :text}
 
+ {:name :parse-json
+  :args {:string :text
+         :keywordize {:type :bool :required false}}
+  :return-type :jsonb}
+
  {:name :jvm-info
   :args {}
   :return-type :jsonb}

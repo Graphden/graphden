@@ -17,31 +17,25 @@
             :return-type (when return-type (name return-type))}}))
 
 
+(defn format-display-value
+  "Formats a value for display in graph nodes. Truncates long strings."
+  [{:keys [value ref-id max-length]}]
+  (let [max-len (or max-length 20)]
+    (cond
+      ref-id (str "ref<fn:" ref-id ">")
+      (and (some? value) (string? value))
+      (if (> (count value) max-len) (str (subs value 0 max-len) "...") value)
+      (some? value)
+      (let [s (pr-str value)]
+        (if (> (count s) max-len) (str (subs s 0 max-len) "...") s))
+      :else "unset")))
+
+
 (defn- arg->node
   [{:keys [id fn-id source-id value ref-id is-fn required] entity-name :name arg-type :type}]
   (let [has-value? (or (some? value) (some? ref-id))
-        ref-type (cond
-                   (some? ref-id) "fn-ref"
-                   (some? value) "literal"
-                   :else "unset")
-        is-ref? (some? ref-id)
-        display-value (cond
-                        ref-id
-                        (str "ref<fn:" ref-id ">")
-
-                        (and (some? value) (string? value))
-                        (if (> (count value) 20)
-                          (str (subs value 0 20) "...")
-                          value)
-
-                        (some? value)
-                        (let [s (pr-str value)]
-                          (if (> (count s) 20)
-                            (str (subs s 0 20) "...")
-                            s))
-
-                        :else
-                        "unset")]
+        ref-type (cond (some? ref-id) "fn-ref" (some? value) "literal" :else "unset")
+        display-value (format-display-value {:value value :ref-id ref-id})]
     {:data {:id (str id)
             :label (str (if entity-name (name entity-name) "?") ": " display-value)
             :type "arg"
@@ -50,7 +44,7 @@
             :arg-type (when arg-type (name arg-type))
             :has-value has-value?
             :is-fn (boolean is-fn)
-            :is-ref is-ref?
+            :is-ref (some? ref-id)
             :ref-type ref-type
             :required (boolean required)
             :ref-id (when ref-id (str ref-id))}}))
@@ -112,77 +106,10 @@
 
 ;; === Cytoscape Initialization ===
 
-(def ^:private default-style
-  [{:selector "node"
-    :style {:label "data(label)"
-            :text-valign "center"
-            :text-halign "center"
-            :font-size "12px"
-            :width 80
-            :height 40}}
-
-   {:selector "node[type='fn'][is-base]"
-    :style {:background-color "#fff"
-            :border-width 2
-            :border-color "#000"
-            :shape "round-rectangle"}}
-
-   {:selector "node[type='fn'][!is-base]"
-    :style {:background-color "#fff"
-            :border-width 2
-            :border-color "#000"
-            :shape "round-rectangle"}}
-
-   {:selector "node[type='arg'][has-value]"
-    :style {:background-color "#f5f5f5"
-            :border-width 1
-            :border-color "#000"
-            :shape "rectangle"
-            :width 100
-            :height 30}}
-
-   {:selector "node[type='arg'][!has-value]"
-    :style {:background-color "#fff"
-            :border-width 1
-            :border-color "#999"
-            :border-style "dashed"
-            :shape "rectangle"
-            :width 100
-            :height 30}}
-
-   {:selector "edge"
-    :style {:width 2
-            :line-color "#ccc"
-            :target-arrow-color "#ccc"
-            :target-arrow-shape "triangle"
-            :curve-style "bezier"}}
-
-   {:selector "edge[type='inherits']"
-    :style {:line-color "#000"
-            :target-arrow-color "#000"
-            :line-style "dashed"}}
-
-   {:selector "edge[type='references']"
-    :style {:line-color "#666"
-            :target-arrow-color "#666"}}
-
-   {:selector ":selected"
-    :style {:border-width 3
-            :border-color "#000"}}])
-
-
-(def ^:private default-layout
-  {:name "dagre"
-   :rankDir "TB"
-   :nodeSep 50
-   :edgeSep 10
-   :rankSep 100})
-
-
 (defn cytoscape-init-script
   [{:keys [container-id elements style layout on-click]}]
-  (let [style-json (json/generate-string (or style default-style))
-        layout-json (json/generate-string (or layout default-layout))
+  (let [style-json (json/generate-string style)
+        layout-json (json/generate-string layout)
         elements-json (json/generate-string elements)
         click-handler (if on-click
                         (str "cy.on('tap', 'node', function(evt) { " on-click "(evt.target.data()); });")
@@ -232,4 +159,5 @@
 (def impls
   {:entities-to-cytoscape entities-to-cytoscape
    :cytoscape-init-script cytoscape-init-script
-   :cytoscape-update-script cytoscape-update-script})
+   :cytoscape-update-script cytoscape-update-script
+   :format-display-value format-display-value})

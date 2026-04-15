@@ -25,18 +25,9 @@
   (let [non-nil-routes (vec (remove nil? routes))
         normalized-routes (keywordize-map-keys non-nil-routes)
         compiled-router (r/router normalized-routes)
-        default-404 {:status 404
-                     :headers {"Content-Type" "text/plain"}
-                     :body "Not Found"}
-        default-405 {:status 405
-                     :headers {"Content-Type" "text/plain"}
-                     :body "Method Not Allowed"}
-        default-500 {:status 500
-                     :headers {"Content-Type" "text/plain"}
-                     :body "Handler not configured"}
-        resp-404 (or not-found-response default-404)
-        resp-405 (or method-not-allowed-response default-405)
-        resp-500 (or error-response default-500)]
+        resp-404 not-found-response
+        resp-405 method-not-allowed-response
+        resp-500 error-response]
     (fn [request]
       (let [uri (:uri request)]
         (if-let [match (r/match-by-path compiled-router uri)]

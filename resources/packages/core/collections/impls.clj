@@ -185,6 +185,16 @@
   (vec (distinct coll)))
 
 
+(defn stringify-map-keys-fn
+  "Converts all map keys to strings (keyword keys become their name)."
+  [{:keys [m]}]
+  (when m
+    (into {}
+          (map (fn [[k v]]
+                 [(if (keyword? k) (name k) (str k)) v])
+               m))))
+
+
 ;; === Registry ===
 
 (def impls
@@ -213,4 +223,5 @@
    :sort sort-fn
    :concat concat-fn
    :flatten flatten-fn
-   :distinct distinct-fn})
+   :distinct distinct-fn
+   :stringify-map-keys stringify-map-keys-fn})

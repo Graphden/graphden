@@ -74,6 +74,12 @@
   (json/generate-string data))
 
 
+(defn parse-json
+  "Parse a JSON string into a data structure."
+  [{:keys [string keywordize]}]
+  (json/parse-string string (if (nil? keywordize) true keywordize)))
+
+
 ;; === System Information ===
 
 (defn jvm-info
@@ -123,6 +129,7 @@
    :make-data-handler (with-meta make-data-handler {:ctx true})
    :make-action-handler (with-meta make-action-handler {:ctx true})
    :to-json-string to-json-string
+   :parse-json parse-json
    :jvm-info jvm-info
    :current-time-ms current-time-ms
    :read-resource read-resource})

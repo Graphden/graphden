@@ -6,7 +6,26 @@
  :fns
 [{:name :router
   :args {:routes :any
-         :not-found-response {:type :jsonb :required false}
-         :method-not-allowed-response {:type :jsonb :required false}
-         :error-response {:type :jsonb :required false}}
-  :return-type :fn}]}
+         :not-found-response :jsonb
+         :method-not-allowed-response :jsonb
+         :error-response :jsonb}
+  :return-type :fn}
+
+ ;; Default error responses
+ {:name :default-404-response
+  :parent :const
+  :args {:value {:status 404
+                 :headers {"Content-Type" "text/plain"}
+                 :body "Not Found"}}}
+
+ {:name :default-405-response
+  :parent :const
+  :args {:value {:status 405
+                 :headers {"Content-Type" "text/plain"}
+                 :body "Method Not Allowed"}}}
+
+ {:name :default-500-response
+  :parent :const
+  :args {:value {:status 500
+                 :headers {"Content-Type" "text/plain"}
+                 :body "Handler not configured"}}}]}

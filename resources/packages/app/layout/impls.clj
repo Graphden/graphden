@@ -268,13 +268,24 @@
               (let [levels (get-inheritance-levels original-fn-id fn-map)
                     fn-name-of (fn [fid]
                                  (let [f (get fn-map fid)]
-                                   (if (:name f)
-                                     (name (:name f))
-                                     "(anonymous)")))
+                                   (or (when (:name f) (name (:name f)))
+                                       ;; Anonymous fn — show nearest named ancestor
+                                       (some (fn [pid]
+                                               (when-let [p (get fn-map pid)]
+                                                 (when (:name p) (name (:name p)))))
+                                             (rest (get-inheritance-chain fid fn-map)))
+                                       "(anonymous)")))
                     visible-levels (take (inc max-visible-ancestors) levels)
-                    label-lines (mapv (fn [level-fn-ids]
-                                        (str/join ", " (map fn-name-of level-fn-ids)))
-                                      visible-levels)
+                    raw-lines (mapv (fn [level-fn-ids]
+                                      (str/join ", " (map fn-name-of level-fn-ids)))
+                                    visible-levels)
+                    ;; Remove consecutive duplicate lines (e.g. anonymous fn
+                    ;; whose resolved name matches the first ancestor)
+                    label-lines (reduce (fn [acc line]
+                                          (if (and (seq acc) (= (peek acc) line))
+                                            acc
+                                            (conj acc line)))
+                                        [] raw-lines)
                     label-lines (if (> (count levels) (inc max-visible-ancestors))
                                   (conj label-lines "...")
                                   label-lines)
@@ -326,6 +337,45 @@
                              :target node-id
                              :argName (when arg-name (name arg-name))
                              :isUnset true}}))))
+
+        ;; Walk the FULL transitive inheritance chain of a fn (including
+        ;; ref-id targets) and collect terminal-source-ids of every bound arg.
+        ;; Used to filter false "unset" args in both canonical and expanded modes.
+        compute-bound-terminals
+        (fn [start-fn-id]
+          (let [visited (atom #{})
+                bound-terms (atom #{})
+                walk (fn walk [fid]
+                       (when (and fid (not (contains? @visited fid)))
+                         (swap! visited conj fid)
+                         (let [fn-args (get args-by-fn fid [])]
+                           (doseq [a fn-args]
+                             (when (or (some? (:value a)) (some? (:ref-id a)))
+                               (let [tid (loop [cur a]
+                                           (if-let [sid (:source-id cur)]
+                                             (if-let [src (get arg-map sid)]
+                                               (recur src)
+                                               (:id cur))
+                                             (:id cur)))]
+                                 (swap! bound-terms conj tid)))
+                             (when-let [rid (:ref-id a)]
+                               (walk rid)))
+                           (when-let [f (get fn-map fid)]
+                             (doseq [pid (:parent-ids f)]
+                               (walk pid))))))]
+            (walk start-fn-id)
+            @bound-terms))
+
+        ;; Check if an arg's terminal source is in a set of bound terminals
+        terminal-bound?
+        (fn [arg-id bound-terminals]
+          (let [tid (loop [cur (get arg-map arg-id)]
+                      (if (and cur (:source-id cur))
+                        (if-let [src (get arg-map (:source-id cur))]
+                          (recur src)
+                          (:id cur))
+                        (or (:id cur) arg-id)))]
+            (contains? bound-terminals tid)))
 
         ;; Compute sources covered by child refs of a fn
         ;; Returns set of source-ids that child refs will handle (for binding deduplication)
@@ -679,15 +729,18 @@
                               (fn [b fid] (add-bindings-from-fn fid b args-by-fn arg-map))
                               {} ancestor-fns)))
 
+                        all-bound-terminals (compute-bound-terminals display-fn-id)
+
                         ancestor-bound?
                         (fn [arg-id]
-                          (when ancestor-bindings
-                            (loop [sid arg-id]
-                              (when sid
-                                (if (get ancestor-bindings sid)
-                                  true
-                                  (when-let [src-arg (get arg-map sid)]
-                                    (recur (:source-id src-arg))))))))
+                          (or (when ancestor-bindings
+                                (loop [sid arg-id]
+                                  (when sid
+                                    (if (get ancestor-bindings sid)
+                                      true
+                                      (when-let [src-arg (get arg-map sid)]
+                                        (recur (:source-id src-arg)))))))
+                              (terminal-bound? arg-id all-bound-terminals)))
 
                         filtered-args
                         (filterv (fn [arg]
@@ -775,31 +828,14 @@
                 ;; 2. Level-0 refs pointing to those targets are hidden at root
                 ;; 3. Level-0 refs pointing to OTHER targets are shown at root
                 (let [raw-args (collect-expanded-args levels expand-set chain-bindings)
-                      ;; Filter out :unset args bound by NON-EXPANDED ancestors.
-                      ;; Uses all-bindings (every ancestor) vs display-bindings
-                      ;; (only expanded fns). An unset arg is hidden if
-                      ;; all-bindings has a binding (some ancestor sets it) but
-                      ;; display-bindings does NOT (that ancestor isn't expanded).
-                      non-expanded-bound?
-                      (fn [arg-id]
-                        (let [found-in-all
-                              (loop [sid arg-id]
-                                (when sid
-                                  (if (get all-bindings sid)
-                                    true
-                                    (when-let [src-arg (get arg-map sid)]
-                                      (recur (:source-id src-arg))))))
-                              found-in-display
-                              (loop [sid arg-id]
-                                (when sid
-                                  (if (get display-bindings sid)
-                                    true
-                                    (when-let [src-arg (get arg-map sid)]
-                                      (recur (:source-id src-arg))))))]
-                          (and found-in-all (not found-in-display))))
+                      ;; Filter out :unset args that are bound ANYWHERE in the
+                      ;; full transitive chain (including ref-id targets).
+                      ;; Simple rule: if the arg's terminal source is bound
+                      ;; somewhere in the chain, it's not truly free.
+                      bound-terminals (compute-bound-terminals original-fn-id)
                       all-args (filterv (fn [arg]
                                           (if (= :unset (:type arg))
-                                            (not (non-expanded-bound? (:arg-id arg)))
+                                            (not (terminal-bound? (:arg-id arg) bound-terminals))
                                             true))
                                         raw-args)
                       ;; Separate by type and origin

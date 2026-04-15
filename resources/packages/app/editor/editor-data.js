@@ -157,9 +157,18 @@ function buildAncestorLevels(levels) {
   const enriched = levels.map((fnIds, depth) => {
     const fns = fnIds.map(fnId => {
       const fn = lookups.fnMap.get(fnId);
+      // For unnamed fns, show nearest named ancestor's name
+      let displayName = fn && fn.name;
+      if (!displayName && fn) {
+        const chain = getInheritanceChain(fnId);
+        for (let i = 1; i < chain.length; i++) {
+          const ancestor = lookups.fnMap.get(chain[i]);
+          if (ancestor && ancestor.name) { displayName = ancestor.name; break; }
+        }
+      }
       return {
         fnId,
-        name: (fn && fn.name) || '(anonymous)',
+        name: displayName || '(anonymous)',
         setsArgs: fnSetsArgs(fnId),
         isClickable: fnSetsArgs(fnId)  // has value or ref-id → produces new nodes on expand
       };
@@ -172,6 +181,18 @@ function buildAncestorLevels(levels) {
       anyClickable: fns.some(f => f.isClickable)
     };
   });
+
+  // Remove consecutive duplicate levels (e.g. anonymous fn whose resolved
+  // name matches the next ancestor level — avoid showing same name twice)
+  for (let i = enriched.length - 1; i > 0; i--) {
+    const prev = enriched[i - 1];
+    const cur = enriched[i];
+    if (!cur.isMI && !prev.isMI
+        && cur.fns.length === 1 && prev.fns.length === 1
+        && cur.fns[0].name === prev.fns[0].name) {
+      enriched.splice(i - 1, 1); // remove the earlier duplicate
+    }
+  }
 
   // Grouping: a level starts a new visual group if it has at least one
   // CLICKABLE fn.  Non-clickable levels merge with the predecessor block

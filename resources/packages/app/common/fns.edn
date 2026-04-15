@@ -144,6 +144,10 @@
   :parent :ring-response
   :args {:status 404}}
 
+ {:name :method-not-allowed-response
+  :parent :ring-response
+  :args {:status 405}}
+
  {:name :error-response
   :parent :ring-response
   :args {:status 500}}
@@ -183,6 +187,8 @@
  {:name :cached-svg-ok-response    :parents [:cached-svg-content-type :ok-response]}
 
  {:name :html-bad-request-response :parents [:html-content-type :bad-request-response]}
+
+ {:name :text-method-not-allowed-response :parents [:text-content-type :method-not-allowed-response]}
 
  {:name :json-not-found-response   :parents [:json-content-type :not-found-response]}
  {:name :html-not-found-response   :parents [:html-content-type :not-found-response]}

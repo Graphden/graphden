@@ -284,6 +284,26 @@
                (inc depth))))))
 
 
+(defn- terminal-source-id
+  "Walks the source-id chain from arg to find the root arg id (one with no source-id).
+   Returns the id of the root arg, or arg's own id if it has no source-id chain.
+   Used to identify free args that are propagated copies of the same root arg
+   across multiple inheritance branches."
+  [args-by-id arg]
+  (loop [current arg
+         depth 0]
+    (when (> depth sp/*max-graph-iterations*)
+      (throw (ex-info "Source-id chain too deep while finding terminal source"
+                      {:type :fn-composition/source-chain-too-deep
+                       :arg-id (:id arg)
+                       :max-depth sp/*max-graph-iterations*})))
+    (if-let [src-id (:source-id current)]
+      (if-let [src-arg (get args-by-id src-id)]
+        (recur src-arg (inc depth))
+        (:id current))
+      (:id current))))
+
+
 (defn- collect-free-args-from-fn
   "Collects all free args from a fn by following ref-id chains.
    Returns a vector of free arg entities.
@@ -333,32 +353,20 @@
     (into free-args ref-free-args)))
 
 
-(defn- terminal-source-id
-  "Walks the source-id chain from arg to find the root arg id (one with no source-id).
-   Returns the id of the root arg, or arg's own id if it has no source-id chain.
-   Used to identify free args that are propagated copies of the same root arg
-   across multiple inheritance branches."
-  [args-by-id arg]
-  (loop [current arg
-         depth 0]
-    (when (> depth sp/*max-graph-iterations*)
-      (throw (ex-info "Source-id chain too deep while finding terminal source"
-                      {:type :fn-composition/source-chain-too-deep
-                       :arg-id (:id arg)
-                       :max-depth sp/*max-graph-iterations*})))
-    (if-let [src-id (:source-id current)]
-      (if-let [src-arg (get args-by-id src-id)]
-        (recur src-arg (inc depth))
-        (:id current))
-      (:id current))))
-
-
 (defn- collect-parent-free-args
   "Collects free args from all parent fns.
    Returns vector of arg entities that are free in the parents.
 
    Accepts a collection of parent fn-ids (multiple inheritance).
    args-data contains :by-fn and :by-id indexes.
+
+   Dedupes by [terminal-source-id, resolved-name]. With diamond inheritance
+   (two parents sharing a common ancestor), the same root free arg is
+   reachable via both parents as different propagated arg entities — they
+   must collapse to one. But the cascade pattern (pair-1, pair, triple, ...)
+   intentionally creates multiple propagated copies of the same root arg
+   under different rename targets (item1, item2, item3, ...), so the
+   resolved name is part of the dedup key to keep them distinct.
 
    Dedupes by [terminal-source-id, resolved-name]. With diamond inheritance
    (two parents sharing a common ancestor), the same root free arg is

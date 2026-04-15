@@ -96,11 +96,8 @@
  ;; =============================================================================
 
  {:name :_router
-  :parent :router
-  :args {:routes :all-routes
-         :not-found-response :default-404-response
-         :method-not-allowed-response :default-405-response
-         :error-response :default-500-response}}
+  :parent :text-error-router
+  :args {:routes :all-routes}}
 
  {:name :web-server
   :parent :http-server

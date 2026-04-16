@@ -86,9 +86,10 @@
          :value {:as :handler}}}
 
  ;; Level 2: method-map (free: method, handler via pass-through from assoc-handler)
+ ;; Renames key -> method (HTTP method) and value -> handler (the bound handler fn)
  {:name :method-map
   :parent :assoc-empty
-  :args {:value :assoc-handler
+  :args {:value {:as :handler :ref :assoc-handler}
          :key {:as :method}}}
 
  ;; Level 3: route = [path, method-map] using pair

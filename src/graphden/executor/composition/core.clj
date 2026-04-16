@@ -73,6 +73,21 @@
 
 ;; === Dependency Analysis ===
 
+(defn- arg-value-fn-ref
+  "Extracts a fn-name keyword from an arg value spec, if it's a fn ref.
+   Handles both simple keyword refs and map syntax with :ref or :value.
+   Returns the fn-name keyword or nil."
+  [arg-value]
+  (cond
+    (keyword? arg-value)
+    (parse-fn-ref arg-value)
+
+    (map? arg-value)
+    ;; {:as :name :ref :fn-name} or {:as :name :value :fn-name}
+    (or (parse-fn-ref (:ref arg-value))
+        (parse-fn-ref (:value arg-value)))))
+
+
 (defn- extract-dependencies
   "Extracts fn names that this fn-def depends on (from args and parents).
    Returns set of keywords."
@@ -81,7 +96,7 @@
         parent-names (concat (when-let [p (:parent fn-def)] [p])
                              (:parents fn-def))
         arg-deps (->> (vals args)
-                      (keep parse-fn-ref)
+                      (keep arg-value-fn-ref)
                       (filter fn-names-in-set)
                       set)
         ;; Parents that are composed fns in our set are dependencies

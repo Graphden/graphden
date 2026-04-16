@@ -16,6 +16,32 @@
 // NODE SIZE CALCULATION
 // ============================================================================
 
+// Compute the height of a fn-overlay row given its width and content. MI rows
+// (comma-separated names) split into N flex cells of width/N each; each cell
+// wraps its name to multiple lines if the name is wider than the cell content
+// area. The overlay height = sum of row heights + drag handle.
+function computeFnOverlayHeight(label, width) {
+  const LINE_H = 13;     // 11px font @ ~1.2 line-height
+  const ROW_PAD = 8;     // 4px top + 4px bottom inside each ancestor-line
+  const CHAR_W = 7;
+  const CELL_PAD = 16;   // 8px left + 8px right inside each MI cell
+  const lines = label.split('\n');
+  let h = 0;
+  for (const line of lines) {
+    if (line.includes(', ')) {
+      const cells = line.split(', ');
+      const cellW = width / cells.length;
+      const cellContentW = Math.max(1, cellW - CELL_PAD);
+      const wrapPerCell = cells.map(c =>
+        Math.max(1, Math.ceil(c.length * CHAR_W / cellContentW)));
+      h += Math.max(...wrapPerCell) * LINE_H + ROW_PAD;
+    } else {
+      h += LINE_H + ROW_PAD;
+    }
+  }
+  return h + DRAG_HANDLE_HEIGHT;
+}
+
 function calculateNodeSize(nodeData) {
   const label = nodeData.label || '';
   const type = nodeData.type;
@@ -28,29 +54,18 @@ function calculateNodeSize(nodeData) {
       width: Math.max(40, effectiveLen * 6 + 16),
       height: 22 + DRAG_HANDLE_HEIGHT  // content (padding 4+4 + line 14) + drag handle
     };
-  } else if (isPlaceholder) {
-    // Placeholder has type="fn" in cytoscape, so use fn width formula to match
-    const lines = label.split('\n');
-    const maxLineLen = 30;
-    const maxLen = Math.max(...lines.map(l => {
-      const cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
-      return Math.min(cleanLen, maxLineLen);
-    }));
-    return {
-      width: Math.max(80, maxLen * 7 + 24),
-      height: Math.max(30, lines.length * 16 + 16) + DRAG_HANDLE_HEIGHT
-    };
   } else {
+    // Both fn and placeholder use fn-overlay rendering with potential MI rows.
     const lines = label.split('\n');
     const maxLineLen = 30;
     const maxLen = Math.max(...lines.map(l => {
       const cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
       return Math.min(cleanLen, maxLineLen);
     }));
-    return {
-      width: Math.max(80, maxLen * 7 + 24),
-      height: Math.max(30, lines.length * 16 + 16) + DRAG_HANDLE_HEIGHT
-    };
+    const width = Math.max(80, maxLen * 7 + 24);
+    const height = Math.max(30 + DRAG_HANDLE_HEIGHT,
+                            computeFnOverlayHeight(label, width));
+    return { width, height };
   }
 }
 
@@ -212,6 +227,23 @@ async function fetchBackendLayout() {
           row: pos.row,
           col: pos.col
         });
+      }
+    });
+
+    // Augment node data with colRightX (right edge of node's column).
+    // Used by edge taxi-turn so the bend lands in the inter-column gap,
+    // never inside a wider sibling node sharing the same column.
+    // Also store computed layoutWidth/layoutHeight so CY node sizing matches
+    // the actual overlay rendering (avoids overlay overflow into next row).
+    nodes.forEach(n => {
+      const pos = gridPos[n.data.id];
+      if (pos) {
+        n.data.colRightX = colLeftX.get(pos.col) + (colWidths.get(pos.col) || 0);
+      }
+      const size = sizes.get(n.data.id);
+      if (size) {
+        n.data.layoutWidth = size.width;
+        n.data.layoutHeight = size.height;
       }
     });
 

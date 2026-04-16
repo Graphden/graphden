@@ -6,7 +6,10 @@
 // ============================================================================
 
 const CYTOSCAPE_STYLES = [
-  // fn node (base dimensions, used for calculating size)
+  // fn node (base dimensions, used for calculating size).
+  // Width/height come from precomputed layoutWidth/layoutHeight on node.data
+  // (computed in editor-layout.js so CY node size MATCHES the actual rendered
+  // overlay height — important for MI rows where cells wrap to multiple lines).
   { selector: 'node[type="fn"]', style: {
     'label': 'data(label)',
     'text-valign': 'center',
@@ -21,19 +24,10 @@ const CYTOSCAPE_STYLES = [
     'color': '#000000',
     'padding': '0px',
     'width': function(node) {
-      var label = node.data('label') || '';
-      var lines = label.split('\n');
-      var maxLineLen = 30;
-      var maxLen = Math.max(...lines.map(function(l) {
-        var cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
-        return Math.min(cleanLen, maxLineLen);
-      }));
-      return Math.max(80, maxLen * 7 + 24);
+      return node.data('layoutWidth') || 80;
     },
     'height': function(node) {
-      var label = node.data('label') || '';
-      var lines = label.split('\n').length;
-      return Math.max(30, lines * 16 + 16);
+      return node.data('layoutHeight') || 30;
     }
   }},
   // Non-placeholder fn nodes - hide completely, overlay shows content
@@ -59,12 +53,11 @@ const CYTOSCAPE_STYLES = [
     'padding': '0px',
     'overlay-opacity': 0,
     'width': function(node) {
-      var label = node.data('label') || '';
-      var maxLen = 30;
-      var effectiveLen = Math.min(label.length, maxLen);
-      return Math.max(40, effectiveLen * 6 + 16);
+      return node.data('layoutWidth') || 40;
     },
-    'height': 22 + 14  // content (padding 4+4 + line 14) + drag handle
+    'height': function(node) {
+      return node.data('layoutHeight') || 36;
+    }
   }},
   // Edge - taxi style
   { selector: 'edge', style: {
@@ -73,7 +66,19 @@ const CYTOSCAPE_STYLES = [
     'line-style': 'solid',
     'curve-style': 'taxi',
     'taxi-direction': 'rightward',
-    'taxi-turn': '40px',
+    // Bend AFTER the source node's column ends, so the vertical segment lands
+    // in the inter-column gap. Without this, edges from a narrow node bend
+    // INSIDE the column at source.right + 40px, which can collide with a
+    // wider sibling node sharing the same column (different row).
+    'taxi-turn': function(edge) {
+      var src = edge.source();
+      var colRight = src.data('colRightX');
+      if (colRight === undefined) return 40;
+      var srcRight = src.position().x + src.width() / 2;
+      // 20px past the column boundary — clears any node in the source's
+      // column and lands the vertical segment safely in the gap.
+      return Math.max(20, colRight - srcRight + 20);
+    },
     'taxi-turn-min-distance': '10px',
     'source-endpoint': 'outside-to-node',
     'target-endpoint': 'outside-to-node'

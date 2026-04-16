@@ -324,14 +324,38 @@
         ;; Returns:
         ;;   - single name string (no rename detected through expanded chain)
         ;;   - multi-line "name1 (fn1, fn2)\nname2 (fn3, fn4)" (renames visible)
+        ;; node-id format: "fn-{uuid}" or "fn-{exp-root-uuid}_{display-uuid}".
+        ;; The DISPLAYED (= source for outgoing edges) fn id is the last
+        ;; UUID — the part after the last "_", or after "fn-" if no "_".
+        node-id->source-fn-id
+        (fn [node-id]
+          (when (and node-id (str/starts-with? node-id "fn-"))
+            (let [stripped (subs node-id 3)
+                  parts (str/split stripped #"_")
+                  fn-id-str (last parts)]
+              (try (java.util.UUID/fromString fn-id-str)
+                   (catch Exception _ nil)))))
+
         compute-edge-label
-        (fn [arg-id expanded-fns]
+        (fn [arg-id source-node-id expanded-fns]
           (when arg-id
             (let [source-chain (loop [acc [], cur (get arg-map arg-id)]
                                  (if cur
                                    (recur (conj acc cur)
                                           (some-> (:source-id cur) arg-map))
                                    acc))
+                  ;; Root fn = the SOURCE fn of the edge (the displayed fn the
+                  ;; edge originates from). Used to decide whether to show
+                  ;; ancestors in brackets: if the only group contains only
+                  ;; the source fn, the arg is "natively" at the source →
+                  ;; no brackets. Otherwise the arg is visible only via
+                  ;; expansion → show non-source ancestors in brackets.
+                  ;; Note: source-chain[0].fn-id may DIFFER from source-fn-id
+                  ;; when the source fn inherits an arg without materializing
+                  ;; its own arg row (e.g. method-map inherits `map` from
+                  ;; assoc-empty without binding it itself).
+                  source-fn-id (node-id->source-fn-id source-node-id)
+                  root-fn-name (some-> source-fn-id fn-map :name name)
                   ;; Keep only args whose fn-id is in the expanded set
                   visible (filter #(contains? expanded-fns (:fn-id %)) source-chain)
                   labeled (mapv (fn [arg]
@@ -345,7 +369,12 @@
                                        :fns (vec (keep :fn grp))})))]
               (cond
                 (empty? groups) nil
-                (= 1 (count groups)) (:name (first groups))
+                (= 1 (count groups))
+                (let [{:keys [name fns]} (first groups)
+                      non-root-fns (filterv #(not= % root-fn-name) fns)]
+                  (if (seq non-root-fns)
+                    (str name " (" (str/join ", " non-root-fns) ")")
+                    name))
                 :else (->> groups
                            (map (fn [{:keys [name fns]}]
                                   (if (seq fns)
@@ -370,7 +399,7 @@
                      {:data {:id edge-id
                              :source source-node-id
                              :target node-id
-                             :argName (or (compute-edge-label arg-id expanded-fns)
+                             :argName (or (compute-edge-label arg-id source-node-id expanded-fns)
                                           (when arg-name (name arg-name)))}}))
             node-id))
 
@@ -391,7 +420,7 @@
                      {:data {:id edge-id
                              :source source-node-id
                              :target node-id
-                             :argName (or (compute-edge-label arg-id expanded-fns)
+                             :argName (or (compute-edge-label arg-id source-node-id expanded-fns)
                                           (when arg-name (name arg-name)))
                              :isUnset true}}))))
 
@@ -744,7 +773,7 @@
                              {:data {:id edge-id
                                      :source source-node-id
                                      :target node-id
-                                     :argName (or (compute-edge-label source-arg-id source-expanded-fns)
+                                     :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                   (when edge-arg-name (name edge-arg-name)))}}))))
 
                 ;; Only process children if this node wasn't already fully processed
@@ -852,7 +881,7 @@
                                  {:data {:id edge-id
                                          :source source-node-id
                                          :target node-id
-                                         :argName (or (compute-edge-label source-arg-id source-expanded-fns)
+                                         :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                       (when edge-arg-name (name edge-arg-name)))}}))))
                     node-id)
                   (do
@@ -907,7 +936,7 @@
                              {:data {:id edge-id
                                      :source source-node-id
                                      :target node-id
-                                     :argName (or (compute-edge-label source-arg-id source-expanded-fns)
+                                     :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                   (when edge-arg-name (name edge-arg-name)))}}))))
 
                 ;; For expanded mode, collect args from entire chain [0..level]
@@ -1052,7 +1081,7 @@
                                  {:data {:id edge-id
                                          :source source-node-id
                                          :target node-id
-                                         :argName (or (compute-edge-label source-arg-id source-expanded-fns)
+                                         :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                       (when edge-arg-name (name edge-arg-name)))}}))))
                     (let [own-args (get args-by-fn fn-id [])
                           unsets (filter (fn [arg]

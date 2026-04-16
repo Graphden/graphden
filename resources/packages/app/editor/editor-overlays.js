@@ -514,7 +514,7 @@ function createEdgeLabelOverlay(edge, container) {
     padding: '2px 4px',
     whiteSpace: 'pre',
     textAlign: 'left',
-    transformOrigin: 'top right',
+    transformOrigin: 'top left',
     userSelect: 'none',
     WebkitUserSelect: 'none'
   });
@@ -629,9 +629,12 @@ function updateOverlayPositions() {
     overlay.style.transformOrigin = 'top left';
   });
 
-  // Position edge label overlays. We anchor each label to the LEFT side of
-  // the target node, vertically centered on the target. The label's
-  // bottom-right corner sits ~6px to the left of the target's left edge.
+  // Position edge label overlays. Anchor: visual right edge sits 6px to the
+  // left of target's left edge, vertically centered on the target.
+  // We measure the element's UNSCALED width/height (offsetWidth/Height ignore
+  // transforms) and compute pixel positions so the visual top-left lands at
+  // (screenRight - w*zoom, screenMid - h*zoom/2). Origin 'top left' means
+  // scaling around the top-left corner — the corner stays at left/top.
   document.querySelectorAll('.edge-label-overlay').forEach(overlay => {
     const edgeId = overlay.dataset.edgeId;
     if (!edgeId) return;
@@ -642,15 +645,13 @@ function updateOverlayPositions() {
 
     const tPos = target.position();
     const tWidth = target.width();
-    // Screen-space coords of target's left edge midpoint
     const screenRight = (tPos.x - tWidth / 2) * zoom + pan.x - 6;
     const screenMid = tPos.y * zoom + pan.y;
 
-    // Anchor: top-right at (screenRight, screenMid - height/2)
-    // Use transform translate so the element sizes to its content first,
-    // then is offset by half its rendered height.
-    overlay.style.left = screenRight + 'px';
-    overlay.style.top = screenMid + 'px';
-    overlay.style.transform = 'scale(' + zoom + ') translate(-100%, -50%)';
+    const w = overlay.offsetWidth;
+    const h = overlay.offsetHeight;
+    overlay.style.left = (screenRight - w * zoom) + 'px';
+    overlay.style.top = (screenMid - h * zoom / 2) + 'px';
+    overlay.style.transform = 'scale(' + zoom + ')';
   });
 }

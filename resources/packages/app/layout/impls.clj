@@ -193,6 +193,10 @@
         ;; Different from added-node-ids which only tracks node creation
         ;; This prevents infinite recursion when same fn is reached via different paths
         processed-fn-nodes (atom #{})
+        ;; Track expansions currently being processed (cycle protection for
+        ;; process-expanded-fn). Cyclic refs (e.g. method-map.value → assoc-handler
+        ;; whose binding chain leads back to method-map) would otherwise loop.
+        in-progress-expansions (atom #{})
         max-visible-ancestors 4
 
         get-effective-spec
@@ -338,44 +342,60 @@
                              :argName (when arg-name (name arg-name))
                              :isUnset true}}))))
 
-        ;; Walk the FULL transitive inheritance chain of a fn (including
-        ;; ref-id targets) and collect terminal-source-ids of every bound arg.
-        ;; Used to filter false "unset" args in both canonical and expanded modes.
-        compute-bound-terminals
-        (fn [start-fn-id]
-          (let [visited (atom #{})
-                bound-terms (atom #{})
-                walk (fn walk [fid]
-                       (when (and fid (not (contains? @visited fid)))
-                         (swap! visited conj fid)
-                         (let [fn-args (get args-by-fn fid [])]
-                           (doseq [a fn-args]
-                             (when (or (some? (:value a)) (some? (:ref-id a)))
-                               (let [tid (loop [cur a]
-                                           (if-let [sid (:source-id cur)]
-                                             (if-let [src (get arg-map sid)]
-                                               (recur src)
-                                               (:id cur))
-                                             (:id cur)))]
-                                 (swap! bound-terms conj tid)))
-                             (when-let [rid (:ref-id a)]
-                               (walk rid)))
-                           (when-let [f (get fn-map fid)]
-                             (doseq [pid (:parent-ids f)]
-                               (walk pid))))))]
-            (walk start-fn-id)
-            @bound-terms))
+        ;; Compute terminal source-id of an arg (walk source chain to root)
+        terminal-source-of
+        (fn [arg-id]
+          (loop [cur (get arg-map arg-id)]
+            (if (and cur (:source-id cur))
+              (if-let [src (get arg-map (:source-id cur))]
+                (recur src)
+                (:id cur))
+              (or (:id cur) arg-id))))
 
-        ;; Check if an arg's terminal source is in a set of bound terminals
-        terminal-bound?
-        (fn [arg-id bound-terminals]
-          (let [tid (loop [cur (get arg-map arg-id)]
-                      (if (and cur (:source-id cur))
-                        (if-let [src (get arg-map (:source-id cur))]
-                          (recur src)
-                          (:id cur))
-                        (or (:id cur) arg-id)))]
-            (contains? bound-terminals tid)))
+        ;; For each fn, the set of terminal-source-ids bound by its parent
+        ;; inheritance closure (including itself). Bindings in ref-id targets
+        ;; are NOT included — those are scoped to the ref's call context.
+        parent-bound-terminals
+        (let [cache (atom {})]
+          (fn [fn-id]
+            (or (get @cache fn-id)
+                (let [visited (atom #{})
+                      terms (atom #{})
+                      walk (fn walk [fid]
+                             (when (and fid (not (contains? @visited fid)))
+                               (swap! visited conj fid)
+                               (doseq [a (get args-by-fn fid [])]
+                                 (when (or (some? (:value a)) (some? (:ref-id a)))
+                                   (swap! terms conj (terminal-source-of (:id a)))))
+                               (when-let [f (get fn-map fid)]
+                                 (doseq [pid (:parent-ids f)]
+                                   (walk pid)))))]
+                  (walk fn-id)
+                  (let [result @terms]
+                    (swap! cache assoc fn-id result)
+                    result)))))
+
+        ;; Check if arg X is "determined" — its terminal is bound by some fn
+        ;; reachable via the source chain owners' parent inheritance.
+        ;;
+        ;; Walks source chain of X; for each arg in the chain, takes the
+        ;; OWNING fn's parent-bound-terminals set; checks if X's terminal is in it.
+        ;;
+        ;; This correctly handles MI-propagated args (e.g. text-error-router.headers
+        ;; → text-not-found-response in chain → text-content-type binds headers via
+        ;; MI parent) WITHOUT falsely including ref-target bindings (e.g. method-map
+        ;; references assoc-handler via 'value' ref — assoc-handler.key binding is
+        ;; scoped to assoc-handler's own call, not method-map.key).
+        arg-determined?
+        (fn [arg-id]
+          (let [terminal (terminal-source-of arg-id)]
+            (loop [cur (get arg-map arg-id)]
+              (if (nil? cur)
+                false
+                (let [fid (:fn-id cur)]
+                  (if (and fid (contains? (parent-bound-terminals fid) terminal))
+                    true
+                    (recur (get arg-map (:source-id cur)))))))))
 
         ;; Compute sources covered by child refs of a fn
         ;; Returns set of source-ids that child refs will handle (for binding deduplication)
@@ -574,7 +594,11 @@
                     current-level @chain-level
                     fn-refs (atom [])
                     fn-values (atom [])
-                    fn-unsets (atom [])]
+                    fn-unsets (atom [])
+                    ;; Self-reference set: bindings whose ref-id targets a fn
+                    ;; in the expand-set are self-cycles (parent calls this fn,
+                    ;; and propagation tries to feed it back). Treat as no binding.
+                    self-ref-targets expand-set]
                 (doseq [arg args]
                   (let [arg-id (:id arg)
                         source-id (or (:source-id arg) arg-id)
@@ -582,12 +606,17 @@
                         has-value (some? (:value arg))
                         has-ref (some? (:ref-id arg))
                         ;; Walk the FULL source-id chain to find a binding.
-                        ;; With multiple inheritance the bound arg may be on a
-                        ;; sibling parent so the binding is keyed by an
-                        ;; ancestor source-id deep in the chain.
+                        ;; Skip bindings whose ref-id is a self-reference
+                        ;; (target fn is in the expand-set being processed).
                         binding (loop [sid arg-id]
                                   (if-let [b (get bindings sid)]
-                                    b
+                                    (if (and (:ref-id b)
+                                             (contains? self-ref-targets (:ref-id b)))
+                                      ;; self-cycle binding — keep walking
+                                      (when-let [src-arg (get arg-map sid)]
+                                        (when-let [next-sid (:source-id src-arg)]
+                                          (recur next-sid)))
+                                      b)
                                     (when-let [src-arg (get arg-map sid)]
                                       (when-let [next-sid (:source-id src-arg)]
                                         (recur next-sid)))))
@@ -729,8 +758,6 @@
                               (fn [b fid] (add-bindings-from-fn fid b args-by-fn arg-map))
                               {} ancestor-fns)))
 
-                        all-bound-terminals (compute-bound-terminals display-fn-id)
-
                         ancestor-bound?
                         (fn [arg-id]
                           (or (when ancestor-bindings
@@ -740,7 +767,7 @@
                                       true
                                       (when-let [src-arg (get arg-map sid)]
                                         (recur (:source-id src-arg)))))))
-                              (terminal-bound? arg-id all-bound-terminals)))
+                              (arg-determined? arg-id)))
 
                         filtered-args
                         (filterv (fn [arg]
@@ -765,6 +792,32 @@
               ;; spec is an expansion spec (integer N for full cascade, or
               ;; {:full-depth N :partial-fns #{...}} for cascade + per-fn).
               ;; The spec is converted to a set of fn-ids that are "merged in".
+              ;;
+              ;; Cycle protection: if we're already processing this expansion,
+              ;; just add the node + edge and return without recursing further.
+              ;; This handles cyclic refs like method-map.value → assoc-handler
+              ;; whose binding chain leads back to method-map.
+              (let [in-progress-key [original-fn-id parent-expansion-root]]
+                (if (contains? @in-progress-expansions in-progress-key)
+                  (let [node-id (add-fn-node original-fn-id is-root parent-expansion-root)]
+                    (when (and source-node-id edge-arg-name)
+                      (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
+                        (when-not (contains? @added-node-ids edge-id)
+                          (swap! added-node-ids conj edge-id)
+                          (swap! edges conj
+                                 {:data {:id edge-id
+                                         :source source-node-id
+                                         :target node-id
+                                         :argName (when edge-arg-name (name edge-arg-name))}}))))
+                    node-id)
+                  (do
+                    (swap! in-progress-expansions conj in-progress-key)
+                    (try
+                      (process-expanded-fn-impl original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root)
+                      (finally
+                        (swap! in-progress-expansions disj in-progress-key)))))))
+
+            (process-expanded-fn-impl [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root]
               (let [levels (get-inheritance-levels original-fn-id fn-map)
                     chain (vec (mapcat identity levels))  ; flat for set ops
                     expand-set (spec->expand-set original-fn-id spec)
@@ -828,14 +881,13 @@
                 ;; 2. Level-0 refs pointing to those targets are hidden at root
                 ;; 3. Level-0 refs pointing to OTHER targets are shown at root
                 (let [raw-args (collect-expanded-args levels expand-set chain-bindings)
-                      ;; Filter out :unset args that are bound ANYWHERE in the
-                      ;; full transitive chain (including ref-id targets).
-                      ;; Simple rule: if the arg's terminal source is bound
-                      ;; somewhere in the chain, it's not truly free.
-                      bound-terminals (compute-bound-terminals original-fn-id)
+                      ;; Filter out :unset args whose terminal is bound by some
+                      ;; fn in the source-chain owners' parent inheritance
+                      ;; closure. Bindings in ref-id targets are NOT considered
+                      ;; (they're scoped to the ref's call context).
                       all-args (filterv (fn [arg]
                                           (if (= :unset (:type arg))
-                                            (not (terminal-bound? (:arg-id arg) bound-terminals))
+                                            (not (arg-determined? (:arg-id arg)))
                                             true))
                                         raw-args)
                       ;; Separate by type and origin
@@ -890,35 +942,38 @@
                                   (recur (:source-id src-arg)))))))]
 
                     ;; ORDER: level-0 args FIRST, then ancestor args.
-                    ;; This ensures the fn's own args (closer to root) get
-                    ;; earlier rows than ancestor-inherited args.
+                    ;; Within each level: refs (structural connections),
+                    ;; then UNSETS (interface — free args the user provides),
+                    ;; then VALUES (internal bindings — implementation details).
+                    ;; Free args come above bindings so the interface is visible
+                    ;; first when reading top-to-bottom.
 
                     ;; Level-0 refs
                     (doseq [arg level-0-refs]
                       (when-not (binding-covered? arg)
                         (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root)))
 
-                    ;; Level-0 values
+                    ;; Level-0 unsets (free args)
+                    (doseq [arg level-0-unsets]
+                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id))
+
+                    ;; Level-0 values (bindings)
                     (doseq [arg level-0-values]
                       (when-not (binding-covered? arg)
                         (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)))
-
-                    ;; Level-0 unsets
-                    (doseq [arg level-0-unsets]
-                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id))
 
                     ;; Ancestor refs (structural expansion)
                     (doseq [arg ancestor-refs]
                       (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root))
 
-                    ;; Ancestor values
+                    ;; Ancestor unsets (free args inherited)
+                    (doseq [arg ancestor-unsets]
+                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id))
+
+                    ;; Ancestor values (ancestor bindings)
                     (doseq [arg ancestor-values]
                       (when-not (binding-covered? arg)
-                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)))
-
-                    ;; Ancestor unsets
-                    (doseq [arg ancestor-unsets]
-                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id))))
+                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)))))
 
                 node-id))
 
@@ -936,7 +991,9 @@
                                       ;; — they are part of the expanded view
                                       (nil? expansion-root))]
                 (if show-as-leaf
-                  ;; Just add the node + edge, don't recurse into children
+                  ;; Add the node + edge, then show free args (interface) as
+                  ;; unset placeholders. Implementation (parent chain, bound
+                  ;; args) stays hidden until user expands.
                   (let [node-id (add-fn-node fn-id false nil)]
                     (when (and source-node-id edge-arg-name)
                       (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
@@ -947,6 +1004,17 @@
                                          :source source-node-id
                                          :target node-id
                                          :argName (when edge-arg-name (name edge-arg-name))}}))))
+                    ;; Show free args (those not bound by inheritance and not
+                    ;; bound by caller's binding via source chain). Iterate the
+                    ;; fn's own args; for each unset arg whose terminal isn't
+                    ;; determined, add an unset placeholder.
+                    (doseq [arg (get args-by-fn fn-id [])]
+                      (let [has-value (some? (:value arg))
+                            has-ref (some? (:ref-id arg))]
+                        (when (and (not has-value) (not has-ref)
+                                   (not (arg-determined? (:id arg))))
+                          (let [arg-name (resolve-arg-name arg arg-map)]
+                            (add-unset-arg-node arg-name (:type arg) (:id arg) node-id)))))
                     node-id)
                   ;; Normal processing
                   (if (spec-trivial? spec)

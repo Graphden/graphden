@@ -67,7 +67,7 @@
 
  ;; Build head elements list for cytoscape
  {:name :editor-head-elements-0
-  :parent :conj-any
+  :parent :conj
   :args {:coll [] :item :editor-style-element}}
 
  ;; Head elements for Cytoscape (adds cytoscape scripts)

@@ -53,11 +53,6 @@
   (cons item coll))
 
 
-(defn conj-fn
-  [{:keys [coll item]}]
-  (conj coll item))
-
-
 (defn conj-any-fn
   [{:keys [coll item]}]
   (conj coll item))
@@ -71,11 +66,6 @@
 (defn get-in-fn
   [{:keys [map path default]}]
   (get-in map path default))
-
-
-(defn assoc-fn
-  [{:keys [map key value]}]
-  (assoc map key value))
 
 
 (defn assoc-any-fn
@@ -201,12 +191,10 @@
   {:first first-fn
    :rest rest-fn
    :cons cons-fn
-   :conj conj-fn
-   :conj-any conj-any-fn
+   :conj conj-any-fn
    :get get-fn
    :get-in get-in-fn
-   :assoc assoc-fn
-   :assoc-any assoc-any-fn
+   :assoc assoc-any-fn
    :dissoc dissoc-fn
    :count count-fn
    :empty? empty?-fn

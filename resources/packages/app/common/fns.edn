@@ -10,7 +10,7 @@
 
  ;; conj to empty vector - first element of a list (free: item)
  {:name :conj-empty
-  :parent :conj-any
+  :parent :conj
   :args {:coll []}}
 
  ;; pair: builds [item1, item2] - a 2-element vector
@@ -21,51 +21,51 @@
 
  ;; pair adds second item (free: item1 from pair-1, item2)
  {:name :pair
-  :parent :conj-any
+  :parent :conj
   :args {:coll :pair-1
          :item {:as :item2}}}
 
  ;; triple: builds [item1, item2, item3] - a 3-element vector
  ;; triple adds third item to pair (free: item1, item2 from pair, item3)
  {:name :triple
-  :parent :conj-any
+  :parent :conj
   :args {:coll :pair
          :item {:as :item3}}}
 
  ;; =============================================================================
  ;; LIST-10: 10-element vector builder
- ;; Hidden cascade of conj-any calls, exposes item1...item10 as free args
+ ;; Hidden cascade of conj calls, exposes item1...item10 as free args
  ;; =============================================================================
  {:name :list-10-4
-  :parent :conj-any
+  :parent :conj
   :args {:coll :triple :item {:as :item4}}}
 
  {:name :list-10-5
-  :parent :conj-any
+  :parent :conj
   :args {:coll :list-10-4 :item {:as :item5}}}
 
  {:name :list-10-6
-  :parent :conj-any
+  :parent :conj
   :args {:coll :list-10-5 :item {:as :item6}}}
 
  {:name :list-10-7
-  :parent :conj-any
+  :parent :conj
   :args {:coll :list-10-6 :item {:as :item7}}}
 
  {:name :list-10-8
-  :parent :conj-any
+  :parent :conj
   :args {:coll :list-10-7 :item {:as :item8}}}
 
  {:name :list-10-9
-  :parent :conj-any
+  :parent :conj
   :args {:coll :list-10-8 :item {:as :item9}}}
 
  {:name :list-10
-  :parent :conj-any
+  :parent :conj
   :args {:coll :list-10-9 :item {:as :item10}}}
 
  {:name :list-11
-  :parent :conj-any
+  :parent :conj
   :args {:coll :list-10 :item {:as :item11}}}
 
  ;; =============================================================================
@@ -75,7 +75,7 @@
 
  ;; Level 1: assoc with empty map preset (free: key, value)
  {:name :assoc-empty
-  :parent :assoc-any
+  :parent :assoc
   :args {:map {}}}
 
  ;; Level 2: assoc-handler (free: handler) - sets key="handler", renames value->handler

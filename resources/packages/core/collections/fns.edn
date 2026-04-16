@@ -19,10 +19,6 @@
   :return-type :jsonb}
 
  {:name :conj
-  :args {:coll :jsonb, :item :any}
-  :return-type :jsonb}
-
- {:name :conj-any
   :args {:coll :any, :item :any}
   :return-type :any}
 
@@ -37,10 +33,6 @@
   :return-type :any}
 
  {:name :assoc
-  :args {:map :jsonb, :key :any, :value :any}
-  :return-type :jsonb}
-
- {:name :assoc-any
   :args {:map :any, :key :any, :value :any}
   :return-type :any}
 

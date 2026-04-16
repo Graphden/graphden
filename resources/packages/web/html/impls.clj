@@ -126,18 +126,11 @@
           [(into [:body normalized-body] scripts-elements)])))
 
 
-(defn with-htmx
-  [{:keys [head version]}]
-  (let [htmx-script [:script {:src (str "https://unpkg.com/htmx.org@" version)}]
+(defn with-cdn-script
+  [{:keys [head url]}]
+  (let [script-el [:script {:src url}]
         head-elements (normalize-head head)]
-    (conj head-elements htmx-script)))
-
-
-(defn with-cytoscape
-  [{:keys [head version]}]
-  (let [cy-script [:script {:src (str "https://unpkg.com/cytoscape@" version "/dist/cytoscape.min.js")}]
-        head-elements (normalize-head head)]
-    (conj head-elements cy-script)))
+    (conj head-elements script-el)))
 
 
 (defn cytoscape-container
@@ -263,8 +256,7 @@
   {:render-hiccup render-hiccup
    :html-response html-response
    :html-page html-page
-   :with-htmx with-htmx
-   :with-cytoscape with-cytoscape
+   :with-cdn-script with-cdn-script
    :cytoscape-container cytoscape-container
    :form-input form-input
    :form-select form-select

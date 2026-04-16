@@ -42,6 +42,7 @@
   :args {:func :fn, :args :jsonb}
   :return-type :any}
 
+ ;; Returns value, ignoring _item — usable as HOF argument
  {:name :constantly
   :args {:value :any
          :_item {:type :any :required false}}

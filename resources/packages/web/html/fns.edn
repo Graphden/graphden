@@ -21,14 +21,10 @@
          :scripts {:type :jsonb :required false}}
   :return-type :jsonb}
 
- {:name :with-htmx
+ ;; Append a CDN script tag to head elements
+ {:name :with-cdn-script
   :args {:head {:type :jsonb :required false}
-         :version :text}
-  :return-type :jsonb}
-
- {:name :with-cytoscape
-  :args {:head {:type :jsonb :required false}
-         :version :text}
+         :url :text}
   :return-type :jsonb}
 
  {:name :cytoscape-container
@@ -102,18 +98,5 @@
   :args {:buttons :jsonb
          :style :jsonb}
   :return-type :jsonb}
-
- ;; =============================================================================
- ;; FN-DEFS: Default values extracted from base-fn implementations
- ;; =============================================================================
-
- ;; Default CDN versions
- {:name :htmx-default-version
-  :parent :const
-  :args {:value "2.0.4"}}
-
- {:name :cytoscape-default-version
-  :parent :const
-  :args {:value "3.30.4"}}
 
 ]}

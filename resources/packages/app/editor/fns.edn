@@ -72,15 +72,15 @@
 
  ;; Head elements for Cytoscape (adds cytoscape scripts)
  {:name :editor-cytoscape-head
-  :parent :with-cytoscape
+  :parent :with-cdn-script
   :args {:head :editor-head-elements-0
-         :version :cytoscape-default-version}}
+         :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
 
  ;; Head elements with HTMX (adds htmx script)
  {:name :editor-head
-  :parent :with-htmx
+  :parent :with-cdn-script
   :args {:head :editor-cytoscape-head
-         :version :htmx-default-version}}
+         :url "https://unpkg.com/htmx.org@2.0.4"}}
 
  ;; Complete HTML page
  ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)

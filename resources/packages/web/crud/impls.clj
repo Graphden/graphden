@@ -60,6 +60,9 @@
 
 
 ;; === Rendering Helpers (private) ===
+;; NOTE: fn-field-specs and arg-field-specs duplicate the fn-defs in fns.edn
+;; (:fn-field-specs, :arg-field-specs). They must stay in sync. The duplication
+;; exists because base-fn impls cannot resolve fn-defs at runtime.
 
 (def ^:private fn-field-specs
   [["ID" :id] ["Name" :name :keyword-to-str] ["Parent ID" :parent-id]

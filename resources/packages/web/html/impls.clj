@@ -140,8 +140,7 @@
 
 (defn form-input
   [{:keys [field-name label-text input-type field-value extra-attrs]}]
-  (let [the-type (or input-type "text")
-        base-attrs {:type the-type
+  (let [base-attrs {:type input-type
                     :name field-name
                     :id field-name}
         with-value (if field-value

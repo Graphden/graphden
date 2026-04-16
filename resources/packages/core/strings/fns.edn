@@ -37,7 +37,7 @@
 
  {:name :str-join
   :args {:coll :jsonb
-         :separator {:type :text :required false}}
+         :separator {:type :text :value ""}}
   :return-type :text}
 
  {:name :str-to-keyword

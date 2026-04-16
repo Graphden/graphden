@@ -139,8 +139,7 @@
 
 (defn cytoscape-update-script
   [{:keys [elements layout]}]
-  (let [elements-json (json/generate-string elements)
-        should-layout (if (nil? layout) true layout)]
+  (let [elements-json (json/generate-string elements)]
     (str "
 (function() {
   var cy = window.graphdenCy;
@@ -148,7 +147,7 @@
 
   cy.elements().remove();
   cy.add(" elements-json ");
-  " (when should-layout "cy.layout({ name: 'dagre', rankDir: 'TB' }).run();") "
+  " (when layout "cy.layout({ name: 'dagre', rankDir: 'TB' }).run();") "
   cy.fit();
 })();
 ")))

@@ -5,6 +5,7 @@
    The loader handles deref before calling these implementations."
   (:require
     [clojure.math :as math]
+    [clojure.walk]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -115,20 +116,18 @@
 
 (defn range-fn
   [{:keys [start end step]}]
-  (let [actual-step (or step 1)
-        actual-start (or start 0)
-        max-size sp/*max-range-size*]
-    (validate-non-zero! actual-step :step "step cannot be zero (would cause infinite loop)")
-    (let [range-size (if (or (and (pos? actual-step) (< actual-start end))
-                             (and (neg? actual-step) (> actual-start end)))
-                       (long (math/ceil (/ (abs (double (- end actual-start)))
-                                           (abs (double actual-step)))))
+  (let [max-size sp/*max-range-size*]
+    (validate-non-zero! step :step "step cannot be zero (would cause infinite loop)")
+    (let [range-size (if (or (and (pos? step) (< start end))
+                             (and (neg? step) (> start end)))
+                       (long (math/ceil (/ (abs (double (- end start)))
+                                           (abs (double step)))))
                        0)]
       (validate-collection-size! range-size max-size
                                  :execution-error/range-too-large
-                                 {:start actual-start :end end :step actual-step}
+                                 {:start start :end end :step step}
                                  (str "range would produce " range-size " elements, max allowed " max-size))
-      (vec (range actual-start end actual-step)))))
+      (vec (range start end step)))))
 
 
 (defn repeat-fn
@@ -185,6 +184,20 @@
                m))))
 
 
+(defn keywordize-map-keys-fn
+  "Recursively converts all string map keys to keywords."
+  [{:keys [m]}]
+  (clojure.walk/postwalk
+    (fn [x]
+      (if (map? x)
+        (into {}
+              (map (fn [[k v]]
+                     [(if (string? k) (keyword k) k) v])
+                   x))
+        x))
+    m))
+
+
 ;; === Registry ===
 
 (def impls
@@ -212,4 +225,5 @@
    :concat concat-fn
    :flatten flatten-fn
    :distinct distinct-fn
-   :stringify-map-keys stringify-map-keys-fn})
+   :stringify-map-keys stringify-map-keys-fn
+   :keywordize-map-keys keywordize-map-keys-fn})

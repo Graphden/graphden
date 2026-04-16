@@ -133,7 +133,7 @@
 
 (defn str-join-fn
   [{:keys [coll separator]}]
-  (str/join (or separator "") coll))
+  (str/join separator coll))
 
 
 (defn str-to-keyword-fn

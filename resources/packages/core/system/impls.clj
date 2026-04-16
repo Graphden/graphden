@@ -77,7 +77,7 @@
 (defn parse-json
   "Parse a JSON string into a data structure."
   [{:keys [string keywordize]}]
-  (json/parse-string string (if (nil? keywordize) true keywordize)))
+  (json/parse-string string keywordize))
 
 
 ;; === System Information ===

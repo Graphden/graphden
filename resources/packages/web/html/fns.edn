@@ -35,7 +35,7 @@
  {:name :form-input
   :args {:field-name :text
          :label-text :text
-         :input-type {:type :text :required false}
+         :input-type {:type :text :value "text"}
          :field-value {:type :any :required false}
          :extra-attrs {:type :jsonb :required false}}
   :return-type :jsonb}

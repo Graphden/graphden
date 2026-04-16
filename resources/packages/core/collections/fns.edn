@@ -69,9 +69,9 @@
   :return-type :jsonb}
 
  {:name :range
-  :args {:start {:type :int :required false}
+  :args {:start {:type :int :value 0}
          :end :int
-         :step {:type :int :required false}}
+         :step {:type :int :value 1}}
   :return-type :jsonb}
 
  {:name :repeat
@@ -108,4 +108,8 @@
 
  {:name :stringify-map-keys
   :args {:m :jsonb}
-  :return-type :jsonb}]}
+  :return-type :jsonb}
+
+ {:name :keywordize-map-keys
+  :args {:m :any}
+  :return-type :any}]}

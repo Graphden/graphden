@@ -73,7 +73,7 @@
 
  {:name :parse-json
   :args {:string :text
-         :keywordize {:type :bool :required false}}
+         :keywordize {:type :bool :value true}}
   :return-type :jsonb}
 
  {:name :jvm-info

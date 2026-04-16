@@ -651,3 +651,69 @@ If a proposed change:
 - Adds complexity without clear benefit → reject
 
 This document serves as the philosophical foundation for design decisions.
+
+---
+
+## Base Function Refactoring Principles
+
+Base-fns must be minimal wrappers over a single library call. All composition and business logic belongs in fn-defs. These principles guide refactoring of fns.edn and impls.clj:
+
+### 1. Consolidate Duplicates
+
+If two base-fns do the same thing with different type signatures, keep one with `:any` types.
+
+**Examples:**
+- `assoc` + `assoc-any` → single `:assoc` with `:any` args
+- `conj` + `conj-any` → single `:conj`
+- `identity` → fn-def of `:const` (same implementation)
+- `wrap-style` + `wrap-script` → fn-defs of `:wrap-element` (parameterized by `:tag`)
+- `with-htmx` + `with-cytoscape` → single `:with-cdn-script` (parameterized by `:url`)
+
+### 2. Extract Reusable Primitives
+
+When the same logic appears in multiple base-fns, extract it as a standalone base-fn.
+
+**Examples:**
+- `parse-query-string` — duplicated in 3 places in crud
+- `parse-json` — inline in layout and crud handlers
+- `stringify-map-keys` — inline closure in http-server
+- `format-display-value` — nested cond in graph `arg->node`
+
+### 3. No Hardcoded Defaults in Impls
+
+Base-fns must not contain hardcoded configuration values. Defaults belong in fn-defs (via arg bindings), not in implementation code. The impl should use the arg directly without `(or arg default)`.
+
+**Examples:**
+- Security headers: from hardcoded map in `http-server` → fn-def arg `:default-headers`
+- Error responses: from hardcoded maps in `router` → fn-defs via MI (`text-error-router`)
+- Default styles: from `cytoscape-container`, `button-row` → explicit required args
+- Optional args with defaults: declared in fns.edn with default value, not `(or arg val)` in impl
+
+### 4. Content → Fn-defs, Not Impls
+
+HTML, SVG, CSS, hardcoded strings belong in fn-defs (`:parent :const`), not in implementation code. Impl stays a pure library wrapper.
+
+**Examples:**
+- `editor-body` → `:const` fn-def with hiccup structure
+- `favicon-svg-body` → `:const` fn-def
+- CDN URLs → fn-def args (not constants in impl)
+- `dagre-script`, `cytoscape-dagre-script` → `:const` fn-defs
+
+### 5. Private Fn-def Naming: `_` Prefix
+
+Intermediate fn-defs that have no standalone semantic meaning use `_` prefix. This signals they exist only as wiring, not as reusable abstractions.
+
+**Examples:**
+- `health-handler-fn` → `_health-handler`
+- `editor-response` → `_editor-response`
+- `favicon-svg-body` → `_favicon-svg-body`
+
+### 6. Rename Args for Domain Clarity
+
+Generic arg names (`key`, `value`) should be renamed via `:as` to reflect domain semantics at the point of use.
+
+**Examples:**
+- `method-map.key` → `:method` (HTTP method)
+- `method-map.value` → `:handler` (request handler)
+- `assoc-status.value` → `:status` (status string)
+- `assoc-timestamp.value` → `:timestamp` (timestamp value)

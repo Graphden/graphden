@@ -3,27 +3,14 @@
   (:require
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [clojure.walk :as walk]
+    [graphden.packages.core.collections.impls :as collections]
     [reitit.core :as r]))
-
-
-(defn- keywordize-map-keys
-  [m]
-  (walk/postwalk
-    (fn [x]
-      (if (map? x)
-        (into {}
-              (map (fn [[k v]]
-                     [(if (string? k) (keyword k) k) v])
-                   x))
-        x))
-    m))
 
 
 (defn router
   [{:keys [routes not-found-response method-not-allowed-response error-response]}]
   (let [non-nil-routes (vec (remove nil? routes))
-        normalized-routes (keywordize-map-keys non-nil-routes)
+        normalized-routes (collections/keywordize-map-keys-fn {:m non-nil-routes})
         compiled-router (r/router normalized-routes)
         resp-404 not-found-response
         resp-405 method-not-allowed-response

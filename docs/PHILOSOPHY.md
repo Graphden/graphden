@@ -656,7 +656,12 @@ This document serves as the philosophical foundation for design decisions.
 
 ## Base Function Refactoring Principles
 
-Base-fns must be minimal wrappers over a single library call. All composition and business logic belongs in fn-defs. These principles guide refactoring of fns.edn and impls.clj:
+A base-fn impl should ideally be **1-2 lines**: call the library, return the result.
+Everything else — composition, defaults, multi-step processing — belongs in fn-defs.
+
+**The fundamental rule: a base-fn MUST NOT call another base-fn.** If it does, the composition is hidden in code instead of being visible in the graph. Fix: compose via fn-def, or make shared logic a private helper (not a registered base-fn).
+
+Acceptable exceptions for longer impls: input validation/size limits (safely wrapping the library) and library adapter boilerplate (e.g., Ring handler format).
 
 ### 1. Consolidate Duplicates
 

@@ -1,13 +1,19 @@
 (ns graphden.packages.web.http.impls
   "Implementations for web/http base functions using http-kit."
   (:require
-    [graphden.packages.core.collections.impls :as collections]
     [org.httpkit.server :as http-kit]))
+
+
+(defn- stringify-keys
+  "Adapts map keys to Ring string format (keyword keys → their name)."
+  [m]
+  (when m
+    (into {} (map (fn [[k v]] [(if (keyword? k) (name k) (str k)) v]) m))))
 
 
 (defn http-server
   [{:keys [handler port default-headers]}]
-  (let [stringify-keys #(collections/stringify-map-keys-fn {:m %})
+  (let [
         base-headers (stringify-keys (or default-headers {}))
         ring-handler (fn [request]
                        (let [req-map {:method (name (:request-method request))

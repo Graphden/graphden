@@ -270,24 +270,30 @@ HOFs like `map`, `filter` support two modes via optional `coll` argument:
 
 ### Base Function Philosophy (CRITICAL)
 
-**Base functions MUST be minimal primitives wrapping Clojure/Java/library capabilities.**
+**Base functions MUST be minimal primitives wrapping a single Clojure/Java/library call.**
+
+A base-fn impl should ideally be **1-2 lines** of actual logic: call the library, return the result. Everything else — composition, defaults, transformation — belongs in fn-defs.
 
 ✅ **GOOD base-fns** (atomic, generic, small):
-- `add`, `sub`, `mul` — wrap Clojure arithmetic
-- `http-server` — wrap http-kit `run-server`
-- `render-hiccup` — wrap hiccup2 `html`
-- `router` — wrap reitit router creation
-- `query-entities` — wrap storage protocol
-- `env` — get environment variable
+- `add`, `sub`, `mul` — wrap Clojure arithmetic (1 line)
+- `render-hiccup` — wrap hiccup2 `html` (1 line)
+- `query-entities` — wrap storage protocol (1 line)
+- `env` — get environment variable (1 line)
+- `wrap-element` — `[(keyword tag) content]` (1 line)
 
 ❌ **BAD base-fns** (anti-patterns to avoid):
-- Hardcoded HTML/CSS/JS content
-- Hardcoded routes or handlers
-- Hardcoded business logic
-- More than ~20 lines of code
-- Anything that could be composed from other base-fns
+- Hardcoded HTML/CSS/JS content → use `:parent :const` fn-def
+- Hardcoded defaults → use arg `:value` in fns.edn
+- Calling another base-fn → hidden composition, must be fn-def
+- Multi-step processing (parse → transform → format) → decompose into separate base-fns composed via fn-defs
+- More than ~5 lines of actual logic (excluding validation)
 
-**Rule:** If it contains hardcoded strings (except library defaults), HTML, routes, or logic — it should be a **fn-def**, not a base-fn.
+**Key rule: base-fn MUST NOT call another base-fn.** If impl A calls impl B, and both are registered base-fns, the composition A→B is hidden in code instead of being visible in the graph. Fix: either compose via fn-def, or make the shared logic a private helper (not a base-fn).
+
+**Acceptable exceptions for longer impls:**
+- Input validation / size limits (e.g., `range` validates step≠0 and max-size)
+- Library adapter boilerplate (e.g., `http-server` builds Ring handler format)
+- These are part of safely wrapping the library, not business logic
 
 **Example: Graph Editor should be fn-defs:**
 ```clojure

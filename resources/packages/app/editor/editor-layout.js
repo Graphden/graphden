@@ -161,7 +161,10 @@ async function fetchBackendLayout() {
       const tgtPos = gridPos[e.data.target];
       if (srcPos && tgtPos && e.data.argName) {
         const labelCol = Math.min(srcPos.col, tgtPos.col);
-        const labelWidth = e.data.argName.length * CHAR_WIDTH + LABEL_PADDING;
+        // Use widest line for multi-line labels (\n-separated)
+        const widestLine = e.data.argName.split('\n').reduce(
+          (max, line) => Math.max(max, line.length), 0);
+        const labelWidth = widestLine * CHAR_WIDTH + LABEL_PADDING;
         const currentGap = colGaps.get(labelCol) || GRID_GAP_X;
         colGaps.set(labelCol, Math.max(currentGap, labelWidth));
       }

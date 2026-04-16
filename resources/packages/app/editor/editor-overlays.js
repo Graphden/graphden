@@ -489,6 +489,39 @@ function createArgOverlay(node, container) {
 }
 
 /**
+ * Create overlay for an edge label (multi-line aware).
+ * Positioned just to the left of the target node, vertically centered
+ * on the target. Uses pre-line white-space so \n in the label produces
+ * actual line breaks.
+ */
+function createEdgeLabelOverlay(edge, container) {
+  const label = edge.data('argName');
+  if (!label) return;
+
+  const overlay = document.createElement('div');
+  overlay.className = 'edge-label-overlay';
+  overlay.dataset.edgeId = edge.id();
+  overlay.textContent = label;
+  Object.assign(overlay.style, {
+    position: 'absolute',
+    pointerEvents: 'none',
+    zIndex: '5',
+    background: '#ffffff',
+    color: '#666666',
+    fontFamily: 'SF Mono, Monaco, monospace',
+    fontSize: '10px',
+    lineHeight: '1.2',
+    padding: '2px 4px',
+    whiteSpace: 'pre',
+    textAlign: 'left',
+    transformOrigin: 'top right',
+    userSelect: 'none',
+    WebkitUserSelect: 'none'
+  });
+  container.appendChild(overlay);
+}
+
+/**
  * Create overlay for placeholder node (unset arg)
  */
 function createPlaceholderOverlay(node, container) {
@@ -552,6 +585,12 @@ function createNodeOverlays() {
     createPlaceholderOverlay(node, container);
   });
 
+  // Remove any stale edge label overlays then create fresh ones
+  document.querySelectorAll('.edge-label-overlay').forEach(el => el.remove());
+  cy.edges().forEach(edge => {
+    if (edge.data('argName')) createEdgeLabelOverlay(edge, container);
+  });
+
   updateOverlayPositions();
 }
 
@@ -588,5 +627,30 @@ function updateOverlayPositions() {
     overlay.style.minHeight = height + 'px';
     overlay.style.transform = 'scale(' + zoom + ')';
     overlay.style.transformOrigin = 'top left';
+  });
+
+  // Position edge label overlays. We anchor each label to the LEFT side of
+  // the target node, vertically centered on the target. The label's
+  // bottom-right corner sits ~6px to the left of the target's left edge.
+  document.querySelectorAll('.edge-label-overlay').forEach(overlay => {
+    const edgeId = overlay.dataset.edgeId;
+    if (!edgeId) return;
+    const edge = cy.getElementById(edgeId);
+    if (!edge.length) return;
+    const target = edge.target();
+    if (!target.length) return;
+
+    const tPos = target.position();
+    const tWidth = target.width();
+    // Screen-space coords of target's left edge midpoint
+    const screenRight = (tPos.x - tWidth / 2) * zoom + pan.x - 6;
+    const screenMid = tPos.y * zoom + pan.y;
+
+    // Anchor: top-right at (screenRight, screenMid - height/2)
+    // Use transform translate so the element sizes to its content first,
+    // then is offset by half its rendered height.
+    overlay.style.left = screenRight + 'px';
+    overlay.style.top = screenMid + 'px';
+    overlay.style.transform = 'scale(' + zoom + ') translate(-100%, -50%)';
   });
 }

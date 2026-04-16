@@ -59,7 +59,7 @@
 
   ;; Linters
   :kondo
-  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2026.01.19"}}
+  {:extra-deps {clj-kondo/clj-kondo {:mvn/version "2026.04.15"}}
    :main-opts ["-m" "clj-kondo.main"]}
 
   :cljstyle

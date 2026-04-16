@@ -302,8 +302,59 @@
                                :originalFnId (str original-fn-id)}})))
             node-id))
 
+        ;; Compute terminal source-id of an arg (walk source chain to root)
+        terminal-source-of
+        (fn [arg-id]
+          (loop [cur (get arg-map arg-id)]
+            (if (and cur (:source-id cur))
+              (if-let [src (get arg-map (:source-id cur))]
+                (recur src)
+                (:id cur))
+              (or (:id cur) arg-id))))
+
+        ;; Compute edge label showing the rename history through the arg's
+        ;; inheritance chain — but only for fns that are "expanded" at the
+        ;; source node (visible structurally). Without expansions only the
+        ;; source fn's own arg is considered, giving a single name.
+        ;;
+        ;; expanded-fns: set of fn-ids visible structurally at the source node.
+        ;;   - For leaf / non-expanded source: just #{source-fn-id}
+        ;;   - For expanded source: the expand-set
+        ;;
+        ;; Returns:
+        ;;   - single name string (no rename detected through expanded chain)
+        ;;   - multi-line "name1 (fn1, fn2)\nname2 (fn3, fn4)" (renames visible)
+        compute-edge-label
+        (fn [arg-id expanded-fns]
+          (when arg-id
+            (let [source-chain (loop [acc [], cur (get arg-map arg-id)]
+                                 (if cur
+                                   (recur (conj acc cur)
+                                          (some-> (:source-id cur) arg-map))
+                                   acc))
+                  ;; Keep only args whose fn-id is in the expanded set
+                  visible (filter #(contains? expanded-fns (:fn-id %)) source-chain)
+                  labeled (mapv (fn [arg]
+                                  {:fn (some-> (:fn-id arg) fn-map :name name)
+                                   :arg-name (resolve-arg-name arg arg-map)})
+                                visible)
+                  groups (->> labeled
+                              (partition-by :arg-name)
+                              (mapv (fn [grp]
+                                      {:name (:arg-name (first grp))
+                                       :fns (vec (keep :fn grp))})))]
+              (cond
+                (empty? groups) nil
+                (= 1 (count groups)) (:name (first groups))
+                :else (->> groups
+                           (map (fn [{:keys [name fns]}]
+                                  (if (seq fns)
+                                    (str name " (" (str/join ", " fns) ")")
+                                    name)))
+                           (str/join "\n"))))))
+
         add-arg-value-node
-        (fn [arg-name value arg-id source-node-id]
+        (fn [arg-name value arg-id source-node-id expanded-fns]
           ;; Node ID must include source-node-id to ensure uniqueness per expansion
           ;; Different fns expanding to same ancestor should get separate arg nodes
           (let [node-id (str "arg-" source-node-id "-" arg-id)
@@ -319,11 +370,12 @@
                      {:data {:id edge-id
                              :source source-node-id
                              :target node-id
-                             :argName (when arg-name (name arg-name))}}))
+                             :argName (or (compute-edge-label arg-id expanded-fns)
+                                          (when arg-name (name arg-name)))}}))
             node-id))
 
         add-unset-arg-node
-        (fn [arg-name arg-type arg-id source-node-id]
+        (fn [arg-name arg-type arg-id source-node-id expanded-fns]
           ;; Node ID must include source-node-id to ensure uniqueness per expansion
           ;; Different fns expanding to same ancestor should get separate unset nodes
           (let [node-id (str "unset-" source-node-id "-" arg-id)
@@ -339,18 +391,9 @@
                      {:data {:id edge-id
                              :source source-node-id
                              :target node-id
-                             :argName (when arg-name (name arg-name))
+                             :argName (or (compute-edge-label arg-id expanded-fns)
+                                          (when arg-name (name arg-name)))
                              :isUnset true}}))))
-
-        ;; Compute terminal source-id of an arg (walk source chain to root)
-        terminal-source-of
-        (fn [arg-id]
-          (loop [cur (get arg-map arg-id)]
-            (if (and cur (:source-id cur))
-              (if-let [src (get arg-map (:source-id cur))]
-                (recur src)
-                (:id cur))
-              (or (:id cur) arg-id))))
 
         ;; For each fn, the set of terminal-source-ids bound by its parent
         ;; inheritance closure (including itself). Bindings in ref-id targets
@@ -680,7 +723,7 @@
 
     ;; Declare process-any-fn before using it
     ;; expansion-root: the original-fn-id of the expanded function we're inside (nil if not in expansion)
-    (letfn [(process-fn [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root]
+    (letfn [(process-fn [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns]
               (let [node-id (add-fn-node original-fn-id is-root expansion-root)
                     ;; Key for tracking fully processed nodes - includes expansion context
                     process-key (str node-id "-" (hash bindings))]
@@ -701,7 +744,8 @@
                              {:data {:id edge-id
                                      :source source-node-id
                                      :target node-id
-                                     :argName (when edge-arg-name (name edge-arg-name))}}))))
+                                     :argName (or (compute-edge-label source-arg-id source-expanded-fns)
+                                                  (when edge-arg-name (name edge-arg-name)))}}))))
 
                 ;; Only process children if this node wasn't already fully processed
                 ;; This prevents infinite recursion when same fn is reached via different paths
@@ -779,13 +823,13 @@
                       (case (:type arg)
                         :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
                                    ref-bindings bindings]
-                               (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root))
-                        :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)
-                        :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)
+                               (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id}))
+                        :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id #{display-fn-id})
+                        :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id})
                         nil))))
                 node-id))
 
-            (process-expanded-fn [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root]
+            (process-expanded-fn [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns]
               ;; parent-expansion-root: if we're nested inside another expansion, keep that context
               ;; Otherwise, this fn becomes its own expansion root
               ;;
@@ -808,16 +852,17 @@
                                  {:data {:id edge-id
                                          :source source-node-id
                                          :target node-id
-                                         :argName (when edge-arg-name (name edge-arg-name))}}))))
+                                         :argName (or (compute-edge-label source-arg-id source-expanded-fns)
+                                                      (when edge-arg-name (name edge-arg-name)))}}))))
                     node-id)
                   (do
                     (swap! in-progress-expansions conj in-progress-key)
                     (try
-                      (process-expanded-fn-impl original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root)
+                      (process-expanded-fn-impl original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns)
                       (finally
                         (swap! in-progress-expansions disj in-progress-key)))))))
 
-            (process-expanded-fn-impl [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root]
+            (process-expanded-fn-impl [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns]
               (let [levels (get-inheritance-levels original-fn-id fn-map)
                     chain (vec (mapcat identity levels))  ; flat for set ops
                     expand-set (spec->expand-set original-fn-id spec)
@@ -862,7 +907,8 @@
                              {:data {:id edge-id
                                      :source source-node-id
                                      :target node-id
-                                     :argName (when edge-arg-name (name edge-arg-name))}}))))
+                                     :argName (or (compute-edge-label source-arg-id source-expanded-fns)
+                                                  (when edge-arg-name (name edge-arg-name)))}}))))
 
                 ;; For expanded mode, collect args from entire chain [0..level]
                 ;;
@@ -951,33 +997,33 @@
                     ;; Level-0 refs
                     (doseq [arg level-0-refs]
                       (when-not (binding-covered? arg)
-                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root)))
+                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set)))
 
                     ;; Level-0 unsets (free args)
                     (doseq [arg level-0-unsets]
-                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id))
+                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set))
 
                     ;; Level-0 values (bindings)
                     (doseq [arg level-0-values]
                       (when-not (binding-covered? arg)
-                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)))
+                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set)))
 
                     ;; Ancestor refs (structural expansion)
                     (doseq [arg ancestor-refs]
-                      (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root))
+                      (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root expand-set))
 
                     ;; Ancestor unsets (free args inherited)
                     (doseq [arg ancestor-unsets]
-                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id))
+                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set))
 
                     ;; Ancestor values (ancestor bindings)
                     (doseq [arg ancestor-values]
                       (when-not (binding-covered? arg)
-                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)))))
+                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set)))))
 
                 node-id))
 
-            (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root]
+            (process-any-fn [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root source-expanded-fns]
               ;; Named fns (with name in DB) are "boundaries" — their implementation
               ;; is hidden by default. Only the root fn and anonymous (name=nil) fns
               ;; are expanded automatically. Named fns show as leaf nodes unless
@@ -1006,7 +1052,8 @@
                                  {:data {:id edge-id
                                          :source source-node-id
                                          :target node-id
-                                         :argName (when edge-arg-name (name edge-arg-name))}}))))
+                                         :argName (or (compute-edge-label source-arg-id source-expanded-fns)
+                                                      (when edge-arg-name (name edge-arg-name)))}}))))
                     (let [own-args (get args-by-fn fn-id [])
                           unsets (filter (fn [arg]
                                            (and (nil? (:value arg))
@@ -1020,11 +1067,11 @@
                       ;; Unsets (free args — interface, propagate up to caller)
                       (doseq [arg unsets]
                         (add-unset-arg-node (resolve-arg-name arg arg-map)
-                                            (:type arg) (:id arg) node-id))
+                                            (:type arg) (:id arg) node-id #{fn-id}))
                       ;; Values (own literal bindings — local state)
                       (doseq [arg values]
                         (add-arg-value-node (resolve-arg-name arg arg-map)
-                                            (:value arg) (:id arg) node-id)))
+                                            (:value arg) (:id arg) node-id #{fn-id})))
                     node-id)
                   ;; Normal processing
                   (if (spec-trivial? spec)
@@ -1034,12 +1081,12 @@
                           bindings (if parent-bindings
                                      (merge parent-bindings bindings)
                                      bindings)]
-                      (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root))
+                      (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns))
                     ;; Expanded mode - pass parent expansion-root to maintain context
-                    (process-expanded-fn fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root)))))]
+                    (process-expanded-fn fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root source-expanded-fns)))))]
 
       ;; Start processing from root - no expansion-root initially
-      (process-any-fn root-fn-id nil nil true nil nil nil)))
+      (process-any-fn root-fn-id nil nil true nil nil nil #{})))
 
     {:nodes @nodes
      :edges @edges}))

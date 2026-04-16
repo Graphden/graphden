@@ -78,22 +78,9 @@ const CYTOSCAPE_STYLES = [
     'source-endpoint': 'outside-to-node',
     'target-endpoint': 'outside-to-node'
   }},
-  // Edge labels
-  { selector: 'edge[argName]', style: {
-    'target-label': function(edge) {
-      return truncateLabel(edge.data('argName') || '', 28);
-    },
-    'target-text-offset': function(edge) {
-      var label = edge.data('argName') || '';
-      return Math.max(30, label.length * 3 + 15);
-    },
-    'font-size': '10px',
-    'font-family': 'SF Mono, Monaco, monospace',
-    'color': '#666666',
-    'text-background-color': '#ffffff',
-    'text-background-opacity': 1,
-    'text-background-padding': '3px'
-  }},
+  // Edge labels are rendered as HTML overlays (see createEdgeLabelOverlay)
+  // — Cytoscape's target-label doesn't render multi-line text reliably with
+  // taxi edges, so we render them as positioned divs instead.
   // Unset edge - dashed, same black color
   { selector: 'edge[?isUnset]', style: {
     'line-style': 'dashed'
@@ -253,6 +240,15 @@ async function renderGraph(shouldFit = true) {
     const newData = nodes.find(n => n.data.id === node.id());
     if (newData) {
       node.data(newData.data);
+    }
+  });
+
+  // Update existing edge data (e.g. argName changes when expansion reveals
+  // rename chains — same edge id, different label)
+  cy.edges().forEach(edge => {
+    const newData = edges.find(e => e.data.id === edge.id());
+    if (newData) {
+      edge.data(newData.data);
     }
   });
 

@@ -853,32 +853,11 @@
                   (swap! expansion-bindings assoc original-fn-id
                          {:has-ancestor-refs has-ancestor-refs})
 
-                  ;; Show ancestor refs (structural expansion)
-                  ;; These will show bindings as their children
-                  ;; Pass ALL chain-bindings - deduplication happens in collect-fn-args
-                  ;; Use effective-expansion-root to maintain context through nested expansions
-                  (doseq [arg ancestor-refs]
-                    (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root))
+                  ;; Compute binding-covered? BEFORE processing nodes.
+                  ;; A binding is "covered" if its source chain leads to an arg
+                  ;; of a displayed ancestor ref fn — it will appear there instead.
+                  (let [expansion-chain-fns (set chain)
 
-                  ;; For bindings (level-0 refs/values and ancestor values):
-                  ;; Show at root ONLY if they DON'T flow to ancestor refs
-                  ;;
-                  ;; How to know if a binding flows to an ancestor ref?
-                  ;; The binding's source chain must lead to an arg of one of the ancestor ref fns
-                  ;;
-                  ;; For simplicity: track which arg sources are "covered" by ancestor refs
-                  ;; Then show uncovered bindings at root
-                  (let [;; Collect all arg-ids that ancestor refs will resolve
-                        ;; (by looking at their inheritance chains)
-                        ;; Collect arg-ids from ancestor ref-fns, EXCLUDING fns
-                        ;; that are also in the expansion root's inheritance chain.
-                        ;; This prevents shared ancestors (e.g., conj-any) from causing
-                        ;; items to be incorrectly filtered as "covered by ancestor ref".
-                        expansion-chain-fns (set chain)
-
-                        ;; Recursively collect all fn-ids reachable from ancestor refs
-                        ;; This walks the composition tree (following ref-ids in args)
-                        ;; so that items deep in coll chains are also covered
                         all-ancestor-ref-fn-ids
                         (let [result (atom #{})]
                           (letfn [(walk [fn-id visited]
@@ -901,7 +880,6 @@
                                                   fn-chain)))
                                       all-ancestor-ref-fn-ids))
 
-                        ;; Check if a binding's source chain leads to ancestor ref args
                         binding-covered?
                         (fn [arg]
                           (loop [sid (:arg-id arg)]
@@ -911,29 +889,36 @@
                                 (let [src-arg (get arg-map sid)]
                                   (recur (:source-id src-arg)))))))]
 
-                    ;; Level-0 refs: determine expansion-root based on context
-                    ;; - If we're nested inside another expansion (parent-expansion-root set),
-                    ;;   level-0 refs are STRUCTURAL children of this nested expansion
-                    ;;   and should use parent-expansion-root to stay isolated per-context
-                    ;; - If we're at top-level (parent-expansion-root nil),
-                    ;;   level-0 refs are potentially SHARED and should use nil (canonical IDs)
+                    ;; ORDER: level-0 args FIRST, then ancestor args.
+                    ;; This ensures the fn's own args (closer to root) get
+                    ;; earlier rows than ancestor-inherited args.
+
+                    ;; Level-0 refs
                     (doseq [arg level-0-refs]
                       (when-not (binding-covered? arg)
                         (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root)))
 
-                    ;; Level-0 values: show if not covered
+                    ;; Level-0 values
                     (doseq [arg level-0-values]
                       (when-not (binding-covered? arg)
                         (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)))
 
-                    ;; Ancestor values: show if not covered
+                    ;; Level-0 unsets
+                    (doseq [arg level-0-unsets]
+                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id))
+
+                    ;; Ancestor refs (structural expansion)
+                    (doseq [arg ancestor-refs]
+                      (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root))
+
+                    ;; Ancestor values
                     (doseq [arg ancestor-values]
                       (when-not (binding-covered? arg)
-                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id))))
+                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id)))
 
-                  ;; Show all unsets (free args)
-                  (doseq [arg (concat level-0-unsets ancestor-unsets)]
-                    (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id)))
+                    ;; Ancestor unsets
+                    (doseq [arg ancestor-unsets]
+                      (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id))))
 
                 node-id))
 

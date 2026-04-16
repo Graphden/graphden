@@ -103,4 +103,7 @@
   :parent :http-server
   :args {:handler :_router
          :port 8080
-         :default-headers :security-headers}}]}
+         :default-headers {"X-Content-Type-Options" "nosniff"
+                           "X-Frame-Options" "DENY"
+                           "X-XSS-Protection" "1; mode=block"
+                           "Referrer-Policy" "strict-origin-when-cross-origin"}}}]}

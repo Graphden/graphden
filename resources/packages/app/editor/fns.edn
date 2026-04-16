@@ -82,29 +82,18 @@
   :args {:head :editor-cytoscape-head
          :version :htmx-default-version}}
 
- ;; External scripts (dagre layout)
- {:name :dagre-script
-  :parent :const
-  :args {:value [:script {:src "https://unpkg.com/dagre@0.8.5/dist/dagre.min.js"}]}}
-
- {:name :cytoscape-dagre-script
-  :parent :const
-  :args {:value [:script {:src "https://unpkg.com/cytoscape-dagre@2.5.0/cytoscape-dagre.js"}]}}
-
- ;; Scripts collection (3 items) using triple
- {:name :editor-scripts
-  :parent :triple
-  :args {:item1 :dagre-script
-         :item2 :cytoscape-dagre-script
-         :item3 :editor-script-element}}
-
  ;; Complete HTML page
+ ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)
+ {:name :_editor-scripts
+  :parent :conj-empty
+  :args {:item :editor-script-element}}
+
  {:name :editor-page
   :parent :html-page
   :args {:title "Graphden - Graph Editor"
          :head :editor-head
          :body :editor-body
-         :scripts :editor-scripts}}
+         :scripts :_editor-scripts}}
 
  ;; Handler returns Ring response with HTML
  {:name :_editor-response

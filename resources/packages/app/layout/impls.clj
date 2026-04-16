@@ -991,9 +991,9 @@
                                       ;; — they are part of the expanded view
                                       (nil? expansion-root))]
                 (if show-as-leaf
-                  ;; Add the node + edge, then show free args (interface) as
-                  ;; unset placeholders. Implementation (parent chain, bound
-                  ;; args) stays hidden until user expands.
+                  ;; Add the node + edge, then show the fn's OWN args.
+                  ;; Only PARENT-defined bindings are hidden behind expansion.
+                  ;; Order: refs (structural) → unsets (free interface) → values (own bindings).
                   (let [node-id (add-fn-node fn-id false nil)]
                     (when (and source-node-id edge-arg-name)
                       (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
@@ -1004,17 +1004,31 @@
                                          :source source-node-id
                                          :target node-id
                                          :argName (when edge-arg-name (name edge-arg-name))}}))))
-                    ;; Show free args (those not bound by inheritance and not
-                    ;; bound by caller's binding via source chain). Iterate the
-                    ;; fn's own args; for each unset arg whose terminal isn't
-                    ;; determined, add an unset placeholder.
-                    (doseq [arg (get args-by-fn fn-id [])]
-                      (let [has-value (some? (:value arg))
-                            has-ref (some? (:ref-id arg))]
-                        (when (and (not has-value) (not has-ref)
-                                   (not (arg-determined? (:id arg))))
-                          (let [arg-name (resolve-arg-name arg arg-map)]
-                            (add-unset-arg-node arg-name (:type arg) (:id arg) node-id)))))
+                    (let [own-args (get args-by-fn fn-id [])
+                          classified (mapv (fn [arg]
+                                             (let [arg-name (resolve-arg-name arg arg-map)]
+                                               (cond
+                                                 (some? (:ref-id arg))
+                                                 {:type :ref :arg arg :arg-name arg-name}
+                                                 (some? (:value arg))
+                                                 {:type :value :arg arg :arg-name arg-name}
+                                                 (not (arg-determined? (:id arg)))
+                                                 {:type :unset :arg arg :arg-name arg-name}
+                                                 :else nil)))
+                                           own-args)
+                          classified (filterv some? classified)
+                          refs (filter #(= :ref (:type %)) classified)
+                          unsets (filter #(= :unset (:type %)) classified)
+                          values (filter #(= :value (:type %)) classified)]
+                      ;; Refs (structural connections to other fns)
+                      (doseq [{:keys [arg arg-name]} refs]
+                        (process-any-fn (:ref-id arg) node-id arg-name false nil (:id arg) nil))
+                      ;; Unsets (free args — interface)
+                      (doseq [{:keys [arg arg-name]} unsets]
+                        (add-unset-arg-node arg-name (:type arg) (:id arg) node-id))
+                      ;; Values (bindings made by this fn)
+                      (doseq [{:keys [arg arg-name]} values]
+                        (add-arg-value-node arg-name (:value arg) (:id arg) node-id)))
                     node-id)
                   ;; Normal processing
                   (if (spec-trivial? spec)

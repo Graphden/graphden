@@ -53,6 +53,6 @@
   :args {:value :any}
   :return-type :any}
 
+ ;; identity is just const with a different name
  {:name :identity
-  :args {:value :any}
-  :return-type :any}]}
+  :parent :const}]}

@@ -72,11 +72,6 @@
   value)
 
 
-(defn identity-fn
-  [{:keys [value]}]
-  value)
-
-
 ;; === Registry ===
 
 (def impls
@@ -90,5 +85,4 @@
    :cond cond-fn
    :case case-fn
    :coalesce coalesce
-   :const const
-   :identity identity-fn})
+   :const const})

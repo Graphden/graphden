@@ -76,14 +76,19 @@
          :field-specs :jsonb}
   :return-type :jsonb}
 
- ;; Wrap content in HTML elements
- {:name :wrap-style
-  :args {:content :text}
+ ;; Wrap text content in an HTML element
+ {:name :wrap-element
+  :args {:tag :text
+         :content :text}
   :return-type :jsonb}
 
+ {:name :wrap-style
+  :parent :wrap-element
+  :args {:tag "style"}}
+
  {:name :wrap-script
-  :args {:content :text}
-  :return-type :jsonb}
+  :parent :wrap-element
+  :args {:tag "script"}}
 
  ;; Generic hiccup element constructor
  {:name :hiccup

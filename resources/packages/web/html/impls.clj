@@ -233,16 +233,10 @@
              [:span {:class "field-value"} (if (nil? value) "-" (str value))]]))))
 
 
-(defn wrap-style
-  "Wraps content in a style element."
-  [{:keys [content]}]
-  [:style content])
-
-
-(defn wrap-script
-  "Wraps content in a script element."
-  [{:keys [content]}]
-  [:script content])
+(defn wrap-element
+  "Wraps text content in an HTML element."
+  [{:keys [tag content]}]
+  [(keyword tag) content])
 
 
 (defn hiccup-element
@@ -278,7 +272,6 @@
    :field-row field-row
    :badge badge
    :entity-field-rows entity-field-rows
-   :wrap-style wrap-style
-   :wrap-script wrap-script
+   :wrap-element wrap-element
    :hiccup hiccup-element
    :button-row button-row})

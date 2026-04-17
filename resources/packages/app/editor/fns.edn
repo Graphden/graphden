@@ -13,9 +13,20 @@
   :args {}
   :return-type :text}
 
+ ;; Editor JS modules — loaded from resources and concatenated in order
+ {:name :_editor-script-paths
+  :parent :const
+  :args {:value ["packages/app/editor/editor-state.js"
+                 "packages/app/editor/editor-data.js"
+                 "packages/app/editor/editor-layout.js"
+                 "packages/app/editor/editor-overlays.js"
+                 "packages/app/editor/editor-ui.js"
+                 "packages/app/editor/editor-cytoscape.js"
+                 "packages/app/editor/editor-main.js"]}}
+
  {:name :editor-script
-  :args {}
-  :return-type :text}
+  :parent :concat-resources
+  :args {:paths :_editor-script-paths}}
 
  ;; =============================================================================
  ;; FN-DEFS: Editor UI structure

@@ -171,15 +171,12 @@
   [:span {:class (if badge-type (str "badge badge-" badge-type) "badge")} badge-text])
 
 
-(defn- apply-transform
-  "Applies transformation to value based on transform spec.
-   Supports: :keyword-to-str, :pr-str, :bool-to-yesno, or nil (no transform)."
-  [value transform]
-  (case transform
+(defn apply-transform-fn
+  [{:keys [value transform]}]
+  (case (when transform (keyword transform))
     :keyword-to-str (when value (if (keyword? value) (name value) (str value)))
     :pr-str (when value (pr-str value))
     :bool-to-yesno (if value "Yes" "No")
-    ;; default: no transform
     value))
 
 
@@ -198,7 +195,7 @@
                 raw-value (if (vector? key-path)
                             (get-in entity key-path)
                             (get entity key-path))
-                value (apply-transform raw-value transform)]
+                value (apply-transform-fn {:value raw-value :transform transform})]
             [:div {:class "field-row"}
              [:span {:class "field-label"} label]
              [:span {:class "field-value"} (if (nil? value) "-" (str value))]]))))
@@ -238,4 +235,5 @@
    :entity-field-rows entity-field-rows
    :wrap-element wrap-element
    :hiccup hiccup-element
-   :button-row button-row})
+   :button-row button-row
+   :apply-transform apply-transform-fn})

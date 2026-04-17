@@ -99,4 +99,10 @@
          :style :jsonb}
   :return-type :jsonb}
 
+ ;; Transform a value for display: :keyword-to-str, :pr-str, :bool-to-yesno
+ {:name :apply-transform
+  :args {:value {:type :any :required false}
+         :transform {:type :text :required false}}
+  :return-type :any}
+
 ]}

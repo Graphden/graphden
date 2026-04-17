@@ -4,6 +4,7 @@
    Provides system information and Ring response primitives."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [graphden.executor.interface :as exec]
     [hiccup2.core :as h])
   (:import
@@ -31,13 +32,8 @@
 
 
 (defn make-request-handler
-  "Creates a handler that calls response-fn for each request.
-   response-fn must be a fn-id (UUID) of a function with one required argument.
-   The function will be called with the request object for each incoming request."
   [{:keys [response-fn]} ctx]
-  (let [callable (exec/make-single-arg-callable ctx response-fn)]
-    (fn [request]
-      (callable request))))
+  (exec/make-single-arg-callable ctx response-fn))
 
 
 (defn make-data-handler
@@ -82,27 +78,35 @@
 
 ;; === System Information ===
 
-(defn jvm-info
+(defn jvm-version
+  [_args]
+  (let [runtime-bean (ManagementFactory/getRuntimeMXBean)]
+    {:name (System/getProperty "java.vm.name")
+     :version (System/getProperty "java.version")
+     :uptime-ms (RuntimeMXBean/.getUptime runtime-bean)}))
+
+(defn heap-memory
   [_args]
   (let [runtime (Runtime/getRuntime)
-        memory-bean (ManagementFactory/getMemoryMXBean)
-        heap-usage (MemoryMXBean/.getHeapMemoryUsage memory-bean)
-        os-bean (ManagementFactory/getOperatingSystemMXBean)
-        runtime-bean (ManagementFactory/getRuntimeMXBean)]
-    {:jvm {:name (System/getProperty "java.vm.name")
-           :version (System/getProperty "java.version")
-           :uptime-ms (RuntimeMXBean/.getUptime runtime-bean)}
-     :memory {:heap-used (MemoryUsage/.getUsed heap-usage)
-              :heap-max (MemoryUsage/.getMax heap-usage)
-              :heap-committed (MemoryUsage/.getCommitted heap-usage)
-              :free (Runtime/.freeMemory runtime)
-              :total (Runtime/.totalMemory runtime)
-              :max (Runtime/.maxMemory runtime)}
-     :threads {:count (Thread/activeCount)}
-     :os {:name (OperatingSystemMXBean/.getName os-bean)
-          :arch (OperatingSystemMXBean/.getArch os-bean)
-          :processors (OperatingSystemMXBean/.getAvailableProcessors os-bean)
-          :load-average (OperatingSystemMXBean/.getSystemLoadAverage os-bean)}}))
+        heap (MemoryMXBean/.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))]
+    {:heap-used (MemoryUsage/.getUsed heap)
+     :heap-max (MemoryUsage/.getMax heap)
+     :heap-committed (MemoryUsage/.getCommitted heap)
+     :free (Runtime/.freeMemory runtime)
+     :total (Runtime/.totalMemory runtime)
+     :max (Runtime/.maxMemory runtime)}))
+
+(defn thread-count
+  [_args]
+  {:count (Thread/activeCount)})
+
+(defn os-info
+  [_args]
+  (let [os-bean (ManagementFactory/getOperatingSystemMXBean)]
+    {:name (OperatingSystemMXBean/.getName os-bean)
+     :arch (OperatingSystemMXBean/.getArch os-bean)
+     :processors (OperatingSystemMXBean/.getAvailableProcessors os-bean)
+     :load-average (OperatingSystemMXBean/.getSystemLoadAverage os-bean)}))
 
 
 (defn current-time-ms
@@ -120,6 +124,11 @@
                      :path path}))))
 
 
+(defn concat-resources
+  [{:keys [paths separator]}]
+  (str/join separator (map #(read-resource {:path %}) paths)))
+
+
 ;; === Registry ===
 
 (def impls
@@ -130,6 +139,10 @@
    :make-action-handler (with-meta make-action-handler {:ctx true})
    :to-json-string to-json-string
    :parse-json parse-json
-   :jvm-info jvm-info
+   :jvm-version jvm-version
+   :heap-memory heap-memory
+   :thread-count thread-count
+   :os-info os-info
    :current-time-ms current-time-ms
-   :read-resource read-resource})
+   :read-resource read-resource
+   :concat-resources concat-resources})

@@ -25,22 +25,8 @@
   (load-resource "packages/app/editor/editor-styles.css"))
 
 
-(defn editor-script
-  "Load JavaScript from external files (modular structure)."
-  [_args]
-  (str
-    ;; Load modules in dependency order
-    (load-resource "packages/app/editor/editor-state.js")   "\n\n"
-    (load-resource "packages/app/editor/editor-data.js")    "\n\n"
-    (load-resource "packages/app/editor/editor-layout.js")  "\n\n"
-    (load-resource "packages/app/editor/editor-overlays.js") "\n\n"
-    (load-resource "packages/app/editor/editor-ui.js")      "\n\n"
-    (load-resource "packages/app/editor/editor-cytoscape.js") "\n\n"
-    (load-resource "packages/app/editor/editor-main.js")))
-
-
 ;; === Registry ===
+;; editor-script is now a fn-def composing :concat-resources + :const paths
 
 (def impls
-  {:editor-styles editor-styles
-   :editor-script editor-script})
+  {:editor-styles editor-styles})

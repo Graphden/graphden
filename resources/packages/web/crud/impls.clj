@@ -31,6 +31,15 @@
 (defn- entity-type-from-string [s]
   (case s "fn" :fn "arg" :arg nil))
 
+(defn- extract-entity-params
+  "Extracts type-str, id-str, entity-type from request path-params."
+  [request]
+  (let [type-str (get-in request [:path-params :type])
+        id-str (get-in request [:path-params :id])]
+    {:type-str type-str
+     :id-str id-str
+     :entity-type (entity-type-from-string type-str)}))
+
 
 ;; === Context-aware Query Functions ===
 
@@ -145,37 +154,29 @@
 (defn render-entity-details-view
   [{:keys [request]} ctx]
   (let [storage (require-storage ctx)
-        entity-type-str (get-in request [:path-params :type])
-        entity-id-str (get-in request [:path-params :id])
-        entity-type (entity-type-from-string entity-type-str)]
-    (if (and entity-type entity-id-str)
-      (let [entity (sp/read-entity storage entity-type (java.util.UUID/fromString entity-id-str))]
-        (if entity
-          [:div
-           [:div {:style "margin-bottom: 12px;"}
-            (html/badge {:badge-text entity-type-str :badge-type entity-type-str})]
-           (html/entity-field-rows {:entity entity
-                                    :field-specs (case entity-type-str
-                                                   "fn" fn-field-specs
-                                                   "arg" arg-field-specs)})
-           (render-entity-actions {:entity-type entity-type-str :entity-id entity-id-str})]
-          [:p {:class "error"} "Entity not found"]))
+        {:keys [type-str id-str entity-type]} (extract-entity-params request)]
+    (if (and entity-type id-str)
+      (if-let [entity (sp/read-entity storage entity-type (java.util.UUID/fromString id-str))]
+        [:div
+         [:div {:style "margin-bottom: 12px;"}
+          (html/badge {:badge-text type-str :badge-type type-str})]
+         (html/entity-field-rows {:entity entity
+                                  :field-specs (case type-str "fn" fn-field-specs "arg" arg-field-specs)})
+         (render-entity-actions {:entity-type type-str :entity-id id-str})]
+        [:p {:class "error"} "Entity not found"])
       [:p {:class "error"} "Invalid request"])))
 
 (defn render-entity-form-view
   [{:keys [request]} ctx]
   (let [storage (require-storage ctx)
-        entity-type-str (get-in request [:path-params :type])
-        entity-id-str (get-in request [:path-params :id])
-        entity-type (entity-type-from-string entity-type-str)]
+        {:keys [type-str id-str entity-type]} (extract-entity-params request)]
     (if entity-type
-      (let [entity (when entity-id-str
-                     (sp/read-entity storage entity-type (java.util.UUID/fromString entity-id-str)))
+      (let [entity (when id-str (sp/read-entity storage entity-type (java.util.UUID/fromString id-str)))
             all-fns (vec (sp/query-entities storage :fn {}))
             all-args (vec (sp/query-entities storage :arg {}))]
         [:div
-         [:h4 (str (if entity "Edit " "Create ") entity-type-str)]
-         (case entity-type-str
+         [:h4 (str (if entity "Edit " "Create ") type-str)]
+         (case type-str
            "fn" (render-fn-form entity all-fns)
            "arg" (render-arg-form entity all-fns all-args)
            [:p "Not implemented"])])
@@ -206,13 +207,12 @@
 (defn process-create-entity
   [{:keys [request]} ctx]
   (let [storage (require-storage ctx)
-        entity-type-str (get-in request [:path-params :type])
-        entity-type (entity-type-from-string entity-type-str)
+        {:keys [type-str entity-type]} (extract-entity-params request)
         form-data (when (:body request)
-                    (let [parsed (parse-query-string (:body request))]
-                      (into {} (map (fn [[k v]] [(keyword k) v]) parsed))))]
+                    (into {} (map (fn [[k v]] [(keyword k) v])
+                                  (parse-query-string (:body request)))))]
     (if (and entity-type form-data)
-      (let [entity-data (case entity-type-str
+      (let [entity-data (case type-str
                           "fn" (parse-fn-from-form {:form-data form-data})
                           "arg" (parse-arg-from-form {:form-data form-data})
                           nil)
@@ -226,11 +226,9 @@
 (defn process-delete-entity
   [{:keys [request]} ctx]
   (let [storage (require-storage ctx)
-        entity-type-str (get-in request [:path-params :type])
-        entity-id-str (get-in request [:path-params :id])
-        entity-type (entity-type-from-string entity-type-str)]
-    (if (and entity-type entity-id-str)
-      (do (sp/delete-entity storage entity-type (java.util.UUID/fromString entity-id-str))
+        {:keys [id-str entity-type]} (extract-entity-params request)]
+    (if (and entity-type id-str)
+      (do (sp/delete-entity storage entity-type (java.util.UUID/fromString id-str))
           {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""})
       {:status 400 :body "<p class=\"error\">Invalid request</p>"})))
 

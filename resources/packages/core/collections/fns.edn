@@ -116,4 +116,12 @@
 
  {:name :select-keys
   :args {:m :any, :ks :jsonb}
+  :return-type :any}
+
+ {:name :zipmap
+  :args {:keys :jsonb, :vals :jsonb}
+  :return-type :any}
+
+ {:name :update-vals
+  :args {:m :any, :f :fn}
   :return-type :any}]}

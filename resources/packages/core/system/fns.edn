@@ -76,9 +76,38 @@
          :keywordize {:type :bool :value true}}
   :return-type :jsonb}
 
- {:name :jvm-info
+ {:name :jvm-version
   :args {}
   :return-type :jsonb}
+
+ {:name :heap-memory
+  :args {}
+  :return-type :jsonb}
+
+ {:name :thread-count
+  :args {}
+  :return-type :int}
+
+ {:name :os-info
+  :args {}
+  :return-type :jsonb}
+
+ ;; jvm-info composed from atomic base-fns via assoc chain
+ {:name :_jvm-section
+  :parent :assoc-empty
+  :args {:key "jvm" :value :jvm-version}}
+
+ {:name :_memory-section
+  :parent :assoc
+  :args {:map :_jvm-section :key "memory" :value :heap-memory}}
+
+ {:name :_threads-section
+  :parent :assoc
+  :args {:map :_memory-section :key "threads" :value :thread-count}}
+
+ {:name :jvm-info
+  :parent :assoc
+  :args {:map :_threads-section :key "os" :value :os-info}}
 
  {:name :current-time-ms
   :args {}
@@ -87,4 +116,10 @@
  ;; Read file from classpath resources
  {:name :read-resource
   :args {:path :text}
+  :return-type :text}
+
+ ;; Load multiple resource files and concatenate with separator
+ {:name :concat-resources
+  :args {:paths :jsonb
+         :separator {:type :text :value "\n\n"}}
   :return-type :text}]}

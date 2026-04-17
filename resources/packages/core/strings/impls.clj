@@ -207,4 +207,6 @@
    :parse-query-string parse-query-string-fn
    :truncate truncate-fn
    :blank? blank?-fn
-   :url-decode url-decode-fn})
+   :url-decode url-decode-fn
+   :str-contains? (fn [{:keys [string substring]}] (str/includes? string substring))
+   :str-starts-with? (fn [{:keys [string prefix]}] (str/starts-with? string prefix))})

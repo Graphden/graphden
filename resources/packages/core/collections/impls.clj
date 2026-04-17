@@ -227,4 +227,6 @@
    :distinct distinct-fn
    :stringify-map-keys stringify-map-keys-fn
    :keywordize-map-keys keywordize-map-keys-fn
-   :select-keys (fn [{:keys [m ks]}] (select-keys m ks))})
+   :select-keys (fn [{:keys [m ks]}] (select-keys m ks))
+   :zipmap (fn [{ks :keys vs :vals}] (zipmap ks vs))
+   :update-vals (fn [{:keys [m f]}] (update-vals m f))})

@@ -71,4 +71,12 @@
 
  {:name :url-decode
   :args {:string :text}
-  :return-type :text}]}
+  :return-type :text}
+
+ {:name :str-contains?
+  :args {:string :text, :substring :text}
+  :return-type :bool}
+
+ {:name :str-starts-with?
+  :args {:string :text, :prefix :text}
+  :return-type :bool}]}

@@ -32,6 +32,7 @@ services:
       DB_USERNAME: graphden
       DB_PASSWORD: graphden
       DB_POOL_SIZE: 10
+      AUTH_TOKEN: ${AUTH_TOKEN:-}
     ports:
       - "9002:8080"
     restart: unless-stopped

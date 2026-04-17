@@ -113,6 +113,11 @@
   :args {}
   :return-type :int}
 
+ ;; Read environment variable
+ {:name :env
+  :args {:name :text}
+  :return-type :text}
+
  ;; Read file from classpath resources
  {:name :read-resource
   :args {:path :text}

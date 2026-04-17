@@ -99,11 +99,36 @@
   :parent :text-error-router
   :args {:routes :all-routes}}
 
- {:name :web-server
-  :parent :http-server
+ ;; =============================================================================
+ ;; AUTH
+ ;; =============================================================================
+
+ {:name :_auth-token
+  :parent :env
+  :args {:name "AUTH_TOKEN"}}
+
+ {:name :_auth-fail-response
+  :parent :ring-response
+  :args {:status 401
+         :headers {"Content-Type" "text/plain"}
+         :body "Unauthorized"}}
+
+ ;; =============================================================================
+ ;; SERVER
+ ;; =============================================================================
+
+ {:name :_ring-handler
+  :parent :ring-adapter
   :args {:handler :_router
-         :port 8080
          :default-headers {"X-Content-Type-Options" "nosniff"
                            "X-Frame-Options" "DENY"
                            "X-XSS-Protection" "1; mode=block"
-                           "Referrer-Policy" "strict-origin-when-cross-origin"}}}]}
+                           "Referrer-Policy" "strict-origin-when-cross-origin"}
+         :auth-token :_auth-token
+         :auth-path-prefix "/api/entities"
+         :auth-fail-response :_auth-fail-response}}
+
+ {:name :web-server
+  :parent :http-server
+  :args {:handler :_ring-handler
+         :port 8080}}]}

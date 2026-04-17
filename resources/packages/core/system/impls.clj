@@ -114,6 +114,11 @@
   (System/currentTimeMillis))
 
 
+(defn env-fn
+  [{:keys [name]}]
+  (System/getenv name))
+
+
 (defn read-resource
   "Read a resource file from classpath and return its contents as string."
   [{:keys [path]}]
@@ -144,5 +149,6 @@
    :thread-count thread-count
    :os-info os-info
    :current-time-ms current-time-ms
+   :env env-fn
    :read-resource read-resource
    :concat-resources concat-resources})

@@ -3,6 +3,7 @@
    Handles JSONB, enum, and other type conversions."
   (:require
     [cheshire.core :as json]
+    [clojure.string :as str]
     [graphden.storage.postgres.util :as util]
     [graphden.storage.protocol.core :as sp])
   (:import
@@ -43,31 +44,51 @@
     (PGobject/.setValue pg-value)))
 
 
-(defn- value->jsonb
-  "Wraps a value as JSONB PGobject for PostgreSQL."
+(defn- preserve-keywords
+  "Converts keyword VALUES to \":name\" strings so they survive JSON round-trip.
+   Map keys are left as-is (Cheshire handles key serialization separately)."
   [v]
-  (->pgobject "jsonb" (json/generate-string v)))
+  (cond
+    (keyword? v) (str v)
+    (map? v) (persistent! (reduce-kv (fn [m k v2] (assoc! m k (preserve-keywords v2))) (transient {}) v))
+    (sequential? v) (mapv preserve-keywords v)
+    :else v))
 
 
-(defn- seqs->vectors
-  "Recursively converts lazy seqs to vectors.
-   Cheshire returns lazy seqs for JSON arrays, but we need vectors
-   for proper conj behavior (append vs prepend)."
+(defn- value->jsonb
+  "Wraps a value as JSONB PGobject for PostgreSQL.
+   Keywords in values are preserved as \":name\" strings."
+  [v]
+  (->pgobject "jsonb" (json/generate-string (preserve-keywords v))))
+
+
+(defn- normalize-parsed-json
+  "Post-processes parsed JSON: converts lazy seqs to vectors and restores
+   keyword values (strings starting with ':' → keywords)."
   [x]
   (cond
-    (map? x) (persistent! (reduce-kv (fn [m k v] (assoc! m k (seqs->vectors v))) (transient {}) x))
-    (sequential? x) (mapv seqs->vectors x)
+    (and (string? x)
+         (> (count x) 1)
+         (str/starts-with? x ":"))
+    (keyword (subs x 1))
+
+    (map? x)
+    (persistent! (reduce-kv (fn [m k v] (assoc! m k (normalize-parsed-json v))) (transient {}) x))
+
+    (sequential? x)
+    (mapv normalize-parsed-json x)
+
     :else x))
 
 
 (defn- parse-jsonb
   "Parses JSONB PGobject value to Clojure data.
    Returns nil for null values.
-   Converts all arrays to vectors for proper conj behavior."
+   Restores keywords from \":name\" strings and converts arrays to vectors."
   [pg-value]
   (when pg-value
     (try
-      (seqs->vectors (json/parse-string pg-value true))
+      (normalize-parsed-json (json/parse-string pg-value true))
       (catch JsonParseException e
         (throw (ex-info "Failed to parse JSONB value"
                         {:type :parse-error/jsonb

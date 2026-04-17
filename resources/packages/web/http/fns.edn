@@ -4,10 +4,21 @@
 
 {:namespace "web.http"
  :fns
-[{:name :http-server
-  :args {:handler :any  ; Receives Clojure fn from router
-         :port :int
-         :default-headers {:type :jsonb :required false}}
+[;; Wraps internal handler into Ring handler:
+ ;; adapts request/response formats, merges default headers,
+ ;; optionally checks Bearer auth for paths matching prefix
+ {:name :ring-adapter
+  :args {:handler :any
+         :default-headers {:type :jsonb :required false}
+         :auth-token {:type :text :required false}
+         :auth-path-prefix {:type :text :required false}
+         :auth-fail-response {:type :jsonb :required false}}
+  :return-type :fn}
+
+ ;; Starts http-kit server. handler must be a Ring handler (use ring-adapter)
+ {:name :http-server
+  :args {:handler :any
+         :port :int}
   :return-type :any}
 
  {:name :http-stop

@@ -226,4 +226,5 @@
    :flatten flatten-fn
    :distinct distinct-fn
    :stringify-map-keys stringify-map-keys-fn
-   :keywordize-map-keys keywordize-map-keys-fn})
+   :keywordize-map-keys keywordize-map-keys-fn
+   :select-keys (fn [{:keys [m ks]}] (select-keys m ks))})

@@ -17,18 +17,17 @@
             :return-type (when return-type (name return-type))}}))
 
 
+(defn- truncate [s max-len]
+  (if (> (count s) max-len) (str (subs s 0 max-len) "...") s))
+
 (defn format-display-value
-  "Formats a value for display in graph nodes. Truncates long strings."
   [{:keys [value ref-id max-length]}]
-  (let [max-len (or max-length 20)]
+  (let [n (or max-length 20)]
     (cond
-      ref-id (str "ref<fn:" ref-id ">")
-      (and (some? value) (string? value))
-      (if (> (count value) max-len) (str (subs value 0 max-len) "...") value)
-      (some? value)
-      (let [s (pr-str value)]
-        (if (> (count s) max-len) (str (subs s 0 max-len) "...") s))
-      :else "unset")))
+      ref-id              (str "ref<fn:" ref-id ">")
+      (string? value)     (truncate value n)
+      (some? value)       (truncate (pr-str value) n)
+      :else               "unset")))
 
 
 (defn- arg->node

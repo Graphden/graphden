@@ -112,4 +112,8 @@
 
  {:name :keywordize-map-keys
   :args {:m :any}
+  :return-type :any}
+
+ {:name :select-keys
+  :args {:m :any, :ks :jsonb}
   :return-type :any}]}

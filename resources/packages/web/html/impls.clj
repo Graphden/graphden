@@ -103,13 +103,9 @@
 
 (defn html-response
   [{:keys [body status]}]
-  (let [html-str (if (string? body)
-                   body
-                   (str (h/html body)))
-        actual-status (or status 200)]
-    {:status actual-status
-     :headers {"Content-Type" "text/html; charset=utf-8"}
-     :body html-str}))
+  {:status (or status 200)
+   :headers {"Content-Type" "text/html; charset=utf-8"}
+   :body (if (string? body) body (str (h/html body)))})
 
 
 (defn html-page
@@ -140,39 +136,26 @@
 
 (defn form-input
   [{:keys [field-name label-text input-type field-value extra-attrs]}]
-  (let [base-attrs {:type input-type
-                    :name field-name
-                    :id field-name}
-        with-value (if field-value
-                     (assoc base-attrs :value field-value)
-                     base-attrs)
-        final-attrs (merge with-value (or extra-attrs {}))]
-    [:div {:class "form-group"}
-     [:label {:for field-name} label-text]
-     [:input final-attrs]]))
+  [:div {:class "form-group"}
+   [:label {:for field-name} label-text]
+   [:input (merge {:type input-type :name field-name :id field-name}
+                  (when field-value {:value field-value})
+                  extra-attrs)]])
 
 
 (defn form-select
   [{:keys [field-name label-text options selected-value extra-attrs]}]
-  (let [base-attrs {:name field-name :id field-name}
-        final-attrs (merge base-attrs (or extra-attrs {}))
-        option-elements (for [opt options]
-                          (let [[v l] (if (map? opt)
-                                        [(:value opt) (:label opt)]
-                                        opt)
-                                opt-attrs (cond-> {:value v}
-                                            (= v selected-value) (assoc :selected true))]
-                            [:option opt-attrs l]))]
-    [:div {:class "form-group"}
-     [:label {:for field-name} label-text]
-     (into [:select final-attrs] option-elements)]))
+  [:div {:class "form-group"}
+   [:label {:for field-name} label-text]
+   (into [:select (merge {:name field-name :id field-name} extra-attrs)]
+         (for [opt options
+               :let [[v l] (if (map? opt) [(:value opt) (:label opt)] opt)]]
+           [:option (cond-> {:value v} (= v selected-value) (assoc :selected true)) l]))])
 
 
 (defn button
   [{:keys [btn-text btn-type extra-attrs]}]
-  (let [base-attrs {:type (or btn-type "button")}
-        final-attrs (merge base-attrs (or extra-attrs {}))]
-    [:button final-attrs btn-text]))
+  [:button (merge {:type (or btn-type "button")} extra-attrs) btn-text])
 
 
 (defn field-row
@@ -184,12 +167,8 @@
 
 
 (defn badge
-  "Renders a badge with optional type for styling."
   [{:keys [badge-text badge-type]}]
-  (let [type-class (if badge-type
-                     (str "badge badge-" badge-type)
-                     "badge")]
-    [:span {:class type-class} badge-text]))
+  [:span {:class (if badge-type (str "badge badge-" badge-type) "badge")} badge-text])
 
 
 (defn- apply-transform
@@ -232,15 +211,9 @@
 
 
 (defn hiccup-element
-  "Creates a hiccup element from tag, attrs, and children."
   [{:keys [tag attrs children]}]
-  (let [tag-kw (if (keyword? tag) tag (keyword tag))
-        base (if attrs
-               [tag-kw attrs]
-               [tag-kw])]
-    (if children
-      (into base children)
-      base)))
+  (let [tag-kw (if (keyword? tag) tag (keyword tag))]
+    (into (if attrs [tag-kw attrs] [tag-kw]) children)))
 
 
 (defn button-row

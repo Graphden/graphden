@@ -58,4 +58,17 @@
 
  {:name :parse-query-string
   :args {:string :text}
-  :return-type :jsonb}]}
+  :return-type :jsonb}
+
+ {:name :truncate
+  :args {:string :text
+         :max-length :int}
+  :return-type :text}
+
+ {:name :blank?
+  :args {:string {:type :text :required false}}
+  :return-type :bool}
+
+ {:name :url-decode
+  :args {:string :text}
+  :return-type :text}]}

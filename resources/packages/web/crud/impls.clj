@@ -6,7 +6,6 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
-    [graphden.packages.core.strings.impls :as strings]
     [graphden.packages.web.html.impls :as html]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs])
@@ -16,6 +15,13 @@
 
 
 ;; === Helpers ===
+
+(defn- parse-query-string [s]
+  (when (and s (not (str/blank? s)))
+    (into {} (for [pair (str/split s #"&")
+                   :let [[k v] (str/split pair #"=" 2)]
+                   :when k]
+               [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
 
 (defn- require-storage [ctx]
   (or (:storage ctx)
@@ -203,7 +209,7 @@
         entity-type-str (get-in request [:path-params :type])
         entity-type (entity-type-from-string entity-type-str)
         form-data (when (:body request)
-                    (let [parsed (strings/parse-query-string-fn {:string (:body request)})]
+                    (let [parsed (parse-query-string (:body request))]
                       (into {} (map (fn [[k v]] [(keyword k) v]) parsed))))]
     (if (and entity-type form-data)
       (let [entity-data (case entity-type-str
@@ -237,7 +243,7 @@
 
 (defn get-query-param
   [{:keys [request param-name default]}]
-  (let [params (strings/parse-query-string-fn {:string (:query-string request)})]
+  (let [params (parse-query-string (:query-string request))]
     (get params param-name default)))
 
 (defn parse-form-body
@@ -245,7 +251,7 @@
   (let [body (:body request)
         content-type (get-in request [:headers "content-type"] "")]
     (if (and body (str/includes? content-type "application/x-www-form-urlencoded"))
-      (or (strings/parse-query-string-fn {:string body}) {})
+      (or (parse-query-string body) {})
       {})))
 
 (defn parse-json-body

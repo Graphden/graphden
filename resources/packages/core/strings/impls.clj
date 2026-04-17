@@ -172,6 +172,23 @@
             [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
 
 
+(defn truncate-fn
+  [{:keys [string max-length]}]
+  (if (> (count string) max-length)
+    (str (subs string 0 max-length) "...")
+    string))
+
+
+(defn blank?-fn
+  [{:keys [string]}]
+  (str/blank? string))
+
+
+(defn url-decode-fn
+  [{:keys [string]}]
+  (java.net.URLDecoder/decode string "UTF-8"))
+
+
 ;; === Registry ===
 
 (def impls
@@ -187,4 +204,7 @@
    :keyword-to-str keyword-to-str-fn
    :pr-str pr-str-fn
    :to-str to-str-fn
-   :parse-query-string parse-query-string-fn})
+   :parse-query-string parse-query-string-fn
+   :truncate truncate-fn
+   :blank? blank?-fn
+   :url-decode url-decode-fn})

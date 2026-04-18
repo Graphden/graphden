@@ -653,7 +653,8 @@
               items (walk-sequence-chain anchor args-by-id)
               item-delays (mapv build-item-delay items)
               sequence-delay (reify clojure.lang.IDeref
-                               (deref [_]
+                               (deref
+                                 [_]
                                  (mapv deref item-delays)))]
           (when include? (swap! delays-by-name assoc key-name sequence-delay))
           (swap! delays-by-id assoc arg-id sequence-delay))))

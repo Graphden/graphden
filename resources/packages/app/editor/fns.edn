@@ -167,4 +167,14 @@
   :parent :delete-route
   :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
 
+ ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
+ ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).
+ {:name :sequence-append-route
+  :parent :post-route
+  :args {:path "/api/sequence/append/:fn-id" :handler :sequence-append-handler}}
+
+ {:name :sequence-remove-route
+  :parent :delete-route
+  :args {:path "/api/sequence/item/:item-id" :handler :sequence-remove-handler}}
+
 ]}

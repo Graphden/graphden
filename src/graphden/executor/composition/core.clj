@@ -740,13 +740,20 @@
                                 :value value
                                 :ref-id ref-id
                                 :is-fn nil
-                                :next-arg-id nil}))
+                                :next-arg-id nil
+                                :prev-arg-id nil}))
                            items)
+        ;; Wire up the doubly-linked list: item[i].next → item[i+1].id and
+        ;; item[i+1].prev → item[i].id. Head.prev points back at the anchor,
+        ;; tail.next is nil.
         linked (vec (map-indexed
                       (fn [idx rec]
-                        (if (< idx (dec (count item-records)))
-                          (assoc rec :next-arg-id (:id (nth item-records (inc idx))))
-                          rec))
+                        (let [next-id (when (< idx (dec (count item-records)))
+                                        (:id (nth item-records (inc idx))))
+                              prev-id (if (zero? idx)
+                                        anchor-id
+                                        (:id (nth item-records (dec idx))))]
+                          (assoc rec :next-arg-id next-id :prev-arg-id prev-id)))
                       item-records))
         anchor {:id anchor-id
                 :fn-id fn-id
@@ -756,7 +763,8 @@
                 :value nil
                 :ref-id nil
                 :is-fn nil
-                :next-arg-id (when (seq linked) (:id (first linked)))}
+                :next-arg-id (when (seq linked) (:id (first linked)))
+                :prev-arg-id nil}
         delete-items (if existing-anchor
                        (walk-anchor-chain-ids (:by-id args-data) existing-anchor)
                        [])]

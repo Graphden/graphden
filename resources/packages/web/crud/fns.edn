@@ -52,6 +52,18 @@
   :return-type :jsonb
   :ctx true}
 
+ ;; Sequence operations: append/remove items of a sequence arg on any fn
+ ;; that has a `:sequence`-typed anchor (e.g. :list, :pairs->map children).
+ {:name :process-sequence-append
+  :args {:request :jsonb}
+  :return-type :jsonb
+  :ctx true}
+
+ {:name :process-sequence-remove
+  :args {:request :jsonb}
+  :return-type :jsonb
+  :ctx true}
+
  ;; Request parameter helpers (pure functions)
  {:name :get-path-param
   :args {:request :jsonb
@@ -172,4 +184,13 @@
 
  {:name :delete-entity-api-handler
   :parent :make-html-action-handler
-  :args {:action-fn :process-delete-entity}}]}
+  :args {:action-fn :process-delete-entity}}
+
+ ;; Sequence-op handlers: return JSON, not HTML partials.
+ {:name :sequence-append-handler
+  :parent :make-html-action-handler
+  :args {:action-fn :process-sequence-append}}
+
+ {:name :sequence-remove-handler
+  :parent :make-html-action-handler
+  :args {:action-fn :process-sequence-remove}}]}

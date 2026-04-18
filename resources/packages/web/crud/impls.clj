@@ -233,6 +233,136 @@
       {:status 400 :body "<p class=\"error\">Invalid request</p>"})))
 
 
+;; === Sequence operations =====================================================
+;; Sequences live as anchor args (type=:sequence, source-id → base-fn template)
+;; with a next_arg_id chain of item args. These helpers find the anchor, walk
+;; the chain, and perform insert/remove/reorder by rewiring one or two refs.
+
+(defn- find-sequence-anchor
+  "Given a fn-id, returns the anchor arg (the one with type=:sequence).
+   Assumes at most one sequence slot per fn (true for :list and :pairs->map)."
+  [storage fn-id]
+  (->> (sp/query-entities storage :arg {:fn-id fn-id})
+       (some #(when (= :sequence (:type %)) %))))
+
+
+(defn- walk-chain-from
+  "Returns the ordered vector of item arg entities starting at `start-arg-id`
+   (walks next-arg-id). Uses the supplied by-id index for O(1) lookup."
+  [by-id start-arg-id]
+  (loop [cur start-arg-id
+         acc []
+         depth 0]
+    (cond
+      (nil? cur) acc
+      (> depth 10000) acc
+      :else
+      (let [item (get by-id cur)]
+        (if (nil? item)
+          acc
+          (recur (:next-arg-id item) (conj acc item) (inc depth)))))))
+
+
+(defn- resolve-payload
+  "Parses a sequence-op request body into {:value … :ref-id …}.
+   Body shapes supported:
+     {\"ref\":  \"fn-uuid-string\"} — ref to a fn by id
+     {\"ref-name\": \"my-fn\"}      — ref resolved by fn-name
+     {\"value\": <any JSON>}        — literal value"
+  [storage body]
+  (cond
+    (contains? body :ref)
+    {:value nil :ref-id (java.util.UUID/fromString (:ref body))}
+
+    (contains? body :ref-name)
+    (if-let [target (first (sp/query-entities storage :fn {:name (:ref-name body)}))]
+      {:value nil :ref-id (:id target)}
+      (throw (ex-info (str "Fn not found by name: " (:ref-name body))
+                      {:type :sequence-op/fn-not-found :ref-name (:ref-name body)})))
+
+    (contains? body :value)
+    {:value (:value body) :ref-id nil}
+
+    :else
+    (throw (ex-info "Sequence op body requires :ref, :ref-name, or :value"
+                    {:type :sequence-op/invalid-body :body body}))))
+
+
+(defn process-sequence-append
+  "POST /api/sequence/:fn-id/append
+   Body: {\"ref\"|\"ref-name\"|\"value\": …}
+   Appends one item to the sequence of fn :fn-id."
+  [{:keys [request]} ctx]
+  (let [storage (require-storage ctx)
+        fn-id-str (get-in request [:path-params :fn-id])
+        fn-id (try (java.util.UUID/fromString fn-id-str) (catch Exception _ nil))
+        body (when (:body request)
+               (try (json/parse-string (:body request) true) (catch Exception _ nil)))]
+    (cond
+      (nil? fn-id)
+      {:status 400 :body "<p class=\"error\">Invalid fn-id</p>"}
+
+      (nil? body)
+      {:status 400 :body "<p class=\"error\">JSON body required</p>"}
+
+      :else
+      (if-let [anchor (find-sequence-anchor storage fn-id)]
+        (let [all-args (sp/query-entities storage :arg {:fn-id fn-id})
+              by-id (into {} (map (juxt :id identity)) all-args)
+              chain (walk-chain-from by-id (:next-arg-id anchor))
+              tail (last chain)
+              prev-id (if tail (:id tail) (:id anchor))
+              {:keys [value ref-id]} (resolve-payload storage body)
+              new-item {:id (random-uuid)
+                        :fn-id fn-id
+                        :source-id nil
+                        :name nil
+                        :type (or (:type anchor) :any)
+                        :value value
+                        :ref-id ref-id
+                        :is-fn nil
+                        :next-arg-id nil
+                        :prev-arg-id prev-id}]
+          (sp/create-entity storage :arg new-item)
+          (if tail
+            (sp/update-entities storage :arg
+                                [(assoc tail :next-arg-id (:id new-item))])
+            (sp/update-entities storage :arg
+                                [(assoc anchor :next-arg-id (:id new-item))]))
+          {:status 200
+           :headers {"Content-Type" "application/json"}
+           :body (json/generate-string {:arg-id (:id new-item)
+                                        :position (count chain)})})
+        {:status 404 :body "<p class=\"error\">Fn has no sequence arg</p>"}))))
+
+
+(defn process-sequence-remove
+  "DELETE /api/sequence/item/:item-id
+   Removes one item, rewiring the predecessor's next-arg-id to the removed
+   item's next-arg-id, and the successor's prev-arg-id back to the
+   predecessor. Both lookups are O(1) via prev-arg-id/next-arg-id."
+  [{:keys [request]} ctx]
+  (let [storage (require-storage ctx)
+        item-id-str (get-in request [:path-params :item-id])
+        item-id (try (java.util.UUID/fromString item-id-str) (catch Exception _ nil))]
+    (if (nil? item-id)
+      {:status 400 :body "<p class=\"error\">Invalid item-id</p>"}
+      (let [item (sp/read-entity storage :arg item-id)]
+        (if (nil? item)
+          {:status 404 :body "<p class=\"error\">Item not found</p>"}
+          (let [prev-id (:prev-arg-id item)
+                next-id (:next-arg-id item)
+                predecessor (when prev-id (sp/read-entity storage :arg prev-id))
+                successor (when next-id (sp/read-entity storage :arg next-id))
+                updates (cond-> []
+                          predecessor (conj (assoc predecessor :next-arg-id next-id))
+                          successor (conj (assoc successor :prev-arg-id prev-id)))]
+            (when (seq updates)
+              (sp/update-entities storage :arg updates))
+            (sp/delete-entity storage :arg item-id)
+            {:status 200 :body ""}))))))
+
+
 ;; === Pure Functions ===
 
 (defn get-path-param
@@ -279,6 +409,8 @@
    :render-entity-form-view (with-meta render-entity-form-view {:ctx true})
    :process-create-entity (with-meta process-create-entity {:ctx true})
    :process-delete-entity (with-meta process-delete-entity {:ctx true})
+   :process-sequence-append (with-meta process-sequence-append {:ctx true})
+   :process-sequence-remove (with-meta process-sequence-remove {:ctx true})
    :render-entity-actions render-entity-actions
    :parse-fn-from-form parse-fn-from-form
    :parse-arg-from-form parse-arg-from-form

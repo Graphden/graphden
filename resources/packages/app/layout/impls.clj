@@ -180,6 +180,49 @@
     s))
 
 
+(defn- walk-anchor-chain
+  "From a sequence anchor arg, walks next-arg-id via arg-map and returns
+   the ordered vector of item arg entities."
+  [anchor arg-map]
+  (loop [cur (:next-arg-id anchor)
+         acc []
+         depth 0]
+    (cond
+      (nil? cur) acc
+      (> depth 10000) acc
+      :else
+      (let [item (get arg-map cur)]
+        (if (nil? item)
+          acc
+          (recur (:next-arg-id item) (conj acc item) (inc depth)))))))
+
+
+(defn- expand-sequence-anchor
+  "For a sequence anchor, returns a vector of synthetic arg descriptors —
+   one per chain item, labeled `<slot>[idx]`. Anchor itself is not emitted.
+   Items with ref-id become :ref entries, items with value become :value."
+  [anchor slot-name arg-map]
+  (let [items (walk-anchor-chain anchor arg-map)]
+    (into []
+          (map-indexed
+            (fn [idx item]
+              (let [lbl (str slot-name "[" idx "]")]
+                (cond
+                  (some? (:ref-id item))
+                  {:type :ref :arg-name lbl
+                   :ref-id (:ref-id item) :arg-id (:id item)
+                   :is-binding false}
+
+                  (some? (:value item))
+                  {:type :value :arg-name lbl
+                   :value (:value item) :arg-id (:id item)}
+
+                  :else
+                  {:type :unset :arg-name lbl
+                   :arg-type (:type item) :arg-id (:id item)}))))
+          items)))
+
+
 (defn- build-graph-elements
   "Build graph elements (nodes, edges) from selected function.
    Returns {:nodes [...] :edges [...]}"
@@ -505,7 +548,28 @@
         ;;   If a binding's source chain leads to one of these arg-ids, the binding should be shown there, not here
         (fn [fn-id bindings & {:keys [is-structural displayed-ref-arg-ids expansion-root-chain]
                                :or {is-structural false displayed-ref-arg-ids #{} expansion-root-chain #{}}}]
-          (let [args (get args-by-fn fn-id [])
+          (let [raw-args (get args-by-fn fn-id [])
+                ;; Sequence handling: find anchors (type=:sequence) and their chain items.
+                ;; Anchor + items get EXCLUDED from normal scalar processing; instead the
+                ;; chain expands to N synthetic slot entries (labeled `<slot>[idx]`).
+                sequence-anchors (filterv #(= :sequence (:type %)) raw-args)
+                chain-item-ids (into #{}
+                                     (mapcat (fn [anchor]
+                                               (map :id (walk-anchor-chain anchor arg-map))))
+                                     sequence-anchors)
+                anchor-ids (set (map :id sequence-anchors))
+                sequence-slot-entries
+                (vec (mapcat
+                       (fn [anchor]
+                         (expand-sequence-anchor
+                           anchor
+                           (or (resolve-arg-name anchor arg-map) "items")
+                           arg-map))
+                       sequence-anchors))
+                args (filterv (fn [a]
+                                (not (or (contains? anchor-ids (:id a))
+                                         (contains? chain-item-ids (:id a)))))
+                              raw-args)
                 ;; Collect sources that child refs will handle (static)
                 ;; This catches direct children of this fn
                 child-sources (child-covered-sources-for-fn fn-id :expansion-root-chain expansion-root-chain)
@@ -605,8 +669,11 @@
                                args)
                 ;; Sort args: refs first (fn type), then values (fixed), then unset (free)
                 type-order {:ref 0 :value 1 :unset 2}
-                sorted-args (sort-by #(get type-order (:type %) 3) all-args)]
-            (filterv some? sorted-args)))
+                sorted-args (sort-by #(get type-order (:type %) 3) all-args)
+                ;; Append sequence slot entries (expanded from anchor chains).
+                ;; They come after the scalar args so the scalar order is unchanged.
+                final-args (into (filterv some? sorted-args) sequence-slot-entries)]
+            final-args))
 
         ;; Collect args from a set of expand-fns with proper ordering:
         ;; For each fn in expand-set (descendants first by BFS order):

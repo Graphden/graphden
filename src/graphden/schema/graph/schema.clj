@@ -123,6 +123,10 @@
   #uuid "d6e7f8a9-b0c1-4d2e-3f4a-5b6c7d8e9f00")
 
 
+(def ^:private arg-prev-arg-id-field-uuid
+  #uuid "e7f8a9b0-c1d2-4e3f-4a5b-6c7d8e9f0011")
+
+
 (defn- value-kind-enum-values
   []
   (into [{:uuid (get value-kind-values :null) :value :null}
@@ -220,6 +224,14 @@
                       ;; and item args (source-id = nil, next → next item or nil at tail).
                       ;; nil for all scalar (non-sequence) args.
                       :next-arg-id {:uuid arg-next-arg-id-field-uuid
+                                    :type :ref
+                                    :ref-entity :arg
+                                    :nullable? true}
+                      ;; prev-arg-id: inverse of next-arg-id. For an item arg
+                      ;; it points back to the previous item (or to the anchor
+                      ;; if this is the head). Maintained by sequence ops so
+                      ;; remove/move-up/insert-before are O(1).
+                      :prev-arg-id {:uuid arg-prev-arg-id-field-uuid
                                     :type :ref
                                     :ref-entity :arg
                                     :nullable? true}})

@@ -58,33 +58,29 @@
 
  ;; UI routes: pages served to browser
  {:name :ui-routes
-  :parent :pair
-  :args {:item1 :favicon-route
-         :item2 :editor-route}}
+  :parent :list
+  :args {:items [:favicon-route :editor-route]}}
 
  ;; Entity CRUD routes: partials + create/delete API
  {:name :entity-crud-routes
-  :parent :list-10-5
-  :args {:item1 :entity-details-route
-         :item2 :entity-form-create-route
-         :item3 :entity-form-edit-route
-         :item4 :create-entity-route
-         :item5 :delete-entity-route}}
+  :parent :list
+  :args {:items [:entity-details-route
+                 :entity-form-create-route
+                 :entity-form-edit-route
+                 :create-entity-route
+                 :delete-entity-route]}}
 
  ;; Graph API routes: entity listing + layout computation
  {:name :graph-api-routes
-  :parent :pair
-  :args {:item1 :api-entities-route
-         :item2 :layout-api-route}}
+  :parent :list
+  :args {:items [:api-entities-route :layout-api-route]}}
 
  ;; Monitoring routes: health + metrics
  {:name :monitoring-routes
-  :parent :pair
-  :args {:item1 :health-route
-         :item2 :metrics-route}}
+  :parent :list
+  :args {:items [:health-route :metrics-route]}}
 
- ;; All routes — single :list with 11 items via the new sequence primitive
- ;; (one node with 11 slot-edges instead of the old 10-step list-N cascade).
+ ;; All routes — single :list with N items via the sequence primitive.
  {:name :all-routes
   :parent :list
   :args {:items [:favicon-route
@@ -95,6 +91,8 @@
                  :entity-form-edit-route
                  :create-entity-route
                  :delete-entity-route
+                 :sequence-append-route
+                 :sequence-remove-route
                  :health-route
                  :metrics-route
                  :layout-api-route]}}
@@ -274,12 +272,28 @@
          :headers {"Content-Type" "text/plain"}
          :body "Unauthorized"}}
 
- ;; Predicate: does the request URI fall under the protected namespace?
- ;; NOTE: :prefix is hardcoded to this app's protected area. A second
- ;; web-server with a different protected prefix would redefine or shadow.
- {:name :is-protected-path?
+ ;; Predicates: does the URI fall under one of this app's protected prefixes?
+ ;; Both entity CRUD (/api/entities) and sequence ops (/api/sequence) are
+ ;; write-facing and need auth. `/api/graph/*` stays public (read-only).
+ {:name :_matches-entities-prefix?
   :parent :str-starts-with?
   :args {:string :ring-uri :prefix "/api/entities"}}
+
+ {:name :_matches-sequence-prefix?
+  :parent :str-starts-with?
+  :args {:string :ring-uri :prefix "/api/sequence"}}
+
+ ;; Collects the predicates into a :list, then :or reduces over it. This is
+ ;; a nice small demo of the sequence primitive: N predicates compose
+ ;; without an if-cascade and without touching :or's fixed arg shape.
+ {:name :_protected-path-checks
+  :parent :list
+  :args {:items [:_matches-entities-prefix?
+                 :_matches-sequence-prefix?]}}
+
+ {:name :is-protected-path?
+  :parent :or
+  :args {:values :_protected-path-checks}}
 
  ;; =============================================================================
  ;; RESPONSE GATING (auth)

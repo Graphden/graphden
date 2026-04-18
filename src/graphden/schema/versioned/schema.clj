@@ -140,6 +140,10 @@
   #uuid "44454647-4849-4a0b-1c2d-3e4f5a6b7c8d")
 
 
+(def ^:private arg-version-prev-arg-id-field-uuid
+  #uuid "45464748-494a-4b1c-2d3e-4f5a6b7c8d9e")
+
+
 (def ^:private arg-version-created-at-field-uuid
   #uuid "42434445-4647-4890-9b0c-1d2e3f4a5b6c")
 
@@ -245,6 +249,9 @@
                               :type :bool
                               :nullable? true}
                       :next-arg-id {:uuid arg-version-next-arg-id-field-uuid
+                                    :type :uuid
+                                    :nullable? true}
+                      :prev-arg-id {:uuid arg-version-prev-arg-id-field-uuid
                                     :type :uuid
                                     :nullable? true}
                       :created-at {:uuid arg-version-created-at-field-uuid

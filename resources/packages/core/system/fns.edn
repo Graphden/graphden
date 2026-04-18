@@ -127,4 +127,14 @@
  {:name :concat-resources
   :args {:paths :jsonb
          :separator {:type :text :value "\n\n"}}
+  :return-type :text}
+
+ ;; Call a Clojure fn (from :any arg) with one argument
+ {:name :invoke
+  :args {:func :any, :arg :any}
+  :return-type :any}
+
+ ;; Read an InputStream/Reader to string
+ {:name :slurp
+  :args {:input :any}
   :return-type :text}]}

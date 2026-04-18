@@ -30,7 +30,8 @@
   :args {:test :any
          :then :any
          :else {:type :any :required false}}
-  :return-type :any}
+  :return-type :any
+  :lazy #{:then :else}}
 
  {:name :cond
   :args {:clauses :jsonb}
@@ -56,5 +57,10 @@
  ;; identity is just const with a different name
  {:name :identity
   :parent :const}
+
+ ;; Two-arg equality (for fn-def composition; :eq uses array which can't hold fn-refs)
+ {:name :equal?
+  :args {:a :any, :b :any}
+  :return-type :bool}
 
 ]}

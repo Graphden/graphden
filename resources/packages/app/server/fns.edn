@@ -1,4 +1,11 @@
-;; Web server fn-defs - combines UI, API, and monitoring routes
+;; Web server fn-defs — combines UI, API, and monitoring routes
+;;
+;; Naming convention:
+;;   - Named (no prefix)  = reusable web-server infrastructure.
+;;     A second web-server on another port can reference these directly
+;;     (ring-request, router-result, bearer-token, etc.).
+;;   - `_` prefix          = local, business-specific glue for THIS app
+;;     (this app's router, specific intermediate accumulator steps).
 ;;
 ;; Route groups:
 ;;   UI:         GET / (Editor), GET /favicon.ico
@@ -10,7 +17,7 @@
 {:namespace "app.server"
  :fns
 [;; =============================================================================
- ;; MONITORING: Health & Metrics
+ ;; MONITORING: Health & Metrics (app-specific)
  ;; =============================================================================
 
  {:name :_health-json-body
@@ -46,7 +53,7 @@
   :args {:path "/metrics" :handler :_metrics-handler}}
 
  ;; =============================================================================
- ;; ROUTES — organized by responsibility
+ ;; ROUTES — organized by responsibility (app-specific groupings)
  ;; =============================================================================
 
  ;; UI routes: pages served to browser
@@ -76,23 +83,24 @@
   :args {:item1 :health-route
          :item2 :metrics-route}}
 
- ;; All routes — combines all groups
+ ;; All routes — single :list with 11 items via the new sequence primitive
+ ;; (one node with 11 slot-edges instead of the old 10-step list-N cascade).
  {:name :all-routes
-  :parent :list-11
-  :args {:item1 :favicon-route
-         :item2 :editor-route
-         :item3 :api-entities-route
-         :item4 :entity-details-route
-         :item5 :entity-form-create-route
-         :item6 :entity-form-edit-route
-         :item7 :create-entity-route
-         :item8 :delete-entity-route
-         :item9 :health-route
-         :item10 :metrics-route
-         :item11 :layout-api-route}}
+  :parent :list
+  :args {:items [:favicon-route
+                 :editor-route
+                 :api-entities-route
+                 :entity-details-route
+                 :entity-form-create-route
+                 :entity-form-edit-route
+                 :create-entity-route
+                 :delete-entity-route
+                 :health-route
+                 :metrics-route
+                 :layout-api-route]}}
 
  ;; =============================================================================
- ;; SERVER
+ ;; ROUTER (this app's specific router instance, bound to all-routes)
  ;; =============================================================================
 
  {:name :_router
@@ -100,35 +108,198 @@
   :args {:routes :all-routes}}
 
  ;; =============================================================================
- ;; AUTH
+ ;; RING REQUEST EXTRACTION — reusable building blocks
  ;; =============================================================================
 
- {:name :_auth-token
+ ;; Single holder for the Ring request — every ring-* field extractor references
+ ;; this one fn so the same request value flows into all of them.
+ {:name :ring-request
+  :parent :identity
+  :args {:value {:as :request}}}
+
+ {:name :ring-method-kw
+  :parent :get
+  :args {:key {:value :request-method} :coll :ring-request}}
+
+ {:name :ring-method
+  :parent :keyword-to-str
+  :args {:keyword :ring-method-kw}}
+
+ {:name :ring-uri
+  :parent :get
+  :args {:key {:value :uri} :coll :ring-request}}
+
+ {:name :ring-query-string
+  :parent :get
+  :args {:key {:value :query-string} :coll :ring-request}}
+
+ {:name :ring-headers
+  :parent :get
+  :args {:key {:value :headers} :coll :ring-request}}
+
+ {:name :ring-body-input-stream
+  :parent :get
+  :args {:key {:value :body} :coll :ring-request}}
+
+ {:name :ring-body
+  :parent :slurp
+  :args {:input :ring-body-input-stream}}
+
+ ;; =============================================================================
+ ;; INTERNAL REQUEST SHAPE — reusable
+ ;; Pure accumulator steps to build a {:method :uri :query-string :headers :body}
+ ;; map. Each intermediate is local glue (one-off).
+ ;; =============================================================================
+
+ {:name :_req-1
+  :parent :assoc-empty
+  :args {:key {:value :method} :value :ring-method}}
+
+ {:name :_req-2
+  :parent :assoc
+  :args {:map :_req-1 :key {:value :uri} :value :ring-uri}}
+
+ {:name :_req-3
+  :parent :assoc
+  :args {:map :_req-2 :key {:value :query-string} :value :ring-query-string}}
+
+ {:name :_req-4
+  :parent :assoc
+  :args {:map :_req-3 :key {:value :headers} :value :ring-headers}}
+
+ {:name :internal-request
+  :parent :assoc
+  :args {:map :_req-4 :key {:value :body} :value :ring-body}}
+
+ ;; =============================================================================
+ ;; ROUTER INVOCATION + RESPONSE EXTRACTION — reusable
+ ;; =============================================================================
+
+ ;; Invokes this app's router — a second web-server would override :func or
+ ;; define its own router-result binding.
+ {:name :router-result
+  :parent :invoke
+  :args {:func :_router :arg :internal-request}}
+
+ {:name :router-response-status
+  :parent :get
+  :args {:coll :router-result :key {:value :status} :default 200}}
+
+ {:name :router-response-headers
+  :parent :get
+  :args {:coll :router-result :key {:value :headers} :default {}}}
+
+ {:name :router-response-body
+  :parent :get
+  :args {:coll :router-result :key {:value :body} :default ""}}
+
+ ;; Opinionated default security headers. Reusable; a different web-server can
+ ;; override :b in `merged-response-headers` or inherit from this with overrides.
+ {:name :default-security-headers
+  :parent :const
+  :args {:value {"X-Content-Type-Options" "nosniff"
+                 "X-Frame-Options" "DENY"
+                 "X-XSS-Protection" "1; mode=block"
+                 "Referrer-Policy" "strict-origin-when-cross-origin"}}}
+
+ {:name :merged-response-headers
+  :parent :merge2
+  :args {:a :default-security-headers :b :router-response-headers}}
+
+ ;; Template — the ring response built from router-result + default headers.
+ ;; NOTE: referenced via two separate children below, NOT shared. Two branches
+ ;; of the auth `if` (protected+valid and unprotected) compute the successful
+ ;; response, but they never fire together — per the Graphden/Clojure rule
+ ;; `let` is only for reusing an actually-computed value, and two mutually-
+ ;; exclusive branches are not a reuse site.
+ {:name :router-ring-response
+  :parent :ring-response
+  :args {:status :router-response-status
+         :headers :merged-response-headers
+         :body :router-response-body}}
+
+ ;; Instance for the "path is not protected" branch.
+ {:name :_unprotected-response
+  :parent :router-ring-response}
+
+ ;; Instance for the "path protected + token valid" branch.
+ {:name :_authenticated-response
+  :parent :router-ring-response}
+
+ ;; =============================================================================
+ ;; AUTH — Bearer token, reusable primitives
+ ;; =============================================================================
+
+ ;; Auth token read from AUTH_TOKEN env var. Opinionated default —
+ ;; override by inheriting :env with a different :name.
+ {:name :auth-token-from-env
   :parent :env
   :args {:name "AUTH_TOKEN"}}
 
- {:name :_auth-fail-response
+ ;; Authorization header value (empty string if absent)
+ {:name :authorization-header
+  :parent :get
+  :args {:coll :ring-headers :key "authorization" :default ""}}
+
+ {:name :has-bearer-prefix?
+  :parent :str-starts-with?
+  :args {:string :authorization-header :prefix "Bearer "}}
+
+ ;; Local: the raw `subs` — only meaningful inside `bearer-token` together
+ ;; with the prefix check.
+ {:name :_bearer-token-raw
+  :parent :subs
+  :args {:string :authorization-header :start 7}}
+
+ {:name :bearer-token
+  :parent :if
+  :args {:test :has-bearer-prefix? :then :_bearer-token-raw :else nil}}
+
+ {:name :token-valid?
+  :parent :equal?
+  :args {:a :bearer-token :b :auth-token-from-env}}
+
+ ;; Default 401 response for auth failures — reusable building block.
+ {:name :default-auth-fail-response
   :parent :ring-response
   :args {:status 401
          :headers {"Content-Type" "text/plain"}
          :body "Unauthorized"}}
 
+ ;; Predicate: does the request URI fall under the protected namespace?
+ ;; NOTE: :prefix is hardcoded to this app's protected area. A second
+ ;; web-server with a different protected prefix would redefine or shadow.
+ {:name :is-protected-path?
+  :parent :str-starts-with?
+  :args {:string :ring-uri :prefix "/api/entities"}}
+
  ;; =============================================================================
- ;; SERVER
+ ;; RESPONSE GATING (auth)
  ;; =============================================================================
 
- {:name :_ring-handler
-  :parent :ring-adapter
-  :args {:handler :_router
-         :default-headers {"X-Content-Type-Options" "nosniff"
-                           "X-Frame-Options" "DENY"
-                           "X-XSS-Protection" "1; mode=block"
-                           "Referrer-Policy" "strict-origin-when-cross-origin"}
-         :auth-token :_auth-token
-         :auth-path-prefix "/api/entities"
-         :auth-fail-response :_auth-fail-response}}
+ ;; If token is valid → router response; else default 401.
+ {:name :token-gated-response
+  :parent :if
+  :args {:test :token-valid?
+         :then :_authenticated-response
+         :else :default-auth-fail-response}}
+
+ ;; If the request targets a protected path → gate on token; else pass through.
+ {:name :path-gated-response
+  :parent :if
+  :args {:test :is-protected-path?
+         :then :token-gated-response
+         :else :_unprotected-response}}
+
+ ;; =============================================================================
+ ;; HANDLER + SERVER (reusable top level)
+ ;; =============================================================================
+
+ ;; Ring handler that runs the full pipeline for each request.
+ {:name :request-handler
+  :parent :make-request-handler
+  :args {:response-fn :path-gated-response}}
 
  {:name :web-server
   :parent :http-server
-  :args {:handler :_ring-handler
-         :port 8080}}]}
+  :args {:handler :request-handler :port 8080}}]}

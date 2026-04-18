@@ -36,7 +36,10 @@
 
 (defn if-fn
   [{:keys [test then else]}]
-  (if test then else))
+  ;; then/else are lazy (SmartDelay) — only deref the chosen branch
+  (if test
+    (if (instance? clojure.lang.IDeref then) @then then)
+    (if (instance? clojure.lang.IDeref else) @else else)))
 
 
 (defn cond-fn
@@ -85,4 +88,5 @@
    :cond cond-fn
    :case case-fn
    :coalesce coalesce
-   :const const})
+   :const const
+   :equal? (fn [{:keys [a b]}] (= a b))})

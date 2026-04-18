@@ -35,7 +35,8 @@
    :jsonb       #uuid "b1b15bb9-a458-4337-9241-2a33e1ef25ea"
    :bytes       #uuid "2dcadfbd-800f-4b7b-bbcc-82b2afcf9f86"
    :any         #uuid "a3d7e8f1-9b2c-4d5e-8f6a-1c2d3e4f5a6b"
-   :fn          #uuid "b4e8f9a2-0c3d-5e6f-9a7b-2d3e4f5a6b7c"})
+   :fn          #uuid "b4e8f9a2-0c3d-5e6f-9a7b-2d3e4f5a6b7c"
+   :sequence    #uuid "9d1b3f8c-7a2e-4c5d-8e3f-1a2b4c6d8e0f"})
 
 
 ;; Entity UUIDs
@@ -116,6 +117,10 @@
 
 (def ^:private arg-is-fn-field-uuid
   #uuid "c5d6e7f8-a9b0-4c1d-2e3f-4a5b6c7d8e9f")
+
+
+(def ^:private arg-next-arg-id-field-uuid
+  #uuid "d6e7f8a9-b0c1-4d2e-3f4a-5b6c7d8e9f00")
 
 
 (defn- value-kind-enum-values
@@ -209,7 +214,15 @@
                                  :nullable? true}
                       :is-fn {:uuid arg-is-fn-field-uuid
                               :type :bool
-                              :nullable? true}})
+                              :nullable? true}
+                      ;; next-arg-id: pointer to the next item in a sequence-arg chain.
+                      ;; Used by anchor args (source-id → sequence template, next → first item)
+                      ;; and item args (source-id = nil, next → next item or nil at tail).
+                      ;; nil for all scalar (non-sequence) args.
+                      :next-arg-id {:uuid arg-next-arg-id-field-uuid
+                                    :type :ref
+                                    :ref-entity :arg
+                                    :nullable? true}})
       (ds/add-constraint :arg {:type :unique :fields [:fn-id :source-id]})
       (ds/add-constraint :arg {:type :unique :fields [:fn-id :name]})))
 

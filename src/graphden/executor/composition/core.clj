@@ -45,11 +45,12 @@
 
 (defn- valid-identifier?
   "Returns true if s looks like a valid identifier.
-   Allows dots for qualified namespace references (e.g. core.arithmetic.add)."
+   Allows dots for qualified namespace references (e.g. core.arithmetic.add)
+   and the Clojure convention of trailing `?` / `!` (e.g. empty?, swap!)."
   [s]
   (when (and (string? s) (seq s))
     (and (not (re-find #"\s" s))
-         (re-matches #"[a-zA-Z_\-][a-zA-Z0-9_.\-]*" s))))
+         (re-matches #"[a-zA-Z_\-][a-zA-Z0-9_.\-?!]*" s))))
 
 
 (defn- local-fn-name?
@@ -622,14 +623,21 @@
 (defn- parse-arg-value-spec
   "Parses arg value specification.
    Supports:
-   - Simple values: 123, \"str\", :keyword, :fn-ref
-   - Map with options: {:as :new-name} or {:as :new-name :value 123} or {:as :new-name :ref :fn-name}
+   - Simple values: 123, \"str\", :keyword (= fn-ref)
+   - Map with :as: {:as :new-name} or {:as :new-name :value 123} or {:as :new-name :ref :fn-name}
+   - Map with :value (no :as): {:value :keyword} — passes keyword as literal value (not fn-ref)
+   - Map with :ref (no :as): {:ref :fn-name} — fn reference without rename
    - Map with :type :fn to mark as HOF argument
 
-   Returns {:rename nil-or-keyword :value-spec original-or-extracted :is-fn bool-or-nil}"
+   :literal? is true when the value came from an explicit :value slot; the caller must
+   skip fn-ref resolution and store it as a literal.
+
+   Returns {:rename nil-or-keyword :value-spec original-or-extracted
+            :is-fn bool-or-nil :literal? bool}"
   [arg-value]
-  (if (and (map? arg-value) (contains? arg-value :as))
-    ;; Map with :as - extract rename and value
+  (cond
+    ;; Map with :as — rename + optional value/ref
+    (and (map? arg-value) (contains? arg-value :as))
     (let [rename (:as arg-value)
           has-value? (contains? arg-value :value)
           has-ref? (contains? arg-value :ref)
@@ -639,11 +647,122 @@
                         {:type :fn-composition/invalid-arg-spec
                          :arg-value arg-value})))
       (cond
-        has-value? {:rename rename :value-spec (:value arg-value) :is-fn is-fn?}
-        has-ref? {:rename rename :value-spec (:ref arg-value) :is-fn is-fn?}
-        :else {:rename rename :value-spec nil :is-fn is-fn?}))
-    ;; Simple value - no rename
-    {:rename nil :value-spec arg-value :is-fn nil}))
+        has-value? {:rename rename :value-spec (:value arg-value) :is-fn is-fn? :literal? true}
+        has-ref? {:rename rename :value-spec (:ref arg-value) :is-fn is-fn? :literal? false}
+        :else {:rename rename :value-spec nil :is-fn is-fn? :literal? false}))
+
+    ;; Map with :value (no :as) — literal value (enables keyword literals)
+    (and (map? arg-value) (contains? arg-value :value) (not (contains? arg-value :as)))
+    {:rename nil :value-spec (:value arg-value) :is-fn nil :literal? true}
+
+    ;; Map with :ref (no :as) — fn reference without rename
+    (and (map? arg-value) (contains? arg-value :ref) (not (contains? arg-value :as)))
+    {:rename nil :value-spec (:ref arg-value) :is-fn (= :fn (:type arg-value)) :literal? false}
+
+    ;; Simple value — no rename
+    :else
+    {:rename nil :value-spec arg-value :is-fn nil :literal? false}))
+
+
+(declare prepare-scalar-arg-record)
+
+
+(defn- resolve-sequence-item
+  "Resolves one element of a sequence arg's value vector into {:value … :ref-id …}.
+   Keywords that name a known fn become refs; other keywords become literal values.
+   Maps with :ref or :value behave as one-shot overrides."
+  [fn-name-cache created-fns item]
+  (cond
+    (uuid? item)
+    {:value nil :ref-id item}
+
+    (keyword? item)
+    (let [nm (name item)]
+      (if (valid-identifier? nm)
+        (if-let [entry (or (get created-fns item)
+                           (when-let [existing (get fn-name-cache nm)]
+                             (:id existing)))]
+          {:value nil :ref-id entry}
+          {:value item :ref-id nil})
+        {:value item :ref-id nil}))
+
+    (and (map? item) (contains? item :ref))
+    {:value nil :ref-id (resolve-fn-id-cached fn-name-cache created-fns (:ref item))}
+
+    (and (map? item) (contains? item :value))
+    {:value (:value item) :ref-id nil}
+
+    :else
+    {:value item :ref-id nil}))
+
+
+(defn- walk-anchor-chain-ids
+  "Walks an anchor arg's next-arg-id chain via args-by-id, returning
+   the ordered vector of item arg-ids. Used to reap orphaned items on re-sync."
+  [args-by-id anchor]
+  (loop [cur (:next-arg-id anchor)
+         acc []
+         depth 0]
+    (cond
+      (nil? cur) acc
+      (> depth 10000)
+      (throw (ex-info "Sequence chain exceeded maximum length while walking"
+                      {:type :fn-composition/sequence-chain-too-long
+                       :anchor-id (:id anchor)}))
+      :else
+      (let [nxt (get args-by-id cur)]
+        (recur (:next-arg-id nxt) (conj acc cur) (inc depth))))))
+
+
+(defn- prepare-sequence-arg-chain
+  "Builds anchor + item arg records forming a next-arg-id linked list.
+
+   Returns {:new-chain [anchor item1 … itemN]
+            :delete-items [existing-item-ids]
+            :source-id <template-arg-id>}
+
+   Anchor.source-id points at the base-fn's sequence template arg; its
+   next-arg-id points at the first item (or nil for an empty sequence).
+   Items have source-id=nil, name=nil, and their own next-arg-id chain."
+  [fn-name-cache created-fns args-data fn-id parent-arg items]
+  (let [template-id (:id parent-arg)
+        existing-anchor (get (:by-fn-source args-data) [fn-id template-id])
+        anchor-id (or (:id existing-anchor) (random-uuid))
+        element-type (or (:of parent-arg) :any)
+        item-records (mapv (fn [item]
+                             (let [{:keys [value ref-id]} (resolve-sequence-item
+                                                            fn-name-cache created-fns item)]
+                               {:id (random-uuid)
+                                :fn-id fn-id
+                                :source-id nil
+                                :name nil
+                                :type element-type
+                                :value value
+                                :ref-id ref-id
+                                :is-fn nil
+                                :next-arg-id nil}))
+                           items)
+        linked (vec (map-indexed
+                      (fn [idx rec]
+                        (if (< idx (dec (count item-records)))
+                          (assoc rec :next-arg-id (:id (nth item-records (inc idx))))
+                          rec))
+                      item-records))
+        anchor {:id anchor-id
+                :fn-id fn-id
+                :source-id template-id
+                :name nil
+                :type :sequence
+                :value nil
+                :ref-id nil
+                :is-fn nil
+                :next-arg-id (when (seq linked) (:id (first linked)))}
+        delete-items (if existing-anchor
+                       (walk-anchor-chain-ids (:by-id args-data) existing-anchor)
+                       [])]
+    {:new-chain (into [anchor] linked)
+     :delete-items delete-items
+     :source-id template-id}))
 
 
 (defn- prepare-arg-record
@@ -653,6 +772,8 @@
    Supports arg value as:
    - Simple value: literal or :fn-ref
    - Map with :as: {:as :new-name} to rename, optionally with :value or :ref
+   - Vector (when parent arg type is :sequence): expands to anchor + linked
+     items. Returns {:new-chain [...] :delete-items [...] :source-id …}.
 
    args-data contains :by-fn, :by-id, and :by-fn-source indexes."
   [fn-cache args-data fn-name-cache created-fns fn-id parent-fn-ids arg-name arg-value]
@@ -661,10 +782,25 @@
                     {:type :fn-composition/internal-error
                      :arg-name arg-name
                      :parent-fn-ids parent-fn-ids})))
+  ;; Use find-available-arg which searches both parent chain AND propagated free args
+  (let [parent-arg (find-available-arg fn-cache args-data parent-fn-ids arg-name)]
+    (if (= :sequence (:type parent-arg))
+      (do
+        (when-not (vector? arg-value)
+          (throw (ex-info (str "Sequence arg '" arg-name "' requires a vector value, got "
+                               (type arg-value))
+                          {:type :fn-composition/invalid-sequence-value
+                           :arg-name arg-name
+                           :arg-value arg-value})))
+        (prepare-sequence-arg-chain fn-name-cache created-fns args-data fn-id parent-arg arg-value))
+      (prepare-scalar-arg-record args-data fn-name-cache created-fns fn-id parent-arg arg-name arg-value))))
+
+
+(defn- prepare-scalar-arg-record
+  "Prepares a scalar (non-sequence) arg record. Returns {:new …} / {:update …} / nil."
+  [args-data fn-name-cache created-fns fn-id parent-arg arg-name arg-value]
   (let [;; Parse arg value spec (supports {:as :new-name ...})
-        {:keys [rename value-spec is-fn]} (parse-arg-value-spec arg-value)
-        ;; Use find-available-arg which searches both parent chain AND propagated free args
-        parent-arg (find-available-arg fn-cache args-data parent-fn-ids arg-name)
+        {:keys [rename value-spec is-fn literal?]} (parse-arg-value-spec arg-value)
         ;; Validate: cannot override already-bound argument
         parent-has-value (or (some? (:value parent-arg))
                              (some? (:ref-id parent-arg)))
@@ -693,6 +829,10 @@
 
                    (uuid? value-spec)
                    {:value nil :ref-id value-spec}
+
+                   ;; Explicit :value slot — always a literal, skip fn-ref resolution
+                   literal?
+                   {:value value-spec :ref-id nil}
 
                    (keyword? value-spec)
                    (if-let [ref-fn-name (parse-fn-ref value-spec)]
@@ -838,14 +978,16 @@
              ;;
              ;; We still collect all records for batch upsert at the end for efficiency.
              ;; args-data contains {:by-fn {fn-id -> [args]}, :by-id {arg-id -> arg}}
-             {:keys [all-new-args all-update-args]}
+             {:keys [all-new-args all-update-args all-delete-items]}
              (loop [remaining sorted-defs
                     args-data args-cache  ; mutable view of args, updated after each fn-def
                     new-args []
-                    update-args []]
+                    update-args []
+                    delete-items []]
                (if (empty? remaining)
                  {:all-new-args new-args
-                  :all-update-args update-args}
+                  :all-update-args update-args
+                  :all-delete-items delete-items}
                  (let [fn-def (first remaining)
                        fn-name (:name fn-def)
                        fn-id (get created-fns fn-name)
@@ -855,17 +997,17 @@
                                            parent-names)
 
                        ;; 3a: Explicit args from fn-def :args
-                       ;; Single pass: collect source-id CHAINS, new args, and update args together
-                       ;; We collect full chains because explicit args shadow ALL args in their
-                       ;; source-id chain, not just the immediate parent arg
-                       ;; Also collect explicit arg names to filter free args with same root name
-                       {:keys [explicit-source-ids explicit-new-args explicit-update-args explicit-arg-names]}
+                       ;; Single pass: collect source-id CHAINS, new args, update args,
+                       ;; and sequence-chain deletions (items orphaned by re-sync).
+                       {:keys [explicit-source-ids explicit-new-args explicit-update-args
+                               explicit-arg-names explicit-delete-items]}
                        (reduce (fn [acc [arg-name arg-value]]
                                  (if-let [record (prepare-arg-record
                                                    fn-id-cache-final args-data fn-name-cache-final
                                                    created-fns fn-id parent-fn-ids arg-name arg-value)]
                                    (let [source-id (or (:source-id (:new record))
-                                                       (:source-id (:update record)))
+                                                       (:source-id (:update record))
+                                                       (:source-id record))
                                          ;; Collect FULL source-id chain to shadow transitive args
                                          source-chain (when source-id
                                                         (collect-source-id-chain (:by-id args-data) source-id))]
@@ -878,12 +1020,17 @@
                                        (:new record)
                                        (update :explicit-new-args conj (:new record))
                                        (:update record)
-                                       (update :explicit-update-args conj (:update record))))
+                                       (update :explicit-update-args conj (:update record))
+                                       (:new-chain record)
+                                       (update :explicit-new-args into (:new-chain record))
+                                       (seq (:delete-items record))
+                                       (update :explicit-delete-items into (:delete-items record))))
                                    acc))
                                {:explicit-source-ids #{}
                                 :explicit-new-args []
                                 :explicit-update-args []
-                                :explicit-arg-names #{}}
+                                :explicit-arg-names #{}
+                                :explicit-delete-items []}
                                (:args fn-def {}))
 
                        ;; 3b: Propagated free args from parent fns
@@ -938,7 +1085,12 @@
                    (recur (rest remaining)
                           args-data'
                           (into new-args fn-new-args)
-                          (into update-args fn-update-args)))))]
+                          (into update-args fn-update-args)
+                          (into delete-items explicit-delete-items)))))]
+
+         ;; Reap orphaned sequence items from prior syncs before writing new chain.
+         (when (seq all-delete-items)
+           (sp/delete-entities storage :arg all-delete-items))
 
          ;; Batch upsert new args
          (when (seq all-new-args)

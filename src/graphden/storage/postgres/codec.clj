@@ -23,7 +23,7 @@
 
 (def ^:private known-value-kind-values
   "Known values of the value_kind enum (SQL snake_case form)."
-  #{"null" "uuid" "text" "int" "bool" "numeric" "timestamptz" "jsonb" "bytes" "any" "fn"})
+  #{"null" "uuid" "text" "int" "bool" "numeric" "timestamptz" "jsonb" "bytes" "any" "fn" "sequence"})
 
 
 (defn- known-enum-value?

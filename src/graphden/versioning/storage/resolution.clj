@@ -52,7 +52,7 @@
 
    :arg {:version-entity :arg-version
          :version-id-field :arg-id
-         :version-data-fields #{:fn-id :name :type :source-id :value :ref-id :is-fn :required}}})
+         :version-data-fields #{:fn-id :name :type :source-id :value :ref-id :is-fn :required :next-arg-id}}})
 
 
 (defn versioned-entity?

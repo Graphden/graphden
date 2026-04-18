@@ -185,30 +185,34 @@ async function fetchBackendLayout() {
       }
     });
 
-    // Calculate X positions with per-column gaps + width spread compensation
+    // Calculate X positions with per-column gaps + width spread compensation.
+    // Skip empty columns entirely — the backend reserves some cells for edge
+    // routing but those produce no nodes, so padding them with a default width
+    // wastes horizontal space.
     const colLeftX = new Map();
-    const maxColKey = Math.max(...Array.from(colWidths.keys()), 0);
+    const usedCols = Array.from(colWidths.keys()).sort((a, b) => a - b);
     let currentX = 0;
-    for (let c = 0; c <= maxColKey; c++) {
+    usedCols.forEach(c => {
       colLeftX.set(c, currentX);
-      const maxWidth = colWidths.get(c) || 80;
+      const maxWidth = colWidths.get(c);
       const minWidth = colMinWidths.get(c) || maxWidth;
-      // Half the spread: wide node center is offset from narrow node center,
-      // so edge label from a narrow node needs extra space to clear the wide node
       const widthSpread = Math.max(0, (maxWidth - minWidth) / 2);
       const gap = colGaps.get(c) || GRID_GAP_X;
       currentX += maxWidth + Math.max(gap, gap + widthSpread);
-    }
+    });
 
-    // Calculate Y positions
+    // Calculate Y positions. Skip empty rows — they happen when the matrix
+    // solver leaves gaps between subtrees, and rendering them at the default
+    // 30px + gap wastes vertical space (seen as a big void between top row
+    // and the rest of the graph).
     const rowCenterY = new Map();
     let currentY = 0;
-    const maxRowKey = Math.max(...Array.from(rowHeights.keys()), 0);
-    for (let r = 0; r <= maxRowKey; r++) {
-      const height = rowHeights.get(r) || 30;
+    const usedRows = Array.from(rowHeights.keys()).sort((a, b) => a - b);
+    usedRows.forEach(r => {
+      const height = rowHeights.get(r);
       rowCenterY.set(r, currentY + height / 2);
       currentY += height + GRID_GAP_Y;
-    }
+    });
 
     // Build final layout
     // Left-align all nodes: x = leftX + nodeWidth/2

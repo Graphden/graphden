@@ -801,12 +801,9 @@
 
 
 (deftest execute-with-queue-nil-result-test
-  (testing "nil return from base function triggers NPE due to {:done nil} being falsy"
-    ;; BUG: try-execute-task returns {:done nil} when fn returns nil.
-    ;; (:done result) is nil which is falsy, so the trampoline enters
-    ;; the :need branch and tries to push nil dependency onto ArrayDeque.
-    ;; This is a known issue: the trampoline check (if (:done result))
-    ;; conflates nil result with "not done".
+  (testing "nil return from base function works correctly"
+    ;; Previously a bug: {:done nil} was falsy, causing NPE.
+    ;; Fixed: try-execute-task now returns {:done true} regardless of result value.
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn!
               :nil-fn
@@ -815,8 +812,7 @@
           nil-base (setup/create-base-fn! storage "nil-fn" :any)
           nil-composed (setup/create-composed-fn! storage "my-nil" (:id nil-base))
           ctx (exec/create-context {:storage storage})]
-      (is (thrown? NullPointerException
-            (exec/execute ctx (:id nil-composed) {})))
+      (is (nil? (exec/execute ctx (:id nil-composed) {})))
       (sp/close storage))))
 
 

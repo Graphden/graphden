@@ -18,6 +18,18 @@
   :args {:item :any, :coll :jsonb}
   :return-type :jsonb}
 
+ ;; First-class list primitive. :items is a sequence-arg; items live in
+ ;; linked arg entities chained via arg.next_arg_id.
+ {:name :list
+  :args {:items {:type :sequence :of :any}}
+  :return-type :jsonb}
+
+ ;; Converts a list of 2-element pairs into a map. :entries is a sequence-arg
+ ;; where each item is either a :pair fn-def result or a literal [k v] vector.
+ {:name :pairs->map
+  :args {:entries {:type :sequence :of :any}}
+  :return-type :jsonb}
+
  {:name :conj
   :args {:coll :any, :item :any}
   :return-type :any}
@@ -63,6 +75,10 @@
  {:name :merge
   :args {:maps :jsonb}
   :return-type :jsonb}
+
+ {:name :merge2
+  :args {:a :any, :b :any}
+  :return-type :any}
 
  {:name :into
   :args {:to :jsonb, :from :jsonb}

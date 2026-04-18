@@ -18,10 +18,16 @@
 
 ;; === Ring Response Primitives ===
 
+(defn- stringify-keys [m]
+  (when m (into {} (map (fn [[k v]] [(if (keyword? k) (name k) (str k)) v])) m)))
+
+
 (defn ring-response
   [{:keys [status headers body]}]
+  ;; Ring spec: header keys must be strings. JSONB round-trip keywordizes them,
+  ;; so we coerce back on the way out.
   {:status status
-   :headers headers
+   :headers (stringify-keys headers)
    :body body})
 
 
@@ -151,4 +157,8 @@
    :current-time-ms current-time-ms
    :env env-fn
    :read-resource read-resource
-   :concat-resources concat-resources})
+   :concat-resources concat-resources
+   :invoke (fn [{:keys [func arg]}] (func arg))
+   :slurp (fn [{:keys [input]}]
+            (when (instance? java.io.InputStream input)
+              (clojure.core/slurp input)))})

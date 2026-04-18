@@ -88,7 +88,11 @@
                 actual (when-not (= v ::nil-sentinel) v)]
             (set! cached-value actual) (set! realized-flag true) actual)
           ;; Not computed yet - throw marker
-          (throw-need-computation cache-key @task-atom)))))
+          (let [task @task-atom]
+            (when-not task
+              (throw (ex-info (str "SmartDelay has nil task for cache-key: " cache-key)
+                              {:type :execution-error/nil-task :cache-key cache-key})))
+            (throw-need-computation cache-key task))))))
 
 
   clojure.lang.IPending
@@ -421,20 +425,57 @@
 ;; Build Args with Lazy SmartDelays
 ;; =============================================================================
 
+(defn- walk-sequence-chain
+  "From a sequence anchor arg, walks next-arg-id via args-by-id and returns
+   an ordered vector of item arg entities. Cycles break at 10000 steps."
+  [anchor args-by-id]
+  (loop [cur (:next-arg-id anchor)
+         acc []
+         depth 0]
+    (cond
+      (nil? cur) acc
+      (> depth 10000)
+      (throw (ex-info "Sequence chain exceeded maximum length"
+                      {:type :execution-error/sequence-chain-too-long
+                       :anchor-id (:id anchor)}))
+      :else
+      (let [item (get args-by-id cur)]
+        (if (nil? item)
+          (throw (ex-info (str "Broken sequence chain — item not found: " cur)
+                          {:type :execution-error/broken-sequence-chain
+                           :missing-id cur}))
+          (recur (:next-arg-id item) (conj acc item) (inc depth)))))))
+
+
 (defn- build-arg-delays
-  "Builds SmartDelays for all args. Uses two passes:
+  "Builds SmartDelays for all args. Uses three passes:
    1. First pass: create delays for all non-ref-id args (literals, provided values)
-   2. Second pass: create lazy delays for ref-id args (can access all sibling delays)"
+   2. Second pass: create lazy delays for ref-id args (can access all sibling delays)
+   3. Third pass: for sequence anchors — walk the linked-list chain of items,
+      build a delay per item, and wrap them in a composite IDeref that yields
+      a Clojure vector of resolved values on deref."
   [exec-state fn-data provided-args caller-args parent-delays depth]
   (let [context (:context exec-state)
         execution-graph (:execution-graph context)
-        args-list (:args fn-data)
+        all-args-list (:args fn-data)
+        args-by-id (:args-by-id execution-graph)
         fn-rec (:fn fn-data)
         fn-id (:id fn-rec)
         strict? (:strict-type-validation? context)
         max-unknown (:max-unknown-types context)
         unknown-counter (:unknown-type-counter context)
-        all-caller-args (into (vec caller-args) args-list)
+        ;; Identify sequence anchors and the items they chain, so scalar passes
+        ;; don't see the items as independent args.
+        sequence-anchors (filterv #(= :sequence (:type %)) all-args-list)
+        chain-item-ids (into #{}
+                             (mapcat (fn [anchor]
+                                       (map :id (walk-sequence-chain anchor args-by-id))))
+                             sequence-anchors)
+        args-list (filterv (fn [a]
+                             (and (not (contains? chain-item-ids (:id a)))
+                                  (not= :sequence (:type a))))
+                           all-args-list)
+        all-caller-args-base (into (vec caller-args) args-list)
         delays-by-name (atom {})
         delays-by-id (atom {})
 
@@ -467,7 +508,22 @@
                               {:type :execution-error/missing-required-arg :arg-id arg-id :arg-name (:name arg)}))
 
               ;; Optional nil
-              :else (smart-delay-realized nil))))]
+              :else (smart-delay-realized nil))))
+
+        ;; PASS 0: deep free args — add to delays-by-id + caller-args for propagation
+        deep-arg-info (:deep-provided-arg context)
+        deep-provided (reduce-kv
+                        (fn [acc arg-id value]
+                          (if (and (some? value)
+                                   (not-any? #(= arg-id (:id %)) args-list))
+                            (do (swap! delays-by-id assoc arg-id
+                                       (if (instance? SmartDelay value) value (smart-delay-realized value)))
+                                (if (and deep-arg-info (= arg-id (:id deep-arg-info)))
+                                  (conj acc (assoc deep-arg-info :value ::deep-provided))
+                                  acc))
+                            acc))
+                        [] provided-args)
+        all-caller-args (into all-caller-args-base deep-provided)]
 
     ;; PASS 1: Process all non-ref-id args first
     (doseq [arg args-list
@@ -548,6 +604,60 @@
         (when include? (swap! delays-by-name assoc key-name sd))
         (swap! delays-by-id assoc arg-id sd)))
 
+    ;; PASS 3: sequence anchors — build a composite IDeref that resolves the
+    ;; whole chain into a Clojure vector when derefed.
+    (letfn [(build-item-delay
+              [item]
+              (let [literal-val (:value item)
+                    ref-fn-id (:ref-id item)]
+                (cond
+                  (some? literal-val)
+                  (smart-delay-realized literal-val)
+
+                  (some? ref-fn-id)
+                  (let [ref-fn-args (or (get-fn-args-with-inheritance execution-graph ref-fn-id 0) [])
+                        extended-caller-args (into (vec all-caller-args-base) ref-fn-args)
+                        prop-map (collect-propagated-args execution-graph extended-caller-args ref-fn-id)
+                        cache-key (build-cache-key execution-graph extended-caller-args ref-fn-id)
+                        cached (or (get @(:value-map exec-state) cache-key)
+                                   (get @(:result-cache exec-state) cache-key))]
+                    (if (some? cached)
+                      (smart-delay-realized cached)
+                      (let [consumed-ids (set (map (comp :id :arg) (vals prop-map)))
+                            remaining (vec (remove (fn [a] (consumed-ids (:id a)))
+                                                   all-caller-args-base))
+                            task-caller-args (into remaining ref-fn-args)
+                            prop-delays (reduce-kv
+                                          (fn [acc tid entry]
+                                            (let [caller-arg (:arg entry)
+                                                  cid (:id caller-arg)
+                                                  d (or (get @delays-by-id cid)
+                                                        (get parent-delays cid)
+                                                        (when (some? (:value caller-arg))
+                                                          (smart-delay-realized (:value caller-arg))))]
+                                              (if d (assoc acc tid d) acc)))
+                                          {} prop-map)
+                            task (->ExecutionTask cache-key ref-fn-id prop-delays
+                                                  task-caller-args
+                                                  (merge parent-delays @delays-by-id)
+                                                  (inc depth))]
+                        (smart-delay cache-key exec-state task))))
+
+                  :else
+                  (smart-delay-realized nil))))]
+      (doseq [anchor sequence-anchors]
+        (let [arg-id (:id anchor)
+              key-name (keyword (graph/get-root-arg-name execution-graph anchor))
+              include? (or (arg-belongs-to-current-fn? execution-graph anchor fn-id)
+                           (contains? provided-args arg-id))
+              items (walk-sequence-chain anchor args-by-id)
+              item-delays (mapv build-item-delay items)
+              sequence-delay (reify clojure.lang.IDeref
+                               (deref [_]
+                                 (mapv deref item-delays)))]
+          (when include? (swap! delays-by-name assoc key-name sequence-delay))
+          (swap! delays-by-id assoc arg-id sequence-delay))))
+
     {:by-name @delays-by-name :by-id @delays-by-id}))
 
 
@@ -590,10 +700,11 @@
 ;; =============================================================================
 
 (defn- try-execute-task
-  "Tries to execute a task. Returns {:done result} or {:need task}."
+  "Tries to execute a task. Returns {:done true} or {:need {:current :dependency}}."
   [task exec-state]
   (try
-    {:done (execute-task-once task exec-state)}
+    (execute-task-once task exec-state)
+    {:done true}
     (catch clojure.lang.ExceptionInfo e
       (if (need-computation-ex? e)
         {:need {:current task :dependency (:task (ex-data e))}}
@@ -617,8 +728,9 @@
         (throw (ex-info "Too many iterations" {:type :execution-error/infinite-loop})))
 
       (if (ArrayDeque/.isEmpty retry-stack)
-        ;; Done
-        (get @(:value-map exec-state) :root)
+        ;; Done — unwrap nil-sentinel back to nil
+        (let [v (get @(:value-map exec-state) :root)]
+          (when-not (= v ::nil-sentinel) v))
 
         (let [task (ArrayDeque/.pop retry-stack)
               result (try-execute-task task exec-state)]
@@ -626,6 +738,10 @@
             (recur (inc iterations))
             ;; Need computation - push tasks back
             (let [{:keys [current dependency]} (:need result)]
+              (when-not dependency
+                (throw (ex-info (str "Nil dependency in NeedComputation. current-fn: " (:fn-id current)
+                                     " cache-key: " (:cache-key current))
+                                {:type :execution-error/nil-dependency})))
               (ArrayDeque/.push retry-stack current)
               (ArrayDeque/.push retry-stack dependency)
               (recur (inc iterations)))))))))

@@ -1,21 +1,9 @@
 ;; HTTP server base functions using http-kit
-;; http-server, http-stop
 
 
 {:namespace "web.http"
  :fns
-[;; Wraps internal handler into Ring handler:
- ;; adapts request/response formats, merges default headers,
- ;; optionally checks Bearer auth for paths matching prefix
- {:name :ring-adapter
-  :args {:handler :any
-         :default-headers {:type :jsonb :required false}
-         :auth-token {:type :text :required false}
-         :auth-path-prefix {:type :text :required false}
-         :auth-fail-response {:type :jsonb :required false}}
-  :return-type :fn}
-
- ;; Starts http-kit server. handler must be a Ring handler (use ring-adapter)
+[;; Starts http-kit server. handler must be a Ring handler
  {:name :http-server
   :args {:handler :any
          :port :int}

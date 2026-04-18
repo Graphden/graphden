@@ -125,7 +125,9 @@
 
 
 (def ^:private identifier-pattern
-  #"^[a-zA-Z_][a-zA-Z0-9_-]*\??$")
+  ;; Allows the Clojure naming conventions: trailing `?` (predicate),
+  ;; trailing `!` (mutator), and `->` anywhere (conversion, e.g. pairs->map).
+  #"^[a-zA-Z_][a-zA-Z0-9_\->]*[?!]?$")
 
 
 (defn- validate-identifier!

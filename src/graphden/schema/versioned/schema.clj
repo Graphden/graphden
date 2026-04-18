@@ -136,6 +136,10 @@
   #uuid "41424344-4546-4789-8a9b-0c1d2e3f4a5b")
 
 
+(def ^:private arg-version-next-arg-id-field-uuid
+  #uuid "44454647-4849-4a0b-1c2d-3e4f5a6b7c8d")
+
+
 (def ^:private arg-version-created-at-field-uuid
   #uuid "42434445-4647-4890-9b0c-1d2e3f4a5b6c")
 
@@ -240,6 +244,9 @@
                       :is-fn {:uuid arg-version-is-fn-field-uuid
                               :type :bool
                               :nullable? true}
+                      :next-arg-id {:uuid arg-version-next-arg-id-field-uuid
+                                    :type :uuid
+                                    :nullable? true}
                       :created-at {:uuid arg-version-created-at-field-uuid
                                    :type :timestamptz}
                       :deleted-at {:uuid arg-version-deleted-at-field-uuid

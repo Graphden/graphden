@@ -228,5 +228,10 @@
    :stringify-map-keys stringify-map-keys-fn
    :keywordize-map-keys keywordize-map-keys-fn
    :select-keys (fn [{:keys [m ks]}] (select-keys m ks))
+   :merge2 (fn [{:keys [a b]}] (merge a b))
    :zipmap (fn [{ks :keys vs :vals}] (zipmap ks vs))
-   :update-vals (fn [{:keys [m f]}] (update-vals m f))})
+   :update-vals (fn [{:keys [m f]}] (update-vals m f))
+   ;; Sequence primitives: executor resolves the linked-list chain into a
+   ;; Clojure vector before calling these impls.
+   :list        (fn [{:keys [items]}] (vec items))
+   :pairs->map  (fn [{:keys [entries]}] (into {} entries))})

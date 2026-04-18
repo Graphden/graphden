@@ -118,41 +118,109 @@
           (mapcat #(get-required-args execution-graph %) parent-ids))))))
 
 
+(defn- get-deep-free-args
+  "Finds free args reachable through ref-id chains (BFS by depth).
+   When all top-level args are bound (have value/ref-id), walks into
+   the ref-id targets to find ultimately-unbound args.
+   Uses BFS to find the SHALLOWEST free args first — this prevents
+   finding args from deeply nested fns (e.g., route handlers) when
+   a shallower fn has the same arg name.
+
+   Returns a seq of arg records with :id :name :type :fn-id :source-id."
+  [execution-graph fn-id visited]
+  (loop [queue (conj clojure.lang.PersistentQueue/EMPTY [fn-id 0])
+         visited (or visited #{})
+         found []]
+    (if (empty? queue)
+      ;; Deduplicate by name, keeping first (shallowest due to BFS)
+      (let [seen (atom #{})
+            unique (filterv (fn [a]
+                              (let [n (:name a)]
+                                (when-not (@seen n)
+                                  (swap! seen conj n)
+                                  true)))
+                            found)]
+        unique)
+      (let [[fid depth] (peek queue)
+            queue (pop queue)]
+        (if (or (visited fid) (> depth 20))
+          (recur queue visited found)
+          (let [visited (conj visited fid)
+                args (sp/graph-get-args execution-graph fid)
+                own-free (filterv (fn [a]
+                                    (and (some? (:name a))
+                                         (not (false? (:required a)))
+                                         (nil? (:value a))
+                                         (nil? (:ref-id a))))
+                                  args)]
+            (if (seq own-free)
+              (recur queue visited (into found own-free))
+              (let [ref-ids (keep :ref-id args)]
+                (recur (into queue (mapv #(vector % (inc depth)) ref-ids)) visited found)))))))))
+
+
 (defn get-single-required-arg
   "Gets the single required arg for a function.
    Used by HOF (map, filter, etc.) to find the target argument.
+
+   First checks top-level required args. If none found, searches
+   through ref-id chains for deep free args (enables fn-def compositions
+   where the free arg is buried inside nested fn-refs).
 
    Returns {:id arg-id :name arg-name :type arg-type}
 
    Throws if the function doesn't have exactly one required argument."
   [context fn-id]
-  (let [required-args (get-required-args (:execution-graph context) fn-id)
-        count-required (count required-args)]
-    (when (not= count-required 1)
-      (throw (ex-info (str "HOF function requires exactly 1 required argument, got " count-required)
+  (let [execution-graph (:execution-graph context)
+        required-args (get-required-args execution-graph fn-id)
+        count-required (count required-args)
+        ;; Fallback: try deep free args when top-level shows 0
+        effective-args (if (zero? count-required)
+                         (get-deep-free-args execution-graph fn-id nil)
+                         required-args)
+        effective-count (count effective-args)]
+    (when (not= effective-count 1)
+      (throw (ex-info (str "HOF function requires exactly 1 required argument, got " effective-count)
                       {:type :execution-error/invalid-hof-function
                        :fn-id fn-id
-                       :required-arg-count count-required
-                       :required-args (mapv #(select-keys % [:id :name :type]) required-args)})))
-    (let [arg (first required-args)]
+                       :required-arg-count effective-count
+                       :required-args (mapv #(select-keys % [:id :name :type]) effective-args)})))
+    (let [arg (first effective-args)]
       {:id (:id arg)
        :name (:name arg)
-       :type (:type arg)})))
+       :type (:type arg)
+       :fn-id (:fn-id arg)
+       :source-id (:source-id arg)})))
 
 
 (defn make-single-arg-callable
   "Creates a callable for a function with exactly one required argument.
    The callable accepts a single value (not a map) and passes it to that argument.
 
+   Supports deep free args: if the fn has 0 top-level required args but
+   has free args buried in fn-ref chains, finds and maps to them.
+   Passes the deep arg record via context so the executor can propagate it.
+
    Used by HOF (map, filter, etc.) to call user functions without requiring
    specific argument names.
 
    Returns a function: value -> result"
   [context fn-id]
-  (let [arg-id (:id (get-single-required-arg context fn-id))]
+  ;; Resolve execution graph for THIS fn (not parent's graph which may
+  ;; not include HOF target fns like _final-response)
+  (let [storage (:storage context)
+        fn-graph (sp/resolve-execution-graph storage fn-id)
+        fn-ctx (assoc context :execution-graph fn-graph)
+        arg-info (get-single-required-arg fn-ctx fn-id)
+        arg-id (:id arg-info)]
     (fn [value]
-      ;; Reset start-time for each invocation (handlers are long-lived)
-      (let [fresh-ctx (assoc context :start-time (ctx/current-time-ms context))]
+      ;; Fresh result-cache per invocation — each call has a different `value`
+      ;; (e.g. the ring request), and the cache keys don't include runtime values,
+      ;; so sharing the cache across calls would return stale first-call results.
+      (let [fresh-ctx (assoc fn-ctx
+                             :start-time (ctx/current-time-ms context)
+                             :deep-provided-arg arg-info
+                             :result-cache (atom {}))]
         (execute-internal fresh-ctx fn-id {arg-id value})))))
 
 
@@ -169,14 +237,18 @@
         count-required (count required-args)]
     (case count-required
       0 (fn [_value]
-          ;; Reset start-time for each invocation (handlers are long-lived)
-          (let [fresh-ctx (assoc context :start-time (ctx/current-time-ms context))]
+          ;; Fresh cache + start-time per invocation (handlers are long-lived)
+          (let [fresh-ctx (assoc context
+                                 :start-time (ctx/current-time-ms context)
+                                 :result-cache (atom {}))]
             (execute-internal fresh-ctx fn-id {})))
 
       1 (let [arg-id (:id (first required-args))]
           (fn [value]
-            ;; Reset start-time for each invocation (handlers are long-lived)
-            (let [fresh-ctx (assoc context :start-time (ctx/current-time-ms context))]
+            ;; Fresh cache + start-time per invocation (handlers are long-lived)
+            (let [fresh-ctx (assoc context
+                                   :start-time (ctx/current-time-ms context)
+                                   :result-cache (atom {}))]
               (execute-internal fresh-ctx fn-id {arg-id value}))))
 
       (throw (ex-info (str "Function requires 0 or 1 arguments, got " count-required)

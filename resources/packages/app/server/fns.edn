@@ -146,30 +146,38 @@
   :args {:input :ring-body-input-stream}}
 
  ;; =============================================================================
- ;; INTERNAL REQUEST SHAPE — reusable
- ;; Pure accumulator steps to build a {:method :uri :query-string :headers :body}
- ;; map. Each intermediate is local glue (one-off).
+ ;; INTERNAL REQUEST SHAPE — one :pairs->map with 5 pair entries.
+ ;; Each _ring-*-pair is a 2-element vector [key-literal ring-field-result];
+ ;; :pairs->map (into {} entries) turns them into {:method :uri … :body}.
  ;; =============================================================================
 
- {:name :_req-1
-  :parent :assoc-empty
-  :args {:key {:value :method} :value :ring-method}}
+ {:name :_ring-method-pair
+  :parent :pair
+  :args {:item1 {:value :method} :item2 :ring-method}}
 
- {:name :_req-2
-  :parent :assoc
-  :args {:map :_req-1 :key {:value :uri} :value :ring-uri}}
+ {:name :_ring-uri-pair
+  :parent :pair
+  :args {:item1 {:value :uri} :item2 :ring-uri}}
 
- {:name :_req-3
-  :parent :assoc
-  :args {:map :_req-2 :key {:value :query-string} :value :ring-query-string}}
+ {:name :_ring-qs-pair
+  :parent :pair
+  :args {:item1 {:value :query-string} :item2 :ring-query-string}}
 
- {:name :_req-4
-  :parent :assoc
-  :args {:map :_req-3 :key {:value :headers} :value :ring-headers}}
+ {:name :_ring-headers-pair
+  :parent :pair
+  :args {:item1 {:value :headers} :item2 :ring-headers}}
+
+ {:name :_ring-body-pair
+  :parent :pair
+  :args {:item1 {:value :body} :item2 :ring-body}}
 
  {:name :internal-request
-  :parent :assoc
-  :args {:map :_req-4 :key {:value :body} :value :ring-body}}
+  :parent :pairs->map
+  :args {:entries [:_ring-method-pair
+                   :_ring-uri-pair
+                   :_ring-qs-pair
+                   :_ring-headers-pair
+                   :_ring-body-pair]}}
 
  ;; =============================================================================
  ;; ROUTER INVOCATION + RESPONSE EXTRACTION — reusable

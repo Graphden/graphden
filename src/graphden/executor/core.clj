@@ -224,6 +224,77 @@
         (execute-internal fresh-ctx fn-id {arg-id value})))))
 
 
+(defn- find-deep-free-arg-by-name
+  "BFS through ref-id chains to find a free arg with the given name.
+   Complement to get-deep-free-args — when the caller knows which named
+   input it wants (e.g. `make-request-handler` always needs the `request`
+   free arg), this cuts through the ambiguity created when multiple deep
+   free args are reachable from a composed fn.
+
+   At each fn we use inheritance-aware args so that refs a composed child
+   inherits from its parent are still walked (e.g. a thin wrapper that
+   binds one arg at the top level but inherits the primary chain from
+   `:if` needs those inherited refs to find the input deep underneath).
+   Own refs at the top fn-id are skipped because they denote values the
+   caller already chose to plug in (like a concrete router), not paths
+   leading toward the function's input slot."
+  [execution-graph fn-id target-name]
+  (let [top-own-ref-ids (set (keep :ref-id (sp/graph-get-args execution-graph fn-id)))]
+    (loop [queue (conj clojure.lang.PersistentQueue/EMPTY [fn-id 0])
+           visited #{}]
+      (when (seq queue)
+        (let [[fid depth] (peek queue)
+              queue (pop queue)]
+          (cond
+            (or (visited fid) (> depth 20))
+            (recur queue visited)
+
+            :else
+            (let [visited (conj visited fid)
+                  args (get-fn-args-with-inheritance execution-graph fid 0)
+                  match (some (fn [a]
+                                (when (and (= (:name a) target-name)
+                                           (nil? (:value a))
+                                           (nil? (:ref-id a)))
+                                  a))
+                              args)]
+              (or match
+                  (let [ref-ids (cond->> (keep :ref-id args)
+                                  (= fid fn-id) (remove top-own-ref-ids))]
+                    (recur (into queue (mapv #(vector % (inc depth)) ref-ids))
+                           visited))))))))))
+
+
+(defn make-named-arg-callable
+  "Creates a callable that routes the incoming value to a specific deep
+   free arg identified by name. Preferred over `make-single-arg-callable`
+   when the caller knows the semantic name of the input (e.g. a Ring
+   request handler always takes a `request` arg). Avoids the ambiguity
+   when multiple unrelated deep free args are reachable."
+  [context fn-id arg-name]
+  (let [storage (:storage context)
+        fn-graph (sp/resolve-execution-graph storage fn-id)
+        fn-ctx (assoc context :execution-graph fn-graph)
+        arg (find-deep-free-arg-by-name fn-graph fn-id arg-name)
+        _ (when-not arg
+            (throw (ex-info (str "No free arg named '" arg-name "' reachable from fn")
+                            {:type :execution-error/missing-named-arg
+                             :fn-id fn-id
+                             :arg-name arg-name})))
+        arg-info {:id (:id arg)
+                  :name (:name arg)
+                  :type (:type arg)
+                  :fn-id (:fn-id arg)
+                  :source-id (:source-id arg)}
+        arg-id (:id arg)]
+    (fn [value]
+      (let [fresh-ctx (assoc fn-ctx
+                             :start-time (ctx/current-time-ms context)
+                             :deep-provided-arg arg-info
+                             :result-cache (atom {}))]
+        (execute-internal fresh-ctx fn-id {arg-id value})))))
+
+
 (defn make-optional-arg-callable
   "Creates a callable for a function with 0 or 1 required arguments.
    - 0 args: callable ignores input, calls fn with no args

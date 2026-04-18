@@ -42,7 +42,15 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 
 /* Node overlay for interactive ancestor list */
 .node-overlay { pointer-events: auto; z-index: 10; }
-.node-overlay .ancestor-line { transition: color 0.1s, font-weight 0.1s; }
+.node-overlay .ancestor-line {
+  /* Each row must occupy one full text-line slot even when the content is
+     empty — e.g. the top row of an anonymous fn keeps its black "no own name"
+     band instead of collapsing. With global box-sizing: border-box the
+     min-height must include vertical padding (4+4) + line-height (13) = 21. */
+  min-height: 21px;
+  line-height: 13px;
+  transition: color 0.1s, font-weight 0.1s;
+}
 
 /* Navigation controls — zoom slider hugs right edge, buttons left of reset */
 #nav-controls {

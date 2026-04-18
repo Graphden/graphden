@@ -313,29 +313,34 @@
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
               (let [levels (get-inheritance-levels original-fn-id fn-map)
-                    fn-name-of (fn [fid]
+                    ;; Name of a fn for label rendering. For level 0 (`top-level?`)
+                    ;; we do NOT substitute the nearest named ancestor: if the fn
+                    ;; is anonymous, its own "name slot" stays empty so the black
+                    ;; header bar visually signals "no own name" and the real
+                    ;; parent chain keeps rendering on the rows below.
+                    ;; For levels >= 1 we preserve the old substitution so each
+                    ;; ancestor row shows something meaningful even if the fid
+                    ;; at that BFS level happens to be anonymous.
+                    fn-name-of (fn [fid top-level?]
                                  (let [f (get fn-map fid)]
                                    (or (when (:name f) (name (:name f)))
-                                       ;; Anonymous fn — show nearest named ancestor
-                                       (some (fn [pid]
-                                               (when-let [p (get fn-map pid)]
-                                                 (when (:name p) (name (:name p)))))
-                                             (rest (get-inheritance-chain fid fn-map)))
-                                       "(anonymous)")))
+                                       (when-not top-level?
+                                         (some (fn [pid]
+                                                 (when-let [p (get fn-map pid)]
+                                                   (when (:name p) (name (:name p)))))
+                                               (rest (get-inheritance-chain fid fn-map))))
+                                       (if top-level? "" "(anonymous)"))))
                     visible-levels (take (inc max-visible-ancestors) levels)
-                    raw-lines (mapv (fn [level-fn-ids]
-                                      (str/join ", " (map fn-name-of level-fn-ids)))
-                                    visible-levels)
-                    ;; Remove consecutive duplicate lines (e.g. anonymous fn
-                    ;; whose resolved name matches the first ancestor)
-                    label-lines (reduce (fn [acc line]
-                                          (if (and (seq acc) (= (peek acc) line))
-                                            acc
-                                            (conj acc line)))
-                                        [] raw-lines)
+                    raw-lines (vec
+                                (map-indexed
+                                  (fn [lvl-idx level-fn-ids]
+                                    (str/join ", "
+                                              (map #(fn-name-of % (zero? lvl-idx))
+                                                   level-fn-ids)))
+                                  visible-levels))
                     label-lines (if (> (count levels) (inc max-visible-ancestors))
-                                  (conj label-lines "...")
-                                  label-lines)
+                                  (conj raw-lines "...")
+                                  raw-lines)
                     label (str/join "\n" label-lines)]
                 (swap! nodes conj
                        {:data {:id node-id

@@ -1,0 +1,223 @@
+;; Reusable Ring-request handler pipeline.
+;;
+;; The exported root `:request-handler` builds a Ring request handler that:
+;;   1. Receives a raw Ring request (free arg, `value/as :request`).
+;;   2. Extracts common fields (method/uri/query-string/headers/body) into
+;;      an internal map via `:pairs->map`.
+;;   3. Invokes a router (free arg `:func`) on that internal request.
+;;   4. Wraps the router result in a ring-response with default security
+;;      headers merged in.
+;;   5. Gates protected paths (/api/entities, /api/sequence) behind a Bearer
+;;      token pulled from the AUTH_TOKEN env var.
+;;
+;; Consumers supply the concrete router via `:func` (bound on a child of
+;; `:path-gated-response` which they then pass to `:request-handler` as
+;; `:response-fn`). Other parts of the pipeline (AUTH_TOKEN env var, the two
+;; protected prefixes, standard security headers) are opinionated defaults —
+;; override by building from the same lower-level pieces.
+
+
+{:namespace "web.ring-adapter"
+ :fns
+[;; =============================================================================
+ ;; RING REQUEST EXTRACTION
+ ;; =============================================================================
+
+ ;; Single holder for the Ring request. All field extractors reference this
+ ;; one fn so the same request value flows into each `get`. The rename
+ ;; `value/as :request` exposes it as a free arg named `:request` — but its
+ ;; ROOT name (walking source-id chain) is still `:value`, which is what
+ ;; `make-single-arg-callable` binds.
+ {:name :ring-request
+  :parent :identity
+  :args {:value {:as :request}}}
+
+ {:name :ring-method-kw
+  :parent :get
+  :args {:key {:value :request-method} :coll :ring-request}}
+
+ {:name :ring-method
+  :parent :keyword-to-str
+  :args {:keyword :ring-method-kw}}
+
+ {:name :ring-uri
+  :parent :get
+  :args {:key {:value :uri} :coll :ring-request}}
+
+ {:name :ring-query-string
+  :parent :get
+  :args {:key {:value :query-string} :coll :ring-request}}
+
+ {:name :ring-headers
+  :parent :get
+  :args {:key {:value :headers} :coll :ring-request}}
+
+ {:name :ring-body-input-stream
+  :parent :get
+  :args {:key {:value :body} :coll :ring-request}}
+
+ {:name :ring-body
+  :parent :slurp
+  :args {:input :ring-body-input-stream}}
+
+ ;; =============================================================================
+ ;; INTERNAL REQUEST SHAPE — one :pairs->map with 5 pair entries.
+ ;; =============================================================================
+
+ {:name :_ring-method-pair
+  :parent :pair
+  :args {:item1 {:value :method} :item2 :ring-method}}
+
+ {:name :_ring-uri-pair
+  :parent :pair
+  :args {:item1 {:value :uri} :item2 :ring-uri}}
+
+ {:name :_ring-qs-pair
+  :parent :pair
+  :args {:item1 {:value :query-string} :item2 :ring-query-string}}
+
+ {:name :_ring-headers-pair
+  :parent :pair
+  :args {:item1 {:value :headers} :item2 :ring-headers}}
+
+ {:name :_ring-body-pair
+  :parent :pair
+  :args {:item1 {:value :body} :item2 :ring-body}}
+
+ {:name :internal-request
+  :parent :pairs->map
+  :args {:entries [:_ring-method-pair
+                   :_ring-uri-pair
+                   :_ring-qs-pair
+                   :_ring-headers-pair
+                   :_ring-body-pair]}}
+
+ ;; =============================================================================
+ ;; ROUTER INVOCATION + RESPONSE EXTRACTION
+ ;; `:func` is a FREE arg — the consuming fn binds it to a concrete router
+ ;; fn-def (e.g. `:_router`). `:arg` is bound to the extracted internal
+ ;; request so every router call receives the same shape.
+ ;; =============================================================================
+
+ {:name :router-result
+  :parent :invoke
+  :args {:arg :internal-request}}
+
+ {:name :router-response-status
+  :parent :get
+  :args {:coll :router-result :key {:value :status} :default 200}}
+
+ {:name :router-response-headers
+  :parent :get
+  :args {:coll :router-result :key {:value :headers} :default {}}}
+
+ {:name :router-response-body
+  :parent :get
+  :args {:coll :router-result :key {:value :body} :default ""}}
+
+ ;; Opinionated default security headers — merged into every response.
+ {:name :default-security-headers
+  :parent :const
+  :args {:value {"X-Content-Type-Options" "nosniff"
+                 "X-Frame-Options" "DENY"
+                 "X-XSS-Protection" "1; mode=block"
+                 "Referrer-Policy" "strict-origin-when-cross-origin"}}}
+
+ {:name :merged-response-headers
+  :parent :merge2
+  :args {:a :default-security-headers :b :router-response-headers}}
+
+ ;; Template — the ring response built from router-result + merged headers.
+ ;; Two children (`_unprotected-response`, `_authenticated-response`) are
+ ;; created for the two mutually-exclusive auth branches; per the Clojure
+ ;; rule, separate code paths don't share a let-binding.
+ {:name :router-ring-response
+  :parent :ring-response
+  :args {:status :router-response-status
+         :headers :merged-response-headers
+         :body :router-response-body}}
+
+ {:name :_unprotected-response
+  :parent :router-ring-response}
+
+ {:name :_authenticated-response
+  :parent :router-ring-response}
+
+ ;; =============================================================================
+ ;; AUTH — Bearer token primitives (opinionated defaults)
+ ;; =============================================================================
+
+ {:name :auth-token-from-env
+  :parent :env
+  :args {:name "AUTH_TOKEN"}}
+
+ {:name :authorization-header
+  :parent :get
+  :args {:coll :ring-headers :key "authorization" :default ""}}
+
+ {:name :has-bearer-prefix?
+  :parent :str-starts-with?
+  :args {:string :authorization-header :prefix "Bearer "}}
+
+ {:name :_bearer-token-raw
+  :parent :subs
+  :args {:string :authorization-header :start 7}}
+
+ {:name :bearer-token
+  :parent :if
+  :args {:test :has-bearer-prefix? :then :_bearer-token-raw :else nil}}
+
+ {:name :token-valid?
+  :parent :equal?
+  :args {:a :bearer-token :b :auth-token-from-env}}
+
+ {:name :default-auth-fail-response
+  :parent :ring-response
+  :args {:status 401
+         :headers {"Content-Type" "text/plain"}
+         :body "Unauthorized"}}
+
+ ;; Path predicates — `/api/entities` and `/api/sequence` are write-facing
+ ;; and gated by auth. `/api/graph/*` stays public (read-only).
+ {:name :matches-entities-prefix?
+  :parent :str-starts-with?
+  :args {:string :ring-uri :prefix "/api/entities"}}
+
+ {:name :matches-sequence-prefix?
+  :parent :str-starts-with?
+  :args {:string :ring-uri :prefix "/api/sequence"}}
+
+ {:name :_protected-path-checks
+  :parent :list
+  :args {:items [:matches-entities-prefix?
+                 :matches-sequence-prefix?]}}
+
+ {:name :is-protected-path?
+  :parent :or
+  :args {:values :_protected-path-checks}}
+
+ ;; =============================================================================
+ ;; RESPONSE GATING (auth)
+ ;; =============================================================================
+
+ {:name :token-gated-response
+  :parent :if
+  :args {:test :token-valid?
+         :then :_authenticated-response
+         :else :default-auth-fail-response}}
+
+ {:name :path-gated-response
+  :parent :if
+  :args {:test :is-protected-path?
+         :then :token-gated-response
+         :else :_unprotected-response}}
+
+ ;; =============================================================================
+ ;; FINAL HANDLER — exported root of this module.
+ ;; The consumer wires in a concrete router by creating a child of
+ ;; `:path-gated-response` with `:func :_their-router` bound and passing
+ ;; it to `:request-handler` as `:response-fn`.
+ ;; =============================================================================
+
+ {:name :request-handler
+  :parent :make-request-handler}]}

@@ -1,17 +1,8 @@
-;; Web server fn-defs — combines UI, API, and monitoring routes
+;; App-specific web-server composition.
 ;;
-;; Naming convention:
-;;   - Named (no prefix)  = reusable web-server infrastructure.
-;;     A second web-server on another port can reference these directly
-;;     (ring-request, router-result, bearer-token, etc.).
-;;   - `_` prefix          = local, business-specific glue for THIS app
-;;     (this app's router, specific intermediate accumulator steps).
-;;
-;; Route groups:
-;;   UI:         GET / (Editor), GET /favicon.ico
-;;   Entity API: GET/POST/DELETE /api/entities/*, GET /partials/*
-;;   Graph API:  GET /api/graph/entities, POST /api/graph/layout
-;;   Monitoring: GET /health, GET /metrics
+;; The reusable ring-adapter + handler pipeline lives in `web/ring-adapter`.
+;; This module only carries THIS app's routes + router binding + the
+;; web-server root node.
 
 
 {:namespace "app.server"
@@ -53,15 +44,13 @@
   :args {:path "/metrics" :handler :_metrics-handler}}
 
  ;; =============================================================================
- ;; ROUTES — organized by responsibility (app-specific groupings)
+ ;; ROUTE GROUPS (named — user navigates to each from sidebar)
  ;; =============================================================================
 
- ;; UI routes: pages served to browser
  {:name :ui-routes
   :parent :list
   :args {:items [:favicon-route :editor-route]}}
 
- ;; Entity CRUD routes: partials + create/delete API
  {:name :entity-crud-routes
   :parent :list
   :args {:items [:entity-details-route
@@ -70,17 +59,14 @@
                  :create-entity-route
                  :delete-entity-route]}}
 
- ;; Graph API routes: entity listing + layout computation
  {:name :graph-api-routes
   :parent :list
   :args {:items [:api-entities-route :layout-api-route]}}
 
- ;; Monitoring routes: health + metrics
  {:name :monitoring-routes
   :parent :list
   :args {:items [:health-route :metrics-route]}}
 
- ;; All routes — single :list with N items via the sequence primitive.
  {:name :all-routes
   :parent :list
   :args {:items [:favicon-route
@@ -98,230 +84,27 @@
                  :layout-api-route]}}
 
  ;; =============================================================================
- ;; ROUTER (this app's specific router instance, bound to all-routes)
+ ;; WEB SERVER
  ;; =============================================================================
 
+ ;; This app's router instance — bound to all-routes.
  {:name :_router
   :parent :text-error-router
   :args {:routes :all-routes}}
 
- ;; =============================================================================
- ;; RING REQUEST EXTRACTION — reusable building blocks
- ;; =============================================================================
+ ;; Bind the router at the response-fn level (a child of ring-adapter's
+ ;; :path-gated-response). `make-request-handler` creates a fresh execution
+ ;; scope re-rooted at :response-fn, so any caller-side binding for :func
+ ;; must live ON the response-fn (or inside its subtree) to be visible at
+ ;; runtime.
+ {:name :_app-path-gated-response
+  :parent :path-gated-response
+  :args {:func :_router}}
 
- ;; Single holder for the Ring request — every ring-* field extractor references
- ;; this one fn so the same request value flows into all of them.
- {:name :ring-request
-  :parent :identity
-  :args {:value {:as :request}}}
-
- {:name :ring-method-kw
-  :parent :get
-  :args {:key {:value :request-method} :coll :ring-request}}
-
- {:name :ring-method
-  :parent :keyword-to-str
-  :args {:keyword :ring-method-kw}}
-
- {:name :ring-uri
-  :parent :get
-  :args {:key {:value :uri} :coll :ring-request}}
-
- {:name :ring-query-string
-  :parent :get
-  :args {:key {:value :query-string} :coll :ring-request}}
-
- {:name :ring-headers
-  :parent :get
-  :args {:key {:value :headers} :coll :ring-request}}
-
- {:name :ring-body-input-stream
-  :parent :get
-  :args {:key {:value :body} :coll :ring-request}}
-
- {:name :ring-body
-  :parent :slurp
-  :args {:input :ring-body-input-stream}}
-
- ;; =============================================================================
- ;; INTERNAL REQUEST SHAPE — one :pairs->map with 5 pair entries.
- ;; Each _ring-*-pair is a 2-element vector [key-literal ring-field-result];
- ;; :pairs->map (into {} entries) turns them into {:method :uri … :body}.
- ;; =============================================================================
-
- {:name :_ring-method-pair
-  :parent :pair
-  :args {:item1 {:value :method} :item2 :ring-method}}
-
- {:name :_ring-uri-pair
-  :parent :pair
-  :args {:item1 {:value :uri} :item2 :ring-uri}}
-
- {:name :_ring-qs-pair
-  :parent :pair
-  :args {:item1 {:value :query-string} :item2 :ring-query-string}}
-
- {:name :_ring-headers-pair
-  :parent :pair
-  :args {:item1 {:value :headers} :item2 :ring-headers}}
-
- {:name :_ring-body-pair
-  :parent :pair
-  :args {:item1 {:value :body} :item2 :ring-body}}
-
- {:name :internal-request
-  :parent :pairs->map
-  :args {:entries [:_ring-method-pair
-                   :_ring-uri-pair
-                   :_ring-qs-pair
-                   :_ring-headers-pair
-                   :_ring-body-pair]}}
-
- ;; =============================================================================
- ;; ROUTER INVOCATION + RESPONSE EXTRACTION — reusable
- ;; =============================================================================
-
- ;; Invokes this app's router — a second web-server would override :func or
- ;; define its own router-result binding.
- {:name :router-result
-  :parent :invoke
-  :args {:func :_router :arg :internal-request}}
-
- {:name :router-response-status
-  :parent :get
-  :args {:coll :router-result :key {:value :status} :default 200}}
-
- {:name :router-response-headers
-  :parent :get
-  :args {:coll :router-result :key {:value :headers} :default {}}}
-
- {:name :router-response-body
-  :parent :get
-  :args {:coll :router-result :key {:value :body} :default ""}}
-
- ;; Opinionated default security headers. Reusable; a different web-server can
- ;; override :b in `merged-response-headers` or inherit from this with overrides.
- {:name :default-security-headers
-  :parent :const
-  :args {:value {"X-Content-Type-Options" "nosniff"
-                 "X-Frame-Options" "DENY"
-                 "X-XSS-Protection" "1; mode=block"
-                 "Referrer-Policy" "strict-origin-when-cross-origin"}}}
-
- {:name :merged-response-headers
-  :parent :merge2
-  :args {:a :default-security-headers :b :router-response-headers}}
-
- ;; Template — the ring response built from router-result + default headers.
- ;; NOTE: referenced via two separate children below, NOT shared. Two branches
- ;; of the auth `if` (protected+valid and unprotected) compute the successful
- ;; response, but they never fire together — per the Graphden/Clojure rule
- ;; `let` is only for reusing an actually-computed value, and two mutually-
- ;; exclusive branches are not a reuse site.
- {:name :router-ring-response
-  :parent :ring-response
-  :args {:status :router-response-status
-         :headers :merged-response-headers
-         :body :router-response-body}}
-
- ;; Instance for the "path is not protected" branch.
- {:name :_unprotected-response
-  :parent :router-ring-response}
-
- ;; Instance for the "path protected + token valid" branch.
- {:name :_authenticated-response
-  :parent :router-ring-response}
-
- ;; =============================================================================
- ;; AUTH — Bearer token, reusable primitives
- ;; =============================================================================
-
- ;; Auth token read from AUTH_TOKEN env var. Opinionated default —
- ;; override by inheriting :env with a different :name.
- {:name :auth-token-from-env
-  :parent :env
-  :args {:name "AUTH_TOKEN"}}
-
- ;; Authorization header value (empty string if absent)
- {:name :authorization-header
-  :parent :get
-  :args {:coll :ring-headers :key "authorization" :default ""}}
-
- {:name :has-bearer-prefix?
-  :parent :str-starts-with?
-  :args {:string :authorization-header :prefix "Bearer "}}
-
- ;; Local: the raw `subs` — only meaningful inside `bearer-token` together
- ;; with the prefix check.
- {:name :_bearer-token-raw
-  :parent :subs
-  :args {:string :authorization-header :start 7}}
-
- {:name :bearer-token
-  :parent :if
-  :args {:test :has-bearer-prefix? :then :_bearer-token-raw :else nil}}
-
- {:name :token-valid?
-  :parent :equal?
-  :args {:a :bearer-token :b :auth-token-from-env}}
-
- ;; Default 401 response for auth failures — reusable building block.
- {:name :default-auth-fail-response
-  :parent :ring-response
-  :args {:status 401
-         :headers {"Content-Type" "text/plain"}
-         :body "Unauthorized"}}
-
- ;; Predicates: does the URI fall under one of this app's protected prefixes?
- ;; Both entity CRUD (/api/entities) and sequence ops (/api/sequence) are
- ;; write-facing and need auth. `/api/graph/*` stays public (read-only).
- {:name :_matches-entities-prefix?
-  :parent :str-starts-with?
-  :args {:string :ring-uri :prefix "/api/entities"}}
-
- {:name :_matches-sequence-prefix?
-  :parent :str-starts-with?
-  :args {:string :ring-uri :prefix "/api/sequence"}}
-
- ;; Collects the predicates into a :list, then :or reduces over it. This is
- ;; a nice small demo of the sequence primitive: N predicates compose
- ;; without an if-cascade and without touching :or's fixed arg shape.
- {:name :_protected-path-checks
-  :parent :list
-  :args {:items [:_matches-entities-prefix?
-                 :_matches-sequence-prefix?]}}
-
- {:name :is-protected-path?
-  :parent :or
-  :args {:values :_protected-path-checks}}
-
- ;; =============================================================================
- ;; RESPONSE GATING (auth)
- ;; =============================================================================
-
- ;; If token is valid → router response; else default 401.
- {:name :token-gated-response
-  :parent :if
-  :args {:test :token-valid?
-         :then :_authenticated-response
-         :else :default-auth-fail-response}}
-
- ;; If the request targets a protected path → gate on token; else pass through.
- {:name :path-gated-response
-  :parent :if
-  :args {:test :is-protected-path?
-         :then :token-gated-response
-         :else :_unprotected-response}}
-
- ;; =============================================================================
- ;; HANDLER + SERVER (reusable top level)
- ;; =============================================================================
-
- ;; Ring handler that runs the full pipeline for each request.
- {:name :request-handler
-  :parent :make-request-handler
-  :args {:response-fn :path-gated-response}}
+ {:name :_app-request-handler
+  :parent :request-handler
+  :args {:response-fn :_app-path-gated-response}}
 
  {:name :web-server
   :parent :http-server
-  :args {:handler :request-handler :port 8080}}]}
+  :args {:handler :_app-request-handler :port 8080}}]}

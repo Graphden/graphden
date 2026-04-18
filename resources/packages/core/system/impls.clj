@@ -39,7 +39,12 @@
 
 (defn make-request-handler
   [{:keys [response-fn]} ctx]
-  (exec/make-single-arg-callable ctx response-fn))
+  ;; Route the Ring request to whichever deep free arg is named "request"
+  ;; inside `response-fn`'s subgraph. Using a name instead of the generic
+  ;; single-free-arg discovery avoids ambiguity when the response-fn is a
+  ;; composed wrapper whose other deep free args (e.g. route handlers
+  ;; further down) happen to be unbound at the time of wrapping.
+  (exec/make-named-arg-callable ctx response-fn "request"))
 
 
 (defn make-data-handler

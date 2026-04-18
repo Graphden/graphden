@@ -155,11 +155,16 @@ function fnHasRefArgs(fnId) {
 // }]
 function buildAncestorLevels(levels) {
   const enriched = levels.map((fnIds, depth) => {
+    const topLevel = depth === 0;
     const fns = fnIds.map(fnId => {
       const fn = lookups.fnMap.get(fnId);
-      // For unnamed fns, show nearest named ancestor's name
+      // Name rendering: at the top level (depth=0) an anonymous fn stays
+      // empty so the black header bar visually shows "no own name" and the
+      // REAL parent chain renders on the rows below (which the user can
+      // then expand). For deeper levels (>=1) we still fall back to the
+      // nearest named ancestor so each row shows something meaningful.
       let displayName = fn && fn.name;
-      if (!displayName && fn) {
+      if (!displayName && fn && !topLevel) {
         const chain = getInheritanceChain(fnId);
         for (let i = 1; i < chain.length; i++) {
           const ancestor = lookups.fnMap.get(chain[i]);
@@ -168,7 +173,7 @@ function buildAncestorLevels(levels) {
       }
       return {
         fnId,
-        name: displayName || '(anonymous)',
+        name: displayName || (topLevel ? '' : '(anonymous)'),
         setsArgs: fnSetsArgs(fnId),
         isClickable: fnSetsArgs(fnId)  // has value or ref-id → produces new nodes on expand
       };
@@ -182,14 +187,17 @@ function buildAncestorLevels(levels) {
     };
   });
 
-  // Remove consecutive duplicate levels (e.g. anonymous fn whose resolved
-  // name matches the next ancestor level — avoid showing same name twice)
+  // Dedup consecutive single-fn levels with identical names (e.g. an
+  // anonymous fn whose resolved ancestor name matches the very next level).
+  // At depth 0 we now keep the empty-name anonymous row distinct from the
+  // named ancestor below, so dedup never collapses it.
   for (let i = enriched.length - 1; i > 0; i--) {
     const prev = enriched[i - 1];
     const cur = enriched[i];
     if (!cur.isMI && !prev.isMI
         && cur.fns.length === 1 && prev.fns.length === 1
-        && cur.fns[0].name === prev.fns[0].name) {
+        && cur.fns[0].name === prev.fns[0].name
+        && cur.fns[0].name !== '') {
       enriched.splice(i - 1, 1); // remove the earlier duplicate
     }
   }

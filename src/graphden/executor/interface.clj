@@ -336,6 +336,20 @@
   (core/make-single-arg-callable context fn-id))
 
 
+(defn make-named-arg-callable
+  "Creates a callable that routes the incoming value to the deep free arg
+   with the given `arg-name`. Unlike `make-single-arg-callable`, this does
+   not require the response-fn to have exactly one discoverable deep free
+   arg — useful for domain-specific wrappers (e.g. a Ring request handler
+   that always feeds the `request` arg) where the caller knows the input's
+   semantic name.
+
+   Throws :execution-error/missing-named-arg if no reachable free arg with
+   that name is found."
+  [context fn-id arg-name]
+  (core/make-named-arg-callable context fn-id arg-name))
+
+
 (defn make-optional-arg-callable
   "Creates a callable for a function with 0 or 1 required arguments.
    - 0 args: callable ignores input, calls fn with no args

@@ -207,14 +207,26 @@
         (if trace
           (let [tid (:target-arg-id trace)
                 existing (get acc tid)
-                ;; Prefer literal values over refs, then shorter depth
+                existing-arg (:arg existing)
+                ;; Prefer args that actually carry a binding (value or ref-id)
+                ;; over pure pass-through shadows (name=nil, no value/ref). A
+                ;; shadow at shorter depth WOULD win on depth alone and shadow
+                ;; a real binding from further up the chain, propagating nil.
+                has-binding? (or (some? (:value caller-arg))
+                                 (some? (:ref-id caller-arg)))
+                existing-has-binding? (or (some? (:value existing-arg))
+                                          (some? (:ref-id existing-arg)))
                 has-literal? (some? (:value caller-arg))
-                existing-has-literal? (some? (:value (:arg existing)))
+                existing-has-literal? (some? (:value existing-arg))
                 replace? (or (nil? existing)
-                             ;; New has literal, existing has ref -> prefer literal
-                             (and has-literal? (not existing-has-literal?))
-                             ;; Both have same type -> prefer shorter depth
-                             (and (= has-literal? existing-has-literal?)
+                             ;; New carries a binding, existing doesn't -> take new
+                             (and has-binding? (not existing-has-binding?))
+                             ;; Both bound: literal beats ref
+                             (and has-binding? existing-has-binding?
+                                  has-literal? (not existing-has-literal?))
+                             ;; Same kind: prefer shorter depth
+                             (and (= has-binding? existing-has-binding?)
+                                  (= has-literal? existing-has-literal?)
                                   (< (:depth trace) (:depth existing))))]
             (if replace? (assoc acc tid {:arg caller-arg :depth (:depth trace)}) acc))
           acc)))
@@ -575,7 +587,10 @@
                        cached (or (get @(:value-map exec-state) cache-key)
                                   (get @(:result-cache exec-state) cache-key))]
                    (if (some? cached)
-                     (smart-delay-realized cached)
+                     ;; Cache stores nil as ::nil-sentinel; unwrap before
+                     ;; handing it to a realized delay, otherwise the sentinel
+                     ;; leaks into downstream values as a stray keyword.
+                     (smart-delay-realized (when-not (= cached ::nil-sentinel) cached))
                      ;; Build task for lazy execution - NOW delays-by-id has ALL sibling delays!
                      (let [consumed-ids (set (map (comp :id :arg) (vals prop-map)))
                            remaining (vec (remove (fn [a] (consumed-ids (:id a))) all-caller-args))
@@ -622,7 +637,7 @@
                         cached (or (get @(:value-map exec-state) cache-key)
                                    (get @(:result-cache exec-state) cache-key))]
                     (if (some? cached)
-                      (smart-delay-realized cached)
+                      (smart-delay-realized (when-not (= cached ::nil-sentinel) cached))
                       (let [consumed-ids (set (map (comp :id :arg) (vals prop-map)))
                             remaining (vec (remove (fn [a] (consumed-ids (:id a)))
                                                    all-caller-args-base))

@@ -7,7 +7,7 @@
 
 (deftest types-test
   (testing "all expected types are defined"
-    (is (= #{:uuid :text :int :bool :numeric :timestamptz :jsonb :bytes}
+    (is (= #{:uuid :text :int :bool :numeric :timestamptz :jsonb :bytes :sequence}
            ft/supported-types)))
 
   (testing "each type has metadata with description"

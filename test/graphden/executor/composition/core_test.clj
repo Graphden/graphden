@@ -286,33 +286,33 @@
 
 (deftest parse-arg-value-spec-test
   (testing "simple values - no rename"
-    (is (= {:rename nil :value-spec 42 :is-fn nil}
+    (is (= {:rename nil :value-spec 42 :is-fn nil :literal? false}
            (#'core/parse-arg-value-spec 42)))
-    (is (= {:rename nil :value-spec "hello" :is-fn nil}
+    (is (= {:rename nil :value-spec "hello" :is-fn nil :literal? false}
            (#'core/parse-arg-value-spec "hello")))
-    (is (= {:rename nil :value-spec :my-fn :is-fn nil}
+    (is (= {:rename nil :value-spec :my-fn :is-fn nil :literal? false}
            (#'core/parse-arg-value-spec :my-fn)))
-    (is (= {:rename nil :value-spec nil :is-fn nil}
+    (is (= {:rename nil :value-spec nil :is-fn nil :literal? false}
            (#'core/parse-arg-value-spec nil))))
 
   (testing "map with :as rename only"
-    (is (= {:rename :new-name :value-spec nil :is-fn false}
+    (is (= {:rename :new-name :value-spec nil :is-fn false :literal? false}
            (#'core/parse-arg-value-spec {:as :new-name}))))
 
-  (testing "map with :as and :value"
-    (is (= {:rename :first :value-spec 42 :is-fn false}
+  (testing "map with :as and :value — marks literal so downstream skips fn-ref resolution"
+    (is (= {:rename :first :value-spec 42 :is-fn false :literal? true}
            (#'core/parse-arg-value-spec {:as :first :value 42}))))
 
   (testing "map with :as and :ref"
-    (is (= {:rename :handler :value-spec :target-fn :is-fn false}
+    (is (= {:rename :handler :value-spec :target-fn :is-fn false :literal? false}
            (#'core/parse-arg-value-spec {:as :handler :ref :target-fn}))))
 
   (testing "map with :as and :type :fn"
-    (is (= {:rename :callback :value-spec nil :is-fn true}
+    (is (= {:rename :callback :value-spec nil :is-fn true :literal? false}
            (#'core/parse-arg-value-spec {:as :callback :type :fn}))))
 
-  (testing "map with :as, :value, and :type :fn"
-    (is (= {:rename :callback :value-spec :some-fn :is-fn true}
+  (testing "map with :as, :value, and :type :fn — still a literal slot"
+    (is (= {:rename :callback :value-spec :some-fn :is-fn true :literal? true}
            (#'core/parse-arg-value-spec {:as :callback :value :some-fn :type :fn}))))
 
   (testing "throws when :as is not a keyword"
@@ -323,7 +323,7 @@
 
   (testing "map without :as is treated as literal value"
     ;; A map without :as key is NOT treated as a spec, just a literal map value
-    (is (= {:rename nil :value-spec {:some "data"} :is-fn nil}
+    (is (= {:rename nil :value-spec {:some "data"} :is-fn nil :literal? false}
            (#'core/parse-arg-value-spec {:some "data"})))))
 
 

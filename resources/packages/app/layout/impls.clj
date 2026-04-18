@@ -734,7 +734,24 @@
                           (recur (:source-id src-arg)))))))]
             ;; Second pass: collect args, skipping those that bind to ref-fn args
             (doseq [fn-id active-fns]
-              (let [args (get args-by-fn fn-id [])
+              (let [raw-args (get args-by-fn fn-id [])
+                    ;; Exclude sequence anchors and their chain items from the
+                    ;; scalar classifier. Anchors are bindings, not free slots,
+                    ;; and their items have no semantic identity outside the
+                    ;; anchor's chain.
+                    anchor-ids (into #{}
+                                     (comp (filter #(= :sequence (:type %)))
+                                           (map :id))
+                                     raw-args)
+                    chain-ids (into #{}
+                                    (mapcat (fn [a]
+                                              (when (= :sequence (:type a))
+                                                (map :id (walk-anchor-chain a arg-map)))))
+                                    raw-args)
+                    args (filterv (fn [a]
+                                    (not (or (contains? anchor-ids (:id a))
+                                             (contains? chain-ids (:id a)))))
+                                  raw-args)
                     current-level @chain-level
                     fn-refs (atom [])
                     fn-values (atom [])
@@ -809,6 +826,19 @@
                           (swap! fn-unsets conj {:type :unset :arg-name arg-name
                                                  :arg-type (:type arg) :arg-id arg-id
                                                  :from-ancestor from-ancestor}))))))
+                ;; Append sequence-slot entries for each anchor on this fn —
+                ;; one entry per item, labelled `<slot>[idx]`, classified by
+                ;; the item's own binding (:ref-id → :ref, :value → :value,
+                ;; nothing → :unset). Matches the root path's behaviour in
+                ;; `collect-fn-args` so `:items`-style slots render as N edges
+                ;; regardless of whether the fn is root or expanded.
+                (let [raw-args-of-fn (get args-by-fn fn-id [])
+                      anchors (filter #(= :sequence (:type %)) raw-args-of-fn)
+                      from-ancestor (pos? current-level)]
+                  (doseq [anchor anchors
+                          :let [slot-name (or (resolve-arg-name anchor arg-map) "items")]
+                          entry (expand-sequence-anchor anchor slot-name arg-map)]
+                    (swap! result conj (assoc entry :from-ancestor from-ancestor))))
                 ;; Add this fn's args in order: refs, values, unsets
                 (doseq [a @fn-refs] (swap! result conj a))
                 (doseq [a @fn-values] (swap! result conj a))
@@ -1155,7 +1185,22 @@
                                          :target node-id
                                          :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                       (when edge-arg-name (name edge-arg-name)))}}))))
-                    (let [own-args (get args-by-fn fn-id [])
+                    (let [raw-own-args (get args-by-fn fn-id [])
+                          ;; Sequence anchors (type=:sequence) and their chain items
+                          ;; are NOT free args — the anchor's presence IS the binding
+                          ;; for the parent's `:items`-style slot. Exclude both from
+                          ;; the scalar pipeline so they don't surface as phantom
+                          ;; "items" placeholders on referenced nodes.
+                          seq-anchors (filterv #(= :sequence (:type %)) raw-own-args)
+                          seq-chain-ids (into #{}
+                                              (mapcat (fn [anchor]
+                                                        (map :id (walk-anchor-chain anchor arg-map))))
+                                              seq-anchors)
+                          anchor-ids (into #{} (map :id) seq-anchors)
+                          own-args (filterv (fn [a]
+                                              (not (or (contains? anchor-ids (:id a))
+                                                       (contains? seq-chain-ids (:id a)))))
+                                            raw-own-args)
                           unsets (filter (fn [arg]
                                            (and (nil? (:value arg))
                                                 (nil? (:ref-id arg))

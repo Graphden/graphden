@@ -35,7 +35,9 @@
   :return-type :any}
 
  {:name :get
-  :args {:coll :jsonb, :key :any, :default :any}
+  :args {:coll :jsonb
+         :key :any
+         :default {:type :any :required false}}
   :return-type :any}
 
  {:name :get-in

@@ -457,6 +457,29 @@ function createFnOverlay(node, container) {
     overlay.appendChild(more);
   }
 
+  // Optional-but-unbound args (e.g. :get.default when no default was supplied)
+  // render as a thin, muted strip instead of their own placeholder nodes —
+  // they carry sane fallbacks so they're not part of the function's interface,
+  // just a nicety the caller may or may not care about.
+  const optionalArgs = node.data('optionalArgs');
+  if (Array.isArray(optionalArgs) && optionalArgs.length) {
+    const strip = document.createElement('div');
+    Object.assign(strip.style, {
+      padding: '2px 8px',
+      color: '#888',
+      fontSize: '10px',
+      fontStyle: 'italic',
+      borderTop: '1px dashed #ccc',
+      background: '#fafafa',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis'
+    });
+    strip.title = 'Optional args (unset, using defaults): ' + optionalArgs.join(', ');
+    strip.textContent = optionalArgs.map(n => '?' + n).join(' ');
+    overlay.appendChild(strip);
+  }
+
   createDragHandle(overlay, node);
 
   overlay.addEventListener('mouseleave', () => {

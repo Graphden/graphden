@@ -42,6 +42,10 @@ function computeFnOverlayHeight(label, width) {
   return h + DRAG_HANDLE_HEIGHT;
 }
 
+// Optional-args strip rendered by editor-overlays.js right above the drag
+// handle: 1px top border + italic text at 10px with 2px vertical padding.
+const OPTIONAL_STRIP_HEIGHT = 17;
+
 function calculateNodeSize(nodeData) {
   const label = nodeData.label || '';
   const type = nodeData.type;
@@ -62,9 +66,15 @@ function calculateNodeSize(nodeData) {
       const cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
       return Math.min(cleanLen, maxLineLen);
     }));
-    const width = Math.max(80, maxLen * 7 + 24);
+    const optionalArgs = nodeData.optionalArgs;
+    const optionalText = Array.isArray(optionalArgs) && optionalArgs.length
+      ? optionalArgs.map(n => '?' + n).join(' ')
+      : '';
+    const widthFromOptional = optionalText ? optionalText.length * 6 + 24 : 0;
+    const width = Math.max(80, maxLen * 7 + 24, widthFromOptional);
+    const extra = optionalText ? OPTIONAL_STRIP_HEIGHT : 0;
     const height = Math.max(30 + DRAG_HANDLE_HEIGHT,
-                            computeFnOverlayHeight(label, width));
+                            computeFnOverlayHeight(label, width) + extra);
     return { width, height };
   }
 }

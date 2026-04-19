@@ -285,6 +285,30 @@
                              (empty? (:partial-fns spec)))
             :else true))
 
+        ;; Walk the source-id chain to the root arg and return its :required
+        ;; value. Propagated shadows have :required=nil, so we need to look at
+        ;; the base-fn's primary arg to know whether an unbound slot is truly
+        ;; optional (`:required false` → caller may leave it blank) or required
+        ;; (no explicit `:required false` → caller must supply it).
+        arg-is-optional?
+        (fn [arg]
+          (let [root (loop [a arg, depth 0]
+                       (if (or (> depth 200) (not (:source-id a)))
+                         a
+                         (recur (get arg-map (:source-id a)) (inc depth))))]
+            (false? (:required root))))
+
+        ;; Optional unbound args don't deserve their own placeholder node — the
+        ;; caller's fn has a sensible fallback baked in. We collect the NAMES
+        ;; per displayed node-id here and surface them on the node's `:data`
+        ;; so the client can render a compact badge like "+default, +else".
+        optional-unsets-by-node (atom {})
+        record-optional-unset!
+        (fn [node-id arg-name]
+          (when (and node-id arg-name)
+            (swap! optional-unsets-by-node update node-id
+                   (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
+
         add-fn-node
         (fn [original-fn-id is-root expansion-root]
           ;; Node ID logic for correct sharing behavior:
@@ -430,22 +454,33 @@
         (fn [arg-name arg-type arg-id source-node-id expanded-fns]
           ;; Node ID must include source-node-id to ensure uniqueness per expansion
           ;; Different fns expanding to same ancestor should get separate unset nodes
-          (let [node-id (str "unset-" source-node-id "-" arg-id)
-                edge-id (str "e-unset-" source-node-id "-" arg-id)]
-            (when-not (contains? @added-node-ids node-id)
-              (swap! added-node-ids conj node-id)
-              (swap! nodes conj
-                     {:data {:id node-id
-                             :label (if arg-type (name arg-type) "any")
-                             :type "fn"
-                             :isPlaceholder true}})
-              (swap! edges conj
-                     {:data {:id edge-id
-                             :source source-node-id
-                             :target node-id
-                             :argName (or (compute-edge-label arg-id source-node-id expanded-fns)
-                                          (when arg-name (name arg-name)))
-                             :isUnset true}}))))
+          ;;
+          ;; Split: optional unbound args (root :required=false, like
+          ;; `:get.default`) don't deserve their own placeholder — we just
+          ;; remember the name against the source node so it can be surfaced
+          ;; as a subtle hint on the node header. Required unbound args keep
+          ;; their visible placeholder — they ARE the caller's interface.
+          (let [arg-rec (get arg-map arg-id)
+                optional? (arg-is-optional? arg-rec)
+                displayed-name (or (compute-edge-label arg-id source-node-id expanded-fns)
+                                   (when arg-name (name arg-name)))]
+            (if optional?
+              (record-optional-unset! source-node-id displayed-name)
+              (let [node-id (str "unset-" source-node-id "-" arg-id)
+                    edge-id (str "e-unset-" source-node-id "-" arg-id)]
+                (when-not (contains? @added-node-ids node-id)
+                  (swap! added-node-ids conj node-id)
+                  (swap! nodes conj
+                         {:data {:id node-id
+                                 :label (if arg-type (name arg-type) "any")
+                                 :type "fn"
+                                 :isPlaceholder true}})
+                  (swap! edges conj
+                         {:data {:id edge-id
+                                 :source source-node-id
+                                 :target node-id
+                                 :argName displayed-name
+                                 :isUnset true}}))))))
 
         ;; For each fn, the set of terminal-source-ids bound by its parent
         ;; inheritance closure (including itself). Bindings in ref-id targets
@@ -528,7 +563,18 @@
         ;;   If a binding's source chain leads to one of these arg-ids, the binding should be shown there, not here
         (fn [fn-id bindings & {:keys [is-structural displayed-ref-arg-ids expansion-root-chain]
                                :or {is-structural false displayed-ref-arg-ids #{} expansion-root-chain #{}}}]
-          (let [raw-args (get args-by-fn fn-id [])
+          (let [;; Inheritance ancestry of the fn we're rendering. Used to
+                ;; filter out sibling bindings that would otherwise flow in
+                ;; through a shared base-fn's source-id chain (e.g. three
+                ;; other `:get` instances binding their own `:default` — none
+                ;; of them apply to THIS `:get` instance unless they sit in
+                ;; its ancestry).
+                fn-ancestry (set (get-inheritance-chain fn-id fn-map))
+                binding-applies? (fn [b]
+                                   (let [barg (some-> (:arg-id b) arg-map)]
+                                     (or (nil? barg)
+                                         (contains? fn-ancestry (:fn-id barg)))))
+                raw-args (get args-by-fn fn-id [])
                 ;; Sequence handling: find anchors (type=:sequence) and their chain items.
                 ;; Anchor + items get EXCLUDED from normal scalar processing; instead the
                 ;; chain expands to N synthetic slot entries (labeled `<slot>[idx]`).
@@ -581,10 +627,18 @@
                                        ;; Walk the FULL source-id chain to find a binding.
                                        ;; With multiple inheritance the bound arg may be on a
                                        ;; sibling parent, so the binding ends up keyed by an
-                                       ;; ancestor source-id deep in the chain.
+                                       ;; ancestor source-id deep in the chain. Skip bindings
+                                       ;; that don't belong to this fn's ancestry — those come
+                                       ;; from siblings sharing the same base-fn's source-id
+                                       ;; (e.g. router-response-body.default piggybacking onto
+                                       ;; ring-method-kw via `:get.default`).
                                        raw-binding (loop [sid (:id arg)]
                                                      (if-let [b (get bindings sid)]
-                                                       b
+                                                       (if (binding-applies? b)
+                                                         b
+                                                         (when-let [src-arg (get arg-map sid)]
+                                                           (when-let [next-sid (:source-id src-arg)]
+                                                             (recur next-sid))))
                                                        (when-let [src-arg (get arg-map sid)]
                                                          (when-let [next-sid (:source-id src-arg)]
                                                            (recur next-sid)))))
@@ -735,6 +789,20 @@
                     ;; in the expand-set are self-cycles (parent calls this fn,
                     ;; and propagation tries to feed it back). Treat as no binding.
                     self-ref-targets expand-set]
+                (let [;; Inheritance chain of the fn whose args we're iterating;
+                      ;; used to verify that a candidate binding isn't coming
+                      ;; from a sibling instance of the same base-fn. Two fns
+                      ;; like `router-response-body` and `ring-method-kw` both
+                      ;; inherit from `:get`, so their `:default` args share a
+                      ;; root source-id. Without this check, router-response-
+                      ;; body's `:default ""` binding (also `:default {}` /
+                      ;; `:default 200` from the headers/status siblings) would
+                      ;; falsely surface on ring-method-kw's display.
+                      fn-ancestry (set (get-inheritance-chain fn-id fn-map))
+                      binding-applies? (fn [b]
+                                         (let [barg (some-> (:arg-id b) arg-map)]
+                                           (or (nil? barg)
+                                               (contains? fn-ancestry (:fn-id barg)))))]
                 (doseq [arg args]
                   (let [arg-id (:id arg)
                         source-id (or (:source-id arg) arg-id)
@@ -744,11 +812,15 @@
                         ;; Walk the FULL source-id chain to find a binding.
                         ;; Skip bindings whose ref-id is a self-reference
                         ;; (target fn is in the expand-set being processed).
+                        ;; Also skip bindings that live on a sibling fn (same
+                        ;; base-fn but not in our inheritance chain) — see
+                        ;; `binding-applies?` docstring above.
                         binding (loop [sid arg-id]
                                   (if-let [b (get bindings sid)]
-                                    (if (and (:ref-id b)
-                                             (contains? self-ref-targets (:ref-id b)))
-                                      ;; self-cycle binding — keep walking
+                                    (if (or (and (:ref-id b)
+                                                 (contains? self-ref-targets (:ref-id b)))
+                                            (not (binding-applies? b)))
+                                      ;; Not applicable here — keep walking up.
                                       (when-let [src-arg (get arg-map sid)]
                                         (when-let [next-sid (:source-id src-arg)]
                                           (recur next-sid)))
@@ -800,7 +872,7 @@
                           :else
                           (swap! fn-unsets conj {:type :unset :arg-name arg-name
                                                  :arg-type (:type arg) :arg-id arg-id
-                                                 :from-ancestor from-ancestor}))))))
+                                                 :from-ancestor from-ancestor})))))))
                 ;; Append sequence-slot entries for each anchor on this fn —
                 ;; one entry per item, labelled `<slot>[idx]`, classified by
                 ;; the item's own binding (:ref-id → :ref, :value → :value,
@@ -1100,10 +1172,17 @@
                     ;; Free args come above bindings so the interface is visible
                     ;; first when reading top-to-bottom.
 
-                    ;; Level-0 refs
+                    ;; Level-0 refs. Use `effective-expansion-root` (same as
+                    ;; ancestor-refs below). Previously this passed
+                    ;; `parent-expansion-root` which is `nil` at the top of a
+                    ;; user-initiated expansion — and when a named ref was
+                    ;; reached both directly from a level-0 binding and via
+                    ;; an ancestor chain, the two calls produced DIFFERENT
+                    ;; node-ids (one canonical, one expansion-prefixed), so
+                    ;; the same fn rendered as two separate nodes on screen.
                     (doseq [arg level-0-refs]
                       (when-not (binding-covered? arg)
-                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set)))
+                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root expand-set)))
 
                     ;; Level-0 unsets (free args)
                     (doseq [arg level-0-unsets]
@@ -1209,8 +1288,18 @@
       ;; Start processing from root - no expansion-root initially
       (process-any-fn root-fn-id nil nil true nil nil nil #{})))
 
-    {:nodes @nodes
-     :edges @edges}))
+    ;; Attach the list of optional-unbound arg names to their source node so
+    ;; the client can render a compact hint (e.g. "+default, +not-found")
+    ;; instead of cluttering the graph with placeholder nodes.
+    (let [final-nodes (mapv (fn [n]
+                              (let [node-id (get-in n [:data :id])
+                                    optionals (get @optional-unsets-by-node node-id)]
+                                (cond-> n
+                                  (seq optionals)
+                                  (assoc-in [:data :optionalArgs] (vec (distinct optionals))))))
+                            @nodes)]
+      {:nodes final-nodes
+       :edges @edges})))
 
 
 ;; =============================================================================

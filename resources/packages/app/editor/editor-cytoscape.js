@@ -96,6 +96,26 @@ const CYTOSCAPE_STYLES = [
 // CYTOSCAPE INITIALIZATION
 // ============================================================================
 
+// Floor for the rendered edge thickness in CSS pixels — just high enough that
+// sub-pixel anti-aliasing still produces a visible line. Kept deliberately low
+// so edges don't look disproportionately thick when the rest of the graph is
+// small: they scale naturally down to this threshold and then hold.
+const MIN_EDGE_PIXELS = 0.75;
+// Edge thickness in graph units at zoom=1 (matches the static stylesheet).
+const BASE_EDGE_WIDTH = 2;
+
+/**
+ * Let edge thickness scale with zoom, but don't let the rendered pixel width
+ * fall below MIN_EDGE_PIXELS — below that sub-pixel rendering makes the line
+ * disappear entirely.
+ */
+function updateEdgeWidthForZoom() {
+  if (!cy) return;
+  const z = cy.zoom();
+  const w = Math.max(BASE_EDGE_WIDTH, MIN_EDGE_PIXELS / z);
+  cy.edges().style('width', w);
+}
+
 /**
  * Create Cytoscape instance with initial elements and layout
  */
@@ -139,7 +159,11 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   cy.on('pan zoom', function() {
     updateOverlayPositions();
     updateZoomSlider();
+    updateEdgeWidthForZoom();
   });
+  // Seed the zoom-aware edge width once on init so edges don't vanish when
+  // the initial `cy.fit` picks a small zoom (big graphs) before any user pan/zoom.
+  updateEdgeWidthForZoom();
 
   // Create overlays
   createNodeOverlays();
@@ -295,6 +319,9 @@ async function renderGraph(shouldFit = true) {
     // Add edges after nodes are positioned
     if (edgesToAdd.length > 0) {
       cy.add(edgesToAdd);
+      // Re-apply the zoom-clamped width — the style() in updateEdgeWidthForZoom
+      // targets the edge set at call time, so newly-added edges need a refresh.
+      updateEdgeWidthForZoom();
     }
 
     // Apply layout positions with animation

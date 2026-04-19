@@ -526,9 +526,16 @@ function createEdgeLabelOverlay(edge, container) {
  */
 function createPlaceholderOverlay(node, container) {
   const overlay = createOverlay(node.id(), { border: '2px dashed black' });
+  // The enclosing cy-node uses a shared minimum height larger than the
+  // placeholder's natural content, so without a column flex the drag handle
+  // would sit at its content offset and leave a blank strip between it and
+  // the bottom border.
+  overlay.style.display = 'flex';
+  overlay.style.flexDirection = 'column';
 
   const content = document.createElement('div');
   content.style.padding = '4px 8px';
+  content.style.flex = '1';
   content.textContent = node.data('label') || 'any';
   overlay.appendChild(content);
 

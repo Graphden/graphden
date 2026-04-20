@@ -148,8 +148,7 @@
 ;;
 ;; Walks every fn/arg entity in storage and compiles each into a Clojure
 ;; closure of shape `(fn [all-fns free-args] result)`. Stored in the
-;; context's `:compiled-registry` atom for the hot path (HTTP handlers)
-;; to bypass the legacy queue entirely.
+;; context's `:compiled-registry` atom for the hot path (HTTP handlers).
 
 (defmethod ig/init-key :exec/compiled-registry [_ {:keys [context]}]
   (log/info "Building compiled registry...")

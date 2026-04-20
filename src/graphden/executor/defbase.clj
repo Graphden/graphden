@@ -167,10 +167,8 @@
         arg-sym->key (into {} (map (fn [s] [s (keyword s)])) args-vec)
         transformed (transform-body body arg-sym->key)
         ;; Multi-arity: 2-arg is the canonical signature (args + ctx); 1-arg
-        ;; delegates with ctx=nil. Needed because the legacy `wrap-impl`
-        ;; in `graphden.packages.loader` invokes non-`:ctx` impls with a
-        ;; single argument `(impl-fn args)`. Once the old queue is retired
-        ;; (Stage 8) we can drop the 1-arg arity.
+        ;; delegates with ctx=nil, so non-`:ctx` loader wrappers that call
+        ;; `(impl-fn args)` with a single argument still work.
         two-body `(do ~@transformed)]
     (if docstring
       `(defn ~fn-name

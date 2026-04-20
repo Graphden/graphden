@@ -66,6 +66,18 @@ const CYTOSCAPE_STYLES = [
     'line-style': 'solid',
     'curve-style': 'taxi',
     'taxi-direction': 'rightward',
+    // Direction markers — one at each end, different shapes so the edge
+    // visually reads "arg-slot of source fn ◯──▸ value fn":
+    //   source: filled circle = socket/pin on the owning fn's arg
+    //   target: triangle arrow = points at the referenced (value-producing) fn
+    // Subtle at default scale; scales with line width via `arrow-scale`.
+    'source-arrow-shape': 'circle',
+    'source-arrow-color': '#000',
+    'source-arrow-fill': 'filled',
+    'target-arrow-shape': 'triangle',
+    'target-arrow-color': '#000',
+    'target-arrow-fill': 'filled',
+    'arrow-scale': 0.9,
     // Bend AFTER the source node's column ends, so the vertical segment lands
     // in the inter-column gap. Without this, edges from a narrow node bend
     // INSIDE the column at source.right + 40px, which can collide with a
@@ -89,6 +101,16 @@ const CYTOSCAPE_STYLES = [
   // Unset edge - dashed, same black color
   { selector: 'edge[?isUnset]', style: {
     'line-style': 'dashed'
+  }},
+  // Hover highlight: edges fan out from a single fn's right edge and converge
+  // onto single target nodes, so any hover lights up the whole visual bundle
+  // (all edges that share the hovered edge's source OR target). Accent blue
+  // reads as "interactive" without fighting the monochrome node aesthetic.
+  { selector: 'edge.edge-hovered', style: {
+    'line-color': '#0066cc',
+    'source-arrow-color': '#0066cc',
+    'target-arrow-color': '#0066cc',
+    'z-index': 999
   }}
 ];
 
@@ -150,6 +172,8 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     autounselectify: true,  // Disable selection — clicks are handled via overlays only
     boxSelectionEnabled: false
   });
+  // Expose for browser-test debugging; harmless in production (single-graph page).
+  window.cy = cy;
 
   if (shouldFit && cy.nodes().length > 0) {
     cy.fit(50);
@@ -164,6 +188,59 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   // Seed the zoom-aware edge width once on init so edges don't vanish when
   // the initial `cy.fit` picks a small zoom (big graphs) before any user pan/zoom.
   updateEdgeWidthForZoom();
+
+  // Edge-hover highlight. Two regimes based on pointer position on the edge:
+  //   - Near the SOURCE endpoint (the circle at the fn side) → light up the
+  //     whole outgoing bundle, same as hovering the fn itself. The circle
+  //     visually represents the "pin on the fn" so hovering it should act
+  //     at the fn level.
+  //   - Anywhere else along the edge → light up ONLY this edge, so you can
+  //     follow one specific connection through a busy area.
+  // SOURCE_CIRCLE_RADIUS is in graph units (matches arrow-scale 0.9 × default
+  // triangle half-length plus a small slack) so the hit-zone feels consistent
+  // across zoom levels — Cytoscape reports `evt.position` in graph coords.
+  const SOURCE_CIRCLE_RADIUS = 14;
+  function edgeSourceHit(evt) {
+    const p = evt.position;
+    const src = evt.target.sourceEndpoint();
+    if (!p || !src) return false;
+    const dx = p.x - src.x;
+    const dy = p.y - src.y;
+    return (dx * dx + dy * dy) <= SOURCE_CIRCLE_RADIUS * SOURCE_CIRCLE_RADIUS;
+  }
+  function applyHover(edge, bundle) {
+    if (bundle) {
+      const sourceNode = edge.source();
+      sourceNode.outgoers('edge').addClass('edge-hovered');
+    } else {
+      edge.addClass('edge-hovered');
+    }
+  }
+  function clearHover() {
+    cy.edges('.edge-hovered').removeClass('edge-hovered');
+  }
+  cy.on('mouseover', 'edge', function (evt) {
+    applyHover(evt.target, edgeSourceHit(evt));
+  });
+  cy.on('mousemove', 'edge', function (evt) {
+    const wantBundle = edgeSourceHit(evt);
+    const edge = evt.target;
+    const sourceNode = edge.source();
+    const bundleAlready = sourceNode.outgoers('edge').hasClass('edge-hovered');
+    const singleAlready = edge.hasClass('edge-hovered') && !bundleAlready;
+    if (wantBundle && !bundleAlready) {
+      clearHover();
+      applyHover(edge, true);
+    } else if (!wantBundle && bundleAlready) {
+      clearHover();
+      applyHover(edge, false);
+    } else if (!wantBundle && !singleAlready && !bundleAlready) {
+      applyHover(edge, false);
+    }
+  });
+  cy.on('mouseout', 'edge', function () {
+    clearHover();
+  });
 
   // Create overlays
   createNodeOverlays();

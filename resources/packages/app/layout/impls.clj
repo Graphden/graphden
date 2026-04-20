@@ -570,10 +570,44 @@
                 ;; of them apply to THIS `:get` instance unless they sit in
                 ;; its ancestry).
                 fn-ancestry (set (get-inheritance-chain fn-id fn-map))
-                binding-applies? (fn [b]
+                ;; Does the binding's arg source-chain reach `target-id`?
+                ;; Used by binding-applies? to accept propagation bindings
+                ;; (where a ref-caller binds through the ref-chain into this
+                ;; fn's own arg) while still rejecting sibling bindings
+                ;; (where two instances of the same base-fn share a source
+                ;; ancestor but neither is the caller of the other).
+                binding-reaches? (fn [b target-id]
+                                   ;; Only PRIMARY args (no source-id) are real input slots
+                                   ;; for a fn. Shadows along propagation chains all share
+                                   ;; source-ids, so a permissive source-chain match would
+                                   ;; let a level-0 binding re-surface on every downstream
+                                   ;; relay (e.g. `_app-path-gated-response.func` appearing
+                                   ;; again on `router-response-body.func`).
+                                   (let [target-arg (get arg-map target-id)
+                                         barg (some-> (:arg-id b) arg-map)]
+                                     (when (nil? (:source-id target-arg))
+                                       (loop [sid (:source-id barg)]
+                                         (cond
+                                           (nil? sid) false
+                                           (= sid target-id) true
+                                           :else (recur (:source-id (get arg-map sid))))))))
+                binding-applies? (fn [b current-arg-id]
                                    (let [barg (some-> (:arg-id b) arg-map)]
                                      (or (nil? barg)
-                                         (contains? fn-ancestry (:fn-id barg)))))
+                                         (contains? fn-ancestry (:fn-id barg))
+                                         (binding-reaches? b current-arg-id))))
+                ;; Does the arg's source-id chain pass through any binding
+                ;; key? If yes, the upstream caller already shows the
+                ;; binding, so this downstream arg should not emit a free
+                ;; placeholder. Used to suppress shadows like `:func` on
+                ;; `router-response-*` when `_app-path-gated-response`
+                ;; already binds it.
+                bound-by-chain? (fn [arg]
+                                  (loop [sid (:source-id arg)]
+                                    (when sid
+                                      (if (contains? bindings sid)
+                                        true
+                                        (recur (:source-id (get arg-map sid)))))))
                 raw-args (get args-by-fn fn-id [])
                 ;; Sequence handling: find anchors (type=:sequence) and their chain items.
                 ;; Anchor + items get EXCLUDED from normal scalar processing; instead the
@@ -634,7 +668,7 @@
                                        ;; ring-method-kw via `:get.default`).
                                        raw-binding (loop [sid (:id arg)]
                                                      (if-let [b (get bindings sid)]
-                                                       (if (binding-applies? b)
+                                                       (if (binding-applies? b (:id arg))
                                                          b
                                                          (when-let [src-arg (get arg-map sid)]
                                                            (when-let [next-sid (:source-id src-arg)]
@@ -695,6 +729,15 @@
                                      ;; Binding existed but went to child - hide this arg entirely
                                      ;; Like Clojure function inlining: args are REPLACED at point of use
                                      raw-binding
+                                     nil
+
+                                     ;; Arg is unbound HERE, but an upstream in its source chain has a
+                                     ;; binding (rendered at the upstream node). Hide rather than emit a
+                                     ;; placeholder — the user sees the concrete binding once, where
+                                     ;; it was applied. This suppresses e.g. propagated `:func` shadows
+                                     ;; on `router-response-*` when `_app-path-gated-response.func` is
+                                     ;; already bound upstream.
+                                     (bound-by-chain? arg)
                                      nil
 
                                      :else
@@ -799,10 +842,28 @@
                       ;; `:default 200` from the headers/status siblings) would
                       ;; falsely surface on ring-method-kw's display.
                       fn-ancestry (set (get-inheritance-chain fn-id fn-map))
-                      binding-applies? (fn [b]
+                      binding-reaches? (fn [b target-id]
+                                         (let [barg (some-> (:arg-id b) arg-map)]
+                                           (loop [sid (:source-id barg)]
+                                             (cond
+                                               (nil? sid) false
+                                               (= sid target-id) true
+                                               :else (recur (:source-id (get arg-map sid)))))))
+                      binding-applies? (fn [b current-arg-id]
                                          (let [barg (some-> (:arg-id b) arg-map)]
                                            (or (nil? barg)
-                                               (contains? fn-ancestry (:fn-id barg)))))]
+                                               (contains? fn-ancestry (:fn-id barg))
+                                               (binding-reaches? b current-arg-id))))
+                      ;; Same logic as in collect-fn-args: hide unbound args
+                      ;; whose source chain passes through a bound arg-id.
+                      ;; The binding is shown upstream; a downstream shadow
+                      ;; would just add a ghost placeholder edge.
+                      bound-by-chain? (fn [arg]
+                                        (loop [sid (:source-id arg)]
+                                          (when sid
+                                            (if (contains? bindings sid)
+                                              true
+                                              (recur (:source-id (get arg-map sid)))))))]
                 (doseq [arg args]
                   (let [arg-id (:id arg)
                         source-id (or (:source-id arg) arg-id)
@@ -819,7 +880,7 @@
                                   (if-let [b (get bindings sid)]
                                     (if (or (and (:ref-id b)
                                                  (contains? self-ref-targets (:ref-id b)))
-                                            (not (binding-applies? b)))
+                                            (not (binding-applies? b arg-id)))
                                       ;; Not applicable here — keep walking up.
                                       (when-let [src-arg (get arg-map sid)]
                                         (when-let [next-sid (:source-id src-arg)]
@@ -868,6 +929,11 @@
                           (swap! fn-values conj {:type :value :arg-name arg-name
                                                  :value (:value arg) :arg-id arg-id
                                                  :from-ancestor from-ancestor})
+
+                          ;; Arg unbound here but bound somewhere upstream in the
+                          ;; source chain — shown there, skip emitting a ghost.
+                          (bound-by-chain? arg)
+                          nil
 
                           :else
                           (swap! fn-unsets conj {:type :unset :arg-name arg-name
@@ -1172,17 +1238,27 @@
                     ;; Free args come above bindings so the interface is visible
                     ;; first when reading top-to-bottom.
 
-                    ;; Level-0 refs. Use `effective-expansion-root` (same as
-                    ;; ancestor-refs below). Previously this passed
-                    ;; `parent-expansion-root` which is `nil` at the top of a
-                    ;; user-initiated expansion — and when a named ref was
-                    ;; reached both directly from a level-0 binding and via
-                    ;; an ancestor chain, the two calls produced DIFFERENT
-                    ;; node-ids (one canonical, one expansion-prefixed), so
-                    ;; the same fn rendered as two separate nodes on screen.
+                    ;; Level-0 refs — own bindings of the expanded fn always
+                    ;; render. We used to filter via `binding-covered?`, but
+                    ;; that treated a legitimate top-level binding as "covered"
+                    ;; whenever its propagation shadow showed up inside a
+                    ;; displayed descendant's inheritance chain (e.g.
+                    ;; `_app-path-gated-response.func :_router` whose shadow
+                    ;; lives on every propagated `:func` slot under
+                    ;; router-ring-response). Deeper propagated copies are
+                    ;; filtered separately by `bound-by-chain?` in the
+                    ;; collect-* functions, so the binding renders exactly
+                    ;; once — at its declaration site (the expansion root).
+                    ;;
+                    ;; Level-0 refs are NOT prefixed with the expansion root
+                    ;; (pass nil as expansion-root). Two expansions that both
+                    ;; reference the same shared fn at their own level 0
+                    ;; should point at a single canonical node, not at two
+                    ;; per-expansion copies. Ancestor refs (via inheritance
+                    ;; chain) still use the prefix so each expansion gets its
+                    ;; own structural subgraph.
                     (doseq [arg level-0-refs]
-                      (when-not (binding-covered? arg)
-                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root expand-set)))
+                      (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set))
 
                     ;; Level-0 unsets (free args)
                     (doseq [arg level-0-unsets]

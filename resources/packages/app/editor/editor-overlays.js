@@ -482,6 +482,21 @@ function createFnOverlay(node, container) {
 
   createDragHandle(overlay, node);
 
+  // Hovering the FN overlay itself (not a specific outgoing edge) lights up
+  // the whole outgoing bundle — the "start point before the args" view the
+  // user asked for. Use mouseenter/leave so the highlight follows the
+  // overlay rectangle precisely and does not leak into child elements.
+  overlay.addEventListener('mouseenter', () => {
+    if (!cy) return;
+    const cyNode = cy.getElementById(nodeId);
+    if (cyNode && cyNode.length) {
+      cyNode.outgoers('edge').addClass('edge-hovered');
+    }
+  });
+  overlay.addEventListener('mouseleave', () => {
+    if (cy) cy.edges('.edge-hovered').removeClass('edge-hovered');
+  });
+
   overlay.addEventListener('mouseleave', () => {
     // Don't clear preview if:
     // 1. Overlays are being rebuilt (rebuildingOverlays flag)

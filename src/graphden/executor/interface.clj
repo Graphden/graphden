@@ -14,8 +14,7 @@
   (:require
     [graphden.executor.context :as ctx]
     [graphden.executor.core :as core]
-    [graphden.executor.registry :as registry]
-    [graphden.executor.types :as types]))
+    [graphden.executor.registry :as registry]))
 
 
 ;; === Execution Context ===
@@ -79,23 +78,6 @@
    Returns nil if not found."
   [context fn-name]
   (registry/get-base-fn-from-context context fn-name))
-
-
-;; === Type Hints ===
-
-(defn register-type-hint!
-  "Registers a human-readable hint for a custom type.
-   The hint is shown in type mismatch error messages to help users understand
-   what value format is expected.
-
-   Custom hints take precedence over built-in hints for the same type.
-   This is useful when you add custom types via field-types extension.
-
-   Example:
-   (register-type-hint! :email \"string in email format (e.g., user@example.com)\")
-   (register-type-hint! :phone \"string with international format (e.g., +1-555-123-4567)\")"
-  [type-keyword hint-string]
-  (types/register-type-hint! type-keyword hint-string))
 
 
 ;; === Execution ===

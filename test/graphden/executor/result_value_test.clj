@@ -141,25 +141,6 @@
       (sp/close storage))))
 
 
-;; === register-type-hint! Tests ===
-
-(deftest register-type-hint-interface-test
-  (testing "registers custom type hint through interface"
-    (exec/register-type-hint! :custom-email "string in email format")
-    ;; The hint is stored internally, we can verify it doesn't throw
-    (is true))
-
-  (testing "rejects invalid type keyword"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"type-keyword must be a keyword"
-          (exec/register-type-hint! "not-keyword" "hint"))))
-
-  (testing "rejects invalid hint string"
-    (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                          #"hint-string must be a string"
-          (exec/register-type-hint! :valid-keyword :not-a-string)))))
-
-
 ;; === with-clean-registry Tests ===
 
 (deftest with-clean-registry-test

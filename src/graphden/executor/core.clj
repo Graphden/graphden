@@ -208,8 +208,7 @@
   [context fn-id]
   ;; Resolve execution graph for THIS fn (not parent's graph which may
   ;; not include HOF target fns like _final-response)
-  (let [storage (:storage context)
-        fn-graph (sp/resolve-execution-graph storage fn-id)
+  (let [fn-graph (ctx/resolve-graph-cached context fn-id)
         fn-ctx (assoc context :execution-graph fn-graph)
         arg-info (get-single-required-arg fn-ctx fn-id)
         arg-id (:id arg-info)]
@@ -272,8 +271,7 @@
    request handler always takes a `request` arg). Avoids the ambiguity
    when multiple unrelated deep free args are reachable."
   [context fn-id arg-name]
-  (let [storage (:storage context)
-        fn-graph (sp/resolve-execution-graph storage fn-id)
+  (let [fn-graph (ctx/resolve-graph-cached context fn-id)
         fn-ctx (assoc context :execution-graph fn-graph)
         arg (find-deep-free-arg-by-name fn-graph fn-id arg-name)
         _ (when-not arg
@@ -348,8 +346,7 @@
                     {:type :execution-error/invalid-args
                      :args args
                      :args-type (type args)})))
-  (let [storage (:storage context)
-        execution-graph (sp/resolve-execution-graph storage fn-id)
+  (let [execution-graph (ctx/resolve-graph-cached context fn-id)
         ;; Reset start-time for each top-level execute call
         context-with-graph (assoc context
                                   :execution-graph execution-graph
@@ -392,8 +389,7 @@
                      :args-type (type named-args)})))
   (if (or (nil? named-args) (empty? named-args))
     (execute context fn-id nil)
-    (let [storage (:storage context)
-          execution-graph (sp/resolve-execution-graph storage fn-id)
+    (let [execution-graph (ctx/resolve-graph-cached context fn-id)
           id-based-args (resolve-named-args execution-graph fn-id named-args)
           ;; Reset start-time for each top-level execute call
           context-with-graph (assoc context

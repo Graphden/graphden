@@ -5,104 +5,102 @@
 
 {:namespace "web.html"
  :fns
-[{:name :render-hiccup
-  :args {:hiccup :jsonb}
-  :return-type :text}
+ [{:name :render-hiccup
+   :args {:hiccup :jsonb}
+   :return-type :text}
 
- {:name :html-response
-  :args {:body :any
-         :status {:type :int :required false}}
-  :return-type :jsonb}
+  {:name :html-response
+   :args {:body :any
+          :status {:type :int :required false}}
+   :return-type :jsonb}
 
- {:name :html-page
-  :args {:title :text
-         :head {:type :jsonb :required false}
-         :body :jsonb
-         :scripts {:type :jsonb :required false}}
-  :return-type :jsonb}
+  {:name :html-page
+   :args {:title :text
+          :head {:type :jsonb :required false}
+          :body :jsonb
+          :scripts {:type :jsonb :required false}}
+   :return-type :jsonb}
 
- ;; Append a CDN script tag to head elements
- {:name :with-cdn-script
-  :args {:head {:type :jsonb :required false}
-         :url :text}
-  :return-type :jsonb}
+  ;; Append a CDN script tag to head elements
+  {:name :with-cdn-script
+   :args {:head {:type :jsonb :required false}
+          :url :text}
+   :return-type :jsonb}
 
- {:name :cytoscape-container
-  :args {:id :text
-         :style :jsonb}
-  :return-type :jsonb}
+  {:name :cytoscape-container
+   :args {:id :text
+          :style :jsonb}
+   :return-type :jsonb}
 
- {:name :form-input
-  :args {:field-name :text
-         :label-text :text
-         :input-type {:type :text :value "text"}
-         :field-value {:type :any :required false}
-         :extra-attrs {:type :jsonb :required false}}
-  :return-type :jsonb}
+  {:name :form-input
+   :args {:field-name :text
+          :label-text :text
+          :input-type {:type :text :value "text"}
+          :field-value {:type :any :required false}
+          :extra-attrs {:type :jsonb :required false}}
+   :return-type :jsonb}
 
- {:name :form-select
-  :args {:field-name :text
-         :label-text :text
-         :options :jsonb
-         :selected-value {:type :any :required false}
-         :extra-attrs {:type :jsonb :required false}}
-  :return-type :jsonb}
+  {:name :form-select
+   :args {:field-name :text
+          :label-text :text
+          :options :jsonb
+          :selected-value {:type :any :required false}
+          :extra-attrs {:type :jsonb :required false}}
+   :return-type :jsonb}
 
- {:name :button
-  :args {:btn-text :text
-         :btn-type {:type :text :required false}
-         :extra-attrs {:type :jsonb :required false}}
-  :return-type :jsonb}
+  {:name :button
+   :args {:btn-text :text
+          :btn-type {:type :text :required false}
+          :extra-attrs {:type :jsonb :required false}}
+   :return-type :jsonb}
 
- ;; Field display helpers
- {:name :field-row
-  :args {:label :text
-         :value :any}
-  :return-type :jsonb}
+  ;; Field display helpers
+  {:name :field-row
+   :args {:label :text
+          :value :any}
+   :return-type :jsonb}
 
- {:name :badge
-  :args {:badge-text :text
-         :badge-type {:type :text :required false}}
-  :return-type :jsonb}
+  {:name :badge
+   :args {:badge-text :text
+          :badge-type {:type :text :required false}}
+   :return-type :jsonb}
 
- ;; Entity field rows - renders multiple field-rows from entity using field-specs
- ;; field-specs: [[label key] ...] or [[label key transform-fn] ...]
- {:name :entity-field-rows
-  :args {:entity :jsonb
-         :field-specs :jsonb}
-  :return-type :jsonb}
+  ;; Entity field rows - renders multiple field-rows from entity using field-specs
+  ;; field-specs: [[label key] ...] or [[label key transform-fn] ...]
+  {:name :entity-field-rows
+   :args {:entity :jsonb
+          :field-specs :jsonb}
+   :return-type :jsonb}
 
- ;; Wrap text content in an HTML element
- {:name :wrap-element
-  :args {:tag :text
-         :content :text}
-  :return-type :jsonb}
+  ;; Wrap text content in an HTML element
+  {:name :wrap-element
+   :args {:tag :text
+          :content :text}
+   :return-type :jsonb}
 
- {:name :wrap-style
-  :parent :wrap-element
-  :args {:tag "style"}}
+  {:name :wrap-style
+   :parent :wrap-element
+   :args {:tag "style"}}
 
- {:name :wrap-script
-  :parent :wrap-element
-  :args {:tag "script"}}
+  {:name :wrap-script
+   :parent :wrap-element
+   :args {:tag "script"}}
 
- ;; Generic hiccup element constructor
- {:name :hiccup
-  :args {:tag :text
-         :attrs {:type :jsonb :required false}
-         :children {:type :jsonb :required false}}
-  :return-type :jsonb}
+  ;; Generic hiccup element constructor
+  {:name :hiccup
+   :args {:tag :text
+          :attrs {:type :jsonb :required false}
+          :children {:type :jsonb :required false}}
+   :return-type :jsonb}
 
- ;; Horizontal flex container for buttons
- {:name :button-row
-  :args {:buttons :jsonb
-         :style :jsonb}
-  :return-type :jsonb}
+  ;; Horizontal flex container for buttons
+  {:name :button-row
+   :args {:buttons :jsonb
+          :style :jsonb}
+   :return-type :jsonb}
 
- ;; Transform a value for display: :keyword-to-str, :pr-str, :bool-to-yesno
- {:name :apply-transform
-  :args {:value {:type :any :required false}
-         :transform {:type :text :required false}}
-  :return-type :any}
-
-]}
+  ;; Transform a value for display: :keyword-to-str, :pr-str, :bool-to-yesno
+  {:name :apply-transform
+   :args {:value {:type :any :required false}
+          :transform {:type :text :required false}}
+   :return-type :any}]}

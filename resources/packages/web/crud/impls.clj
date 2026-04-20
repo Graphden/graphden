@@ -6,6 +6,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
+    [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.web.html.impls :as html]
     [graphden.storage.protocol.core :as sp]
     [graphden.versioning.storage.core :as vs])
@@ -16,20 +17,26 @@
 
 ;; === Helpers ===
 
-(defn- parse-query-string [s]
+(defn- parse-query-string
+  [s]
   (when (and s (not (str/blank? s)))
     (into {} (for [pair (str/split s #"&")
                    :let [[k v] (str/split pair #"=" 2)]
                    :when k]
                [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
 
-(defn- require-storage [ctx]
+
+(defn- require-storage
+  [ctx]
   (or (:storage ctx)
       (throw (ex-info "Storage not available in context"
                       {:type :execution-error/missing-storage}))))
 
-(defn- entity-type-from-string [s]
+
+(defn- entity-type-from-string
+  [s]
   (case s "fn" :fn "arg" :arg nil))
+
 
 (defn- extract-entity-params
   "Extracts type-str, id-str, entity-type from request path-params."
@@ -43,29 +50,34 @@
 
 ;; === Context-aware Query Functions ===
 
-(defn list-entities
-  [{:keys [entity-type where]} ctx]
-  (vec (sp/query-entities (require-storage ctx) (keyword @entity-type) (or (when where @where) {}))))
+(defbase list-entities
+  [entity-type where]
+  (vec (sp/query-entities (require-storage ctx) (keyword entity-type) (or where {}))))
 
-(defn get-entity
-  [{:keys [entity-type id]} ctx]
-  (sp/read-entity (require-storage ctx) (keyword @entity-type) @id))
 
-(defn create-entity
-  [{:keys [entity-type data]} ctx]
-  (sp/create-entity (require-storage ctx) (keyword @entity-type) @data))
+(defbase get-entity
+  [entity-type id]
+  (sp/read-entity (require-storage ctx) (keyword entity-type) id))
 
-(defn update-entity
-  [{:keys [entity-type id data]} ctx]
-  (sp/update-entity (require-storage ctx) (keyword @entity-type) @id @data))
 
-(defn delete-entity
-  [{:keys [entity-type id]} ctx]
-  (sp/delete-entity (require-storage ctx) (keyword @entity-type) @id)
+(defbase create-entity
+  [entity-type data]
+  (sp/create-entity (require-storage ctx) (keyword entity-type) data))
+
+
+(defbase update-entity
+  [entity-type id data]
+  (sp/update-entity (require-storage ctx) (keyword entity-type) id data))
+
+
+(defbase delete-entity
+  [entity-type id]
+  (sp/delete-entity (require-storage ctx) (keyword entity-type) id)
   true)
 
-(defn list-all-graph-entities
-  [_args ctx]
+
+(defbase list-all-graph-entities
+  []
   (let [storage (require-storage ctx)
         base (if (instance? VersionedStorage storage)
                (vs/query-all-graph-entities storage)
@@ -83,13 +95,16 @@
   [["ID" :id] ["Name" :name :keyword-to-str] ["Parent ID" :parent-id]
    ["Return Type" :return-type :keyword-to-str] ["Impl Hash" :impl-hash]])
 
+
 (def ^:private arg-field-specs
   [["ID" :id] ["Name" :name :keyword-to-str] ["Fn ID" :fn-id]
    ["Type" :type :keyword-to-str] ["Required" :required :bool-to-yesno]
    ["Is Fn" :is-fn :bool-to-yesno] ["Source ID" :source-id]
    ["Value" :value :pr-str] ["Ref ID" :ref-id]])
 
-(defn- render-fn-form [entity all-fns]
+
+(defn- render-fn-form
+  [entity all-fns]
   (let [editing? (some? entity)
         parent-options (into [["" "None"]]
                              (mapv (fn [f] [(str (:id f)) (name (:name f))]) all-fns))]
@@ -106,7 +121,9 @@
                                  [:button {:type "submit" :class "btn btn-primary"} (if editing? "Save" "Create")]]
                        :style {:display "flex" :gap "8px" :justify-content "flex-end" :margin-top "16px"}})]))
 
-(defn- render-arg-form [entity all-fns all-args]
+
+(defn- render-arg-form
+  [entity all-fns all-args]
   (let [editing? (some? entity)
         fn-options (into [["" "Select function..."]]
                          (mapv (fn [f] [(str (:id f)) (name (:name f))]) all-fns))
@@ -139,8 +156,8 @@
 
 ;; === Render View Functions (context-aware) ===
 
-(defn render-entity-actions
-  [{:keys [entity-type entity-id]}]
+(defbase render-entity-actions
+  [entity-type entity-id]
   [:div {:style "margin-top: 16px; display: flex; gap: 8px;"}
    [:button {:class "btn btn-primary"
              :hx-get (str "/partials/entity-form/" entity-type "/" entity-id)
@@ -151,8 +168,9 @@
              :hx-target "#details-panel" :hx-swap "outerHTML"
              :_ "on htmx:afterRequest trigger entityDeleted on body"} "Delete"]])
 
-(defn render-entity-details-view
-  [{:keys [request]} ctx]
+
+(defbase render-entity-details-view
+  [request]
   (let [storage (require-storage ctx)
         {:keys [type-str id-str entity-type]} (extract-entity-params request)]
     (if (and entity-type id-str)
@@ -166,8 +184,9 @@
         [:p {:class "error"} "Entity not found"])
       [:p {:class "error"} "Invalid request"])))
 
-(defn render-entity-form-view
-  [{:keys [request]} ctx]
+
+(defbase render-entity-form-view
+  [request]
   (let [storage (require-storage ctx)
         {:keys [type-str id-str entity-type]} (extract-entity-params request)]
     (if entity-type
@@ -185,14 +204,15 @@
 
 ;; === Form Parsing (pure) ===
 
-(defn parse-fn-from-form
-  [{:keys [form-data]}]
+(defbase parse-fn-from-form
+  [form-data]
   (cond-> {:name (keyword (:name form-data))}
     (not (str/blank? (:parent-id form-data)))
     (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data)))))
 
-(defn parse-arg-from-form
-  [{:keys [form-data]}]
+
+(defbase parse-arg-from-form
+  [form-data]
   (cond-> {:name (keyword (:name form-data))
            :fn-id (java.util.UUID/fromString (:fn-id form-data))
            :type (keyword (:type form-data))}
@@ -204,8 +224,8 @@
 
 ;; === Action Handlers (context-aware) ===
 
-(defn process-create-entity
-  [{:keys [request]} ctx]
+(defbase process-create-entity
+  [request]
   (let [storage (require-storage ctx)
         {:keys [type-str entity-type]} (extract-entity-params request)
         form-data (when (:body request)
@@ -223,8 +243,9 @@
           {:status 400 :body "<p class=\"error\">Failed to create entity</p>"}))
       {:status 400 :body "<p class=\"error\">Invalid request</p>"})))
 
-(defn process-delete-entity
-  [{:keys [request]} ctx]
+
+(defbase process-delete-entity
+  [request]
   (let [storage (require-storage ctx)
         {:keys [id-str entity-type]} (extract-entity-params request)]
     (if (and entity-type id-str)
@@ -254,8 +275,7 @@
          acc []
          depth 0]
     (cond
-      (nil? cur) acc
-      (> depth 10000) acc
+      (or (nil? cur) (> depth 10000)) acc
       :else
       (let [item (get by-id cur)]
         (if (nil? item)
@@ -288,11 +308,11 @@
                     {:type :sequence-op/invalid-body :body body}))))
 
 
-(defn process-sequence-append
+(defbase process-sequence-append
   "POST /api/sequence/:fn-id/append
    Body: {\"ref\"|\"ref-name\"|\"value\": …}
    Appends one item to the sequence of fn :fn-id."
-  [{:keys [request]} ctx]
+  [request]
   (let [storage (require-storage ctx)
         fn-id-str (get-in request [:path-params :fn-id])
         fn-id (try (java.util.UUID/fromString fn-id-str) (catch Exception _ nil))
@@ -336,12 +356,12 @@
         {:status 404 :body "<p class=\"error\">Fn has no sequence arg</p>"}))))
 
 
-(defn process-sequence-remove
+(defbase process-sequence-remove
   "DELETE /api/sequence/item/:item-id
    Removes one item, rewiring the predecessor's next-arg-id to the removed
    item's next-arg-id, and the successor's prev-arg-id back to the
    predecessor. Both lookups are O(1) via prev-arg-id/next-arg-id."
-  [{:keys [request]} ctx]
+  [request]
   (let [storage (require-storage ctx)
         item-id-str (get-in request [:path-params :item-id])
         item-id (try (java.util.UUID/fromString item-id-str) (catch Exception _ nil))]
@@ -365,32 +385,36 @@
 
 ;; === Pure Functions ===
 
-(defn get-path-param
-  [{:keys [request param-name]}]
+(defbase get-path-param
+  [request param-name]
   (get-in request [:path-params (keyword param-name)]))
 
-(defn get-query-param
-  [{:keys [request param-name default]}]
+
+(defbase get-query-param
+  [request param-name default]
   (let [params (parse-query-string (:query-string request))]
     (get params param-name default)))
 
-(defn parse-form-body
-  [{:keys [request]}]
+
+(defbase parse-form-body
+  [request]
   (let [body (:body request)
         content-type (get-in request [:headers "content-type"] "")]
     (if (and body (str/includes? content-type "application/x-www-form-urlencoded"))
       (or (parse-query-string body) {})
       {})))
 
-(defn parse-json-body
-  [{:keys [request]}]
+
+(defbase parse-json-body
+  [request]
   (let [body (:body request)
         content-type (get-in request [:headers "content-type"] "")]
     (when (and body (str/includes? content-type "application/json"))
       (json/parse-string body true))))
 
-(defn str-to-uuid
-  [{:keys [string]}]
+
+(defbase str-to-uuid
+  [string]
   (try
     (java.util.UUID/fromString string)
     (catch Exception _ nil)))
@@ -399,18 +423,18 @@
 ;; === Registry ===
 
 (def impls
-  {:list-entities (with-meta list-entities {:ctx true})
-   :get-entity (with-meta get-entity {:ctx true})
-   :create-entity (with-meta create-entity {:ctx true})
-   :update-entity (with-meta update-entity {:ctx true})
-   :delete-entity (with-meta delete-entity {:ctx true})
-   :list-all-graph-entities (with-meta list-all-graph-entities {:ctx true})
-   :render-entity-details-view (with-meta render-entity-details-view {:ctx true})
-   :render-entity-form-view (with-meta render-entity-form-view {:ctx true})
-   :process-create-entity (with-meta process-create-entity {:ctx true})
-   :process-delete-entity (with-meta process-delete-entity {:ctx true})
-   :process-sequence-append (with-meta process-sequence-append {:ctx true})
-   :process-sequence-remove (with-meta process-sequence-remove {:ctx true})
+  {:list-entities list-entities
+   :get-entity get-entity
+   :create-entity create-entity
+   :update-entity update-entity
+   :delete-entity delete-entity
+   :list-all-graph-entities list-all-graph-entities
+   :render-entity-details-view render-entity-details-view
+   :render-entity-form-view render-entity-form-view
+   :process-create-entity process-create-entity
+   :process-delete-entity process-delete-entity
+   :process-sequence-append process-sequence-append
+   :process-sequence-remove process-sequence-remove
    :render-entity-actions render-entity-actions
    :parse-fn-from-form parse-fn-from-form
    :parse-arg-from-form parse-arg-from-form

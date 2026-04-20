@@ -4,57 +4,57 @@
 
 {:namespace "core.hof"
  :fns
-[{:name :map
-  :args {:func :fn
-         :coll {:type :jsonb :required false}}
-  :return-type :any}
+ [{:name :map
+   :args {:func :fn
+          :coll {:type :jsonb :required false}}
+   :return-type :any}
 
- {:name :filter
-  :args {:pred :fn
-         :coll {:type :jsonb :required false}}
-  :return-type :any}
+  {:name :filter
+   :args {:pred :fn
+          :coll {:type :jsonb :required false}}
+   :return-type :any}
 
- {:name :reduce
-  :args {:func :fn, :init :any, :coll :jsonb}
-  :return-type :any}
+  {:name :reduce
+   :args {:func :fn, :init :any, :coll :jsonb}
+   :return-type :any}
 
- {:name :some
-  :args {:pred :fn, :coll :jsonb}
-  :return-type :any}
+  {:name :some
+   :args {:pred :fn, :coll :jsonb}
+   :return-type :any}
 
- {:name :every?
-  :args {:pred :fn, :coll :jsonb}
-  :return-type :bool}
+  {:name :every?
+   :args {:pred :fn, :coll :jsonb}
+   :return-type :bool}
 
- {:name :find-first
-  :args {:pred :fn, :coll :jsonb}
-  :return-type :any}
+  {:name :find-first
+   :args {:pred :fn, :coll :jsonb}
+   :return-type :any}
 
- {:name :group-by
-  :args {:key-fn :fn, :coll :jsonb}
-  :return-type :jsonb}
+  {:name :group-by
+   :args {:key-fn :fn, :coll :jsonb}
+   :return-type :jsonb}
 
- {:name :sort-by
-  :args {:key-fn :fn, :coll :jsonb}
-  :return-type :jsonb}
+  {:name :sort-by
+   :args {:key-fn :fn, :coll :jsonb}
+   :return-type :jsonb}
 
- {:name :apply
-  :args {:func :fn, :args :jsonb}
-  :return-type :any}
+  {:name :apply
+   :args {:func :fn, :args :jsonb}
+   :return-type :any}
 
- ;; Returns value, ignoring _item — usable as HOF argument
- {:name :constantly
-  :args {:value :any
-         :_item {:type :any :required false}}
-  :return-type :any}
+  ;; Returns value, ignoring _item — usable as HOF argument
+  {:name :constantly
+   :args {:value :any
+          :_item {:type :any :required false}}
+   :return-type :any}
 
- {:name :comp
-  :args {:functions :jsonb}
-  :return-type :any}
+  {:name :comp
+   :args {:functions :jsonb}
+   :return-type :any}
 
- {:name :transduce
-  :args {:transducer :any
-         :reducer :fn
-         :init :any
-         :coll :jsonb}
-  :return-type :any}]}
+  {:name :transduce
+   :args {:transducer :any
+          :reducer :fn
+          :init :any
+          :coll :jsonb}
+   :return-type :any}]}

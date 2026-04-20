@@ -4,27 +4,25 @@
 
 {:namespace "web.graph"
  :fns
-[{:name :entities-to-cytoscape
-  :args {:entities :jsonb}
-  :return-type :jsonb}
+ [{:name :entities-to-cytoscape
+   :args {:entities :jsonb}
+   :return-type :jsonb}
 
- {:name :cytoscape-init-script
-  :args {:container-id :text
-         :elements :jsonb
-         :style :jsonb
-         :layout :jsonb
-         :on-click {:type :text :required false}}
-  :return-type :text}
+  {:name :cytoscape-init-script
+   :args {:container-id :text
+          :elements :jsonb
+          :style :jsonb
+          :layout :jsonb
+          :on-click {:type :text :required false}}
+   :return-type :text}
 
- {:name :cytoscape-update-script
-  :args {:elements :jsonb
-         :layout {:type :bool :value true}}
-  :return-type :text}
+  {:name :cytoscape-update-script
+   :args {:elements :jsonb
+          :layout {:type :bool :value true}}
+   :return-type :text}
 
- {:name :format-display-value
-  :args {:value {:type :any :required false}
-         :ref-id {:type :text :required false}
-         :max-length {:type :int :required false}}
-  :return-type :text}
-
-]}
+  {:name :format-display-value
+   :args {:value {:type :any :required false}
+          :ref-id {:type :text :required false}
+          :max-length {:type :int :required false}}
+   :return-type :text}]}

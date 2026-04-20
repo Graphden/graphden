@@ -4,137 +4,137 @@
 
 {:namespace "core.system"
  :fns
-[{:name :ring-response
-  :args {:status :int
-         :headers :jsonb
-         :body :text}
-  :return-type :jsonb}
+ [{:name :ring-response
+   :args {:status :int
+          :headers :jsonb
+          :body :text}
+   :return-type :jsonb}
 
- {:name :make-handler
-  :args {:response :jsonb}
-  :return-type :fn}
+  {:name :make-handler
+   :args {:response :jsonb}
+   :return-type :fn}
 
- ;; Dynamic handler that calls response-fn for each request
- ;; response-fn is a fn-id of function with one required arg (receives request)
- {:name :make-request-handler
-  :args {:response-fn :fn}
-  :return-type :fn
-  :ctx true}
+  ;; Dynamic handler that calls response-fn for each request
+  ;; response-fn is a fn-id of function with one required arg (receives request)
+  {:name :make-request-handler
+   :args {:response-fn :fn}
+   :return-type :fn
+   :ctx true}
 
- ;; =============================================================================
- ;; HANDLER FACTORIES (base-fns)
- ;; =============================================================================
+  ;; =============================================================================
+  ;; HANDLER FACTORIES (base-fns)
+  ;; =============================================================================
 
- ;; Data handler: data-fn(request) -> data, body-fn(data) -> body string
- {:name :make-data-handler
-  :args {:data-fn :fn
-         :body-fn :fn
-         :status :int
-         :headers :jsonb}
-  :return-type :fn
-  :ctx true}
+  ;; Data handler: data-fn(request) -> data, body-fn(data) -> body string
+  {:name :make-data-handler
+   :args {:data-fn :fn
+          :body-fn :fn
+          :status :int
+          :headers :jsonb}
+   :return-type :fn
+   :ctx true}
 
- ;; Action handler: action-fn(request) -> {:status :headers :body}
- {:name :make-action-handler
-  :args {:action-fn :fn
-         :base-headers :jsonb}
-  :return-type :fn
-  :ctx true}
+  ;; Action handler: action-fn(request) -> {:status :headers :body}
+  {:name :make-action-handler
+   :args {:action-fn :fn
+          :base-headers :jsonb}
+   :return-type :fn
+   :ctx true}
 
- ;; =============================================================================
- ;; FN-DEFS: Specialized handlers via inheritance
- ;; =============================================================================
+  ;; =============================================================================
+  ;; FN-DEFS: Specialized handlers via inheritance
+  ;; =============================================================================
 
- ;; JSON data handler - data-fn returns data, serialized to JSON
- {:name :make-json-response-handler
-  :parent :make-data-handler
-  :args {:body-fn :to-json-string
-         :status 200
-         :headers {"Content-Type" "application/json"}
-         :data-fn {:as :data-fn}}}
+  ;; JSON data handler - data-fn returns data, serialized to JSON
+  {:name :make-json-response-handler
+   :parent :make-data-handler
+   :args {:body-fn :to-json-string
+          :status 200
+          :headers {"Content-Type" "application/json"}
+          :data-fn {:as :data-fn}}}
 
- ;; HTML data handler - data-fn returns hiccup, rendered to HTML
- {:name :make-html-response-handler
-  :parent :make-data-handler
-  :args {:body-fn :render-hiccup
-         :status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :data-fn {:as :render-fn}}}
+  ;; HTML data handler - data-fn returns hiccup, rendered to HTML
+  {:name :make-html-response-handler
+   :parent :make-data-handler
+   :args {:body-fn :render-hiccup
+          :status 200
+          :headers {"Content-Type" "text/html; charset=utf-8"}
+          :data-fn {:as :render-fn}}}
 
- ;; HTML action handler - action-fn returns full response map
- {:name :make-html-action-handler
-  :parent :make-action-handler
-  :args {:base-headers {"Content-Type" "text/html; charset=utf-8"}
-         :action-fn {:as :action-fn}}}
+  ;; HTML action handler - action-fn returns full response map
+  {:name :make-html-action-handler
+   :parent :make-action-handler
+   :args {:base-headers {"Content-Type" "text/html; charset=utf-8"}
+          :action-fn {:as :action-fn}}}
 
- {:name :to-json-string
-  :args {:data :any}
-  :return-type :text}
+  {:name :to-json-string
+   :args {:data :any}
+   :return-type :text}
 
- {:name :parse-json
-  :args {:string :text
-         :keywordize {:type :bool :value true}}
-  :return-type :jsonb}
+  {:name :parse-json
+   :args {:string :text
+          :keywordize {:type :bool :value true}}
+   :return-type :jsonb}
 
- {:name :jvm-version
-  :args {}
-  :return-type :jsonb}
+  {:name :jvm-version
+   :args {}
+   :return-type :jsonb}
 
- {:name :heap-memory
-  :args {}
-  :return-type :jsonb}
+  {:name :heap-memory
+   :args {}
+   :return-type :jsonb}
 
- {:name :thread-count
-  :args {}
-  :return-type :int}
+  {:name :thread-count
+   :args {}
+   :return-type :int}
 
- {:name :os-info
-  :args {}
-  :return-type :jsonb}
+  {:name :os-info
+   :args {}
+   :return-type :jsonb}
 
- ;; jvm-info composed from atomic base-fns via assoc chain
- {:name :_jvm-section
-  :parent :assoc-empty
-  :args {:key "jvm" :value :jvm-version}}
+  ;; jvm-info composed from atomic base-fns via assoc chain
+  {:name :_jvm-section
+   :parent :assoc-empty
+   :args {:key "jvm" :value :jvm-version}}
 
- {:name :_memory-section
-  :parent :assoc
-  :args {:map :_jvm-section :key "memory" :value :heap-memory}}
+  {:name :_memory-section
+   :parent :assoc
+   :args {:map :_jvm-section :key "memory" :value :heap-memory}}
 
- {:name :_threads-section
-  :parent :assoc
-  :args {:map :_memory-section :key "threads" :value :thread-count}}
+  {:name :_threads-section
+   :parent :assoc
+   :args {:map :_memory-section :key "threads" :value :thread-count}}
 
- {:name :jvm-info
-  :parent :assoc
-  :args {:map :_threads-section :key "os" :value :os-info}}
+  {:name :jvm-info
+   :parent :assoc
+   :args {:map :_threads-section :key "os" :value :os-info}}
 
- {:name :current-time-ms
-  :args {}
-  :return-type :int}
+  {:name :current-time-ms
+   :args {}
+   :return-type :int}
 
- ;; Read environment variable
- {:name :env
-  :args {:name :text}
-  :return-type :text}
+  ;; Read environment variable
+  {:name :env
+   :args {:name :text}
+   :return-type :text}
 
- ;; Read file from classpath resources
- {:name :read-resource
-  :args {:path :text}
-  :return-type :text}
+  ;; Read file from classpath resources
+  {:name :read-resource
+   :args {:path :text}
+   :return-type :text}
 
- ;; Load multiple resource files and concatenate with separator
- {:name :concat-resources
-  :args {:paths :jsonb
-         :separator {:type :text :value "\n\n"}}
-  :return-type :text}
+  ;; Load multiple resource files and concatenate with separator
+  {:name :concat-resources
+   :args {:paths :jsonb
+          :separator {:type :text :value "\n\n"}}
+   :return-type :text}
 
- ;; Call a Clojure fn (from :any arg) with one argument
- {:name :invoke
-  :args {:func :any, :arg :any}
-  :return-type :any}
+  ;; Call a Clojure fn (from :any arg) with one argument
+  {:name :invoke
+   :args {:func :any, :arg :any}
+   :return-type :any}
 
- ;; Read an InputStream/Reader to string
- {:name :slurp
-  :args {:input :any}
-  :return-type :text}]}
+  ;; Read an InputStream/Reader to string
+  {:name :slurp
+   :args {:input :any}
+   :return-type :text}]}

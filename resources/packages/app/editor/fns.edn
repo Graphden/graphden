@@ -5,176 +5,174 @@
 
 {:namespace "app.editor"
  :fns
-[;; =============================================================================
- ;; BASE FUNCTIONS (implementations in impls.clj load from resource files)
- ;; =============================================================================
+ [;; =============================================================================
+  ;; BASE FUNCTIONS (implementations in impls.clj load from resource files)
+  ;; =============================================================================
 
- {:name :editor-styles
-  :args {}
-  :return-type :text}
+  {:name :editor-styles
+   :args {}
+   :return-type :text}
 
- ;; Editor JS modules — loaded from resources and concatenated in order
- {:name :_editor-script-paths
-  :parent :const
-  :args {:value ["packages/app/editor/editor-state.js"
-                 "packages/app/editor/editor-data.js"
-                 "packages/app/editor/editor-layout.js"
-                 "packages/app/editor/editor-overlays.js"
-                 "packages/app/editor/editor-ui.js"
-                 "packages/app/editor/editor-cytoscape.js"
-                 "packages/app/editor/editor-main.js"]}}
+  ;; Editor JS modules — loaded from resources and concatenated in order
+  {:name :_editor-script-paths
+   :parent :const
+   :args {:value ["packages/app/editor/editor-state.js"
+                  "packages/app/editor/editor-data.js"
+                  "packages/app/editor/editor-layout.js"
+                  "packages/app/editor/editor-overlays.js"
+                  "packages/app/editor/editor-ui.js"
+                  "packages/app/editor/editor-cytoscape.js"
+                  "packages/app/editor/editor-main.js"]}}
 
- {:name :editor-script
-  :parent :concat-resources
-  :args {:paths :_editor-script-paths}}
+  {:name :editor-script
+   :parent :concat-resources
+   :args {:paths :_editor-script-paths}}
 
- ;; =============================================================================
- ;; FN-DEFS: Editor UI structure
- ;; =============================================================================
+  ;; =============================================================================
+  ;; FN-DEFS: Editor UI structure
+  ;; =============================================================================
 
- ;; Editor body — HTML structure as hiccup constant
- {:name :editor-body
-  :parent :const
-  :args {:value
-   [:div {:id "app"}
-    [:div {:id "main-container"}
-     ;; Side menu
-     [:div {:id "side-menu"}
-      [:div {:class "menu-header"}
-       [:h2 "Graphden"]]
-      [:div {:id "search-bar"}
-       [:input {:id "search-input" :type "text" :placeholder "Filter..."
-                :oninput "onSearchInput(this.value)"}]
-       [:button {:id "search-clear" :onclick "clearSearch()"} "\u00D7"]]
-      [:div {:id "entity-list"}]]
-     ;; Graph container
-     [:div {:id "graph-container"}
-      [:div {:id "cy"}]
-      ;; Navigation controls
-      [:div {:id "nav-controls"}
-       [:div {:class "nav-zoom-col"}
-        [:button {:class "nav-btn" :onclick "navZoom(1)" :title "Zoom in"} "+"]
-        [:input {:id "zoom-slider" :type "range" :min "10" :max "300" :value "100"
-                 :orient "vertical"
-                 :oninput "navZoomTo(this.value/100)" :title "Zoom"}]
-        [:button {:class "nav-btn" :onclick "navZoom(-1)" :title "Zoom out"} "\u2212"]]
-       [:div {:class "nav-bottom-row"}
-        [:button {:class "nav-btn" :onclick "navGoToRoot()" :title "Go to root node"} "\u2302"]
-        [:button {:class "nav-btn" :onclick "navResetPositions()" :title "Reset all node positions"} "\u27F2"]
-        [:button {:class "nav-btn" :onclick "navResetZoom()" :title "Reset zoom"} "\u2299"]]]]]]}}
+  ;; Editor body — HTML structure as hiccup constant
+  {:name :editor-body
+   :parent :const
+   :args {:value
+          [:div {:id "app"}
+           [:div {:id "main-container"}
+            ;; Side menu
+            [:div {:id "side-menu"}
+             [:div {:class "menu-header"}
+              [:h2 "Graphden"]]
+             [:div {:id "search-bar"}
+              [:input {:id "search-input" :type "text" :placeholder "Filter..."
+                       :oninput "onSearchInput(this.value)"}]
+              [:button {:id "search-clear" :onclick "clearSearch()"} "\u00D7"]]
+             [:div {:id "entity-list"}]]
+            ;; Graph container
+            [:div {:id "graph-container"}
+             [:div {:id "cy"}]
+             ;; Navigation controls
+             [:div {:id "nav-controls"}
+              [:div {:class "nav-zoom-col"}
+               [:button {:class "nav-btn" :onclick "navZoom(1)" :title "Zoom in"} "+"]
+               [:input {:id "zoom-slider" :type "range" :min "10" :max "300" :value "100"
+                        :orient "vertical"
+                        :oninput "navZoomTo(this.value/100)" :title "Zoom"}]
+               [:button {:class "nav-btn" :onclick "navZoom(-1)" :title "Zoom out"} "\u2212"]]
+              [:div {:class "nav-bottom-row"}
+               [:button {:class "nav-btn" :onclick "navGoToRoot()" :title "Go to root node"} "\u2302"]
+               [:button {:class "nav-btn" :onclick "navResetPositions()" :title "Reset all node positions"} "\u27F2"]
+               [:button {:class "nav-btn" :onclick "navResetZoom()" :title "Reset zoom"} "\u2299"]]]]]]}}
 
- ;; Wrapped elements — fn-defs using wrap-style/wrap-script
- {:name :editor-style-element
-  :parent :wrap-style
-  :args {:content :editor-styles}}
+  ;; Wrapped elements — fn-defs using wrap-style/wrap-script
+  {:name :editor-style-element
+   :parent :wrap-style
+   :args {:content :editor-styles}}
 
- {:name :editor-script-element
-  :parent :wrap-script
-  :args {:content :editor-script}}
+  {:name :editor-script-element
+   :parent :wrap-script
+   :args {:content :editor-script}}
 
- ;; =============================================================================
- ;; PAGE COMPOSITION (fn-defs)
- ;; =============================================================================
+  ;; =============================================================================
+  ;; PAGE COMPOSITION (fn-defs)
+  ;; =============================================================================
 
- ;; Build head elements list for cytoscape
- {:name :editor-head-elements-0
-  :parent :conj
-  :args {:coll [] :item :editor-style-element}}
+  ;; Build head elements list for cytoscape
+  {:name :editor-head-elements-0
+   :parent :conj
+   :args {:coll [] :item :editor-style-element}}
 
- ;; Head elements for Cytoscape (adds cytoscape scripts)
- {:name :editor-cytoscape-head
-  :parent :with-cdn-script
-  :args {:head :editor-head-elements-0
-         :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
+  ;; Head elements for Cytoscape (adds cytoscape scripts)
+  {:name :editor-cytoscape-head
+   :parent :with-cdn-script
+   :args {:head :editor-head-elements-0
+          :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
 
- ;; Head elements with HTMX (adds htmx script)
- {:name :editor-head
-  :parent :with-cdn-script
-  :args {:head :editor-cytoscape-head
-         :url "https://unpkg.com/htmx.org@2.0.4"}}
+  ;; Head elements with HTMX (adds htmx script)
+  {:name :editor-head
+   :parent :with-cdn-script
+   :args {:head :editor-cytoscape-head
+          :url "https://unpkg.com/htmx.org@2.0.4"}}
 
- ;; Complete HTML page
- ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)
- {:name :_editor-scripts
-  :parent :conj-empty
-  :args {:item :editor-script-element}}
+  ;; Complete HTML page
+  ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)
+  {:name :_editor-scripts
+   :parent :conj-empty
+   :args {:item :editor-script-element}}
 
- {:name :editor-page
-  :parent :html-page
-  :args {:title "Graphden - Graph Editor"
-         :head :editor-head
-         :body :editor-body
-         :scripts :_editor-scripts}}
+  {:name :editor-page
+   :parent :html-page
+   :args {:title "Graphden - Graph Editor"
+          :head :editor-head
+          :body :editor-body
+          :scripts :_editor-scripts}}
 
- ;; Handler returns Ring response with HTML
- {:name :_editor-response
-  :parent :html-response
-  :args {:body :editor-page}}
+  ;; Handler returns Ring response with HTML
+  {:name :_editor-response
+   :parent :html-response
+   :args {:body :editor-page}}
 
- {:name :_editor-handler
-  :parent :make-handler
-  :args {:response :_editor-response}}
+  {:name :_editor-handler
+   :parent :make-handler
+   :args {:response :_editor-response}}
 
- ;; =============================================================================
- ;; FAVICON (SVG icon with caching)
- ;; =============================================================================
+  ;; =============================================================================
+  ;; FAVICON (SVG icon with caching)
+  ;; =============================================================================
 
- {:name :_favicon-svg-body
-  :parent :const
-  :args {:value "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#fff\" rx=\"4\"/><rect x=\"1\" y=\"1\" width=\"30\" height=\"30\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" rx=\"4\"/><rect x=\"3\" y=\"12\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"4\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"20\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"14\" x2=\"19\" y2=\"8\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"18\" x2=\"19\" y2=\"24\" stroke=\"#000\" stroke-width=\"1.5\"/></svg>"}}
+  {:name :_favicon-svg-body
+   :parent :const
+   :args {:value "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#fff\" rx=\"4\"/><rect x=\"1\" y=\"1\" width=\"30\" height=\"30\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" rx=\"4\"/><rect x=\"3\" y=\"12\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"4\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"20\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"14\" x2=\"19\" y2=\"8\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"18\" x2=\"19\" y2=\"24\" stroke=\"#000\" stroke-width=\"1.5\"/></svg>"}}
 
- {:name :_favicon-response
-  :parent :cached-svg-ok-response
-  :args {:body :_favicon-svg-body}}
+  {:name :_favicon-response
+   :parent :cached-svg-ok-response
+   :args {:body :_favicon-svg-body}}
 
- {:name :_favicon-handler
-  :parent :make-handler
-  :args {:response :_favicon-response}}
+  {:name :_favicon-handler
+   :parent :make-handler
+   :args {:response :_favicon-response}}
 
- ;; =============================================================================
- ;; ROUTES
- ;; =============================================================================
+  ;; =============================================================================
+  ;; ROUTES
+  ;; =============================================================================
 
- {:name :favicon-route
-  :parent :get-route
-  :args {:path "/favicon.ico" :handler :_favicon-handler}}
+  {:name :favicon-route
+   :parent :get-route
+   :args {:path "/favicon.ico" :handler :_favicon-handler}}
 
- {:name :editor-route
-  :parent :get-route
-  :args {:path "/" :handler :_editor-handler}}
+  {:name :editor-route
+   :parent :get-route
+   :args {:path "/" :handler :_editor-handler}}
 
- {:name :api-entities-route
-  :parent :get-route
-  :args {:path "/api/graph/entities" :handler :all-entities-json-handler}}
+  {:name :api-entities-route
+   :parent :get-route
+   :args {:path "/api/graph/entities" :handler :all-entities-json-handler}}
 
- {:name :entity-details-route
-  :parent :get-route
-  :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler}}
+  {:name :entity-details-route
+   :parent :get-route
+   :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler}}
 
- {:name :entity-form-create-route
-  :parent :get-route
-  :args {:path "/partials/entity-form/:type" :handler :entity-form-create-handler}}
+  {:name :entity-form-create-route
+   :parent :get-route
+   :args {:path "/partials/entity-form/:type" :handler :entity-form-create-handler}}
 
- {:name :entity-form-edit-route
-  :parent :get-route
-  :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-edit-handler}}
+  {:name :entity-form-edit-route
+   :parent :get-route
+   :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-edit-handler}}
 
- {:name :create-entity-route
-  :parent :post-route
-  :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
+  {:name :create-entity-route
+   :parent :post-route
+   :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
 
- {:name :delete-entity-route
-  :parent :delete-route
-  :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
+  {:name :delete-entity-route
+   :parent :delete-route
+   :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
 
- ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
- ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).
- {:name :sequence-append-route
-  :parent :post-route
-  :args {:path "/api/sequence/append/:fn-id" :handler :sequence-append-handler}}
+  ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
+  ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).
+  {:name :sequence-append-route
+   :parent :post-route
+   :args {:path "/api/sequence/append/:fn-id" :handler :sequence-append-handler}}
 
- {:name :sequence-remove-route
-  :parent :delete-route
-  :args {:path "/api/sequence/item/:item-id" :handler :sequence-remove-handler}}
-
-]}
+  {:name :sequence-remove-route
+   :parent :delete-route
+   :args {:path "/api/sequence/item/:item-id" :handler :sequence-remove-handler}}]}

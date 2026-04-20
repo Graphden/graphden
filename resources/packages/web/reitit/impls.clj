@@ -2,8 +2,8 @@
   "Implementations for web/reitit base functions."
   (:require
     [clojure.string :as str]
-    [clojure.tools.logging :as log]
     [clojure.walk :as walk]
+    [graphden.executor.defbase :refer [defbase]]
     [reitit.core :as r]))
 
 
@@ -18,8 +18,8 @@
     m))
 
 
-(defn router
-  [{:keys [routes not-found-response method-not-allowed-response error-response]}]
+(defbase router
+  [routes not-found-response method-not-allowed-response error-response]
   (let [non-nil-routes (vec (remove nil? routes))
         normalized-routes (keywordize-map-keys non-nil-routes)
         compiled-router (r/router normalized-routes)

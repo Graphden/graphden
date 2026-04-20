@@ -12,6 +12,7 @@
    :http/server      → [:exec/context, :exec/fn-entities, :app/packages]"
   (:require
     [clojure.tools.logging :as log]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
@@ -144,13 +145,37 @@
 
 
 ;; =============================================================================
-;; HTTP Server (executed via graph)
+;; Compiled Registry (compile-at-startup executor)
+;; =============================================================================
+;;
+;; Walks every fn/arg entity in storage and compiles each into a Clojure
+;; closure of shape `(fn [all-fns free-args] result)`. Stored in the
+;; context's `:compiled-registry` atom for the hot path (HTTP handlers)
+;; to bypass the legacy queue entirely.
+
+(defmethod ig/init-key :exec/compiled-registry [_ {:keys [context]}]
+  (log/info "Building compiled registry...")
+  (let [registry (cr/rebuild! context)]
+    (log/info "Compiled registry built:" (count registry) "fns")
+    registry))
+
+
+;; =============================================================================
+;; HTTP Server (executed via compile-at-startup registry)
 ;; =============================================================================
 
 (defmethod ig/init-key :http/server [_ {:keys [context packages port]}]
-  (let [startup-fn-name (:startup-fn packages)]
-    (log/info "Starting HTTP server via" startup-fn-name "on port" port "...")
-    (let [server (exec/execute-by-name context (name startup-fn-name) nil)]
+  (let [startup-fn-name (:startup-fn packages)
+        ;; EXECUTOR env var picks which path starts the server:
+        ;;   "compiled" (default) → compile-at-startup registry
+        ;;   "legacy"             → trampolined queue (for A/B debugging)
+        executor-kind (keyword (or (System/getenv "EXECUTOR") "compiled"))]
+    (log/info "Starting HTTP server via" startup-fn-name
+              "on port" port
+              "(executor:" executor-kind ")...")
+    (let [server (case executor-kind
+                   :legacy   (exec/execute-by-name context (name startup-fn-name) nil)
+                   :compiled (cr/execute-by-name context (name startup-fn-name) nil))]
       (log/info "HTTP server started on port" port)
       server)))
 

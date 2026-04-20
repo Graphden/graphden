@@ -7,104 +7,104 @@
 
 {:namespace "app.server"
  :fns
-[;; =============================================================================
- ;; MONITORING: Health & Metrics (app-specific)
- ;; =============================================================================
+ [;; =============================================================================
+  ;; MONITORING: Health & Metrics (app-specific)
+  ;; =============================================================================
 
- {:name :_health-json-body
-  :parent :to-json-string
-  :args {:data :health-status}}
+  {:name :_health-json-body
+   :parent :to-json-string
+   :args {:data :health-status}}
 
- {:name :_health-response
-  :parent :json-ok-response
-  :args {:body :_health-json-body}}
+  {:name :_health-response
+   :parent :json-ok-response
+   :args {:body :_health-json-body}}
 
- {:name :_health-handler
-  :parent :make-handler
-  :args {:response :_health-response}}
+  {:name :_health-handler
+   :parent :make-handler
+   :args {:response :_health-response}}
 
- {:name :health-route
-  :parent :get-route
-  :args {:path "/health" :handler :_health-handler}}
+  {:name :health-route
+   :parent :get-route
+   :args {:path "/health" :handler :_health-handler}}
 
- {:name :_metrics-json-body
-  :parent :to-json-string
-  :args {:data :jvm-info}}
+  {:name :_metrics-json-body
+   :parent :to-json-string
+   :args {:data :jvm-info}}
 
- {:name :_metrics-response
-  :parent :json-ok-response
-  :args {:body :_metrics-json-body}}
+  {:name :_metrics-response
+   :parent :json-ok-response
+   :args {:body :_metrics-json-body}}
 
- {:name :_metrics-handler
-  :parent :make-handler
-  :args {:response :_metrics-response}}
+  {:name :_metrics-handler
+   :parent :make-handler
+   :args {:response :_metrics-response}}
 
- {:name :metrics-route
-  :parent :get-route
-  :args {:path "/metrics" :handler :_metrics-handler}}
+  {:name :metrics-route
+   :parent :get-route
+   :args {:path "/metrics" :handler :_metrics-handler}}
 
- ;; =============================================================================
- ;; ROUTE GROUPS (named — user navigates to each from sidebar)
- ;; =============================================================================
+  ;; =============================================================================
+  ;; ROUTE GROUPS (named — user navigates to each from sidebar)
+  ;; =============================================================================
 
- {:name :ui-routes
-  :parent :list
-  :args {:items [:favicon-route :editor-route]}}
+  {:name :ui-routes
+   :parent :list
+   :args {:items [:favicon-route :editor-route]}}
 
- {:name :entity-crud-routes
-  :parent :list
-  :args {:items [:entity-details-route
-                 :entity-form-create-route
-                 :entity-form-edit-route
-                 :create-entity-route
-                 :delete-entity-route]}}
+  {:name :entity-crud-routes
+   :parent :list
+   :args {:items [:entity-details-route
+                  :entity-form-create-route
+                  :entity-form-edit-route
+                  :create-entity-route
+                  :delete-entity-route]}}
 
- {:name :graph-api-routes
-  :parent :list
-  :args {:items [:api-entities-route :layout-api-route]}}
+  {:name :graph-api-routes
+   :parent :list
+   :args {:items [:api-entities-route :layout-api-route]}}
 
- {:name :monitoring-routes
-  :parent :list
-  :args {:items [:health-route :metrics-route]}}
+  {:name :monitoring-routes
+   :parent :list
+   :args {:items [:health-route :metrics-route]}}
 
- {:name :all-routes
-  :parent :list
-  :args {:items [:favicon-route
-                 :editor-route
-                 :api-entities-route
-                 :entity-details-route
-                 :entity-form-create-route
-                 :entity-form-edit-route
-                 :create-entity-route
-                 :delete-entity-route
-                 :sequence-append-route
-                 :sequence-remove-route
-                 :health-route
-                 :metrics-route
-                 :layout-api-route]}}
+  {:name :all-routes
+   :parent :list
+   :args {:items [:favicon-route
+                  :editor-route
+                  :api-entities-route
+                  :entity-details-route
+                  :entity-form-create-route
+                  :entity-form-edit-route
+                  :create-entity-route
+                  :delete-entity-route
+                  :sequence-append-route
+                  :sequence-remove-route
+                  :health-route
+                  :metrics-route
+                  :layout-api-route]}}
 
- ;; =============================================================================
- ;; WEB SERVER
- ;; =============================================================================
+  ;; =============================================================================
+  ;; WEB SERVER
+  ;; =============================================================================
 
- ;; This app's router instance — bound to all-routes.
- {:name :_router
-  :parent :text-error-router
-  :args {:routes :all-routes}}
+  ;; This app's router instance — bound to all-routes.
+  {:name :_router
+   :parent :text-error-router
+   :args {:routes :all-routes}}
 
- ;; Bind the router at the response-fn level (a child of ring-adapter's
- ;; :path-gated-response). `make-request-handler` creates a fresh execution
- ;; scope re-rooted at :response-fn, so any caller-side binding for :func
- ;; must live ON the response-fn (or inside its subtree) to be visible at
- ;; runtime.
- {:name :_app-path-gated-response
-  :parent :path-gated-response
-  :args {:func :_router}}
+  ;; Bind the router at the response-fn level (a child of ring-adapter's
+  ;; :path-gated-response). `make-request-handler` creates a fresh execution
+  ;; scope re-rooted at :response-fn, so any caller-side binding for :func
+  ;; must live ON the response-fn (or inside its subtree) to be visible at
+  ;; runtime.
+  {:name :_app-path-gated-response
+   :parent :path-gated-response
+   :args {:func :_router}}
 
- {:name :_app-request-handler
-  :parent :request-handler
-  :args {:response-fn :_app-path-gated-response}}
+  {:name :_app-request-handler
+   :parent :request-handler
+   :args {:response-fn :_app-path-gated-response}}
 
- {:name :web-server
-  :parent :http-server
-  :args {:handler :_app-request-handler :port 8080}}]}
+  {:name :web-server
+   :parent :http-server
+   :args {:handler :_app-request-handler :port 8080}}]}

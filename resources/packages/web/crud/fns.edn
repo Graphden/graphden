@@ -4,193 +4,193 @@
 
 {:namespace "web.crud"
  :fns
-[;; Query functions (context-aware)
- {:name :list-entities
-  :args {:entity-type :text
-         :where {:type :jsonb :required false}}
-  :return-type :jsonb
-  :ctx true}
+ [;; Query functions (context-aware)
+  {:name :list-entities
+   :args {:entity-type :text
+          :where {:type :jsonb :required false}}
+   :return-type :jsonb
+   :ctx true}
 
- {:name :get-entity
-  :args {:entity-type :text
-         :id :uuid}
-  :return-type :jsonb
-  :ctx true}
+  {:name :get-entity
+   :args {:entity-type :text
+          :id :uuid}
+   :return-type :jsonb
+   :ctx true}
 
- {:name :create-entity
-  :args {:entity-type :text
-         :data :jsonb}
-  :return-type :jsonb
-  :ctx true}
+  {:name :create-entity
+   :args {:entity-type :text
+          :data :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- {:name :update-entity
-  :args {:entity-type :text
-         :id :uuid
-         :data :jsonb}
-  :return-type :jsonb
-  :ctx true}
+  {:name :update-entity
+   :args {:entity-type :text
+          :id :uuid
+          :data :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- {:name :delete-entity
-  :args {:entity-type :text
-         :id :uuid}
-  :return-type :bool
-  :ctx true}
+  {:name :delete-entity
+   :args {:entity-type :text
+          :id :uuid}
+   :return-type :bool
+   :ctx true}
 
- {:name :list-all-graph-entities
-  :args {}
-  :return-type :jsonb
-  :ctx true}
+  {:name :list-all-graph-entities
+   :args {}
+   :return-type :jsonb
+   :ctx true}
 
- ;; Action functions (context-aware, return {:status :headers :body} response map)
- {:name :process-create-entity
-  :args {:request :jsonb}
-  :return-type :jsonb
-  :ctx true}
+  ;; Action functions (context-aware, return {:status :headers :body} response map)
+  {:name :process-create-entity
+   :args {:request :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- {:name :process-delete-entity
-  :args {:request :jsonb}
-  :return-type :jsonb
-  :ctx true}
+  {:name :process-delete-entity
+   :args {:request :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- ;; Sequence operations: append/remove items of a sequence arg on any fn
- ;; that has a `:sequence`-typed anchor (e.g. :list, :pairs->map children).
- {:name :process-sequence-append
-  :args {:request :jsonb}
-  :return-type :jsonb
-  :ctx true}
+  ;; Sequence operations: append/remove items of a sequence arg on any fn
+  ;; that has a `:sequence`-typed anchor (e.g. :list, :pairs->map children).
+  {:name :process-sequence-append
+   :args {:request :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- {:name :process-sequence-remove
-  :args {:request :jsonb}
-  :return-type :jsonb
-  :ctx true}
+  {:name :process-sequence-remove
+   :args {:request :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- ;; Request parameter helpers (pure functions)
- {:name :get-path-param
-  :args {:request :jsonb
-         :param-name :text}
-  :return-type :any}
+  ;; Request parameter helpers (pure functions)
+  {:name :get-path-param
+   :args {:request :jsonb
+          :param-name :text}
+   :return-type :any}
 
- {:name :get-query-param
-  :args {:request :jsonb
-         :param-name :text
-         :default {:type :any :required false}}
-  :return-type :any}
+  {:name :get-query-param
+   :args {:request :jsonb
+          :param-name :text
+          :default {:type :any :required false}}
+   :return-type :any}
 
- {:name :parse-form-body
-  :args {:request :jsonb}
-  :return-type :jsonb}
+  {:name :parse-form-body
+   :args {:request :jsonb}
+   :return-type :jsonb}
 
- {:name :parse-json-body
-  :args {:request :jsonb}
-  :return-type :jsonb}
+  {:name :parse-json-body
+   :args {:request :jsonb}
+   :return-type :jsonb}
 
- {:name :str-to-uuid
-  :args {:string :text}
-  :return-type :uuid}
+  {:name :str-to-uuid
+   :args {:string :text}
+   :return-type :uuid}
 
- ;; Render functions (context-aware, return hiccup)
- {:name :render-entity-details-view
-  :args {:request :jsonb}
-  :return-type :jsonb
-  :ctx true}
+  ;; Render functions (context-aware, return hiccup)
+  {:name :render-entity-details-view
+   :args {:request :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- {:name :render-entity-form-view
-  :args {:request :jsonb}
-  :return-type :jsonb
-  :ctx true}
+  {:name :render-entity-form-view
+   :args {:request :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- ;; Renders action buttons (Edit/Delete) for entity
- {:name :render-entity-actions
-  :args {:entity-type :text
-         :entity-id :text}
-  :return-type :jsonb}
+  ;; Renders action buttons (Edit/Delete) for entity
+  {:name :render-entity-actions
+   :args {:entity-type :text
+          :entity-id :text}
+   :return-type :jsonb}
 
- ;; Form data parsing helpers
- {:name :parse-fn-from-form
-  :args {:form-data :jsonb}
-  :return-type :jsonb}
+  ;; Form data parsing helpers
+  {:name :parse-fn-from-form
+   :args {:form-data :jsonb}
+   :return-type :jsonb}
 
- {:name :parse-arg-from-form
-  :args {:form-data :jsonb}
-  :return-type :jsonb}
+  {:name :parse-arg-from-form
+   :args {:form-data :jsonb}
+   :return-type :jsonb}
 
- ;; =============================================================================
- ;; FN-DEFS: Constants and composed functions
- ;; =============================================================================
+  ;; =============================================================================
+  ;; FN-DEFS: Constants and composed functions
+  ;; =============================================================================
 
- ;; Field specs for fn entity details
- {:name :fn-field-specs
-  :parent :const
-  :args {:value [["ID" :id]
-                 ["Name" :name :keyword-to-str]
-                 ["Parent ID" :parent-id]
-                 ["Return Type" :return-type :keyword-to-str]
-                 ["Impl Hash" :impl-hash]]}}
+  ;; Field specs for fn entity details
+  {:name :fn-field-specs
+   :parent :const
+   :args {:value [["ID" :id]
+                  ["Name" :name :keyword-to-str]
+                  ["Parent ID" :parent-id]
+                  ["Return Type" :return-type :keyword-to-str]
+                  ["Impl Hash" :impl-hash]]}}
 
- ;; Render fn details using entity-field-rows
- {:name :render-fn-details
-  :parent :entity-field-rows
-  :args {:field-specs :fn-field-specs
-         :entity {:as :entity}}}
+  ;; Render fn details using entity-field-rows
+  {:name :render-fn-details
+   :parent :entity-field-rows
+   :args {:field-specs :fn-field-specs
+          :entity {:as :entity}}}
 
- ;; Field specs for arg entity details
- {:name :arg-field-specs
-  :parent :const
-  :args {:value [["ID" :id]
-                 ["Name" :name :keyword-to-str]
-                 ["Fn ID" :fn-id]
-                 ["Type" :type :keyword-to-str]
-                 ["Required" :required :bool-to-yesno]
-                 ["Is Fn" :is-fn :bool-to-yesno]
-                 ["Source ID" :source-id]
-                 ["Value" :value :pr-str]
-                 ["Ref ID" :ref-id]]}}
+  ;; Field specs for arg entity details
+  {:name :arg-field-specs
+   :parent :const
+   :args {:value [["ID" :id]
+                  ["Name" :name :keyword-to-str]
+                  ["Fn ID" :fn-id]
+                  ["Type" :type :keyword-to-str]
+                  ["Required" :required :bool-to-yesno]
+                  ["Is Fn" :is-fn :bool-to-yesno]
+                  ["Source ID" :source-id]
+                  ["Value" :value :pr-str]
+                  ["Ref ID" :ref-id]]}}
 
- ;; Render arg details using entity-field-rows
- {:name :render-arg-details
-  :parent :entity-field-rows
-  :args {:field-specs :arg-field-specs
-         :entity {:as :entity}}}
+  ;; Render arg details using entity-field-rows
+  {:name :render-arg-details
+   :parent :entity-field-rows
+   :args {:field-specs :arg-field-specs
+          :entity {:as :entity}}}
 
- ;; =============================================================================
- ;; FN-DEFS: Response handlers composed from base functions
- ;; =============================================================================
+  ;; =============================================================================
+  ;; FN-DEFS: Response handlers composed from base functions
+  ;; =============================================================================
 
- {:name :all-entities-json-handler
-  :parent :make-json-response-handler
-  :args {:data-fn :list-all-graph-entities}}
+  {:name :all-entities-json-handler
+   :parent :make-json-response-handler
+   :args {:data-fn :list-all-graph-entities}}
 
- {:name :entity-details-handler
-  :parent :make-html-response-handler
-  :args {:render-fn :render-entity-details-view}}
+  {:name :entity-details-handler
+   :parent :make-html-response-handler
+   :args {:render-fn :render-entity-details-view}}
 
- {:name :_entity-form-create-view
-  :parent :render-entity-form-view}
+  {:name :_entity-form-create-view
+   :parent :render-entity-form-view}
 
- {:name :entity-form-create-handler
-  :parent :make-html-response-handler
-  :args {:render-fn :_entity-form-create-view}}
+  {:name :entity-form-create-handler
+   :parent :make-html-response-handler
+   :args {:render-fn :_entity-form-create-view}}
 
- {:name :_entity-form-edit-view
-  :parent :render-entity-form-view}
+  {:name :_entity-form-edit-view
+   :parent :render-entity-form-view}
 
- {:name :entity-form-edit-handler
-  :parent :make-html-response-handler
-  :args {:render-fn :_entity-form-edit-view}}
+  {:name :entity-form-edit-handler
+   :parent :make-html-response-handler
+   :args {:render-fn :_entity-form-edit-view}}
 
- {:name :create-entity-api-handler
-  :parent :make-html-action-handler
-  :args {:action-fn :process-create-entity}}
+  {:name :create-entity-api-handler
+   :parent :make-html-action-handler
+   :args {:action-fn :process-create-entity}}
 
- {:name :delete-entity-api-handler
-  :parent :make-html-action-handler
-  :args {:action-fn :process-delete-entity}}
+  {:name :delete-entity-api-handler
+   :parent :make-html-action-handler
+   :args {:action-fn :process-delete-entity}}
 
- ;; Sequence-op handlers: return JSON, not HTML partials.
- {:name :sequence-append-handler
-  :parent :make-html-action-handler
-  :args {:action-fn :process-sequence-append}}
+  ;; Sequence-op handlers: return JSON, not HTML partials.
+  {:name :sequence-append-handler
+   :parent :make-html-action-handler
+   :args {:action-fn :process-sequence-append}}
 
- {:name :sequence-remove-handler
-  :parent :make-html-action-handler
-  :args {:action-fn :process-sequence-remove}}]}
+  {:name :sequence-remove-handler
+   :parent :make-html-action-handler
+   :args {:action-fn :process-sequence-remove}}]}

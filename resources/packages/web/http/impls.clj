@@ -1,19 +1,20 @@
 (ns graphden.packages.web.http.impls
   "Implementations for web/http base functions.
 
-   Only thin wrappers around http-kit. Request adaptation, header merging,
-   and auth are composed from fn-defs in app/server/fns.edn."
+   Thin wrappers around http-kit. Request adaptation, header merging,
+   and auth are composed from fn-defs elsewhere."
   (:require
+    [graphden.executor.defbase :refer [defbase]]
     [org.httpkit.server :as http-kit]))
 
 
-(defn http-server
-  [{:keys [handler port]}]
+(defbase http-server
+  [handler port]
   (http-kit/run-server handler {:port port}))
 
 
-(defn http-stop
-  [{:keys [server]}]
+(defbase http-stop
+  [server]
   (when server (server) nil))
 
 

@@ -4,56 +4,56 @@
 
 {:namespace "core.arithmetic"
  :fns
-[;; === Arithmetic ===
- {:name :add
-  :args {:nums :jsonb}
-  :return-type :numeric}
+ [;; === Arithmetic ===
+  {:name :add
+   :args {:nums :jsonb}
+   :return-type :numeric}
 
- {:name :sub
-  :args {:nums :jsonb}
-  :return-type :numeric}
+  {:name :sub
+   :args {:nums :jsonb}
+   :return-type :numeric}
 
- {:name :mul
-  :args {:nums :jsonb}
-  :return-type :numeric}
+  {:name :mul
+   :args {:nums :jsonb}
+   :return-type :numeric}
 
- {:name :div
-  :args {:nums :jsonb}
-  :return-type :numeric}
+  {:name :div
+   :args {:nums :jsonb}
+   :return-type :numeric}
 
- {:name :mod
-  :args {:dividend :numeric, :divisor :numeric}
-  :return-type :numeric}
+  {:name :mod
+   :args {:dividend :numeric, :divisor :numeric}
+   :return-type :numeric}
 
- {:name :neg
-  :args {:number :numeric}
-  :return-type :numeric}
+  {:name :neg
+   :args {:number :numeric}
+   :return-type :numeric}
 
- {:name :abs
-  :args {:number :numeric}
-  :return-type :numeric}
+  {:name :abs
+   :args {:number :numeric}
+   :return-type :numeric}
 
- ;; === Comparison ===
- {:name :eq
-  :args {:values :jsonb}
-  :return-type :bool}
+  ;; === Comparison ===
+  {:name :eq
+   :args {:values :jsonb}
+   :return-type :bool}
 
- {:name :neq
-  :args {:values :jsonb}
-  :return-type :bool}
+  {:name :neq
+   :args {:values :jsonb}
+   :return-type :bool}
 
- {:name :lt
-  :args {:nums :jsonb}
-  :return-type :bool}
+  {:name :lt
+   :args {:nums :jsonb}
+   :return-type :bool}
 
- {:name :lte
-  :args {:nums :jsonb}
-  :return-type :bool}
+  {:name :lte
+   :args {:nums :jsonb}
+   :return-type :bool}
 
- {:name :gt
-  :args {:nums :jsonb}
-  :return-type :bool}
+  {:name :gt
+   :args {:nums :jsonb}
+   :return-type :bool}
 
- {:name :gte
-  :args {:nums :jsonb}
-  :return-type :bool}]}
+  {:name :gte
+   :args {:nums :jsonb}
+   :return-type :bool}]}

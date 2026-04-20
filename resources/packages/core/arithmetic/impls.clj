@@ -1,14 +1,16 @@
 (ns graphden.packages.core.arithmetic.impls
   "Implementations for core/arithmetic base functions.
 
-   All functions receive already-dereferenced arguments.
-   The loader handles deref before calling these implementations.")
+   Written with the new `defbase` macro — arg symbols resolve lazily at
+   use site, short-circuit evaluation preserved, and HOF `:fn` args
+   are auto-wrapped by the runtime. See `graphden.executor.defbase`."
+  (:require
+    [graphden.executor.defbase :refer [defbase]]))
 
 
 ;; === Helpers ===
 
 (defn- check-numeric-result!
-  "Validates that result is not Infinity or NaN."
   [result operation nums]
   (when (and (number? result)
              (double? result)
@@ -26,13 +28,11 @@
 
 ;; === Arithmetic ===
 
-(defn add
-  [{:keys [nums]}]
+(defbase add [nums]
   (check-numeric-result! (apply + nums) :add nums))
 
 
-(defn sub
-  [{:keys [nums]}]
+(defbase sub [nums]
   (when (empty? nums)
     (throw (ex-info "Subtraction requires at least one number"
                     {:type :execution-error/invalid-args
@@ -40,13 +40,11 @@
   (check-numeric-result! (apply - nums) :sub nums))
 
 
-(defn mul
-  [{:keys [nums]}]
+(defbase mul [nums]
   (check-numeric-result! (apply * nums) :mul nums))
 
 
-(defn div
-  [{:keys [nums]}]
+(defbase div [nums]
   (when (empty? nums)
     (throw (ex-info "Division requires at least one number"
                     {:type :execution-error/invalid-args
@@ -59,8 +57,7 @@
   (check-numeric-result! (apply / nums) :div nums))
 
 
-(defn mod-fn
-  [{:keys [dividend divisor]}]
+(defbase mod-fn [dividend divisor]
   (when (zero? divisor)
     (throw (ex-info "Modulo by zero"
                     {:type :execution-error/modulo-by-zero
@@ -68,45 +65,37 @@
   (mod dividend divisor))
 
 
-(defn neg
-  [{:keys [number]}]
+(defbase neg [number]
   (- number))
 
 
-(defn abs-fn
-  [{:keys [number]}]
+(defbase abs-fn [number]
   (abs number))
 
 
 ;; === Comparison ===
 
-(defn eq
-  [{:keys [values]}]
+(defbase eq [values]
   (apply = values))
 
 
-(defn neq
-  [{:keys [values]}]
+(defbase neq [values]
   (apply not= values))
 
 
-(defn lt
-  [{:keys [nums]}]
+(defbase lt [nums]
   (apply < nums))
 
 
-(defn lte
-  [{:keys [nums]}]
+(defbase lte [nums]
   (apply <= nums))
 
 
-(defn gt
-  [{:keys [nums]}]
+(defbase gt [nums]
   (apply > nums))
 
 
-(defn gte
-  [{:keys [nums]}]
+(defbase gte [nums]
   (apply >= nums))
 
 

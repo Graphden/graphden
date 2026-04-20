@@ -47,6 +47,7 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
+    [graphden.executor.runtime :as rt]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -173,58 +174,55 @@
        (not (contains? fn-def :parents))))
 
 
-(defn- deref-args
-  "Dereferences all delay values in an args map.
-   Used to convert executor's delay-wrapped args to plain values for impls.
-
-   Supports both Clojure Delay and SmartDelay (from queue executor)."
-  [args lazy-set]
-  (reduce-kv
-    (fn [m k v]
-      (assoc m k (if (and (instance? clojure.lang.IDeref v)
-                          (not (contains? lazy-set k)))
-                   (if (nil? v)
-                     (do
-                       (log/warn "deref-args: nil IDeref" {:arg-key k})
-                       nil)
-                     @v)
-                   v)))
-    {}
-    args))
-
-
 (defn- fn-def->base-fn-def
   "Converts a fns.edn entry + impl function to registry format.
 
    Input:  {:name :add :args {:nums :jsonb} :return-type :numeric}
-   Impl:   (fn [{:keys [nums]}] (apply + nums))
+   Impl:   (defbase add [nums] (apply + nums))
    Output: {:args {:nums {:type :jsonb :required true}}
             :return-type :numeric
             :impl <fn>
-            :lazy #{...}  ; optional
             :ctx true}    ; optional
 
-   Note: The wrapper handles:
-   - Dereferencing delay-wrapped args (executor passes delays)
-   - Passing ctx to impl if :ctx true in fn-def
-   - Preserving lazy args as delays (not dereferenced)"
+   The wrapper pre-wraps `:fn`-type args as single-arg callables so HOF
+   impls receive ready-to-invoke fns regardless of executor (legacy queue
+   passes SmartDelay(fn-id); the new compile path passes already-wrapped
+   callables; both are normalised here). Non-`:fn` args are passed
+   through — `rt/resolve-arg` inside defbase bodies handles both thunks
+   and IDeref on demand.
+
+   `:ctx true` impls (plain `defn` handlers that need the raw fn-id to
+   build named-arg callables) bypass fn-arg wrapping and receive the raw
+   args map."
   [fn-def impl-fn]
-  (let [lazy-set (or (:lazy fn-def) #{})
-        ;; Wrap impl to:
-        ;; 1. Match executor's [args ctx] signature
-        ;; 2. Deref args before passing to impl (package impls expect plain values)
-        wrapped-impl (if (:ctx fn-def)
-                       ;; :ctx true - impl expects [args ctx], deref args
-                       (fn [args ctx]
-                         (impl-fn (deref-args args lazy-set) ctx))
-                       ;; :ctx false - impl expects [args], deref args, ignore ctx
-                       (fn [args _ctx]
-                         (impl-fn (deref-args args lazy-set))))]
-    (cond-> {:args (normalize-args (:args fn-def))
+  (let [args (normalize-args (:args fn-def))
+        ctx? (boolean (:ctx fn-def))
+        fn-arg-keys (when-not ctx?
+                      (into #{}
+                            (keep (fn [[k spec]]
+                                    (when (= :fn (:type spec)) k)))
+                            args))
+        wrapped-impl
+        (cond
+          ctx?
+          impl-fn
+
+          (seq fn-arg-keys)
+          (fn [a c]
+            (let [a' (reduce (fn [m k]
+                               (if (contains? m k)
+                                 (assoc m k (rt/hof-callable m k c))
+                                 m))
+                             a
+                             fn-arg-keys)]
+              (impl-fn a')))
+
+          :else
+          (fn [a _c] (impl-fn a)))]
+    (cond-> {:args args
              :return-type (:return-type fn-def)
              :impl wrapped-impl}
-      (:lazy fn-def) (assoc :lazy (:lazy fn-def))
-      (:ctx fn-def) (assoc :ctx true))))
+      ctx? (assoc :ctx true))))
 
 
 (defn- process-module

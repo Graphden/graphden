@@ -1,7 +1,8 @@
 (ns graphden.packages.web.graph.impls
   "Implementations for web/graph base functions for Cytoscape.js."
   (:require
-    [cheshire.core :as json]))
+    [cheshire.core :as json]
+    [graphden.executor.defbase :refer [defbase]]))
 
 
 ;; === Entity to Cytoscape Conversion ===
@@ -17,11 +18,13 @@
             :return-type (when return-type (name return-type))}}))
 
 
-(defn- truncate [s max-len]
+(defn- truncate
+  [s max-len]
   (if (> (count s) max-len) (str (subs s 0 max-len) "...") s))
 
-(defn format-display-value
-  [{:keys [value ref-id max-length]}]
+
+(defn- format-display-value-impl
+  [value ref-id max-length]
   (let [n (or max-length 20)]
     (cond
       ref-id              (str "ref<fn:" ref-id ">")
@@ -34,7 +37,7 @@
   [{:keys [id fn-id source-id value ref-id is-fn required] entity-name :name arg-type :type}]
   (let [has-value? (or (some? value) (some? ref-id))
         ref-type (cond (some? ref-id) "fn-ref" (some? value) "literal" :else "unset")
-        display-value (format-display-value {:value value :ref-id ref-id})]
+        display-value (format-display-value-impl value ref-id nil)]
     {:data {:id (str id)
             :label (str (if entity-name (name entity-name) "?") ": " display-value)
             :type "arg"
@@ -88,8 +91,8 @@
                  arg-ref-edges))))
 
 
-(defn entities-to-cytoscape
-  [{:keys [entities]}]
+(defbase entities-to-cytoscape
+  [entities]
   (let [{:keys [fns args]
          :or {fns [] args []}}
         entities
@@ -105,8 +108,8 @@
 
 ;; === Cytoscape Initialization ===
 
-(defn cytoscape-init-script
-  [{:keys [container-id elements style layout on-click]}]
+(defbase cytoscape-init-script
+  [container-id elements style layout on-click]
   (let [style-json (json/generate-string style)
         layout-json (json/generate-string layout)
         elements-json (json/generate-string elements)
@@ -136,8 +139,8 @@
 ")))
 
 
-(defn cytoscape-update-script
-  [{:keys [elements layout]}]
+(defbase cytoscape-update-script
+  [elements layout]
   (let [elements-json (json/generate-string elements)]
     (str "
 (function() {
@@ -150,6 +153,11 @@
   cy.fit();
 })();
 ")))
+
+
+(defbase format-display-value
+  [value ref-id max-length]
+  (format-display-value-impl value ref-id max-length))
 
 
 ;; === Registry ===

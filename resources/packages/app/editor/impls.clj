@@ -2,7 +2,8 @@
   "Graph editor implementations.
    CSS and JS loaded from external resource files."
   (:require
-    [clojure.java.io :as io]))
+    [clojure.java.io :as io]
+    [graphden.executor.defbase :refer [defbase]]))
 
 
 ;; === Resource Loading ===
@@ -19,9 +20,9 @@
 
 ;; === Implementations ===
 
-(defn editor-styles
+(defbase editor-styles
   "Load CSS from external file."
-  [_args]
+  []
   (load-resource "packages/app/editor/editor-styles.css"))
 
 

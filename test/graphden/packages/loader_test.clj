@@ -64,78 +64,42 @@
 
 
 ;; =============================================================================
-;; deref-args tests
-;; =============================================================================
-
-(deftest deref-args-test
-  (testing "derefs delay values"
-    (let [args {:a (delay 1) :b (delay 2)}
-          result (#'loader/deref-args args #{})]
-      (is (= {:a 1 :b 2} result))))
-
-  (testing "preserves non-delay values"
-    (let [args {:a 1 :b "hello"}
-          result (#'loader/deref-args args #{})]
-      (is (= {:a 1 :b "hello"} result))))
-
-  (testing "preserves lazy args as delays"
-    (let [d (delay 42)
-          args {:a d :b (delay 2)}
-          result (#'loader/deref-args args #{:a})]
-      (is (= d (:a result)) "lazy arg should remain as delay")
-      (is (= 2 (:b result)) "non-lazy arg should be deref'd")))
-
-  (testing "mixed delay and non-delay values"
-    (let [args {:a (delay 1) :b 2 :c (delay 3)}
-          result (#'loader/deref-args args #{})]
-      (is (= {:a 1 :b 2 :c 3} result)))))
-
-
-;; =============================================================================
 ;; fn-def->base-fn-def tests
 ;; =============================================================================
+;;
+;; The loader no longer pre-derefs args; defbase bodies use `rt/resolve-arg`
+;; which handles IDeref (and thunks) on-demand. `:fn`-type args are
+;; pre-wrapped into callables via `rt/hof-callable` so HOF impls receive a
+;; ready-to-invoke fn regardless of whether the executor is the legacy
+;; queue or the new compile path.
 
 (deftest fn-def->base-fn-def-test
-  (testing "creates base-fn-def with wrapped impl"
+  (testing "creates base-fn-def; non-:fn args pass through to impl as-is"
     (let [fn-def {:name :add :args {:a :int :b :int} :return-type :int}
-          impl-fn (fn [{:keys [a b]}] (+ a b))
+          impl-fn (fn [{:keys [a b]}]
+                    ;; Impl receives whatever the caller put in the args map
+                    ;; — no forced deref.
+                    (+ (if (instance? clojure.lang.IDeref a) @a a)
+                       (if (instance? clojure.lang.IDeref b) @b b)))
           result (#'loader/fn-def->base-fn-def fn-def impl-fn)]
       (is (= {:a {:type :int :required true}
               :b {:type :int :required true}}
              (:args result)))
       (is (= :int (:return-type result)))
       (is (fn? (:impl result)))
-      ;; Test wrapped impl works correctly
       (let [wrapped (:impl result)]
-        (is (= 5 (wrapped {:a (delay 2) :b (delay 3)} nil))))))
+        (is (= 5 (wrapped {:a (delay 2) :b (delay 3)} nil)))
+        (is (= 5 (wrapped {:a 2 :b 3} nil))))))
 
-  (testing "creates base-fn-def with :ctx true"
+  (testing "creates base-fn-def with :ctx true — impl receives raw args + ctx"
     (let [fn-def {:name :ctx-fn :args {:x :int} :return-type :int :ctx true}
-          impl-fn (fn [{:keys [x]} ctx] (+ x (:offset ctx)))
+          impl-fn (fn [{:keys [x]} ctx]
+                    (+ (if (instance? clojure.lang.IDeref x) @x x)
+                       (:offset ctx)))
           result (#'loader/fn-def->base-fn-def fn-def impl-fn)]
       (is (true? (:ctx result)))
-      ;; Test wrapped impl passes ctx
       (let [wrapped (:impl result)]
-        (is (= 15 (wrapped {:x (delay 10)} {:offset 5}))))))
-
-  (testing "creates base-fn-def with :lazy args"
-    (let [fn-def {:name :if-fn :args {:condition :bool :then :any :else :any}
-                  :return-type :any :lazy #{:then :else}}
-          impl-fn (fn [{:keys [condition then else]}]
-                    (if condition @then @else))
-          result (#'loader/fn-def->base-fn-def fn-def impl-fn)]
-      (is (= #{:then :else} (:lazy result)))
-      ;; Test lazy args remain as delays
-      (let [wrapped (:impl result)
-            then-called (atom false)
-            else-called (atom false)]
-        ;; When condition is true, only then should be evaluated
-        (is (= 1 (wrapped {:condition (delay true)
-                           :then (delay (do (reset! then-called true) 1))
-                           :else (delay (do (reset! else-called true) 2))}
-                          nil)))
-        (is @then-called)
-        (is (not @else-called))))))
+        (is (= 15 (wrapped {:x (delay 10)} {:offset 5})))))))
 
 
 ;; =============================================================================

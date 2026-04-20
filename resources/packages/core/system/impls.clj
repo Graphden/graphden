@@ -5,8 +5,8 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
-    [graphden.executor.interface :as exec]
-    [hiccup2.core :as h])
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.executor.interface :as exec])
   (:import
     (java.lang.management
       ManagementFactory
@@ -18,86 +18,103 @@
 
 ;; === Ring Response Primitives ===
 
-(defn- stringify-keys [m]
+(defn- stringify-keys
+  [m]
   (when m (into {} (map (fn [[k v]] [(if (keyword? k) (name k) (str k)) v])) m)))
 
 
-(defn ring-response
-  [{:keys [status headers body]}]
-  ;; Ring spec: header keys must be strings. JSONB round-trip keywordizes them,
-  ;; so we coerce back on the way out.
+(defbase ring-response [status headers body]
+  ;; Ring spec: header keys must be strings. JSONB round-trip keywordizes
+  ;; them, so we coerce back on the way out.
   {:status status
    :headers (stringify-keys headers)
    :body body})
 
 
-(defn make-handler
-  [{:keys [response]}]
+(defbase make-handler [response]
   (let [r response]
     (fn [_request] r)))
 
 
+;; Plain `defn` (not `defbase`) because these factories bridge two executors:
+;;
+;; - Compile path (production): `:fn`-type args arrive as already-wrapped
+;;   Ring-handler callables. compile.clj/hof-wrap has a `:request`
+;;   special-case that routes the item to the deep `:request` free arg —
+;;   exactly what these factories want. So we just return the callable.
+;;
+;; - Legacy queue path (tests): `:fn`-type args arrive as SmartDelay(UUID)
+;;   because the `:ctx true` flag skips loader-level pre-wrapping. We
+;;   deref to the raw fn-id and build a name-aware callable via the legacy
+;;   exec helpers so the item routes to the right deep arg.
+
+(defn- deref-if-needed
+  [v]
+  (if (instance? clojure.lang.IDeref v) @v v))
+
+
 (defn make-request-handler
   [{:keys [response-fn]} ctx]
-  ;; Route the Ring request to whichever deep free arg is named "request"
-  ;; inside `response-fn`'s subgraph. Using a name instead of the generic
-  ;; single-free-arg discovery avoids ambiguity when the response-fn is a
-  ;; composed wrapper whose other deep free args (e.g. route handlers
-  ;; further down) happen to be unbound at the time of wrapping.
-  (exec/make-named-arg-callable ctx response-fn "request"))
+  (if (fn? response-fn)
+    response-fn
+    (let [fn-id (deref-if-needed response-fn)]
+      (exec/make-named-arg-callable ctx fn-id "request"))))
 
 
 (defn make-data-handler
-  "Data handler factory: data-fn(request) -> data, body-fn(data) -> body string.
-   Returns Ring handler function."
   [{:keys [data-fn body-fn status headers]} ctx]
-  (let [data-callable (exec/make-optional-arg-callable ctx data-fn)
-        body-callable (exec/make-single-arg-callable ctx body-fn)]
+  (let [data-callable (if (fn? data-fn)
+                        data-fn
+                        (exec/make-optional-arg-callable ctx (deref-if-needed data-fn)))
+        body-callable (if (fn? body-fn)
+                        body-fn
+                        (exec/make-single-arg-callable ctx (deref-if-needed body-fn)))
+        st (deref-if-needed status)
+        hs (deref-if-needed headers)]
     (fn [request]
       (let [data (data-callable request)
             body (body-callable data)]
-        {:status status
-         :headers headers
+        {:status st
+         :headers hs
          :body body}))))
 
 
 (defn make-action-handler
-  "Action handler factory: action-fn(request) -> {:status :headers :body}.
-   Merges base-headers with headers from action-fn result."
   [{:keys [action-fn base-headers]} ctx]
-  (let [action-callable (exec/make-optional-arg-callable ctx action-fn)]
+  (let [action-callable (if (fn? action-fn)
+                          action-fn
+                          (exec/make-optional-arg-callable ctx (deref-if-needed action-fn)))
+        base-hs (deref-if-needed base-headers)]
     (fn [request]
       (let [result (action-callable request)
             resp-status (or (:status result) 200)
-            resp-headers (merge base-headers (or (:headers result) {}))
+            resp-headers (merge base-hs (or (:headers result) {}))
             resp-body (or (:body result) "")]
         {:status resp-status
          :headers resp-headers
          :body resp-body}))))
 
 
-(defn to-json-string
-  [{:keys [data]}]
+(defbase to-json-string [data]
   (json/generate-string data))
 
 
-(defn parse-json
+(defbase parse-json
   "Parse a JSON string into a data structure."
-  [{:keys [string keywordize]}]
+  [string keywordize]
   (json/parse-string string keywordize))
 
 
 ;; === System Information ===
 
-(defn jvm-version
-  [_args]
+(defbase jvm-version []
   (let [runtime-bean (ManagementFactory/getRuntimeMXBean)]
     {:name (System/getProperty "java.vm.name")
      :version (System/getProperty "java.version")
      :uptime-ms (RuntimeMXBean/.getUptime runtime-bean)}))
 
-(defn heap-memory
-  [_args]
+
+(defbase heap-memory []
   (let [runtime (Runtime/getRuntime)
         heap (MemoryMXBean/.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))]
     {:heap-used (MemoryUsage/.getUsed heap)
@@ -107,12 +124,12 @@
      :total (Runtime/.totalMemory runtime)
      :max (Runtime/.maxMemory runtime)}))
 
-(defn thread-count
-  [_args]
+
+(defbase thread-count []
   {:count (Thread/activeCount)})
 
-(defn os-info
-  [_args]
+
+(defbase os-info []
   (let [os-bean (ManagementFactory/getOperatingSystemMXBean)]
     {:name (OperatingSystemMXBean/.getName os-bean)
      :arch (OperatingSystemMXBean/.getArch os-bean)
@@ -120,19 +137,16 @@
      :load-average (OperatingSystemMXBean/.getSystemLoadAverage os-bean)}))
 
 
-(defn current-time-ms
-  [_args]
+(defbase current-time-ms []
   (System/currentTimeMillis))
 
 
-(defn env-fn
-  [{:keys [name]}]
+(defbase env-fn [name]
   (System/getenv name))
 
 
-(defn read-resource
-  "Read a resource file from classpath and return its contents as string."
-  [{:keys [path]}]
+(defn- read-resource-impl
+  [path]
   (if-let [resource (clojure.java.io/resource path)]
     (slurp resource)
     (throw (ex-info (str "Resource not found: " path)
@@ -140,9 +154,23 @@
                      :path path}))))
 
 
-(defn concat-resources
-  [{:keys [paths separator]}]
-  (str/join separator (map #(read-resource {:path %}) paths)))
+(defbase read-resource
+  "Read a resource file from classpath and return its contents as string."
+  [path]
+  (read-resource-impl path))
+
+
+(defbase concat-resources [paths separator]
+  (str/join separator (map read-resource-impl paths)))
+
+
+(defbase invoke-fn [func arg]
+  (func arg))
+
+
+(defbase slurp-fn [input]
+  (when (instance? java.io.InputStream input)
+    (clojure.core/slurp input)))
 
 
 ;; === Registry ===
@@ -163,7 +191,5 @@
    :env env-fn
    :read-resource read-resource
    :concat-resources concat-resources
-   :invoke (fn [{:keys [func arg]}] (func arg))
-   :slurp (fn [{:keys [input]}]
-            (when (instance? java.io.InputStream input)
-              (clojure.core/slurp input)))})
+   :invoke invoke-fn
+   :slurp slurp-fn})

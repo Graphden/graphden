@@ -5,78 +5,78 @@
 
 {:namespace "core.strings"
  :fns
-[{:name :str
-  :args {:parts :jsonb}
-  :return-type :text}
+ [{:name :str
+   :args {:parts :jsonb}
+   :return-type :text}
 
- {:name :subs
-  :args {:string :text
-         :start :int
-         :end {:type :int :required false}}
-  :return-type :text}
+  {:name :subs
+   :args {:string :text
+          :start :int
+          :end {:type :int :required false}}
+   :return-type :text}
 
- {:name :str-len
-  :args {:string :text}
-  :return-type :int}
+  {:name :str-len
+   :args {:string :text}
+   :return-type :int}
 
- {:name :str-upper
-  :args {:string :text}
-  :return-type :text}
+  {:name :str-upper
+   :args {:string :text}
+   :return-type :text}
 
- {:name :str-lower
-  :args {:string :text}
-  :return-type :text}
+  {:name :str-lower
+   :args {:string :text}
+   :return-type :text}
 
- {:name :str-trim
-  :args {:string :text}
-  :return-type :text}
+  {:name :str-trim
+   :args {:string :text}
+   :return-type :text}
 
- {:name :str-split
-  :args {:string :text, :separator :text}
-  :return-type :jsonb}
+  {:name :str-split
+   :args {:string :text, :separator :text}
+   :return-type :jsonb}
 
- {:name :str-join
-  :args {:coll :jsonb
-         :separator {:type :text :value ""}}
-  :return-type :text}
+  {:name :str-join
+   :args {:coll :jsonb
+          :separator {:type :text :value ""}}
+   :return-type :text}
 
- {:name :str-to-keyword
-  :args {:string :text}
-  :return-type :any}
+  {:name :str-to-keyword
+   :args {:string :text}
+   :return-type :any}
 
- {:name :keyword-to-str
-  :args {:keyword :any}
-  :return-type :text}
+  {:name :keyword-to-str
+   :args {:keyword :any}
+   :return-type :text}
 
- {:name :pr-str
-  :args {:value :any}
-  :return-type :text}
+  {:name :pr-str
+   :args {:value :any}
+   :return-type :text}
 
- {:name :to-str
-  :args {:value :any}
-  :return-type :text}
+  {:name :to-str
+   :args {:value :any}
+   :return-type :text}
 
- {:name :parse-query-string
-  :args {:string :text}
-  :return-type :jsonb}
+  {:name :parse-query-string
+   :args {:string :text}
+   :return-type :jsonb}
 
- {:name :truncate
-  :args {:string :text
-         :max-length :int}
-  :return-type :text}
+  {:name :truncate
+   :args {:string :text
+          :max-length :int}
+   :return-type :text}
 
- {:name :blank?
-  :args {:string {:type :text :required false}}
-  :return-type :bool}
+  {:name :blank?
+   :args {:string {:type :text :required false}}
+   :return-type :bool}
 
- {:name :url-decode
-  :args {:string :text}
-  :return-type :text}
+  {:name :url-decode
+   :args {:string :text}
+   :return-type :text}
 
- {:name :str-contains?
-  :args {:string :text, :substring :text}
-  :return-type :bool}
+  {:name :str-contains?
+   :args {:string :text, :substring :text}
+   :return-type :bool}
 
- {:name :str-starts-with?
-  :args {:string :text, :prefix :text}
-  :return-type :bool}]}
+  {:name :str-starts-with?
+   :args {:string :text, :prefix :text}
+   :return-type :bool}]}

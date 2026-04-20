@@ -4,39 +4,39 @@
 
 {:namespace "web.reitit"
  :fns
-[{:name :router
-  :args {:routes :any
-         :not-found-response :jsonb
-         :method-not-allowed-response :jsonb
-         :error-response :jsonb}
-  :return-type :fn}
+ [{:name :router
+   :args {:routes :any
+          :not-found-response :jsonb
+          :method-not-allowed-response :jsonb
+          :error-response :jsonb}
+   :return-type :fn}
 
- ;; Router with individual text defaults — each sets one error response
- {:name :router-with-text-404
-  :parent :router
-  :args {:not-found-response :_text-404-body}}
+  ;; Router with individual text defaults — each sets one error response
+  {:name :router-with-text-404
+   :parent :router
+   :args {:not-found-response :_text-404-body}}
 
- ;; Response bodies: use ring-response directly (all args explicit, no free arg leakage)
- {:name :_text-404-body
-  :parent :text-not-found-response
-  :args {:body "Not Found"}}
+  ;; Response bodies: use ring-response directly (all args explicit, no free arg leakage)
+  {:name :_text-404-body
+   :parent :text-not-found-response
+   :args {:body "Not Found"}}
 
- {:name :router-with-text-405
-  :parent :router
-  :args {:method-not-allowed-response :_text-405-body}}
+  {:name :router-with-text-405
+   :parent :router
+   :args {:method-not-allowed-response :_text-405-body}}
 
- {:name :_text-405-body
-  :parent :text-method-not-allowed-response
-  :args {:body "Method Not Allowed"}}
+  {:name :_text-405-body
+   :parent :text-method-not-allowed-response
+   :args {:body "Method Not Allowed"}}
 
- {:name :router-with-text-500
-  :parent :router
-  :args {:error-response :_text-500-body}}
+  {:name :router-with-text-500
+   :parent :router
+   :args {:error-response :_text-500-body}}
 
- {:name :_text-500-body
-  :parent :text-error-response
-  :args {:body "Handler not configured"}}
+  {:name :_text-500-body
+   :parent :text-error-response
+   :args {:body "Handler not configured"}}
 
- ;; Router with all text defaults via MI
- {:name :text-error-router
-  :parents [:router-with-text-404 :router-with-text-405 :router-with-text-500]}]}
+  ;; Router with all text defaults via MI
+  {:name :text-error-router
+   :parents [:router-with-text-404 :router-with-text-405 :router-with-text-500]}]}

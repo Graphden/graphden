@@ -4,63 +4,60 @@
 
 {:namespace "core.logic"
  :fns
-[;; === Logic ===
- {:name :and
-  :args {:values :jsonb}
-  :return-type :bool}
+ [;; === Logic ===
+  {:name :and
+   :args {:values :jsonb}
+   :return-type :bool}
 
- {:name :or
-  :args {:values :jsonb}
-  :return-type :bool}
+  {:name :or
+   :args {:values :jsonb}
+   :return-type :bool}
 
- {:name :not
-  :args {:value :any}
-  :return-type :bool}
+  {:name :not
+   :args {:value :any}
+   :return-type :bool}
 
- {:name :some?
-  :args {:value :any}
-  :return-type :bool}
+  {:name :some?
+   :args {:value :any}
+   :return-type :bool}
 
- {:name :nil?
-  :args {:value :any}
-  :return-type :bool}
+  {:name :nil?
+   :args {:value :any}
+   :return-type :bool}
 
- ;; === Conditionals ===
- {:name :if
-  :args {:test :any
-         :then :any
-         :else {:type :any :required false}}
-  :return-type :any
-  :lazy #{:then :else}}
+  ;; === Conditionals ===
+  {:name :if
+   :args {:test :any
+          :then :any
+          :else {:type :any :required false}}
+   :return-type :any}
 
- {:name :cond
-  :args {:clauses :jsonb}
-  :return-type :any}
+  {:name :cond
+   :args {:clauses :jsonb}
+   :return-type :any}
 
- {:name :case
-  :args {:value :any
-         :clauses :jsonb
-         :default {:type :any :required false}}
-  :return-type :any}
+  {:name :case
+   :args {:value :any
+          :clauses :jsonb
+          :default {:type :any :required false}}
+   :return-type :any}
 
- ;; === Defaults ===
- {:name :coalesce
-  :args {:value :any
-         :default :any}
-  :return-type :any}
+  ;; === Defaults ===
+  {:name :coalesce
+   :args {:value :any
+          :default :any}
+   :return-type :any}
 
- ;; === Constants ===
- {:name :const
-  :args {:value :any}
-  :return-type :any}
+  ;; === Constants ===
+  {:name :const
+   :args {:value :any}
+   :return-type :any}
 
- ;; identity is just const with a different name
- {:name :identity
-  :parent :const}
+  ;; identity is just const with a different name
+  {:name :identity
+   :parent :const}
 
- ;; Two-arg equality (for fn-def composition; :eq uses array which can't hold fn-refs)
- {:name :equal?
-  :args {:a :any, :b :any}
-  :return-type :bool}
-
-]}
+  ;; Two-arg equality (for fn-def composition; :eq uses array which can't hold fn-refs)
+  {:name :equal?
+   :args {:a :any, :b :any}
+   :return-type :bool}]}

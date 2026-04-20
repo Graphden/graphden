@@ -3,12 +3,12 @@
 
 {:namespace "web.http"
  :fns
-[;; Starts http-kit server. handler must be a Ring handler
- {:name :http-server
-  :args {:handler :any
-         :port :int}
-  :return-type :any}
+ [;; Starts http-kit server. handler must be a Ring handler
+  {:name :http-server
+   :args {:handler :any
+          :port :int}
+   :return-type :any}
 
- {:name :http-stop
-  :args {:server :any}
-  :return-type :any}]}
+  {:name :http-stop
+   :args {:server :any}
+   :return-type :any}]}

@@ -31,7 +31,13 @@
    unknown-type-counter     ; Atom: count of unknown types (circuit breaker for forward compat)
    clock                    ; Function returning current time in millis (for testing)
    cache-warning-threshold  ; Threshold for warning about large cache
-   cache-max-size])         ; Maximum cache size before error
+   cache-max-size           ; Maximum cache size before error
+   graph-cache              ; Atom: {fn-id -> execution-graph} shared across requests
+   ;; (resolve-execution-graph is deterministic per fn-id between syncs;
+   ;; HTTP requests resolve the same graph 5+ times without this cache).
+   compiled-registry])      ; Atom: {fn-id -> compiled-closure} or nil. When populated by
+;; the compile system at startup, public `execute` uses it
+;; instead of the legacy queue for hot-path evaluation.
 
 
 ;; === Execution Limits ===
@@ -222,7 +228,23 @@
     (->ExecutionContext storage nil fns max-depth timeout-ms (clock-fn) 0
                         nil (atom {}) strict-type-validation?
                         max-unknown-types (atom 0) clock-fn
-                        cache-warning-threshold cache-max-size)))
+                        cache-warning-threshold cache-max-size
+                        (atom {}) (atom nil))))
+
+
+(defn resolve-graph-cached
+  "Resolve an execution graph, reusing a cached result when available.
+   The cache is keyed by fn-id and shared across an entire context's lifetime
+   (created once at startup in `create-context`, reused across all HTTP
+   requests). Fn graphs don't change between syncs, so a memoized result
+   stays valid as long as the JVM runs."
+  [context fn-id]
+  (let [cache (:graph-cache context)]
+    (if (and cache (contains? @cache fn-id))
+      (get @cache fn-id)
+      (let [graph (sp/resolve-execution-graph (:storage context) fn-id)]
+        (when cache (swap! cache assoc fn-id graph))
+        graph))))
 
 
 (defn current-time-ms

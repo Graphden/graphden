@@ -7,23 +7,23 @@
 
 {:namespace "app.layout"
  :fns
-[;; Layout data function - fetches from DB, builds graph, computes layout
- ;; Context-aware: receives storage from ctx
- {:name :get-layout-data
-  :args {:request :jsonb}
-  :return-type :jsonb
-  :ctx true}
+ [;; Layout data function - fetches from DB, builds graph, computes layout
+  ;; Context-aware: receives storage from ctx
+  {:name :get-layout-data
+   :args {:request :jsonb}
+   :return-type :jsonb
+   :ctx true}
 
- ;; =============================================================================
- ;; FN-DEFS: Layout API handler
- ;; =============================================================================
+  ;; =============================================================================
+  ;; FN-DEFS: Layout API handler
+  ;; =============================================================================
 
- ;; Layout handler using make-json-response-handler pattern
- {:name :_layout-api-handler
-  :parent :make-json-response-handler
-  :args {:data-fn :get-layout-data}}
+  ;; Layout handler using make-json-response-handler pattern
+  {:name :_layout-api-handler
+   :parent :make-json-response-handler
+   :args {:data-fn :get-layout-data}}
 
- ;; POST /api/graph/layout - accepts root-id and expansions
- {:name :layout-api-route
-  :parent :post-route
-  :args {:path "/api/graph/layout" :handler :_layout-api-handler}}]}
+  ;; POST /api/graph/layout - accepts root-id and expansions
+  {:name :layout-api-route
+   :parent :post-route
+   :args {:path "/api/graph/layout" :handler :_layout-api-handler}}]}

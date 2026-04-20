@@ -31,7 +31,15 @@
   :max-depth #long #or [#env EXEC_MAX_DEPTH "1000"]
   :timeout-ms #long #or [#env EXEC_TIMEOUT_MS "30000"]}
 
+ ;; Compile fn graphs into Clojure closures at startup. Depends on
+ ;; fn-entities so every composed fn is already in storage before we
+ ;; traverse them.
+ :exec/compiled-registry
+ {:context #ig/ref :exec/context
+  :_fn-entities #ig/ref :exec/fn-entities}
+
  :http/server
  {:context #ig/ref :exec/context
   :packages #ig/ref :app/packages
-  :port #long #or [#env PORT "8080"]}}
+  :port #long #or [#env PORT "8080"]
+  :_compiled-registry #ig/ref :exec/compiled-registry}}

@@ -69,11 +69,6 @@
     (exec/register-base-fn! fn-name (:impl fn-def))))
 
 
-;; Retired alias — kept for downstream callers that imported the raw
-;; variant during the transitional period.
-(def register-base-fns-raw! register-base-fns!)
-
-
 ;; === Storage Sync ===
 
 (def ^:private base-fn-namespace-uuid

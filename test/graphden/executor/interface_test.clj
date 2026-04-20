@@ -35,13 +35,6 @@
   (is (nil? (exec/get-base-fn :does-not-exist-123))))
 
 
-(deftest register-base-fn-raw-is-alias
-  (testing "the retired `register-base-fn-raw!` alias still works"
-    (let [impl (fn [_ _] :raw)]
-      (exec/register-base-fn-raw! :raw-probe impl)
-      (is (identical? impl (exec/get-base-fn :raw-probe))))))
-
-
 ;; ============================================================================
 ;; `get-default-registry` — snapshot for create-context
 ;; ============================================================================

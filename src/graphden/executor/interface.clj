@@ -61,12 +61,6 @@
   (registry/register-base-fn! fn-name f))
 
 
-;; Retired alias — kept briefly for any callers that grew around the
-;; pre-refactor raw/wrap split. `register-base-fn!` already delegates
-;; straight to the registry with no adapter.
-(def register-base-fn-raw! register-base-fn!)
-
-
 (defn get-base-fn
   "Gets a base function from the registry by name.
    Returns nil if not found."

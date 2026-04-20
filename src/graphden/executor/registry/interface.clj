@@ -33,10 +33,6 @@
   (core/register-base-fns! defs))
 
 
-;; Retired alias — `register-base-fns!` is itself the raw path now.
-(def register-base-fns-raw! register-base-fns!)
-
-
 ;; === Storage Sync ===
 
 (defn fn-uuid

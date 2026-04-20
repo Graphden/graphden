@@ -19,10 +19,9 @@
 
 
 (defn- create-test-storage
-  "Creates a PostgreSQL storage from the current test container.
-   Cleans the database before creating storage to ensure test isolation."
+  "Creates a PostgreSQL storage from the current test container. Relies
+   on the :each fixture to have cleaned the schema already."
   []
-  (th/clean-database-fast! *container*)
   (pg/create-storage (th/get-container-config *container*)))
 
 

@@ -42,9 +42,10 @@
 
 
 (defn- create-versioned-storage
-  "Creates a versioned storage initialized with versioned schema."
+  "Creates a versioned storage initialized with versioned schema. The
+   `:each` fixture (`create-clean-db-fixture`) already drops and recreates
+   the public schema before each test, so there's no extra clean here."
   []
-  (th/clean-database-fast! *container*)
   (let [schema (vds/build-schema (mds/create-builder))
         base (-> (pg/create-storage (th/get-container-config *container*))
                  (sp/initialize-with-cleanup! schema))]

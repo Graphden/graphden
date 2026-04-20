@@ -392,12 +392,6 @@
     @result))
 
 
-(defn- hof-free-ext-names
-  "Legacy alias kept for any stale callers. Prefer `deep-free-ext-names`."
-  [fn-id lookups]
-  (deep-free-ext-names fn-id lookups))
-
-
 ;; =============================================================================
 ;; Free-args translation at ref call-sites (MI + rename support)
 ;; =============================================================================
@@ -591,7 +585,7 @@
   (mapv (fn [b]
           (cond
             (and (= :ref (:kind b)) (:is-fn b))
-            (assoc b :hof-free-names (hof-free-ext-names (:ref-id b) lookups))
+            (assoc b :hof-free-names (deep-free-ext-names (:ref-id b) lookups))
 
             (= :ref (:kind b))
             (assoc b :ref-renames (build-ref-renames (:ref-id b) fn-id lookups))
@@ -622,25 +616,59 @@
     env-bindings))
 
 
-(defn compile-fn
-  "Produce the compiled closure for fn-id.
+(defn- resolve-impl
+  "Look up the base-fn impl for `fn-id`; throw with context on miss."
+  [fn-id {:keys [fn-map base-fns]}]
+  (let [base (base-fn-of fn-id fn-map)
+        base-name-kw (keyword (:name base))]
+    (if-let [impl (get base-fns base-name-kw)]
+      impl
+      (throw (ex-info (str "No impl registered for base fn " base-name-kw)
+                      {:type :compile-error/missing-impl
+                       :base-fn base-name-kw
+                       :fn-id fn-id})))))
 
-   Requires `ctx` (execution-context) so the closure can pass it to the
-   impl — impls declared with `(defbase … (get ctx …))` need it.
+
+(defn- wrap-top-level
+  "Every compiled closure acts as a potential top-level entry point, so
+   it installs a fresh `*call-cache*` when one isn't already in scope.
+   Sub-calls via thunks reuse the outer cache — memoizing side-effecting
+   ref targets like `:ring-body` (slurp of a single-use InputStream) for
+   the duration of one top-level call."
+  [inner]
+  (fn [all-fns free-args]
+    (if *call-cache*
+      (inner all-fns free-args)
+      (binding [*call-cache* (atom {})]
+        (inner all-fns free-args)))))
+
+
+(defn- build-closure
+  "Produce the compiled closure for one fn-id given its precomputed
+   bindings and env-bindings. Wraps the call with the shared call-cache
+   entry point."
+  [impl bindings env-bindings ctx]
+  (wrap-top-level
+    (if (seq env-bindings)
+      (fn [all-fns free-args]
+        (let [aug (augment-env env-bindings all-fns free-args)]
+          (impl (build-args-map bindings all-fns aug) ctx)))
+      (fn [all-fns free-args]
+        (impl (build-args-map bindings all-fns free-args) ctx)))))
+
+
+(defn compile-fn
+  "Produce the compiled closure for a single fn-id.
+
+   `lookups` must already carry `:base-fns`. `ctx` is the execution-
+   context the impl will receive as its second arg.
 
    Returns `(fn [all-fns free-args])`."
-  [fn-id {:keys [fn-map base-fns] :as lookups} ctx]
-  (let [base (base-fn-of fn-id fn-map)
-        base-name-kw (keyword (:name base))
-        impl (get base-fns base-name-kw)
-        _ (when-not impl
-            (throw (ex-info (str "No impl registered for base fn " base-name-kw)
-                            {:type :compile-error/missing-impl
-                             :base-fn base-name-kw
-                             :fn-id fn-id})))
-        bindings (enrich-ref-bindings fn-id (collect-bindings fn-id lookups) lookups)]
-    (fn [all-fns free-args]
-      (impl (build-args-map bindings all-fns free-args) ctx))))
+  [fn-id lookups ctx]
+  (let [impl (resolve-impl fn-id lookups)
+        bindings (enrich-ref-bindings fn-id (collect-bindings fn-id lookups) lookups)
+        env-bindings (collect-env-bindings fn-id lookups)]
+    (build-closure impl bindings env-bindings ctx)))
 
 
 ;; =============================================================================
@@ -651,52 +679,10 @@
   "Compile every fn in `fns` into a map `{fn-id → compiled-closure}`.
 
    `base-fns` is a registry `{fn-name-keyword → impl-fn}` (from
-   exec-context). `ctx` is the execution-context the impls will receive.
-
-   Constant-foldable fns (all-literal or all-constant-refs, no free args,
-   no HOF callables) are evaluated once at compile time and replaced with
-   `(constantly v)`. Ref callers transparently see the precomputed value."
+   exec-context). `ctx` is the execution-context the impls will receive."
   [{:keys [fns args base-fns]} ctx]
-  (let [lookups (assoc (build-lookups fns args) :base-fns base-fns)
-        bindings-by-id (into {}
-                             (map (fn [f]
-                                    [(:id f) (enrich-ref-bindings
-                                               (:id f)
-                                               (collect-bindings (:id f) lookups)
-                                               lookups)]))
-                             fns)
-        env-bindings-by-id (into {}
-                                 (map (fn [f]
-                                        [(:id f) (collect-env-bindings (:id f) lookups)]))
-                                 fns)]
+  (let [lookups (assoc (build-lookups fns args) :base-fns base-fns)]
     (into {}
           (map (fn [f]
-                 (let [base (base-fn-of (:id f) (:fn-map lookups))
-                       base-name-kw (keyword (:name base))
-                       impl (get base-fns base-name-kw)
-                       bindings (get bindings-by-id (:id f))
-                       env-bindings (get env-bindings-by-id (:id f))]
-                   (when-not impl
-                     (throw (ex-info (str "No impl registered for base fn " base-name-kw)
-                                     {:type :compile-error/missing-impl
-                                      :base-fn base-name-kw
-                                      :fn-id (:id f)})))
-                   [(:id f)
-                    ;; Every compiled closure acts as a potential top-level
-                    ;; entry point, so it installs a fresh `*call-cache*`
-                    ;; when one isn't already in scope. Subcalls via thunks
-                    ;; reuse the outer cache — memoizing side-effecting ref
-                    ;; targets like `:ring-body` (slurp of a single-use
-                    ;; InputStream) for the duration of one top-level call.
-                    (let [inner (if (seq env-bindings)
-                                  (fn [all-fns free-args]
-                                    (let [aug (augment-env env-bindings all-fns free-args)]
-                                      (impl (build-args-map bindings all-fns aug) ctx)))
-                                  (fn [all-fns free-args]
-                                    (impl (build-args-map bindings all-fns free-args) ctx)))]
-                      (fn [all-fns free-args]
-                        (if *call-cache*
-                          (inner all-fns free-args)
-                          (binding [*call-cache* (atom {})]
-                            (inner all-fns free-args)))))])))
+                 [(:id f) (compile-fn (:id f) lookups ctx)]))
           fns)))

@@ -140,11 +140,9 @@
 ;; Executor Context
 ;; =============================================================================
 
-(defmethod ig/init-key :exec/context [_ {:keys [storage max-depth timeout-ms]}]
+(defmethod ig/init-key :exec/context [_ {:keys [storage]}]
   (log/info "Creating executor context...")
-  (exec/create-context {:storage storage
-                        :max-depth (or max-depth 1000)
-                        :timeout-ms (or timeout-ms 30000)}))
+  (exec/create-context {:storage storage}))
 
 
 ;; =============================================================================

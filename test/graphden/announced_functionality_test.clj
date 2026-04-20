@@ -907,8 +907,7 @@
                                            {:name :two :parent :const :args {:x 2}}
                                            {:name :add-valid :parent :add :args {:a :one :b :two}}])
 
-        (let [ctx (exec/create-context {:storage storage
-                                        :strict-type-validation? true})
+        (let [ctx (exec/create-context {:storage storage})
               valid-fn (first (sp/query-entities storage :fn {:name "add-valid"}))]
           (testing "valid types execute correctly"
             (is (= 3 (exec/execute ctx (:id valid-fn) nil)))))

@@ -72,31 +72,9 @@
 ;; implemented in the compile executor — re-introduce once parity lands.
 
 
-;; === Context Validation Tests ===
-
-(deftest context-validation-test
-  (testing "throws when max-depth exceeds upper limit"
-    (let [storage (setup/create-test-storage)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"max-depth exceeds maximum allowed value"
-            (exec/create-context {:storage storage :max-depth 100001})))
-      (sp/close storage)))
-
-  (testing "accepts max-depth at upper limit"
-    (let [storage (setup/create-test-storage)
-          ctx (exec/create-context {:storage storage :max-depth 100000})]
-      (is (some? ctx))
-      (sp/close storage)))
-
-  (testing "throws when max-depth is not a positive integer"
-    (let [storage (setup/create-test-storage)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"max-depth must be a positive integer"
-            (exec/create-context {:storage storage :max-depth 0})))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"max-depth must be a positive integer"
-            (exec/create-context {:storage storage :max-depth -1})))
-      (sp/close storage))))
+;; The legacy max-depth / timeout-ms validation was retired with the
+;; queue executor; the remaining context-level validation (`storage`
+;; presence + protocol satisfaction) lives in `context_test.clj`.
 
 
 ;; === Additional Timestamp Type Tests ===
@@ -122,24 +100,8 @@
       (sp/close storage))))
 
 
-;; === Timeout Validation Tests ===
-
-(deftest timeout-ms-validation-test
-  (testing "throws when timeout-ms is below minimum (50ms)"
-    (let [storage (setup/create-test-storage)]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"timeout-ms must be at least 50ms"
-            (exec/create-context {:storage storage :timeout-ms 10})))
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                            #"timeout-ms must be at least 50ms"
-            (exec/create-context {:storage storage :timeout-ms 49})))
-      (sp/close storage)))
-
-  (testing "accepts timeout-ms at minimum (50ms)"
-    (let [storage (setup/create-test-storage)
-          ctx (exec/create-context {:storage storage :timeout-ms 50})]
-      (is (some? ctx))
-      (sp/close storage))))
+;; Timeout validation tests were removed along with the legacy queue
+;; executor. Re-introduce once compile enforces per-call timeouts.
 
 
 ;; === Execute Args Validation Tests ===

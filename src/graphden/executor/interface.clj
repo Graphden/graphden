@@ -1,99 +1,21 @@
 (ns graphden.executor.interface
-  "Function graph executor.
+  "Function graph executor — public API.
 
-   Executes functions stored in the graph by:
-   1. Resolving the function with its arg-values
-   2. Building delays for lazy evaluation
-   3. Calling the base function with delays
+   The compile-at-startup executor lives under the hood (see
+   `graphden.executor.compile` and `graphden.executor.compile-runtime`).
+   Base-fn impls are authored with the `defbase` macro in
+   `graphden.executor.defbase` and registered in the global registry via
+   `register-base-fn!`. The executor wraps each composed fn into a
+   Clojure closure at startup; `execute` looks the closure up by fn-id
+   and invokes it with free-args.
 
-   Arguments are passed to base functions as Clojure `delay` objects.
-   Use @ (deref) to get the value:
-     (+ @a @b)           ; for regular args
-     (f {:item x})       ; for :fn args (f is a callable after deref)
+   Within an impl body, use `graphden.executor.runtime/resolve-arg` to
+   read arg values (or let `defbase` inline the calls for you).
 
-   Use the defbase macro from fn-registry for convenient function definitions
-   with automatic argument dereferencing.
-
-   Supports:
-   - Lazy evaluation (delays)
-   - Recursion protection (max-depth)
-   - Timeout protection
-   - Base function registry
-
-   ## Performance Tuning Guide
-
-   The executor has several configurable limits that interact with each other.
-   Understanding these interactions helps optimize for different workloads.
-
-   ### Limit Interaction Matrix
-
-   | Limit           | Default  | Affects                | First to hit         |
-   |-----------------|----------|------------------------|----------------------|
-   | :max-depth      | 1000     | Recursion depth        | Deep graphs          |
-   | :timeout-ms     | 30000    | Total execution time   | Complex computations |
-   | :cache-max-size | 10000    | Result cache entries   | Wide graphs          |
-
-   **Which limit fires first?**
-
-   - **Deep linear chains** (A→B→C→...→Z): :max-depth fires first
-   - **Wide branching graphs** (A calls B,C,D,...,Z): :cache-max-size fires first
-   - **Slow base functions** (API calls, heavy computation): :timeout-ms fires first
-
-   ### Recommended Values by Workload
-
-   **Simple functions** (typical use):
-   ```clojure
-   {:max-depth 100
-    :timeout-ms 5000
-    :cache-max-size 1000}
-   ```
-
-   **Deep recursive graphs** (>50 levels):
-   ```clojure
-   {:max-depth 1000
-    :timeout-ms 30000
-    :cache-max-size 5000}
-   ```
-
-   **Wide parallel graphs** (map over large collections):
-   ```clojure
-   {:max-depth 100
-    :timeout-ms 60000
-    :cache-max-size 50000}
-   ```
-
-   **API-bound functions** (external service calls):
-   ```clojure
-   {:max-depth 50
-    :timeout-ms 120000  ; 2 minutes for slow APIs
-    :cache-max-size 1000}
-   ```
-
-   ### Warning Thresholds
-
-   The executor logs warnings at 80% of each limit:
-
-   - `Approaching max recursion depth` - Consider simplifying graph structure
-   - `Approaching execution timeout` - Consider async execution
-   - `Result cache size reached warning threshold` - Consider limiting graph depth
-
-   ### Cache Behavior
-
-   Result cache stores fn-usage computations for memoization.
-
-   - **Cache hit**: O(1) lookup, no recomputation
-   - **Cache miss**: Execute function, store result
-   - **Cache full**: Evict 20% oldest entries (LRU-like)
-
-   **Memory estimation**: ~1KB per cached value average.
-   Default 10,000 entries ≈ 10MB memory overhead.
-
-   ### Monitoring
-
-   Enable debug logging to see:
-   - Cache hit/miss events
-   - Depth/timeout warnings at 80% threshold
-   - Cache eviction events"
+   Runtime-limit enforcement (max-depth, per-call timeout, cache-size
+   bounds) was part of the retired queue executor and has not yet been
+   re-implemented on top of compile. Those knobs will return when the
+   compile path enforces them."
   (:require
     [graphden.executor.context :as ctx]
     [graphden.executor.core :as core]
@@ -106,23 +28,12 @@
 (defn create-context
   "Creates an execution context.
 
-   Options:
-   - :storage - Storage instance (required)
-   - :base-fns - Map of fn-name -> fn for base function lookup (optional)
-                 If not provided, uses snapshot of default global registry
-   - :max-depth - Maximum recursion depth (default 1000)
-                  Depth is incremented for each nested function call.
-                  Set lower values for tighter control over recursion.
-   - :timeout-ms - Maximum execution time in ms (default 30000)
-                   IMPORTANT: This is a best-effort timeout checked at the start
-                   of each function call. A long-running base function will complete
-                   fully even if it exceeds the timeout. For hard timeouts on
-                   individual operations, base functions should use their own
-                   timeout mechanisms (e.g., future with deref timeout).
-
-   Example with custom base-fns:
-   (create-context {:storage s
-                    :base-fns {:add my-add-fn :if my-if-fn}})"
+   Options (see `graphden.executor.context/create-context` for the full
+   contract):
+   - :storage   Storage instance (required).
+   - :base-fns  Map of fn-name → impl-fn (optional; defaults to the
+                global registry).
+   - :clock     Zero-arg fn returning current time in ms (test hook)."
   [opts]
   (ctx/create-context opts))
 
@@ -346,23 +257,6 @@
    Throws if the function has more than 1 required argument."
   [context fn-id]
   (core/make-optional-arg-callable context fn-id))
-
-
-;; === Context Utilities ===
-
-(defn clear-result-cache!
-  "Clears the result cache in the given context.
-   Useful for long-running applications that reuse contexts across multiple executions.
-
-   Returns the number of entries that were cleared.
-
-   Example:
-   (let [ctx (create-context {:storage s})]
-     (execute ctx fn-id-1 nil)
-     (clear-result-cache! ctx)  ; Clear before next independent execution
-     (execute ctx fn-id-2 nil))"
-  [context]
-  (ctx/clear-result-cache! context))
 
 
 ;; === Test Fixtures ===

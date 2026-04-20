@@ -496,3 +496,237 @@
           route (get compiled route-id)]
       (is (= ["/h" {"m" :bound}] (route compiled {:path "/h"}))
           ":route's :path free arg must reach :pair-1 as :item1"))))
+
+
+;; ============================================================================
+;; :seq bindings — linked-list-encoded sequence args (`:list`, `:pairs->map`)
+;; ============================================================================
+
+(defbase list-fn [items]
+  (vec items))
+
+
+(defn- mk-seq-anchor
+  "Sequence-type anchor arg on a composed fn: same source as the base
+   primary, `:type :sequence`, no value/ref — instead links via
+   `:next-arg-id` to a chain of item args."
+  [id fn-id source-id next-arg-id]
+  {:id id :fn-id fn-id :source-id source-id
+   :type :sequence :next-arg-id next-arg-id})
+
+
+(defn- mk-seq-item
+  "Sequence item arg (own slot on the composed fn, not bound to base).
+   `:value` or `:ref-id` carries the element; `:next-arg-id` points to
+   the next item (or nil at the tail)."
+  [id fn-id opts next-arg-id]
+  (merge {:id id :fn-id fn-id :source-id nil :next-arg-id next-arg-id} opts))
+
+
+(deftest seq-binding-literal-items
+  (testing ":list base-fn with literal sequence items materialises to a vector"
+    (let [list-id (random-uuid)
+          items-primary (mk-primary-arg (random-uuid) list-id "items")
+
+          three-id (random-uuid)
+          item-c (mk-seq-item (random-uuid) three-id {:value "c"} nil)
+          item-b (mk-seq-item (random-uuid) three-id {:value "b"} (:id item-c))
+          item-a (mk-seq-item (random-uuid) three-id {:value "a"} (:id item-b))
+          anchor (mk-seq-anchor (random-uuid) three-id (:id items-primary) (:id item-a))
+
+          fns [(mk-fn list-id :list-fn)
+               (mk-fn three-id :three list-id)]
+          args [items-primary anchor item-a item-b item-c]
+          compiled (c/compile-all {:fns fns :args args :base-fns {:list-fn list-fn}} nil)
+          three (get compiled three-id)]
+      (is (= ["a" "b" "c"] (three compiled {})))))
+
+  (testing "empty sequence → empty vector"
+    (let [list-id (random-uuid)
+          items-primary (mk-primary-arg (random-uuid) list-id "items")
+
+          empty-id (random-uuid)
+          anchor (mk-seq-anchor (random-uuid) empty-id (:id items-primary) nil)
+
+          fns [(mk-fn list-id :list-fn)
+               (mk-fn empty-id :empty-list list-id)]
+          args [items-primary anchor]
+          compiled (c/compile-all {:fns fns :args args :base-fns {:list-fn list-fn}} nil)
+          empty-list (get compiled empty-id)]
+      (is (= [] (empty-list compiled {}))))))
+
+
+(deftest seq-binding-ref-items
+  (testing ":list with ref-items walks each ref at runtime"
+    ;; Two refs to `:return-42` + one literal. Build [42, 42, "hi"].
+    (let [ret42-id (random-uuid)
+          list-id (random-uuid)
+          items-primary (mk-primary-arg (random-uuid) list-id "items")
+
+          mixed-id (random-uuid)
+          item-lit (mk-seq-item (random-uuid) mixed-id {:value "hi"} nil)
+          item-ref-b (mk-seq-item (random-uuid) mixed-id {:ref-id ret42-id} (:id item-lit))
+          item-ref-a (mk-seq-item (random-uuid) mixed-id {:ref-id ret42-id} (:id item-ref-b))
+          anchor (mk-seq-anchor (random-uuid) mixed-id (:id items-primary) (:id item-ref-a))
+
+          fns [(mk-fn ret42-id :return-42)
+               (mk-fn list-id :list-fn)
+               (mk-fn mixed-id :mixed list-id)]
+          args [items-primary anchor item-ref-a item-ref-b item-lit]
+          compiled (c/compile-all {:fns fns :args args
+                                   :base-fns {:list-fn list-fn :return-42 return-42}} nil)
+          mixed (get compiled mixed-id)]
+      (is (= [42 42 "hi"] (mixed compiled {}))))))
+
+
+;; ============================================================================
+;; Per-call memoization via `*call-cache*`
+;;
+;; Multiple refs to the same target with the same free-args, reached from
+;; different branches of a single top-level invocation, execute once —
+;; the cache memoizes by [ref-id free-args]. Distinct top-level calls get
+;; fresh caches.
+;; ============================================================================
+
+(deftest call-cache-dedups-same-ref
+  (testing "same ref called twice in one top-level invocation runs target once"
+    (let [counter (atom 0)
+          base-id (random-uuid)
+          base-v (mk-primary-arg (random-uuid) base-id "v")
+
+          ;; :bump — side-effecting impl that increments `counter`.
+          bump-id (random-uuid)
+          bump-v (mk-binding-arg (random-uuid) bump-id (:id base-v) {:value 1})
+
+          ;; :pair-of-bump — add(a=:bump, b=:bump). Both refs hit cache key
+          ;; [bump-id, {}] so the impl runs once total.
+          add-id (random-uuid)
+          add-a (mk-primary-arg (random-uuid) add-id "a")
+          add-b (mk-primary-arg (random-uuid) add-id "b")
+          sum-id (random-uuid)
+          sum-a (mk-binding-arg (random-uuid) sum-id (:id add-a) {:ref-id bump-id})
+          sum-b (mk-binding-arg (random-uuid) sum-id (:id add-b) {:ref-id bump-id})
+
+          fns [(mk-fn base-id :counter-base)
+               (mk-fn bump-id :bump base-id)
+               (mk-fn add-id :add)
+               (mk-fn sum-id :sum add-id)]
+          args [base-v bump-v add-a add-b sum-a sum-b]
+          counter-impl (fn [args ctx] (swap! counter inc) (const-fn args ctx))
+          compiled (c/compile-all {:fns fns :args args
+                                   :base-fns {:counter-base counter-impl :add add}} nil)
+          sum-fn (get compiled sum-id)]
+      (reset! counter 0)
+      (is (= 2 (sum-fn compiled {})))
+      (is (= 1 @counter)
+          "bump target executed once despite being referenced by both :a and :b")
+      ;; A second top-level call gets a fresh cache and re-runs the target.
+      (is (= 2 (sum-fn compiled {})))
+      (is (= 2 @counter) "second top-level invocation runs the target afresh"))))
+
+
+(deftest call-cache-keyed-by-free-args
+  (testing "same ref with different free-args is NOT deduplicated"
+    ;; Two separate top-level invocations with distinct free-args each
+    ;; get a fresh `*call-cache*`, so the side-effecting target runs
+    ;; once per top-level call.
+    (let [counter (atom 0)
+          base-id (random-uuid)
+          base-x (mk-primary-arg (random-uuid) base-id "x")
+
+          echo-id (random-uuid)
+
+          fns [(mk-fn base-id :echo-base)
+               (mk-fn echo-id :echo base-id)]
+          args [base-x]
+          ;; Return the free-arg :x (what the caller passed). `rt/resolve-arg`
+          ;; is private to the impl; we re-derive it here to avoid coupling
+          ;; the test to a second base-fn's naming.
+          side-effect-impl (fn [args _ctx]
+                             (swap! counter inc)
+                             (get args :x))
+          compiled (c/compile-all {:fns fns :args args
+                                   :base-fns {:echo-base side-effect-impl}} nil)
+          echo (get compiled echo-id)]
+      (reset! counter 0)
+      (is (= 1 (echo compiled {:x 1})))
+      (is (= 2 (echo compiled {:x 2})))
+      (is (= 2 @counter)
+          "distinct top-level invocations run the target once each"))))
+
+
+;; ============================================================================
+;; HOF wrap — 0-free-args variadic
+;; ============================================================================
+
+(defbase wrap-caller
+  "Invokes a `:fn`-type arg with a dummy value; returns whatever comes back."
+  [f]
+  (f :dummy))
+
+
+(deftest hof-wrap-zero-free-args-variadic
+  (testing "HOF target with 0 free args receives a variadic callable"
+    ;; :target = :return-42 (no args). Wrapped as a 0-arg callable that
+    ;; accepts any input and ignores it. `:wrap-caller` invokes with a
+    ;; dummy — should succeed and return 42.
+    (let [target-id (random-uuid)
+
+          caller-base-id (random-uuid)
+          caller-f-arg (mk-primary-arg (random-uuid) caller-base-id "f")
+
+          caller-id (random-uuid)
+          bind-f (mk-binding-arg (random-uuid) caller-id (:id caller-f-arg)
+                                 {:ref-id target-id :is-fn true})
+
+          fns [(mk-fn target-id :return-42)
+               (mk-fn caller-base-id :wrap-caller)
+               (mk-fn caller-id :caller caller-base-id)]
+          args [caller-f-arg bind-f]
+          compiled (c/compile-all {:fns fns :args args
+                                   :base-fns {:return-42 return-42
+                                              :wrap-caller wrap-caller}} nil)
+          caller (get compiled caller-id)]
+      (is (= 42 (caller compiled {}))))))
+
+
+;; ============================================================================
+;; env-bindings — bindings whose terminal lies outside the base fn's primaries
+;; reach deep ref targets via `augment-env`.
+;; ============================================================================
+
+(deftest env-binding-propagates-value-to-ref-target
+  (testing "value bound on outer fn reaches a ref-target that needs it as free arg"
+    ;; Shape:
+    ;;   :identity-fn (base, free: value)
+    ;;   :wrap         (identity-fn inheritor, no bindings — free: value)
+    ;;   :add          (base, primaries: a, b)
+    ;;   :outer        (add inheritor, :a = ref :wrap, :b = value 10, AND
+    ;;                  binds :value = 5 which doesn't match :add's primaries —
+    ;;                  travels via env-bindings to :wrap's compiled closure
+    ;;                  when :wrap fires, yielding 5.)
+    (let [id-id (random-uuid)
+          id-value (mk-primary-arg (random-uuid) id-id "value")
+
+          wrap-id (random-uuid)
+
+          add-id (random-uuid)
+          add-a (mk-primary-arg (random-uuid) add-id "a")
+          add-b (mk-primary-arg (random-uuid) add-id "b")
+
+          outer-id (random-uuid)
+          o-a (mk-binding-arg (random-uuid) outer-id (:id add-a) {:ref-id wrap-id})
+          o-b (mk-binding-arg (random-uuid) outer-id (:id add-b) {:value 10})
+          ;; env-binding: value = 5, terminal = :identity-fn.value
+          ;; (not in :add's primaries — so compile routes it through env.)
+          o-env (mk-binding-arg (random-uuid) outer-id (:id id-value) {:value 5})
+
+          fns [(mk-fn id-id :identity-fn)
+               (mk-fn wrap-id :wrap id-id)
+               (mk-fn add-id :add)
+               (mk-fn outer-id :outer add-id)]
+          args [id-value add-a add-b o-a o-b o-env]
+          compiled (c/compile-all {:fns fns :args args
+                                   :base-fns {:identity-fn identity-fn :add add}} nil)
+          outer (get compiled outer-id)]
+      (is (= 15 (outer compiled {})) "env-bound :value reaches :wrap → returns 5, plus :b 10"))))

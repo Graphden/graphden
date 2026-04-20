@@ -58,6 +58,24 @@
           (recur storage source-arg))))))
 
 
+(deftest sync-fns-to-storage-3-arity-accepts-ns-id-map
+  (testing "3-arity variant threads ns-id-map through to core — exercised by system init-key"
+    (let [storage (create-test-storage)]
+      (try
+        (exec/register-base-fn! :const-1 (fn [_ _] 1))
+        (registry/sync-defs-to-storage! storage {:const-1 {:args {}
+                                                           :return-type :int
+                                                           :impl (fn [_ _] 1)}})
+        (let [result (fn-composition/sync-fns-to-storage!
+                       storage
+                       [{:name :my-const :parent :const-1}]
+                       {})]
+          (is (map? result))
+          (is (contains? result :my-const)))
+        (finally
+          (sp/close storage))))))
+
+
 (deftest sync-fns-to-storage!-test
   (testing "syncs fn definitions to storage"
     (let [storage (create-test-storage)

@@ -205,3 +205,107 @@
                  (exec/execute-with-named-args ctx callable {:anything 42}))))
         (finally
           (sp/close storage))))))
+
+
+;; ============================================================================
+;; Adapter methods — exercise the reify's full ILookup/Associative/IFn/
+;; IPersistentCollection/Seqable surface via direct method calls, since
+;; destructuring alone only hits `valAt`.
+;; ============================================================================
+
+(defn- adapted
+  "Register a probe fn that captures whatever adapter it receives, then
+   invoke it once to obtain the adapter instance. Lets tests poke the
+   reify's methods directly."
+  [underlying]
+  (let [captured (atom nil)]
+    (exec/register-base-fn! :adapter-probe
+                            (fn [args _] (reset! captured args) :done))
+    (let [wrapper (:adapter-probe (exec/get-default-registry))]
+      (wrapper underlying nil))
+    @captured))
+
+
+(deftest adapter-ilookup-missing-key-returns-nil-delay
+  (let [a (adapted {:present 1})]
+    (is (= 1 @(get a :present)) "present key forces to the literal")
+    (let [v (get a :absent)]
+      (is (instance? clojure.lang.IDeref v))
+      (is (nil? @v) "absent key forces to nil"))))
+
+
+(deftest adapter-ilookup-not-found-default
+  (testing "2-arity valAt: present keys force, absent keys return the default untouched"
+    (let [a (adapted {:present 1})]
+      (is (= 1 @(get a :present :sentinel)))
+      (is (= :sentinel (get a :absent :sentinel))
+          "absent returns the default directly, not a delay"))))
+
+
+(deftest adapter-associative-containsKey
+  (let [a (adapted {:a 1 :b 2})]
+    (is (contains? a :a))
+    (is (contains? a :b))
+    (is (not (contains? a :z)))))
+
+
+(deftest adapter-associative-entryAt
+  (let [a (adapted {:a 42})]
+    (let [e (clojure.lang.Associative/.entryAt a :a)]
+      (is (some? e))
+      (is (= :a (key e)))
+      (is (= 42 @(val e))))
+    (is (nil? (clojure.lang.Associative/.entryAt a :missing)))))
+
+
+(deftest adapter-associative-assoc-throws
+  (let [a (adapted {:a 1})]
+    (is (thrown? UnsupportedOperationException
+          (clojure.lang.Associative/.assoc a :new 99)))))
+
+
+(deftest adapter-count
+  (let [a (adapted {:one 1 :two 2 :three 3})]
+    (is (= 3 (count a)))))
+
+
+(deftest adapter-collection-ops-throw
+  (let [a (adapted {:a 1})]
+    (is (thrown? UnsupportedOperationException
+          (clojure.lang.IPersistentCollection/.cons a :new)))
+    (is (thrown? UnsupportedOperationException
+          (clojure.lang.IPersistentCollection/.empty a)))))
+
+
+(deftest adapter-equiv-is-always-false
+  ;; Equality comparison across the adapter isn't meaningful (the keys
+  ;; hold delays, not values). The adapter returns false from `.equiv`.
+  (let [a (adapted {:a 1})]
+    (is (not (clojure.lang.IPersistentCollection/.equiv a {:a 1})))))
+
+
+(deftest adapter-seq-materialises-entries
+  (testing "seq returns [[k Delay] ...] pairs that force to values"
+    (let [a (adapted {:a 10 :b 20})
+          entries (seq a)]
+      (is (= 2 (count entries)))
+      (is (= #{:a :b} (set (map key entries))))
+      (is (= #{10 20} (set (map (comp deref val) entries)))))))
+
+
+(deftest adapter-seq-empty-when-underlying-empty
+  (is (nil? (seq (adapted {})))))
+
+
+(deftest adapter-ifn-invoke-single-arg
+  (testing "adapter is callable as a 1-arg fn — equivalent to valAt"
+    (let [a (adapted {:k 7})]
+      (is (= 7 @(a :k)))
+      (is (nil? @(a :missing))))))
+
+
+(deftest adapter-ifn-invoke-two-arg
+  (testing "adapter as 2-arg fn returns default for absent keys"
+    (let [a (adapted {:k 7})]
+      (is (= 7 @(a :k :unused)))
+      (is (= :fallback (a :missing :fallback))))))

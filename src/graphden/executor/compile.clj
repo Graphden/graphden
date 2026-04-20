@@ -644,91 +644,6 @@
 
 
 ;; =============================================================================
-;; Constant folding
-;; =============================================================================
-
-(defn- foldable?
-  "An fn is foldable iff every binding is either a literal value, a ref
-   to an already-foldable target, or a sequence whose items are all
-   literals / refs to foldable targets. Free args and HOF (`:is-fn`) refs
-   defeat folding — the first because input isn't known at compile time,
-   the second because the callable has to stay live to be invoked on
-   each element."
-  [bindings const?]
-  (every? (fn [{:keys [kind ref-id is-fn items]}]
-            (case kind
-              :value true
-              :free false
-              :ref (and (not is-fn)
-                        (contains? const? ref-id))
-              :seq (every? (fn [it]
-                             (or (some? (:value it))
-                                 (and (:ref-id it)
-                                      (contains? const? (:ref-id it)))))
-                           items)))
-          bindings))
-
-
-(defn- fold-constants
-  "Walk `bindings-by-id` to a fixpoint, marking fns whose inputs are all
-   statically known. For each, invoke its compiled closure once with an
-   empty free-args and replace it with `(constantly value)`. Replacement
-   is silent-transparent for consumers: refs still look up `all-fns[id]`
-   and get a fn that takes the same args and returns the precomputed
-   value.
-
-   Currently DISABLED: folding an impl at compile time executes its body,
-   which breaks impls with side effects (counters, I/O, time-reading
-   base-fns like `current-time-ms`, tests instrumenting branch
-   evaluation). Re-enable once impls carry an explicit `:pure?` marker
-   and we only fold pure ones.
-
-   Returns `all-fns` unchanged."
-  [all-fns _bindings-by-id]
-  all-fns)
-
-
-#_:clj-kondo/ignore
-
-
-(defn- fold-constants-original
-  "Original folding implementation — kept for reference; do not call."
-  [all-fns bindings-by-id]
-  ;; `const-order` is a vector: insertion order matches dependency order
-  ;; (a fn is added only after all its ref targets are already marked),
-  ;; so when we reduce through to precompute values, every ref lookup
-  ;; sees the already-folded version.
-  (let [const-order (loop [known []
-                           known-set #{}]
-                      (let [[grown grown-set]
-                            (reduce (fn [[ord s] [fn-id bindings]]
-                                      (if (or (contains? s fn-id)
-                                              (not (foldable? bindings s)))
-                                        [ord s]
-                                        [(conj ord fn-id) (conj s fn-id)]))
-                                    [known known-set]
-                                    bindings-by-id)]
-                        (if (= grown-set known-set)
-                          grown
-                          (recur grown grown-set))))]
-    (reduce (fn [m fn-id]
-              (let [closure (get m fn-id)
-                    v (try
-                        (closure m {})
-                        ;; Constant folding runs impls at compile time; any
-                        ;; exception (including arithmetic errors like
-                        ;; divide-by-zero) means the fold is unsafe — keep
-                        ;; the original closure. Throwable catches both
-                        ;; Exception and Error subclasses.
-                        (catch Exception _ ::fold-failed))]
-                (if (= v ::fold-failed)
-                  m
-                  (assoc m fn-id (constantly v)))))
-            all-fns
-            const-order)))
-
-
-;; =============================================================================
 ;; Entry point
 ;; =============================================================================
 
@@ -753,36 +668,35 @@
         env-bindings-by-id (into {}
                                  (map (fn [f]
                                         [(:id f) (collect-env-bindings (:id f) lookups)]))
-                                 fns)
-        raw (into {}
-                  (map (fn [f]
-                         (let [base (base-fn-of (:id f) (:fn-map lookups))
-                               base-name-kw (keyword (:name base))
-                               impl (get base-fns base-name-kw)
-                               bindings (get bindings-by-id (:id f))
-                               env-bindings (get env-bindings-by-id (:id f))]
-                           (when-not impl
-                             (throw (ex-info (str "No impl registered for base fn " base-name-kw)
-                                             {:type :compile-error/missing-impl
-                                              :base-fn base-name-kw
-                                              :fn-id (:id f)})))
-                           [(:id f)
-                            ;; Every compiled closure acts as a potential top-level
-                            ;; entry point, so it installs a fresh `*call-cache*`
-                            ;; when one isn't already in scope. Subcalls via thunks
-                            ;; reuse the outer cache — memoizing side-effecting ref
-                            ;; targets like `:ring-body` (slurp of a single-use
-                            ;; InputStream) for the duration of one top-level call.
-                            (let [inner (if (seq env-bindings)
-                                          (fn [all-fns free-args]
-                                            (let [aug (augment-env env-bindings all-fns free-args)]
-                                              (impl (build-args-map bindings all-fns aug) ctx)))
-                                          (fn [all-fns free-args]
-                                            (impl (build-args-map bindings all-fns free-args) ctx)))]
-                              (fn [all-fns free-args]
-                                (if *call-cache*
-                                  (inner all-fns free-args)
-                                  (binding [*call-cache* (atom {})]
-                                    (inner all-fns free-args)))))])))
-                  fns)]
-    (fold-constants raw bindings-by-id)))
+                                 fns)]
+    (into {}
+          (map (fn [f]
+                 (let [base (base-fn-of (:id f) (:fn-map lookups))
+                       base-name-kw (keyword (:name base))
+                       impl (get base-fns base-name-kw)
+                       bindings (get bindings-by-id (:id f))
+                       env-bindings (get env-bindings-by-id (:id f))]
+                   (when-not impl
+                     (throw (ex-info (str "No impl registered for base fn " base-name-kw)
+                                     {:type :compile-error/missing-impl
+                                      :base-fn base-name-kw
+                                      :fn-id (:id f)})))
+                   [(:id f)
+                    ;; Every compiled closure acts as a potential top-level
+                    ;; entry point, so it installs a fresh `*call-cache*`
+                    ;; when one isn't already in scope. Subcalls via thunks
+                    ;; reuse the outer cache — memoizing side-effecting ref
+                    ;; targets like `:ring-body` (slurp of a single-use
+                    ;; InputStream) for the duration of one top-level call.
+                    (let [inner (if (seq env-bindings)
+                                  (fn [all-fns free-args]
+                                    (let [aug (augment-env env-bindings all-fns free-args)]
+                                      (impl (build-args-map bindings all-fns aug) ctx)))
+                                  (fn [all-fns free-args]
+                                    (impl (build-args-map bindings all-fns free-args) ctx)))]
+                      (fn [all-fns free-args]
+                        (if *call-cache*
+                          (inner all-fns free-args)
+                          (binding [*call-cache* (atom {})]
+                            (inner all-fns free-args)))))])))
+          fns)))

@@ -114,4 +114,129 @@
   (testing "rejects reserved arg name"
     (let [ex (expand-cause '(graphden.executor.defbase/defbase bad [ctx] (+ ctx 1)))]
       (is (instance? clojure.lang.ExceptionInfo ex))
-      (is (re-find #"clashes with reserved symbol" (ex-message ex))))))
+      (is (re-find #"clashes with reserved symbol" (ex-message ex)))))
+  (testing "rejects __args as reserved"
+    (let [ex (expand-cause '(graphden.executor.defbase/defbase bad [__args] __args))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (re-find #"clashes with reserved symbol" (ex-message ex)))))
+  (testing "rejects non-symbol entries in arg list"
+    (let [ex (expand-cause '(graphden.executor.defbase/defbase bad [a "b"] (+ a b)))]
+      (is (instance? clojure.lang.ExceptionInfo ex))
+      (is (re-find #"arg list must contain only simple symbols" (ex-message ex))))))
+
+
+;; =============================================================================
+;; Single-arity dispatch + ctx threading
+;; =============================================================================
+
+(deftest single-arity-delegates-to-two-arity-with-nil-ctx
+  (testing "calling the 1-arg version threads ctx=nil"
+    ;; The `ctx-aware` body does `(get ctx :key)`. With ctx=nil,
+    ;; `(get nil :anything)` → nil.
+    (is (nil? (ctx-aware {:key :greeting})))))
+
+
+;; =============================================================================
+;; Additional binding forms — verify each known shadowing form is respected
+;; =============================================================================
+
+;; Destructured fn params (e.g. `(fn [{:keys [x]}] ...)`) are a known
+;; limitation — `extract-bound-symbols` doesn't walk into map destructure
+;; forms, so the inner `x` incorrectly gets rewritten to `(rt/resolve-arg
+;; __args :x)`. Bodies needing destructure have to use `let` after the fn
+;; param: `(fn [m] (let [x (:x m)] ...))`.
+
+
+(defbase shadow-via-letfn
+  "letfn binding shadows the arg symbol inside the local fn's body."
+  [x]
+  (letfn [(x [] 99)]
+    (x)))
+
+
+(defbase shadow-via-loop
+  "loop binding shadows the arg."
+  [x]
+  (loop [x 5 acc 0]
+    (if (zero? x) acc (recur (dec x) (inc acc)))))
+
+
+(defbase shadow-via-for
+  "for binding shadows the arg."
+  [x]
+  (first (for [x [10 20 30]] (* x 2))))
+
+
+(defbase shadow-via-if-let
+  "if-let binding shadows the arg in the then-branch."
+  [x]
+  (if-let [x :from-if-let] (name x) :unreachable))
+
+
+(defbase shadow-via-when-let
+  [x]
+  (when-let [x :from-when-let] (name x)))
+
+
+(defbase shadow-via-if-some
+  [x]
+  (if-some [x :from-if-some] (name x) :unreachable))
+
+
+(defbase shadow-via-when-some
+  [x]
+  (when-some [x :from-when-some] (name x)))
+
+
+(defbase shadow-via-doseq
+  "doseq binding shadows the arg — final captured value comes from the
+   loop var, not from the original `x`."
+  [x]
+  (let [last-seen (atom nil)]
+    (doseq [x [1 2 3]]
+      (reset! last-seen x))
+    @last-seen))
+
+
+(defbase shadow-via-catch
+  [x]
+  (try
+    (throw (ex-info "boom" {}))
+    (catch Exception x (ex-message x))))
+
+
+(deftest binding-forms-all-shadow-correctly
+  (is (= 99 (shadow-via-letfn {:x 999} nil)))
+  (is (= 5 (shadow-via-loop {:x 999} nil)))
+  (is (= 20 (shadow-via-for {:x 999} nil)))
+  (is (= "from-if-let" (shadow-via-if-let {:x 999} nil)))
+  (is (= "from-when-let" (shadow-via-when-let {:x 999} nil)))
+  (is (= "from-if-some" (shadow-via-if-some {:x 999} nil)))
+  (is (= "from-when-some" (shadow-via-when-some {:x 999} nil)))
+  (is (= 3 (shadow-via-doseq {:x 999} nil)))
+  (is (= "boom" (shadow-via-catch {:x 999} nil))))
+
+
+;; =============================================================================
+;; Nested data structures — map and set substitution paths
+;; =============================================================================
+
+(defbase nested-in-map-fn [value]
+  {:wrapped value :literal 42})
+
+
+(defbase nested-in-set-fn [value]
+  #{value :sentinel})
+
+
+(defbase nested-in-vector-fn [value]
+  [value [value value]])
+
+
+(deftest arg-substitution-in-nested-data
+  (testing "arg sub works inside maps"
+    (is (= {:wrapped :x :literal 42} (nested-in-map-fn {:value :x} nil))))
+  (testing "arg sub works inside sets"
+    (is (= #{:x :sentinel} (nested-in-set-fn {:value :x} nil))))
+  (testing "arg sub works inside nested vectors"
+    (is (= [:x [:x :x]] (nested-in-vector-fn {:value :x} nil)))))

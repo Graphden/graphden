@@ -6,7 +6,8 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.compile :as c]
-    [graphden.executor.defbase :refer [defbase]]))
+    [graphden.executor.defbase :refer [defbase]]
+    [graphden.executor.runtime :as rt]))
 
 
 ;; ============================================================================
@@ -694,6 +695,151 @@
 ;; env-bindings — bindings whose terminal lies outside the base fn's primaries
 ;; reach deep ref targets via `augment-env`.
 ;; ============================================================================
+
+;; ============================================================================
+;; Error paths — compile and runtime.
+;; ============================================================================
+
+(deftest compile-error-missing-base-fn-impl
+  (testing "base-fn name not registered → compile throws at ref-invocation time"
+    (let [unknown-base-id (random-uuid)
+          fns [(mk-fn unknown-base-id :unknown-base)]
+          args []]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"No impl registered for base fn"
+            (c/compile-all {:fns fns :args args :base-fns {}} nil))))))
+
+
+(deftest runtime-error-missing-ref-target
+  (testing "ref-id points to fn missing from all-fns → runtime throws"
+    ;; Create :wrapper that binds :value via ref to a fn-id that isn't
+    ;; compiled. Since compile-all only iterates `fns`, an orphan ref-id
+    ;; doesn't show up until runtime.
+    (let [ghost-id (random-uuid)  ; referenced but not in fns
+          id-id (random-uuid)
+          value-arg (mk-primary-arg (random-uuid) id-id "value")
+
+          wrapper-id (random-uuid)
+          bind-v (mk-binding-arg (random-uuid) wrapper-id (:id value-arg) {:ref-id ghost-id})
+
+          fns [(mk-fn id-id :identity-fn)
+               (mk-fn wrapper-id :wrap id-id)]
+          args [value-arg bind-v]
+          compiled (c/compile-all {:fns fns :args args
+                                   :base-fns {:identity-fn identity-fn}} nil)
+          wrap (get compiled wrapper-id)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Ref target not found"
+            (wrap compiled {}))))))
+
+
+(deftest runtime-error-missing-seq-item-ref
+  (testing "seq-item ref-id not in all-fns → runtime throws"
+    (let [ghost-id (random-uuid)
+          list-id (random-uuid)
+          items-primary (mk-primary-arg (random-uuid) list-id "items")
+
+          bad-list-id (random-uuid)
+          bad-item (mk-seq-item (random-uuid) bad-list-id {:ref-id ghost-id} nil)
+          anchor (mk-seq-anchor (random-uuid) bad-list-id (:id items-primary) (:id bad-item))
+
+          fns [(mk-fn list-id :list-fn)
+               (mk-fn bad-list-id :bad-list list-id)]
+          args [items-primary anchor bad-item]
+          compiled (c/compile-all {:fns fns :args args :base-fns {:list-fn list-fn}} nil)
+          bad-list (get compiled bad-list-id)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Sequence item ref target not found"
+            (bad-list compiled {}))))))
+
+
+;; ============================================================================
+;; Multiple inheritance — two parents contribute to different primary slots.
+;; ============================================================================
+
+(deftest multiple-inheritance-orthogonal-bindings
+  (testing "child with two parents collects bindings from both (status × content-type pattern)"
+    ;; :response-base (a, b, c) — 3 primaries.
+    ;; :bind-a (a=1)  and  :bind-b (b=2)  are independent.
+    ;; :combined parents [:bind-a :bind-b] — inherits a=1 from first, b=2 from second. :c stays free.
+    (let [base-id (random-uuid)
+          a-arg (mk-primary-arg (random-uuid) base-id "a")
+          b-arg (mk-primary-arg (random-uuid) base-id "b")
+          c-arg (mk-primary-arg (random-uuid) base-id "c")
+
+          bind-a-id (random-uuid)
+          a-val (mk-binding-arg (random-uuid) bind-a-id (:id a-arg) {:value 1})
+
+          bind-b-id (random-uuid)
+          b-val (mk-binding-arg (random-uuid) bind-b-id (:id b-arg) {:value 2})
+
+          combined-id (random-uuid)
+
+          triple-sum (fn [args _]
+                       (+ (rt/resolve-arg args :a)
+                          (rt/resolve-arg args :b)
+                          (rt/resolve-arg args :c)))
+
+          fns [(mk-fn base-id :triple-sum)
+               (mk-fn bind-a-id :bind-a base-id)
+               (mk-fn bind-b-id :bind-b base-id)
+               {:id combined-id :name :combined :parent-ids [bind-a-id bind-b-id]}]
+          args [a-arg b-arg c-arg a-val b-val]
+          compiled (c/compile-all {:fns fns :args args :base-fns {:triple-sum triple-sum}} nil)
+          combined (get compiled combined-id)]
+      (is (= 13 (combined compiled {:c 10})) "a=1 (parent-1) + b=2 (parent-2) + c=10 (free)"))))
+
+
+(deftest multiple-inheritance-first-parent-wins-on-conflict
+  (testing "when two parents bind the same slot differently, the first in BFS wins"
+    (let [base-id (random-uuid)
+          x-arg (mk-primary-arg (random-uuid) base-id "x")
+          bind-1-id (random-uuid)
+          v1 (mk-binding-arg (random-uuid) bind-1-id (:id x-arg) {:value 100})
+          bind-2-id (random-uuid)
+          v2 (mk-binding-arg (random-uuid) bind-2-id (:id x-arg) {:value 200})
+          combined-id (random-uuid)
+
+          fns [(mk-fn base-id :identity-fn)
+               (mk-fn bind-1-id :with-100 base-id)
+               (mk-fn bind-2-id :with-200 base-id)
+               {:id combined-id :name :combined :parent-ids [bind-1-id bind-2-id]}]
+          args [x-arg v1 v2]
+          value-impl (fn [args _] (rt/resolve-arg args :x))
+          compiled (c/compile-all {:fns fns :args args
+                                   :base-fns {:identity-fn value-impl}} nil)
+          combined (get compiled combined-id)]
+      (is (= 100 (combined compiled {}))
+          ":with-100 sits first in BFS chain, so x=100 wins"))))
+
+
+;; ============================================================================
+;; `compile-fn` — single-fn entry point (distinct from batch `compile-all`).
+;; ============================================================================
+
+(deftest compile-fn-single-entry
+  (testing "compile-fn produces a working closure for one fn"
+    (let [add-id (random-uuid)
+          a-arg (mk-primary-arg (random-uuid) add-id "a")
+          b-arg (mk-primary-arg (random-uuid) add-id "b")
+          fns [(mk-fn add-id :add)]
+          args [a-arg b-arg]
+          lookups (assoc (c/build-lookups fns args) :base-fns {:add add})
+          closure (#'c/compile-fn add-id lookups nil)]
+      (is (fn? closure))
+      ;; `all-fns` is the lookup map; since add has no refs, any map works.
+      (is (= 9 (closure {add-id closure} {:a 4 :b 5}))))))
+
+
+(deftest compile-fn-missing-impl-throws
+  (testing "compile-fn throws when the base-fn impl isn't in base-fns"
+    (let [unknown-id (random-uuid)
+          fns [(mk-fn unknown-id :unknown-base)]
+          lookups (assoc (c/build-lookups fns []) :base-fns {})]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"No impl registered for base fn"
+            (#'c/compile-fn unknown-id lookups nil))))))
+
 
 (deftest env-binding-propagates-value-to-ref-target
   (testing "value bound on outer fn reaches a ref-target that needs it as free arg"

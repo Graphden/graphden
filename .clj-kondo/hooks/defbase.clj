@@ -38,11 +38,31 @@
                         (if (= 1 (count body))
                           (first body)
                           (api/list-node (cons (api/token-node 'do) body)))))
+        ;; Produce both arities: 1-arg `[args]` (delegates to 2-arg with
+        ;; ctx=nil) + 2-arg `[args ctx]` (canonical body). Matches what
+        ;; the real macro emits so callsites with either arity pass
+        ;; kondo's arity check. The 1-arg version binds `ctx` to nil so
+        ;; the shared body form typechecks either way.
+        one-arity-let (api/list-node
+                        (list (api/token-node 'let)
+                              (api/vector-node
+                                [(api/token-node 'ctx) (api/token-node 'nil)])
+                              (if (= 1 (count body))
+                                (first body)
+                                (api/list-node (cons (api/token-node 'do) body)))))
+        one-arity (api/list-node
+                    (list
+                      (api/vector-node [destructure-map])
+                      one-arity-let))
+        two-arity (api/list-node
+                    (list
+                      (api/vector-node [destructure-map (api/token-node 'ctx)])
+                      ctx-let))
         fn-form (api/list-node
                   (list
                     (api/token-node 'fn)
-                    (api/vector-node [destructure-map (api/token-node 'ctx)])
-                    ctx-let))
+                    one-arity
+                    two-arity))
         new-node (api/list-node
                    (list
                      (api/token-node 'def)

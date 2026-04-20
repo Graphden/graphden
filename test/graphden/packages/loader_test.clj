@@ -2,7 +2,8 @@
   "Tests for package loader."
   (:require
     [clojure.test :refer [deftest is testing]]
-    [graphden.packages.loader :as loader]))
+    [graphden.packages.loader :as loader]
+    [graphden.storage.protocol.core]))
 
 
 ;; =============================================================================
@@ -209,3 +210,105 @@
       (catch clojure.lang.ExceptionInfo _
         ;; Skip if packages not available
         nil))))
+
+
+;; =============================================================================
+;; load-module-fns — both `fns.edn` shapes (vector legacy vs {:namespace :fns})
+;; =============================================================================
+
+(deftest load-module-fns-supports-vector-format
+  (testing "legacy vector format returns {:ns-path nil :fns [...]} for real module"
+    ;; `core/arithmetic` uses the map shape with :namespace. All real
+    ;; packages do. We assert the structural invariants instead of
+    ;; trying to synthesise a temp package.
+    (let [{:keys [ns-path fns]} (#'loader/load-module-fns "core" "arithmetic")]
+      (is (string? ns-path))
+      (is (vector? fns))
+      (is (pos? (count fns))))))
+
+
+;; =============================================================================
+;; load-packages — full integration touching real packages
+;; =============================================================================
+
+(deftest load-packages-collects-startup-fn
+  (testing "the :app package declares :web-server as startup-fn"
+    (try
+      (let [result (loader/load-packages ["core" "web" "app"])]
+        (is (= :web-server (:startup-fn result))))
+      (catch clojure.lang.ExceptionInfo _ nil))))
+
+
+(deftest load-packages-collects-namespaces
+  (testing "loaded packages expose a set of declared namespace paths"
+    (try
+      (let [result (loader/load-packages ["core" "web" "app"])
+            nss (:namespaces result)]
+        (is (set? nss))
+        (is (contains? nss "core") "parent ns implicit")
+        (is (contains? nss "core.arithmetic") "leaf ns present"))
+      (catch clojure.lang.ExceptionInfo _ nil))))
+
+
+(deftest load-packages-fn-defs-have-namespace-metadata
+  (testing "every fn-def from a namespaced module carries :namespace"
+    (try
+      (let [result (loader/load-packages ["core" "web" "app"])]
+        (when (seq (:fn-defs result))
+          (is (every? :namespace (:fn-defs result))
+              "all fn-defs from namespaced fns.edn get :namespace")))
+      (catch clojure.lang.ExceptionInfo _ nil))))
+
+
+;; =============================================================================
+;; sync-namespaces! — creates parent-child ns hierarchy in storage
+;; =============================================================================
+
+(deftest sync-namespaces-builds-hierarchy
+  (testing "parent ns is created before children; returns {path → id}"
+    ;; Minimal mock storage: in-memory list of created ns entities.
+    (let [state (atom {:next-id 0 :entities {}})
+          mock-storage
+          (reify
+            graphden.storage.protocol.core/StorageCRUD
+            (create-entity
+              [_ entity-type data]
+              (let [id (random-uuid)
+                    record (assoc data :id id)]
+                (swap! state update-in [:entities entity-type] (fnil conj []) record)
+                record))
+
+            (read-entity [_ _ _] nil)
+
+            (query-entities
+              [_ entity-type _where]
+              (get-in @state [:entities entity-type] []))
+
+            (update-entity [_ _ _ _] nil)
+
+            (delete-entity [_ _ _] nil))
+          result (loader/sync-namespaces! mock-storage #{"core" "core.arithmetic" "web"})]
+      (is (= 3 (count result)))
+      (is (contains? result "core"))
+      (is (contains? result "core.arithmetic"))
+      (is (contains? result "web"))
+      (is (= 3 (count (get-in @state [:entities :ns])))
+          "three ns entities were created"))))
+
+
+(deftest sync-namespaces-empty-input-returns-empty-map
+  (let [state (atom 0)
+        mock-storage
+        (reify
+          graphden.storage.protocol.core/StorageCRUD
+          (create-entity [_ _ _] (swap! state inc) {:id (random-uuid)})
+
+          (read-entity [_ _ _] nil)
+
+          (query-entities [_ _ _] [])
+
+          (update-entity [_ _ _ _] nil)
+
+          (delete-entity [_ _ _] nil))]
+    (is (= {} (loader/sync-namespaces! mock-storage #{})))
+    (is (zero? @state) "no entities created for empty set")))

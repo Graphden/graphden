@@ -77,13 +77,3 @@
 (defn make-single-arg-callable
   [context fn-id]
   (cr/make-single-arg-callable context fn-id))
-
-
-(defn make-optional-arg-callable
-  [context fn-id]
-  (cr/make-optional-arg-callable context fn-id))
-
-
-(defn make-named-arg-callable
-  [context fn-id arg-name]
-  (cr/make-named-arg-callable context fn-id arg-name))

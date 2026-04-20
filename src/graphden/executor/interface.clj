@@ -126,23 +126,6 @@
   (core/make-single-arg-callable context fn-id))
 
 
-(defn make-named-arg-callable
-  "Builds a callable that routes the incoming value to the specific free
-   arg named `arg-name` (string or keyword). Used when the target has
-   several free args and the caller knows the input's semantic name
-   (e.g. `:request` for Ring handlers)."
-  [context fn-id arg-name]
-  (core/make-named-arg-callable context fn-id arg-name))
-
-
-(defn make-optional-arg-callable
-  "Like `make-single-arg-callable` but also accepts 0-free-arg targets
-   (the incoming value is ignored). Throws when the target has more than
-   one free arg."
-  [context fn-id]
-  (core/make-optional-arg-callable context fn-id))
-
-
 ;; === Test Fixtures ===
 
 (defn with-clean-registry

@@ -6,8 +6,6 @@
    - `execute-by-name` with string vs keyword storage name codec
    - `execute-with-arg-ids` (legacy arg-id map style)
    - `make-single-arg-callable` fn-pass-through and free-arg shape dispatch
-   - `make-optional-arg-callable` arity guard
-   - `make-named-arg-callable` routing
    - `registry` / `rebuild!` lifecycle"
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
@@ -209,70 +207,5 @@
               call (cr/make-single-arg-callable ctx (:id composed))]
           (is (zero? (call :whatever)))
           (is (zero? (call :something-else-entirely))))
-        (finally
-          (sp/close storage))))))
-
-
-;; ============================================================================
-;; `make-optional-arg-callable`
-;; ============================================================================
-
-(deftest optional-arg-callable-too-many-free-args
-  (testing "target with >1 free arg throws — use `make-single-arg-callable` instead"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
-        (let [{:keys [composed-fn]} (setup/setup-add-function! storage)
-              ctx (exec/create-context {:storage storage})]
-          (is (thrown-with-msg? clojure.lang.ExceptionInfo
-                                #"Function requires 0 or 1 arguments, got 2"
-                (cr/make-optional-arg-callable ctx (:id composed-fn)))))
-        (finally
-          (sp/close storage))))))
-
-
-(deftest optional-arg-callable-zero-args-ignores-input
-  (let [storage (setup/create-test-storage)]
-    (try
-      (exec/register-base-fn! :pi (fn [_ _] 3.14))
-      (let [base-fn (setup/create-base-fn! storage "pi" :numeric)
-            composed (setup/create-composed-fn! storage "my-pi" (:id base-fn))
-            ctx (exec/create-context {:storage storage})
-            call (cr/make-optional-arg-callable ctx (:id composed))]
-        (is (= 3.14 (call :ignored))))
-      (finally
-        (sp/close storage)))))
-
-
-;; ============================================================================
-;; `make-named-arg-callable`
-;; ============================================================================
-
-(deftest named-arg-callable-routes-by-name
-  (testing "value is injected under `arg-name` regardless of target's free args"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (exec/register-base-fn! :echo (setup/fn-impl [payload] payload))
-        (let [base-fn (setup/create-base-fn! storage "echo" :any)
-              _ (setup/create-arg! storage (:id base-fn)
-                                   {:name "payload" :type :any :required true :is-fn false})
-              composed (setup/create-composed-fn! storage "my-echo" (:id base-fn))
-              ctx (exec/create-context {:storage storage})
-              call (cr/make-named-arg-callable ctx (:id composed) :payload)]
-          (is (= {:hello :world} (call {:hello :world}))))
-        (finally
-          (sp/close storage)))))
-
-  (testing "accepts string arg-name (coerced to keyword)"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (exec/register-base-fn! :echo (setup/fn-impl [payload] payload))
-        (let [base-fn (setup/create-base-fn! storage "echo" :any)
-              _ (setup/create-arg! storage (:id base-fn)
-                                   {:name "payload" :type :any :required true :is-fn false})
-              composed (setup/create-composed-fn! storage "echo-2" (:id base-fn))
-              ctx (exec/create-context {:storage storage})
-              call (cr/make-named-arg-callable ctx (:id composed) "payload")]
-          (is (= 42 (call 42))))
         (finally
           (sp/close storage))))))

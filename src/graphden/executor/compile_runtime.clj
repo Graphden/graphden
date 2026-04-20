@@ -187,33 +187,6 @@
           (fn [items] (closure reg (zipmap names items))))))))
 
 
-(defn make-optional-arg-callable
-  "Callable for 0-or-1 required-arg fns. A 0-arg target ignores the
-   incoming value; a 1-arg target receives it. Throws if the fn has more
-   than one free arg (use `make-single-arg-callable` for vec-convention
-   multi-arg HOF targets)."
-  [ctx fn-id]
-  (let [free-names (free-arg-ext-names ctx fn-id)]
-    (when (> (count free-names) 1)
-      (throw (ex-info (str "Function requires 0 or 1 arguments, got " (count free-names))
-                      {:type :execution-error/invalid-handler-function
-                       :fn-id fn-id
-                       :required-arg-count (count free-names)})))
-    (make-single-arg-callable ctx fn-id)))
-
-
-(defn make-named-arg-callable
-  "Callable that routes the incoming value to the specific free arg named
-   `arg-name` (string or keyword). Used when the target has several deep
-   free args and the caller knows which one receives the input — e.g.
-   `:request` for Ring handlers."
-  [ctx fn-id arg-name]
-  (let [reg (registry ctx)
-        closure (get reg fn-id)
-        n (keyword arg-name)]
-    (fn [value] (closure reg {n value}))))
-
-
 ;; Re-export — so this namespace is the canonical entry surface.
 (def thunk rt/thunk)
 (def resolve-arg rt/resolve-arg)

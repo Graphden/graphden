@@ -753,3 +753,137 @@
                   (fn [_] nil)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
             (#'core/resolve-parent-fn-id-cached {} {} {} :missing))))))
+
+
+;; === resolve-sequence-item ===
+;;
+;; Converts one element of a sequence literal (`[:item-1 :item-2 42 ...]`)
+;; into a `{:value … :ref-id …}` spec. Covers: UUID pass-through, keyword
+;; that names an already-created fn (ref), keyword that does NOT match a
+;; known fn (literal keyword), keyword with bad identifier (literal),
+;; map with explicit `:ref` override, map with explicit `:value`
+;; override, everything else (number, string, …) as a literal.
+
+(deftest resolve-sequence-item-uuid
+  (let [id (random-uuid)]
+    (is (= {:value nil :ref-id id}
+           (#'core/resolve-sequence-item {} {} id)))))
+
+
+(deftest resolve-sequence-item-keyword-matching-created
+  (testing "keyword matching a freshly-created fn resolves to a ref"
+    (let [id (random-uuid)]
+      (is (= {:value nil :ref-id id}
+             (#'core/resolve-sequence-item {} {:my-fn id} :my-fn))))))
+
+
+(deftest resolve-sequence-item-keyword-matching-registry
+  (testing "keyword matching an existing fn in the name-cache resolves"
+    (let [id (random-uuid)]
+      (is (= {:value nil :ref-id id}
+             (#'core/resolve-sequence-item {"my-fn" {:id id}} {} :my-fn))))))
+
+
+(deftest resolve-sequence-item-keyword-unknown-fn-is-literal
+  (testing "keyword that doesn't name any known fn stays as a literal value"
+    (is (= {:value :not-a-fn :ref-id nil}
+           (#'core/resolve-sequence-item {} {} :not-a-fn)))))
+
+
+(deftest resolve-sequence-item-keyword-invalid-identifier
+  (testing "keyword with invalid identifier (e.g. contains `/`) stays literal"
+    ;; Namespaced keywords produce names with `/` which `valid-identifier?`
+    ;; rejects. The item is still valid as a literal keyword value.
+    (is (= {:value :ns/kw :ref-id nil}
+           (#'core/resolve-sequence-item {} {} :ns/kw)))))
+
+
+(deftest resolve-sequence-item-map-with-ref-override
+  (let [id (random-uuid)]
+    (is (= {:value nil :ref-id id}
+           (#'core/resolve-sequence-item {"target" {:id id}} {} {:ref :target})))))
+
+
+(deftest resolve-sequence-item-map-with-value-override
+  (testing "explicit `:value` bypasses fn-ref resolution"
+    (is (= {:value :keyword-as-literal :ref-id nil}
+           (#'core/resolve-sequence-item {} {} {:value :keyword-as-literal})))
+    (is (= {:value [1 2 3] :ref-id nil}
+           (#'core/resolve-sequence-item {} {} {:value [1 2 3]})))))
+
+
+(deftest resolve-sequence-item-literals
+  (testing "non-keyword, non-map, non-uuid values pass through as literal :value"
+    (is (= {:value 42 :ref-id nil}
+           (#'core/resolve-sequence-item {} {} 42)))
+    (is (= {:value "string" :ref-id nil}
+           (#'core/resolve-sequence-item {} {} "string")))
+    (is (= {:value [1 2] :ref-id nil}
+           (#'core/resolve-sequence-item {} {} [1 2])))))
+
+
+;; === walk-anchor-chain-ids ===
+;;
+;; Follows the `:next-arg-id` pointer from an anchor and returns the
+;; ordered item-ids. Used at sync-time to reap orphaned items.
+
+(deftest walk-anchor-chain-ids-empty
+  (testing "anchor with no next-arg-id returns []"
+    (is (= [] (#'core/walk-anchor-chain-ids {} {:id :anchor})))))
+
+
+(deftest walk-anchor-chain-ids-single-item
+  (let [item-id (random-uuid)
+        args-by-id {item-id {:id item-id :next-arg-id nil}}]
+    (is (= [item-id] (#'core/walk-anchor-chain-ids args-by-id {:next-arg-id item-id})))))
+
+
+(deftest walk-anchor-chain-ids-multiple-items
+  (let [a (random-uuid), b (random-uuid), c (random-uuid)
+        args-by-id {a {:id a :next-arg-id b}
+                    b {:id b :next-arg-id c}
+                    c {:id c :next-arg-id nil}}]
+    (is (= [a b c] (#'core/walk-anchor-chain-ids args-by-id {:next-arg-id a})))))
+
+
+(deftest walk-anchor-chain-ids-detects-overlong-chain
+  (testing "chains exceeding 10K hops throw — guards against a corrupted cycle"
+    ;; Build a cycle: each item points at the next, and the last loops
+    ;; back. Walk will detect > 10000 depth and throw.
+    (let [ids (vec (repeatedly 5 random-uuid))
+          args-by-id (into {} (map-indexed
+                                (fn [i id]
+                                  [id {:id id
+                                       :next-arg-id (nth ids (mod (inc i) 5))}]))
+                           ids)]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Sequence chain exceeded maximum length"
+            (#'core/walk-anchor-chain-ids args-by-id
+                                          {:id :anchor :next-arg-id (first ids)}))))))
+
+
+;; === parse-arg-value-spec — additional shapes not in the existing test ===
+
+(deftest parse-arg-value-spec-map-with-ref
+  (testing "bare {:ref :fn-name} → ref without rename"
+    (is (= {:rename nil :value-spec :target :is-fn false :literal? false}
+           (#'core/parse-arg-value-spec {:ref :target})))))
+
+
+(deftest parse-arg-value-spec-map-with-value
+  (testing "bare {:value …} → literal without rename, bypasses fn-ref resolution"
+    (is (= {:rename nil :value-spec :kw-as-value :is-fn nil :literal? true}
+           (#'core/parse-arg-value-spec {:value :kw-as-value})))))
+
+
+(deftest parse-arg-value-spec-map-as-with-type-fn
+  (testing "{:as :rename :type :fn} sets is-fn true"
+    (is (= {:rename :r :value-spec nil :is-fn true :literal? false}
+           (#'core/parse-arg-value-spec {:as :r :type :fn})))))
+
+
+(deftest parse-arg-value-spec-as-rejects-non-keyword
+  (testing ":as with non-keyword value throws"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #":as must be a keyword"
+          (#'core/parse-arg-value-spec {:as "string"})))))

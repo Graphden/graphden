@@ -111,7 +111,10 @@
   (let [base-fn-defs (:base-fn-defs packages)
         ;; Sync namespace entities first (creates ns hierarchy in DB)
         ns-id-map (pkg/sync-namespaces! storage (:namespaces packages))]
-    (registry/register-base-fns! base-fn-defs)
+    ;; Packages register via the raw path (no legacy-deref adapter) —
+    ;; all package impls come from `defbase` and already use
+    ;; `rt/resolve-arg` directly, so the adapter is pure overhead.
+    (registry/register-base-fns-raw! base-fn-defs)
     (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map)
     (log/info "Base functions registered:" (count base-fn-defs))
     {:status :registered :ns-id-map ns-id-map}))

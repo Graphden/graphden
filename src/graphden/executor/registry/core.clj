@@ -61,10 +61,23 @@
 
 
 (defn register-base-fns!
-  "Registers base functions from a definitions map."
+  "Registers base functions from a definitions map. Uses
+   `exec/register-base-fn!` which wraps each impl in the legacy-deref
+   adapter. Use for test code that writes impls with `@arg` style;
+   production-loaded packages should prefer `register-base-fns-raw!`."
   [defs]
   (doseq [[fn-name fn-def] defs]
     (exec/register-base-fn! fn-name (:impl fn-def))))
+
+
+(defn register-base-fns-raw!
+  "Registers base functions without the legacy-deref adapter. For impls
+   produced by the `defbase` macro (which already call `rt/resolve-arg`
+   directly) — skipping the adapter saves one reify + one delay-per-arg
+   on every invocation."
+  [defs]
+  (doseq [[fn-name fn-def] defs]
+    (exec/register-base-fn-raw! fn-name (:impl fn-def))))
 
 
 ;; === Storage Sync ===

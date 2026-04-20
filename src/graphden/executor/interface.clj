@@ -238,7 +238,8 @@
    deref still works. Prefer the `defbase` macro in
    `graphden.executor.defbase` — it walks the body at compile time and
    substitutes arg symbols with `rt/resolve-arg` calls, no manual deref
-   required.
+   required; in that case use `register-base-fn-raw!` to skip the
+   redundant adapter.
 
    A nil impl registers nil (no-op), matching the pre-refactor contract
    that callers relying on `:impl` being absent still get `nil` back.
@@ -248,6 +249,18 @@
                              (+ @a @b)))"
   [fn-name f]
   (registry/register-base-fn! fn-name (when f (wrap-legacy-derefs f))))
+
+
+(defn register-base-fn-raw!
+  "Registers a base function *without* the legacy-deref adapter. Use for
+   impls that already handle their args directly — production `defbase`
+   outputs (which use `rt/resolve-arg`) and anything else that doesn't
+   rely on Clojure-style `@arg` deref.
+
+   Skipping the adapter removes one reify + one delay-per-arg per
+   invocation from the hot path."
+  [fn-name f]
+  (registry/register-base-fn! fn-name f))
 
 
 (defn get-base-fn

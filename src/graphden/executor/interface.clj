@@ -10,12 +10,7 @@
    and invokes it with free-args.
 
    Within an impl body, use `graphden.executor.runtime/resolve-arg` to
-   read arg values (or let `defbase` inline the calls for you).
-
-   Runtime-limit enforcement (max-depth, per-call timeout, cache-size
-   bounds) was part of the retired queue executor and has not yet been
-   re-implemented on top of compile. Those knobs will return when the
-   compile path enforces them."
+   read arg values (or let `defbase` inline the calls for you)."
   (:require
     [graphden.executor.context :as ctx]
     [graphden.executor.core :as core]
@@ -43,20 +38,13 @@
 (defn register-base-fn!
   "Registers a base function in the global registry.
    fn-name is a keyword (e.g. :add, :if, :map).
-   f is a function that takes [args context] and returns a value.
+   f is a 2-arity function `(fn [args ctx] …)` receiving the raw args
+   map (no delay wrapping) and the execution context.
 
-   Impls are called with the raw args map — no delay wrapping. Use
-   `rt/resolve-arg` to extract values (or the `defbase` macro in
-   `graphden.executor.defbase`, which walks the body at compile time
-   and substitutes arg symbols with `rt/resolve-arg` calls).
-
-   A nil impl registers nil — matches the pre-refactor contract for
-   callers passing fn-defs where `:impl` is absent.
-
-   Example:
-   (register-base-fn! :add (fn [args _]
-                             (+ (rt/resolve-arg args :a)
-                                (rt/resolve-arg args :b))))"
+   Use `rt/resolve-arg` to read arg values, or prefer the `defbase`
+   macro in `graphden.executor.defbase` which inlines the calls for
+   you. A nil impl is stored as-is (matches fn-defs where `:impl` is
+   absent)."
   [fn-name f]
   (registry/register-base-fn! fn-name f))
 
@@ -113,79 +101,34 @@
 ;; === Execution ===
 
 (defn execute
-  "Executes a function by its id.
+  "Executes a function by id using the compiled registry.
 
    Arguments:
    - context: Execution context (created with create-context)
    - fn-id: UUID of the function to execute
-   - args: Map of arguments for FREE args only (optional, can be nil or {})
-           Keys are arg-schema-ids (UUIDs).
-           IMPORTANT: Can only provide values for args NOT defined in DB.
-           If an arg already has a value in DB, the provided value is IGNORED
-           and a warning is logged. To change an arg value, update the DB.
-
-   Returns the result of the function execution.
-
-   Timeout semantics:
-   Timeout is checked at the START of each function call, not during execution.
-   This means a long-running base function will complete fully even if it
-   exceeds the timeout. For precise timeout control, base functions should
-   implement their own timeout logic (e.g., using futures with deref timeout).
-
-   Example base function with hard timeout:
-   (defn http-request-fn [{:keys [url timeout-ms]} ctx]
-     (let [result (future (http/get (force-value url ctx)))]
-       (deref result (or timeout-ms 5000) {:error :timeout})))
+   - args: Free args map, keyed by external arg name (preferred), by
+           arg-id UUID (legacy test-style — auto-translated), or nil/{}.
 
    Throws:
-   - :execution-error/max-depth-exceeded if recursion limit is reached
-   - :execution-error/timeout if execution time limit is exceeded
-   - :execution-error/base-fn-not-found if base function is not registered
-   - :execution-error/missing-required-arg if required argument not provided"
+   - :execution-error/fn-not-found if `fn-id` has no compiled closure
+   - :execution-error/invalid-args if `args` is non-nil and not a map"
   [context fn-id args]
   (core/execute context fn-id args))
 
 
 (defn execute-with-named-args
-  "Executes a function with arguments passed by name instead of by schema-id.
-   Useful for HOF functions that need to call child functions with dynamic args.
+  "Executes a function with `named-args` keyed by external arg name.
 
-   Arguments:
-   - context: Execution context (created with create-context)
-   - fn-id: UUID of the function to execute
-   - named-args: Map of {arg-name-keyword -> value}
-
-   Example:
-   (execute-with-named-args ctx fn-id {:item 42 :acc 0})
-
-   This resolves :item and :acc to their respective arg-schema-ids and calls execute.
-
-   Throws:
-   - :execution-error/unknown-arg-name if an arg name doesn't exist for the function
-   - All errors from execute"
+   Useful for HOFs that call child fns with dynamic args. Unknown arg
+   names throw `:execution-error/unknown-arg-name`."
   [context fn-id named-args]
   (core/execute-with-named-args context fn-id named-args))
 
 
 (defn execute-by-name
-  "Executes a function by its name (string).
-   Convenience function that looks up the fn entity by name and executes it.
-
-   Arguments:
-   - context: Execution context (created with create-context)
-   - fn-name: String name of the function to execute (e.g., \"my-add-fn\")
-   - named-args: Map of {arg-name-keyword -> value} (optional, can be nil or {})
-
-   Example:
-   (execute-by-name ctx \"calculate-total\" {:items [1 2 3]})
-
-   This looks up the fn with name \"calculate-total\", then resolves arg names
-   to arg-schema-ids and executes.
-
-   Throws:
-   - :execution-error/fn-not-found if no function with the given name exists
-   - :execution-error/invalid-fn-name if fn-name is not a string
-   - All errors from execute-with-named-args"
+  "Looks up a fn entity by `fn-name` (string) and executes it with
+   `named-args`. Throws `:execution-error/fn-not-found` on miss and
+   `:execution-error/invalid-fn-name` when `fn-name` isn't a string."
   [context fn-name named-args]
   (core/execute-by-name context fn-name named-args))
 
@@ -193,62 +136,27 @@
 ;; === HOF Helpers ===
 
 (defn make-single-arg-callable
-  "Creates a callable for a function with exactly one required argument.
-   The callable accepts a single value (not a map) and passes it to that argument.
-
-   Used by HOF (map, filter, etc.) to call user functions without requiring
-   specific argument names.
-
-   Arguments:
-   - context: Execution context with execution-graph populated
-   - fn-id: UUID of the function (must have exactly 1 required arg)
-
-   Returns a function: value -> result
-
-   Example:
-   ;; User function 'double' has one arg :x (any name works)
-   (let [callable (make-single-arg-callable ctx fn-id)]
-     (mapv callable [1 2 3]))  ; => [2 4 6]
-
-   Throws :execution-error/invalid-hof-function if the function doesn't have
-   exactly one required argument."
+  "Builds a `(fn [value] result)` callable over `fn-id`. Routes `value`
+   to the target's single free arg — or to `:request` when present (Ring
+   handler convention). Multi-free-arg targets receive a vector routed
+   by position."
   [context fn-id]
   (core/make-single-arg-callable context fn-id))
 
 
 (defn make-named-arg-callable
-  "Creates a callable that routes the incoming value to the deep free arg
-   with the given `arg-name`. Unlike `make-single-arg-callable`, this does
-   not require the response-fn to have exactly one discoverable deep free
-   arg — useful for domain-specific wrappers (e.g. a Ring request handler
-   that always feeds the `request` arg) where the caller knows the input's
-   semantic name.
-
-   Throws :execution-error/missing-named-arg if no reachable free arg with
-   that name is found."
+  "Builds a callable that routes the incoming value to the specific free
+   arg named `arg-name` (string or keyword). Used when the target has
+   several free args and the caller knows the input's semantic name
+   (e.g. `:request` for Ring handlers)."
   [context fn-id arg-name]
   (core/make-named-arg-callable context fn-id arg-name))
 
 
 (defn make-optional-arg-callable
-  "Creates a callable for a function with 0 or 1 required arguments.
-   - 0 args: callable ignores input, calls fn with no args
-   - 1 arg: callable passes input to that argument
-
-   Used by response handlers where data-fn may or may not need request.
-
-   Returns a function: value -> result
-
-   Example:
-   ;; For a function with 0 required args (like list-all-entities)
-   (let [callable (make-optional-arg-callable ctx fn-id)]
-     (callable request))  ; request is ignored, returns all entities
-
-   ;; For a function with 1 required arg (like get-entity-details)
-   (let [callable (make-optional-arg-callable ctx fn-id)]
-     (callable request))  ; request is passed to the required arg
-
-   Throws if the function has more than 1 required argument."
+  "Like `make-single-arg-callable` but also accepts 0-free-arg targets
+   (the incoming value is ignored). Throws when the target has more than
+   one free arg."
   [context fn-id]
   (core/make-optional-arg-callable context fn-id))
 
@@ -256,20 +164,9 @@
 ;; === Test Fixtures ===
 
 (defn with-clean-registry
-  "Test fixture that clears the global base-fn registry before and after each test.
-   Prevents test pollution from leftover registered functions.
-
-   Usage with clojure.test:
-   (use-fixtures :each exec/with-clean-registry)
-
-   For custom setup/teardown in fixture:
-   (defn my-fixture [f]
-     (exec/with-clean-registry
-       (fn []
-         ;; custom setup
-         (exec/register-base-fn! :test-fn ...)
-         (f))))
-   (use-fixtures :each my-fixture)"
+  "Test fixture that clears the global base-fn registry before and after
+   each test. Prevents leftover registrations from polluting other tests.
+   Wire in via `(use-fixtures :each exec/with-clean-registry)`."
   [f]
   (clear-base-fns!)
   (try

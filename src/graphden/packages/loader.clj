@@ -47,7 +47,6 @@
     [clojure.java.io :as io]
     [clojure.string :as str]
     [clojure.tools.logging :as log]
-    [graphden.executor.runtime :as rt]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -184,41 +183,16 @@
             :impl <fn>
             :ctx true}    ; optional
 
-   The wrapper pre-wraps `:fn`-type args as single-arg callables so HOF
-   impls receive ready-to-invoke fns regardless of executor (legacy queue
-   passes SmartDelay(fn-id); the new compile path passes already-wrapped
-   callables; both are normalised here). Non-`:fn` args are passed
-   through — `rt/resolve-arg` inside defbase bodies handles both thunks
-   and IDeref on demand.
-
-   `:ctx true` impls (plain `defn` handlers that need the raw fn-id to
-   build named-arg callables) bypass fn-arg wrapping and receive the raw
-   args map."
+   Under the compile-at-startup executor, compile.clj/hof-wrap already
+   delivers `:fn`-typed args as invokable callables, so the loader no
+   longer needs to pre-wrap anything — it just routes the impl's arity
+   by whether it expects a ctx."
   [fn-def impl-fn]
   (let [args (normalize-args (:args fn-def))
         ctx? (boolean (:ctx fn-def))
-        fn-arg-keys (when-not ctx?
-                      (into #{}
-                            (keep (fn [[k spec]]
-                                    (when (= :fn (:type spec)) k)))
-                            args))
-        wrapped-impl
-        (cond
-          ctx?
-          impl-fn
-
-          (seq fn-arg-keys)
-          (fn [a c]
-            (let [a' (reduce (fn [m k]
-                               (if (contains? m k)
-                                 (assoc m k (rt/hof-callable m k c))
-                                 m))
-                             a
-                             fn-arg-keys)]
-              (impl-fn a')))
-
-          :else
-          (fn [a _c] (impl-fn a)))]
+        wrapped-impl (if ctx?
+                       impl-fn
+                       (fn [a _c] (impl-fn a)))]
     (cond-> {:args args
              :return-type (:return-type fn-def)
              :impl wrapped-impl}

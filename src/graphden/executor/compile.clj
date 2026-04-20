@@ -117,7 +117,7 @@
   (set (walk-source-chain arg-id arg-map)))
 
 
-(defn- arg-ext-name
+(defn arg-ext-name
   "External name of `arg-id` — first `:name` found walking its source-id
    chain (from `arg-id` toward the terminal primary), falling back to the
    terminal primary's name. Handles propagated args correctly: a nameless
@@ -677,7 +677,22 @@
    and get a fn that takes the same args and returns the precomputed
    value.
 
-   Returns the enriched `all-fns`."
+   Currently DISABLED: folding an impl at compile time executes its body,
+   which breaks impls with side effects (counters, I/O, time-reading
+   base-fns like `current-time-ms`, tests instrumenting branch
+   evaluation). Re-enable once impls carry an explicit `:pure?` marker
+   and we only fold pure ones.
+
+   Returns `all-fns` unchanged."
+  [all-fns _bindings-by-id]
+  all-fns)
+
+
+#_:clj-kondo/ignore
+
+
+(defn- fold-constants-original
+  "Original folding implementation — kept for reference; do not call."
   [all-fns bindings-by-id]
   ;; `const-order` is a vector: insertion order matches dependency order
   ;; (a fn is added only after all its ref targets are already marked),

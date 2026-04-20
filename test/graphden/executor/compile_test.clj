@@ -341,64 +341,11 @@
   v)
 
 
-(deftest constant-folding-of-literal-binding
-  (testing "fn with only literal bindings folds to (constantly v)"
-    (let [const-id (random-uuid)
-          v-arg (mk-primary-arg (random-uuid) const-id "v")
-
-          hello-id (random-uuid)
-          bind-v (mk-binding-arg (random-uuid) hello-id (:id v-arg) {:value "hello"})
-
-          fns [(mk-fn const-id :const-fn)
-               (mk-fn hello-id :hello const-id)]
-          args [v-arg bind-v]
-          call-count (atom 0)
-          instrumented-const (fn [args ctx]
-                               (swap! call-count inc)
-                               (const-fn args ctx))
-          compiled (c/compile-all {:fns fns :args args
-                                   :base-fns {:const-fn instrumented-const}} nil)
-          hello (get compiled hello-id)]
-      ;; The fold should have invoked const-fn once at compile time.
-      (is (= 1 @call-count) "called exactly once during folding")
-      ;; Subsequent invocations return the precomputed value without calling const-fn.
-      (is (= "hello" (hello compiled {})))
-      (is (= "hello" (hello compiled {})))
-      (is (= 1 @call-count) "no further calls — fold replaced with (constantly v)"))))
-
-
-(deftest constant-folding-through-ref-chain
-  (testing "fn whose only ref-binding points to a constant folds too"
-    (let [const-id (random-uuid)
-          v-arg (mk-primary-arg (random-uuid) const-id "v")
-
-          ;; :forty-two — constant 42
-          forty-two-id (random-uuid)
-          bind-42 (mk-binding-arg (random-uuid) forty-two-id (:id v-arg) {:value 42})
-
-          ;; :wrap-42 — binds v via ref to :forty-two
-          wrap-id (random-uuid)
-          bind-wrap (mk-binding-arg (random-uuid) wrap-id (:id v-arg) {:ref-id forty-two-id})
-
-          fns [(mk-fn const-id :const-fn)
-               (mk-fn forty-two-id :forty-two const-id)
-               (mk-fn wrap-id :wrap wrap-id)]
-          ;; Fix: :wrap's parent should be :const-fn, not itself.
-          fns (-> fns
-                  (pop)
-                  (conj (mk-fn wrap-id :wrap const-id)))
-          args [v-arg bind-42 bind-wrap]
-          call-count (atom 0)
-          instrumented (fn [args ctx]
-                         (swap! call-count inc)
-                         (const-fn args ctx))
-          compiled (c/compile-all {:fns fns :args args
-                                   :base-fns {:const-fn instrumented}} nil)
-          wrap (get compiled wrap-id)]
-      ;; Both :forty-two and :wrap folded; const-fn invoked exactly twice.
-      (is (= 2 @call-count))
-      (is (= 42 (wrap compiled {})))
-      (is (= 2 @call-count) "no further calls"))))
+;; Constant-folding tests were deactivated when `fold-constants` was
+;; temporarily disabled (see compile.clj). Folding ran impl bodies at
+;; compile time, which broke side-effecting base-fns (counters, time,
+;; I/O). Re-enable these tests once impls carry an explicit `:pure?`
+;; marker and folding respects it.
 
 
 (deftest constant-folding-skipped-for-free-args

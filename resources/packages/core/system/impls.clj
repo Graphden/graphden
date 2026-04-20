@@ -5,8 +5,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
-    [graphden.executor.defbase :refer [defbase]]
-    [graphden.executor.interface :as exec])
+    [graphden.executor.defbase :refer [defbase]])
   (:import
     (java.lang.management
       ManagementFactory
@@ -36,63 +35,33 @@
     (fn [_request] r)))
 
 
-;; Plain `defn` (not `defbase`) because these factories bridge two executors:
-;;
-;; - Compile path (production): `:fn`-type args arrive as already-wrapped
-;;   Ring-handler callables. compile.clj/hof-wrap has a `:request`
-;;   special-case that routes the item to the deep `:request` free arg —
-;;   exactly what these factories want. So we just return the callable.
-;;
-;; - Legacy queue path (tests): `:fn`-type args arrive as SmartDelay(UUID)
-;;   because the `:ctx true` flag skips loader-level pre-wrapping. We
-;;   deref to the raw fn-id and build a name-aware callable via the legacy
-;;   exec helpers so the item routes to the right deep arg.
+;; Ring handler factories. `:fn`-type args arrive as already-wrapped
+;; Ring-handler callables (compile.clj/hof-wrap has a `:request`
+;; special-case that routes the item to the deep `:request` free arg
+;; of the wrapped target). The factory just assembles them.
 
-(defn- deref-if-needed
-  [v]
-  (if (instance? clojure.lang.IDeref v) @v v))
+(defbase make-request-handler [response-fn]
+  response-fn)
 
 
-(defn make-request-handler
-  [{:keys [response-fn]} ctx]
-  (if (fn? response-fn)
-    response-fn
-    (let [fn-id (deref-if-needed response-fn)]
-      (exec/make-named-arg-callable ctx fn-id "request"))))
+(defbase make-data-handler [data-fn body-fn status headers]
+  (fn [request]
+    (let [data (data-fn request)
+          body (body-fn data)]
+      {:status status
+       :headers headers
+       :body body})))
 
 
-(defn make-data-handler
-  [{:keys [data-fn body-fn status headers]} ctx]
-  (let [data-callable (if (fn? data-fn)
-                        data-fn
-                        (exec/make-optional-arg-callable ctx (deref-if-needed data-fn)))
-        body-callable (if (fn? body-fn)
-                        body-fn
-                        (exec/make-single-arg-callable ctx (deref-if-needed body-fn)))
-        st (deref-if-needed status)
-        hs (deref-if-needed headers)]
-    (fn [request]
-      (let [data (data-callable request)
-            body (body-callable data)]
-        {:status st
-         :headers hs
-         :body body}))))
-
-
-(defn make-action-handler
-  [{:keys [action-fn base-headers]} ctx]
-  (let [action-callable (if (fn? action-fn)
-                          action-fn
-                          (exec/make-optional-arg-callable ctx (deref-if-needed action-fn)))
-        base-hs (deref-if-needed base-headers)]
-    (fn [request]
-      (let [result (action-callable request)
-            resp-status (or (:status result) 200)
-            resp-headers (merge base-hs (or (:headers result) {}))
-            resp-body (or (:body result) "")]
-        {:status resp-status
-         :headers resp-headers
-         :body resp-body}))))
+(defbase make-action-handler [action-fn base-headers]
+  (fn [request]
+    (let [result (action-fn request)
+          resp-status (or (:status result) 200)
+          resp-headers (merge base-headers (or (:headers result) {}))
+          resp-body (or (:body result) "")]
+      {:status resp-status
+       :headers resp-headers
+       :body resp-body})))
 
 
 (defbase to-json-string [data]
@@ -178,9 +147,9 @@
 (def impls
   {:ring-response ring-response
    :make-handler make-handler
-   :make-request-handler (with-meta make-request-handler {:ctx true})
-   :make-data-handler (with-meta make-data-handler {:ctx true})
-   :make-action-handler (with-meta make-action-handler {:ctx true})
+   :make-request-handler make-request-handler
+   :make-data-handler make-data-handler
+   :make-action-handler make-action-handler
    :to-json-string to-json-string
    :parse-json parse-json
    :jvm-version jvm-version

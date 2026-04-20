@@ -16,6 +16,7 @@
    instead of enums. Cannot unify without schema alignment."
   (:require
     [graphden.executor.interface :as exec]
+    [graphden.executor.runtime :as rt]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.postgres.core :as pg]
@@ -117,11 +118,13 @@
    - Creates args owned by base fn
    - Creates composed fn with parent-id=base-fn-id"
   [storage]
-  ;; Register the base function (args are delays, use @ to deref)
+  ;; Register the base function. Args arrive via compile's build-args-map —
+  ;; plain values for literal bindings, `rt/thunk` for refs, or raw values
+  ;; in free-args. `rt/resolve-arg` handles all three.
   (exec/register-base-fn!
     :add
-    (fn [{:keys [a b]} _ctx]
-      (+ @a @b)))
+    (fn [args _ctx]
+      (+ (rt/resolve-arg args :a) (rt/resolve-arg args :b))))
 
   ;; Create base fn - keep name "add" to match registry keyword
   ;; Composed fn gets unique name to avoid conflicts

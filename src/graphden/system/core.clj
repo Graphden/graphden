@@ -165,17 +165,9 @@
 ;; =============================================================================
 
 (defmethod ig/init-key :http/server [_ {:keys [context packages port]}]
-  (let [startup-fn-name (:startup-fn packages)
-        ;; EXECUTOR env var picks which path starts the server:
-        ;;   "compiled" (default) → compile-at-startup registry
-        ;;   "legacy"             → trampolined queue (for A/B debugging)
-        executor-kind (keyword (or (System/getenv "EXECUTOR") "compiled"))]
-    (log/info "Starting HTTP server via" startup-fn-name
-              "on port" port
-              "(executor:" executor-kind ")...")
-    (let [server (case executor-kind
-                   :legacy   (exec/execute-by-name context (name startup-fn-name) nil)
-                   :compiled (cr/execute-by-name context (name startup-fn-name) nil))]
+  (let [startup-fn-name (:startup-fn packages)]
+    (log/info "Starting HTTP server via" startup-fn-name "on port" port "...")
+    (let [server (cr/execute-by-name context (name startup-fn-name) nil)]
       (log/info "HTTP server started on port" port)
       server)))
 

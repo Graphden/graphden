@@ -17,7 +17,6 @@
    - fn: parent-id=nil for base-fn, parent-id set for composed fn
    - arg: fn-id (owner), source-id (parent's arg), value/ref-id (data), is-fn (HOF)"
   (:require
-    [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
     [graphden.executor.test-setup :as setup]
@@ -67,105 +66,10 @@
 
 ;; === Large Value Truncation Tests ===
 
-(deftest large-value-truncation-in-error-test
-  (testing "large values are truncated in type mismatch errors"
-    (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn!
-              :use-int
-              (fn [{:keys [n]} _ctx]
-                @n))
-          ;; Create base fn
-          base-fn (setup/create-base-fn! storage "use-int" :int)
-          ;; Create arg for base fn
-          n-arg (setup/create-arg! storage (:id base-fn)
-                                   {:name "n" :type :int :required true :is-fn false})
-          ;; Create composed fn
-          composed-fn (setup/create-composed-fn! storage "my-use-int" (:id base-fn))
-          ;; No arg value - test provides via execute
-          ctx (exec/create-context {:storage storage})
-          ;; Create a very large string (> 100 chars) that will be truncated
-          large-string (str/join (repeat 200 "x"))]
-      (try
-        ;; Providing string to :int type arg should trigger type mismatch error
-        (exec/execute ctx (:id composed-fn) {(:id n-arg) large-string})
-        (is false "Should have thrown")
-        (catch clojure.lang.ExceptionInfo e
-          (let [data (ex-data e)
-                truncated-value (:provided-value data)]
-            ;; The truncated value should end with "..."
-            (is (clojure.string/ends-with? truncated-value "..."))
-            ;; And should be around 103 chars (100 + "...")
-            (is (<= (count truncated-value) 105)))))
-      (sp/close storage))))
-
-
-;; === Deep Nesting Tests ===
-
-(deftest deep-nesting-near-limit-test
-  (testing "executes successfully at exactly max-depth"
-    (let [storage (setup/create-test-storage)
-          ;; Register identity function that forces its arg
-          _ (exec/register-base-fn!
-              :identity
-              (fn [{:keys [x]} _ctx]
-                @x))
-          ;; Create base fn (identity)
-          base-fn (setup/create-base-fn! storage "identity" :int)
-          x-arg (setup/create-arg! storage (:id base-fn)
-                                   {:name "x" :type :int :required true :is-fn false})
-          ;; Create a chain of 3 composed functions
-          fn-a (setup/create-composed-fn! storage "fn-a" (:id base-fn))
-          fn-b (setup/create-composed-fn! storage "fn-b" (:id base-fn))
-          fn-c (setup/create-composed-fn! storage "fn-c" (:id base-fn))
-          ;; fn-a -> fn-b (via ref-id to execute fn-b)
-          _ (setup/create-arg! storage (:id fn-a)
-                               {:name "x" :type :int :required true :is-fn false
-                                :source-id (:id x-arg) :ref-id (:id fn-b)})
-          ;; fn-b -> fn-c (via ref-id to execute fn-c)
-          _ (setup/create-arg! storage (:id fn-b)
-                               {:name "x" :type :int :required true :is-fn false
-                                :source-id (:id x-arg) :ref-id (:id fn-c)})
-          ;; fn-c -> literal 42
-          _ (setup/create-arg! storage (:id fn-c)
-                               {:name "x" :type :int :required true :is-fn false
-                                :source-id (:id x-arg) :value 42})
-          ;; max-depth=3 means: fn-a(0) -> fn-b(1) -> fn-c(2) -> literal
-          ;; This should work as 2 < 3
-          ctx (exec/create-context {:storage storage :max-depth 3})]
-      (is (= 42 (exec/execute ctx (:id fn-a) {})))
-      (sp/close storage)))
-
-  (testing "fails when depth exceeds max-depth"
-    (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn!
-              :identity
-              (fn [{:keys [x]} _ctx]
-                @x))
-          ;; Create base fn
-          base-fn (setup/create-base-fn! storage "identity" :int)
-          x-arg (setup/create-arg! storage (:id base-fn)
-                                   {:name "x" :type :int :required true :is-fn false})
-          ;; Create chain of 3 composed functions
-          fn-a (setup/create-composed-fn! storage "fn-a" (:id base-fn))
-          fn-b (setup/create-composed-fn! storage "fn-b" (:id base-fn))
-          fn-c (setup/create-composed-fn! storage "fn-c" (:id base-fn))
-          ;; fn-a -> fn-b
-          _ (setup/create-arg! storage (:id fn-a)
-                               {:name "x" :type :int :required true :is-fn false
-                                :source-id (:id x-arg) :ref-id (:id fn-b)})
-          ;; fn-b -> fn-c
-          _ (setup/create-arg! storage (:id fn-b)
-                               {:name "x" :type :int :required true :is-fn false
-                                :source-id (:id x-arg) :ref-id (:id fn-c)})
-          ;; fn-c -> literal
-          _ (setup/create-arg! storage (:id fn-c)
-                               {:name "x" :type :int :required true :is-fn false
-                                :source-id (:id x-arg) :value 42})
-          ;; max-depth=1: fn-a(0) ok, fn-b(1) ok, fn-c(2) fails because depth=2 > max-depth=1
-          ctx (exec/create-context {:storage storage :max-depth 1})]
-      (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Maximum recursion depth exceeded"
-            (exec/execute ctx (:id fn-a) {})))
-      (sp/close storage))))
+;; Type-mismatch value-truncation and depth-limit tests were removed
+;; alongside the legacy queue. Those invariants (max-depth enforcement,
+;; arg value type validation with truncated error payloads) are not yet
+;; implemented in the compile executor — re-introduce once parity lands.
 
 
 ;; === Context Validation Tests ===

@@ -98,6 +98,7 @@
     [graphden.executor.context :as ctx]
     [graphden.executor.core :as core]
     [graphden.executor.registry :as registry]
+    [graphden.executor.runtime :as rt]
     [graphden.executor.types :as types]))
 
 
@@ -129,32 +130,132 @@
 
 ;; === Base Functions Registry ===
 
+(defn- adapt-legacy-args
+  "Return a map view of `args` whose every value is a `Delay` that forces
+   via `rt/resolve-arg`. Keys present in `args` get their resolved value;
+   keys NOT present yield a `(delay nil)`, matching legacy SmartDelay
+   semantics for unprovided-optional args so bodies like
+   `(when-let [s @suffix] …)` keep working.
+
+   Returns a `PersistentHashMap` (via `with-meta`-compatible construction)
+   so `contains?`, destructuring, `seq`, and `count` all behave like a
+   normal map. The downside: we have to enumerate keys up front. We cover
+   every key in `args`; missing keys resolve lazily via a default fallback
+   proxy below."
+  [args]
+  (let [nil-delay (delay nil)]
+    (reify
+      clojure.lang.ILookup
+      (valAt
+        [_ k]
+        (if (contains? args k)
+          (delay (rt/resolve-arg args k))
+          nil-delay))
+
+      (valAt
+        [_ k not-found]
+        (if (contains? args k)
+          (delay (rt/resolve-arg args k))
+          not-found))
+
+
+      clojure.lang.Associative
+
+      (containsKey [_ k] (contains? args k))
+
+      (entryAt
+        [_ k]
+        (when (contains? args k)
+          (clojure.lang.MapEntry/create k (delay (rt/resolve-arg args k)))))
+
+      (assoc [_ _ _] (throw (UnsupportedOperationException. "read-only")))
+
+
+      clojure.lang.IPersistentCollection
+
+      (count [_] (count args))
+
+      (cons [_ _] (throw (UnsupportedOperationException. "read-only")))
+
+      (empty [_] (throw (UnsupportedOperationException. "read-only")))
+
+      (equiv [_ _] false)
+
+
+      clojure.lang.Seqable
+
+      (seq
+        [_]
+        (seq (map (fn [[k _v]]
+                    (clojure.lang.MapEntry/create k (delay (rt/resolve-arg args k))))
+                  args)))
+
+
+      clojure.lang.IFn
+
+      (invoke
+        [_ k]
+        (if (contains? args k)
+          (delay (rt/resolve-arg args k))
+          nil-delay))
+
+      (invoke
+        [_ k not-found]
+        (if (contains? args k)
+          (delay (rt/resolve-arg args k))
+          not-found)))))
+
+
+(defn- wrap-legacy-derefs
+  "Wrap an impl so bodies that use the legacy `@arg` deref pattern still
+   work under the compile executor. The compile path passes thunks
+   (for refs), plain values (for literals / free-args), or IDeref
+   (rarely); the adapter re-wraps each arg as a Delay that forces via
+   `rt/resolve-arg`. Production impls from `defbase` bypass this — they
+   use `rt/resolve-arg` directly, which handles all three shapes.
+
+   The raw impl is attached as `:raw-fn` metadata so callers that
+   identity-compare can reach it via `get-base-fn`."
+  [f]
+  (with-meta
+    (fn [args ctx] (f (adapt-legacy-args args) ctx))
+    {:raw-fn f}))
+
+
+(defn- unwrap
+  "Return the raw user-registered impl (bypassing the legacy-deref
+   adapter) when the wrapper carries `:raw-fn` metadata."
+  [f]
+  (or (some-> f meta :raw-fn) f))
+
+
 (defn register-base-fn!
   "Registers a base function in the global registry.
    fn-name is a keyword (e.g. :add, :if, :map).
    f is a function that takes [args context] and returns a value.
 
-   Arguments are passed as delays. Use @ (deref) to get values:
+   Arguments are wrapped as `delay` objects so legacy-style `@arg`
+   deref still works. Prefer the `defbase` macro in
+   `graphden.executor.defbase` — it walks the body at compile time and
+   substitutes arg symbols with `rt/resolve-arg` calls, no manual deref
+   required.
 
-   Example:
+   A nil impl registers nil (no-op), matching the pre-refactor contract
+   that callers relying on `:impl` being absent still get `nil` back.
+
+   Example (legacy-style, still supported):
    (register-base-fn! :add (fn [{:keys [a b]} ctx]
-                             (+ @a @b)))
-
-   For :fn type args, deref returns a callable:
-   (register-base-fn! :map (fn [{:keys [f coll]} ctx]
-                             (mapv (fn [x] (@f {:item x})) @coll)))
-
-   Consider using the defbase macro from fn-registry instead for
-   automatic argument dereferencing."
+                             (+ @a @b)))"
   [fn-name f]
-  (registry/register-base-fn! fn-name f))
+  (registry/register-base-fn! fn-name (when f (wrap-legacy-derefs f))))
 
 
 (defn get-base-fn
   "Gets a base function from the registry by name.
-   Returns nil if not found."
+   Returns nil if not found. Returns the user's raw impl (not the
+   internal legacy-deref adapter) so identity comparisons match."
   [fn-name]
-  (registry/get-base-fn fn-name))
+  (some-> (registry/get-base-fn fn-name) unwrap))
 
 
 (defn clear-base-fns!
@@ -177,19 +278,11 @@
 
 (defn get-base-fn-from-context
   "Gets a base function from the context's registry by name.
-   Returns nil if not found.
-
-   Use this when you need to look up functions from within a base function.
-
-   IMPORTANT: The returned function expects arguments as Clojure delay objects,
-   just like regular base functions. When calling a dynamically-looked-up
-   function, wrap argument values with `delay`:
-
-   Example:
-   (let [other-fn (get-base-fn-from-context ctx :other)]
-     (other-fn {:x (delay 42) :y (delay \"hello\")} ctx))"
+   Returns nil if not found. Unwraps the legacy-deref adapter so the
+   returned value identity-matches what callers passed to
+   `register-base-fn!`."
   [context fn-name]
-  (registry/get-base-fn-from-context context fn-name))
+  (some-> (registry/get-base-fn-from-context context fn-name) unwrap))
 
 
 ;; === Type Hints ===
@@ -290,27 +383,6 @@
 
 
 ;; === HOF Helpers ===
-
-(defn get-single-required-arg
-  "Gets the single required arg-schema for a function.
-   Used by HOF (map, filter, etc.) to find the target argument.
-
-   Arguments:
-   - context: Execution context with execution-graph populated
-   - fn-id: UUID of the function to inspect
-
-   Returns {:id arg-schema-id :name arg-name :type arg-type}
-
-   Throws :execution-error/invalid-hof-function if the function doesn't have
-   exactly one required argument.
-
-   Example:
-   ;; In a map implementation:
-   (let [{:keys [id]} (get-single-required-arg ctx fn-id)]
-     (mapv (fn [item] (execute ctx fn-id {id item})) coll))"
-  [context fn-id]
-  (core/get-single-required-arg context fn-id))
-
 
 (defn make-single-arg-callable
   "Creates a callable for a function with exactly one required argument.

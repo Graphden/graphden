@@ -175,65 +175,6 @@
       (sp/close storage))))
 
 
-;; =============================================================================
-;; defbase Macro Tests
-;; =============================================================================
-
-#_{:clj-kondo/ignore [:unresolved-symbol]}
-
-
-(registry/defbase test-add-iface
-                  {:args {:a :int :b :int}
-                   :return-type :int}
-                  (+ a b))
-
-
-#_{:clj-kondo/ignore [:unresolved-symbol]}
-
-
-(registry/defbase test-if-iface
-                  "A conditional function - short-circuit evaluation preserved."
-                  {:args {:cond :bool :then :any :else :any}
-                   :return-type :any}
-                  (if cond then else))
-
-
-(deftest defbase-macro-test
-  (testing "defines function with :impl"
-    (is (fn? (:impl test-add-iface)))
-    (is (= :int (:return-type test-add-iface)))
-    (is (= {:a :int :b :int} (:args test-add-iface))))
-
-  (testing "defines function with docstring"
-    (is (fn? (:impl test-if-iface)))
-    (is (= :any (:return-type test-if-iface)))
-    (is (= {:cond :bool :then :any :else :any} (:args test-if-iface))))
-
-  (testing "impl works with delays"
-    (let [impl (:impl test-add-iface)
-          result (impl {:a (delay 3) :b (delay 4)} {})]
-      (is (= 7 result))))
-
-  (testing "short-circuit evaluation - only needed branch is derefed"
-    (let [impl (:impl test-if-iface)
-          then-called? (atom false)
-          else-called? (atom false)
-          then-delay (delay (reset! then-called? true) "then-value")
-          else-delay (delay (reset! else-called? true) "else-value")
-          ;; When cond is true, only :then should be derefed
-          result (impl {:cond (delay true)
-                        :then then-delay
-                        :else else-delay}
-                       {})]
-      (is (= "then-value" result))
-      (is @then-called?)
-      (is (not @else-called?)))))
-
-
-;; =============================================================================
-;; *custom-binding-forms* Tests
-;; =============================================================================
-
-(deftest custom-binding-forms-test
-  (testing "*custom-binding-forms* is bound"
-    (is (set? registry/*custom-binding-forms*))))
+;; The legacy `registry/defbase` macro was removed — impls live in
+;; `graphden.executor.defbase` and get tested in `defbase-test`. The
+;; interface now only exposes registration + storage-sync helpers.

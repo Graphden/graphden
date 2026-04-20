@@ -33,7 +33,6 @@ services:
       DB_PASSWORD: graphden
       DB_POOL_SIZE: 10
       AUTH_TOKEN: ${AUTH_TOKEN:-}
-      EXECUTOR: ${EXECUTOR:-compiled}
     ports:
       - "9002:8080"
     restart: unless-stopped

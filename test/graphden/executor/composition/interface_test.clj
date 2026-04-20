@@ -14,6 +14,7 @@
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
+    [graphden.executor.test-setup :as setup]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.postgres.core :as pg]
@@ -483,7 +484,7 @@
           _ (registry/initialize-all! storage
                                       [{:two-arg-fn {:args {:a :int :b :int}
                                                      :return-type :int
-                                                     :impl (fn [{:keys [a b]} _ctx] (+ @a @b))}}])
+                                                     :impl (setup/fn-impl [a b] (+ a b))}}])
           ;; Sync partial-fn that only binds :a, leaving :b free
           result (fn-composition/sync-fns-to-storage! storage
                                                       [{:name :partial-fn :parent :two-arg-fn :args {:a 10}}])
@@ -526,11 +527,14 @@
           _ (registry/initialize-all! storage
                                       [{:adder {:args {:a :int :b :int}
                                                 :return-type :int
-                                                :impl (fn [{:keys [a b]} _] (+ @a @b))}}
+                                                :impl (setup/fn-impl [a b] (+ a b))}}
                                        {:caller {:args {:f :fn :x :int}
                                                  :return-type :int
-                                                 :impl (fn [{:keys [f x]} ctx]
-                                                         (@f {:value @x} ctx))}}])
+                                                 :impl (setup/fn-impl [f x]
+                                                                      ;; `f` arrives pre-wrapped as a single-arg
+                                                                      ;; callable; feeding `x` routes it to the
+                                                                      ;; target's single free slot.
+                                                                      (f x))}}])
           ;; Composed fns:
           ;; - add-10: partial application of adder with a=10, b is free
           ;; - call-add-10: calls add-10 passing :x as :b
@@ -566,7 +570,7 @@
           _ (registry/initialize-all! storage
                                       [{:three-arg {:args {:a :int :b :int :c :int}
                                                     :return-type :int
-                                                    :impl (fn [{:keys [a b c]} _] (+ @a @b @c))}}
+                                                    :impl (setup/fn-impl [a b c] (+ a b c))}}
                                        {:ref-holder {:args {:fn-ref :fn}
                                                      :return-type :any
                                                      :impl (fn [{:keys [fn-ref]} _] fn-ref)}}])
@@ -626,7 +630,7 @@
           _ (registry/initialize-all! storage
                                       [{:two-arg-fn {:args {:a :int :b :int}
                                                      :return-type :int
-                                                     :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+                                                     :impl (setup/fn-impl [a b] (+ a b))}}])
           ;; Rename :a to :first and :b to :second without binding values
           result (fn-composition/sync-fns-to-storage! storage
                                                       [{:name :renamed-fn
@@ -652,7 +656,7 @@
           _ (registry/initialize-all! storage
                                       [{:two-arg-fn {:args {:a :int :b :int}
                                                      :return-type :int
-                                                     :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+                                                     :impl (setup/fn-impl [a b] (+ a b))}}])
           ;; Rename :a to :first and bind value 42
           result (fn-composition/sync-fns-to-storage! storage
                                                       [{:name :renamed-with-value

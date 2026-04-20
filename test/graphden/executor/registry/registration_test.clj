@@ -5,6 +5,7 @@
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.core :as core]
     [graphden.executor.registry.interface :as registry]
+    [graphden.executor.test-setup :as setup]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.postgres.core :as pg]
@@ -50,10 +51,10 @@
     ;; impl functions receive delays, use @ to deref
     (let [defs {:test-add {:args {:a :numeric :b :numeric}
                            :return-type :numeric
-                           :impl (fn [{:keys [a b]} _ctx] (+ @a @b))}
+                           :impl (setup/fn-impl [a b] (+ a b))}
                 :test-sub {:args {:a :numeric :b :numeric}
                            :return-type :numeric
-                           :impl (fn [{:keys [a b]} _ctx] (- @a @b))}}]
+                           :impl (setup/fn-impl [a b] (- a b))}}]
       (registry/register-base-fns! defs)
       (is (some? (exec/get-base-fn :test-add)))
       (is (some? (exec/get-base-fn :test-sub)))

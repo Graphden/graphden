@@ -112,7 +112,7 @@
 (deftest execute-with-named-args-error-test
   (testing "executes with named args"
     (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn! :add-named (fn [{:keys [a b]} _] (+ @a @b)))
+          _ (exec/register-base-fn! :add-named (setup/fn-impl [a b] (+ a b)))
           ;; Create base fn
           base-fn (setup/create-base-fn! storage "add-named" :int)
           _ (setup/create-arg! storage (:id base-fn)
@@ -127,7 +127,7 @@
 
   (testing "throws for unknown arg name"
     (let [storage (setup/create-test-storage)
-          _ (exec/register-base-fn! :single-arg (fn [{:keys [x]} _] @x))
+          _ (exec/register-base-fn! :single-arg (setup/fn-impl [x] x))
           ;; Create base fn
           base-fn (setup/create-base-fn! storage "single-arg" :int)
           _ (setup/create-arg! storage (:id base-fn)

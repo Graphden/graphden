@@ -19,8 +19,8 @@
 ;; === Function Registration ===
 
 (defn register-base-fns!
-  "Registers base functions from a definitions map. Impls are wrapped in
-   the legacy-deref adapter so `@arg`-style bodies continue to work.
+  "Registers base functions from a definitions map. Impls receive the
+   raw args map — use `rt/resolve-arg` inside the body.
 
    Arguments:
    - defs: map of {fn-name -> fn-def}
@@ -33,11 +33,8 @@
   (core/register-base-fns! defs))
 
 
-(defn register-base-fns-raw!
-  "Registers base functions without the legacy-deref adapter. Prefer
-   for production `defbase` impls that already use `rt/resolve-arg`."
-  [defs]
-  (core/register-base-fns-raw! defs))
+;; Retired alias — `register-base-fns!` is itself the raw path now.
+(def register-base-fns-raw! register-base-fns!)
 
 
 ;; === Storage Sync ===

@@ -1,9 +1,6 @@
 (ns graphden.executor.interface-test
-  "Tests for the public `exec/` surface — specifically the legacy-deref
-   adapter (`adapt-legacy-args` + `wrap-legacy-derefs`) that lets impls
-   written with the old `@arg` pattern keep working under the compile
-   executor, and the registry identity contract (`get-base-fn` returns
-   the user's raw impl despite internal wrapping)."
+  "Tests for the public `exec/` surface — registry basics, context
+   fallback, and `execute-with-named-args` validation."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.interface :as exec]
@@ -18,19 +15,14 @@
 
 
 ;; ============================================================================
-;; `register-base-fn!` + `get-base-fn` — raw-impl identity is preserved.
-;;
-;; The user passes an impl; internally we wrap it in a legacy-deref
-;; adapter. `get-base-fn` must unwrap via the `:raw-fn` metadata so
-;; equality / identity checks against the impl work.
+;; `register-base-fn!` + `get-base-fn` — registry round-trip
 ;; ============================================================================
 
-(deftest get-base-fn-returns-raw-impl
-  (testing "identity is preserved through register/get roundtrip"
+(deftest get-base-fn-returns-registered-impl
+  (testing "register/get roundtrip returns the same fn object"
     (let [impl (fn [_ _] :marker)]
       (exec/register-base-fn! :identity-probe impl)
-      (is (identical? impl (exec/get-base-fn :identity-probe)))
-      (is (= impl (exec/get-base-fn :identity-probe))))))
+      (is (identical? impl (exec/get-base-fn :identity-probe))))))
 
 
 (deftest register-nil-impl-is-noop
@@ -43,93 +35,11 @@
   (is (nil? (exec/get-base-fn :does-not-exist-123))))
 
 
-;; ============================================================================
-;; Legacy `@arg` adapter — `wrap-legacy-derefs` + `adapt-legacy-args`.
-;;
-;; Impls registered via `exec/register-base-fn!` receive arg values
-;; wrapped in Delays, so bodies like `(+ @a @b)` keep working even
-;; under the compile executor that otherwise passes thunks/literals.
-;; ============================================================================
-
-(deftest legacy-deref-basic-values
-  (testing "literal args become delays that yield the literal"
-    (let [captured (atom nil)
-          impl (fn [{:keys [x]} _]
-                 (reset! captured x)
-                 @x)]
-      (exec/register-base-fn! :legacy-echo impl)
-      (let [wrapped (exec/get-default-registry)
-            wrapped-fn (:legacy-echo wrapped)
-            result (wrapped-fn {:x 42} nil)]
-        (is (= 42 result))
-        (is (instance? clojure.lang.IDeref @captured)
-            "the value reaching the impl is a Delay (IDeref), not the raw int")
-        (is (= 42 @@captured) "forces to the underlying value")))))
-
-
-(deftest legacy-deref-missing-key-yields-nil-delay
-  (testing "keys absent from the underlying map resolve to `(delay nil)`"
-    (let [impl (fn [{:keys [present missing]} _]
-                 [@present @missing])]
-      (exec/register-base-fn! :missing-probe impl)
-      (let [wrapped-fn (:missing-probe (exec/get-default-registry))]
-        (is (= [1 nil] (wrapped-fn {:present 1} nil))
-            "missing :missing forces to nil, no NPE")))))
-
-
-(deftest legacy-deref-contains-and-seq-support
-  (testing "adapter supports `contains?`, `seq`, `count` so destructure + iteration work"
-    (let [captured (atom nil)
-          impl (fn [args _]
-                 (reset! captured
-                         {:contains-a (contains? args :a)
-                          :contains-z (contains? args :z)
-                          :count (count args)
-                          :keys (sort (map first (seq args)))}))]
-      (exec/register-base-fn! :introspect impl)
-      (let [wrapped-fn (:introspect (exec/get-default-registry))]
-        (wrapped-fn {:a 1 :b 2} nil)
-        (is (true? (:contains-a @captured)))
-        (is (false? (:contains-z @captured)))
-        (is (= 2 (:count @captured)))
-        (is (= [:a :b] (:keys @captured)))))))
-
-
-(deftest legacy-deref-forces-thunks
-  (testing "when the underlying arg is a `rt/thunk`, deref forces through it"
-    (let [impl (fn [{:keys [x]} _] @x)]
-      (exec/register-base-fn! :thunk-probe impl)
-      (let [call-count (atom 0)
-            thunked #(do (swap! call-count inc) 7)
-            thunk (with-meta thunked #:graphden.executor.runtime{:thunk true})
-            wrapped-fn (:thunk-probe (exec/get-default-registry))]
-        (is (= 7 (wrapped-fn {:x thunk} nil)))
-        (is (= 1 @call-count) "thunk fired exactly once on deref")))))
-
-
-(deftest legacy-deref-passes-ctx-through
-  (testing "ctx is delivered to the impl without wrapping"
-    (let [captured-ctx (atom nil)
-          impl (fn [_ ctx] (reset! captured-ctx ctx) :ok)]
-      (exec/register-base-fn! :ctx-probe impl)
-      (let [wrapped-fn (:ctx-probe (exec/get-default-registry))]
-        (wrapped-fn {} {:marker :ctx-value})
-        (is (= {:marker :ctx-value} @captured-ctx))))))
-
-
-(deftest legacy-deref-assoc-is-read-only
-  (testing "adapter throws on assoc — the wrapped map is a view, not a target"
-    (let [captured-ex (atom nil)
-          impl (fn [args _]
-                 (try
-                   (assoc args :new 1)
-                   (catch UnsupportedOperationException e
-                     (reset! captured-ex e)
-                     :ok)))]
-      (exec/register-base-fn! :assoc-probe impl)
-      (let [wrapped-fn (:assoc-probe (exec/get-default-registry))]
-        (is (= :ok (wrapped-fn {:x 1} nil)) "catch branch ran")
-        (is (some? @captured-ex) "assoc on the adapter throws")))))
+(deftest register-base-fn-raw-is-alias
+  (testing "the retired `register-base-fn-raw!` alias still works"
+    (let [impl (fn [_ _] :raw)]
+      (exec/register-base-fn-raw! :raw-probe impl)
+      (is (identical? impl (exec/get-base-fn :raw-probe))))))
 
 
 ;; ============================================================================
@@ -180,7 +90,7 @@
   (testing "external callers get `Unknown argument name` on typos"
     (let [storage (setup/create-test-storage)]
       (try
-        (exec/register-base-fn! :double (fn [{:keys [x]} _] (* 2 @x)))
+        (exec/register-base-fn! :double (setup/fn-impl [x] (* 2 x)))
         (let [base-fn (setup/create-base-fn! storage "double" :int)
               _ (setup/create-arg! storage (:id base-fn)
                                    {:name "x" :type :int :required true :is-fn false})
@@ -205,107 +115,3 @@
                  (exec/execute-with-named-args ctx callable {:anything 42}))))
         (finally
           (sp/close storage))))))
-
-
-;; ============================================================================
-;; Adapter methods — exercise the reify's full ILookup/Associative/IFn/
-;; IPersistentCollection/Seqable surface via direct method calls, since
-;; destructuring alone only hits `valAt`.
-;; ============================================================================
-
-(defn- adapted
-  "Register a probe fn that captures whatever adapter it receives, then
-   invoke it once to obtain the adapter instance. Lets tests poke the
-   reify's methods directly."
-  [underlying]
-  (let [captured (atom nil)]
-    (exec/register-base-fn! :adapter-probe
-                            (fn [args _] (reset! captured args) :done))
-    (let [wrapper (:adapter-probe (exec/get-default-registry))]
-      (wrapper underlying nil))
-    @captured))
-
-
-(deftest adapter-ilookup-missing-key-returns-nil-delay
-  (let [a (adapted {:present 1})]
-    (is (= 1 @(get a :present)) "present key forces to the literal")
-    (let [v (get a :absent)]
-      (is (instance? clojure.lang.IDeref v))
-      (is (nil? @v) "absent key forces to nil"))))
-
-
-(deftest adapter-ilookup-not-found-default
-  (testing "2-arity valAt: present keys force, absent keys return the default untouched"
-    (let [a (adapted {:present 1})]
-      (is (= 1 @(get a :present :sentinel)))
-      (is (= :sentinel (get a :absent :sentinel))
-          "absent returns the default directly, not a delay"))))
-
-
-(deftest adapter-associative-containsKey
-  (let [a (adapted {:a 1 :b 2})]
-    (is (contains? a :a))
-    (is (contains? a :b))
-    (is (not (contains? a :z)))))
-
-
-(deftest adapter-associative-entryAt
-  (let [a (adapted {:a 42})]
-    (let [e (clojure.lang.Associative/.entryAt a :a)]
-      (is (some? e))
-      (is (= :a (key e)))
-      (is (= 42 @(val e))))
-    (is (nil? (clojure.lang.Associative/.entryAt a :missing)))))
-
-
-(deftest adapter-associative-assoc-throws
-  (let [a (adapted {:a 1})]
-    (is (thrown? UnsupportedOperationException
-          (clojure.lang.Associative/.assoc a :new 99)))))
-
-
-(deftest adapter-count
-  (let [a (adapted {:one 1 :two 2 :three 3})]
-    (is (= 3 (count a)))))
-
-
-(deftest adapter-collection-ops-throw
-  (let [a (adapted {:a 1})]
-    (is (thrown? UnsupportedOperationException
-          (clojure.lang.IPersistentCollection/.cons a :new)))
-    (is (thrown? UnsupportedOperationException
-          (clojure.lang.IPersistentCollection/.empty a)))))
-
-
-(deftest adapter-equiv-is-always-false
-  ;; Equality comparison across the adapter isn't meaningful (the keys
-  ;; hold delays, not values). The adapter returns false from `.equiv`.
-  (let [a (adapted {:a 1})]
-    (is (not (clojure.lang.IPersistentCollection/.equiv a {:a 1})))))
-
-
-(deftest adapter-seq-materialises-entries
-  (testing "seq returns [[k Delay] ...] pairs that force to values"
-    (let [a (adapted {:a 10 :b 20})
-          entries (seq a)]
-      (is (= 2 (count entries)))
-      (is (= #{:a :b} (set (map key entries))))
-      (is (= #{10 20} (set (map (comp deref val) entries)))))))
-
-
-(deftest adapter-seq-empty-when-underlying-empty
-  (is (nil? (seq (adapted {})))))
-
-
-(deftest adapter-ifn-invoke-single-arg
-  (testing "adapter is callable as a 1-arg fn — equivalent to valAt"
-    (let [a (adapted {:k 7})]
-      (is (= 7 @(a :k)))
-      (is (nil? @(a :missing))))))
-
-
-(deftest adapter-ifn-invoke-two-arg
-  (testing "adapter as 2-arg fn returns default for absent keys"
-    (let [a (adapted {:k 7})]
-      (is (= 7 @(a :k :unused)))
-      (is (= :fallback (a :missing :fallback))))))

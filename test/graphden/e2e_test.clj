@@ -16,6 +16,8 @@
     [graphden.executor.composition.interface :as composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
+    [graphden.executor.runtime :as rt]
+    [graphden.executor.test-setup :as setup]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.versioned.schema :as vds]
     [graphden.storage.postgres.core :as pg]
@@ -58,15 +60,15 @@
         ;; Step 1: Define base functions (simulating package loading)
         (let [base-fn-defs {:const {:args {:x {:type :any :required true}}
                                     :return-type :any
-                                    :impl (fn [{:keys [x]} _] @x)}
+                                    :impl (setup/fn-impl [x] x)}
                             :add {:args {:a {:type :int :required true}
                                          :b {:type :int :required true}}
                                   :return-type :int
-                                  :impl (fn [{:keys [a b]} _] (+ @a @b))}
+                                  :impl (setup/fn-impl [a b] (+ a b))}
                             :multiply {:args {:a {:type :int :required true}
                                               :b {:type :int :required true}}
                                        :return-type :int
-                                       :impl (fn [{:keys [a b]} _] (* @a @b))}}]
+                                       :impl (setup/fn-impl [a b] (* a b))}}]
 
           ;; Step 2: Initialize registry with base functions
           (registry/initialize-all! storage (mapv (fn [[k v]] {k v}) base-fn-defs))
@@ -106,11 +108,11 @@
         (registry/initialize-all! storage
                                   [{:const {:args {:x {:type :any :required true}}
                                             :return-type :any
-                                            :impl (fn [{:keys [x]} _] @x)}}
+                                            :impl (setup/fn-impl [x] x)}}
                                    {:add {:args {:a {:type :int :required true}
                                                  :b {:type :int :required true}}
                                           :return-type :int
-                                          :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+                                          :impl (setup/fn-impl [a b] (+ a b))}}])
 
         ;; Create initial fn on main branch
         (composition/sync-fns-to-storage! storage
@@ -169,26 +171,26 @@
         (registry/initialize-all! storage
                                   [{:const {:args {:x {:type :any :required true}}
                                             :return-type :any
-                                            :impl (fn [{:keys [x]} _] @x)}}
+                                            :impl (setup/fn-impl [x] x)}}
                                    {:inc {:args {:n {:type :int :required true}}
                                           :return-type :int
-                                          :impl (fn [{:keys [n]} _] (inc @n))}}
+                                          :impl (setup/fn-impl [n] (inc n))}}
                                    {:double {:args {:n {:type :int :required true}}
                                              :return-type :int
-                                             :impl (fn [{:keys [n]} _] (* 2 @n))}}
+                                             :impl (setup/fn-impl [n] (* 2 n))}}
                                    {:add {:args {:a {:type :int :required true}
                                                  :b {:type :int :required true}}
                                           :return-type :int
-                                          :impl (fn [{:keys [a b]} _] (+ @a @b))}}
+                                          :impl (setup/fn-impl [a b] (+ a b))}}
                                    ;; Compose two unary int->int functions
                                    {:compose-unary {:args {:f {:type :fn :required true}
                                                            :g {:type :fn :required true}
                                                            :x {:type :int :required true}}
                                                     :return-type :int
-                                                    :impl (fn [{:keys [f g x]} ctx]
-                                                            (let [inner-result (exec/execute-with-named-args ctx @f {:n @x})
-                                                                  outer-result (exec/execute-with-named-args ctx @g {:n inner-result})]
-                                                              outer-result))}}])
+                                                    :impl (setup/fn-impl [f g x]
+                                                                         (let [inner-result (exec/execute-with-named-args ctx f {:n x})
+                                                                               outer-result (exec/execute-with-named-args ctx g {:n inner-result})]
+                                                                           outer-result))}}])
 
         ;; Create composition: double(inc(5)) = double(6) = 12
         (composition/sync-fns-to-storage! storage
@@ -220,25 +222,27 @@
         (registry/initialize-all! storage
                                   [{:const {:args {:x {:type :any :required true}}
                                             :return-type :any
-                                            :impl (fn [{:keys [x]} _] @x)}}
+                                            :impl (setup/fn-impl [x] x)}}
                                    {:left-branch {:args {:x {:type :any :required true}}
                                                   :return-type :any
-                                                  :impl (fn [{:keys [x]} _]
-                                                          (reset! left-called true)
-                                                          @x)}}
+                                                  :impl (setup/fn-impl [x]
+                                                                       (reset! left-called true)
+                                                                       x)}}
                                    {:right-branch {:args {:x {:type :any :required true}}
                                                    :return-type :any
-                                                   :impl (fn [{:keys [x]} _]
-                                                           (reset! right-called true)
-                                                           @x)}}
+                                                   :impl (setup/fn-impl [x]
+                                                                        (reset! right-called true)
+                                                                        x)}}
                                    ;; if-fn: returns then-val if cond is truthy, else else-val
                                    {:if-fn {:args {:condition {:type :bool :required true}
                                                    :then-val {:type :any :required true}
                                                    :else-val {:type :any :required true}}
                                             :return-type :any
                                             :lazy #{:then-val :else-val}
-                                            :impl (fn [{:keys [condition then-val else-val]} _]
-                                                    (if @condition @then-val @else-val))}}])
+                                            :impl (setup/fn-impl [condition]
+                                                                 (if condition
+                                                                   (rt/resolve-arg args :then-val)
+                                                                   (rt/resolve-arg args :else-val)))}}])
 
         (composition/sync-fns-to-storage! storage
                                           [{:name :true-val :parent :const :args {:x true}}
@@ -279,7 +283,7 @@
         (registry/initialize-all! storage
                                   [{:const {:args {:x {:type :any :required true}}
                                             :return-type :any
-                                            :impl (fn [{:keys [x]} _] @x)}}
+                                            :impl (setup/fn-impl [x] x)}}
                                    {:failing-fn {:args {:x {:type :any :required true}}
                                                  :return-type :any
                                                  :impl (fn [_ _]
@@ -287,7 +291,7 @@
                                                                          {:type :test-error})))}}
                                    {:wrapper {:args {:inner {:type :any :required true}}
                                               :return-type :any
-                                              :impl (fn [{:keys [inner]} _] @inner)}}])
+                                              :impl (setup/fn-impl [inner] inner)}}])
 
         (composition/sync-fns-to-storage! storage
                                           [{:name :will-fail :parent :failing-fn :args {:x 1}}
@@ -315,7 +319,7 @@
         (registry/initialize-all! storage
                                   [{:const {:args {:x {:type :any :required true}}
                                             :return-type :any
-                                            :impl (fn [{:keys [x]} _] @x)}}])
+                                            :impl (setup/fn-impl [x] x)}}])
 
         ;; Create initial fn on main
         (composition/sync-fns-to-storage! storage
@@ -350,11 +354,11 @@
         (registry/initialize-all! storage
                                   [{:const {:args {:x {:type :any :required true}}
                                             :return-type :any
-                                            :impl (fn [{:keys [x]} _] @x)}}
+                                            :impl (setup/fn-impl [x] x)}}
                                    {:add {:args {:a {:type :int :required true}
                                                  :b {:type :int :required true}}
                                           :return-type :int
-                                          :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+                                          :impl (setup/fn-impl [a b] (+ a b))}}])
 
         ;; Create diamond dependency: result depends on both left and right,
         ;; which both depend on base

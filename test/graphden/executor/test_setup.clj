@@ -25,6 +25,37 @@
 
 
 ;; ============================================================================
+;; Impl helper — inline `defbase`-style for test registration
+;; ============================================================================
+
+(defmacro fn-impl
+  "Build an anonymous base-fn impl whose body references args by name,
+   mirroring `defbase` but inline. Equivalent to:
+
+     (fn [args ctx]
+       (let [a (rt/resolve-arg args :a)
+             b (rt/resolve-arg args :b)]
+         body))
+
+   The symbols `args` and `ctx` are bound by the generated fn and
+   accessible from the body — useful for HOF impls that need ctx
+   (`(exec/make-single-arg-callable ctx some-fn)`) or lazy impls that
+   want to skip the eager resolve for specific keys
+   (`(rt/resolve-arg args :then-branch)` inside an `if`).
+
+   Use in tests instead of `(fn [{:keys [a b]} _] (+ @a @b))` — the
+   latter relies on the legacy-deref adapter which production no longer
+   pays for on the hot path."
+  [arg-syms & body]
+  (let [let-bindings (mapcat (fn [s] [s `(rt/resolve-arg ~'args ~(keyword s))]) arg-syms)]
+    `(fn [~'args ~'ctx]
+       (let [~'ctx ~'ctx               ; keep kondo quiet for bodies that ignore ctx
+             ~'args ~'args             ; and same for args if the body only names resolved syms
+             ~@let-bindings]
+         ~@body))))
+
+
+;; ============================================================================
 ;; Container Management
 ;; ============================================================================
 

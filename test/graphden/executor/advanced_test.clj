@@ -38,8 +38,8 @@
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn!
               :use-any
-              (fn [{:keys [data]} _ctx]
-                @data))
+              (setup/fn-impl [data]
+                             data))
           ;; Create base fn
           base-fn (setup/create-base-fn! storage "use-any" :any)
           ;; Create arg for base fn
@@ -106,8 +106,8 @@
     (let [storage (setup/create-test-storage)
           _ (exec/register-base-fn!
               :use-timestamp
-              (fn [{:keys [ts]} _ctx]
-                @ts))
+              (setup/fn-impl [ts]
+                             ts))
           ;; Create base fn
           base-fn (setup/create-base-fn! storage "use-timestamp" :timestamptz)
           ;; Create arg for base fn

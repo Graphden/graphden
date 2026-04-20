@@ -62,10 +62,10 @@
                                      :headers :jsonb
                                      :body :any}
                               :return-type :jsonb
-                              :impl (fn [{:keys [status headers body]} _]
-                                      {:status @status
-                                       :headers @headers
-                                       :body @body})}}])
+                              :impl (setup/fn-impl [status headers body]
+                                                   {:status status
+                                                    :headers headers
+                                                    :body body})}}])
           ;; Two single-parent fns binding orthogonal args
           ;; - ok-record:    binds status=200          (free: headers, body)
           ;; - json-record:  binds headers={CT json}   (free: status, body)

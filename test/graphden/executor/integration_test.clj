@@ -35,10 +35,10 @@
         (registry/initialize-all! storage
                                   [{:const {:args {:x :any}
                                             :return-type :any
-                                            :impl (fn [{:keys [x]} _] @x)}}
+                                            :impl (setup/fn-impl [x] x)}}
                                    {:add {:args {:a :int :b :int}
                                           :return-type :int
-                                          :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+                                          :impl (setup/fn-impl [a b] (+ a b))}}])
 
         ;; Define composed functions using fn-composition
         (fn-composition/sync-fns-to-storage! storage
@@ -69,12 +69,12 @@
         (registry/initialize-all! storage
                                   [{:counted-const {:args {:x :any}
                                                     :return-type :any
-                                                    :impl (fn [{:keys [x]} _]
-                                                            (swap! call-count inc)
-                                                            @x)}}
+                                                    :impl (setup/fn-impl [x]
+                                                                         (swap! call-count inc)
+                                                                         x)}}
                                    {:add {:args {:a :int :b :int}
                                           :return-type :int
-                                          :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+                                          :impl (setup/fn-impl [a b] (+ a b))}}])
 
         ;; Define functions where same fn-usage is used twice
         (fn-composition/sync-fns-to-storage! storage
@@ -114,10 +114,10 @@
         (registry/initialize-all! storage
                                   [{:multiply {:args {:a :int :b :int}
                                                :return-type :int
-                                               :impl (fn [{:keys [a b]} _] (* @a @b))}}
+                                               :impl (setup/fn-impl [a b] (* a b))}}
                                    {:const {:args {:x :any}
                                             :return-type :any
-                                            :impl (fn [{:keys [x]} _] @x)}}])
+                                            :impl (setup/fn-impl [x] x)}}])
 
         ;; Create nested composition: (2 * (3 * 4)) = 24
         (fn-composition/sync-fns-to-storage! storage

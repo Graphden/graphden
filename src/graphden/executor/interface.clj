@@ -98,7 +98,6 @@
     [graphden.executor.context :as ctx]
     [graphden.executor.core :as core]
     [graphden.executor.registry :as registry]
-    [graphden.executor.runtime :as rt]
     [graphden.executor.types :as types]))
 
 
@@ -130,145 +129,38 @@
 
 ;; === Base Functions Registry ===
 
-(defn- adapt-legacy-args
-  "Return a map view of `args` whose every value is a `Delay` that forces
-   via `rt/resolve-arg`. Keys present in `args` get their resolved value;
-   keys NOT present yield a `(delay nil)`, matching legacy SmartDelay
-   semantics for unprovided-optional args so bodies like
-   `(when-let [s @suffix] …)` keep working.
-
-   Returns a `PersistentHashMap` (via `with-meta`-compatible construction)
-   so `contains?`, destructuring, `seq`, and `count` all behave like a
-   normal map. The downside: we have to enumerate keys up front. We cover
-   every key in `args`; missing keys resolve lazily via a default fallback
-   proxy below."
-  [args]
-  (let [nil-delay (delay nil)]
-    (reify
-      clojure.lang.ILookup
-      (valAt
-        [_ k]
-        (if (contains? args k)
-          (delay (rt/resolve-arg args k))
-          nil-delay))
-
-      (valAt
-        [_ k not-found]
-        (if (contains? args k)
-          (delay (rt/resolve-arg args k))
-          not-found))
-
-
-      clojure.lang.Associative
-
-      (containsKey [_ k] (contains? args k))
-
-      (entryAt
-        [_ k]
-        (when (contains? args k)
-          (clojure.lang.MapEntry/create k (delay (rt/resolve-arg args k)))))
-
-      (assoc [_ _ _] (throw (UnsupportedOperationException. "read-only")))
-
-
-      clojure.lang.IPersistentCollection
-
-      (count [_] (count args))
-
-      (cons [_ _] (throw (UnsupportedOperationException. "read-only")))
-
-      (empty [_] (throw (UnsupportedOperationException. "read-only")))
-
-      (equiv [_ _] false)
-
-
-      clojure.lang.Seqable
-
-      (seq
-        [_]
-        (seq (map (fn [[k _v]]
-                    (clojure.lang.MapEntry/create k (delay (rt/resolve-arg args k))))
-                  args)))
-
-
-      clojure.lang.IFn
-
-      (invoke
-        [_ k]
-        (if (contains? args k)
-          (delay (rt/resolve-arg args k))
-          nil-delay))
-
-      (invoke
-        [_ k not-found]
-        (if (contains? args k)
-          (delay (rt/resolve-arg args k))
-          not-found)))))
-
-
-(defn- wrap-legacy-derefs
-  "Wrap an impl so bodies that use the legacy `@arg` deref pattern still
-   work under the compile executor. The compile path passes thunks
-   (for refs), plain values (for literals / free-args), or IDeref
-   (rarely); the adapter re-wraps each arg as a Delay that forces via
-   `rt/resolve-arg`. Production impls from `defbase` bypass this — they
-   use `rt/resolve-arg` directly, which handles all three shapes.
-
-   The raw impl is attached as `:raw-fn` metadata so callers that
-   identity-compare can reach it via `get-base-fn`."
-  [f]
-  (with-meta
-    (fn [args ctx] (f (adapt-legacy-args args) ctx))
-    {:raw-fn f}))
-
-
-(defn- unwrap
-  "Return the raw user-registered impl (bypassing the legacy-deref
-   adapter) when the wrapper carries `:raw-fn` metadata."
-  [f]
-  (or (some-> f meta :raw-fn) f))
-
-
 (defn register-base-fn!
   "Registers a base function in the global registry.
    fn-name is a keyword (e.g. :add, :if, :map).
    f is a function that takes [args context] and returns a value.
 
-   Arguments are wrapped as `delay` objects so legacy-style `@arg`
-   deref still works. Prefer the `defbase` macro in
-   `graphden.executor.defbase` — it walks the body at compile time and
-   substitutes arg symbols with `rt/resolve-arg` calls, no manual deref
-   required; in that case use `register-base-fn-raw!` to skip the
-   redundant adapter.
+   Impls are called with the raw args map — no delay wrapping. Use
+   `rt/resolve-arg` to extract values (or the `defbase` macro in
+   `graphden.executor.defbase`, which walks the body at compile time
+   and substitutes arg symbols with `rt/resolve-arg` calls).
 
-   A nil impl registers nil (no-op), matching the pre-refactor contract
-   that callers relying on `:impl` being absent still get `nil` back.
+   A nil impl registers nil — matches the pre-refactor contract for
+   callers passing fn-defs where `:impl` is absent.
 
-   Example (legacy-style, still supported):
-   (register-base-fn! :add (fn [{:keys [a b]} ctx]
-                             (+ @a @b)))"
-  [fn-name f]
-  (registry/register-base-fn! fn-name (when f (wrap-legacy-derefs f))))
-
-
-(defn register-base-fn-raw!
-  "Registers a base function *without* the legacy-deref adapter. Use for
-   impls that already handle their args directly — production `defbase`
-   outputs (which use `rt/resolve-arg`) and anything else that doesn't
-   rely on Clojure-style `@arg` deref.
-
-   Skipping the adapter removes one reify + one delay-per-arg per
-   invocation from the hot path."
+   Example:
+   (register-base-fn! :add (fn [args _]
+                             (+ (rt/resolve-arg args :a)
+                                (rt/resolve-arg args :b))))"
   [fn-name f]
   (registry/register-base-fn! fn-name f))
 
 
+;; Retired alias — kept briefly for any callers that grew around the
+;; pre-refactor raw/wrap split. `register-base-fn!` already delegates
+;; straight to the registry with no adapter.
+(def register-base-fn-raw! register-base-fn!)
+
+
 (defn get-base-fn
   "Gets a base function from the registry by name.
-   Returns nil if not found. Returns the user's raw impl (not the
-   internal legacy-deref adapter) so identity comparisons match."
+   Returns nil if not found."
   [fn-name]
-  (some-> (registry/get-base-fn fn-name) unwrap))
+  (registry/get-base-fn fn-name))
 
 
 (defn clear-base-fns!
@@ -291,11 +183,9 @@
 
 (defn get-base-fn-from-context
   "Gets a base function from the context's registry by name.
-   Returns nil if not found. Unwraps the legacy-deref adapter so the
-   returned value identity-matches what callers passed to
-   `register-base-fn!`."
+   Returns nil if not found."
   [context fn-name]
-  (some-> (registry/get-base-fn-from-context context fn-name) unwrap))
+  (registry/get-base-fn-from-context context fn-name))
 
 
 ;; === Type Hints ===

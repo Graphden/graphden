@@ -31,7 +31,7 @@
   (testing "a fresh context has nil registry; accessing builds it on demand"
     (let [storage (setup/create-test-storage)]
       (try
-        (exec/register-base-fn! :add (fn [{:keys [a b]} _] (+ @a @b)))
+        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
         (setup/setup-add-function! storage)
         (let [ctx (exec/create-context {:storage storage})]
           (is (nil? @(:compiled-registry ctx)) "fresh — nothing compiled yet")
@@ -53,7 +53,7 @@
   (testing "manual `rebuild!` re-reads storage and replaces atom contents"
     (let [storage (setup/create-test-storage)]
       (try
-        (exec/register-base-fn! :add (fn [{:keys [a b]} _] (+ @a @b)))
+        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
         (setup/setup-add-function! storage)
         (let [ctx (exec/create-context {:storage storage})
               reg-1 (cr/registry ctx)
@@ -140,7 +140,7 @@
   (testing "arg-ids are resolved to external names via `arg-ext-name`"
     (let [storage (setup/create-test-storage)]
       (try
-        (exec/register-base-fn! :add (fn [{:keys [a b]} _] (+ @a @b)))
+        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
         (let [{:keys [arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
               ctx (exec/create-context {:storage storage})]
           (is (= 11 (cr/execute-with-arg-ids ctx (:id composed-fn)
@@ -186,7 +186,7 @@
   (testing "single-free-arg target: callable routes item under that arg name"
     (let [storage (setup/create-test-storage)]
       (try
-        (exec/register-base-fn! :double (fn [{:keys [x]} _] (* 2 @x)))
+        (exec/register-base-fn! :double (setup/fn-impl [x] (* 2 x)))
         (let [base-fn (setup/create-base-fn! storage "double" :int)
               _ (setup/create-arg! storage (:id base-fn)
                                    {:name "x" :type :int :required true :is-fn false})
@@ -221,7 +221,7 @@
   (testing "target with >1 free arg throws — use `make-single-arg-callable` instead"
     (let [storage (setup/create-test-storage)]
       (try
-        (exec/register-base-fn! :add (fn [{:keys [a b]} _] (+ @a @b)))
+        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
         (let [{:keys [composed-fn]} (setup/setup-add-function! storage)
               ctx (exec/create-context {:storage storage})]
           (is (thrown-with-msg? clojure.lang.ExceptionInfo
@@ -252,7 +252,7 @@
   (testing "value is injected under `arg-name` regardless of target's free args"
     (let [storage (setup/create-test-storage)]
       (try
-        (exec/register-base-fn! :echo (fn [{:keys [payload]} _] @payload))
+        (exec/register-base-fn! :echo (setup/fn-impl [payload] payload))
         (let [base-fn (setup/create-base-fn! storage "echo" :any)
               _ (setup/create-arg! storage (:id base-fn)
                                    {:name "payload" :type :any :required true :is-fn false})
@@ -266,7 +266,7 @@
   (testing "accepts string arg-name (coerced to keyword)"
     (let [storage (setup/create-test-storage)]
       (try
-        (exec/register-base-fn! :echo (fn [{:keys [payload]} _] @payload))
+        (exec/register-base-fn! :echo (setup/fn-impl [payload] payload))
         (let [base-fn (setup/create-base-fn! storage "echo" :any)
               _ (setup/create-arg! storage (:id base-fn)
                                    {:name "payload" :type :any :required true :is-fn false})

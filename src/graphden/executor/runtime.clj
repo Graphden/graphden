@@ -40,10 +40,8 @@
   "Return the resolved value for `arg-key` in `args`.
 
    Handles three cases:
-   - `thunk?` — call it (compile.clj ref wrapping).
-   - `IDeref` — `@` it (legacy queue.clj passes args as `SmartDelay`; kept
-     through the impl migration so `defbase` impls run under both
-     executors).
+   - `thunk?` — call it (compile-produced ref wrapping).
+   - `IDeref` — `@` it (test code often passes `(delay …)` literals).
    - otherwise — return as-is."
   [args arg-key]
   (let [v (get args arg-key)]
@@ -56,18 +54,12 @@
 (defn hof-callable
   "Resolve an `:fn`-type arg into an invokable callable for HOF impls.
 
-   - New compile model: value is already an HOF-wrapped Clojure fn
-     (produced by `compile/hof-wrap`). Return as-is.
-   - Legacy queue model path A: value is a `SmartDelay` whose deref
-     yields a raw fn-id. Deref, then wrap via `make-single-arg-callable`.
-   - Legacy queue model path B: the loader's `wrap-impl` deref'd the arg
-     already before calling us, so we see a raw UUID directly. Same
-     wrapping via `make-single-arg-callable`.
+   - Compile-produced HOF wrapper (already a callable) → return as-is.
+   - Raw fn-id (UUID, or an `IDeref` wrapping one from test code) →
+     wrap via `make-single-arg-callable`.
 
    `make-single-arg-callable` is resolved lazily to avoid a require-cycle
-   (runtime.clj sits below executor/interface.clj). `ctx` is required for
-   the legacy paths; new-executor callers pass whatever they like since
-   those paths fall through."
+   (runtime.clj sits below executor/interface.clj)."
   [args arg-key ctx]
   (let [v (get args arg-key)
         wrap-fn-id (fn [fn-id]

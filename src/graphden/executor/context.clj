@@ -1,10 +1,5 @@
 (ns graphden.executor.context
-  "Execution context for the function executor.
-
-   Slim record after the legacy-queue retirement — only fields the
-   compile-at-startup executor actually consults are kept. Re-add
-   runtime-limit fields (`:max-depth`, `:timeout-ms`, result-cache
-   bounds) once compile enforces them."
+  "Execution context for the function executor."
   (:require
     [graphden.executor.registry :as registry]
     [graphden.storage.protocol.core :as sp]))
@@ -16,9 +11,6 @@
   [storage          ; Storage instance implementing ExecutionGraph.
    base-fns         ; {fn-name-keyword → impl-fn} — read by compile.
    clock            ; Zero-arg fn returning current time in ms (testability).
-   graph-cache      ; Atom: {fn-id → execution-graph} shared across requests.
-   ;; `resolve-execution-graph` is deterministic per fn-id
-   ;; between syncs, so memoising is safe.
    compiled-registry]) ; Atom: {fn-id → compiled-closure} or nil. Populated
 ;; by the compile system at startup; `execute` reads from it on the hot
 ;; path.
@@ -57,23 +49,7 @@
   (->ExecutionContext storage
                       (or base-fns (registry/get-default-registry))
                       (or clock #(System/currentTimeMillis))
-                      (atom {})
                       (atom nil)))
-
-
-(defn resolve-graph-cached
-  "Resolve an execution graph, reusing a cached result when available.
-   The cache is keyed by fn-id and shared across a context's lifetime
-   (created once in `create-context`, reused across all HTTP requests).
-   Fn graphs don't change between syncs, so a memoised result stays
-   valid as long as the JVM runs."
-  [context fn-id]
-  (let [cache (:graph-cache context)]
-    (if (and cache (contains? @cache fn-id))
-      (get @cache fn-id)
-      (let [graph (sp/resolve-execution-graph (:storage context) fn-id)]
-        (when cache (swap! cache assoc fn-id graph))
-        graph))))
 
 
 (defn current-time-ms

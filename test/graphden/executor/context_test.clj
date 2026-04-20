@@ -1,6 +1,6 @@
 (ns graphden.executor.context-test
   "Tests for `graphden.executor.context/create-context` — validation,
-   defaults, and context helpers (current-time-ms, resolve-graph-cached)."
+   defaults, and `current-time-ms`."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
     [graphden.executor.context :as ctx]
@@ -45,9 +45,7 @@
         (is (fn? (:clock c)))
         (is (some? (:base-fns c)) "base-fns defaults to the global registry")
         (is (instance? clojure.lang.Atom (:compiled-registry c)))
-        (is (instance? clojure.lang.Atom (:graph-cache c)))
-        (is (nil? @(:compiled-registry c)) "compiled-registry starts empty")
-        (is (empty? @(:graph-cache c)) "graph-cache starts empty"))
+        (is (nil? @(:compiled-registry c)) "compiled-registry starts empty"))
       (finally
         (sp/close storage)))))
 
@@ -76,39 +74,3 @@
         (is (= custom (:base-fns c))))
       (finally
         (sp/close storage)))))
-
-
-;; ============================================================================
-;; `resolve-graph-cached` — graph-cache memoization
-;; ============================================================================
-
-(deftest resolve-graph-cached-populates-cache-on-first-call
-  (testing "the graph cache memoises `resolve-execution-graph` per fn-id"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (exec/register-base-fn! :const-42 (fn [_ _] 42))
-        (let [base-fn (setup/create-base-fn! storage "const-42" :int)
-              composed (setup/create-composed-fn! storage "c42" (:id base-fn))
-              c (ctx/create-context {:storage storage})]
-          (is (empty? @(:graph-cache c)) "starts empty")
-          (let [graph-1 (ctx/resolve-graph-cached c (:id composed))
-                graph-2 (ctx/resolve-graph-cached c (:id composed))]
-            (is (= 1 (count @(:graph-cache c))) "one entry cached")
-            (is (identical? graph-1 graph-2)
-                "second call returns the cached graph")))
-        (finally
-          (sp/close storage))))))
-
-
-(deftest resolve-graph-cached-without-cache-still-works
-  (testing "context missing `:graph-cache` atom still resolves (no caching path)"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (exec/register-base-fn! :const-1 (fn [_ _] 1))
-        (let [base-fn (setup/create-base-fn! storage "const-1" :int)
-              composed (setup/create-composed-fn! storage "cached-off" (:id base-fn))
-              c (dissoc (ctx/create-context {:storage storage}) :graph-cache)
-              graph (ctx/resolve-graph-cached c (:id composed))]
-          (is (some? graph) "still returns a resolved graph"))
-        (finally
-          (sp/close storage))))))

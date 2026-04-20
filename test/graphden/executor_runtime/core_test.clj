@@ -294,7 +294,6 @@
           (is (contains? ctx :storage))
           (is (contains? ctx :base-fns))
           (is (contains? ctx :clock))
-          (is (contains? ctx :graph-cache))
           (is (contains? ctx :compiled-registry)))
         (finally
           (ig/halt! system))))))

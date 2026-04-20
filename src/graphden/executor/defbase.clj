@@ -19,13 +19,13 @@
    The macro walks the body AST and replaces each arg-symbol with
    `(rt/resolve-arg __args :arg-name)`. That helper handles:
    - Thunks (from compile.clj) → call them.
-   - `IDeref` values (legacy queue SmartDelay) → deref.
+   - `IDeref` values (test-supplied delays) → deref.
    - Everything else → return as-is.
 
-   For `:fn`-typed args (HOF), the loader's `wrap-impl` pre-wraps the
-   value into an invokable callable before the impl ever runs, so impls
-   uniformly write `(mapv func coll)` without worrying about whether
-   `func` is a compiled closure, a fn-id, or a SmartDelay.
+   For `:fn`-typed args (HOF), the callable is resolved via
+   `rt/hof-callable` so impls uniformly write `(mapv func coll)`
+   without worrying about whether `func` is a compiled closure or a
+   raw fn-id.
 
    In-place symbol substitution preserves Clojure's natural short-circuit
    for `if`/`and`/`or`/`when`/`cond`.

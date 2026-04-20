@@ -6,6 +6,7 @@
   (:require
     [clojure.test :refer [deftest is testing]]
     [graphden.executor.compile :as c]
+    [graphden.executor.compile.lookups :as l]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.executor.runtime :as rt]))
 
@@ -154,7 +155,7 @@
   (let [a (random-uuid), b (random-uuid), c (random-uuid)
         fns [(mk-fn a :a) (mk-fn b :b a) (mk-fn c :c b)]
         {:keys [fn-map]} (c/build-lookups fns [])]
-    (is (= [c b a] (#'c/inheritance-chain c fn-map)))
+    (is (= [c b a] (l/inheritance-chain c fn-map)))
     (is (= :a (:name (c/base-fn-of c fn-map))))
     (is (= :a (:name (c/base-fn-of b fn-map))))
     (is (= :a (:name (c/base-fn-of a fn-map))))))

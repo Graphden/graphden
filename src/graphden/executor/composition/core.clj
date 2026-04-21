@@ -36,174 +36,10 @@
   (:require
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.parsing :as parsing]
+    [graphden.executor.composition.source-chain :as sc]
     [graphden.executor.composition.validation :as validation]
     [graphden.executor.registry.interface :as registry]
     [graphden.storage.protocol.core :as sp]))
-
-
-;; === Free Argument Propagation ===
-
-(defn- free-arg?
-  "Returns true if the arg is 'free' (has no value and no ref-id)."
-  [arg]
-  (and (nil? (:value arg))
-       (nil? (:ref-id arg))))
-
-
-(defn- partition-args-by-freedom
-  "Partitions args into {:free-args [...] :bound-args [...]} in single pass.
-   Free args have no value and no ref-id; bound args have either."
-  [args]
-  (reduce (fn [acc arg]
-            (if (free-arg? arg)
-              (update acc :free-args conj arg)
-              (update acc :bound-args conj arg)))
-          {:free-args [] :bound-args []}
-          args))
-
-
-(defn- resolve-arg-name-cached
-  "Resolves arg name by following source-id chain using args-by-id index.
-   If arg has :name, returns it. Otherwise follows source-id to find name.
-   Returns string name or nil if not resolvable.
-
-   Uses O(1) lookup via args-by-id index instead of O(F×A) scan."
-  [args-by-id arg depth]
-  (when (> depth sp/*max-graph-iterations*)
-    (throw (ex-info "Source-id chain too deep while resolving arg name"
-                    {:type :fn-composition/source-chain-too-deep
-                     :arg-id (:id arg)
-                     :max-depth sp/*max-graph-iterations*})))
-  (if-let [arg-name (:name arg)]
-    arg-name
-    (when-let [source-id (:source-id arg)]
-      ;; O(1) lookup by arg-id
-      (when-let [source-arg (get args-by-id source-id)]
-        (recur args-by-id source-arg (inc depth))))))
-
-
-(defn- collect-source-id-chain
-  "Follows source-id chain from an arg-id and collects all arg-ids in the chain.
-   Returns a set of arg-ids including the starting arg-id.
-   Used to determine which args should be shadowed when a child explicitly binds an arg."
-  [args-by-id arg-id]
-  (loop [current-id arg-id
-         ids #{}
-         depth 0]
-    (if (or (nil? current-id) (> depth 100))
-      ids
-      (let [arg (get args-by-id current-id)]
-        (recur (:source-id arg)
-               (conj ids current-id)
-               (inc depth))))))
-
-
-(defn- terminal-source-id
-  "Walks the source-id chain from arg to find the root arg id (one with no source-id).
-   Returns the id of the root arg, or arg's own id if it has no source-id chain.
-   Used to identify free args that are propagated copies of the same root arg
-   across multiple inheritance branches."
-  [args-by-id arg]
-  (loop [current arg
-         depth 0]
-    (when (> depth sp/*max-graph-iterations*)
-      (throw (ex-info "Source-id chain too deep while finding terminal source"
-                      {:type :fn-composition/source-chain-too-deep
-                       :arg-id (:id arg)
-                       :max-depth sp/*max-graph-iterations*})))
-    (if-let [src-id (:source-id current)]
-      (if-let [src-arg (get args-by-id src-id)]
-        (recur src-arg (inc depth))
-        (:id current))
-      (:id current))))
-
-
-(defn- collect-free-args-from-fn
-  "Collects all free args from a fn by following ref-id chains.
-   Returns a vector of free arg entities.
-
-   Free args come from:
-   1. Direct free args on this fn
-   2. Free args from fns referenced in arg values (via ref-id)
-
-   args-data contains :by-fn and :by-id indexes."
-  [fn-cache args-data fn-id visited-fns depth]
-  (when (> depth sp/*max-graph-iterations*)
-    (throw (ex-info "Free arg collection chain too deep"
-                    {:type :fn-composition/chain-too-deep
-                     :fn-id fn-id
-                     :max-depth sp/*max-graph-iterations*})))
-  (if (contains? visited-fns fn-id)
-    ;; Cycle detected, return empty to avoid infinite loop
-    []
-    (let [visited' (conj visited-fns fn-id)
-          fn-args (get (:by-fn args-data) fn-id [])
-          {:keys [free-args bound-args]} (partition-args-by-freedom fn-args)]
-      ;; Free args are:
-      ;; 1. Own free args
-      ;; 2. Free args from fns referenced via ref-id (recursively)
-      (into free-args
-            (mapcat (fn [arg]
-                      (when-let [ref-fn-id (:ref-id arg)]
-                        (collect-free-args-from-fn fn-cache args-data ref-fn-id visited' (inc depth)))))
-            bound-args))))
-
-
-(defn- collect-parent-free-args-for-one
-  "Collects free args from a single parent fn (internal helper)."
-  [fn-cache args-data parent-fn-id depth]
-  (when (> depth sp/*max-graph-iterations*)
-    (throw (ex-info "Parent chain too deep while collecting free args"
-                    {:type :fn-composition/parent-chain-too-deep
-                     :parent-fn-id parent-fn-id
-                     :max-depth sp/*max-graph-iterations*})))
-  (let [fn-args (get (:by-fn args-data) parent-fn-id [])
-        {:keys [free-args bound-args]} (partition-args-by-freedom fn-args)
-        ;; Collect free args from referenced fns (only bound args have ref-id)
-        ref-free-args (mapcat (fn [arg]
-                                (when-let [ref-fn-id (:ref-id arg)]
-                                  (collect-free-args-from-fn fn-cache args-data ref-fn-id #{} (inc depth))))
-                              bound-args)]
-    (into free-args ref-free-args)))
-
-
-(defn- collect-parent-free-args
-  "Collects free args from all parent fns.
-   Returns vector of arg entities that are free in the parents.
-
-   Accepts a collection of parent fn-ids (multiple inheritance).
-   args-data contains :by-fn and :by-id indexes.
-
-   Dedupes by [terminal-source-id, resolved-name]. With diamond inheritance
-   (two parents sharing a common ancestor), the same root free arg is
-   reachable via both parents as different propagated arg entities — they
-   must collapse to one. But the cascade pattern (pair-1, pair, triple, ...)
-   intentionally creates multiple propagated copies of the same root arg
-   under different rename targets (item1, item2, item3, ...), so the
-   resolved name is part of the dedup key to keep them distinct.
-
-   Dedupes by [terminal-source-id, resolved-name]. With diamond inheritance
-   (two parents sharing a common ancestor), the same root free arg is
-   reachable via both parents as different propagated arg entities — they
-   must collapse to one. But the cascade pattern (pair-1, pair, triple, ...)
-   intentionally creates multiple propagated copies of the same root arg
-   under different rename targets (item1, item2, item3, ...), so the
-   resolved name is part of the dedup key to keep them distinct."
-  [fn-cache args-data parent-fn-ids depth]
-  (let [args-by-id (:by-id args-data)
-        seen (atom #{})]
-    (into []
-          (comp
-            (mapcat (fn [pid]
-                      (collect-parent-free-args-for-one fn-cache args-data pid depth)))
-            (remove (fn [a]
-                      (let [root (terminal-source-id args-by-id a)
-                            resolved-name (resolve-arg-name-cached args-by-id a 0)
-                            k [root resolved-name]]
-                        (if (contains? @seen k)
-                          true
-                          (do (swap! seen conj k) false))))))
-          (remove nil? parent-fn-ids))))
 
 
 (defn- preload-all-args
@@ -258,7 +94,7 @@
             (recur rest-q visited (inc iter))
             (let [fn-args (get (:by-fn args-data) fn-id [])
                   ;; Match by resolved name using O(1) by-id lookup
-                  found (some #(when (= (resolve-arg-name-cached args-by-id % 0) arg-name-str) %)
+                  found (some #(when (= (sc/resolve-arg-name-cached args-by-id % 0) arg-name-str) %)
                               fn-args)]
               (or found
                   ;; Not found on this fn, enqueue all parent fns
@@ -297,11 +133,11 @@
         ;; Not in parent chain - search in propagated free args from refs
         ;; Single pass: find free-arg match first, else first any-match
         ;; Use resolved names for matching with O(1) by-id lookup
-        (let [parent-free-args (collect-parent-free-args fn-cache args-data parent-fn-ids 0)
+        (let [parent-free-args (sc/collect-parent-free-args fn-cache args-data parent-fn-ids 0)
               found (reduce (fn [first-match arg]
-                              (let [resolved-name (resolve-arg-name-cached args-by-id arg 0)]
+                              (let [resolved-name (sc/resolve-arg-name-cached args-by-id arg 0)]
                                 (if (= resolved-name arg-name-str)
-                                  (if (free-arg? arg)
+                                  (if (sc/free-arg? arg)
                                     (reduced arg)           ; Free arg - best match, stop
                                     (or first-match arg))   ; Keep first non-free as fallback
                                   first-match)))
@@ -313,7 +149,7 @@
                               {:type :fn-composition/unresolved-arg
                                :parent-fn-ids parent-fn-ids
                                :arg-name arg-name
-                               :available-args (mapv #(resolve-arg-name-cached args-by-id % 0)
+                               :available-args (mapv #(sc/resolve-arg-name-cached args-by-id % 0)
                                                      parent-free-args)})))))))
 
 
@@ -616,7 +452,7 @@
                                       (contains? arg-value :ref))))
         _ (when (and parent-has-value child-sets-value)
             (let [args-by-id (:by-id args-data)
-                  parent-arg-name (resolve-arg-name-cached args-by-id parent-arg 0)]
+                  parent-arg-name (sc/resolve-arg-name-cached args-by-id parent-arg 0)]
               (throw (ex-info (str "Cannot override already-bound argument: " parent-arg-name
                                    ". Parent already sets value=" (:value parent-arg)
                                    " ref-id=" (:ref-id parent-arg))
@@ -816,7 +652,7 @@
                                                        (:source-id record))
                                          ;; Collect FULL source-id chain to shadow transitive args
                                          source-chain (when source-id
-                                                        (collect-source-id-chain (:by-id args-data) source-id))]
+                                                        (sc/collect-source-id-chain (:by-id args-data) source-id))]
                                      (cond-> acc
                                        ;; Add explicit arg name (as string) to filter free args
                                        true
@@ -844,7 +680,7 @@
                        ;; The executor handles transitive arg propagation at runtime via trace-source-to-fn.
                        ;; This prevents internal free args (like html-response.status) from leaking
                        ;; through bound refs (like editor-route.handler).
-                       parent-free-args (collect-parent-free-args
+                       parent-free-args (sc/collect-parent-free-args
                                           fn-id-cache-final args-data parent-fn-ids 0)
 
                        ;; Use parent-free-args directly (no combination with explicit-ref-free-args)
@@ -852,7 +688,7 @@
 
                        ;; Helper to get root name of a free arg
                        args-by-id (:by-id args-data)
-                       get-root-name (fn [arg] (resolve-arg-name-cached args-by-id arg 0))
+                       get-root-name (fn [arg] (sc/resolve-arg-name-cached args-by-id arg 0))
 
                        propagated-new-args
                        (into []

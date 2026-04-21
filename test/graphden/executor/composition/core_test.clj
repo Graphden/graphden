@@ -7,6 +7,7 @@
     [graphden.executor.composition.core :as core]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.parsing :as parsing]
+    [graphden.executor.composition.source-chain :as sc]
     [graphden.executor.composition.validation :as validation]
     [graphden.executor.registry.interface :as registry]
     [graphden.storage.protocol.core :as sp]))
@@ -91,18 +92,18 @@
 
 (deftest free-arg?-test
   (testing "returns true when both value and ref-id are nil"
-    (is (#'core/free-arg? {:value nil :ref-id nil}))
-    (is (#'core/free-arg? {:id (random-uuid) :fn-id (random-uuid)}))
-    (is (#'core/free-arg? {})))
+    (is (sc/free-arg? {:value nil :ref-id nil}))
+    (is (sc/free-arg? {:id (random-uuid) :fn-id (random-uuid)}))
+    (is (sc/free-arg? {})))
 
   (testing "returns false when value is set"
-    (is (not (#'core/free-arg? {:value 42 :ref-id nil})))
-    (is (not (#'core/free-arg? {:value "hello"})))
-    (is (not (#'core/free-arg? {:value false}))))
+    (is (not (sc/free-arg? {:value 42 :ref-id nil})))
+    (is (not (sc/free-arg? {:value "hello"})))
+    (is (not (sc/free-arg? {:value false}))))
 
   (testing "returns false when ref-id is set"
-    (is (not (#'core/free-arg? {:value nil :ref-id (random-uuid)})))
-    (is (not (#'core/free-arg? {:ref-id (random-uuid)})))))
+    (is (not (sc/free-arg? {:value nil :ref-id (random-uuid)})))
+    (is (not (sc/free-arg? {:ref-id (random-uuid)})))))
 
 
 ;; === partition-args-by-freedom ===
@@ -113,22 +114,22 @@
           free2 {:id :b}
           bound1 {:id :c :value 42}
           bound2 {:id :d :ref-id (random-uuid)}
-          result (#'core/partition-args-by-freedom [free1 free2 bound1 bound2])]
+          result (#'sc/partition-args-by-freedom [free1 free2 bound1 bound2])]
       (is (= [free1 free2] (:free-args result)))
       (is (= [bound1 bound2] (:bound-args result)))))
 
   (testing "handles empty input"
-    (let [result (#'core/partition-args-by-freedom [])]
+    (let [result (#'sc/partition-args-by-freedom [])]
       (is (= [] (:free-args result)))
       (is (= [] (:bound-args result)))))
 
   (testing "handles all free"
-    (let [result (#'core/partition-args-by-freedom [{:id :a} {:id :b}])]
+    (let [result (#'sc/partition-args-by-freedom [{:id :a} {:id :b}])]
       (is (= 2 (count (:free-args result))))
       (is (zero? (count (:bound-args result))))))
 
   (testing "handles all bound"
-    (let [result (#'core/partition-args-by-freedom [{:value 1} {:ref-id (random-uuid)}])]
+    (let [result (#'sc/partition-args-by-freedom [{:value 1} {:ref-id (random-uuid)}])]
       (is (zero? (count (:free-args result))))
       (is (= 2 (count (:bound-args result)))))))
 
@@ -138,7 +139,7 @@
 (deftest resolve-arg-name-cached-test
   (testing "returns name directly if present"
     (let [arg {:id :a :name "my-arg"}]
-      (is (= "my-arg" (#'core/resolve-arg-name-cached {} arg 0)))))
+      (is (= "my-arg" (sc/resolve-arg-name-cached {} arg 0)))))
 
   (testing "follows source-id chain to find name"
     (let [root-id (random-uuid)
@@ -147,19 +148,19 @@
           args-by-id {root-id {:id root-id :name "root-name"}
                       mid-id {:id mid-id :source-id root-id}
                       leaf-id {:id leaf-id :source-id mid-id}}]
-      (is (= "root-name" (#'core/resolve-arg-name-cached args-by-id
-                                                         (get args-by-id leaf-id)
-                                                         0)))))
+      (is (= "root-name" (sc/resolve-arg-name-cached args-by-id
+                                                     (get args-by-id leaf-id)
+                                                     0)))))
 
   (testing "returns nil when source-id chain leads nowhere"
     (let [orphan-id (random-uuid)
           args-by-id {orphan-id {:id orphan-id :source-id (random-uuid)}}]
-      (is (nil? (#'core/resolve-arg-name-cached args-by-id
-                                                (get args-by-id orphan-id)
-                                                0)))))
+      (is (nil? (sc/resolve-arg-name-cached args-by-id
+                                            (get args-by-id orphan-id)
+                                            0)))))
 
   (testing "returns nil for arg with no name and no source-id"
-    (is (nil? (#'core/resolve-arg-name-cached {} {:id :x} 0))))
+    (is (nil? (sc/resolve-arg-name-cached {} {:id :x} 0))))
 
   (testing "throws when chain is too deep"
     ;; Create a circular chain that will exceed max-graph-iterations
@@ -176,9 +177,9 @@
                         id-d {:id id-d :source-id id-e}
                         id-e {:id id-e :source-id id-a}}] ; circular to ensure depth exceeded
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too deep"
-              (#'core/resolve-arg-name-cached args-by-id
-                                              (get args-by-id id-a)
-                                              0)))))))
+              (sc/resolve-arg-name-cached args-by-id
+                                          (get args-by-id id-a)
+                                          0)))))))
 
 
 ;; === collect-source-id-chain ===
@@ -187,7 +188,7 @@
   (testing "collects single id when no source-id"
     (let [id (random-uuid)
           args-by-id {id {:id id}}
-          result (#'core/collect-source-id-chain args-by-id id)]
+          result (sc/collect-source-id-chain args-by-id id)]
       (is (contains? result id))
       (is (= 1 (count result)))))
 
@@ -198,15 +199,15 @@
           args-by-id {a {:id a :source-id b}
                       b {:id b :source-id c}
                       c {:id c}}
-          result (#'core/collect-source-id-chain args-by-id a)]
+          result (sc/collect-source-id-chain args-by-id a)]
       (is (= #{a b c} result))))
 
   (testing "handles nil arg-id"
-    (is (= #{} (#'core/collect-source-id-chain {} nil))))
+    (is (= #{} (sc/collect-source-id-chain {} nil))))
 
   (testing "handles missing arg in index"
     (let [id (random-uuid)
-          result (#'core/collect-source-id-chain {} id)]
+          result (sc/collect-source-id-chain {} id)]
       ;; Should include the id itself and stop (source-id from nil arg is nil)
       (is (contains? result id)))))
 
@@ -221,7 +222,7 @@
           args-data {:by-fn {fn-id [free-arg bound-arg]}
                      :by-id {(:id free-arg) free-arg
                              (:id bound-arg) bound-arg}}
-          result (#'core/collect-free-args-from-fn {} args-data fn-id #{} 0)]
+          result (#'sc/collect-free-args-from-fn {} args-data fn-id #{} 0)]
       (is (= [free-arg] result))))
 
   (testing "follows ref-id to collect transitive free args"
@@ -235,23 +236,23 @@
                              fn-b [free-b]}
                      :by-id {(:id bound-a) bound-a
                              (:id free-b) free-b}}
-          result (#'core/collect-free-args-from-fn {} args-data fn-a #{} 0)]
+          result (#'sc/collect-free-args-from-fn {} args-data fn-a #{} 0)]
       (is (= [free-b] result))))
 
   (testing "handles cycle in visited-fns"
     (let [fn-id (random-uuid)
-          result (#'core/collect-free-args-from-fn {} {:by-fn {}} fn-id #{fn-id} 0)]
+          result (#'sc/collect-free-args-from-fn {} {:by-fn {}} fn-id #{fn-id} 0)]
       (is (= [] result))))
 
   (testing "returns empty for fn with no args"
     (let [fn-id (random-uuid)
-          result (#'core/collect-free-args-from-fn {} {:by-fn {}} fn-id #{} 0)]
+          result (#'sc/collect-free-args-from-fn {} {:by-fn {}} fn-id #{} 0)]
       (is (= [] result))))
 
   (testing "throws when chain too deep"
     (binding [sp/*max-graph-iterations* 2]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too deep"
-            (#'core/collect-free-args-from-fn {} {:by-fn {}} (random-uuid) #{} 10))))))
+            (#'sc/collect-free-args-from-fn {} {:by-fn {}} (random-uuid) #{} 10))))))
 
 
 ;; === collect-parent-free-args ===
@@ -262,7 +263,7 @@
           free-arg {:id (random-uuid) :fn-id parent-id :value nil :ref-id nil}
           args-data {:by-fn {parent-id [free-arg]}
                      :by-id {(:id free-arg) free-arg}}
-          result (#'core/collect-parent-free-args {} args-data [parent-id] 0)]
+          result (sc/collect-parent-free-args {} args-data [parent-id] 0)]
       (is (= [free-arg] result))))
 
   (testing "collects free args from refs in parent's bound args"
@@ -276,13 +277,13 @@
                              ref-fn-id [ref-free]}
                      :by-id {(:id bound-arg) bound-arg
                              (:id ref-free) ref-free}}
-          result (#'core/collect-parent-free-args {} args-data [parent-id] 0)]
+          result (sc/collect-parent-free-args {} args-data [parent-id] 0)]
       (is (= [ref-free] result))))
 
   (testing "throws when depth exceeded"
     (binding [sp/*max-graph-iterations* 2]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too deep"
-            (#'core/collect-parent-free-args {} {:by-fn {}} [(random-uuid)] 10))))))
+            (sc/collect-parent-free-args {} {:by-fn {}} [(random-uuid)] 10))))))
 
 
 ;; === parse-arg-value-spec ===

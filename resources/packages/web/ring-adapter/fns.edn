@@ -136,21 +136,32 @@
                   "X-XSS-Protection" "1; mode=block"
                   "Referrer-Policy" "strict-origin-when-cross-origin"}}}
 
-  {:name :merged-response-headers
-   :parent :merge2
-   :args {:a :default-security-headers :b :router-response-headers}}
-
   ;; Ring response built from router-result + merged headers. Both auth
   ;; branches (protected+valid and unprotected) of `path-gated-response`
   ;; ultimately need THIS exact response; wrapping each branch in its own
   ;; `_unprotected-response` / `_authenticated-response` child added zero
   ;; bindings and just doubled the subtree in the editor view. Lazy `:if`
   ;; already computes only the chosen branch, so sharing the fn-id is safe.
-  {:name :router-ring-response
+  ;;
+  ;; Structural split: `merged-response-headers` preloads default security
+  ;; headers on top of `merge2`; `router-ring-response` inherits those
+  ;; (+ a fixed `:status`) via `_router-ring-response-envelope` so the
+  ;; editor-visible level of `router-ring-response` shows only the body
+  ;; binding (the slot that carries the actual router computation).
+
+  {:name :merged-response-headers
+   :parent :merge2
+   :args {:a :default-security-headers
+          :b :router-response-headers}}
+
+  {:name :_router-ring-response-envelope
    :parent :ring-response
    :args {:status :router-response-status
-          :headers :merged-response-headers
-          :body :router-response-body}}
+          :headers :merged-response-headers}}
+
+  {:name :router-ring-response
+   :parent :_router-ring-response-envelope
+   :args {:body :router-response-body}}
 
   ;; =============================================================================
   ;; AUTH — Bearer token primitives (opinionated defaults)
@@ -180,11 +191,18 @@
    :parent :equal?
    :args {:a :bearer-token :b :auth-token-from-env}}
 
-  {:name :default-auth-fail-response
+  ;; default-auth-fail-response: all three slots are literal defaults, so
+  ;; push them into an intermediate. The caller-visible `default-auth-fail-
+  ;; response` fn thus has zero own bindings — appearing as a compact
+  ;; sealed unit when it shows up as `:else` in `token-gated-response`.
+  {:name :_default-auth-fail-body
    :parent :ring-response
    :args {:status 401
-          :headers {"Content-Type" "text/plain"}
-          :body "Unauthorized"}}
+          :headers {"Content-Type" "text/plain"}}}
+
+  {:name :default-auth-fail-response
+   :parent :_default-auth-fail-body
+   :args {:body "Unauthorized"}}
 
   ;; Path predicates — `/api/entities` and `/api/sequence` are write-facing
   ;; and gated by auth. `/api/graph/*` stays public (read-only).
@@ -209,11 +227,19 @@
   ;; RESPONSE GATING (auth)
   ;; =============================================================================
 
-  {:name :token-gated-response
+  ;; token-gated-response: keep `:then` (the shared `router-ring-response`
+  ;; branch) on the visible layer, push the `:test` / `:else` details into
+  ;; `_token-gated-branches`. Drilling into the intermediate still shows
+  ;; the full auth logic; the compact view emphasises the shared success
+  ;; path that also arrives via `path-gated-response.else`.
+  {:name :_token-gated-branches
    :parent :if
    :args {:test :token-valid?
-          :then :router-ring-response
           :else :default-auth-fail-response}}
+
+  {:name :token-gated-response
+   :parent :_token-gated-branches
+   :args {:then :router-ring-response}}
 
   {:name :path-gated-response
    :parent :if

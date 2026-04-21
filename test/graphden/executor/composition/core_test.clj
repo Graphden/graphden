@@ -892,3 +892,132 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #":as must be a keyword"
           (#'records/parse-arg-value-spec {:as "string"})))))
+
+
+;; =============================================================================
+;; prepare-sequence-arg-chain — anchor + linked item records
+;; =============================================================================
+;;
+;; Takes a parent arg (template with :type :sequence) and a vector of
+;; items, and produces an `{:new-chain [...] :delete-items […] :source-id
+;; <template-id>}` map. Items become a doubly-linked list rooted at the
+;; anchor.
+
+(deftest prepare-sequence-arg-chain-empty-items
+  (testing "no items — anchor only, no delete-items"
+    (let [template-id (random-uuid)
+          fn-id (random-uuid)
+          parent-arg {:id template-id :type :sequence :of :int}
+          args-data {:by-id {} :by-fn-source {}}
+          {:keys [new-chain delete-items source-id]}
+          (#'records/prepare-sequence-arg-chain {} {} args-data fn-id parent-arg [])]
+      (is (= template-id source-id))
+      (is (= [] delete-items))
+      (is (= 1 (count new-chain)) "anchor only")
+      (let [anchor (first new-chain)]
+        (is (= fn-id (:fn-id anchor)))
+        (is (= template-id (:source-id anchor)))
+        (is (= :sequence (:type anchor)))
+        (is (nil? (:next-arg-id anchor)) "tail=nil for empty chain")))))
+
+
+(deftest prepare-sequence-arg-chain-multi-item-linking
+  (testing "chain of item records linked via next-arg-id / prev-arg-id"
+    (let [template-id (random-uuid)
+          fn-id (random-uuid)
+          parent-arg {:id template-id :type :sequence :of :any}
+          args-data {:by-id {} :by-fn-source {}}
+          {:keys [new-chain]}
+          (#'records/prepare-sequence-arg-chain {} {} args-data fn-id parent-arg
+                                                [1 2 3])
+          [anchor i1 i2 i3] new-chain]
+      (is (= 4 (count new-chain)))
+      (is (= :sequence (:type anchor)))
+      (is (= (:id i1) (:next-arg-id anchor)))
+      (is (= (:id anchor) (:prev-arg-id i1)) "head.prev → anchor")
+      (is (= (:id i2) (:next-arg-id i1)))
+      (is (= (:id i1) (:prev-arg-id i2)))
+      (is (= (:id i3) (:next-arg-id i2)))
+      (is (nil? (:next-arg-id i3)) "tail.next=nil")
+      (is (= 1 (:value i1)))
+      (is (= 2 (:value i2)))
+      (is (= 3 (:value i3)))
+      (is (every? #(= :any (:type %)) [i1 i2 i3])
+          ":of of template propagates as element :type"))))
+
+
+(deftest prepare-sequence-arg-chain-reuses-existing-anchor-id
+  (testing "existing anchor's id is preserved; old items go to :delete-items"
+    (let [template-id (random-uuid)
+          fn-id (random-uuid)
+          old-anchor-id (random-uuid)
+          old-item-a (random-uuid)
+          old-item-b (random-uuid)
+          parent-arg {:id template-id :type :sequence}
+          args-data {:by-id {old-item-a {:id old-item-a :next-arg-id old-item-b}
+                             old-item-b {:id old-item-b :next-arg-id nil}}
+                     :by-fn-source {[fn-id template-id]
+                                    {:id old-anchor-id :next-arg-id old-item-a}}}
+          {:keys [new-chain delete-items]}
+          (#'records/prepare-sequence-arg-chain {} {} args-data fn-id parent-arg
+                                                [:new-val])]
+      (is (= old-anchor-id (:id (first new-chain))) "reuses old anchor id")
+      (is (= [old-item-a old-item-b] delete-items)
+          "sweep listed for reap"))))
+
+
+;; =============================================================================
+;; prepare-arg-record — top-level dispatch + error paths
+;; =============================================================================
+
+(deftest prepare-arg-record-throws-on-nil-fn-id
+  (testing "nil fn-id aborts immediately"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"fn-id cannot be nil"
+          (records/prepare-arg-record {} {} {} {} nil [] :foo 1)))))
+
+
+(deftest prepare-arg-record-sequence-arg-requires-vector
+  (testing "parent arg :type :sequence + non-vector value throws"
+    (let [tmpl-id (random-uuid)
+          fn-id (random-uuid)
+          parent-arg {:id tmpl-id :name "items" :type :sequence}
+          args-data {:by-id {tmpl-id parent-arg}
+                     :by-fn {(random-uuid) [parent-arg]}
+                     :by-fn-source {}}
+          fn-cache {fn-id {:id fn-id :parent-ids []}}]
+      (with-redefs [records/find-available-arg (fn [_ _ _ _] parent-arg)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Sequence arg ':items' requires a vector"
+              (records/prepare-arg-record fn-cache args-data {} {} fn-id [] :items
+                                          "not-a-vector")))))))
+
+
+(deftest prepare-arg-record-dispatches-sequence-to-chain
+  (testing "vector value on :sequence parent → chain record"
+    (let [tmpl-id (random-uuid)
+          fn-id (random-uuid)
+          parent-arg {:id tmpl-id :name "items" :type :sequence :of :int}
+          args-data {:by-id {tmpl-id parent-arg} :by-fn {} :by-fn-source {}}]
+      (with-redefs [records/find-available-arg (fn [_ _ _ _] parent-arg)]
+        (let [result (records/prepare-arg-record {} args-data {} {} fn-id [] :items
+                                                 [10 20])]
+          (is (contains? result :new-chain))
+          (is (= 3 (count (:new-chain result))))
+          (is (= tmpl-id (:source-id result))))))))
+
+
+;; =============================================================================
+;; prepare-scalar-arg-record — override-forbidden error path
+;; =============================================================================
+
+(deftest prepare-scalar-arg-record-rejects-override-of-bound-parent
+  (testing "child cannot override parent's already-bound :value"
+    (let [parent-arg-id (random-uuid)
+          parent-arg {:id parent-arg-id :name "x" :value 42 :ref-id nil}
+          args-data {:by-id {parent-arg-id parent-arg}
+                     :by-fn-source {}}]
+      (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                            #"Cannot override already-bound argument"
+            (#'records/prepare-scalar-arg-record args-data {} {} (random-uuid)
+                                                 parent-arg :x 7))))))

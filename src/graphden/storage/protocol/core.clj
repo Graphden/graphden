@@ -69,6 +69,7 @@
     [graphden.storage.protocol.locks :as locks]
     [graphden.storage.protocol.metadata :as metadata]
     [graphden.storage.protocol.naming :as naming]
+    [graphden.storage.protocol.redaction :as redaction]
     [graphden.storage.protocol.validation :as validation])
   (:import
     (graphden.storage.protocol.graph
@@ -265,8 +266,8 @@
 (def storage-error-types errors/storage-error-types)
 (def make-error-context errors/make-error-context)
 (def make-storage-error errors/make-storage-error)
-(def redact-sensitive-map errors/redact-sensitive-map)
-(def redact-sensitive-deep errors/redact-sensitive-deep)
+(def redact-sensitive-map redaction/redact-sensitive-map)
+(def redact-sensitive-deep redaction/redact-sensitive-deep)
 
 
 (def wrap-storage-error
@@ -343,66 +344,66 @@
 
 (def register-sensitive-field-name!
   "Registers an explicit field name as sensitive for redaction.
-   See errors/register-sensitive-field-name! for details."
-  errors/register-sensitive-field-name!)
+   See redaction/register-sensitive-field-name! for details."
+  redaction/register-sensitive-field-name!)
 
 
 (def register-sensitive-field-pattern!
   "Registers a regex pattern for matching sensitive field names.
-   See errors/register-sensitive-field-pattern! for details."
-  errors/register-sensitive-field-pattern!)
+   See redaction/register-sensitive-field-pattern! for details."
+  redaction/register-sensitive-field-pattern!)
 
 
 (def register-sensitive-field-predicate!
   "Registers a custom predicate for sensitive field detection.
-   See errors/register-sensitive-field-predicate! for details."
-  errors/register-sensitive-field-predicate!)
+   See redaction/register-sensitive-field-predicate! for details."
+  redaction/register-sensitive-field-predicate!)
 
 
 (def reset-sensitive-field-registry!
   "Resets sensitive field registry to defaults. Use with caution."
-  errors/reset-sensitive-field-registry!)
+  redaction/reset-sensitive-field-registry!)
 
 
 (def get-sensitive-field-registry
   "Returns current sensitive field registry state. Useful for tests."
-  errors/get-sensitive-field-registry)
+  redaction/get-sensitive-field-registry)
 
 
 (def set-sensitive-field-registry!
   "Sets sensitive field registry to a specific state. Useful for tests."
-  errors/set-sensitive-field-registry!)
+  redaction/set-sensitive-field-registry!)
 
 
 (defmacro with-sensitive-field-registry
   "Executes body with isolated sensitive field registry.
    Automatically saves and restores registry state for test isolation."
   [& body]
-  `(errors/with-sensitive-field-registry (do ~@body)))
+  `(redaction/with-sensitive-field-registry (do ~@body)))
 
 
 (def sensitive-field?
   "Returns true if field name matches sensitive patterns.
    Checks explicit names, regex patterns, and custom predicates."
-  errors/sensitive-field?)
+  redaction/sensitive-field?)
 
 
 (def critical-sensitive-patterns
   "Critical patterns that must be matched for security."
-  errors/critical-sensitive-patterns)
+  redaction/critical-sensitive-patterns)
 
 
 (def validate-sensitive-field-coverage!
   "Validates that all critical sensitive patterns are properly matched.
    Throws if any critical pattern would not be detected as sensitive.
    Use this at application startup to verify security configuration."
-  errors/validate-sensitive-field-coverage!)
+  redaction/validate-sensitive-field-coverage!)
 
 
 (def warn-on-suspicious-field
   "Logs warning if field looks sensitive but isn't registered.
    Returns true if field looks suspicious but not registered."
-  errors/warn-on-suspicious-field)
+  redaction/warn-on-suspicious-field)
 
 
 ;; === Metadata re-exports ===

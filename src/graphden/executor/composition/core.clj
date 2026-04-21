@@ -241,8 +241,6 @@
     (validate-fn-def! fn-def)))
 
 
-;; === Storage Sync (Batch Optimized) ===
-
 ;; === Free Argument Propagation ===
 
 (defn- free-arg?

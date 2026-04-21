@@ -160,23 +160,6 @@
           (sp/close storage))))))
 
 
-;; === create-storage-with-base-fns Tests ===
-
-(deftest create-storage-with-base-fns-test
-  (testing "creates storage and initializes with base fns"
-    (let [storage (registry/create-storage-with-base-fns
-                    #(create-test-storage))]
-      (try
-        ;; Should have storage
-        (is (some? storage))
-        ;; Base functions should be registered
-        (is (some? (exec/get-base-fn :add)))
-        ;; fns should be in storage
-        (is (some? (sp/read-entity storage :fn (registry/fn-uuid :add))))
-        (finally
-          (sp/close storage))))))
-
-
 ;; === initialize-all! Tests ===
 
 (deftest initialize-all-test

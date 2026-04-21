@@ -158,23 +158,6 @@
       (sp/close storage))))
 
 
-;; =============================================================================
-;; create-storage-with-base-fns Tests
-;; =============================================================================
-
-(deftest create-storage-with-base-fns-test
-  (testing "creates storage and initializes with base functions"
-    ;; We need a factory function that creates a storage
-    (let [storage (registry/create-storage-with-base-fns setup/create-test-storage)]
-      ;; Should return initialized storage
-      (is (satisfies? sp/StorageCRUD storage))
-      ;; Check that base functions were synced
-      (let [add-id (core/fn-uuid :add)
-            add-fn (sp/read-entity storage :fn add-id)]
-        (is (some? add-fn)))
-      (sp/close storage))))
-
-
 ;; The legacy `registry/defbase` macro was removed — impls live in
 ;; `graphden.executor.defbase` and get tested in `defbase-test`. The
 ;; interface now only exposes registration + storage-sync helpers.

@@ -95,10 +95,3 @@
     (register-base-fns! defs)
     (sync-defs-to-storage! storage defs))
   storage)
-
-
-(defn create-storage-with-base-fns
-  "Generic factory that creates storage and initializes with base functions."
-  [create-fn & args]
-  (-> (apply create-fn args)
-      (initialize-with-base-fns!)))

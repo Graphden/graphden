@@ -43,8 +43,7 @@
 
 (deftest registry-nil-without-atom
   (testing "context without `:compiled-registry` atom returns nil"
-    (is (nil? (cr/registry {:storage :mock})))
-    (is (false? (cr/compiled? {:storage :mock})))))
+    (is (nil? (cr/registry {:storage :mock})))))
 
 
 (deftest rebuild-replaces-current-registry

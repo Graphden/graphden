@@ -31,6 +31,32 @@
     (is (empty? (junction/ref-many-fields {})))))
 
 
+(deftest normalize-uuid-test
+  (testing "UUID passes through unchanged"
+    (let [u (random-uuid)]
+      (is (identical? u (#'junction/normalize-uuid u)))))
+
+  (testing "valid UUID string is parsed"
+    (let [u (random-uuid)
+          s (str u)]
+      (is (= u (#'junction/normalize-uuid s)))))
+
+  (testing "invalid UUID string throws from fromString"
+    (is (thrown? IllegalArgumentException
+          (#'junction/normalize-uuid "not-a-uuid"))))
+
+  (testing "unsupported value type throws with :invalid-data"
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Expected UUID or UUID string"
+          (#'junction/normalize-uuid 42)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Expected UUID or UUID string"
+          (#'junction/normalize-uuid :keyword)))
+    (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                          #"Expected UUID or UUID string"
+          (#'junction/normalize-uuid nil)))))
+
+
 (deftest has-ref-many-test
   (testing "returns true when at least one ref-many field exists"
     (is (true? (junction/has-ref-many?

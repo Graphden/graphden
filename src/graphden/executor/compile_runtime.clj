@@ -79,21 +79,17 @@
   "Invoke `fn-id` via the compiled registry. `named-args` is a `{arg-name
    value}` map using the outermost external arg names (rename-aware).
 
-   If `fn-id` is actually a fn object (e.g. a `hof-wrap`-produced
-   callable that a legacy-style HOF impl extracted via `@fn-arg`),
-   invoke it directly. For single-entry named-args the value is
-   unwrapped (matching the 1-arg callable shape); otherwise the whole
-   map is forwarded. This keeps legacy test patterns working where the
-   impl does `(exec/execute-with-named-args ctx @f {:x x})`."
+   HOF impls that deref a `:fn`-type arg end up with a callable (from
+   `rt/hof-callable`) rather than a UUID and hand it back in through
+   this same entry point. For single-entry args the value is unwrapped
+   from the map; for empty or multi-entry args the whole map is passed
+   through."
   [ctx fn-id named-args]
-  (cond
-    (fn? fn-id)
+  (if (fn? fn-id)
     (let [args (or named-args {})]
-      (if (and (map? args) (= 1 (count args)))
+      (if (= 1 (count args))
         (fn-id (first (vals args)))
         (fn-id args)))
-
-    :else
     (let [reg (registry ctx)
           closure (get reg fn-id)]
       (when-not closure

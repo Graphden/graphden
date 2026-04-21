@@ -33,9 +33,9 @@
    Lexical scoping: if a form shadows an arg name (`let`, `fn`, `loop`, …),
    the inner binding wins inside the shadow's scope.
 
-   Generated signature: two-arity `(fn ([__args] …) ([__args ctx] …))`.
-   `ctx` is the executor context — impls that need storage/callable
-   machinery reference the `ctx` symbol directly."
+   Generated signature: `(fn [__args ctx] …)`. `ctx` is the executor
+   context — impls that need storage/callable machinery reference the
+   `ctx` symbol directly."
   (:require
     [graphden.executor.runtime :as rt]))
 
@@ -167,9 +167,6 @@
         arg-sym->key (into {} (map (fn [s] [s (keyword s)])) args-vec)
         transformed (transform-body body arg-sym->key)
         body-form `(do ~@transformed)]
-    (if docstring
-      `(defn ~fn-name
-         ~docstring
-         [~'__args ~'ctx] ~body-form)
-      `(defn ~fn-name
-         [~'__args ~'ctx] ~body-form))))
+    `(defn ~fn-name
+       ~@(when docstring [docstring])
+       [~'__args ~'ctx] ~body-form)))

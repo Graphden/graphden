@@ -1003,11 +1003,7 @@
                 {:id root-item2-arg-id :fn-id root-id :source-id container-item2-arg-id :ref-id child2-id}]
 
           lookups (build-lookups {:fns fns :args args})
-          ;; Expand both root and container. Named refs inside an expansion
-          ;; are boundaries (leaves) by default — to see bindings propagate
-          ;; through a coll chain, the caller must expand every step.
-          expansions {root-id 1
-                      container-id 1}
+          expansions {root-id 1}  ; Expand root to level 1
 
           result (build-graph-elements root-id expansions lookups)
           nodes (:nodes result)
@@ -1329,12 +1325,9 @@
 
           lookups (build-lookups {:fns fns :args args})
 
-          ;; Named refs are boundaries inside an expansion — to see the
-          ;; shared-handler canonical node, method-map and assoc-handler
-          ;; must also be expanded so their structure surfaces.
-          expansions {[nil route1-id] 1
-                      method-map-id 1
-                      assoc-handler-id 1}
+          ;; Expand only route1 to level 1 (shows route ancestor with method-map ref)
+          ;; shared-handler appears as binding for assoc-handler's :handler arg
+          expansions {[nil route1-id] 1}
 
           result (build-graph-elements parent-id expansions lookups)
           nodes (:nodes result)
@@ -1443,18 +1436,14 @@
                 {:id root-item9-arg-id :fn-id root-id :source-id list-10-9-item9-arg-id :ref-id child-fn-id}]
 
           lookups (build-lookups {:fns fns :args args})
-          ;; Named refs inside expansion are leaves — the chain root → list-11
-          ;; → list-10 → list-10-9 only surfaces when each link is expanded.
-          expansions {root-id 1
-                      list-10-id 1
-                      list-10-9-id 1}
+          expansions {root-id 1}  ; Expand root to level 1 (shows list-11 ancestor)
 
           result (build-graph-elements root-id expansions lookups)
           nodes (:nodes result)
           child-fn-node (some #(when (str/includes? (str (get-in % [:data :id])) (str child-fn-id)) %) nodes)]
 
-      ;; With the chain expanded, child-fn surfaces connected through
-      ;; list-10-9's item9 arg.
+      ;; The bug: child-fn would NOT appear because bindings were lost at list-10 -> list-10-9 step
+      ;; The fix: child-fn should appear, connected from list-10-9's item9 arg
       (is child-fn-node
           (str "child-fn should be in graph - binding should propagate through coll chain. "
                "Node IDs: " (mapv #(get-in % [:data :id]) nodes))))))

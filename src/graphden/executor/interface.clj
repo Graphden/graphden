@@ -12,8 +12,8 @@
    Within an impl body, use `graphden.executor.runtime/resolve-arg` to
    read arg values (or let `defbase` inline the calls for you)."
   (:require
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.context :as ctx]
-    [graphden.executor.core :as core]
     [graphden.executor.registry :as registry]))
 
 
@@ -95,16 +95,46 @@
    - :execution-error/fn-not-found if `fn-id` has no compiled closure
    - :execution-error/invalid-args if `args` is non-nil and not a map"
   [context fn-id args]
-  (core/execute context fn-id args))
+  (when (and (some? args) (not (map? args)))
+    (throw (ex-info "args must be nil or a map"
+                    {:type :execution-error/invalid-args
+                     :args args
+                     :args-type (type args)})))
+  (cond
+    (or (nil? args) (empty? args))
+    (cr/execute context fn-id {})
+
+    ;; Keyed by arg-id (UUID) — legacy test style.
+    (uuid? (first (keys args)))
+    (cr/execute-with-arg-ids context fn-id args)
+
+    ;; Keyed by external arg name.
+    :else
+    (cr/execute context fn-id args)))
 
 
 (defn execute-with-named-args
   "Executes a function with `named-args` keyed by external arg name.
 
    Useful for HOFs that call child fns with dynamic args. Unknown arg
-   names throw `:execution-error/unknown-arg-name`."
+   names throw `:execution-error/unknown-arg-name`. Validation is skipped
+   when `fn-id` is a callable (HOF impls that deref a :fn-type arg pass
+   the resulting callable back through here)."
   [context fn-id named-args]
-  (core/execute-with-named-args context fn-id named-args))
+  (when (and (some? named-args) (not (map? named-args)))
+    (throw (ex-info "named-args must be nil or a map"
+                    {:type :execution-error/invalid-args
+                     :args named-args
+                     :args-type (type named-args)})))
+  (when (and (seq named-args) (uuid? fn-id))
+    (let [valid (set (cr/free-arg-ext-names context fn-id))]
+      (when-let [unknown (first (remove valid (keys named-args)))]
+        (throw (ex-info (str "Unknown argument name: " unknown)
+                        {:type :execution-error/unknown-arg-name
+                         :arg-name unknown
+                         :fn-id fn-id
+                         :available-args valid})))))
+  (cr/execute context fn-id (or named-args {})))
 
 
 (defn execute-by-name
@@ -112,7 +142,12 @@
    `named-args`. Throws `:execution-error/fn-not-found` on miss and
    `:execution-error/invalid-fn-name` when `fn-name` isn't a string."
   [context fn-name named-args]
-  (core/execute-by-name context fn-name named-args))
+  (when-not (string? fn-name)
+    (throw (ex-info "fn-name must be a string"
+                    {:type :execution-error/invalid-fn-name
+                     :fn-name fn-name
+                     :fn-name-type (type fn-name)})))
+  (cr/execute-by-name context fn-name named-args))
 
 
 ;; === HOF Helpers ===
@@ -123,7 +158,7 @@
    handler convention). Multi-free-arg targets receive a vector routed
    by position."
   [context fn-id]
-  (core/make-single-arg-callable context fn-id))
+  (cr/make-single-arg-callable context fn-id))
 
 
 ;; === Test Fixtures ===

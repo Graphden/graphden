@@ -177,11 +177,11 @@
 
 
 (defbase str-contains?-fn [string substring]
-  (str/includes? string substring))
+  (boolean (and string (str/includes? string substring))))
 
 
 (defbase str-starts-with?-fn [string prefix]
-  (str/starts-with? string prefix))
+  (boolean (and string (str/starts-with? string prefix))))
 
 
 ;; === Registry ===

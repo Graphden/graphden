@@ -171,9 +171,12 @@
    :parent :env
    :args {:name "AUTH_TOKEN"}}
 
+  ;; Missing `Authorization` header → `get` returns nil; downstream
+  ;; `has-bearer-prefix?` is nil-safe (returns false), so no default
+  ;; needed here. Keeps the node free of literal-default clutter.
   {:name :authorization-header
    :parent :get
-   :args {:coll :ring-headers :key "authorization" :default ""}}
+   :args {:coll :ring-headers :key "authorization"}}
 
   {:name :has-bearer-prefix?
    :parent :str-starts-with?

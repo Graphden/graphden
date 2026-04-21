@@ -180,23 +180,15 @@
    Impl:   (defbase add [nums] (apply + nums))
    Output: {:args {:nums {:type :jsonb :required true}}
             :return-type :numeric
-            :impl <fn>
-            :ctx true}    ; optional
+            :impl <fn>}
 
-   Under the compile-at-startup executor, compile.clj/hof-wrap already
-   delivers `:fn`-typed args as invokable callables, so the loader no
-   longer needs to pre-wrap anything — it just routes the impl's arity
-   by whether it expects a ctx."
+   All registered impls are 2-arity `(fn [args ctx] …)` (produced by
+   `defbase`). The executor always calls them with both args, so the
+   loader simply hands impl-fn through."
   [fn-def impl-fn]
-  (let [args (normalize-args (:args fn-def))
-        ctx? (boolean (:ctx fn-def))
-        wrapped-impl (if ctx?
-                       impl-fn
-                       (fn [a _c] (impl-fn a)))]
-    (cond-> {:args args
-             :return-type (:return-type fn-def)
-             :impl wrapped-impl}
-      ctx? (assoc :ctx true))))
+  {:args (normalize-args (:args fn-def))
+   :return-type (:return-type fn-def)
+   :impl impl-fn})
 
 
 (defn- process-module

@@ -75,11 +75,9 @@
 ;; queue or the new compile path.
 
 (deftest fn-def->base-fn-def-test
-  (testing "creates base-fn-def; non-:fn args pass through to impl as-is"
+  (testing "normalizes args, preserves :return-type, passes impl through"
     (let [fn-def {:name :add :args {:a :int :b :int} :return-type :int}
-          impl-fn (fn [{:keys [a b]}]
-                    ;; Impl receives whatever the caller put in the args map
-                    ;; — no forced deref.
+          impl-fn (fn [{:keys [a b]} _ctx]
                     (+ (if (instance? clojure.lang.IDeref a) @a a)
                        (if (instance? clojure.lang.IDeref b) @b b)))
           result (#'loader/fn-def->base-fn-def fn-def impl-fn)]
@@ -87,20 +85,17 @@
               :b {:type :int :required true}}
              (:args result)))
       (is (= :int (:return-type result)))
-      (is (fn? (:impl result)))
-      (let [wrapped (:impl result)]
-        (is (= 5 (wrapped {:a (delay 2) :b (delay 3)} nil)))
-        (is (= 5 (wrapped {:a 2 :b 3} nil))))))
+      (is (identical? impl-fn (:impl result))
+          "loader no longer wraps impl-fn")))
 
-  (testing "creates base-fn-def with :ctx true — impl receives raw args + ctx"
-    (let [fn-def {:name :ctx-fn :args {:x :int} :return-type :int :ctx true}
+  (testing "ctx is threaded through untouched — impl body can read it"
+    (let [fn-def {:name :ctx-fn :args {:x :int} :return-type :int}
           impl-fn (fn [{:keys [x]} ctx]
                     (+ (if (instance? clojure.lang.IDeref x) @x x)
                        (:offset ctx)))
-          result (#'loader/fn-def->base-fn-def fn-def impl-fn)]
-      (is (true? (:ctx result)))
-      (let [wrapped (:impl result)]
-        (is (= 15 (wrapped {:x (delay 10)} {:offset 5})))))))
+          result (#'loader/fn-def->base-fn-def fn-def impl-fn)
+          wrapped (:impl result)]
+      (is (= 15 (wrapped {:x (delay 10)} {:offset 5}))))))
 
 
 ;; =============================================================================

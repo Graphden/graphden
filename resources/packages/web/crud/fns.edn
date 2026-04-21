@@ -1,5 +1,6 @@
-;; Storage CRUD base functions for web UI
-;; Context-aware functions (marked with :ctx true) require storage in execution context
+;; Storage CRUD base functions for web UI.
+;; Impls that need storage access read it from `ctx` in their body
+;; (see resources/packages/web/crud/impls.clj).
 
 
 {:namespace "web.crud"
@@ -8,61 +9,51 @@
   {:name :list-entities
    :args {:entity-type :text
           :where {:type :jsonb :required false}}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   {:name :get-entity
    :args {:entity-type :text
           :id :uuid}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   {:name :create-entity
    :args {:entity-type :text
           :data :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   {:name :update-entity
    :args {:entity-type :text
           :id :uuid
           :data :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   {:name :delete-entity
    :args {:entity-type :text
           :id :uuid}
-   :return-type :bool
-   :ctx true}
+   :return-type :bool}
 
   {:name :list-all-graph-entities
    :args {}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   ;; Action functions (context-aware, return {:status :headers :body} response map)
   {:name :process-create-entity
    :args {:request :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   {:name :process-delete-entity
    :args {:request :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   ;; Sequence operations: append/remove items of a sequence arg on any fn
   ;; that has a `:sequence`-typed anchor (e.g. :list, :pairs->map children).
   {:name :process-sequence-append
    :args {:request :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   {:name :process-sequence-remove
    :args {:request :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   ;; Request parameter helpers (pure functions)
   {:name :get-path-param
@@ -91,13 +82,11 @@
   ;; Render functions (context-aware, return hiccup)
   {:name :render-entity-details-view
    :args {:request :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   {:name :render-entity-form-view
    :args {:request :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   ;; Renders action buttons (Edit/Delete) for entity
   {:name :render-entity-actions

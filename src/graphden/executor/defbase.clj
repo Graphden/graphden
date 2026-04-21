@@ -166,15 +166,10 @@
                             {:fn-name fn-name :reserved reserved})))
         arg-sym->key (into {} (map (fn [s] [s (keyword s)])) args-vec)
         transformed (transform-body body arg-sym->key)
-        ;; Multi-arity: 2-arg is the canonical signature (args + ctx); 1-arg
-        ;; delegates with ctx=nil, so non-`:ctx` loader wrappers that call
-        ;; `(impl-fn args)` with a single argument still work.
-        two-body `(do ~@transformed)]
+        body-form `(do ~@transformed)]
     (if docstring
       `(defn ~fn-name
          ~docstring
-         ([~'__args] (~fn-name ~'__args nil))
-         ([~'__args ~'ctx] ~two-body))
+         [~'__args ~'ctx] ~body-form)
       `(defn ~fn-name
-         ([~'__args] (~fn-name ~'__args nil))
-         ([~'__args ~'ctx] ~two-body)))))
+         [~'__args ~'ctx] ~body-form))))

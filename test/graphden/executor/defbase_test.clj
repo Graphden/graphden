@@ -126,17 +126,6 @@
 
 
 ;; =============================================================================
-;; Single-arity dispatch + ctx threading
-;; =============================================================================
-
-(deftest single-arity-delegates-to-two-arity-with-nil-ctx
-  (testing "calling the 1-arg version threads ctx=nil"
-    ;; The `ctx-aware` body does `(get ctx :key)`. With ctx=nil,
-    ;; `(get nil :anything)` → nil.
-    (is (nil? (ctx-aware {:key :greeting})))))
-
-
-;; =============================================================================
 ;; Additional binding forms — verify each known shadowing form is respected
 ;; =============================================================================
 

@@ -835,19 +835,38 @@
                         (when-let [binding (get bindings (:id arg))]
                           (when-let [ref-id (:ref-id binding)]
                             (swap! ref-fn-ids conj ref-id))))))
-                ;; Collect all arg-ids that belong to displayed ref-fns (including inheritance)
-                ;; EXCLUDE args from fns that are also in the expansion root's inheritance chain.
-                ;; This prevents shared ancestors (e.g., conj-any shared by list-11 and list-10)
-                ;; from causing items to be filtered as "belonging inside ref-fn".
+                ;; Collect all arg-ids that belong to displayed ref-fns. Walk both
+                ;; inheritance ancestry AND the transitive ref-target closure —
+                ;; propagated free-arg shadows on the current fn often have their
+                ;; source-id pointing DEEP into a ref-chain (e.g. :request on
+                ;; `_app-path-gated-response` sources to `router-response-body`,
+                ;; which `router-ring-response` reaches through its own refs). The
+                ;; closure catches those so shadows whose source chain flows into
+                ;; any displayed sub-graph get suppressed at the parent.
+                ;; EXCLUDE args from fns that are also in the expansion root's
+                ;; inheritance chain so shared ancestors (e.g. conj-any shared by
+                ;; list-11 and list-10) don't cause items to be filtered as
+                ;; "belonging inside ref-fn".
                 expansion-chain-fns full-chain-fns
+                ref-closure-fns (let [seen (atom #{})]
+                                  (letfn [(walk
+                                            [fn-id]
+                                            (when-not (contains? @seen fn-id)
+                                              (swap! seen conj fn-id)
+                                              (doseq [anc (get-inheritance-chain fn-id fn-map)]
+                                                (swap! seen conj anc)
+                                                (doseq [a (get args-by-fn anc [])]
+                                                  (when-let [r (:ref-id a)]
+                                                    (walk r))))))]
+                                    (doseq [rid @ref-fn-ids]
+                                      (walk rid)))
+                                  @seen)
                 ref-fn-arg-ids (atom #{})
-                _ (doseq [ref-fn-id @ref-fn-ids]
-                    (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
-                      (doseq [rfn-id ref-chain]
-                        (when-not (contains? expansion-chain-fns rfn-id)
-                          (let [ref-args (get args-by-fn rfn-id [])]
-                            (doseq [ra ref-args]
-                              (swap! ref-fn-arg-ids conj (:id ra))))))))
+                _ (doseq [rfn-id ref-closure-fns]
+                    (when-not (contains? expansion-chain-fns rfn-id)
+                      (let [ref-args (get args-by-fn rfn-id [])]
+                        (doseq [ra ref-args]
+                          (swap! ref-fn-arg-ids conj (:id ra))))))
                 result (atom [])
                 chain-level (atom 0)
                 ;; Helper: check if any arg in the source chain is in ref-fn-arg-ids
@@ -997,6 +1016,13 @@
                             ;; Arg unbound here but bound somewhere upstream in the
                             ;; source chain — shown there, skip emitting a ghost.
                             (bound-by-chain? arg)
+                            nil
+
+                            ;; Propagated free-arg shadow whose source-id chain
+                            ;; reaches into a displayed ref-fn — that ref-fn is
+                            ;; the natural owner of the slot on the graph, so
+                            ;; skip emitting a duplicate placeholder here.
+                            binds-to-ref-fn
                             nil
 
                             :else
@@ -1352,18 +1378,17 @@
 
               (process-any-fn
                 [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root source-expanded-fns]
-                ;; Named fns (with name in DB) are "boundaries" — their implementation
-                ;; is hidden by default. Only the root fn and anonymous (name=nil) fns
-                ;; are expanded automatically. Named fns show as leaf nodes unless
-                ;; the user explicitly requests expansion.
+                ;; Named fns (with name in DB) are "boundaries" — their
+                ;; implementation is hidden by default. Only the root fn and
+                ;; anonymous (name=nil) fns are expanded automatically. Named
+                ;; fns show as leaf nodes unless the user explicitly requests
+                ;; expansion, even inside another expansion — each named ref
+                ;; requires its own click so the graph reveals incrementally.
                 (let [fn-entity (get fn-map fn-id)
                       is-named (and fn-entity (:name fn-entity))
                       spec (get-effective-spec fn-id expansion-root)
                       ;; A named non-root fn with no expansion spec → show as leaf
-                      show-as-leaf (and is-named (not is-root) (spec-trivial? spec)
-                                        ;; Inside an expansion, don't collapse named refs
-                                        ;; — they are part of the expanded view
-                                        (nil? expansion-root))]
+                      show-as-leaf (and is-named (not is-root) (spec-trivial? spec))]
                   (if show-as-leaf
                     ;; Add the node + edge. Show the fn's OWN values and unsets,
                     ;; but NOT refs — refs go to other named fns which would

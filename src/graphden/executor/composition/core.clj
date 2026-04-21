@@ -34,211 +34,11 @@
    1. fn from this definition set (by name)
    2. fn already in storage (by name)"
   (:require
-    [clojure.set :as set]
-    [clojure.string :as str]
-    [clojure.tools.logging :as log]
+    [graphden.executor.composition.deps :as deps]
+    [graphden.executor.composition.parsing :as parsing]
+    [graphden.executor.composition.validation :as validation]
     [graphden.executor.registry.interface :as registry]
     [graphden.storage.protocol.core :as sp]))
-
-
-;; === Arg Value Parsing ===
-
-(defn- valid-identifier?
-  "Returns true if s looks like a valid identifier.
-   Allows dots for qualified namespace references (e.g. core.arithmetic.add)
-   and the Clojure convention of trailing `?` / `!` (e.g. empty?, swap!)."
-  [s]
-  (when (and (string? s) (seq s))
-    (and (not (re-find #"\s" s))
-         (re-matches #"[a-zA-Z_\-][a-zA-Z0-9_.\-?!]*" s))))
-
-
-(defn- local-fn-name?
-  "Returns true if fn-name starts with _ (local/unnamed fn).
-   Local fns are stored with name=nil in DB and only referenced by id."
-  [fn-name]
-  (when fn-name
-    (let [n (if (keyword? fn-name) (name fn-name) (str fn-name))]
-      (str/starts-with? n "_"))))
-
-
-(defn- parse-fn-ref
-  "Parses a keyword that might be a fn reference.
-   Returns fn-name keyword or nil if not a fn ref."
-  [value]
-  (when (keyword? value)
-    (let [kw-name (name value)]
-      (when (valid-identifier? kw-name)
-        value))))
-
-
-;; === Dependency Analysis ===
-
-(defn- arg-value-fn-ref
-  "Extracts a fn-name keyword from an arg value spec, if it's a fn ref.
-   Handles both simple keyword refs and map syntax with :ref or :value.
-   Returns the fn-name keyword or nil."
-  [arg-value]
-  (cond
-    (keyword? arg-value)
-    (parse-fn-ref arg-value)
-
-    (map? arg-value)
-    ;; {:as :name :ref :fn-name} or {:as :name :value :fn-name}
-    (or (parse-fn-ref (:ref arg-value))
-        (parse-fn-ref (:value arg-value)))))
-
-
-(defn- extract-dependencies
-  "Extracts fn names that this fn-def depends on (from args and parents).
-   Returns set of keywords."
-  [fn-def fn-names-in-set]
-  (let [args (:args fn-def {})
-        parent-names (concat (when-let [p (:parent fn-def)] [p])
-                             (:parents fn-def))
-        arg-deps (->> (vals args)
-                      (keep arg-value-fn-ref)
-                      (filter fn-names-in-set)
-                      set)
-        ;; Parents that are composed fns in our set are dependencies
-        parent-deps (into #{} (filter fn-names-in-set) parent-names)]
-    (into arg-deps parent-deps)))
-
-
-(defn- build-dependency-graph
-  "Builds dependency graph from fn-defs.
-   Returns map of {fn-name -> #{dependency-names}}."
-  [fn-defs]
-  (let [fn-names (into #{} (map :name) fn-defs)]
-    (into {}
-          (map (fn [fd]
-                 [(:name fd) (extract-dependencies fd fn-names)])
-               fn-defs))))
-
-
-(defn- topological-sort
-  "Topologically sorts fn-defs by dependencies.
-   Returns sorted vector of fn-defs.
-   Throws on cycles.
-
-   Uses Kahn's algorithm with O(V+E) complexity:
-   - Tracks in-degree (unvisited deps count) for each node
-   - Maintains ready-set of nodes with zero in-degree
-   - Each node enters/exits ready-set exactly once"
-  [fn-defs]
-  (let [dep-graph (build-dependency-graph fn-defs)
-        fn-def-map (into {} (map (juxt :name identity) fn-defs))
-        all-names (into #{} (map :name) fn-defs)
-        ;; Build reverse dependency map: {fn-name -> #{fns-that-depend-on-it}}
-        reverse-deps (reduce-kv
-                       (fn [acc fn-name deps]
-                         (reduce (fn [m dep]
-                                   (update m dep (fnil conj #{}) fn-name))
-                                 acc deps))
-                       {}
-                       dep-graph)
-        ;; Initial in-degree: count of unvisited dependencies
-        ;; Only count deps that are in our set (external deps are pre-satisfied)
-        initial-in-degree (into {}
-                                (map (fn [fn-name]
-                                       [fn-name (count (set/intersection
-                                                         (get dep-graph fn-name #{})
-                                                         all-names))]))
-                                all-names)
-        ;; Initial ready-set: nodes with no dependencies within the set
-        initial-ready (into #{} (filter #(zero? (get initial-in-degree % 0))) all-names)]
-    (loop [sorted []
-           ready-set initial-ready
-           in-degree initial-in-degree]
-      (if (empty? ready-set)
-        (if (= (count sorted) (count fn-defs))
-          (mapv fn-def-map sorted)
-          ;; Not all processed - cycle detected
-          (let [remaining (set/difference all-names (set sorted))]
-            (throw (ex-info "Circular dependency detected in fn definitions"
-                            {:type :fn-composition/circular-dependency
-                             :remaining remaining
-                             :dep-graph (select-keys dep-graph remaining)}))))
-        ;; Pick any ready node (first for determinism)
-        (let [current (first ready-set)
-              rest-ready (disj ready-set current)
-              ;; Update in-degree for all dependents
-              dependents (get reverse-deps current #{})
-              {:keys [new-ready new-in-degree]}
-              (reduce (fn [{:keys [new-ready new-in-degree]} dependent]
-                        (let [old-deg (get new-in-degree dependent)
-                              new-deg (dec old-deg)]
-                          {:new-in-degree (assoc new-in-degree dependent new-deg)
-                           :new-ready (if (zero? new-deg)
-                                        (conj new-ready dependent)
-                                        new-ready)}))
-                      {:new-ready rest-ready :new-in-degree in-degree}
-                      dependents)]
-          (recur (conj sorted current) new-ready new-in-degree))))))
-
-
-(defn- check-order-and-warn
-  "Checks if fn-defs are in valid topological order.
-   Logs warning if not, with suggested order."
-  [fn-defs sorted-defs]
-  (let [original-order (mapv :name fn-defs)
-        sorted-order (mapv :name sorted-defs)]
-    (when (not= original-order sorted-order)
-      (log/warn "fn-defs are not in dependency order."
-                "Current order:" (str/join " -> " (map name original-order))
-                "Suggested order:" (str/join " -> " (map name sorted-order))))))
-
-
-;; === Validation ===
-
-(defn- validate-fn-def!
-  "Validates a single fn definition."
-  [{parent :parent parent-list :parents args :args :as fn-def}]
-  (let [fn-name (:name fn-def)]
-    (when-not fn-name
-      (throw (ex-info "fn-def must have :name"
-                      {:type :fn-composition/invalid-def
-                       :fn-def fn-def})))
-    (when-not (keyword? fn-name)
-      (throw (ex-info "fn-def :name must be a keyword"
-                      {:type :fn-composition/invalid-def
-                       :name fn-name})))
-    (when-not (or parent (seq parent-list))
-      (throw (ex-info (str "fn-def " fn-name " must have :parent (single) or :parents (vector)")
-                      {:type :fn-composition/invalid-def
-                       :fn-def fn-def})))
-    (when (and parent-list (not (sequential? parent-list)))
-      (throw (ex-info (str "fn-def " fn-name " :parents must be a vector/list of keywords")
-                      {:type :fn-composition/invalid-def
-                       :fn-def fn-def})))
-    (when (and args (not (map? args)))
-      (throw (ex-info (str "fn-def " fn-name " :args must be a map")
-                      {:type :fn-composition/invalid-def
-                       :fn-def fn-def})))))
-
-
-(defn- validate-all-defs!
-  "Validates all fn definitions before sync."
-  [fn-defs]
-  (when-not (sequential? fn-defs)
-    (throw (ex-info "fn-defs must be a vector/list"
-                    {:type :fn-composition/invalid-defs
-                     :fn-defs-type (type fn-defs)})))
-  ;; Single-pass duplicate detection with early termination capability
-  (let [duplicates (loop [remaining (map :name fn-defs)
-                          seen #{}
-                          dups #{}]
-                     (if-let [n (first remaining)]
-                       (if (contains? seen n)
-                         (recur (rest remaining) seen (conj dups n))
-                         (recur (rest remaining) (conj seen n) dups))
-                       dups))]
-    (when (seq duplicates)
-      (throw (ex-info "Duplicate fn names in definitions"
-                      {:type :fn-composition/duplicate-names
-                       :duplicates (vec duplicates)}))))
-  (doseq [fn-def fn-defs]
-    (validate-fn-def! fn-def)))
 
 
 ;; === Free Argument Propagation ===
@@ -572,7 +372,7 @@
   [fn-name-cache fn-id-cache created-fns fn-def ns-id-map]
   (let [fn-name (:name fn-def)
         fn-name-str (clojure.core/name fn-name)
-        is-local? (local-fn-name? fn-name)]
+        is-local? (parsing/local-fn-name? fn-name)]
     ;; Local fns are never "existing" - they're always created fresh
     ;; (since they have name=nil in DB and can't be looked up by name)
     (if (and (not is-local?)
@@ -676,7 +476,7 @@
 
     (keyword? item)
     (let [nm (name item)]
-      (if (valid-identifier? nm)
+      (if (parsing/valid-identifier? nm)
         (if-let [entry (or (get created-fns item)
                            (when-let [existing (get fn-name-cache nm)]
                              (:id existing)))]
@@ -841,7 +641,7 @@
                    {:value value-spec :ref-id nil}
 
                    (keyword? value-spec)
-                   (if-let [ref-fn-name (parse-fn-ref value-spec)]
+                   (if-let [ref-fn-name (parsing/parse-fn-ref value-spec)]
                      (let [ref-fn-id (resolve-fn-id-cached fn-name-cache created-fns ref-fn-name)]
                        {:value nil :ref-id ref-fn-id})
                      {:value value-spec :ref-id nil})
@@ -899,9 +699,9 @@
    (if (empty? fn-defs)
      {}
      (do
-       (validate-all-defs! fn-defs)
-       (let [sorted-defs (topological-sort fn-defs)
-             _ (check-order-and-warn fn-defs sorted-defs)
+       (validation/validate-all-defs! fn-defs)
+       (let [sorted-defs (deps/topological-sort fn-defs)
+             _ (deps/check-order-and-warn fn-defs sorted-defs)
 
              ;; Phase 1: Pre-load existing data (single pass over all-fns)
              all-fns (sp/query-entities storage :fn {})

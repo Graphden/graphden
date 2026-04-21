@@ -5,6 +5,9 @@
     [clojure.test :refer [deftest is testing]]
     [clojure.tools.logging]
     [graphden.executor.composition.core :as core]
+    [graphden.executor.composition.deps :as deps]
+    [graphden.executor.composition.parsing :as parsing]
+    [graphden.executor.composition.validation :as validation]
     [graphden.executor.registry.interface :as registry]
     [graphden.storage.protocol.core :as sp]))
 
@@ -13,75 +16,75 @@
 
 (deftest valid-identifier?-test
   (testing "accepts valid identifiers"
-    (is (#'core/valid-identifier? "hello"))
-    (is (#'core/valid-identifier? "my-fn"))
-    (is (#'core/valid-identifier? "_private"))
-    (is (#'core/valid-identifier? "fn123"))
-    (is (#'core/valid-identifier? "a"))
-    (is (#'core/valid-identifier? "A-B-C"))
-    (is (#'core/valid-identifier? "my_fn_name")))
+    (is (parsing/valid-identifier? "hello"))
+    (is (parsing/valid-identifier? "my-fn"))
+    (is (parsing/valid-identifier? "_private"))
+    (is (parsing/valid-identifier? "fn123"))
+    (is (parsing/valid-identifier? "a"))
+    (is (parsing/valid-identifier? "A-B-C"))
+    (is (parsing/valid-identifier? "my_fn_name")))
 
   (testing "rejects identifiers starting with digit"
-    (is (not (#'core/valid-identifier? "123abc")))
-    (is (not (#'core/valid-identifier? "0test"))))
+    (is (not (parsing/valid-identifier? "123abc")))
+    (is (not (parsing/valid-identifier? "0test"))))
 
   (testing "rejects identifiers with special chars"
-    (is (not (#'core/valid-identifier? "hello world")))
-    (is (not (#'core/valid-identifier? "fn@name")))
-    (is (#'core/valid-identifier? "a.b"))
-    (is (#'core/valid-identifier? "core.arithmetic.add"))
-    (is (not (#'core/valid-identifier? "a/b")))
-    (is (not (#'core/valid-identifier? ">")))
-    (is (not (#'core/valid-identifier? "+"))))
+    (is (not (parsing/valid-identifier? "hello world")))
+    (is (not (parsing/valid-identifier? "fn@name")))
+    (is (parsing/valid-identifier? "a.b"))
+    (is (parsing/valid-identifier? "core.arithmetic.add"))
+    (is (not (parsing/valid-identifier? "a/b")))
+    (is (not (parsing/valid-identifier? ">")))
+    (is (not (parsing/valid-identifier? "+"))))
 
   (testing "rejects empty and nil"
-    (is (not (#'core/valid-identifier? "")))
-    (is (not (#'core/valid-identifier? nil))))
+    (is (not (parsing/valid-identifier? "")))
+    (is (not (parsing/valid-identifier? nil))))
 
   (testing "rejects non-string input"
-    (is (not (#'core/valid-identifier? 123)))
-    (is (not (#'core/valid-identifier? true)))
-    (is (not (#'core/valid-identifier? :keyword)))))
+    (is (not (parsing/valid-identifier? 123)))
+    (is (not (parsing/valid-identifier? true)))
+    (is (not (parsing/valid-identifier? :keyword)))))
 
 
 ;; === local-fn-name? ===
 
 (deftest local-fn-name?-test
   (testing "returns true for underscore-prefixed keywords"
-    (is (#'core/local-fn-name? :_local))
-    (is (#'core/local-fn-name? :_my-local-fn)))
+    (is (parsing/local-fn-name? :_local))
+    (is (parsing/local-fn-name? :_my-local-fn)))
 
   (testing "returns true for underscore-prefixed strings"
-    (is (#'core/local-fn-name? "_local")))
+    (is (parsing/local-fn-name? "_local")))
 
   (testing "returns false for non-underscore names"
-    (is (not (#'core/local-fn-name? :my-fn)))
-    (is (not (#'core/local-fn-name? :hello)))
-    (is (not (#'core/local-fn-name? "normal"))))
+    (is (not (parsing/local-fn-name? :my-fn)))
+    (is (not (parsing/local-fn-name? :hello)))
+    (is (not (parsing/local-fn-name? "normal"))))
 
   (testing "returns nil/falsy for nil"
-    (is (not (#'core/local-fn-name? nil)))))
+    (is (not (parsing/local-fn-name? nil)))))
 
 
 ;; === parse-fn-ref ===
 
 (deftest parse-fn-ref-test
   (testing "returns keyword for valid identifiers"
-    (is (= :my-fn (#'core/parse-fn-ref :my-fn)))
-    (is (= :handler (#'core/parse-fn-ref :handler)))
-    (is (= :my-fn-123 (#'core/parse-fn-ref :my-fn-123))))
+    (is (= :my-fn (parsing/parse-fn-ref :my-fn)))
+    (is (= :handler (parsing/parse-fn-ref :handler)))
+    (is (= :my-fn-123 (parsing/parse-fn-ref :my-fn-123))))
 
   (testing "returns nil for non-keyword values"
-    (is (nil? (#'core/parse-fn-ref "string")))
-    (is (nil? (#'core/parse-fn-ref 42)))
-    (is (nil? (#'core/parse-fn-ref nil)))
-    (is (nil? (#'core/parse-fn-ref [1 2 3])))
-    (is (nil? (#'core/parse-fn-ref {:a 1}))))
+    (is (nil? (parsing/parse-fn-ref "string")))
+    (is (nil? (parsing/parse-fn-ref 42)))
+    (is (nil? (parsing/parse-fn-ref nil)))
+    (is (nil? (parsing/parse-fn-ref [1 2 3])))
+    (is (nil? (parsing/parse-fn-ref {:a 1}))))
 
   (testing "returns nil for keywords with invalid names"
-    (is (nil? (#'core/parse-fn-ref :>)))
-    (is (nil? (#'core/parse-fn-ref :+)))
-    (is (nil? (#'core/parse-fn-ref :123-starts-with-digit)))))
+    (is (nil? (parsing/parse-fn-ref :>)))
+    (is (nil? (parsing/parse-fn-ref :+)))
+    (is (nil? (parsing/parse-fn-ref :123-starts-with-digit)))))
 
 
 ;; === free-arg? ===
@@ -331,67 +334,67 @@
 
 (deftest validate-fn-def!-test
   (testing "accepts valid fn-def"
-    (is (nil? (#'core/validate-fn-def! {:name :my-fn :parent :base})))
-    (is (nil? (#'core/validate-fn-def! {:name :my-fn :parent :base :args {:a 1}}))))
+    (is (nil? (#'validation/validate-fn-def! {:name :my-fn :parent :base})))
+    (is (nil? (#'validation/validate-fn-def! {:name :my-fn :parent :base :args {:a 1}}))))
 
   (testing "throws on missing name"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must have :name"
-          (#'core/validate-fn-def! {:parent :base}))))
+          (#'validation/validate-fn-def! {:parent :base}))))
 
   (testing "throws on non-keyword name"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a keyword"
-          (#'core/validate-fn-def! {:name "string" :parent :base}))))
+          (#'validation/validate-fn-def! {:name "string" :parent :base}))))
 
   (testing "throws on missing parent"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must have :parent"
-          (#'core/validate-fn-def! {:name :my-fn}))))
+          (#'validation/validate-fn-def! {:name :my-fn}))))
 
   (testing "throws on non-map args"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"args must be a map"
-          (#'core/validate-fn-def! {:name :my-fn :parent :base :args [1 2]})))
+          (#'validation/validate-fn-def! {:name :my-fn :parent :base :args [1 2]})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"args must be a map"
-          (#'core/validate-fn-def! {:name :my-fn :parent :base :args "bad"}))))
+          (#'validation/validate-fn-def! {:name :my-fn :parent :base :args "bad"}))))
 
   (testing "accepts nil args (no args key)"
-    (is (nil? (#'core/validate-fn-def! {:name :my-fn :parent :base})))))
+    (is (nil? (#'validation/validate-fn-def! {:name :my-fn :parent :base})))))
 
 
 ;; === validate-all-defs! ===
 
 (deftest validate-all-defs!-test
   (testing "accepts valid definitions"
-    (is (nil? (#'core/validate-all-defs!
-               [{:name :a :parent :base}
-                {:name :b :parent :base}]))))
+    (is (nil? (validation/validate-all-defs!
+                [{:name :a :parent :base}
+                 {:name :b :parent :base}]))))
 
   (testing "throws on non-sequential input"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must be a vector"
-          (#'core/validate-all-defs! {:name :a :parent :base}))))
+          (validation/validate-all-defs! {:name :a :parent :base}))))
 
   (testing "throws on duplicate names"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Duplicate"
-          (#'core/validate-all-defs!
-           [{:name :a :parent :base}
-            {:name :a :parent :other}]))))
+          (validation/validate-all-defs!
+            [{:name :a :parent :base}
+             {:name :a :parent :other}]))))
 
   (testing "reports multiple duplicates"
     (try
-      (#'core/validate-all-defs!
-       [{:name :a :parent :base}
-        {:name :b :parent :base}
-        {:name :a :parent :other}
-        {:name :b :parent :other}])
+      (validation/validate-all-defs!
+        [{:name :a :parent :base}
+         {:name :b :parent :base}
+         {:name :a :parent :other}
+         {:name :b :parent :other}])
       (is false "Should have thrown")
       (catch clojure.lang.ExceptionInfo e
         (let [dups (:duplicates (ex-data e))]
           (is (= #{:a :b} (set dups)))))))
 
   (testing "accepts empty vector"
-    (is (nil? (#'core/validate-all-defs! []))))
+    (is (nil? (validation/validate-all-defs! []))))
 
   (testing "validates each fn-def"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"must have :parent"
-          (#'core/validate-all-defs! [{:name :a}])))))
+          (validation/validate-all-defs! [{:name :a}])))))
 
 
 ;; === topological-sort ===
@@ -401,7 +404,7 @@
     (let [fn-defs [{:name :a :parent :base :args {:x :b}}
                    {:name :b :parent :base :args {:x :c}}
                    {:name :c :parent :base}]
-          sorted (#'core/topological-sort fn-defs)
+          sorted (deps/topological-sort fn-defs)
           names (mapv :name sorted)
           pos (into {} (map-indexed (fn [i n] [n i])) names)]
       (is (< (pos :c) (pos :b)))
@@ -411,7 +414,7 @@
     (let [fn-defs [{:name :x :parent :base}
                    {:name :y :parent :base}
                    {:name :z :parent :base}]
-          sorted (#'core/topological-sort fn-defs)]
+          sorted (deps/topological-sort fn-defs)]
       (is (= 3 (count sorted)))
       (is (= #{:x :y :z} (set (map :name sorted))))))
 
@@ -420,7 +423,7 @@
                    {:name :b :parent :base :args {:x :a}}
                    {:name :c :parent :base :args {:x :a}}
                    {:name :a :parent :base}]
-          sorted (#'core/topological-sort fn-defs)
+          sorted (deps/topological-sort fn-defs)
           names (mapv :name sorted)
           pos (into {} (map-indexed (fn [i n] [n i])) names)]
       ;; a must come first, then b and c, then d
@@ -432,29 +435,29 @@
   (testing "handles parent as dependency (parent in fn-names set)"
     (let [fn-defs [{:name :child :parent :parent-fn :args {:a 1}}
                    {:name :parent-fn :parent :base}]
-          sorted (#'core/topological-sort fn-defs)
+          sorted (deps/topological-sort fn-defs)
           names (mapv :name sorted)
           pos (into {} (map-indexed (fn [i n] [n i])) names)]
       (is (< (pos :parent-fn) (pos :child)))))
 
   (testing "detects two-node cycle"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
-          (#'core/topological-sort
-           [{:name :a :parent :base :args {:x :b}}
-            {:name :b :parent :base :args {:x :a}}]))))
+          (deps/topological-sort
+            [{:name :a :parent :base :args {:x :b}}
+             {:name :b :parent :base :args {:x :a}}]))))
 
   (testing "cycle exception includes remaining nodes"
     (try
-      (#'core/topological-sort
-       [{:name :a :parent :base :args {:x :b}}
-        {:name :b :parent :base :args {:x :a}}])
+      (deps/topological-sort
+        [{:name :a :parent :base :args {:x :b}}
+         {:name :b :parent :base :args {:x :a}}])
       (is false "Should have thrown")
       (catch clojure.lang.ExceptionInfo e
         (is (= :fn-composition/circular-dependency (:type (ex-data e))))
         (is (= #{:a :b} (:remaining (ex-data e)))))))
 
   (testing "single element"
-    (let [sorted (#'core/topological-sort [{:name :solo :parent :base}])]
+    (let [sorted (deps/topological-sort [{:name :solo :parent :base}])]
       (is (= [:solo] (mapv :name sorted))))))
 
 
@@ -468,7 +471,7 @@
       (with-redefs [clojure.tools.logging/log*
                     (fn [_ level _ msg]
                       (swap! logged conj {:level level :message msg}))]
-        (#'core/check-order-and-warn fn-defs sorted))
+        (deps/check-order-and-warn fn-defs sorted))
       (is (empty? @logged))))
 
   (testing "warns when order differs"
@@ -478,7 +481,7 @@
       (with-redefs [clojure.tools.logging/log*
                     (fn [_ level _ msg]
                       (swap! logged conj {:level level :message msg}))]
-        (#'core/check-order-and-warn fn-defs sorted))
+        (deps/check-order-and-warn fn-defs sorted))
       (is (= 1 (count @logged)))
       (is (= :warn (:level (first @logged)))))))
 
@@ -498,29 +501,29 @@
 (deftest extract-dependencies-comprehensive-test
   (testing "includes parent when parent is in fn-names set"
     (let [fn-def {:name :child :parent :parent-fn :args {:a 1}}
-          deps (#'core/extract-dependencies fn-def #{:parent-fn :child})]
+          deps (#'deps/extract-dependencies fn-def #{:parent-fn :child})]
       (is (contains? deps :parent-fn))))
 
   (testing "does not include parent when parent is external"
     (let [fn-def {:name :child :parent :external-base :args {:a :some-fn}}
-          deps (#'core/extract-dependencies fn-def #{:child :some-fn})]
+          deps (#'deps/extract-dependencies fn-def #{:child :some-fn})]
       (is (not (contains? deps :external-base)))
       (is (contains? deps :some-fn))))
 
   (testing "handles arg values that are maps (not fn refs)"
     (let [fn-def {:name :my-fn :parent :base :args {:a {:key "value"}}}
-          deps (#'core/extract-dependencies fn-def #{:my-fn})]
+          deps (#'deps/extract-dependencies fn-def #{:my-fn})]
       ;; Maps are not fn refs, so no deps
       (is (empty? deps))))
 
   (testing "handles arg values that are vectors (not fn refs)"
     (let [fn-def {:name :my-fn :parent :base :args {:a [1 2 3]}}
-          deps (#'core/extract-dependencies fn-def #{:my-fn})]
+          deps (#'deps/extract-dependencies fn-def #{:my-fn})]
       (is (empty? deps))))
 
   (testing "handles arg values that are numbers"
     (let [fn-def {:name :my-fn :parent :base :args {:a 42 :b 3.14}}
-          deps (#'core/extract-dependencies fn-def #{:my-fn})]
+          deps (#'deps/extract-dependencies fn-def #{:my-fn})]
       (is (empty? deps))))
 
   (testing "handles mixed arg values"
@@ -529,7 +532,7 @@
                          :b :external  ; fn ref not in set
                          :c 42         ; literal
                          :d "string"}} ; literal
-          deps (#'core/extract-dependencies fn-def #{:my-fn :dep-fn})]
+          deps (#'deps/extract-dependencies fn-def #{:my-fn :dep-fn})]
       (is (= #{:dep-fn} deps)))))
 
 
@@ -537,16 +540,16 @@
 
 (deftest build-dependency-graph-comprehensive-test
   (testing "empty input"
-    (is (= {} (#'core/build-dependency-graph []))))
+    (is (= {} (#'deps/build-dependency-graph []))))
 
   (testing "single fn with no deps"
-    (is (= {:solo #{}} (#'core/build-dependency-graph [{:name :solo :parent :base}]))))
+    (is (= {:solo #{}} (#'deps/build-dependency-graph [{:name :solo :parent :base}]))))
 
   (testing "complex graph"
     (let [fn-defs [{:name :a :parent :base}
                    {:name :b :parent :a :args {:x :a}}
                    {:name :c :parent :base :args {:x :a :y :b}}]
-          graph (#'core/build-dependency-graph fn-defs)]
+          graph (#'deps/build-dependency-graph fn-defs)]
       (is (= #{} (get graph :a)))
       (is (= #{:a} (get graph :b)))
       (is (= #{:a :b} (get graph :c))))))

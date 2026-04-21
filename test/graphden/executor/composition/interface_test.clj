@@ -10,8 +10,9 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging]
-    [graphden.executor.composition.core :as core]
+    [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.interface :as fn-composition]
+    [graphden.executor.composition.parsing :as parsing]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
     [graphden.executor.test-setup :as setup]
@@ -180,19 +181,19 @@
 
 (deftest parse-fn-ref-test
   (testing "parses :fn-name as fn reference"
-    (is (= :my-fn (#'core/parse-fn-ref :my-fn))))
+    (is (= :my-fn (parsing/parse-fn-ref :my-fn))))
 
   (testing "parses valid identifier keywords"
-    (is (= :handler (#'core/parse-fn-ref :handler)))
-    (is (= :my-fn-123 (#'core/parse-fn-ref :my-fn-123))))
+    (is (= :handler (parsing/parse-fn-ref :handler)))
+    (is (= :my-fn-123 (parsing/parse-fn-ref :my-fn-123))))
 
   (testing "returns nil for non-fn refs"
-    (is (nil? (#'core/parse-fn-ref "not-a-keyword")))
-    (is (nil? (#'core/parse-fn-ref 123))))
+    (is (nil? (parsing/parse-fn-ref "not-a-keyword")))
+    (is (nil? (parsing/parse-fn-ref 123))))
 
   (testing "returns nil for invalid identifiers"
-    (is (nil? (#'core/parse-fn-ref :>)))
-    (is (nil? (#'core/parse-fn-ref :123-starts-with-digit)))))
+    (is (nil? (parsing/parse-fn-ref :>)))
+    (is (nil? (parsing/parse-fn-ref :123-starts-with-digit)))))
 
 
 ;; === extract-dependencies edge case tests ===
@@ -205,7 +206,7 @@
                          :b :third-fn   ; fn ref
                          :c 42}}        ; literal (ignored)
           fn-names #{:other-fn :third-fn}
-          deps (#'core/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names)]
       (is (= #{:other-fn :third-fn} deps))))
 
   (testing "ignores refs to fns not in the set"
@@ -213,12 +214,12 @@
                   :parent :base
                   :args {:a :external-fn}}  ; not in fn-names set
           fn-names #{:other-fn}
-          deps (#'core/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names)]
       (is (empty? deps))))
 
   (testing "handles empty args"
     (let [fn-def {:name :my-fn :parent :base}
-          deps (#'core/extract-dependencies fn-def #{})]
+          deps (#'deps/extract-dependencies fn-def #{})]
       (is (empty? deps)))))
 
 
@@ -229,7 +230,7 @@
     (let [fn-defs [{:name :a :parent :base :args {:x :b}}
                    {:name :b :parent :base :args {:x :c}}
                    {:name :c :parent :base}]
-          graph (#'core/build-dependency-graph fn-defs)]
+          graph (#'deps/build-dependency-graph fn-defs)]
       (is (= {:a #{:b} :b #{:c} :c #{}} graph)))))
 
 
@@ -238,28 +239,28 @@
 (deftest topological-sort-edge-cases-test
   (testing "handles single element"
     (let [fn-defs [{:name :single :parent :base}]
-          sorted (#'core/topological-sort fn-defs)]
+          sorted (deps/topological-sort fn-defs)]
       (is (= [:single] (mapv :name sorted)))))
 
   (testing "handles independent elements (no dependencies)"
     (let [fn-defs [{:name :a :parent :base}
                    {:name :b :parent :base}
                    {:name :c :parent :base}]
-          sorted (#'core/topological-sort fn-defs)]
+          sorted (deps/topological-sort fn-defs)]
       ;; Order doesn't matter for independent elements
       (is (= #{:a :b :c} (set (mapv :name sorted))))))
 
   (testing "throws on self-reference cycle"
     (let [fn-defs [{:name :self-ref :parent :base :args {:x :self-ref}}]]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
-            (#'core/topological-sort fn-defs)))))
+            (deps/topological-sort fn-defs)))))
 
   (testing "throws on three-way cycle"
     (let [fn-defs [{:name :a :parent :base :args {:x :b}}
                    {:name :b :parent :base :args {:x :c}}
                    {:name :c :parent :base :args {:x :a}}]]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
-            (#'core/topological-sort fn-defs))))))
+            (deps/topological-sort fn-defs))))))
 
 
 (deftest validation-edge-cases-test
@@ -416,20 +417,20 @@
 
 (deftest valid-identifier-edge-cases-test
   (testing "returns falsy for empty string"
-    (is (not (#'core/valid-identifier? ""))))
+    (is (not (parsing/valid-identifier? ""))))
 
   (testing "returns falsy for string with whitespace"
-    (is (not (#'core/valid-identifier? "hello world"))))
+    (is (not (parsing/valid-identifier? "hello world"))))
 
   (testing "returns falsy for non-string input"
-    (is (not (#'core/valid-identifier? nil)))
-    (is (not (#'core/valid-identifier? 123))))
+    (is (not (parsing/valid-identifier? nil)))
+    (is (not (parsing/valid-identifier? 123))))
 
   (testing "returns truthy for valid identifiers"
-    (is (#'core/valid-identifier? "hello"))
-    (is (#'core/valid-identifier? "my-fn"))
-    (is (#'core/valid-identifier? "_private"))
-    (is (#'core/valid-identifier? "fn123"))))
+    (is (parsing/valid-identifier? "hello"))
+    (is (parsing/valid-identifier? "my-fn"))
+    (is (parsing/valid-identifier? "_private"))
+    (is (parsing/valid-identifier? "fn123"))))
 
 
 (deftest extract-dependencies-with-parent-dep-test
@@ -438,7 +439,7 @@
                   :parent :parent-fn  ; parent is another fn-def
                   :args {:a 1}}
           fn-names #{:parent-fn :child-fn}
-          deps (#'core/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names)]
       (is (contains? deps :parent-fn)))))
 
 

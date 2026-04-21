@@ -480,6 +480,30 @@ function createFnOverlay(node, container) {
     overlay.appendChild(strip);
   }
 
+  // HOF-captured args (e.g. `:request` on a Ring-handler subtree) are free
+  // slots that the enclosing higher-order call site will fill at runtime —
+  // not interface args for the graph-level caller. Render as a compact
+  // strip prefixed with `λ` so the user can see the slot exists without
+  // needing to plan for supplying it themselves.
+  const hofCapturedArgs = node.data('hofCapturedArgs');
+  if (Array.isArray(hofCapturedArgs) && hofCapturedArgs.length) {
+    const strip = document.createElement('div');
+    Object.assign(strip.style, {
+      padding: '2px 8px',
+      color: '#557',
+      fontSize: '10px',
+      fontStyle: 'italic',
+      borderTop: '1px dashed #b8c0e0',
+      background: '#f4f6fc',
+      whiteSpace: 'nowrap',
+      overflow: 'hidden',
+      textOverflow: 'ellipsis'
+    });
+    strip.title = 'Args supplied by the enclosing HOF invocation: ' + hofCapturedArgs.join(', ');
+    strip.textContent = hofCapturedArgs.map(n => 'λ' + n).join(' ');
+    overlay.appendChild(strip);
+  }
+
   createDragHandle(overlay, node);
 
   // Hovering the FN overlay itself (not a specific outgoing edge) lights up

@@ -311,6 +311,30 @@
             (swap! optional-unsets-by-node update node-id
                    (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
 
+        ;; Free args on HOF-reachable nodes (descendants reached through an
+        ;; `is-fn=true` arg boundary) are supplied by the HOF invocation, not
+        ;; by the graph-level caller. Collect their names here and surface
+        ;; them on node data; frontend renders them as a compact badge
+        ;; separate from interface free args.
+        hof-captured-by-node (atom {})
+        record-hof-captured!
+        (fn [node-id arg-name]
+          (when (and node-id arg-name)
+            (swap! hof-captured-by-node update node-id
+                   (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
+
+        ;; Does `arg-entity` propagate an `is-fn=true` marker anywhere in its
+        ;; source-id chain? Used to decide whether a ref-binding to another
+        ;; fn crosses a HOF boundary.
+        arg-marks-hof?
+        (fn [arg-entity]
+          (loop [a arg-entity, depth 0]
+            (cond
+              (nil? a) false
+              (> depth 200) false
+              (:is-fn a) true
+              :else (recur (get arg-map (:source-id a)) (inc depth)))))
+
         add-fn-node
         (fn [original-fn-id is-root expansion-root]
           ;; Node ID logic for correct sharing behavior:
@@ -453,36 +477,48 @@
             node-id))
 
         add-unset-arg-node
-        (fn [arg-name arg-type arg-id source-node-id expanded-fns]
-          ;; Node ID must include source-node-id to ensure uniqueness per expansion
-          ;; Different fns expanding to same ancestor should get separate unset nodes
-          ;;
-          ;; Split: optional unbound args (root :required=false, like
-          ;; `:get.default`) don't deserve their own placeholder — we just
-          ;; remember the name against the source node so it can be surfaced
-          ;; as a subtle hint on the node header. Required unbound args keep
-          ;; their visible placeholder — they ARE the caller's interface.
-          (let [arg-rec (get arg-map arg-id)
-                optional? (arg-is-optional? arg-rec)
-                displayed-name (or (compute-edge-label arg-id source-node-id expanded-fns)
-                                   (when arg-name (name arg-name)))]
-            (if optional?
-              (record-optional-unset! source-node-id displayed-name)
-              (let [node-id (str "unset-" source-node-id "-" arg-id)
-                    edge-id (str "e-unset-" source-node-id "-" arg-id)]
-                (when-not (contains? @added-node-ids node-id)
-                  (swap! added-node-ids conj node-id)
-                  (swap! nodes conj
-                         {:data {:id node-id
-                                 :label (if arg-type (name arg-type) "any")
-                                 :type "fn"
-                                 :isPlaceholder true}})
-                  (swap! edges conj
-                         {:data {:id edge-id
-                                 :source source-node-id
-                                 :target node-id
-                                 :argName displayed-name
-                                 :isUnset true}}))))))
+        (fn add-unset-arg-node
+          ;; 4-arity kept for back-compat; 6-arity adds `is-hof` flag.
+          ([arg-name arg-type arg-id source-node-id expanded-fns]
+           (add-unset-arg-node arg-name arg-type arg-id source-node-id expanded-fns false))
+          ([arg-name arg-type arg-id source-node-id expanded-fns is-hof]
+           ;; Three routing cases, in priority order:
+           ;;
+           ;;   1. Optional (root `:required=false`, e.g. `:get.default`) —
+           ;;      compact `?name` badge via `:optionalArgs`. Sane fallback
+           ;;      exists, not part of the interface.
+           ;;   2. HOF-captured (the node sits under an `is-fn=true` ref
+           ;;      boundary) — compact `λname` badge via `:hofCapturedArgs`.
+           ;;      The enclosing HOF invocation will supply the value.
+           ;;   3. Otherwise — visible dashed placeholder node. This IS the
+           ;;      caller's interface; the caller must fill it.
+           (let [arg-rec (get arg-map arg-id)
+                 optional? (arg-is-optional? arg-rec)
+                 displayed-name (or (compute-edge-label arg-id source-node-id expanded-fns)
+                                    (when arg-name (name arg-name)))]
+             (cond
+               optional?
+               (record-optional-unset! source-node-id displayed-name)
+
+               is-hof
+               (record-hof-captured! source-node-id displayed-name)
+
+               :else
+               (let [node-id (str "unset-" source-node-id "-" arg-id)
+                     edge-id (str "e-unset-" source-node-id "-" arg-id)]
+                 (when-not (contains? @added-node-ids node-id)
+                   (swap! added-node-ids conj node-id)
+                   (swap! nodes conj
+                          {:data {:id node-id
+                                  :label (if arg-type (name arg-type) "any")
+                                  :type "fn"
+                                  :isPlaceholder true}})
+                   (swap! edges conj
+                          {:data {:id edge-id
+                                  :source source-node-id
+                                  :target node-id
+                                  :argName displayed-name
+                                  :isUnset true}})))))))
 
         ;; For each fn, the set of terminal-source-ids bound by its parent
         ;; inheritance closure (including itself). Bindings in ref-id targets
@@ -1032,7 +1068,7 @@
       ;; Declare process-any-fn before using it
       ;; expansion-root: the original-fn-id of the expanded function we're inside (nil if not in expansion)
       (letfn [(process-fn
-                [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns]
+                [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns is-hof]
                 (let [node-id (add-fn-node original-fn-id is-root expansion-root)
                       ;; Key for tracking fully processed nodes - includes expansion context
                       process-key (str node-id "-" (hash bindings))]
@@ -1131,15 +1167,21 @@
                       (doseq [arg filtered-args]
                         (case (:type arg)
                           :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
-                                     ref-bindings bindings]
-                                 (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id}))
+                                     ref-bindings bindings
+                                     ;; HOF-reachability crosses this edge if the
+                                     ;; arg binding (or any in its source chain)
+                                     ;; is is-fn=true. Otherwise inherit caller's
+                                     ;; is-hof context.
+                                     arg-entity (get arg-map (:arg-id arg))
+                                     child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
+                                 (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} child-is-hof))
                           :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id #{display-fn-id})
-                          :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id})
+                          :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id} is-hof)
                           nil))))
                   node-id))
 
               (process-expanded-fn
-                [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns]
+                [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns is-hof]
                 ;; parent-expansion-root: if we're nested inside another expansion, keep that context
                 ;; Otherwise, this fn becomes its own expansion root
                 ;;
@@ -1168,12 +1210,12 @@
                     (do
                       (swap! in-progress-expansions conj in-progress-key)
                       (try
-                        (process-expanded-fn-impl original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns)
+                        (process-expanded-fn-impl original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns is-hof)
                         (finally
                           (swap! in-progress-expansions disj in-progress-key)))))))
 
               (process-expanded-fn-impl
-                [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns]
+                [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns is-hof]
                 (let [levels (get-inheritance-levels original-fn-id fn-map)
                       chain (vec (mapcat identity levels))  ; flat for set ops
                       expand-set (spec->expand-set original-fn-id spec)
@@ -1324,11 +1366,13 @@
                       ;; per-expansion copies.
                       (doseq [arg level-0-refs]
                         (when-not (binding-covered? arg)
-                          (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set)))
+                          (let [arg-entity (get arg-map (:arg-id arg))
+                                child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
+                            (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set child-is-hof))))
 
                       ;; Level-0 unsets (free args)
                       (doseq [arg level-0-unsets]
-                        (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set))
+                        (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof))
 
                       ;; Level-0 values (bindings)
                       (doseq [arg level-0-values]
@@ -1337,11 +1381,13 @@
 
                       ;; Ancestor refs (structural expansion)
                       (doseq [arg ancestor-refs]
-                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root expand-set))
+                        (let [arg-entity (get arg-map (:arg-id arg))
+                              child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
+                          (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) effective-expansion-root expand-set child-is-hof)))
 
                       ;; Ancestor unsets (free args inherited)
                       (doseq [arg ancestor-unsets]
-                        (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set))
+                        (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof))
 
                       ;; Ancestor values (ancestor bindings)
                       (doseq [arg ancestor-values]
@@ -1351,7 +1397,7 @@
                   node-id))
 
               (process-any-fn
-                [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root source-expanded-fns]
+                [fn-id source-node-id edge-arg-name is-root parent-bindings source-arg-id expansion-root source-expanded-fns is-hof]
                 ;; Named fns (with name in DB) are "boundaries" — their implementation
                 ;; is hidden by default. Only the root fn and anonymous (name=nil) fns
                 ;; are expanded automatically. Named fns show as leaf nodes unless
@@ -1407,10 +1453,13 @@
                                              (and (some? (:value arg))
                                                   (nil? (:ref-id arg))))
                                            own-args)]
-                        ;; Unsets (free args — interface, propagate up to caller)
+                        ;; Unsets (free args — interface, propagate up to caller).
+                        ;; On HOF-reachable leaves these are supplied by the HOF
+                        ;; runtime; `add-unset-arg-node` routes them to the
+                        ;; compact badge when is-hof is true.
                         (doseq [arg unsets]
                           (add-unset-arg-node (resolve-arg-name arg arg-map)
-                                              (:type arg) (:id arg) node-id #{fn-id}))
+                                              (:type arg) (:id arg) node-id #{fn-id} is-hof))
                         ;; Values (own literal bindings — local state)
                         (doseq [arg values]
                           (add-arg-value-node (resolve-arg-name arg arg-map)
@@ -1424,22 +1473,26 @@
                             bindings (if parent-bindings
                                        (merge parent-bindings bindings)
                                        bindings)]
-                        (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns))
+                        (process-fn fn-id fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns is-hof))
                       ;; Expanded mode - pass parent expansion-root to maintain context
-                      (process-expanded-fn fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root source-expanded-fns)))))]
+                      (process-expanded-fn fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings expansion-root source-expanded-fns is-hof)))))]
 
-        ;; Start processing from root - no expansion-root initially
-        (process-any-fn root-fn-id nil nil true nil nil nil #{})))
+        ;; Start processing from root - no expansion-root initially, not HOF.
+        (process-any-fn root-fn-id nil nil true nil nil nil #{} false)))
 
     ;; Attach the list of optional-unbound arg names to their source node so
     ;; the client can render a compact hint (e.g. "+default, +not-found")
     ;; instead of cluttering the graph with placeholder nodes.
     (let [final-nodes (mapv (fn [n]
                               (let [node-id (get-in n [:data :id])
-                                    optionals (get @optional-unsets-by-node node-id)]
+                                    optionals (get @optional-unsets-by-node node-id)
+                                    hof-captured (get @hof-captured-by-node node-id)]
                                 (cond-> n
                                   (seq optionals)
-                                  (assoc-in [:data :optionalArgs] (vec (distinct optionals))))))
+                                  (assoc-in [:data :optionalArgs] (vec (distinct optionals)))
+
+                                  (seq hof-captured)
+                                  (assoc-in [:data :hofCapturedArgs] (vec (distinct hof-captured))))))
                             @nodes)]
       {:nodes final-nodes
        :edges @edges})))

@@ -7,6 +7,7 @@
     [graphden.executor.composition.core :as core]
     [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.parsing :as parsing]
+    [graphden.executor.composition.records :as records]
     [graphden.executor.composition.source-chain :as sc]
     [graphden.executor.composition.validation :as validation]
     [graphden.executor.registry.interface :as registry]
@@ -291,44 +292,44 @@
 (deftest parse-arg-value-spec-test
   (testing "simple values - no rename"
     (is (= {:rename nil :value-spec 42 :is-fn nil :literal? false}
-           (#'core/parse-arg-value-spec 42)))
+           (#'records/parse-arg-value-spec 42)))
     (is (= {:rename nil :value-spec "hello" :is-fn nil :literal? false}
-           (#'core/parse-arg-value-spec "hello")))
+           (#'records/parse-arg-value-spec "hello")))
     (is (= {:rename nil :value-spec :my-fn :is-fn nil :literal? false}
-           (#'core/parse-arg-value-spec :my-fn)))
+           (#'records/parse-arg-value-spec :my-fn)))
     (is (= {:rename nil :value-spec nil :is-fn nil :literal? false}
-           (#'core/parse-arg-value-spec nil))))
+           (#'records/parse-arg-value-spec nil))))
 
   (testing "map with :as rename only"
     (is (= {:rename :new-name :value-spec nil :is-fn false :literal? false}
-           (#'core/parse-arg-value-spec {:as :new-name}))))
+           (#'records/parse-arg-value-spec {:as :new-name}))))
 
   (testing "map with :as and :value — marks literal so downstream skips fn-ref resolution"
     (is (= {:rename :first :value-spec 42 :is-fn false :literal? true}
-           (#'core/parse-arg-value-spec {:as :first :value 42}))))
+           (#'records/parse-arg-value-spec {:as :first :value 42}))))
 
   (testing "map with :as and :ref"
     (is (= {:rename :handler :value-spec :target-fn :is-fn false :literal? false}
-           (#'core/parse-arg-value-spec {:as :handler :ref :target-fn}))))
+           (#'records/parse-arg-value-spec {:as :handler :ref :target-fn}))))
 
   (testing "map with :as and :type :fn"
     (is (= {:rename :callback :value-spec nil :is-fn true :literal? false}
-           (#'core/parse-arg-value-spec {:as :callback :type :fn}))))
+           (#'records/parse-arg-value-spec {:as :callback :type :fn}))))
 
   (testing "map with :as, :value, and :type :fn — still a literal slot"
     (is (= {:rename :callback :value-spec :some-fn :is-fn true :literal? true}
-           (#'core/parse-arg-value-spec {:as :callback :value :some-fn :type :fn}))))
+           (#'records/parse-arg-value-spec {:as :callback :value :some-fn :type :fn}))))
 
   (testing "throws when :as is not a keyword"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #":as must be a keyword"
-          (#'core/parse-arg-value-spec {:as "not-keyword"})))
+          (#'records/parse-arg-value-spec {:as "not-keyword"})))
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #":as must be a keyword"
-          (#'core/parse-arg-value-spec {:as 123}))))
+          (#'records/parse-arg-value-spec {:as 123}))))
 
   (testing "map without :as is treated as literal value"
     ;; A map without :as key is NOT treated as a spec, just a literal map value
     (is (= {:rename nil :value-spec {:some "data"} :is-fn nil :literal? false}
-           (#'core/parse-arg-value-spec {:some "data"})))))
+           (#'records/parse-arg-value-spec {:some "data"})))))
 
 
 ;; === validate-fn-def! ===
@@ -565,7 +566,7 @@
           fn-cache {fn-id {:id fn-id :parent-ids nil}}
           args-data {:by-fn {fn-id [arg]}
                      :by-id {(:id arg) arg}}]
-      (is (= arg (#'core/get-parent-arg-cached fn-cache args-data [fn-id] :x)))))
+      (is (= arg (#'records/get-parent-arg-cached fn-cache args-data [fn-id] :x)))))
 
   (testing "follows parent-id chain to find arg"
     (let [grandparent-id (random-uuid)
@@ -576,7 +577,7 @@
           args-data {:by-fn {parent-id []
                              grandparent-id [arg]}
                      :by-id {(:id arg) arg}}]
-      (is (= arg (#'core/get-parent-arg-cached fn-cache args-data [parent-id] :deep-arg)))))
+      (is (= arg (#'records/get-parent-arg-cached fn-cache args-data [parent-id] :deep-arg)))))
 
   (testing "throws when arg not found in chain"
     (let [fn-id (random-uuid)
@@ -584,7 +585,7 @@
           args-data {:by-fn {fn-id []}
                      :by-id {}}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Argument not found"
-            (#'core/get-parent-arg-cached fn-cache args-data [fn-id] :nonexistent)))))
+            (#'records/get-parent-arg-cached fn-cache args-data [fn-id] :nonexistent)))))
 
   (testing "throws when chain too deep"
     (binding [sp/*max-graph-iterations* 2]
@@ -594,7 +595,7 @@
                                            (butlast ids)))
             args-data {:by-fn {} :by-id {}}]
         (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too deep"
-              (#'core/get-parent-arg-cached fn-cache args-data [(first ids)] :x)))))))
+              (#'records/get-parent-arg-cached fn-cache args-data [(first ids)] :x)))))))
 
 
 ;; === find-available-arg ===
@@ -606,7 +607,7 @@
           fn-cache {parent-id {:id parent-id :parent-ids nil}}
           args-data {:by-fn {parent-id [arg]}
                      :by-id {(:id arg) arg}}]
-      (is (= arg (#'core/find-available-arg fn-cache args-data [parent-id] :x)))))
+      (is (= arg (#'records/find-available-arg fn-cache args-data [parent-id] :x)))))
 
   (testing "finds arg in propagated free args when not in parent chain"
     (let [parent-id (random-uuid)
@@ -621,7 +622,7 @@
                              ref-fn-id [free-arg]}
                      :by-id {(:id bound-arg) bound-arg
                              (:id free-arg) free-arg}}]
-      (is (= free-arg (#'core/find-available-arg fn-cache args-data [parent-id] :target)))))
+      (is (= free-arg (#'records/find-available-arg fn-cache args-data [parent-id] :target)))))
 
   (testing "throws when arg not found anywhere"
     (let [parent-id (random-uuid)
@@ -629,7 +630,7 @@
           args-data {:by-fn {parent-id []}
                      :by-id {}}]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found in available args"
-            (#'core/find-available-arg fn-cache args-data [parent-id] :nonexistent))))))
+            (#'records/find-available-arg fn-cache args-data [parent-id] :nonexistent))))))
 
 
 ;; === prepare-propagated-arg-record ===
@@ -639,7 +640,7 @@
     (let [fn-id (random-uuid)
           parent-arg {:id (random-uuid) :type :int :is-fn false}
           args-data {:by-fn-source {}}
-          result (#'core/prepare-propagated-arg-record args-data fn-id parent-arg)]
+          result (records/prepare-propagated-arg-record args-data fn-id parent-arg)]
       (is (some? (:new result)))
       (is (= fn-id (:fn-id (:new result))))
       (is (= (:id parent-arg) (:source-id (:new result))))
@@ -652,7 +653,7 @@
           parent-arg {:id (random-uuid) :type :int :is-fn false}
           existing {:id (random-uuid) :fn-id fn-id :source-id (:id parent-arg)}
           args-data {:by-fn-source {[fn-id (:id parent-arg)] existing}}
-          result (#'core/prepare-propagated-arg-record args-data fn-id parent-arg)]
+          result (records/prepare-propagated-arg-record args-data fn-id parent-arg)]
       (is (nil? result)))))
 
 
@@ -668,7 +669,7 @@
           ;; Mock registry to return parent-id for :base-fn
           result (with-redefs [registry/fn-uuid
                                (fn [n] (when (= n :base-fn) parent-id))]
-                   (#'core/prepare-fn-record fn-name-cache fn-id-cache created-fns fn-def {}))]
+                   (records/prepare-fn-record fn-name-cache fn-id-cache created-fns fn-def {}))]
       (is (some? (:new result)))
       (is (= "new-fn" (:name (:new result))))
       (is (= [parent-id] (:parent-ids (:new result))))))
@@ -677,7 +678,7 @@
     (let [existing-fn {:id (random-uuid) :name "existing-fn"}
           fn-name-cache {"existing-fn" existing-fn}
           fn-def {:name :existing-fn :parent :base}
-          result (#'core/prepare-fn-record fn-name-cache {} {} fn-def {})]
+          result (records/prepare-fn-record fn-name-cache {} {} fn-def {})]
       (is (= existing-fn (:existing result)))))
 
   (testing "local fn (underscore prefix) is always created fresh"
@@ -687,7 +688,7 @@
           fn-def {:name :_local :parent :base-fn}
           result (with-redefs [registry/fn-uuid
                                (fn [n] (when (= n :base-fn) parent-id))]
-                   (#'core/prepare-fn-record fn-name-cache fn-id-cache {} fn-def {}))]
+                   (records/prepare-fn-record fn-name-cache fn-id-cache {} fn-def {}))]
       ;; Should create new, not return existing
       (is (some? (:new result)))
       ;; Local fns get name=nil in DB
@@ -698,7 +699,7 @@
           fn-def {:name :child :parent :parent-fn}
           result (with-redefs [registry/fn-uuid
                                (fn [_] nil)]
-                   (#'core/prepare-fn-record {} {} {:parent-fn parent-id} fn-def {}))]
+                   (records/prepare-fn-record {} {} {:parent-fn parent-id} fn-def {}))]
       (is (some? (:new result)))
       (is (= [parent-id] (:parent-ids (:new result))))))
 
@@ -706,7 +707,7 @@
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
           (with-redefs [registry/fn-uuid
                         (fn [_] nil)]
-            (#'core/prepare-fn-record {} {} {} {:name :orphan :parent :missing} {}))))))
+            (records/prepare-fn-record {} {} {} {:name :orphan :parent :missing} {}))))))
 
 
 ;; === resolve-fn-id-cached ===
@@ -714,23 +715,23 @@
 (deftest resolve-fn-id-cached-test
   (testing "resolves from created-fns first"
     (let [id (random-uuid)]
-      (is (= id (#'core/resolve-fn-id-cached {} {:my-fn id} :my-fn)))))
+      (is (= id (#'records/resolve-fn-id-cached {} {:my-fn id} :my-fn)))))
 
   (testing "resolves from fn-name-cache"
     (let [id (random-uuid)]
-      (is (= id (#'core/resolve-fn-id-cached {"my-fn" {:id id}} {} :my-fn)))))
+      (is (= id (#'records/resolve-fn-id-cached {"my-fn" {:id id}} {} :my-fn)))))
 
   (testing "prefers created-fns over fn-name-cache"
     (let [created-id (random-uuid)
           cached-id (random-uuid)]
-      (is (= created-id (#'core/resolve-fn-id-cached
+      (is (= created-id (#'records/resolve-fn-id-cached
                          {"my-fn" {:id cached-id}}
                          {:my-fn created-id}
                          :my-fn)))))
 
   (testing "throws when not found"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
-          (#'core/resolve-fn-id-cached {} {} :missing)))))
+          (#'records/resolve-fn-id-cached {} {} :missing)))))
 
 
 ;; === resolve-parent-fn-id-cached ===
@@ -738,25 +739,25 @@
 (deftest resolve-parent-fn-id-cached-test
   (testing "resolves from created-fns first"
     (let [id (random-uuid)]
-      (is (= id (#'core/resolve-parent-fn-id-cached {} {} {:my-parent id} :my-parent)))))
+      (is (= id (records/resolve-parent-fn-id-cached {} {} {:my-parent id} :my-parent)))))
 
   (testing "resolves from registry via fn-id-cache"
     (let [base-id (random-uuid)]
       (with-redefs [registry/fn-uuid
                     (fn [n] (when (= n :base) base-id))]
-        (is (= base-id (#'core/resolve-parent-fn-id-cached
-                        {} {base-id {:id base-id}} {} :base))))))
+        (is (= base-id (records/resolve-parent-fn-id-cached
+                         {} {base-id {:id base-id}} {} :base))))))
 
   (testing "resolves from fn-name-cache"
     (let [id (random-uuid)]
-      (is (= id (#'core/resolve-parent-fn-id-cached
-                 {"my-parent" {:id id}} {} {} :my-parent)))))
+      (is (= id (records/resolve-parent-fn-id-cached
+                  {"my-parent" {:id id}} {} {} :my-parent)))))
 
   (testing "throws when not found"
     (with-redefs [registry/fn-uuid
                   (fn [_] nil)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"not found"
-            (#'core/resolve-parent-fn-id-cached {} {} {} :missing))))))
+            (records/resolve-parent-fn-id-cached {} {} {} :missing))))))
 
 
 ;; === resolve-sequence-item ===
@@ -771,27 +772,27 @@
 (deftest resolve-sequence-item-uuid
   (let [id (random-uuid)]
     (is (= {:value nil :ref-id id}
-           (#'core/resolve-sequence-item {} {} id)))))
+           (#'records/resolve-sequence-item {} {} id)))))
 
 
 (deftest resolve-sequence-item-keyword-matching-created
   (testing "keyword matching a freshly-created fn resolves to a ref"
     (let [id (random-uuid)]
       (is (= {:value nil :ref-id id}
-             (#'core/resolve-sequence-item {} {:my-fn id} :my-fn))))))
+             (#'records/resolve-sequence-item {} {:my-fn id} :my-fn))))))
 
 
 (deftest resolve-sequence-item-keyword-matching-registry
   (testing "keyword matching an existing fn in the name-cache resolves"
     (let [id (random-uuid)]
       (is (= {:value nil :ref-id id}
-             (#'core/resolve-sequence-item {"my-fn" {:id id}} {} :my-fn))))))
+             (#'records/resolve-sequence-item {"my-fn" {:id id}} {} :my-fn))))))
 
 
 (deftest resolve-sequence-item-keyword-unknown-fn-is-literal
   (testing "keyword that doesn't name any known fn stays as a literal value"
     (is (= {:value :not-a-fn :ref-id nil}
-           (#'core/resolve-sequence-item {} {} :not-a-fn)))))
+           (#'records/resolve-sequence-item {} {} :not-a-fn)))))
 
 
 (deftest resolve-sequence-item-keyword-invalid-identifier
@@ -799,31 +800,31 @@
     ;; Namespaced keywords produce names with `/` which `valid-identifier?`
     ;; rejects. The item is still valid as a literal keyword value.
     (is (= {:value :ns/kw :ref-id nil}
-           (#'core/resolve-sequence-item {} {} :ns/kw)))))
+           (#'records/resolve-sequence-item {} {} :ns/kw)))))
 
 
 (deftest resolve-sequence-item-map-with-ref-override
   (let [id (random-uuid)]
     (is (= {:value nil :ref-id id}
-           (#'core/resolve-sequence-item {"target" {:id id}} {} {:ref :target})))))
+           (#'records/resolve-sequence-item {"target" {:id id}} {} {:ref :target})))))
 
 
 (deftest resolve-sequence-item-map-with-value-override
   (testing "explicit `:value` bypasses fn-ref resolution"
     (is (= {:value :keyword-as-literal :ref-id nil}
-           (#'core/resolve-sequence-item {} {} {:value :keyword-as-literal})))
+           (#'records/resolve-sequence-item {} {} {:value :keyword-as-literal})))
     (is (= {:value [1 2 3] :ref-id nil}
-           (#'core/resolve-sequence-item {} {} {:value [1 2 3]})))))
+           (#'records/resolve-sequence-item {} {} {:value [1 2 3]})))))
 
 
 (deftest resolve-sequence-item-literals
   (testing "non-keyword, non-map, non-uuid values pass through as literal :value"
     (is (= {:value 42 :ref-id nil}
-           (#'core/resolve-sequence-item {} {} 42)))
+           (#'records/resolve-sequence-item {} {} 42)))
     (is (= {:value "string" :ref-id nil}
-           (#'core/resolve-sequence-item {} {} "string")))
+           (#'records/resolve-sequence-item {} {} "string")))
     (is (= {:value [1 2] :ref-id nil}
-           (#'core/resolve-sequence-item {} {} [1 2])))))
+           (#'records/resolve-sequence-item {} {} [1 2])))))
 
 
 ;; === walk-anchor-chain-ids ===
@@ -833,13 +834,13 @@
 
 (deftest walk-anchor-chain-ids-empty
   (testing "anchor with no next-arg-id returns []"
-    (is (= [] (#'core/walk-anchor-chain-ids {} {:id :anchor})))))
+    (is (= [] (#'records/walk-anchor-chain-ids {} {:id :anchor})))))
 
 
 (deftest walk-anchor-chain-ids-single-item
   (let [item-id (random-uuid)
         args-by-id {item-id {:id item-id :next-arg-id nil}}]
-    (is (= [item-id] (#'core/walk-anchor-chain-ids args-by-id {:next-arg-id item-id})))))
+    (is (= [item-id] (#'records/walk-anchor-chain-ids args-by-id {:next-arg-id item-id})))))
 
 
 (deftest walk-anchor-chain-ids-multiple-items
@@ -847,7 +848,7 @@
         args-by-id {a {:id a :next-arg-id b}
                     b {:id b :next-arg-id c}
                     c {:id c :next-arg-id nil}}]
-    (is (= [a b c] (#'core/walk-anchor-chain-ids args-by-id {:next-arg-id a})))))
+    (is (= [a b c] (#'records/walk-anchor-chain-ids args-by-id {:next-arg-id a})))))
 
 
 (deftest walk-anchor-chain-ids-detects-overlong-chain
@@ -862,8 +863,8 @@
                            ids)]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"Sequence chain exceeded maximum length"
-            (#'core/walk-anchor-chain-ids args-by-id
-                                          {:id :anchor :next-arg-id (first ids)}))))))
+            (#'records/walk-anchor-chain-ids args-by-id
+                                             {:id :anchor :next-arg-id (first ids)}))))))
 
 
 ;; === parse-arg-value-spec — additional shapes not in the existing test ===
@@ -871,23 +872,23 @@
 (deftest parse-arg-value-spec-map-with-ref
   (testing "bare {:ref :fn-name} → ref without rename"
     (is (= {:rename nil :value-spec :target :is-fn false :literal? false}
-           (#'core/parse-arg-value-spec {:ref :target})))))
+           (#'records/parse-arg-value-spec {:ref :target})))))
 
 
 (deftest parse-arg-value-spec-map-with-value
   (testing "bare {:value …} → literal without rename, bypasses fn-ref resolution"
     (is (= {:rename nil :value-spec :kw-as-value :is-fn nil :literal? true}
-           (#'core/parse-arg-value-spec {:value :kw-as-value})))))
+           (#'records/parse-arg-value-spec {:value :kw-as-value})))))
 
 
 (deftest parse-arg-value-spec-map-as-with-type-fn
   (testing "{:as :rename :type :fn} sets is-fn true"
     (is (= {:rename :r :value-spec nil :is-fn true :literal? false}
-           (#'core/parse-arg-value-spec {:as :r :type :fn})))))
+           (#'records/parse-arg-value-spec {:as :r :type :fn})))))
 
 
 (deftest parse-arg-value-spec-as-rejects-non-keyword
   (testing ":as with non-keyword value throws"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #":as must be a keyword"
-          (#'core/parse-arg-value-spec {:as "string"})))))
+          (#'records/parse-arg-value-spec {:as "string"})))))

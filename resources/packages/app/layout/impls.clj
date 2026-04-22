@@ -32,13 +32,34 @@
 ;; DATA LOADING FROM STORAGE
 ;; =============================================================================
 
-(defn- load-graph-entities
-  "Load all fns and args from storage."
+(defn- load-graph-entities-uncached
   [storage]
   (if (instance? VersionedStorage storage)
     (vs/query-all-graph-entities storage)
     {:fns (vec (sp/query-entities storage :fn {}))
      :args (vec (sp/query-entities storage :arg {}))}))
+
+
+;; Layout is read-only and runs on every hover-preview + click. A full
+;; `query-all-graph-entities` takes ~130ms on the current graph and dominates
+;; request latency. Cache the result per-storage with a short TTL so the
+;; typical burst of requests during expand/preview hits the cache. TTL is
+;; intentionally short so CRUD edits via the editor API become visible
+;; within at most TTL ms without needing explicit invalidation wiring.
+(def ^:private graph-cache (atom {}))
+(def ^:private graph-cache-ttl-ns (* 1000 1000000)) ; 1s
+
+
+(defn- load-graph-entities
+  [storage]
+  (let [now (System/nanoTime)
+        k (System/identityHashCode storage)
+        cached (get @graph-cache k)]
+    (if (and cached (< (- now (:at cached)) graph-cache-ttl-ns))
+      (:data cached)
+      (let [data (load-graph-entities-uncached storage)]
+        (swap! graph-cache assoc k {:at now :data data})
+        data))))
 
 
 (defn- build-lookups

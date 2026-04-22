@@ -1487,45 +1487,6 @@
     (first (filter #(not (contains? has-parent (get-in % [:data :id]))) nodes))))
 
 
-(defn- find-paths-to-shared
-  "For each node, find which shared nodes are reachable from it."
-  [children shared-nodes]
-  (let [memo (atom {})]
-    (letfn [(reachable-from
-              [node-id]
-              (if-let [cached (get @memo node-id)]
-                cached
-                (let [result (if (contains? shared-nodes node-id)
-                               #{node-id}
-                               (let [child-ids (get children node-id [])]
-                                 (reduce (fn [acc cid]
-                                           (into acc (reachable-from cid)))
-                                         #{} child-ids)))]
-                  (swap! memo assoc node-id result)
-                  result)))]
-      (reduce (fn [m node-id]
-                (assoc m node-id (reachable-from node-id)))
-              {}
-              (keys children)))))
-
-
-(defn- path-length-to-shared
-  "Calculate path length from node to shared node (BFS)."
-  [from-id shared-id children]
-  (loop [queue [[from-id 0]]
-         visited #{}]
-    (when (seq queue)
-      (let [[node-id dist] (first queue)]
-        (cond
-          (= node-id shared-id) dist
-          (contains? visited node-id) (recur (rest queue) visited)
-          :else
-          (let [child-ids (get children node-id [])]
-            (recur (into (vec (rest queue))
-                         (map (fn [c] [c (inc dist)]) child-ids))
-                   (conj visited node-id))))))))
-
-
 (defn- get-child-type
   "Get type of child node: :fn, :fixed, or :free"
   [child-id node-data-map]
@@ -1537,257 +1498,20 @@
       :else :free)))
 
 
-(defn- find-divergence-roots
-  "Find divergence roots - siblings that both lead to the same shared node.
-
-   Returns set of node-ids that are divergence roots.
-   These nodes should NOT have path-position applied to them at their parent level.
-   Only their descendants should use path-position ordering.
-
-   Divergence roots are nodes where paths to a shared node SPLIT - i.e., siblings
-   that both lead to the same shared node. We find them by:
-   1. For each shared node, trace paths back to common ancestor
-   2. The children of that ancestor that lead to shared are divergence roots"
-  [children parents shared-nodes paths-to-shared]
-  (let [divergence-roots (atom #{})]
-    ;; For each shared node, find siblings that lead to it
-    (doseq [shared-id shared-nodes]
-      ;; Find all nodes that have this shared node in their paths-to-shared
-      (let [leading-to-shared (filter (fn [[_node-id targets]]
-                                        (contains? targets shared-id))
-                                      paths-to-shared)
-            ;; Group by their parent
-            by-parent (group-by (fn [[node-id _]]
-                                  ;; Find parent of this node
-                                  (first (filter (fn [potential-parent]
-                                                   (some #(= % node-id) (get children potential-parent [])))
-                                                 (keys children))))
-                                leading-to-shared)]
-        ;; Siblings (same parent) that both lead to shared are divergence roots
-        (doseq [[_parent siblings] by-parent]
-          (when (> (count siblings) 1)
-            ;; All these siblings are divergence roots for this shared node
-            (doseq [[sibling-id _] siblings]
-              (swap! divergence-roots conj sibling-id))))))
-    @divergence-roots))
-
-
-(defn- compute-path-positions
-  "For each node, determine if it's on an upper or lower path to shared nodes.
-
-   Returns map: node-id -> :upper | :lower | nil
-
-   Key insight: path positions only apply to nodes AFTER the divergence point.
-   Pre-divergence nodes (including the divergence point itself) are on BOTH paths
-   and should NOT be marked upper or lower.
-
-   Divergence point = parent of divergence roots (siblings where paths split).
-   Propagation of lower/upper stops at the divergence point.
-
-   Rules:
-   - Bottom parent of shared node → :lower
-   - Ancestors of bottom parent up to (but NOT including) divergence point → :lower
-   - Other parents and their ancestors up to divergence point → :upper
-   - Divergence roots themselves get path-position for ordering their own children
-   - Pre-divergence nodes (divergence point and above) → nil (no position)"
-  [children parents shared-nodes]
-  (let [paths-to-shared (find-paths-to-shared children shared-nodes)
-
-        ;; Find divergence points for each shared node
-        ;; A divergence point is a node whose children include 2+ siblings
-        ;; that both lead to the same shared node
-        divergence-points-per-shared
-        (into {}
-              (map (fn [shared-id]
-                     (let [;; Find all nodes that have children leading to this shared node
-                           points (filter
-                                    (fn [node-id]
-                                      (let [kids (get children node-id [])
-                                            kids-leading (filter #(contains? (get paths-to-shared % #{}) shared-id) kids)]
-                                        (> (count kids-leading) 1)))
-                                    (keys children))]
-                       [shared-id (set points)]))
-                   shared-nodes))
-
-        lower-path-nodes (atom #{})
-
-        ;; For each shared node, mark bottom parent and ancestors up to divergence point
-        _ (doseq [shared-id shared-nodes]
-            (let [parent-ids (get parents shared-id [])
-                  div-points (get divergence-points-per-shared shared-id #{})]
-              (when (seq parent-ids)
-                (let [bottom-parent (last parent-ids)]
-                  (swap! lower-path-nodes conj bottom-parent)
-                  ;; Propagate UP but STOP at divergence points
-                  (loop [to-check [bottom-parent]]
-                    (when (seq to-check)
-                      (let [node-id (first to-check)
-                            node-parents (get parents node-id [])
-                            eligible (filter #(and (contains? (get paths-to-shared % #{}) shared-id)
-                                                   (not (contains? div-points %))
-                                                   (not (contains? @lower-path-nodes %)))
-                                             node-parents)]
-                        (doseq [parent-id eligible]
-                          (swap! lower-path-nodes conj parent-id))
-                        (recur (into (vec (rest to-check)) eligible)))))))))
-
-        ;; Similarly compute upper-path nodes: non-bottom parents up to divergence point
-        upper-path-nodes (atom #{})
-        _ (doseq [shared-id shared-nodes]
-            (let [parent-ids (get parents shared-id [])
-                  div-points (get divergence-points-per-shared shared-id #{})]
-              (when (> (count parent-ids) 1)
-                (let [bottom-parent (last parent-ids)
-                      upper-parents (butlast parent-ids)]
-                  (doseq [up upper-parents]
-                    (swap! upper-path-nodes conj up)
-                    ;; Propagate UP but STOP at divergence points
-                    (loop [to-check [up]]
-                      (when (seq to-check)
-                        (let [node-id (first to-check)
-                              node-parents (get parents node-id [])
-                              ;; Filter eligible parents BEFORE marking them
-                              eligible (filter #(and (contains? (get paths-to-shared % #{}) shared-id)
-                                                     (not (contains? div-points %))
-                                                     (not (contains? @upper-path-nodes %)))
-                                               node-parents)]
-                          ;; Mark eligible parents
-                          (doseq [parent-id eligible]
-                            (swap! upper-path-nodes conj parent-id))
-                          ;; Continue propagation with newly marked parents
-                          (recur (into (vec (rest to-check)) eligible))))))))))]
-
-    ;; Build result map - only nodes AFTER divergence get positions
-    (reduce (fn [m node-id]
-              (condp contains? node-id
-                @lower-path-nodes (assoc m node-id :lower)
-                @upper-path-nodes (assoc m node-id :upper)
-                m))
-            {}
-            (keys children))))
-
-
 (defn- order-children
-  "Order children for layout placement.
-
-   See docs/LAYOUT.md Section 3.3 and 4.2 for full specification.
-
-   Key rules:
-   1. Divergence roots stay ADJACENT at their original position (not pushed to top/bottom)
-   2. Within divergence group: lower-path root goes LAST
-   3. Path nodes on LOWER path: path-to-shared children go FIRST (horizontal branch)
-   4. Path nodes on UPPER path: path-to-shared children go LAST (pushed down)
-   5. Direct shared children: included in output (handled by remove-shared-from-upper-parents separately)
-
-   This ensures the lower path forms a horizontal branch to the shared node."
-  [parent-id children-map paths-to-shared shared-nodes graph-children node-data-map path-position divergence-roots all-path-positions]
-  (let [child-ids (get children-map parent-id [])
-
-        classify-child
-        (fn [child-id idx]
-          (let [targets (get paths-to-shared child-id #{})
-                child-type (get-child-type child-id node-data-map)
-                is-shared-node (contains? shared-nodes child-id)
-                is-divergence-root (contains? divergence-roots child-id)
-                is-path-to-shared (and (seq targets) (not is-divergence-root) (not is-shared-node))]
-            {:id child-id
-             :type child-type
-             :original-idx idx
-             :targets targets
-             :is-shared-node is-shared-node
-             :is-divergence-root is-divergence-root
-             :is-path-to-shared is-path-to-shared
-             :primary-target (first (sort targets))}))
-
-        classified (map-indexed (fn [idx id] (classify-child id idx)) child-ids)
-
-        ;; Separate children into categories
-        divergence-children (filter :is-divergence-root classified)
-        path-children (filter :is-path-to-shared classified)
-        direct-shared-children (filter :is-shared-node classified)
-        neutral-children (filter #(and (not (:is-divergence-root %))
-                                       (not (:is-path-to-shared %))
-                                       (not (:is-shared-node %)))
-                                 classified)
-
-        ;; Group divergence roots by their shared target
-        divergence-by-target (group-by :primary-target divergence-children)
-
-        ;; Build unified list preserving positions:
-        ;; - Divergence groups: insert at min-idx of the group, sorted internally (lower-path LAST)
-        ;; - Neutral children: stay at original position
-        ;; - Direct shared children: stay at original position
-        ;; - Path-to-shared: moved based on path-position rule
-        divergence-groups
-        (map (fn [[target members]]
-               (let [min-idx (apply min (map :original-idx members))
-                     ;; Within group: lower-path member goes LAST
-                     sorted-members (sort-by (fn [m]
-                                               (if (= :lower (get all-path-positions (:id m)))
-                                                 1  ; Lower path = sort last within group
-                                                 0))
-                                             members)]
-                 {:type :divergence-group
-                  :min-idx min-idx
-                  :target target
-                  :members sorted-members}))
-             divergence-by-target)
-
-        ;; Is this parent on lower or upper path?
-        is-lower-path (= path-position :lower)
-        is-upper-path (= path-position :upper)
-
-        ;; Build sorted list:
-        ;; 1. Create position slots for neutral, direct-shared, path, and divergence groups
-        neutral-items (map (fn [c] {:type :neutral :idx (:original-idx c) :child c}) neutral-children)
-        shared-items (map (fn [c] {:type :shared :idx (:original-idx c) :child c}) direct-shared-children)
-        path-items (map (fn [c] {:type :path :idx (:original-idx c) :child c}) path-children)
-        divergence-items (map (fn [g] {:type :divergence :idx (:min-idx g) :group g}) divergence-groups)
-
-        ;; Sort all positional items by index (includes path-children for the :else case)
-        positional-items (sort-by :idx (concat neutral-items shared-items divergence-items))
-
-        ;; All items including path (for pre-divergence nodes where no special ordering needed)
-        all-positional-items (sort-by :idx (concat neutral-items shared-items path-items divergence-items))
-
-        ;; Extract IDs from positional items
-        positional-ids (mapcat (fn [item]
-                                 (case (:type item)
-                                   :neutral [(:id (:child item))]
-                                   :shared [(:id (:child item))]
-                                   :path [(:id (:child item))]
-                                   :divergence (map :id (:members (:group item)))))
-                               positional-items)
-
-        ;; All IDs including path-children at their original positions
-        all-positional-ids (mapcat (fn [item]
-                                     (case (:type item)
-                                       :neutral [(:id (:child item))]
-                                       :shared [(:id (:child item))]
-                                       :path [(:id (:child item))]
-                                       :divergence (map :id (:members (:group item)))))
-                                   all-positional-items)
-
-        ;; Path-to-shared children IDs (sorted by original-idx within each target group)
-        path-ids (->> path-children
-                      (group-by :primary-target)
-                      (mapcat (fn [[_target group]] (sort-by :original-idx group)))
-                      (map :id))]
-
-    ;; Final ordering based on parent's path position
-    (cond
-      ;; Lower path: path-to-shared children FIRST (forms horizontal branch)
-      is-lower-path
-      (vec (concat path-ids positional-ids))
-
-      ;; Upper path: path-to-shared children LAST (pushed down)
-      is-upper-path
-      (vec (concat positional-ids path-ids))
-
-      ;; Not on any path (pre-divergence or neutral): include all children
-      ;; at their original positions, no special path ordering
-      :else
-      (vec all-positional-ids))))         ; regular last           ; then divergence roots
+  "Order a node's children for placement. Per-call-site model: every
+   child has exactly one parent, no sharing, so ordering is a simple
+   stable sort by type (fn > fixed > free) preserving original index
+   within a type."
+  [parent-id children-map node-data-map]
+  (let [type-order {:fn 0 :fixed 1 :free 2}
+        child-ids (get children-map parent-id [])]
+    (vec
+      (sort-by
+        (fn [cid]
+          [(get type-order (get-child-type cid node-data-map) 3)
+           (.indexOf ^java.util.List child-ids cid)])
+        child-ids))))
 
 
 ;; Matrix operations
@@ -1818,148 +1542,30 @@
   (get-in matrix [:positions node-id]))
 
 
-(defn- compute-column-depths
-  "Compute column depth (distance from root in columns) for each node.
-   Each step in the graph = +1 column.
-   Returns map: node-id -> column-depth"
-  [root-id children]
-  (loop [queue [[root-id 0]]
-         depths {}]
-    (if (empty? queue)
-      depths
-      (let [[node-id depth] (first queue)
-            rest-queue (rest queue)]
-        (if (contains? depths node-id)
-          (recur rest-queue depths)
-          (let [depths (assoc depths node-id depth)
-                child-ids (get children node-id [])
-                new-entries (map (fn [c] [c (inc depth)]) child-ids)]
-            (recur (into (vec rest-queue) new-entries) depths)))))))
-
-
-(defn- compute-parent-offsets
-  "For each shared node, compute offsets so all direct parents end up at the same column.
-
-   Uses column-depths directly: the deepest parent stays as-is,
-   shallower parents get shifted right by the difference.
-
-   This ensures the shared node (placed at keeper's col+1) is always
-   to the RIGHT of all parents, eliminating backward edges.
-
-   Returns map: node-id -> offset (number of extra columns to shift right)"
-  [shared-nodes parents-map column-depths]
-  (reduce
-    (fn [offsets shared-id]
-      (let [parent-ids (get parents-map shared-id [])
-            parent-depths (map (fn [pid] {:id pid :depth (get column-depths pid 0)}) parent-ids)
-            max-depth (if (seq parent-depths)
-                        (apply max (map :depth parent-depths))
-                        0)]
-        (reduce
-          (fn [offs {:keys [id depth]}]
-            (let [needed (- max-depth depth)]
-              (if (pos? needed)
-                ;; Take max if parent already has offset from another shared node
-                (update offs id (fn [old] (max (or old 0) needed)))
-                offs)))
-          offsets
-          parent-depths)))
-    {}
-    shared-nodes))
-
-
-(defn- remove-shared-from-upper-parents
-  "For each shared node, remove it from children lists of all parents except
-   the one that should place it on its horizontal branch (the 'keeper').
-
-   Keeper selection:
-   1. If any parent is on the LOWER path to this shared node, that parent
-      keeps it. The lower path forms the horizontal branch; the shared node
-      belongs there. Upper-path parents have it removed entirely so their
-      edge simply points down to the shared node on the lower branch.
-   2. Otherwise (no path info), fall back to shallowest-parent rule:
-      sort by column depth ASC, index DESC; first wins.
-
-   Edges still exist for drawing — removing from children-map only affects
-   placement, not connectivity."
-  [children-map parents-map shared-nodes column-depths path-positions]
-  (reduce
-    (fn [cm shared-id]
-      (let [parent-ids (get parents-map shared-id [])
-            ;; Try to find a parent on the lower path to this shared node
-            lower-parent (first (filter (fn [pid]
-                                          (= :lower (get path-positions pid)))
-                                        parent-ids))
-            ;; Fall back: shallowest parent (min column depth), latest index wins ties
-            fallback-keeper
-            (when-not lower-parent
-              (let [indexed (map-indexed (fn [idx pid]
-                                           [pid (get column-depths pid Integer/MAX_VALUE) idx])
-                                         parent-ids)
-                    sorted (sort-by (fn [[_pid depth idx]] [depth (- idx)]) indexed)]
-                (ffirst sorted)))
-            keeper (or lower-parent fallback-keeper)
-            parents-to-remove (remove #(= % keeper) parent-ids)]
-        (reduce
-          (fn [cm2 parent-id]
-            (update cm2 parent-id (fn [kids] (vec (remove #(= % shared-id) kids)))))
-          cm
-          parents-to-remove)))
-    children-map
-    shared-nodes))
-
-
 (defn- layout-graph
-  "Main layout function implementing depth-first placement.
+  "Depth-first grid placement. Per-call-site model: every node has
+   exactly one parent, so the output is a tree.
 
-   Algorithm (see docs/LAYOUT.md for full description):
+   Algorithm:
+   1. Build the horizontal branch (chain of first children from root).
+   2. Find the first row where the branch fits (checks column occupancy).
+   3. Place the branch on that row.
+   4. Right-to-left across the branch, place each node's remaining
+      children as subtrees, starting one row below.
+   5. Recurse into each placed subtree.
 
-   1. Build horizontal branch: chain of first children from SELECTED node
-   2. Find row where branch fits (checking cols are free below too)
-   3. Place the branch
-   4. For each node in branch (RIGHT-TO-LEFT), process remaining children DEPTH-FIRST
-      - For each remaining child, recursively place its ENTIRE subtree
-      - Only move to next child after current child's subtree is fully placed
-   5. Backtrack when branch is fully processed
-
-   Key invariant: A node's entire subtree is placed before its sibling."
+   Invariant: a node's entire subtree is placed before its next sibling."
   [root-id graph-info]
-  (let [{:keys [children parents shared-nodes node-data-map]} graph-info
-        paths-to-shared (find-paths-to-shared children shared-nodes)
-        divergence-roots (find-divergence-roots children parents shared-nodes paths-to-shared)
-        path-positions (compute-path-positions children parents shared-nodes)
-
-        ;; Pre-calculate sorted children for each node
-        ;; Compute column depths FIRST - needed for determining which parent keeps shared nodes
-        column-depths (compute-column-depths root-id children)
-
+  (let [{:keys [children node-data-map]} graph-info
         sorted-children-map
         (into {}
               (map (fn [node-id]
-                     [node-id (order-children node-id children paths-to-shared
-                                              shared-nodes children node-data-map
-                                              (get path-positions node-id)
-                                              divergence-roots
-                                              path-positions)])
-                   (keys node-data-map)))
-
-        ;; Remove shared nodes from non-keeper parents' children lists.
-        ;; Lower-path parent keeps the shared child (for horizontal branch).
-        sorted-children-map (remove-shared-from-upper-parents
-                              sorted-children-map parents shared-nodes
-                              column-depths path-positions)
-
-        ;; Compute column offsets: align direct parents of shared nodes
-        ;; Shallower parents get shifted right so all parents end up at same column
-        parent-offsets (compute-parent-offsets shared-nodes parents column-depths)]
+                     [node-id (order-children node-id children node-data-map)])
+                   (keys node-data-map)))]
 
     (letfn [(get-sorted-children
               [node-id]
               (get sorted-children-map node-id []))
-
-            (get-offset
-              [node-id]
-              (get parent-offsets node-id 0))
 
             ;; Build horizontal branch (chain of first children)
             (build-branch
@@ -1969,24 +1575,18 @@
                      branch []]
                 (if (nil? current)
                   branch
-                  (let [offset (get-offset current)
-                        actual-col (+ col offset)
-                        branch (conj branch {:id current :col actual-col :offset offset})
+                  (let [branch (conj branch {:id current :col col})
                         kids (get-sorted-children current)
                         first-child (first kids)]
                     (if first-child
-                      (recur first-child (inc actual-col) branch)
+                      (recur first-child (inc col) branch)
                       branch)))))
 
-            ;; Check if branch fits at row (including reserved edge cells for offsets)
+            ;; Check if branch fits at row
             (branch-fits-at-row?
               [matrix branch row]
-              (every? (fn [{:keys [col offset]}]
-                        (let [offset (or offset 0)]
-                          ;; Check the node cell AND any offset-reserved cells
-                          (and (not (cell-occupied? matrix row col))
-                               (every? #(not (cell-occupied? matrix row %))
-                                       (range (- col offset) col)))))
+              (every? (fn [{:keys [col]}]
+                        (not (cell-occupied? matrix row col)))
                       branch))
 
             ;; Find row where branch fits
@@ -1997,21 +1597,12 @@
                   row
                   (recur (inc row)))))
 
-            ;; Place branch at row, reserving edge cells for offsets
+            ;; Place branch at row
             (place-branch
               [matrix branch row]
               (reduce
-                (fn [m {:keys [id col offset]}]
-                  (let [m (place-node-in-matrix m id row col)
-                        offset (or offset 0)]
-                    ;; Reserve cells for horizontal edge gap when offset > 0
-                    (if (pos? offset)
-                      (reduce (fn [m2 edge-col]
-                                (assoc-in m2 [:grid [row edge-col]]
-                                          {:edge-reserve true}))
-                              m
-                              (range (- col offset) col))
-                      m)))
+                (fn [m {:keys [id col]}]
+                  (place-node-in-matrix m id row col))
                 matrix
                 branch))
 

@@ -261,19 +261,18 @@
         max-visible-ancestors 4
 
         get-effective-spec
-        ;; Get expansion spec for a fn in its context.
-        ;; Lookup order: [expansion-root fn-id], [nil fn-id], fn-id (legacy).
+        ;; Get expansion spec for a node keyed by its call-site identity.
+        ;; The key is either the root fn-id (for the root node) or the
+        ;; source-arg-id (for any child call-site). Node ids in the wire
+        ;; format are `fn-<uuid>` so every key is a single UUID.
         ;;
         ;; Returns one of:
-        ;;   integer N            — legacy: full cascade through BFS depth N
+        ;;   integer N            — full cascade through BFS depth N
         ;;   {:full-depth N       — depths 1..N fully expanded
         ;;    :partial-fns #{...}}  plus these specific fn-ids at depth N+1
-        ;;   nil/0                — no expansion
-        (fn [fn-id expansion-root]
-          (or (get expansions [expansion-root fn-id])
-              (get expansions [nil fn-id])
-              (get expansions fn-id)
-              0))
+        ;;   0                    — no expansion
+        (fn [node-key]
+          (or (get expansions node-key) 0))
 
         ;; Convert any expansion spec into a set of fn-ids that should be
         ;; "merged into" the focus fn's display (always includes fn-id itself).
@@ -352,30 +351,22 @@
               :else (recur (get arg-map (:source-id a)) (inc depth)))))
 
         add-fn-node
-        (fn [original-fn-id is-root expansion-root]
-          ;; Node ID logic for correct sharing behavior:
+        (fn [original-fn-id is-root source-arg-id]
+          ;; Node ID strategy: each call-site is distinct. A call-site is
+          ;; uniquely identified by the id of the binding arg that pointed
+          ;; to it (`source-arg-id` — the arg entity on the caller whose
+          ;; `ref-id` is this fn). The root is the one exception: no caller,
+          ;; so keyed by the fn's own id.
           ;;
-          ;; 1. Root nodes and expanded roots: use canonical ID (fn-{id})
-          ;;    - These are the main nodes user sees and expands
-          ;;
-          ;; 2. Nodes inside expansion (expansion-root is set, not root):
-          ;;    - Use expansion-prefixed ID: fn-{expansion-root}-{id}
-          ;;    - This ensures each expansion has its own "copy" of ancestor structure
-          ;;    - Example: metrics-route and api-entities-route both expand to route,
-          ;;      each gets own method-map with own bindings
-          ;;
-          ;; 3. Nodes at level 0 (no expansion): use canonical ID
-          ;;    - These are direct refs from non-expanded fns
-          ;;    - Example: entity-form-handler referenced by multiple routes at level 0
-          ;;
-          ;; Key insight: expansion-root being nil means we're NOT inside an expansion
-          ;; (either this is the expansion root itself, or it's a level-0 fn)
-          (let [use-expansion-prefix (and expansion-root (not is-root))
-                ;; Use underscore as separator between expansion-root and fn-id
-                ;; This allows parsing: fn-{uuid} or fn-{uuid1}_{uuid2}
-                node-id (if use-expansion-prefix
-                          (str "fn-" expansion-root "_" original-fn-id)
-                          (str "fn-" original-fn-id))]
+          ;; This matches clojure semantics: two usages of the same fn in
+          ;; different places in a body are two independent call-sites with
+          ;; their own bindings. Previously we shared them (canonical id)
+          ;; or scoped per enclosing expansion, which created spurious
+          ;; shared nodes and forced the layout algorithm into keeper /
+          ;; divergence / path-position contortions.
+          (let [node-id (if (or is-root (nil? source-arg-id))
+                          (str "fn-" original-fn-id)
+                          (str "fn-" source-arg-id))]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
               (let [levels (get-inheritance-levels original-fn-id fn-map)
@@ -1044,7 +1035,7 @@
       ;; expansion-root: the original-fn-id of the expanded function we're inside (nil if not in expansion)
       (letfn [(process-fn
                 [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns is-hof]
-                (let [node-id (add-fn-node original-fn-id is-root expansion-root)
+                (let [node-id (add-fn-node original-fn-id is-root source-arg-id)
                       ;; Key for tracking fully processed nodes - includes expansion context
                       process-key (str node-id "-" (hash bindings))]
                   ;; Add edge from parent ALWAYS (even if node already processed)
@@ -1170,7 +1161,7 @@
                 ;; whose binding chain leads back to method-map.
                 (let [in-progress-key [original-fn-id parent-expansion-root]]
                   (if (contains? @in-progress-expansions in-progress-key)
-                    (let [node-id (add-fn-node original-fn-id is-root parent-expansion-root)]
+                    (let [node-id (add-fn-node original-fn-id is-root source-arg-id)]
                       (when (and source-node-id edge-arg-name)
                         (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
                           (when-not (contains? @added-node-ids edge-id)
@@ -1213,9 +1204,7 @@
                       ;; - If this is a top-level expansion (parent-expansion-root is nil),
                       ;;   this fn becomes the expansion root
                       effective-expansion-root (or parent-expansion-root original-fn-id)
-                      ;; Add the node with appropriate expansion root
-                      ;; Only use nil (canonical) if this is truly a top-level expansion
-                      node-id (add-fn-node original-fn-id is-root parent-expansion-root)]
+                      node-id (add-fn-node original-fn-id is-root source-arg-id)]
 
 
                   ;; Add edge from parent
@@ -1379,7 +1368,8 @@
                 ;; the user explicitly requests expansion.
                 (let [fn-entity (get fn-map fn-id)
                       is-named (and fn-entity (:name fn-entity))
-                      spec (get-effective-spec fn-id expansion-root)
+                      node-key (if is-root fn-id source-arg-id)
+                      spec (get-effective-spec node-key)
                       ;; Named fns are boundaries. Expanding a fn substitutes
                       ;; only THAT fn's impl — its ref-targets stay leaves
                       ;; until the user explicitly expands them. Holds inside
@@ -1395,7 +1385,7 @@
                     ;; optional-? badge) and its own literal value bindings.
                     ;; No recursion into refs: user must explicitly expand to
                     ;; see the leaf's body.
-                    (let [node-id (add-fn-node fn-id false expansion-root)]
+                    (let [node-id (add-fn-node fn-id false source-arg-id)]
                       (when (and source-node-id edge-arg-name)
                         (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
                           (when-not (contains? @added-node-ids edge-id)
@@ -2169,22 +2159,18 @@
 
 (defn- parse-expansions
   "Parse raw expansions map from request.
-   Keys have 'fn-' prefix from node IDs; structural nodes use 'fn-{root}_{fn-id}' format.
-   Returns map of {[expansion-root fn-id] spec} or {[nil fn-id] spec}."
+   Keys have 'fn-' prefix from node IDs. After per-call-site scoping the
+   id is always a single UUID: either the root fn-id (for the root node)
+   or the source-arg-id (for any child call-site). Returns map of
+   {node-key spec} where node-key is the UUID."
   [expansions-raw]
   (into {}
         (map (fn [[k v]]
                (let [k-str (name k)
                      stripped (if (str/starts-with? k-str "fn-")
                                 (subs k-str 3)
-                                k-str)
-                     [expansion-root fn-id]
-                     (if (str/includes? stripped "_")
-                       (let [parts (str/split stripped #"_")]
-                         [(java.util.UUID/fromString (first parts))
-                          (java.util.UUID/fromString (second parts))])
-                       [nil (java.util.UUID/fromString stripped)])]
-                 [[expansion-root fn-id] (parse-spec v)]))
+                                k-str)]
+                 [(java.util.UUID/fromString stripped) (parse-spec v)]))
              expansions-raw)))
 
 

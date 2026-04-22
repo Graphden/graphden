@@ -1292,80 +1292,21 @@
                     (swap! expansion-bindings assoc original-fn-id
                            {:has-ancestor-refs has-ancestor-refs})
 
-                    ;; Compute binding-covered? BEFORE processing nodes.
-                    ;; A binding is "covered" if its source chain leads to an arg
-                    ;; of a displayed ancestor ref fn — it will appear there instead.
-                    (let [expansion-chain-fns (set chain)
-
-                          all-ancestor-ref-fn-ids
-                          (let [result (atom #{})]
-                            (letfn [(walk
-                                      [fn-id visited]
-                                      (when-not (contains? visited fn-id)
-                                        (swap! result conj fn-id)
-                                        (let [fn-args (get args-by-fn fn-id [])
-                                              child-refs (keep :ref-id fn-args)]
-                                          (doseq [cr child-refs]
-                                            (walk cr (conj visited fn-id))))))]
-                              (doseq [ref ancestor-refs]
-                                (walk (:ref-id ref) #{})))
-                            @result)
-
-                          ancestor-ref-arg-sources
-                          (set (mapcat (fn [fn-id]
-                                         (let [fn-chain (get-inheritance-chain fn-id fn-map)]
-                                           (mapcat (fn [chain-fn-id]
-                                                     (when-not (contains? expansion-chain-fns chain-fn-id)
-                                                       (map :id (get args-by-fn chain-fn-id []))))
-                                                   fn-chain)))
-                                       all-ancestor-ref-fn-ids))
-
-                          binding-covered?
-                          (fn [arg]
-                            (loop [sid (:arg-id arg)]
-                              (when sid
-                                (if (contains? ancestor-ref-arg-sources sid)
-                                  true
-                                  (let [src-arg (get arg-map sid)]
-                                    (recur (:source-id src-arg)))))))]
-
-                      ;; ORDER: level-0 args FIRST, then ancestor args.
-                      ;; Within each level: refs (structural connections),
-                      ;; then UNSETS (interface — free args the user provides),
-                      ;; then VALUES (internal bindings — implementation details).
-                      ;; Free args come above bindings so the interface is visible
-                      ;; first when reading top-to-bottom.
-
-                      ;; Level-0 refs. Hidden when `binding-covered?` — the
-                      ;; binding's source chain passes through an arg inside a
-                      ;; displayed ancestor-ref subtree. In that case the
-                      ;; binding MOVES to the descendant that actually consumes
-                      ;; the slot (e.g. `:func :_router` on an `:if` migrates
-                      ;; to `router-result` which inherits from `:invoke` where
-                      ;; `:func` is primary). `binding-applies?` accepts the
-                      ;; binding there via the terminal-primary-on-ancestry
-                      ;; check; `bound-by-chain?` suppresses the propagation
-                      ;; relays in between so the edge renders exactly once.
-                      ;;
-                      ;; Level-0 refs are NOT prefixed with the expansion root
-                      ;; (pass nil as expansion-root). Two expansions that both
-                      ;; reference the same shared fn at their own level 0
-                      ;; should point at a single canonical node, not at two
-                      ;; per-expansion copies.
+                    ;; ORDER: level-0 args FIRST, then ancestor args.
+                    ;; Within each level: refs (structural connections),
+                    ;; then UNSETS (interface — free args the user provides),
+                    ;; then VALUES (internal bindings — implementation details).
+                    (do
                       (doseq [arg level-0-refs]
-                        (when-not (binding-covered? arg)
-                          (let [arg-entity (get arg-map (:arg-id arg))
-                                child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
-                            (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set child-is-hof))))
+                        (let [arg-entity (get arg-map (:arg-id arg))
+                              child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
+                          (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set child-is-hof)))
 
-                      ;; Level-0 unsets (free args)
                       (doseq [arg level-0-unsets]
                         (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof))
 
-                      ;; Level-0 values (bindings)
                       (doseq [arg level-0-values]
-                        (when-not (binding-covered? arg)
-                          (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set)))
+                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))
 
                       ;; Ancestor refs (structural expansion)
                       (doseq [arg ancestor-refs]
@@ -1379,8 +1320,7 @@
 
                       ;; Ancestor values (ancestor bindings)
                       (doseq [arg ancestor-values]
-                        (when-not (binding-covered? arg)
-                          (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set)))))
+                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))))
 
                   node-id))
 

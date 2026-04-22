@@ -1445,19 +1445,31 @@
                 (let [fn-entity (get fn-map fn-id)
                       is-named (and fn-entity (:name fn-entity))
                       spec (get-effective-spec fn-id expansion-root)
-                      ;; A named non-root fn with no expansion spec → show as leaf
-                      show-as-leaf (and is-named (not is-root) (spec-trivial? spec)
-                                        ;; Inside an expansion, don't collapse named refs
-                                        ;; — they are part of the expanded view
-                                        (nil? expansion-root))]
+                      ;; Named fns are boundaries. Expanding a fn substitutes
+                      ;; only THAT fn's impl — its ref-targets stay leaves
+                      ;; until the user explicitly expands them. Holds inside
+                      ;; enclosing expansions too. Propagated bindings that
+                      ;; target the leaf's slots still render on the leaf
+                      ;; (see leaf code path below) so a named ref-target
+                      ;; reached from an anon `_` intermediate shows the
+                      ;; migrated :coll/:item bindings as edges from itself.
+                      show-as-leaf (and is-named (not is-root) (spec-trivial? spec))]
                   (if show-as-leaf
                     ;; Add the node + edge. Show the fn's OWN values and unsets,
-                    ;; but NOT refs — refs go to other named fns which would
-                    ;; recursively explode the visualization. Refs require
-                    ;; explicit expansion. Inherited bindings from parents stay
-                    ;; hidden until expansion too.
-                    ;; Order: unsets (free interface) → values (own bindings).
-                    (let [node-id (add-fn-node fn-id false nil)]
+                    ;; and its direct refs to other named leaves (no explosion
+                    ;; since those targets are also leaves). Inherited bindings
+                    ;; from parents propagate here as edges from this leaf so
+                    ;; migrated slot values surface at the leaf where the slot
+                    ;; lives.
+                    ;;
+                    ;; Scope: when inside an enclosing expansion each leaf
+                    ;; gets a per-expansion-root copy (fn-{root}_{fn-id}) so
+                    ;; the same named fn reached via two different expansion
+                    ;; contexts stays as two separate nodes with their own
+                    ;; migrated bindings. Outside any expansion we reuse the
+                    ;; canonical id so multiple callers share one leaf.
+                    (let [node-id (add-fn-node fn-id false expansion-root)
+                          process-key (str node-id "-" (hash parent-bindings))]
                       (when (and source-node-id edge-arg-name)
                         (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
                           (when-not (contains? @added-node-ids edge-id)
@@ -1468,6 +1480,13 @@
                                            :target node-id
                                            :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                         (when edge-arg-name (name edge-arg-name)))}}))))
+                      ;; Skip child render if this leaf+binding-context was
+                      ;; already processed. Cycles arise via propagated ref
+                      ;; chains (e.g. list-10 → list-10-9 → list-10 through
+                      ;; :coll migration). The incoming edge above is still
+                      ;; added every time — only further recursion is pruned.
+                      (when-not (contains? @processed-fn-nodes process-key)
+                        (swap! processed-fn-nodes conj process-key)
                       (let [raw-own-args (get args-by-fn fn-id [])
                             ;; Sequence anchors (type=:sequence) and their chain items
                             ;; are NOT free args — the anchor's presence IS the binding
@@ -1484,26 +1503,73 @@
                                                 (not (or (contains? anchor-ids (:id a))
                                                          (contains? seq-chain-ids (:id a)))))
                                               raw-own-args)
-                            unsets (filter (fn [arg]
-                                             (and (nil? (:value arg))
-                                                  (nil? (:ref-id arg))
-                                                  (not (arg-determined? (:id arg)))))
-                                           own-args)
-                            values (filter (fn [arg]
-                                             (and (some? (:value arg))
-                                                  (nil? (:ref-id arg))))
-                                           own-args)]
+                            ;; Walk arg-id source chain for a propagated binding
+                            ;; coming in via the enclosing expansion. When a named
+                            ;; leaf is reached from an expanded parent, the parent's
+                            ;; bindings migrate here and should render as edges from
+                            ;; THIS leaf to the bound ref-target (or value node).
+                            find-propagated-binding
+                            (fn [arg-id]
+                              (when parent-bindings
+                                (loop [sid arg-id]
+                                  (when sid
+                                    (if-let [b (get parent-bindings sid)]
+                                      b
+                                      (let [src-arg (get arg-map sid)]
+                                        (recur (:source-id src-arg))))))))
+                            classified (mapv
+                                         (fn [arg]
+                                           (let [has-value (some? (:value arg))
+                                                 has-ref (some? (:ref-id arg))
+                                                 prop-binding (when-not (or has-value has-ref)
+                                                                (find-propagated-binding (:id arg)))]
+                                             (cond
+                                               (and prop-binding (:ref-id prop-binding))
+                                               {:kind :prop-ref :arg arg :binding prop-binding}
+
+                                               (and prop-binding (some? (:value prop-binding)))
+                                               {:kind :prop-value :arg arg :binding prop-binding}
+
+                                               has-value
+                                               {:kind :value :arg arg}
+
+                                               (and (nil? has-value) (nil? has-ref)
+                                                    (not (arg-determined? (:id arg))))
+                                               {:kind :unset :arg arg}
+
+                                               :else nil)))
+                                         own-args)
+                            parts (group-by :kind (remove nil? classified))]
                         ;; Unsets (free args — interface, propagate up to caller).
                         ;; On HOF-reachable leaves these are supplied by the HOF
                         ;; runtime; `add-unset-arg-node` routes them to the
                         ;; compact badge when is-hof is true.
-                        (doseq [arg unsets]
+                        (doseq [{:keys [arg]} (:unset parts)]
                           (add-unset-arg-node (resolve-arg-name arg arg-map)
                                               (:type arg) (:id arg) node-id #{fn-id} is-hof))
                         ;; Values (own literal bindings — local state)
-                        (doseq [arg values]
+                        (doseq [{:keys [arg]} (:value parts)]
                           (add-arg-value-node (resolve-arg-name arg arg-map)
-                                              (:value arg) (:id arg) node-id #{fn-id})))
+                                              (:value arg) (:id arg) node-id #{fn-id}))
+                        ;; Propagated bindings from the enclosing expansion —
+                        ;; migrate here per rule 5. Rendered as edges from this
+                        ;; leaf to the bound target. Pass expansion-root=nil so
+                        ;; the target gets a canonical id: the bound value is
+                        ;; caller-supplied and shared across call sites, not
+                        ;; structurally inside any one expansion context.
+                        (doseq [{:keys [arg binding]} (:prop-ref parts)]
+                          (let [arg-entity (get arg-map (:id arg))
+                                child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
+                            (process-any-fn (:ref-id binding) node-id
+                                            (or (:arg-name binding)
+                                                (resolve-arg-name arg arg-map))
+                                            false parent-bindings (:id arg)
+                                            nil #{fn-id} child-is-hof)))
+                        (doseq [{:keys [arg binding]} (:prop-value parts)]
+                          (add-arg-value-node (or (:arg-name binding)
+                                                  (resolve-arg-name arg arg-map))
+                                              (:value binding) (:id arg)
+                                              node-id #{fn-id}))))
                       node-id)
                     ;; Normal processing
                     (if (spec-trivial? spec)

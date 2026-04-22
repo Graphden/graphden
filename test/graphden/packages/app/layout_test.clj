@@ -1325,9 +1325,14 @@
 
           lookups (build-lookups {:fns fns :args args})
 
-          ;; Expand only route1 to level 1 (shows route ancestor with method-map ref)
-          ;; shared-handler appears as binding for assoc-handler's :handler arg
-          expansions {[nil route1-id] 1}
+          ;; Expand route1 to level 1 AND method-map inside route1's context
+          ;; to level 1 — under rule 5, named ref-targets don't auto-unfold,
+          ;; so method-map stays a leaf until the user asks. With method-map
+          ;; expanded, its ref to assoc-handler surfaces (assoc-handler itself
+          ;; stays a leaf) and the propagated :handler binding migrates to
+          ;; assoc-handler's slot, rendering as an edge to shared-handler.
+          expansions {[nil route1-id] 1
+                      [route1-id method-map-id] 1}
 
           result (build-graph-elements parent-id expansions lookups)
           nodes (:nodes result)

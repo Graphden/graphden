@@ -92,19 +92,14 @@
    :parent :text-error-router
    :args {:routes :all-routes}}
 
-  ;; Bind the router at the response-fn level (a child of ring-adapter's
-  ;; :path-gated-response). `make-request-handler` creates a fresh execution
-  ;; scope re-rooted at :response-fn, so any caller-side binding for :func
-  ;; must live ON the response-fn (or inside its subtree) to be visible at
-  ;; runtime.
+  ;; Bind the router inside the ring-adapter's :path-gated-response
+  ;; subtree. `:handler` on `:http-server` is `:fn`-type, so compile's
+  ;; hof-wrap turns this fn-graph into a Ring callable directly at
+  ;; `:web-server.handler` — no adapter node in between.
   {:name :_app-path-gated-response
    :parent :path-gated-response
    :args {:func :_router}}
 
-  {:name :_app-request-handler
-   :parent :request-handler
-   :args {:response-fn :_app-path-gated-response}}
-
   {:name :web-server
    :parent :http-server
-   :args {:handler :_app-request-handler :port 8080}}]}
+   :args {:handler :_app-path-gated-response :port 8080}}]}

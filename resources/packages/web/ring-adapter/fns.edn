@@ -251,11 +251,10 @@
           :else :router-ring-response}}
 
   ;; =============================================================================
-  ;; FINAL HANDLER — exported root of this module.
-  ;; The consumer wires in a concrete router by creating a child of
-  ;; `:path-gated-response` with `:func :_their-router` bound and passing
-  ;; it to `:request-handler` as `:response-fn`.
+  ;; ENTRY POINT
+  ;; The consumer binds `:path-gated-response` (or a child of it with
+  ;; `:func :_their-router`) directly to the web server's `:handler` slot.
+  ;; `:handler` is declared `:fn`-type on `:http-server`, so compile's
+  ;; hof-wrap turns the fn-graph into a Ring callable automatically.
   ;; =============================================================================
-
-  {:name :request-handler
-   :parent :make-request-handler}]}
+  ]}

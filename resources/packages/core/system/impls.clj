@@ -40,10 +40,6 @@
 ;; special-case that routes the item to the deep `:request` free arg
 ;; of the wrapped target). The factory just assembles them.
 
-(defbase make-request-handler [response-fn]
-  response-fn)
-
-
 (defbase make-data-handler [data-fn body-fn status headers]
   (fn [request]
     (let [data (data-fn request)
@@ -147,7 +143,6 @@
 (def impls
   {:ring-response ring-response
    :make-handler make-handler
-   :make-request-handler make-request-handler
    :make-data-handler make-data-handler
    :make-action-handler make-action-handler
    :to-json-string to-json-string

@@ -14,13 +14,6 @@
    :args {:response :jsonb}
    :return-type :fn}
 
-  ;; Dynamic handler that calls response-fn for each request.
-  ;; `:fn`-type arg — compile wraps it into a Ring callable with
-  ;; `:request` routing before the impl ever sees it.
-  {:name :make-request-handler
-   :args {:response-fn :fn}
-   :return-type :fn}
-
   ;; =============================================================================
   ;; HANDLER FACTORIES (base-fns)
   ;; =============================================================================

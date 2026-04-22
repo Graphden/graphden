@@ -876,73 +876,8 @@
                 ;; ref-fn-arg-ids (so shared ancestors don't get filtered)
                 full-chain-fns (set (mapcat identity levels))
                 covered-sources (atom #{})
-                ;; First pass: collect all refs to know which fns will be displayed
-                ref-fn-ids (atom #{})
-                _ (doseq [fn-id active-fns]
-                    (let [args (get args-by-fn fn-id [])]
-                      (doseq [arg args]
-                        (when-let [ref-id (:ref-id arg)]
-                          (swap! ref-fn-ids conj ref-id))
-                        ;; Also check bindings
-                        (when-let [binding (get bindings (:id arg))]
-                          (when-let [ref-id (:ref-id binding)]
-                            (swap! ref-fn-ids conj ref-id))))))
-                ;; Collect all arg-ids that belong to displayed ref-fns. Walk
-                ;; BOTH inheritance ancestry AND the transitive ref-target
-                ;; closure — propagated free-arg shadows on the current fn
-                ;; often have their source-id pointing DEEP into a ref-chain
-                ;; (e.g. `:request` on `_app-path-gated-response` sources to
-                ;; `router-response-body`, which `router-ring-response` reaches
-                ;; through its own refs). The closure catches those so shadows
-                ;; whose source chain flows into any displayed sub-graph get
-                ;; suppressed at the parent — they render on the ref-target
-                ;; where the slot is actually introduced.
-                ;; EXCLUDE args from fns in the expansion root's inheritance
-                ;; chain so shared ancestors (e.g. `conj-any` shared by
-                ;; list-11 and list-10) don't cause items to be filtered as
-                ;; "belonging inside ref-fn".
-                expansion-chain-fns full-chain-fns
-                ref-closure-fns (let [seen (atom #{})]
-                                  (letfn [(walk
-                                            [fn-id]
-                                            (when-not (contains? @seen fn-id)
-                                              (swap! seen conj fn-id)
-                                              (doseq [anc (get-inheritance-chain fn-id fn-map)]
-                                                (swap! seen conj anc)
-                                                (doseq [a (get args-by-fn anc [])]
-                                                  (when-let [r (:ref-id a)]
-                                                    (walk r))
-                                                  ;; Sequence anchors: walk each
-                                                  ;; item's ref-id too. Without
-                                                  ;; this, `:entries` on
-                                                  ;; `internal-request` stops the
-                                                  ;; closure at the anchor, and
-                                                  ;; `ring-request` / `ring-uri`
-                                                  ;; stay outside it.
-                                                  (when (= :sequence (:type a))
-                                                    (doseq [item (walk-anchor-chain a arg-map)]
-                                                      (when-let [r (:ref-id item)]
-                                                        (walk r))))))))]
-                                    (doseq [rid @ref-fn-ids]
-                                      (walk rid)))
-                                  @seen)
-                ref-fn-arg-ids (atom #{})
-                _ (doseq [rfn-id ref-closure-fns]
-                    (when-not (contains? expansion-chain-fns rfn-id)
-                      (let [ref-args (get args-by-fn rfn-id [])]
-                        (doseq [ra ref-args]
-                          (swap! ref-fn-arg-ids conj (:id ra))))))
                 result (atom [])
-                chain-level (atom 0)
-                ;; Helper: check if any arg in the source chain is in ref-fn-arg-ids
-                source-chain-binds-to-ref-fn
-                (fn [start-arg-id]
-                  (loop [sid start-arg-id]
-                    (when sid
-                      (if (contains? @ref-fn-arg-ids sid)
-                        true
-                        (let [src-arg (get arg-map sid)]
-                          (recur (:source-id src-arg)))))))]
+                chain-level (atom 0)]
             ;; Second pass: collect args, skipping those that bind to ref-fn args
             (doseq [fn-id active-fns]
               (let [raw-args (get args-by-fn fn-id [])
@@ -1037,16 +972,8 @@
                                       (when-let [src-arg (get arg-map sid)]
                                         (when-let [next-sid (:source-id src-arg)]
                                           (recur next-sid)))))
-                          ;; Check if ANY arg in the source chain is an arg of a displayed ref-fn
-                          ;; This applies to BOTH value and ref args - if the arg's source chain
-                          ;; leads to an arg inside a displayed ref-fn, this arg is a binding for
-                          ;; that ref-fn's arg and should be shown inside, not as direct child
-                          binds-to-ref-fn (and (:source-id arg)
-                                               (source-chain-binds-to-ref-fn (:source-id arg)))
-                          ;; Skip if: already covered OR (has binding AND binds to ref-fn)
-                          ;; The binding will appear on the ref-fn instead
-                          skip-binding-to-ref (and binding binds-to-ref-fn)]
-                      (when (and (not already-covered) (not skip-binding-to-ref))
+                          ]
+                      (when (not already-covered)
                         ;; Mark as covered (including all sources in chain)
                         (loop [sid source-id]
                           (when sid
@@ -1081,14 +1008,6 @@
                             ;; Arg unbound here but bound somewhere upstream in the
                             ;; source chain — shown there, skip emitting a ghost.
                             (bound-by-chain? arg)
-                            nil
-
-                            ;; Propagated free-arg shadow whose source-id chain
-                            ;; reaches into a displayed ref-fn (or anything in
-                            ;; its ref-closure). The slot is introduced by that
-                            ;; ref-target — render it there, not as a duplicate
-                            ;; placeholder on the parent.
-                            binds-to-ref-fn
                             nil
 
                             :else
@@ -1471,21 +1390,12 @@
                       ;; migrated :coll/:item bindings as edges from itself.
                       show-as-leaf (and is-named (not is-root) (spec-trivial? spec))]
                   (if show-as-leaf
-                    ;; Add the node + edge. Show the fn's OWN values and unsets,
-                    ;; and its direct refs to other named leaves (no explosion
-                    ;; since those targets are also leaves). Inherited bindings
-                    ;; from parents propagate here as edges from this leaf so
-                    ;; migrated slot values surface at the leaf where the slot
-                    ;; lives.
-                    ;;
-                    ;; Scope: when inside an enclosing expansion each leaf
-                    ;; gets a per-expansion-root copy (fn-{root}_{fn-id}) so
-                    ;; the same named fn reached via two different expansion
-                    ;; contexts stays as two separate nodes with their own
-                    ;; migrated bindings. Outside any expansion we reuse the
-                    ;; canonical id so multiple callers share one leaf.
-                    (let [node-id (add-fn-node fn-id false expansion-root)
-                          process-key (str node-id "-" (hash parent-bindings))]
+                    ;; Named leaf boundary. Show only THIS fn's own args —
+                    ;; its free-arg interface (unsets → placeholder / HOF-λ /
+                    ;; optional-? badge) and its own literal value bindings.
+                    ;; No recursion into refs: user must explicitly expand to
+                    ;; see the leaf's body.
+                    (let [node-id (add-fn-node fn-id false expansion-root)]
                       (when (and source-node-id edge-arg-name)
                         (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
                           (when-not (contains? @added-node-ids edge-id)
@@ -1496,45 +1406,7 @@
                                            :target node-id
                                            :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                         (when edge-arg-name (name edge-arg-name)))}}))))
-                      ;; Skip child render if this leaf+binding-context was
-                      ;; already processed. Cycles arise via propagated ref
-                      ;; chains (e.g. list-10 → list-10-9 → list-10 through
-                      ;; :coll migration). The incoming edge above is still
-                      ;; added every time — only further recursion is pruned.
-                      (when-not (contains? @processed-fn-nodes process-key)
-                        (swap! processed-fn-nodes conj process-key)
-                      (let [;; Transitive ref-closure of this leaf — all fn-ids
-                            ;; reachable by walking this fn's inheritance and
-                            ;; its bound refs recursively. Used to identify
-                            ;; shadows on the enclosing expansion-root that
-                            ;; migrated to this leaf (their source-chain walks
-                            ;; into a fn inside the closure).
-                            leaf-closure
-                            (let [seen (atom #{})]
-                              (letfn [(walk [fid]
-                                        (when-not (contains? @seen fid)
-                                          (swap! seen conj fid)
-                                          (doseq [anc (get-inheritance-chain fid fn-map)]
-                                            (swap! seen conj anc)
-                                            (doseq [a (get args-by-fn anc [])]
-                                              (when-let [r (:ref-id a)]
-                                                (walk r))
-                                              (when (= :sequence (:type a))
-                                                (doseq [item (walk-anchor-chain a arg-map)]
-                                                  (when-let [r (:ref-id item)]
-                                                    (walk r))))))))]
-                                (walk fn-id))
-                              @seen)
-                            leaf-closure-arg-ids
-                            (into #{}
-                                  (mapcat (fn [fid] (map :id (get args-by-fn fid []))))
-                                  leaf-closure)
-                            raw-own-args (get args-by-fn fn-id [])
-                            ;; Sequence anchors (type=:sequence) and their chain items
-                            ;; are NOT free args — the anchor's presence IS the binding
-                            ;; for the parent's `:items`-style slot. Exclude both from
-                            ;; the scalar pipeline so they don't surface as phantom
-                            ;; "items" placeholders on referenced nodes.
+                      (let [raw-own-args (get args-by-fn fn-id [])
                             seq-anchors (filterv #(= :sequence (:type %)) raw-own-args)
                             seq-chain-ids (into #{}
                                                 (mapcat (fn [anchor]
@@ -1545,108 +1417,21 @@
                                                 (not (or (contains? anchor-ids (:id a))
                                                          (contains? seq-chain-ids (:id a)))))
                                               raw-own-args)
-                            ;; Walk arg-id source chain for a propagated binding
-                            ;; coming in via the enclosing expansion. When a named
-                            ;; leaf is reached from an expanded parent, the parent's
-                            ;; bindings migrate here and should render as edges from
-                            ;; THIS leaf to the bound ref-target (or value node).
-                            find-propagated-binding
-                            (fn [arg-id]
-                              (when parent-bindings
-                                (loop [sid arg-id]
-                                  (when sid
-                                    (if-let [b (get parent-bindings sid)]
-                                      b
-                                      (let [src-arg (get arg-map sid)]
-                                        (recur (:source-id src-arg))))))))
-                            classified (mapv
-                                         (fn [arg]
-                                           (let [has-value (some? (:value arg))
-                                                 has-ref (some? (:ref-id arg))
-                                                 prop-binding (when-not (or has-value has-ref)
-                                                                (find-propagated-binding (:id arg)))]
-                                             (cond
-                                               (and prop-binding (:ref-id prop-binding))
-                                               {:kind :prop-ref :arg arg :binding prop-binding}
-
-                                               (and prop-binding (some? (:value prop-binding)))
-                                               {:kind :prop-value :arg arg :binding prop-binding}
-
-                                               has-value
-                                               {:kind :value :arg arg}
-
-                                               (and (not has-value) (not has-ref)
-                                                    (not (arg-determined? (:id arg))))
-                                               {:kind :unset :arg arg}
-
-                                               :else nil)))
-                                         own-args)
-                            parts (group-by :kind (remove nil? classified))]
-                        ;; Unsets (free args — interface, propagate up to caller).
-                        ;; On HOF-reachable leaves these are supplied by the HOF
-                        ;; runtime; `add-unset-arg-node` routes them to the
-                        ;; compact badge when is-hof is true.
-                        (doseq [{:keys [arg]} (:unset parts)]
+                            unsets (filter (fn [a]
+                                             (and (nil? (:value a))
+                                                  (nil? (:ref-id a))
+                                                  (not (arg-determined? (:id a)))))
+                                           own-args)
+                            values (filter (fn [a]
+                                             (and (some? (:value a))
+                                                  (nil? (:ref-id a))))
+                                           own-args)]
+                        (doseq [arg unsets]
                           (add-unset-arg-node (resolve-arg-name arg arg-map)
                                               (:type arg) (:id arg) node-id #{fn-id} is-hof))
-                        ;; Values (own literal bindings — local state)
-                        (doseq [{:keys [arg]} (:value parts)]
+                        (doseq [arg values]
                           (add-arg-value-node (resolve-arg-name arg arg-map)
-                                              (:value arg) (:id arg) node-id #{fn-id}))
-                        ;; Propagated bindings from the enclosing expansion —
-                        ;; migrate here per rule 5. Rendered as edges from this
-                        ;; leaf to the bound target. Pass expansion-root=nil so
-                        ;; the target gets a canonical id: the bound value is
-                        ;; caller-supplied and shared across call sites, not
-                        ;; structurally inside any one expansion context.
-                        (doseq [{:keys [arg binding]} (:prop-ref parts)]
-                          (let [arg-entity (get arg-map (:id arg))
-                                child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
-                            (process-any-fn (:ref-id binding) node-id
-                                            (or (:arg-name binding)
-                                                (resolve-arg-name arg arg-map))
-                                            false parent-bindings (:id arg)
-                                            nil #{fn-id} child-is-hof)))
-                        (doseq [{:keys [arg binding]} (:prop-value parts)]
-                          (add-arg-value-node (or (:arg-name binding)
-                                                  (resolve-arg-name arg arg-map))
-                                              (:value binding) (:id arg)
-                                              node-id #{fn-id}))
-                        ;; Transitive free args migrating from the enclosing
-                        ;; expansion-root. Per rule 5, the leaf boundary is
-                        ;; where free args of its hidden body surface — if
-                        ;; composition didn't eagerly propagate them onto the
-                        ;; leaf's own DB shadows (as is the case for
-                        ;; `router-result` whose parent is a base-fn with no
-                        ;; ref-chain to walk), we surface them here by looking
-                        ;; at the caller-side expansion-root's shadow args
-                        ;; whose terminal source-id lives inside this leaf's
-                        ;; ref-closure. Shadows already covered by this leaf's
-                        ;; own args are skipped to avoid double rendering.
-                        (when expansion-root
-                          (let [own-terminals (into #{}
-                                                    (map (fn [a] (terminal-source-of (:id a))))
-                                                    raw-own-args)
-                                already-rendered-terminals
-                                (into own-terminals
-                                      (map (fn [{:keys [arg]}] (terminal-source-of (:id arg))))
-                                      (:unset parts))
-                                root-args (get args-by-fn expansion-root [])
-                                seen-keys (atom already-rendered-terminals)]
-                            (doseq [a root-args
-                                    :let [term (terminal-source-of (:id a))
-                                          nm (resolve-arg-name a arg-map)
-                                          dedup-key [term nm]]
-                                    :when (and (nil? (:value a))
-                                               (nil? (:ref-id a))
-                                               (not= :sequence (:type a))
-                                               (contains? leaf-closure-arg-ids term)
-                                               (not (contains? @seen-keys term))
-                                               (not (contains? @seen-keys dedup-key))
-                                               (not (arg-determined? (:id a))))]
-                              (swap! seen-keys conj dedup-key)
-                              (add-unset-arg-node nm (:type a) (:id a) node-id
-                                                  #{fn-id} is-hof))))))
+                                              (:value arg) (:id arg) node-id #{fn-id})))
                       node-id)
                     ;; Normal processing
                     (if (spec-trivial? spec)

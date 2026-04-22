@@ -871,19 +871,51 @@
                         (when-let [binding (get bindings (:id arg))]
                           (when-let [ref-id (:ref-id binding)]
                             (swap! ref-fn-ids conj ref-id))))))
-                ;; Collect all arg-ids that belong to displayed ref-fns (including inheritance)
-                ;; EXCLUDE args from fns that are also in the expansion root's inheritance chain.
-                ;; This prevents shared ancestors (e.g., conj-any shared by list-11 and list-10)
-                ;; from causing items to be filtered as "belonging inside ref-fn".
+                ;; Collect all arg-ids that belong to displayed ref-fns. Walk
+                ;; BOTH inheritance ancestry AND the transitive ref-target
+                ;; closure — propagated free-arg shadows on the current fn
+                ;; often have their source-id pointing DEEP into a ref-chain
+                ;; (e.g. `:request` on `_app-path-gated-response` sources to
+                ;; `router-response-body`, which `router-ring-response` reaches
+                ;; through its own refs). The closure catches those so shadows
+                ;; whose source chain flows into any displayed sub-graph get
+                ;; suppressed at the parent — they render on the ref-target
+                ;; where the slot is actually introduced.
+                ;; EXCLUDE args from fns in the expansion root's inheritance
+                ;; chain so shared ancestors (e.g. `conj-any` shared by
+                ;; list-11 and list-10) don't cause items to be filtered as
+                ;; "belonging inside ref-fn".
                 expansion-chain-fns full-chain-fns
+                ref-closure-fns (let [seen (atom #{})]
+                                  (letfn [(walk
+                                            [fn-id]
+                                            (when-not (contains? @seen fn-id)
+                                              (swap! seen conj fn-id)
+                                              (doseq [anc (get-inheritance-chain fn-id fn-map)]
+                                                (swap! seen conj anc)
+                                                (doseq [a (get args-by-fn anc [])]
+                                                  (when-let [r (:ref-id a)]
+                                                    (walk r))
+                                                  ;; Sequence anchors: walk each
+                                                  ;; item's ref-id too. Without
+                                                  ;; this, `:entries` on
+                                                  ;; `internal-request` stops the
+                                                  ;; closure at the anchor, and
+                                                  ;; `ring-request` / `ring-uri`
+                                                  ;; stay outside it.
+                                                  (when (= :sequence (:type a))
+                                                    (doseq [item (walk-anchor-chain a arg-map)]
+                                                      (when-let [r (:ref-id item)]
+                                                        (walk r))))))))]
+                                    (doseq [rid @ref-fn-ids]
+                                      (walk rid)))
+                                  @seen)
                 ref-fn-arg-ids (atom #{})
-                _ (doseq [ref-fn-id @ref-fn-ids]
-                    (let [ref-chain (get-inheritance-chain ref-fn-id fn-map)]
-                      (doseq [rfn-id ref-chain]
-                        (when-not (contains? expansion-chain-fns rfn-id)
-                          (let [ref-args (get args-by-fn rfn-id [])]
-                            (doseq [ra ref-args]
-                              (swap! ref-fn-arg-ids conj (:id ra))))))))
+                _ (doseq [rfn-id ref-closure-fns]
+                    (when-not (contains? expansion-chain-fns rfn-id)
+                      (let [ref-args (get args-by-fn rfn-id [])]
+                        (doseq [ra ref-args]
+                          (swap! ref-fn-arg-ids conj (:id ra))))))
                 result (atom [])
                 chain-level (atom 0)
                 ;; Helper: check if any arg in the source chain is in ref-fn-arg-ids
@@ -1033,6 +1065,14 @@
                             ;; Arg unbound here but bound somewhere upstream in the
                             ;; source chain — shown there, skip emitting a ghost.
                             (bound-by-chain? arg)
+                            nil
+
+                            ;; Propagated free-arg shadow whose source-id chain
+                            ;; reaches into a displayed ref-fn (or anything in
+                            ;; its ref-closure). The slot is introduced by that
+                            ;; ref-target — render it there, not as a duplicate
+                            ;; placeholder on the parent.
+                            binds-to-ref-fn
                             nil
 
                             :else

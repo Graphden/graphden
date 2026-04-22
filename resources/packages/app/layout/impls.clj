@@ -261,18 +261,11 @@
         max-visible-ancestors 4
 
         get-effective-spec
-        ;; Get expansion spec for a node keyed by its call-site identity.
-        ;; The key is either the root fn-id (for the root node) or the
-        ;; source-arg-id (for any child call-site). Node ids in the wire
-        ;; format are `fn-<uuid>` so every key is a single UUID.
-        ;;
-        ;; Returns one of:
-        ;;   integer N            — full cascade through BFS depth N
-        ;;   {:full-depth N       — depths 1..N fully expanded
-        ;;    :partial-fns #{...}}  plus these specific fn-ids at depth N+1
-        ;;   0                    — no expansion
-        (fn [node-key]
-          (or (get expansions node-key) 0))
+        ;; Look up expansion spec by cytoscape node-id string. The
+        ;; `expansions` map is keyed by the same node-id that
+        ;; `add-fn-node` emits, so the match is exact.
+        (fn [node-id]
+          (or (get expansions node-id) 0))
 
         ;; Convert any expansion spec into a set of fn-ids that should be
         ;; "merged into" the focus fn's display (always includes fn-id itself).
@@ -351,22 +344,33 @@
               :else (recur (get arg-map (:source-id a)) (inc depth)))))
 
         add-fn-node
-        (fn [original-fn-id is-root source-arg-id]
-          ;; Node ID strategy: each call-site is distinct. A call-site is
-          ;; uniquely identified by the id of the binding arg that pointed
-          ;; to it (`source-arg-id` — the arg entity on the caller whose
-          ;; `ref-id` is this fn). The root is the one exception: no caller,
-          ;; so keyed by the fn's own id.
+        (fn [original-fn-id is-root source-node-id source-arg-id]
+          ;; Node ID strategy: each call-site is distinct. A call-site in
+          ;; the expanded tree is uniquely identified by (caller-node-id,
+          ;; source-arg-id) — WHO called and THROUGH WHICH arg binding.
+          ;; The arg binding alone isn't enough: when the binding lives on
+          ;; an inherited ancestor (e.g. `:pair.coll :pair-1`), two
+          ;; different callers inherit the SAME arg entity but each call
+          ;; is its own independent computation.
           ;;
-          ;; This matches clojure semantics: two usages of the same fn in
-          ;; different places in a body are two independent call-sites with
-          ;; their own bindings. Previously we shared them (canonical id)
-          ;; or scoped per enclosing expansion, which created spurious
-          ;; shared nodes and forced the layout algorithm into keeper /
-          ;; divergence / path-position contortions.
-          (let [node-id (if (or is-root (nil? source-arg-id))
+          ;; The root is the one exception: no caller, keyed by fn-id.
+          ;;
+          ;; Matches clojure semantics: two usages of the same fn in
+          ;; different places in a body are two independent call-sites
+          ;; with their own bindings.
+          (let [node-id (cond
+                          (or is-root (nil? source-arg-id))
                           (str "fn-" original-fn-id)
-                          (str "fn-" source-arg-id))]
+
+                          ;; Strip "fn-" from caller-node-id so we don't
+                          ;; keep doubling the prefix at each nesting.
+                          :else
+                          (let [caller-tag (if (and source-node-id
+                                                    (clojure.string/starts-with?
+                                                      source-node-id "fn-"))
+                                             (subs source-node-id 3)
+                                             (str source-node-id))]
+                            (str "fn-" caller-tag "-" source-arg-id)))]
             (when-not (contains? @added-node-ids node-id)
               (swap! added-node-ids conj node-id)
               (let [levels (get-inheritance-levels original-fn-id fn-map)
@@ -1023,7 +1027,27 @@
                 (doseq [a @fn-values] (swap! result conj a))
                 (doseq [a @fn-unsets] (swap! result conj a))
                 (swap! chain-level inc)))
-            @result))]
+            ;; Dedup :unset entries by their terminal primary arg-id.
+            ;; Propagation materializes one DB shadow per ref-chain the free
+            ;; arg flowed through (e.g. `:request` on `router-response-body`
+            ;; has 5 shadows, one per ring-*-entry path) — all of them point
+            ;; to the SAME semantic slot at the terminal. We want a single
+            ;; placeholder per slot, not five.
+            (let [seen (atom #{})]
+              (into []
+                    (keep (fn [arg]
+                            (if (not= :unset (:type arg))
+                              arg
+                              (let [terminal (loop [sid (:arg-id arg)]
+                                               (if-let [a (get arg-map sid)]
+                                                 (if (:source-id a)
+                                                   (recur (:source-id a))
+                                                   (:id a))
+                                                 sid))]
+                                (when-not (contains? @seen terminal)
+                                  (swap! seen conj terminal)
+                                  arg)))))
+                    @result))))]
 
     ;; Track bindings for EACH expanded function
     ;; Key: expanded-fn-id, Value: {:refs #{ref-ids}, :values #{arg-ids}}
@@ -1035,7 +1059,7 @@
       ;; expansion-root: the original-fn-id of the expanded function we're inside (nil if not in expansion)
       (letfn [(process-fn
                 [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns is-hof]
-                (let [node-id (add-fn-node original-fn-id is-root source-arg-id)
+                (let [node-id (add-fn-node original-fn-id is-root source-node-id source-arg-id)
                       ;; Key for tracking fully processed nodes - includes expansion context
                       process-key (str node-id "-" (hash bindings))]
                   ;; Add edge from parent ALWAYS (even if node already processed)
@@ -1161,7 +1185,7 @@
                 ;; whose binding chain leads back to method-map.
                 (let [in-progress-key [original-fn-id parent-expansion-root]]
                   (if (contains? @in-progress-expansions in-progress-key)
-                    (let [node-id (add-fn-node original-fn-id is-root source-arg-id)]
+                    (let [node-id (add-fn-node original-fn-id is-root source-node-id source-arg-id)]
                       (when (and source-node-id edge-arg-name)
                         (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
                           (when-not (contains? @added-node-ids edge-id)
@@ -1204,7 +1228,7 @@
                       ;; - If this is a top-level expansion (parent-expansion-root is nil),
                       ;;   this fn becomes the expansion root
                       effective-expansion-root (or parent-expansion-root original-fn-id)
-                      node-id (add-fn-node original-fn-id is-root source-arg-id)]
+                      node-id (add-fn-node original-fn-id is-root source-node-id source-arg-id)]
 
 
                   ;; Add edge from parent
@@ -1368,8 +1392,20 @@
                 ;; the user explicitly requests expansion.
                 (let [fn-entity (get fn-map fn-id)
                       is-named (and fn-entity (:name fn-entity))
-                      node-key (if is-root fn-id source-arg-id)
-                      spec (get-effective-spec node-key)
+                      ;; Compute the node-id this call-site will carry so we
+                      ;; can look up its expansion spec under the exact key
+                      ;; the frontend sent back.
+                      node-id-for-lookup
+                      (cond
+                        is-root (str "fn-" fn-id)
+                        (nil? source-arg-id) (str "fn-" fn-id)
+                        :else (let [caller-tag (if (and source-node-id
+                                                        (str/starts-with?
+                                                          source-node-id "fn-"))
+                                                 (subs source-node-id 3)
+                                                 (str source-node-id))]
+                                (str "fn-" caller-tag "-" source-arg-id)))
+                      spec (get-effective-spec node-id-for-lookup)
                       ;; Named fns are boundaries. Expanding a fn substitutes
                       ;; only THAT fn's impl — its ref-targets stay leaves
                       ;; until the user explicitly expands them. Holds inside
@@ -1385,7 +1421,7 @@
                     ;; optional-? badge) and its own literal value bindings.
                     ;; No recursion into refs: user must explicitly expand to
                     ;; see the leaf's body.
-                    (let [node-id (add-fn-node fn-id false source-arg-id)]
+                    (let [node-id (add-fn-node fn-id false source-node-id source-arg-id)]
                       (when (and source-node-id edge-arg-name)
                         (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
                           (when-not (contains? @added-node-ids edge-id)
@@ -1750,19 +1786,16 @@
 
 (defn- parse-expansions
   "Parse raw expansions map from request.
-   Keys have 'fn-' prefix from node IDs. After per-call-site scoping the
-   id is always a single UUID: either the root fn-id (for the root node)
-   or the source-arg-id (for any child call-site). Returns map of
-   {node-key spec} where node-key is the UUID."
+   Keys are cytoscape node-ids (`fn-<...>` strings). Under per-call-site
+   scoping a non-root node id has the form `fn-<caller-tag>-<source-arg-id>`
+   which is NOT a single UUID, so we just keep the full id string as the
+   map key. Layout looks up the spec using the exact same string it
+   assigned when building each node."
   [expansions-raw]
   (into {}
         (map (fn [[k v]]
-               (let [k-str (name k)
-                     stripped (if (str/starts-with? k-str "fn-")
-                                (subs k-str 3)
-                                k-str)]
-                 [(java.util.UUID/fromString stripped) (parse-spec v)]))
-             expansions-raw)))
+               [(name k) (parse-spec v)]))
+        expansions-raw))
 
 
 (defn- parse-layout-request

@@ -1487,7 +1487,33 @@
                       ;; added every time — only further recursion is pruned.
                       (when-not (contains? @processed-fn-nodes process-key)
                         (swap! processed-fn-nodes conj process-key)
-                      (let [raw-own-args (get args-by-fn fn-id [])
+                      (let [;; Transitive ref-closure of this leaf — all fn-ids
+                            ;; reachable by walking this fn's inheritance and
+                            ;; its bound refs recursively. Used to identify
+                            ;; shadows on the enclosing expansion-root that
+                            ;; migrated to this leaf (their source-chain walks
+                            ;; into a fn inside the closure).
+                            leaf-closure
+                            (let [seen (atom #{})]
+                              (letfn [(walk [fid]
+                                        (when-not (contains? @seen fid)
+                                          (swap! seen conj fid)
+                                          (doseq [anc (get-inheritance-chain fid fn-map)]
+                                            (swap! seen conj anc)
+                                            (doseq [a (get args-by-fn anc [])]
+                                              (when-let [r (:ref-id a)]
+                                                (walk r))
+                                              (when (= :sequence (:type a))
+                                                (doseq [item (walk-anchor-chain a arg-map)]
+                                                  (when-let [r (:ref-id item)]
+                                                    (walk r))))))))]
+                                (walk fn-id))
+                              @seen)
+                            leaf-closure-arg-ids
+                            (into #{}
+                                  (mapcat (fn [fid] (map :id (get args-by-fn fid []))))
+                                  leaf-closure)
+                            raw-own-args (get args-by-fn fn-id [])
                             ;; Sequence anchors (type=:sequence) and their chain items
                             ;; are NOT free args — the anchor's presence IS the binding
                             ;; for the parent's `:items`-style slot. Exclude both from
@@ -1569,7 +1595,42 @@
                           (add-arg-value-node (or (:arg-name binding)
                                                   (resolve-arg-name arg arg-map))
                                               (:value binding) (:id arg)
-                                              node-id #{fn-id}))))
+                                              node-id #{fn-id}))
+                        ;; Transitive free args migrating from the enclosing
+                        ;; expansion-root. Per rule 5, the leaf boundary is
+                        ;; where free args of its hidden body surface — if
+                        ;; composition didn't eagerly propagate them onto the
+                        ;; leaf's own DB shadows (as is the case for
+                        ;; `router-result` whose parent is a base-fn with no
+                        ;; ref-chain to walk), we surface them here by looking
+                        ;; at the caller-side expansion-root's shadow args
+                        ;; whose terminal source-id lives inside this leaf's
+                        ;; ref-closure. Shadows already covered by this leaf's
+                        ;; own args are skipped to avoid double rendering.
+                        (when expansion-root
+                          (let [own-terminals (into #{}
+                                                    (map (fn [a] (terminal-source-of (:id a))))
+                                                    raw-own-args)
+                                already-rendered-terminals
+                                (into own-terminals
+                                      (map (fn [{:keys [arg]}] (terminal-source-of (:id arg))))
+                                      (:unset parts))
+                                root-args (get args-by-fn expansion-root [])
+                                seen-keys (atom already-rendered-terminals)]
+                            (doseq [a root-args
+                                    :let [term (terminal-source-of (:id a))
+                                          nm (resolve-arg-name a arg-map)
+                                          dedup-key [term nm]]
+                                    :when (and (nil? (:value a))
+                                               (nil? (:ref-id a))
+                                               (not= :sequence (:type a))
+                                               (contains? leaf-closure-arg-ids term)
+                                               (not (contains? @seen-keys term))
+                                               (not (contains? @seen-keys dedup-key))
+                                               (not (arg-determined? (:id a))))]
+                              (swap! seen-keys conj dedup-key)
+                              (add-unset-arg-node nm (:type a) (:id a) node-id
+                                                  #{fn-id} is-hof))))))
                       node-id)
                     ;; Normal processing
                     (if (spec-trivial? spec)

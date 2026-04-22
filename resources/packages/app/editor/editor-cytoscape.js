@@ -258,23 +258,23 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
  * Fetches nodes, edges, and layout from backend in single request
  */
 async function renderGraph(shouldFit = true) {
-  // Capture anchor BEFORE await - anchorFnId may be cleared by caller after async yield
-  const capturedAnchorFnId = anchorFnId;
-  let anchorNodeId = null;
+  // Capture anchor BEFORE await — anchorNodeId may be cleared by caller after async yield.
+  // The anchor holds the FULL cytoscape node id (including `fn-{root}_{fn-id}`
+  // scoping prefix where applicable) so scoped leaves stay stationary too.
+  let capturedAnchorNodeId = anchorNodeId;
   let anchorOldPos = null;
 
   if (cy) {
-    // Determine anchor node
-    if (capturedAnchorFnId) {
-      anchorNodeId = 'fn-' + capturedAnchorFnId;
-    } else if (previewState.size > 0) {
-      // previewState keys are already full node IDs (e.g., "fn-uuid")
-      anchorNodeId = previewState.keys().next().value;
+    // Fallback: if no explicit anchor was set (e.g. the user triggered a
+    // render path that didn't go through applyClickSpec/applyHoverSpec),
+    // anchor to a preview key so hover re-renders don't drift the graph.
+    if (!capturedAnchorNodeId && previewState.size > 0) {
+      capturedAnchorNodeId = previewState.keys().next().value;
     }
 
     // Save anchor position BEFORE fetch (before any async yield)
-    if (anchorNodeId) {
-      const anchorNode = cy.getElementById(anchorNodeId);
+    if (capturedAnchorNodeId) {
+      const anchorNode = cy.getElementById(capturedAnchorNodeId);
       if (anchorNode.length) {
         anchorOldPos = { ...anchorNode.position() };
       }
@@ -314,8 +314,8 @@ async function renderGraph(shouldFit = true) {
   // all nodes to match the user's drag, visually "undoing" the drag.
   let offsetX = 0;
   let offsetY = 0;
-  if (anchorNodeId && anchorOldPos && !userMovedNodes.has(anchorNodeId)) {
-    const anchorNewPos = layout.get(anchorNodeId);
+  if (capturedAnchorNodeId && anchorOldPos && !userMovedNodes.has(capturedAnchorNodeId)) {
+    const anchorNewPos = layout.get(capturedAnchorNodeId);
     if (anchorNewPos) {
       offsetX = anchorOldPos.x - anchorNewPos.x;
       offsetY = anchorOldPos.y - anchorNewPos.y;

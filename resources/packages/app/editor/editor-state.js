@@ -1,6 +1,6 @@
 // Editor State - Global variables, constants, and configuration
 // Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-21 13:10';
+const BUILD_TIMESTAMP = '2026-04-22 08:00';
 console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================
@@ -25,7 +25,7 @@ let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
 //   L > fullDepth + 1       → cascade: fullDepth = L - 1, partial = {fn}
 let expansionState = new Map();  // nodeId -> {fullDepth, partialFns}
 let previewState = new Map();    // nodeId -> {fullDepth, partialFns}
-let anchorFnId = null;            // fnId that should stay stationary during layout
+let anchorNodeId = null;          // cytoscape node id (full, incl. expansion prefix) that should stay stationary during layout
 
 // UI state flags
 let rebuildingOverlays = false;   // Prevents mouseleave during overlay rebuild

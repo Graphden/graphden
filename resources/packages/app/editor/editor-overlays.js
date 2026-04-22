@@ -378,10 +378,9 @@ function createFnOverlay(node, container) {
           suppressPreviewOnClick();
           savedUserPositions.clear();
           previewState.delete(nodeId);
-          const parts = nodeId.replace('fn-', '').split('_');
-          anchorFnId = parts[parts.length - 1];
+          anchorNodeId = nodeId;
           renderGraph(false);
-          anchorFnId = null;
+          anchorNodeId = null;
         };
         span.addEventListener('mousedown', onMouseDown);
         span.addEventListener('touchend', onMouseDown);

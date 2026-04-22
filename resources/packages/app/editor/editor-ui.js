@@ -330,8 +330,7 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = null;
   }
-  const parts = nodeId.replace('fn-', '').split('_');
-  anchorFnId = parts[parts.length - 1];
+  anchorNodeId = nodeId;
 
   const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
   if (newSpec === null) {
@@ -347,7 +346,7 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
   // committed state lose their manual position.
   savedUserPositions.clear();
   renderGraph(false);
-  anchorFnId = null;
+  anchorNodeId = null;
 }
 
 /**
@@ -372,13 +371,12 @@ function applyHoverSpec(nodeId, depth, fnId, allFnsAtDepth) {
     return;
   }
   previewDebounceTimer = setTimeout(() => {
-    const parts = nodeId.replace('fn-', '').split('_');
-    anchorFnId = parts[parts.length - 1];
+    anchorNodeId = nodeId;
     // null spec means "collapse everything" — use {fullDepth:0} so the
     // preview render shows the collapsed graph (not the committed state).
     previewState.set(nodeId, newSpec || { fullDepth: 0, partialFns: new Set() });
     renderGraph(false);
-    anchorFnId = null;
+    anchorNodeId = null;
   }, PREVIEW_DEBOUNCE_MS);
 }
 
@@ -389,11 +387,10 @@ function clearPreview(nodeId) {
   }
   if (!previewState.has(nodeId)) return;
   previewDebounceTimer = setTimeout(() => {
-    const parts = nodeId.replace('fn-', '').split('_');
-    anchorFnId = parts[parts.length - 1];
+    anchorNodeId = nodeId;
     previewState.delete(nodeId);
     renderGraph(false);
-    anchorFnId = null;
+    anchorNodeId = null;
   }, PREVIEW_DEBOUNCE_MS);
 }
 

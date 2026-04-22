@@ -1533,7 +1533,7 @@
                                                has-value
                                                {:kind :value :arg arg}
 
-                                               (and (nil? has-value) (nil? has-ref)
+                                               (and (not has-value) (not has-ref)
                                                     (not (arg-determined? (:id arg))))
                                                {:kind :unset :arg arg}
 

@@ -21,7 +21,9 @@
 
 (defn rebuild!
   "Rebuild the compiled registry in `ctx` from whatever fns/args storage
-   currently holds. Call at startup and on invalidation."
+   currently holds. Also primes `:graph-cache` with the same raw entities
+   so read-heavy consumers (e.g. the layout API) can reuse them without
+   re-querying storage. Call at startup and on invalidation."
   [ctx]
   (let [storage (:storage ctx)
         fns (sp/query-entities storage :fn {})
@@ -29,6 +31,8 @@
         base-fns (:base-fns ctx)
         registry (compile/compile-all {:fns fns :args args :base-fns base-fns} ctx)]
     (reset! (:compiled-registry ctx) registry)
+    (when-let [graph-cache (:graph-cache ctx)]
+      (reset! graph-cache {:fns (vec fns) :args (vec args)}))
     registry))
 
 

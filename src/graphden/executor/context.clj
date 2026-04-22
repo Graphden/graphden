@@ -11,9 +11,22 @@
   [storage          ; Storage instance implementing ExecutionGraph.
    base-fns         ; {fn-name-keyword → impl-fn} — read by compile.
    clock            ; Zero-arg fn returning current time in ms (testability).
-   compiled-registry]) ; Atom: {fn-id → compiled-closure} or nil. Populated
-;; by the compile system at startup; `execute` reads from it on the hot
-;; path.
+   compiled-registry ; Atom: {fn-id → compiled-closure} or nil. Populated
+   ;; by the compile system at startup; `execute` reads from it on the hot
+   ;; path.
+   graph-cache])    ; Atom holding `{:fns [...] :args [...]}` loaded from
+;; storage. Populated lazily by read-heavy consumers (e.g. the layout API).
+;; Invalidated by CRUD mutations that change fn/arg entities via
+;; `invalidate-graph-cache!`. Nil before first load.
+
+
+(defn invalidate-graph-cache!
+  "Clear the raw graph-entities cache on `ctx`. Call after any mutation
+   that writes/deletes fn or arg entities so read paths reload on next
+   request."
+  [ctx]
+  (when-let [c (:graph-cache ctx)]
+    (reset! c nil)))
 
 
 ;; === Context Validation ===
@@ -49,6 +62,7 @@
   (->ExecutionContext storage
                       (or base-fns (registry/get-default-registry))
                       (or clock #(System/currentTimeMillis))
+                      (atom nil)
                       (atom nil)))
 
 

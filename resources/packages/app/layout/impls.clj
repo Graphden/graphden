@@ -40,26 +40,21 @@
      :args (vec (sp/query-entities storage :arg {}))}))
 
 
-;; Layout is read-only and runs on every hover-preview + click. A full
-;; `query-all-graph-entities` takes ~130ms on the current graph and dominates
-;; request latency. Cache the result per-storage with a short TTL so the
-;; typical burst of requests during expand/preview hits the cache. TTL is
-;; intentionally short so CRUD edits via the editor API become visible
-;; within at most TTL ms without needing explicit invalidation wiring.
-(def ^:private graph-cache (atom {}))
-(def ^:private graph-cache-ttl-ns (* 1000 1000000)) ; 1s
-
-
+;; Graph entities are loaded ONCE per executor context and cached on
+;; `(:graph-cache ctx)`. Layout runs on every hover-preview + click; a
+;; full `query-all-graph-entities` takes ~130ms on the current graph, so
+;; we cannot re-query per request. The compile-at-startup executor
+;; already assumes graph state is built once at startup; layout follows
+;; the same model. Invalidation is driven by CRUD mutation defbase's
+;; (create/update/delete entity, sequence append/remove) calling
+;; `graphden.executor.context/invalidate-graph-cache!` after writing.
 (defn- load-graph-entities
-  [storage]
-  (let [now (System/nanoTime)
-        k (System/identityHashCode storage)
-        cached (get @graph-cache k)]
-    (if (and cached (< (- now (:at cached)) graph-cache-ttl-ns))
-      (:data cached)
-      (let [data (load-graph-entities-uncached storage)]
-        (swap! graph-cache assoc k {:at now :data data})
-        data))))
+  [ctx]
+  (let [cache (:graph-cache ctx)]
+    (or (and cache @cache)
+        (let [data (load-graph-entities-uncached (:storage ctx))]
+          (when cache (reset! cache data))
+          data))))
 
 
 (defn- build-lookups
@@ -2433,7 +2428,7 @@
       (throw (ex-info "Storage not available in context"
                       {:type :execution-error/missing-storage})))
     (let [{:keys [root-id expansions]} (parse-layout-request request)
-          raw-data (load-graph-entities storage)
+          raw-data (load-graph-entities ctx)
           lookups (build-lookups raw-data)
           _ (when-not (get (:fn-map lookups) root-id)
               (throw (ex-info "Root function not found"

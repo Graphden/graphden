@@ -6,6 +6,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
+    [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.web.html.impls :as html]
     [graphden.storage.protocol.core :as sp]
@@ -62,17 +63,22 @@
 
 (defbase create-entity
   [entity-type data]
-  (sp/create-entity (require-storage ctx) (keyword entity-type) data))
+  (let [result (sp/create-entity (require-storage ctx) (keyword entity-type) data)]
+    (exec-ctx/invalidate-graph-cache! ctx)
+    result))
 
 
 (defbase update-entity
   [entity-type id data]
-  (sp/update-entity (require-storage ctx) (keyword entity-type) id data))
+  (let [result (sp/update-entity (require-storage ctx) (keyword entity-type) id data)]
+    (exec-ctx/invalidate-graph-cache! ctx)
+    result))
 
 
 (defbase delete-entity
   [entity-type id]
   (sp/delete-entity (require-storage ctx) (keyword entity-type) id)
+  (exec-ctx/invalidate-graph-cache! ctx)
   true)
 
 
@@ -238,8 +244,9 @@
                           nil)
             created (when entity-data (sp/create-entity storage entity-type entity-data))]
         (if created
-          {:status 200 :headers {"HX-Trigger" "entityCreated"}
-           :body "<p>Entity created successfully</p>"}
+          (do (exec-ctx/invalidate-graph-cache! ctx)
+              {:status 200 :headers {"HX-Trigger" "entityCreated"}
+               :body "<p>Entity created successfully</p>"})
           {:status 400 :body "<p class=\"error\">Failed to create entity</p>"}))
       {:status 400 :body "<p class=\"error\">Invalid request</p>"})))
 
@@ -250,6 +257,7 @@
         {:keys [id-str entity-type]} (extract-entity-params request)]
     (if (and entity-type id-str)
       (do (sp/delete-entity storage entity-type (java.util.UUID/fromString id-str))
+          (exec-ctx/invalidate-graph-cache! ctx)
           {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""})
       {:status 400 :body "<p class=\"error\">Invalid request</p>"})))
 
@@ -349,6 +357,7 @@
                                 [(assoc tail :next-arg-id (:id new-item))])
             (sp/update-entities storage :arg
                                 [(assoc anchor :next-arg-id (:id new-item))]))
+          (exec-ctx/invalidate-graph-cache! ctx)
           {:status 200
            :headers {"Content-Type" "application/json"}
            :body (json/generate-string {:arg-id (:id new-item)
@@ -380,6 +389,7 @@
             (when (seq updates)
               (sp/update-entities storage :arg updates))
             (sp/delete-entity storage :arg item-id)
+            (exec-ctx/invalidate-graph-cache! ctx)
             {:status 200 :body ""}))))))
 
 

@@ -975,26 +975,34 @@
                 (doseq [a @fn-values] (swap! result conj a))
                 (doseq [a @fn-unsets] (swap! result conj a))
                 (swap! chain-level inc)))
-            ;; Dedup :unset entries by their terminal primary arg-id.
-            ;; Propagation materializes one DB shadow per ref-chain the free
-            ;; arg flowed through (e.g. `:request` on `router-response-body`
-            ;; has 5 shadows, one per ring-*-entry path) — all of them point
-            ;; to the SAME semantic slot at the terminal. We want a single
-            ;; placeholder per slot, not five.
-            (let [seen (atom #{})]
+            ;; Dedup entries by (terminal-primary, ref-id|value-marker).
+            ;; Composition materializes many DB shadows for the SAME
+            ;; semantic slot when a free arg propagates through multiple
+            ;; ref-chains (e.g. `:request` on `router-response-body` has 5
+            ;; shadows through 5 ring-*-entry paths). A bound ref to the
+            ;; same target through different paths ALSO duplicates (observed:
+            ;; token-gated-response has 33 `ref-id=router-ring-response`
+            ;; entries via different propagation source chains). All of
+            ;; these collapse to one visible edge per slot.
+            (let [seen (atom #{})
+                  term (fn [sid]
+                         (loop [cur sid]
+                           (if-let [a (get arg-map cur)]
+                             (if (:source-id a)
+                               (recur (:source-id a))
+                               (:id a))
+                             cur)))]
               (into []
                     (keep (fn [arg]
-                            (if (not= :unset (:type arg))
-                              arg
-                              (let [terminal (loop [sid (:arg-id arg)]
-                                               (if-let [a (get arg-map sid)]
-                                                 (if (:source-id a)
-                                                   (recur (:source-id a))
-                                                   (:id a))
-                                                 sid))]
-                                (when-not (contains? @seen terminal)
-                                  (swap! seen conj terminal)
-                                  arg)))))
+                            (let [t (term (:arg-id arg))
+                                  k (case (:type arg)
+                                      :ref [t :ref (:ref-id arg)]
+                                      :value [t :value (:value arg)]
+                                      :unset [t :unset]
+                                      [t (:type arg)])]
+                              (when-not (contains? @seen k)
+                                (swap! seen conj k)
+                                arg))))
                     @result))))]
 
     ;; Track bindings for EACH expanded function
@@ -1407,34 +1415,55 @@
                                     (if-let [b (get parent-bindings sid)]
                                       b
                                       (recur (:source-id (get arg-map sid))))))))]
-                        (doseq [arg own-args]
-                          (let [has-value (some? (:value arg))
-                                has-ref (some? (:ref-id arg))
-                                migrated (when-not (or has-value has-ref)
-                                           (find-migrated (:id arg)))]
-                            (cond
-                              has-value
-                              (add-arg-value-node (resolve-arg-name arg arg-map)
-                                                  (:value arg) (:id arg) node-id #{fn-id})
+                        (let [slot-terminal
+                              (fn [sid]
+                                (loop [cur sid]
+                                  (if-let [a (get arg-map cur)]
+                                    (if (:source-id a)
+                                      (recur (:source-id a))
+                                      (:id a))
+                                    cur)))
+                              ;; Dedup by (terminal-slot, rendered-kind).
+                              ;; Propagation materializes many shadows per
+                              ;; semantic slot; only emit one edge per slot.
+                              seen (atom #{})
+                              mark-once!
+                              (fn [key-extra]
+                                (let [k key-extra]
+                                  (if (contains? @seen k) false (do (swap! seen conj k) true))))]
+                          (doseq [arg own-args]
+                            (let [has-value (some? (:value arg))
+                                  has-ref (some? (:ref-id arg))
+                                  migrated (when-not (or has-value has-ref)
+                                             (find-migrated (:id arg)))
+                                  terminal (slot-terminal (:id arg))]
+                              (cond
+                                has-value
+                                (when (mark-once! [terminal :value (:value arg)])
+                                  (add-arg-value-node (resolve-arg-name arg arg-map)
+                                                      (:value arg) (:id arg) node-id #{fn-id}))
 
-                              (and migrated (:ref-id migrated))
-                              (let [arg-entity (get arg-map (:id arg))
-                                    child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
-                                (process-any-fn (:ref-id migrated) node-id
-                                                (or (:arg-name migrated)
-                                                    (resolve-arg-name arg arg-map))
-                                                false parent-bindings (:id arg)
-                                                nil #{fn-id} child-is-hof))
+                                (and migrated (:ref-id migrated))
+                                (when (mark-once! [terminal :ref (:ref-id migrated)])
+                                  (let [arg-entity (get arg-map (:id arg))
+                                        child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
+                                    (process-any-fn (:ref-id migrated) node-id
+                                                    (or (:arg-name migrated)
+                                                        (resolve-arg-name arg arg-map))
+                                                    false parent-bindings (:id arg)
+                                                    nil #{fn-id} child-is-hof)))
 
-                              (and migrated (some? (:value migrated)))
-                              (add-arg-value-node (or (:arg-name migrated)
-                                                      (resolve-arg-name arg arg-map))
-                                                  (:value migrated) (:id arg)
-                                                  node-id #{fn-id})
+                                (and migrated (some? (:value migrated)))
+                                (when (mark-once! [terminal :value (:value migrated)])
+                                  (add-arg-value-node (or (:arg-name migrated)
+                                                          (resolve-arg-name arg arg-map))
+                                                      (:value migrated) (:id arg)
+                                                      node-id #{fn-id}))
 
-                              (and (not has-ref) (not (arg-determined? (:id arg))))
-                              (add-unset-arg-node (resolve-arg-name arg arg-map)
-                                                  (:type arg) (:id arg) node-id #{fn-id} is-hof)))))
+                                (and (not has-ref) (not (arg-determined? (:id arg))))
+                                (when (mark-once! [terminal :unset])
+                                  (add-unset-arg-node (resolve-arg-name arg arg-map)
+                                                      (:type arg) (:id arg) node-id #{fn-id} is-hof)))))))
                       node-id)
                     ;; Normal processing
                     (if (spec-trivial? spec)

@@ -5,7 +5,6 @@
    These tests load the layout impls dynamically since they're in resources/packages/."
   (:require
     [clojure.java.io :as io]
-    [clojure.string :as str]
     [clojure.test :refer [deftest is testing]]))
 
 
@@ -935,5 +934,3 @@
             (str "D should be in middle. Sorted order: " sorted-children))
         (is (= 1 (Math/abs (- c-idx d-idx)))
             (str "C and D must be adjacent. Sorted order: " sorted-children))))))
-
-

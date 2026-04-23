@@ -35,8 +35,8 @@
 (defn- call-mw
   "Call the middleware factory impl. `body` is now a 1-arg callable
    that takes a context map `{:request _ :next-handler _}`."
-  [name body]
-  (middleware-impl {:name name :body body} nil))
+  [mw-name body]
+  (middleware-impl {:name mw-name :body body} nil))
 
 
 ;; =============================================================================

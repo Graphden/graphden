@@ -11,8 +11,7 @@
   ;; Context-aware: receives storage from ctx
   {:name :get-layout-data
    :args {:request :jsonb}
-   :return-type :jsonb
-   :ctx true}
+   :return-type :jsonb}
 
   ;; =============================================================================
   ;; FN-DEFS: Layout API handler

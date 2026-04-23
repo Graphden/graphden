@@ -1,17 +1,17 @@
 ;; Graph Editor fn-defs
-;; Base functions load CSS/JS from files
-;; Everything else is fn-def composition
+;; CSS / JS loaded via the core :read-resource / :concat-resources
+;; chain. No base-fns in this package.
 
 
 {:namespace "app.editor"
  :fns
  [;; =============================================================================
-  ;; BASE FUNCTIONS (implementations in impls.clj load from resource files)
+  ;; CSS + JS asset loading (fn-def compositions)
   ;; =============================================================================
 
   {:name :editor-styles
-   :args {}
-   :return-type :text}
+   :parent :read-resource
+   :args {:path "packages/app/editor/editor-styles.css"}}
 
   ;; Editor JS modules — loaded from resources and concatenated in order
   {:name :_editor-script-paths

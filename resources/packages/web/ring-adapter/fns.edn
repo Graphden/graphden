@@ -38,13 +38,9 @@
    :parent :get
    :args {:coll :ring-request}}
 
-  {:name :ring-method-kw
+  {:name :ring-method
    :parent :ring-request-field
    :args {:key {:value :request-method}}}
-
-  {:name :ring-method
-   :parent :keyword-to-str
-   :args {:keyword :ring-method-kw}}
 
   {:name :ring-uri
    :parent :ring-request-field
@@ -72,7 +68,7 @@
 
   {:name :ring-method-entry
    :parent :pair
-   :args {:item1 {:value :method} :item2 :ring-method}}
+   :args {:item1 {:value :request-method} :item2 :ring-method}}
 
   {:name :ring-uri-entry
    :parent :pair

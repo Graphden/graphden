@@ -110,18 +110,18 @@
   (System/getenv name))
 
 
-(defbase env-required-fn
-  "Like `env` but throws if the env var is missing or blank. Use for
-   security-critical config (tokens, secrets) where silent `nil`
-   would cause the surrounding logic to misbehave — e.g. a bearer-
-   token comparison where `(= nil nil)` mistakenly passes auth."
-  [name]
-  (let [value (System/getenv name)]
-    (when (or (nil? value) (str/blank? value))
-      (throw (ex-info (format "Required env var %s is not set" name)
-                      {:type :execution-error/missing-env-var
-                       :name name})))
-    value))
+(defbase ex-info-fn
+  "Construct a clojure.lang.ExceptionInfo. Lets fn-graphs build
+   exceptions compositionally without reaching into Clojure code."
+  [message data]
+  (ex-info message data))
+
+
+(defbase throw-fn
+  "Throw the given exception. Paired with `ex-info` (or any other
+   Throwable-producing fn) to express `raise` at graph level."
+  [exception]
+  (throw exception))
 
 
 (defn- read-resource-impl
@@ -167,7 +167,8 @@
    :os-info os-info
    :current-time-ms current-time-ms
    :env env-fn
-   :env-required env-required-fn
+   :ex-info ex-info-fn
+   :throw throw-fn
    :read-resource read-resource
    :concat-resources concat-resources
    :invoke invoke-fn

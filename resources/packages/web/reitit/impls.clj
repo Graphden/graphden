@@ -5,10 +5,9 @@
    expressed at graph level via `middleware` (factory producing a reitit
    spec map) and `proceed` (delegate-to-next in chain) — see below."
   (:require
-    [clojure.string :as str]
     [clojure.walk :as walk]
     [graphden.executor.defbase :refer [defbase]]
-    [reitit.core :as r]))
+    [reitit.ring :as ring]))
 
 
 (defn- keywordize-map-keys
@@ -61,53 +60,23 @@
 
 
 ;; === Router ====================================================================
-
-(defn- compile-middleware-chain
-  "Reduce a route's middleware specs into a single handler wrapper —
-   applied right-to-left so the FIRST entry runs outermost (first to
-   see the request, last to see the response). Matches reitit's
-   convention."
-  [handler middleware]
-  (reduce
-    (fn [h mw]
-      (let [wrap (:wrap mw)]
-        (wrap h)))
-    handler
-    (reverse middleware)))
-
+;;
+;; `reitit.ring/ring-handler` compiles routes (including middleware chains)
+;; ONCE at startup and returns a Ring callable. We just hand it routes in
+;; the shape the graph built — reitit owns all per-request dispatch,
+;; method-matching, and middleware composition. No manual chain-building
+;; at runtime.
 
 (defbase router
   [routes not-found-response method-not-allowed-response error-response]
   (let [non-nil-routes (vec (remove nil? routes))
-        normalized-routes (keywordize-map-keys non-nil-routes)
-        compiled-router (r/router normalized-routes)
-        resp-404 not-found-response
-        resp-405 method-not-allowed-response
-        resp-500 error-response]
-    (fn [request]
-      (let [uri (:uri request)]
-        (if-let [match (r/match-by-path compiled-router uri)]
-          (let [method (if (keyword? (:method request))
-                         (:method request)
-                         (keyword (str/lower-case (str (:method request)))))
-                route-data (:data match)
-                method-data (get route-data method)]
-            (if method-data
-              (if-let [handler-fn (:handler method-data)]
-                (let [;; Reitit convention: middleware can live at the
-                      ;; route-data level (applies to all methods) and/or
-                      ;; at the method-data level (this method only). We
-                      ;; concat route-level first, then method-level, so
-                      ;; route-wide middleware wraps outermost.
-                      middleware (concat (:middleware route-data)
-                                         (:middleware method-data))
-                      composed (if (seq middleware)
-                                 (compile-middleware-chain handler-fn middleware)
-                                 handler-fn)]
-                  (composed (assoc request :path-params (:path-params match))))
-                resp-500)
-              resp-405))
-          resp-404)))))
+        normalized-routes (keywordize-map-keys non-nil-routes)]
+    (ring/ring-handler
+      (ring/router normalized-routes)
+      (ring/create-default-handler
+        {:not-found          (fn [_] not-found-response)
+         :method-not-allowed (fn [_] method-not-allowed-response)
+         :not-acceptable     (fn [_] error-response)}))))
 
 
 ;; === Registry ===

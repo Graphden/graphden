@@ -109,11 +109,59 @@
    :args {:name :text}
    :return-type :text}
 
-  ;; Like :env but throws at evaluation time if the variable is missing
-  ;; or blank. Use for security-critical config (tokens, secrets).
+  ;; Construct an ExceptionInfo. Paired with :throw to raise from
+  ;; graph code; also usable as a plain value if something wants a
+  ;; ready-made exception without raising.
+  {:name :ex-info
+   :args {:message :text
+          :data :jsonb}
+   :return-type :any}
+
+  ;; Raise the given exception. :return-type is :any because control
+  ;; flow never returns, but the graph-level caller needs a placeholder.
+  {:name :throw
+   :args {:exception :any}
+   :return-type :any}
+
+  ;; `:env-required` is now a fn-def (see below) composing :env with
+  ;; :if + :throw + :ex-info — kept here as a forward declaration so
+  ;; consumers reading fns.edn see the spec in one place.
   {:name :env-required
-   :args {:name :text}
-   :return-type :text}
+   :parent :if
+   :args {:test :_env-blank?
+          :then :_env-missing-throw
+          :else :_env-value}}
+
+  {:name :_env-value
+   :parent :env
+   :args {:name {:as :name}}}
+
+  {:name :_env-blank?
+   :parent :blank?
+   :args {:string :_env-value}}
+
+  {:name :_env-missing-message
+   :parent :str
+   :args {:parts :_env-missing-message-parts}}
+
+  {:name :_env-missing-message-parts
+   :parent :list
+   :args {:items [{:value "Required env var "}
+                  :_env-name-as-string
+                  {:value " is not set"}]}}
+
+  {:name :_env-name-as-string
+   :parent :identity
+   :args {:value {:as :name}}}
+
+  {:name :_env-missing-error
+   :parent :ex-info
+   :args {:message :_env-missing-message
+          :data {"type" "execution-error/missing-env-var"}}}
+
+  {:name :_env-missing-throw
+   :parent :throw
+   :args {:exception :_env-missing-error}}
 
   ;; Read file from classpath resources
   {:name :read-resource

@@ -1,5 +1,5 @@
 ;; Reitit routing base functions
-;; router
+;; router, middleware factory, proceed (next-in-chain delegate)
 
 
 {:namespace "web.reitit"
@@ -10,6 +10,22 @@
           :method-not-allowed-response :jsonb
           :error-response :jsonb}
    :return-type :fn}
+
+  ;; Middleware factory. `:body` is a Ring-shaped fn-graph (one free
+  ;; arg `:request`). The produced spec is consumed by `:router` and
+  ;; folded around a route's handler. Inside `:body`, use `:proceed` to
+  ;; delegate to the next link in the chain.
+  {:name :middleware
+   :args {:name :any
+          :body :fn}
+   :return-type :jsonb}
+
+  ;; Delegate to the next handler in the middleware chain. Only valid
+  ;; inside a middleware `:body`. Takes the request to pass along
+  ;; (commonly the caller's own `:request` free arg, untransformed).
+  {:name :proceed
+   :args {:request :any}
+   :return-type :jsonb}
 
   ;; Router with individual text defaults — each sets one error response
   {:name :router-with-text-404

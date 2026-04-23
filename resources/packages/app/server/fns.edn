@@ -84,6 +84,25 @@
                   :layout-api-route]}}
 
   ;; =============================================================================
+  ;; AUTH-REQUIRED ROUTE SHORTCUTS
+  ;; App-specific wiring: bind `auth-required-middleware` as the route's
+  ;; middleware list. Third-party apps with different auth policies
+  ;; define their own shortcuts in the same style.
+  ;; =============================================================================
+
+  {:name :_auth-middleware-list
+   :parent :list
+   :args {:items [:auth-required-middleware]}}
+
+  {:name :post-auth-required-route
+   :parent :post-route-with-middleware
+   :args {:middleware :_auth-middleware-list}}
+
+  {:name :delete-auth-required-route
+   :parent :delete-route-with-middleware
+   :args {:middleware :_auth-middleware-list}}
+
+  ;; =============================================================================
   ;; WEB SERVER
   ;; =============================================================================
 
@@ -92,14 +111,14 @@
    :parent :text-error-router
    :args {:routes :all-routes}}
 
-  ;; Bind the router inside the ring-adapter's :path-gated-response
-  ;; subtree. `:handler` on `:http-server` is `:fn`-type, so compile's
-  ;; hof-wrap turns this fn-graph into a Ring callable directly at
-  ;; `:web-server.handler` — no adapter node in between.
-  {:name :_app-path-gated-response
-   :parent :path-gated-response
+  ;; Wrap the router in the Ring-response envelope and bind it directly
+  ;; to http-server's :fn-typed :handler slot. Auth happens per-route via
+  ;; reitit middleware (see protected-* routes below); no separate
+  ;; path-gating layer before the router.
+  {:name :_app-ring-response
+   :parent :router-ring-response
    :args {:func :_router}}
 
   {:name :web-server
    :parent :http-server
-   :args {:handler :_app-path-gated-response :port 8080}}]}
+   :args {:handler :_app-ring-response :port 8080}}]}

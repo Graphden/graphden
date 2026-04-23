@@ -159,20 +159,22 @@
    :parent :get-route
    :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-edit-handler}}
 
+  ;; Write-facing endpoints — gated by auth-required-middleware via
+  ;; post/delete-auth-required-route templates (see app/server).
   {:name :create-entity-route
-   :parent :post-route
+   :parent :post-auth-required-route
    :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
 
   {:name :delete-entity-route
-   :parent :delete-route
+   :parent :delete-auth-required-route
    :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
 
   ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
   ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).
   {:name :sequence-append-route
-   :parent :post-route
+   :parent :post-auth-required-route
    :args {:path "/api/sequence/append/:fn-id" :handler :sequence-append-handler}}
 
   {:name :sequence-remove-route
-   :parent :delete-route
+   :parent :delete-auth-required-route
    :args {:path "/api/sequence/item/:item-id" :handler :sequence-remove-handler}}]}

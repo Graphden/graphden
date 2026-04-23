@@ -194,10 +194,7 @@
    :parent :equal?
    :args {:a :bearer-token :b :auth-token-from-env}}
 
-  ;; default-auth-fail-response: all three slots are literal defaults, so
-  ;; push them into an intermediate. The caller-visible `default-auth-fail-
-  ;; response` fn thus has zero own bindings — appearing as a compact
-  ;; sealed unit when it shows up as `:else` in `token-gated-response`.
+  ;; 401 response used by auth middleware on failure.
   {:name :_default-auth-fail-body
    :parent :ring-response
    :args {:status 401
@@ -207,53 +204,31 @@
    :parent :_default-auth-fail-body
    :args {:body "Unauthorized"}}
 
-  ;; Path predicates — `/api/entities` and `/api/sequence` are write-facing
-  ;; and gated by auth. `/api/graph/*` stays public (read-only).
-  {:name :matches-entities-prefix?
-   :parent :str-starts-with?
-   :args {:string :ring-uri :prefix "/api/entities"}}
-
-  {:name :matches-sequence-prefix?
-   :parent :str-starts-with?
-   :args {:string :ring-uri :prefix "/api/sequence"}}
-
-  {:name :protected-path-checks
-   :parent :list
-   :args {:items [:matches-entities-prefix?
-                  :matches-sequence-prefix?]}}
-
-  {:name :is-protected-path?
-   :parent :or
-   :args {:values :protected-path-checks}}
-
   ;; =============================================================================
-  ;; RESPONSE GATING (auth)
+  ;; AUTH MIDDLEWARE
+  ;; Body is a Ring-shaped fn-graph: if token valid → proceed to the next
+  ;; handler in the middleware chain, else return the 401 response
+  ;; directly. Attached to protected routes via `:middleware
+  ;; [:auth-required-middleware]` in the route's method-data. No pre-router
+  ;; path-gating layer — the router reads route-data once, runs the chain,
+  ;; dispatches.
   ;; =============================================================================
 
-  ;; token-gated-response: keep `:then` (the shared `router-ring-response`
-  ;; branch) on the visible layer, push the `:test` / `:else` details into
-  ;; `_token-gated-branches`. Drilling into the intermediate still shows
-  ;; the full auth logic; the compact view emphasises the shared success
-  ;; path that also arrives via `path-gated-response.else`.
-  {:name :_token-gated-branches
+  {:name :_auth-required-body
    :parent :if
    :args {:test :token-valid?
+          :then :proceed
           :else :default-auth-fail-response}}
 
-  {:name :token-gated-response
-   :parent :_token-gated-branches
-   :args {:then :router-ring-response}}
-
-  {:name :path-gated-response
-   :parent :if
-   :args {:test :is-protected-path?
-          :then :token-gated-response
-          :else :router-ring-response}}
+  {:name :auth-required-middleware
+   :parent :middleware
+   :args {:name {:value :auth-required}
+          :body :_auth-required-body}}
 
   ;; =============================================================================
   ;; ENTRY POINT
-  ;; The consumer binds `:path-gated-response` (or a child of it with
-  ;; `:func :_their-router`) directly to the web server's `:handler` slot.
+  ;; The consumer binds a router fn-graph (usually wrapped into
+  ;; `:router-ring-response`) directly to the web server's `:handler` slot.
   ;; `:handler` is declared `:fn`-type on `:http-server`, so compile's
   ;; hof-wrap turns the fn-graph into a Ring callable automatically.
   ;; =============================================================================

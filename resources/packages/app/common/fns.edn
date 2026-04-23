@@ -82,6 +82,47 @@
    :args {:method "patch"}}
 
   ;; =============================================================================
+  ;; ROUTES WITH MIDDLEWARE
+  ;; Reitit reads `:middleware` at the route-data level and composes the
+  ;; chain around this route's handler. Generic template: the caller
+  ;; supplies the middleware list. Method-specific shorthands below
+  ;; mirror the plain route family.
+  ;; =============================================================================
+
+  ;; Add a "middleware" key to the method-map (route-level middleware).
+  {:name :_method-map-with-middleware
+   :parent :assoc
+   :args {:map :method-map
+          :key "middleware"
+          :value {:as :middleware}}}
+
+  ;; Route carrying its own middleware list (free: path, handler, middleware).
+  {:name :route-with-middleware
+   :parent :pair
+   :args {:item2 :_method-map-with-middleware
+          :item1 {:as :path}}}
+
+  {:name :get-route-with-middleware
+   :parent :route-with-middleware
+   :args {:method "get"}}
+
+  {:name :post-route-with-middleware
+   :parent :route-with-middleware
+   :args {:method "post"}}
+
+  {:name :put-route-with-middleware
+   :parent :route-with-middleware
+   :args {:method "put"}}
+
+  {:name :delete-route-with-middleware
+   :parent :route-with-middleware
+   :args {:method "delete"}}
+
+  {:name :patch-route-with-middleware
+   :parent :route-with-middleware
+   :args {:method "patch"}}
+
+  ;; =============================================================================
   ;; RESPONSE MATRIX (status × content-type via multiple inheritance)
   ;;
   ;; Two orthogonal axes inherit from :ring-response and bind one arg each:

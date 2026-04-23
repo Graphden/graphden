@@ -1,20 +1,20 @@
 ;; Reusable Ring-request handler pipeline.
 ;;
-;; The exported root `:request-handler` builds a Ring request handler that:
+;; Produces the `:router-ring-response` building block that:
 ;;   1. Receives a raw Ring request (free arg, `value/as :request`).
 ;;   2. Extracts common fields (method/uri/query-string/headers/body) into
 ;;      an internal map via `:pairs->map`.
 ;;   3. Invokes a router (free arg `:func`) on that internal request.
 ;;   4. Wraps the router result in a ring-response with default security
 ;;      headers merged in.
-;;   5. Gates protected paths (/api/entities, /api/sequence) behind a Bearer
-;;      token pulled from the AUTH_TOKEN env var.
 ;;
 ;; Consumers supply the concrete router via `:func` (bound on a child of
-;; `:path-gated-response` which they then pass to `:request-handler` as
-;; `:response-fn`). Other parts of the pipeline (AUTH_TOKEN env var, the two
-;; protected prefixes, standard security headers) are opinionated defaults —
-;; override by building from the same lower-level pieces.
+;; `:router-ring-response`) and pass that child directly to
+;; `:http-server.handler` (`:fn`-typed, so compile's hof-wrap produces the
+;; Ring callable).
+;;
+;; Auth is expressed per-route via reitit middleware (see
+;; `:auth-required-middleware` below) — no pre-router path-gating layer.
 
 
 {:namespace "web.ring-adapter"
@@ -136,12 +136,7 @@
                   "X-XSS-Protection" "1; mode=block"
                   "Referrer-Policy" "strict-origin-when-cross-origin"}}}
 
-  ;; Ring response built from router-result + merged headers. Both auth
-  ;; branches (protected+valid and unprotected) of `path-gated-response`
-  ;; ultimately need THIS exact response; wrapping each branch in its own
-  ;; `_unprotected-response` / `_authenticated-response` child added zero
-  ;; bindings and just doubled the subtree in the editor view. Lazy `:if`
-  ;; already computes only the chosen branch, so sharing the fn-id is safe.
+  ;; Ring response built from router-result + merged headers.
   ;;
   ;; Structural split: `merged-response-headers` preloads default security
   ;; headers on top of `merge2`; `router-ring-response` inherits those

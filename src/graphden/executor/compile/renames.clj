@@ -28,9 +28,9 @@
 (defn deep-free-ext-names
   "Collect free-arg external names reachable from `fn-id`, walking across
    ref bindings (but NOT through :seq items — those are closed). Without
-   this, a fn whose own primary slots are all bound (e.g.
-   `_app-path-gated-response` — all three `:if` slots fixed) would
-   appear as 0-arg, even though its ref-chain exposes `:request`."
+   this, a fn whose own primary slots are all bound (e.g. a composed
+   Ring handler whose `:if` test/then/else are all fixed) would appear
+   as 0-arg, even though its ref-chain exposes `:request`."
   [fn-id lookups]
   (let [result (atom [])
         seen (atom #{})]

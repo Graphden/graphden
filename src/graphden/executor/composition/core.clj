@@ -292,4 +292,31 @@
          (when (seq all-update-args)
            (sp/upsert-entities storage :arg all-update-args))
 
+         ;; Reap ORPHAN fn-def entities: composed fns (no :impl-hash —
+         ;; base-fns keep theirs and are out of scope here) previously
+         ;; synced under one of the namespaces we're syncing NOW, whose
+         ;; name no longer appears in the incoming fn-defs. Without this,
+         ;; removing a fn-def from `fns.edn` leaves a dead entity
+         ;; lingering in storage — visible in the editor as a zombie node.
+         ;;
+         ;; Scope is limited to the current sync's namespaces so user-
+         ;; created fns living in other (or no) namespaces are untouched.
+         ;; Anonymous fn entities (name=nil) created by composition as
+         ;; `_app-*`/intermediate wrappers are skipped here — they're
+         ;; re-created with fresh ids on every sync and would need a
+         ;; separate invariant to prune (tracked by the write-hook layer
+         ;; when it exists).
+         (let [ns-ids-synced (set (vals ns-id-map))
+               synced-fn-names (set (map #(name (:name %)) sorted-defs))
+               orphan-fns (filter (fn [e]
+                                    (and (:namespace-id e)
+                                         (contains? ns-ids-synced (:namespace-id e))
+                                         (:name e)
+                                         (nil? (:impl-hash e))
+                                         (not (contains? synced-fn-names (name (:name e))))))
+                                  all-fns)]
+           (when (seq orphan-fns)
+             (doseq [orphan orphan-fns]
+               (sp/delete-entity storage :fn (:id orphan)))))
+
          created-fns)))))

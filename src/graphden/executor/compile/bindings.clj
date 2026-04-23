@@ -139,9 +139,10 @@
       it needs to reach `:pair-1` via the call-site free-args rename.
 
    2. Bindings on a slot whose terminal primary lies outside F's base.
-      E.g. `:_app-path-gated-response` binds `:func :_router` — `:if`
-      (its base) has no `:func` primary; the binding instead augments
-      free-args so the deep `:invoke.func` slot picks it up.
+      E.g. a child of `:router-ring-response` binding `:func :_router` —
+      `:ring-response` (the base) has no `:func` primary; the binding
+      instead augments free-args so the deep `:invoke.func` slot picks
+      it up at runtime.
 
    Dedup by ext-name (each unique external name shows up once). The arg
    whose source chain *stays within F's chain AND terminates at a base

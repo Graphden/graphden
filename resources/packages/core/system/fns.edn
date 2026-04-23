@@ -109,6 +109,12 @@
    :args {:name :text}
    :return-type :text}
 
+  ;; Like :env but throws at evaluation time if the variable is missing
+  ;; or blank. Use for security-critical config (tokens, secrets).
+  {:name :env-required
+   :args {:name :text}
+   :return-type :text}
+
   ;; Read file from classpath resources
   {:name :read-resource
    :args {:path :text}

@@ -162,8 +162,11 @@
   ;; AUTH — Bearer token primitives (opinionated defaults)
   ;; =============================================================================
 
+  ;; `env-required` throws on empty/unset — prevents the `(= nil nil)`
+  ;; bypass where an unset AUTH_TOKEN would make `token-valid?` return
+  ;; true for requests without an Authorization header.
   {:name :auth-token-from-env
-   :parent :env
+   :parent :env-required
    :args {:name "AUTH_TOKEN"}}
 
   ;; Missing `Authorization` header → `get` returns nil; downstream

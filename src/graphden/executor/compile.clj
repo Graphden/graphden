@@ -93,8 +93,8 @@
 
    - If `:request` is among the free args → single-arg callable feeding
      the item under `:request`. This covers the Ring-handler case
-     (`make-request-handler` — many propagated deep free args, but the
-     caller only ever has the request to pass).
+     (e.g. `:http-server.handler` — the fn-graph has many propagated
+     deep free args, but the caller only ever has the request to pass).
    - 0 free args → variadic callable that ignores its input. Handlers
      built from `:make-data-handler` still pass `request` through even
      when the data-fn is a constant (e.g. `:list-all-graph-entities`

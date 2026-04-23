@@ -110,6 +110,20 @@
   (System/getenv name))
 
 
+(defbase env-required-fn
+  "Like `env` but throws if the env var is missing or blank. Use for
+   security-critical config (tokens, secrets) where silent `nil`
+   would cause the surrounding logic to misbehave — e.g. a bearer-
+   token comparison where `(= nil nil)` mistakenly passes auth."
+  [name]
+  (let [value (System/getenv name)]
+    (when (or (nil? value) (str/blank? value))
+      (throw (ex-info (format "Required env var %s is not set" name)
+                      {:type :execution-error/missing-env-var
+                       :name name})))
+    value))
+
+
 (defn- read-resource-impl
   [path]
   (if-let [resource (clojure.java.io/resource path)]
@@ -153,6 +167,7 @@
    :os-info os-info
    :current-time-ms current-time-ms
    :env env-fn
+   :env-required env-required-fn
    :read-resource read-resource
    :concat-resources concat-resources
    :invoke invoke-fn

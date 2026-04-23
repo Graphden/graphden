@@ -72,7 +72,7 @@ fn: add-10
 **Using the composed function:**
 ```clojure
 ;; Execute add-10 with b=5 → returns 15
-(execute ctx add-10-id {:b-arg-id 5})
+(execute ctx add-10-id {:b 5})
 ```
 
 **Key insight:** All argument binding happens in the database via arg entities. No separate fn-arg/arg-value entities needed. The arg entity combines schema, value, and inheritance in one place.
@@ -84,9 +84,11 @@ fn: add-10
 | [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles, rationale, module mapping | Before making architectural decisions |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical details, execution model, examples | When implementing features |
 | [docs/PACKAGES.md](docs/PACKAGES.md) | Package system, module structure, loading | When adding base-fns or fn-defs |
+| [docs/TYPES.md](docs/TYPES.md) | Type system design & semantics | When working with arg types |
+| [docs/LAYOUT.md](docs/LAYOUT.md) | Graph-editor layout pipeline (Stages 1–7) | When touching layout impl or editor frontend |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |
-| [docs/EXTENDING.md](docs/EXTENDING.md) | Adding new storage backends | When implementing new backend |
+| [docs/EXTENDING.md](docs/EXTENDING.md) | HOF semantics, custom storage, schema extensions, impl-hash | When extending below the package layer |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Implementation status, future plans | For project planning |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
@@ -401,52 +403,7 @@ resources/packages/     # Package definitions (EDN + Clojure impls)
 
 ## Packages System
 
-Base functions and fn-defs are organized in packages under `resources/packages/`. Each package contains modules with `fns.edn` (definitions) and `impls.clj` (Clojure implementations).
-
-### Package Structure
-
-```
-resources/packages/{package-name}/
-├── package.edn                    # Package metadata
-└── {module-name}/
-    ├── fns.edn                    # Function definitions (base-fns + fn-defs)
-    └── impls.clj                  # Clojure implementations for base-fns
-```
-
-### package.edn Format
-
-```edn
-{:name "web"
- :version "1.0.0"
- :description "Web primitives: HTTP, routing, HTML"
- :dependencies ["core"]           ; Packages to load first
- :modules ["http" "reitit" "html"]
- :startup-fn :web-server}         ; Optional: fn to execute on start
-```
-
-### fns.edn Format
-
-```edn
-[;; Base function (has implementation in impls.clj)
- {:name :add
-  :args {:nums :jsonb}
-  :return-type :numeric}
-
- ;; Fn-def (composition, no implementation)
- {:name :add-10
-  :parent :add
-  :args {:nums [10]}}]
-```
-
-### Loading Packages
-
-```clojure
-(require '[graphden.packages.loader :as pkg])
-
-;; Load packages in dependency order
-(def packages (pkg/load-packages ["core" "web" "app"]))
-;; => {:base-fn-defs {...}, :fn-defs [...], :packages [...], :startup-fn :web-server}
-```
+Base functions and fn-defs live in `resources/packages/{pkg}/{module}/` as `fns.edn` (declarations) + `impls.clj` (Clojure impls). Dependencies in `package.edn` drive load order. See [docs/PACKAGES.md](docs/PACKAGES.md) for full format and workflow.
 
 ## Best Practices (CRITICAL)
 

@@ -86,26 +86,31 @@
 ```
 
 **3.2 Lazy Evaluation:**
-Arguments are wrapped in Clojure `delay` objects:
-- Literal values → immediate delay
-- ref-id references → delay that executes function
-- is-fn=true refs → delay returning fn-id (for HOF)
+Ref bindings are wrapped as thunks (`rt/thunk`); impls deref them via
+`rt/resolve-arg` (handled transparently by the `defbase` macro so
+bodies use bare symbols). `:fn`-typed refs bypass the thunk and go
+through `hof-wrap` — see EXTENDING.md "Higher-Order Functions".
 
 **3.3 Result Caching:**
-- Results cached by ref-id within execution context
-- Same ref-id in multiple args → function executes once
+- Per-invocation `*call-cache*` memoises `[ref-id, free-args]` pairs
+- Shared subgraphs (e.g. `:router-result` pulled from multiple slots)
+  run once per top-level invocation
 
 **3.4 Executor:**
-- `execute` - Main entry point
-- `execute-with-named-args` - Execute with named arguments
-- `execute-by-name` - Execute by function name
-- Depth/timeout protection
+- `execute` — execute a fn by id with named free args
+- `execute-by-name` — execute a fn looked up by name
+- `make-single-arg-callable` — public HOF-wrap entry for raw fn-ids
 - Inheritance resolution via parent-id chain
+- Compile-at-startup: registry built once, closures cached in
+  `ctx :compiled-registry` atom
 
-**3.5 fn-registry component:**
-- `register-base-fns!` - Register implementations
-- `sync-defs-to-storage!` - Sync schemas to storage
+**3.5 fn-registry + package loader:**
+- `register-base-fn!` — register a single impl
+- `register-base-fns!` — bulk registration
+- `sync-defs-to-storage!` — sync fn-defs from `fns.edn` to storage
 - Deterministic UUID generation for idempotent operations
+- Orphan fn-def reaping: entries removed from `fns.edn` are deleted
+  from storage on next sync
 
 ---
 
@@ -128,35 +133,33 @@ Arguments are wrapped in Clojure `delay` objects:
 - Utilities: `identity`, `constantly`
 
 **4.4 I/O (Client) [PLANNED]**
-- `http-request` - HTTP client (http-kit)
+- `http-request` — HTTP client (http-kit)
 - File operations
 
-**4.5 I/O (Server) [PLANNED]**
-- `http-server` - HTTP server (http-kit)
-- Service Manager for long-lived processes
-
-**Service Manager design:**
-```clojure
-(defprotocol ServiceManager
-  (start-service [this service-fn-id])
-  (stop-service [this instance-id])
-  (list-services [this])
-  (service-status [this instance-id]))
-```
+**4.5 I/O (Server) [DONE]**
+- `http-server` — http-kit server wrapper (`web/http`)
+- Reitit-based routing (`web/reitit`): `ring-router`,
+  `ring-create-default-handler`, `ring-handler`, `middleware`
+- Ring-adapter: request-field extractors, response envelope,
+  bearer-token auth middleware (`web/ring-adapter`)
 
 ---
 
-## Phase 5: UI/API [PLANNED]
+## Phase 5: UI/API [PARTIAL]
 
-**5.1 REST API**
-- CRUD endpoints for all entities
-- POST /execute - run function
-- WebSocket for live updates
+**5.1 REST API [PARTIAL]**
+- CRUD endpoints for fn / arg entities [DONE — `web/crud`]
+- GET `/api/graph/entities` [DONE]
+- POST `/api/graph/layout` [DONE — `app/layout`]
+- Bearer-token auth middleware on mutating routes [DONE]
+- POST `/execute` — run fn from UI [PLANNED]
+- WebSocket for live updates [PLANNED]
 
-**5.2 Web Interface**
-- Function list
-- Graph editor (visual node-based)
-- Execute button with results
+**5.2 Web Interface [PARTIAL]**
+- Namespace-grouped entity list in sidebar [DONE]
+- Graph editor (Cytoscape-based, server-computed layout) [DONE]
+- Entity create/edit/delete modals [DONE]
+- Execute button with result display [PLANNED]
 
 ---
 

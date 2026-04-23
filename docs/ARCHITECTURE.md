@@ -150,22 +150,23 @@ fn: factorial
   ]
 ```
 
-**With lazy execution this works**, if there's a base case:
+**With lazy execution this works**, given a base case:
 
 ```clojure
-;; Base factorial function
-(defn base-factorial [{:keys [n recursive-call]}]
+;; Self-referential base-fn (schematic — in practice self-recursion
+;; is expressed via fn-def composition over :if + a ref back to the
+;; fn itself, not in Clojure).
+(defbase base-factorial [n recursive-call]
   (if (<= n 1)
     1
-    (* n (execute-fn recursive-call {:n (dec n)}))))
+    (* n (recursive-call {:n (dec n)}))))
 ```
 
-**Danger**: Infinite recursion when there's no base case.
-
-**Solutions (all implemented):**
-1. **Depth limit** - executor has max-depth (default: 1000)
-2. **Timeout** - maximum execution time (default: 30000ms)
-3. **Runtime detection** - deferred (depth/timeout is sufficient)
+**Danger**: infinite recursion when there's no base case. The
+compile executor has no built-in depth cap on recursion — a runaway
+graph blows the JVM stack. Storage-layer graph resolution does cap
+walks via `*max-graph-iterations*` (default 10000), which bounds the
+number of entities compile can visit when building a closure.
 
 ### Cyclic Dependencies (Not Recursion)
 
@@ -354,11 +355,11 @@ fn: report
 // calculate-sales executes ONCE, result shared between arg1 and arg2
 ```
 
-**Exposed arguments:** Args without value/ref-id form the fn's interface. Pass them at runtime:
+**Exposed arguments:** Args without value/ref-id form the fn's interface. Pass them at runtime, keyed by external (author-chosen) arg name:
 
 ```clojure
-;; fn-a has exposed argument arg-id
-(execute ctx fn-a-id {arg-id 42})
+;; fn-a exposes an argument externally named :count
+(execute ctx fn-a-id {:count 42})
 ```
 
 ### Base Functions and Their Types

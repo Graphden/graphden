@@ -151,17 +151,24 @@ Contains a vector of function definitions. Each definition is either:
 
 ### impls.clj — Clojure Implementations
 
+Base-fn bodies are written with the `defbase` macro. Arg symbols
+listed in the vector refer to the corresponding args declared in
+`fns.edn` and arrive already-resolved inside the body. `ctx` is
+automatically available for impls that need storage or the
+execution context:
+
 ```clojure
-(ns graphden.packages.core.arithmetic.impls)
+(ns graphden.packages.core.arithmetic.impls
+  (:require [graphden.executor.defbase :refer [defbase]]))
 
-(defn add
-  "Adds numbers together."
-  [{:keys [nums]}]
-  (apply + nums))
+(defbase add
+  "Add two numbers."
+  [a b]
+  (+ a b))
 
-(defn sub
-  [{:keys [nums]}]
-  (apply - nums))
+(defbase sub
+  [a b]
+  (- a b))
 
 ;; Export map: fn-name → implementation
 (def impls
@@ -169,27 +176,13 @@ Contains a vector of function definitions. Each definition is either:
    :sub sub})
 ```
 
-**Implementation function signature:**
-```clojure
-(defn my-fn
-  [{:keys [arg1 arg2 ...]}]  ; Destructure args (already dereferenced)
-  ...)
-```
+**Context access** — any `defbase` impl can reference `ctx` directly
+(no flag required; present for every impl):
 
-**With context access:**
-```edn
-;; In fns.edn
-{:name :list-entities
- :args {:entity-type :text}
- :return-type :jsonb
- :ctx true}
-```
 ```clojure
-;; In impls.clj
-(defn list-entities
-  [{:keys [entity-type]} ctx]  ; ctx is second argument
-  (let [storage (:storage ctx)]
-    (sp/query-entities storage (keyword entity-type) {})))
+(defbase list-entities
+  [entity-type]
+  (sp/query-entities (:storage ctx) (keyword entity-type) {}))
 ```
 
 ---
@@ -440,9 +433,10 @@ mkdir -p resources/packages/{package}/{module}
 
 3. **Create `impls.clj`** (if has base functions):
 ```clojure
-(ns graphden.packages.{package}.{module}.impls)
+(ns graphden.packages.{package}.{module}.impls
+  (:require [graphden.executor.defbase :refer [defbase]]))
 
-(defn first-fn [{:keys [x]}] x)
+(defbase first-fn [x] x)
 
 (def impls {:first-fn first-fn})
 ```

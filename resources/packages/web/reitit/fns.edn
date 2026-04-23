@@ -47,13 +47,13 @@
   ;; MIDDLEWARE CHAIN
   ;; =============================================================================
 
-  ;; Middleware factory. `:body` is a Ring-shaped fn-graph with one
-  ;; leftover free arg `:ctx` — a context map that the middleware impl
-  ;; populates as `{:request <ring-request>, :next-handler <next-link>}`.
-  ;; The produced spec is consumed by `:router` and folded around a
-  ;; route's handler. Inside `:body`, use `:proceed` to delegate to the
-  ;; next link in the chain (it pulls both `:request` and `:next-handler`
-  ;; out of `:ctx`).
+  ;; Middleware factory. `:body` is a Ring-shaped fn-graph with two
+  ;; leftover free args (`:request` and `:next-handler`) — compile's
+  ;; `hof-wrap` builds a map-callable for that shape. The middleware
+  ;; impl invokes it per request as
+  ;; `(body {:request <ring-request> :next-handler <next-link>})`.
+  ;; Inside `:body`, use `:proceed` to delegate to the next link in
+  ;; the chain (it just runs `:invoke` over those two free args).
   {:name :middleware
    :args {:name :any
           :body :fn}

@@ -154,11 +154,11 @@
 (deftest inheritance-chain-walks-first-parent
   (let [a (random-uuid), b (random-uuid), c (random-uuid)
         fns [(mk-fn a :a) (mk-fn b :b a) (mk-fn c :c b)]
-        {:keys [fn-map]} (c/build-lookups fns [])]
+        {:keys [fn-map]} (l/build-lookups fns [])]
     (is (= [c b a] (l/inheritance-chain c fn-map)))
-    (is (= :a (:name (c/base-fn-of c fn-map))))
-    (is (= :a (:name (c/base-fn-of b fn-map))))
-    (is (= :a (:name (c/base-fn-of a fn-map))))))
+    (is (= :a (:name (l/base-fn-of c fn-map))))
+    (is (= :a (:name (l/base-fn-of b fn-map))))
+    (is (= :a (:name (l/base-fn-of a fn-map))))))
 
 
 (deftest terminal-primary-id-walks-source-chain
@@ -166,10 +166,10 @@
         args [{:id p :fn-id (random-uuid) :source-id nil :name "p"}
               {:id child :fn-id (random-uuid) :source-id p :name "c"}
               {:id gc :fn-id (random-uuid) :source-id child :name "gc"}]
-        {:keys [arg-map]} (c/build-lookups [] args)]
-    (is (= p (c/terminal-primary-id gc arg-map)))
-    (is (= p (c/terminal-primary-id child arg-map)))
-    (is (= p (c/terminal-primary-id p arg-map)))))
+        {:keys [arg-map]} (l/build-lookups [] args)]
+    (is (= p (l/terminal-primary-id gc arg-map)))
+    (is (= p (l/terminal-primary-id child arg-map)))
+    (is (= p (l/terminal-primary-id p arg-map)))))
 
 
 ;; ============================================================================
@@ -825,7 +825,7 @@
           b-arg (mk-primary-arg (random-uuid) add-id "b")
           fns [(mk-fn add-id :add)]
           args [a-arg b-arg]
-          lookups (assoc (c/build-lookups fns args) :base-fns {:add add})
+          lookups (assoc (l/build-lookups fns args) :base-fns {:add add})
           closure (#'c/compile-fn add-id lookups nil)]
       (is (fn? closure))
       ;; `all-fns` is the lookup map; since add has no refs, any map works.
@@ -836,7 +836,7 @@
   (testing "compile-fn throws when the base-fn impl isn't in base-fns"
     (let [unknown-id (random-uuid)
           fns [(mk-fn unknown-id :unknown-base)]
-          lookups (assoc (c/build-lookups fns []) :base-fns {})]
+          lookups (assoc (l/build-lookups fns []) :base-fns {})]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo
                             #"No impl registered for base fn"
             (#'c/compile-fn unknown-id lookups nil))))))

@@ -4,7 +4,6 @@
    Focuses on branches that core-level tests don't always hit directly:
    - `execute` with a callable `fn-id` (legacy HOF pattern)
    - `execute-by-name` with string vs keyword storage name codec
-   - `execute-with-arg-ids` (legacy arg-id map style)
    - `make-single-arg-callable` fn-pass-through and free-arg shape dispatch
    - `registry` / `rebuild!` lifecycle"
   (:require
@@ -125,34 +124,6 @@
           (is (thrown-with-msg? clojure.lang.ExceptionInfo
                                 #"Function 'nope' not found"
                 (cr/execute-by-name ctx "nope" nil))))
-        (finally
-          (sp/close storage))))))
-
-
-;; ============================================================================
-;; `execute-with-arg-ids` — arg-id keyed map (legacy style)
-;; ============================================================================
-
-(deftest execute-with-arg-ids-translates-to-ext-names
-  (testing "arg-ids are resolved to external names via `arg-ext-name`"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (exec/register-base-fn! :add (setup/fn-impl [a b] (+ a b)))
-        (let [{:keys [arg-a arg-b composed-fn]} (setup/setup-add-function! storage)
-              ctx (exec/create-context {:storage storage})]
-          (is (= 11 (cr/execute-with-arg-ids ctx (:id composed-fn)
-                                             {(:id arg-a) 4 (:id arg-b) 7}))))
-        (finally
-          (sp/close storage)))))
-
-  (testing "empty arg-id map passes {} straight to execute"
-    (let [storage (setup/create-test-storage)]
-      (try
-        (exec/register-base-fn! :const-7 (fn [_ _] 7))
-        (let [base-fn (setup/create-base-fn! storage "const-7" :int)
-              composed (setup/create-composed-fn! storage "my-c7" (:id base-fn))
-              ctx (exec/create-context {:storage storage})]
-          (is (= 7 (cr/execute-with-arg-ids ctx (:id composed) {}))))
         (finally
           (sp/close storage))))))
 

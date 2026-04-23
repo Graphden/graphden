@@ -29,21 +29,6 @@
     [graphden.executor.runtime :as rt]))
 
 
-;; Lookup helpers moved to `graphden.executor.compile.lookups`. Re-exports
-;; keep the 4 externally-used names resolvable at the old path.
-(def build-lookups l/build-lookups)
-(def base-fn-of l/base-fn-of)
-(def terminal-primary-id l/terminal-primary-id)
-(def arg-ext-name l/arg-ext-name)
-
-
-;; `collect-bindings` + `collect-env-bindings` live in `compile.bindings`.
-;; Re-exports below keep existing callers of `compile/collect-bindings`
-;; (compile-runtime) and internal users resolvable without path churn.
-(def collect-bindings b/collect-bindings)
-(def collect-env-bindings b/collect-env-bindings)
-
-
 ;; =============================================================================
 ;; Per-call memoization
 ;;
@@ -233,7 +218,7 @@
 (defn- resolve-impl
   "Look up the base-fn impl for `fn-id`; throw with context on miss."
   [fn-id {:keys [fn-map base-fns]}]
-  (let [base (base-fn-of fn-id fn-map)
+  (let [base (l/base-fn-of fn-id fn-map)
         base-name-kw (keyword (:name base))]
     (if-let [impl (get base-fns base-name-kw)]
       impl
@@ -280,8 +265,8 @@
    Returns `(fn [all-fns free-args])`."
   [fn-id lookups ctx]
   (let [impl (resolve-impl fn-id lookups)
-        bindings (enrich-ref-bindings fn-id (collect-bindings fn-id lookups) lookups)
-        env-bindings (collect-env-bindings fn-id lookups)]
+        bindings (enrich-ref-bindings fn-id (b/collect-bindings fn-id lookups) lookups)
+        env-bindings (b/collect-env-bindings fn-id lookups)]
     (build-closure impl bindings env-bindings ctx)))
 
 
@@ -295,7 +280,7 @@
    `base-fns` is a registry `{fn-name-keyword → impl-fn}` (from
    exec-context). `ctx` is the execution-context the impls will receive."
   [{:keys [fns args base-fns]} ctx]
-  (let [lookups (assoc (build-lookups fns args) :base-fns base-fns)]
+  (let [lookups (assoc (l/build-lookups fns args) :base-fns base-fns)]
     (into {}
           (map (fn [f]
                  [(:id f) (compile-fn (:id f) lookups ctx)]))

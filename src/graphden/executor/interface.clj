@@ -88,8 +88,7 @@
    Arguments:
    - context: Execution context (created with create-context)
    - fn-id: UUID of the function to execute
-   - args: Free args map, keyed by external arg name (preferred), by
-           arg-id UUID (legacy test-style — auto-translated), or nil/{}.
+   - args: Free args map, keyed by external arg name, or nil/{}.
 
    Throws:
    - :execution-error/fn-not-found if `fn-id` has no compiled closure
@@ -100,17 +99,7 @@
                     {:type :execution-error/invalid-args
                      :args args
                      :args-type (type args)})))
-  (cond
-    (or (nil? args) (empty? args))
-    (cr/execute context fn-id {})
-
-    ;; Keyed by arg-id (UUID) — legacy test style.
-    (uuid? (first (keys args)))
-    (cr/execute-with-arg-ids context fn-id args)
-
-    ;; Keyed by external arg name.
-    :else
-    (cr/execute context fn-id args)))
+  (cr/execute context fn-id (or args {})))
 
 
 (defn execute-with-named-args

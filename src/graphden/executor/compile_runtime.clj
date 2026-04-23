@@ -11,6 +11,8 @@
    through the system-level `:exec/compiled-registry` init-key)."
   (:require
     [graphden.executor.compile :as compile]
+    [graphden.executor.compile.bindings :as b]
+    [graphden.executor.compile.lookups :as l]
     [graphden.executor.runtime :as rt]
     [graphden.storage.protocol.core :as sp]))
 
@@ -50,11 +52,6 @@
 ;; Arg-name resolution
 ;; =============================================================================
 
-(defn- build-arg-map
-  [storage]
-  (into {} (map (juxt :id identity)) (sp/query-entities storage :arg {})))
-
-
 (defn free-arg-ext-names
   "Return the ordered vector of external names for fn-id's free args
    reachable through its ref-chain. Used to shape HOF callables when the
@@ -63,11 +60,11 @@
   (let [storage (:storage ctx)
         fns (sp/query-entities storage :fn {})
         args (sp/query-entities storage :arg {})
-        lookups (assoc (compile/build-lookups fns args)
+        lookups (assoc (l/build-lookups fns args)
                        :base-fns (:base-fns ctx))]
     (mapv :ext-name
           (filter #(= :free (:kind %))
-                  (compile/collect-bindings fn-id lookups)))))
+                  (b/collect-bindings fn-id lookups)))))
 
 
 ;; =============================================================================
@@ -124,24 +121,6 @@
                       {:type :execution-error/fn-not-found
                        :fn-name fn-name})))
     (execute ctx (:id match) named-args)))
-
-
-(defn execute-with-arg-ids
-  "Execute using a `{arg-id → value}` map (legacy test-code style).
-   Converts arg-ids to their external names via `compile/arg-ext-name`
-   and delegates to `execute`. Most callers should use `execute` directly
-   with name-keyed args; this shim keeps pre-compile-era tests working."
-  [ctx fn-id arg-id-map]
-  (if (empty? arg-id-map)
-    (execute ctx fn-id {})
-    (let [arg-map (build-arg-map (:storage ctx))
-          named (reduce-kv (fn [acc arg-id v]
-                             (if-let [n (compile/arg-ext-name arg-id arg-map)]
-                               (assoc acc n v)
-                               acc))
-                           {}
-                           arg-id-map)]
-      (execute ctx fn-id named))))
 
 
 ;; =============================================================================

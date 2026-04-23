@@ -75,24 +75,17 @@
 
 
 (defn- load-module-fns
-  "Loads fns.edn for a module. Supports two formats:
+  "Loads fns.edn for a module. Expected shape:
 
-   Vector (legacy, no namespace):
-     [{:name :add :args {...}} ...]
-
-   Map (with namespace):
      {:namespace \"core.arithmetic\"
       :fns [{:name :add :args {...}} ...]}
 
-   Returns {:ns-path nil-or-string :fns [fn-defs]}"
+   Returns {:ns-path string :fns [fn-defs]}."
   [package-name module-name]
   (let [path (str "packages/" package-name "/" module-name "/fns.edn")]
     (if-let [raw (read-resource-edn path)]
-      (if (map? raw)
-        {:ns-path (:namespace raw)
-         :fns       (vec (:fns raw))}
-        {:ns-path nil
-         :fns       (vec raw)})
+      {:ns-path (:namespace raw)
+       :fns (vec (:fns raw))}
       (throw (ex-info (str "Module fns not found: " package-name "/" module-name)
                       {:type :package-error/module-not-found
                        :package package-name

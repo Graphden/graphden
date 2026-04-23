@@ -43,17 +43,17 @@
           ;; Create base fn
           base-fn (setup/create-base-fn! storage "use-any" :any)
           ;; Create arg for base fn
-          data-arg (setup/create-arg! storage (:id base-fn)
-                                      {:name "data" :type :any :required true :is-fn false})
+          _data-arg (setup/create-arg! storage (:id base-fn)
+                                       {:name "data" :type :any :required true :is-fn false})
           ;; Create composed fn
           composed-fn (setup/create-composed-fn! storage "my-use-any" (:id base-fn))
           ;; No arg value - test provides values via execute (free arg)
           ctx (exec/create-context {:storage storage})]
       ;; Any type should accept any value (provided at runtime since no DB value)
-      (is (= "a string" (exec/execute ctx (:id composed-fn) {(:id data-arg) "a string"})))
-      (is (= 12345 (exec/execute ctx (:id composed-fn) {(:id data-arg) 12345})))
-      (is (= {:key "value"} (exec/execute ctx (:id composed-fn) {(:id data-arg) {:key "value"}})))
-      (is (= [1 2 3] (exec/execute ctx (:id composed-fn) {(:id data-arg) [1 2 3]})))
+      (is (= "a string" (exec/execute ctx (:id composed-fn) {:data "a string"})))
+      (is (= 12345 (exec/execute ctx (:id composed-fn) {:data 12345})))
+      (is (= {:key "value"} (exec/execute ctx (:id composed-fn) {:data {:key "value"}})))
+      (is (= [1 2 3] (exec/execute ctx (:id composed-fn) {:data [1 2 3]})))
       (sp/close storage))))
 
 
@@ -89,14 +89,14 @@
           ;; Create base fn
           base-fn (setup/create-base-fn! storage "use-timestamp" :timestamptz)
           ;; Create arg for base fn
-          ts-arg (setup/create-arg! storage (:id base-fn)
-                                    {:name "ts" :type :timestamptz :required true :is-fn false})
+          _ts-arg (setup/create-arg! storage (:id base-fn)
+                                     {:name "ts" :type :timestamptz :required true :is-fn false})
           ;; Create composed fn
           composed-fn (setup/create-composed-fn! storage "my-use-timestamp" (:id base-fn))
           ;; No arg value - provide at runtime
           ctx (exec/create-context {:storage storage})
           test-ldt (java.time.LocalDateTime/of 2024 1 1 12 0 0)]
-      (is (= test-ldt (exec/execute ctx (:id composed-fn) {(:id ts-arg) test-ldt})))
+      (is (= test-ldt (exec/execute ctx (:id composed-fn) {:ts test-ldt})))
       (sp/close storage))))
 
 

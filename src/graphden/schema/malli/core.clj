@@ -10,10 +10,6 @@
     [malli.error :as me]))
 
 
-;; Re-export for backwards compatibility
-(def malli-type-mapping types/malli-type-mapping)
-
-
 (defn- find-first-duplicate
   "Returns first duplicate value in seq, or nil if none.
    Uses transient set for O(n) single-pass detection with early exit."

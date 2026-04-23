@@ -163,16 +163,61 @@
    :parent :throw
    :args {:exception :_env-missing-error}}
 
-  ;; Read file from classpath resources
-  {:name :read-resource
+  ;; Look up a classpath resource and slurp it. Returns nil if missing.
+  {:name :read-resource-or-nil
    :args {:path :text}
    :return-type :text}
 
-  ;; Load multiple resource files and concatenate with separator
+  ;; Read file from classpath resources, or throw with a clear message
+  ;; if the path doesn't resolve. fn-def composition on top of
+  ;; `:read-resource-or-nil` + `:if` + `:throw` + `:ex-info`.
+  {:name :read-resource
+   :parent :if
+   :args {:test :_resource-nil?
+          :then :_resource-not-found-throw
+          :else :_resource-or-nil}}
+
+  {:name :_resource-or-nil
+   :parent :read-resource-or-nil
+   :args {:path {:as :path}}}
+
+  {:name :_resource-nil?
+   :parent :nil?
+   :args {:value :_resource-or-nil}}
+
+  {:name :_resource-not-found-message
+   :parent :str
+   :args {:parts :_resource-not-found-parts}}
+
+  {:name :_resource-not-found-parts
+   :parent :list
+   :args {:items [{:value "Resource not found: "}
+                  :_resource-path-echo]}}
+
+  {:name :_resource-path-echo
+   :parent :identity
+   :args {:value {:as :path}}}
+
+  {:name :_resource-not-found-error
+   :parent :ex-info
+   :args {:message :_resource-not-found-message
+          :data {"type" "execution-error/resource-not-found"}}}
+
+  {:name :_resource-not-found-throw
+   :parent :throw
+   :args {:exception :_resource-not-found-error}}
+
+  ;; Load multiple resource files and concatenate with separator.
+  ;; Pure composition over `:map :read-resource` + `:str-join`.
   {:name :concat-resources
-   :args {:paths :jsonb
-          :separator {:type :text :value "\n\n"}}
-   :return-type :text}
+   :parent :str-join
+   :args {:coll :_concat-resources-list
+          :separator {:type :text :value "\n\n"}}}
+
+  {:name :_concat-resources-list
+   :parent :map
+   :args {:func :read-resource
+          :coll {:as :paths}}}
 
   ;; Call a Clojure fn (from :any arg) with one argument
   {:name :invoke

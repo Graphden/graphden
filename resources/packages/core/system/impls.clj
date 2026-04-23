@@ -124,23 +124,14 @@
   (throw exception))
 
 
-(defn- read-resource-impl
+(defbase read-resource-or-nil
+  "Lookup + slurp a classpath resource. Returns the file contents as a
+   string, or nil if the resource isn't on the classpath. `read-resource`
+   (fn-def) pairs this with :if + :throw to surface a clear error when
+   the path is missing."
   [path]
-  (if-let [resource (clojure.java.io/resource path)]
-    (slurp resource)
-    (throw (ex-info (str "Resource not found: " path)
-                    {:type :execution-error/resource-not-found
-                     :path path}))))
-
-
-(defbase read-resource
-  "Read a resource file from classpath and return its contents as string."
-  [path]
-  (read-resource-impl path))
-
-
-(defbase concat-resources [paths separator]
-  (str/join separator (map read-resource-impl paths)))
+  (when-let [r (clojure.java.io/resource path)]
+    (clojure.core/slurp r)))
 
 
 (defbase invoke-fn [func arg]
@@ -169,7 +160,6 @@
    :env env-fn
    :ex-info ex-info-fn
    :throw throw-fn
-   :read-resource read-resource
-   :concat-resources concat-resources
+   :read-resource-or-nil read-resource-or-nil
    :invoke invoke-fn
    :slurp slurp-fn})

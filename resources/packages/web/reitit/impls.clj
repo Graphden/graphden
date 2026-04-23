@@ -1,24 +1,41 @@
 (ns graphden.packages.web.reitit.impls
   "Implementations for web/reitit base functions.
 
-   Wraps reitit's routing + middleware-chain composition. Middleware is
-   expressed at graph level via `middleware` (factory producing a reitit
-   spec map) and `proceed` (delegate-to-next in chain) — see below."
+   Thin `defbase` wrappers around `reitit.ring` primitives —
+   `ring-router`, `ring-create-default-handler`, `ring-handler` —
+   plus the middleware primitives (`middleware`, `proceed`).
+
+   Router assembly (filter nils, build defaults-map, call
+   reitit.ring/ring-handler) is expressed at graph level as a fn-def
+   composition in `fns.edn`; this namespace only carries the three
+   reitit-library call-sites."
   (:require
-    [clojure.walk :as walk]
     [graphden.executor.defbase :refer [defbase]]
     [reitit.ring :as ring]))
 
 
-(defn- keywordize-map-keys
-  "Adapts map keys to reitit keyword format (string keys → keywords, recursive)."
-  [m]
-  (walk/postwalk
-    (fn [x]
-      (if (map? x)
-        (into {} (map (fn [[k v]] [(if (string? k) (keyword k) k) v]) x))
-        x))
-    m))
+;; === Reitit library wrappers ====================================================
+
+(defbase ring-router-fn
+  "Compile routes into a reitit router. Consumes reitit-shaped route
+   data `[[path {:method {:handler …}} …]]` with keyword keys."
+  [routes]
+  (ring/router routes))
+
+
+(defbase ring-create-default-handler-fn
+  "Build a Ring handler that reitit falls back to when no route matches.
+   `handlers` is a map with `:not-found`, `:method-not-allowed`,
+   `:not-acceptable` keys, each a Ring handler."
+  [handlers]
+  (ring/create-default-handler handlers))
+
+
+(defbase ring-handler-fn
+  "Compose a compiled reitit router and a default handler into the
+   final Ring-handler callable that http-kit invokes per request."
+  [router default-handler]
+  (ring/ring-handler router default-handler))
 
 
 ;; === Middleware chain ==========================================================
@@ -59,29 +76,11 @@
   (*next-handler* request))
 
 
-;; === Router ====================================================================
-;;
-;; `reitit.ring/ring-handler` compiles routes (including middleware chains)
-;; ONCE at startup and returns a Ring callable. We just hand it routes in
-;; the shape the graph built — reitit owns all per-request dispatch,
-;; method-matching, and middleware composition. No manual chain-building
-;; at runtime.
-
-(defbase router
-  [routes not-found-response method-not-allowed-response error-response]
-  (let [non-nil-routes (vec (remove nil? routes))
-        normalized-routes (keywordize-map-keys non-nil-routes)]
-    (ring/ring-handler
-      (ring/router normalized-routes)
-      (ring/create-default-handler
-        {:not-found          (fn [_] not-found-response)
-         :method-not-allowed (fn [_] method-not-allowed-response)
-         :not-acceptable     (fn [_] error-response)}))))
-
-
 ;; === Registry ===
 
 (def impls
-  {:router router
-   :middleware middleware
-   :proceed proceed})
+  {:ring-router                 ring-router-fn
+   :ring-create-default-handler ring-create-default-handler-fn
+   :ring-handler                ring-handler-fn
+   :middleware                  middleware
+   :proceed                     proceed})

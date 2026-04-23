@@ -1,15 +1,51 @@
-;; Reitit routing base functions
-;; router, middleware factory, proceed (next-in-chain delegate)
+;; Reitit routing base functions + `:router` assembly fn-def
+;;
+;; `:ring-router`, `:ring-create-default-handler`, `:ring-handler` are
+;; thin wrappers around the corresponding `reitit.ring` calls. `:router`
+;; is a pure graph-level composition — filter nils, normalize keys,
+;; wrap default responses into Ring handlers, feed it all to reitit —
+;; expressed here as a fn-def so the assembly is visible in the graph.
+;;
+;; `:middleware` / `:proceed` are the middleware primitives consumed by
+;; reitit's per-route chain (see reitit/impls.clj for the dynvar plumbing).
 
 
 {:namespace "web.reitit"
  :fns
- [{:name :router
-   :args {:routes :any
-          :not-found-response :jsonb
-          :method-not-allowed-response :jsonb
-          :error-response :jsonb}
+ [;; =============================================================================
+  ;; REITIT-LIBRARY WRAPPERS (base-fns)
+  ;; =============================================================================
+
+  ;; Compile routes into a reitit router. `routes` is the shape reitit
+  ;; expects: `[[path {:method {:handler …}} …] …]` with keyword keys
+  ;; at every level of the route-data map.
+  {:name :ring-router
+   :args {:routes :any}
+   :return-type :any}
+
+  ;; Build a Ring handler reitit falls back to when no route matches.
+  ;; `handlers` is a map with `:not-found`, `:method-not-allowed`,
+  ;; `:not-acceptable` keys; each value is a Ring-shaped handler fn.
+  {:name :ring-create-default-handler
+   :args {:handlers :jsonb}
    :return-type :fn}
+
+  ;; Compose a compiled reitit router and a default handler into the
+  ;; final Ring callable that http-kit invokes per request.
+  ;;
+  ;; `:default-handler` is `:any` (not `:fn`): the fn-graph bound here
+  ;; evaluates to a Ring callable (built via `:make-handler` + reitit's
+  ;; `create-default-handler`) and we want to pass THAT fn object
+  ;; through. `:fn` would trigger `hof-wrap` and re-wrap the fn-graph
+  ;; — wrong here, because the value IS already a callable.
+  {:name :ring-handler
+   :args {:router :any
+          :default-handler :any}
+   :return-type :fn}
+
+  ;; =============================================================================
+  ;; MIDDLEWARE CHAIN
+  ;; =============================================================================
 
   ;; Middleware factory. `:body` is a Ring-shaped fn-graph (one free
   ;; arg `:request`). The produced spec is consumed by `:router` and
@@ -27,12 +63,100 @@
    :args {:request :any}
    :return-type :jsonb}
 
-  ;; Router with individual text defaults — each sets one error response
+  ;; =============================================================================
+  ;; ROUTER ASSEMBLY (fn-def composition)
+  ;;
+  ;; Free args (caller interface, same shape as the old monolithic
+  ;; `:router` base-fn):
+  ;;   :routes, :not-found-response, :method-not-allowed-response, :error-response
+  ;;
+  ;; Pipeline:
+  ;;
+  ;;   :routes → filter nils → keywordize keys → :ring-router
+  ;;                                                     ↓
+  ;;                                     :ring-handler → :router
+  ;;                                                     ↑
+  ;;    make-handler × 3 → pairs→map → :ring-create-default-handler
+  ;; =============================================================================
+
+  ;; Drop nils so unused slot entries can be passed in uniformly.
+  {:name :_router-non-nil-routes
+   :parent :filter
+   :args {:pred :some?
+          :coll {:as :routes}}}
+
+  ;; Reitit walks route-data with keyword keys; our routes arrive with
+  ;; string keys (`"get"`, `"handler"`, `"middleware"`) because they
+  ;; were built via `:assoc` with literal string keys in app/common.
+  {:name :_router-normalized-routes
+   :parent :keywordize-map-keys
+   :args {:m :_router-non-nil-routes}}
+
+  {:name :_router-compiled
+   :parent :ring-router
+   :args {:routes :_router-normalized-routes}}
+
+  ;; Three constant Ring handlers — one per reitit fallback slot.
+  ;; Free arg on each is the response it wraps; those names become
+  ;; the router fn-def's public free-arg interface.
+  {:name :_router-not-found-handler
+   :parent :make-handler
+   :args {:response {:as :not-found-response}}}
+
+  {:name :_router-method-not-allowed-handler
+   :parent :make-handler
+   :args {:response {:as :method-not-allowed-response}}}
+
+  {:name :_router-not-acceptable-handler
+   :parent :make-handler
+   :args {:response {:as :error-response}}}
+
+  ;; Defaults-map entries. Keys are reitit slot keywords (literal, so
+  ;; `{:value :kw}` bypasses fn-ref resolution); values are the constant
+  ;; handlers built above.
+  {:name :_router-not-found-entry
+   :parent :pair
+   :args {:item1 {:value :not-found}
+          :item2 :_router-not-found-handler}}
+
+  {:name :_router-method-not-allowed-entry
+   :parent :pair
+   :args {:item1 {:value :method-not-allowed}
+          :item2 :_router-method-not-allowed-handler}}
+
+  {:name :_router-not-acceptable-entry
+   :parent :pair
+   :args {:item1 {:value :not-acceptable}
+          :item2 :_router-not-acceptable-handler}}
+
+  {:name :_router-defaults-map
+   :parent :pairs->map
+   :args {:entries [:_router-not-found-entry
+                    :_router-method-not-allowed-entry
+                    :_router-not-acceptable-entry]}}
+
+  {:name :_router-default-handler
+   :parent :ring-create-default-handler
+   :args {:handlers :_router-defaults-map}}
+
+  ;; Entry point. Same free-arg surface as the old `:router` base-fn,
+  ;; so all downstream fn-defs (`:router-with-text-404`, etc.) keep
+  ;; their existing bindings.
+  {:name :router
+   :parent :ring-handler
+   :args {:router :_router-compiled
+          :default-handler :_router-default-handler}}
+
+  ;; =============================================================================
+  ;; ROUTER TEXT-DEFAULT PRESETS
+  ;; =============================================================================
+
+  ;; Router with individual text defaults — each sets one error response.
   {:name :router-with-text-404
    :parent :router
    :args {:not-found-response :_text-404-body}}
 
-  ;; Response bodies: use ring-response directly (all args explicit, no free arg leakage)
+  ;; Response bodies: use ring-response directly (all args explicit, no free arg leakage).
   {:name :_text-404-body
    :parent :text-not-found-response
    :args {:body "Not Found"}}
@@ -53,6 +177,6 @@
    :parent :text-error-response
    :args {:body "Handler not configured"}}
 
-  ;; Router with all text defaults via MI
+  ;; Router with all text defaults via MI.
   {:name :text-error-router
    :parents [:router-with-text-404 :router-with-text-405 :router-with-text-500]}]}

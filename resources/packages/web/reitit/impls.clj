@@ -3,12 +3,13 @@
 
    Thin `defbase` wrappers around `reitit.ring` primitives —
    `ring-router`, `ring-create-default-handler`, `ring-handler` —
-   plus the middleware primitives (`middleware`, `proceed`).
+   plus the middleware factory.
 
    Router assembly (filter nils, build defaults-map, call
-   reitit.ring/ring-handler) is expressed at graph level as a fn-def
-   composition in `fns.edn`; this namespace only carries the three
-   reitit-library call-sites."
+   reitit.ring/ring-handler) and `:proceed` (delegate-to-next) are
+   expressed at graph level as fn-def compositions in `fns.edn`; this
+   namespace only carries library call-sites and the middleware
+   factory."
   (:require
     [graphden.executor.defbase :refer [defbase]]
     [reitit.ring :as ring]))
@@ -38,42 +39,29 @@
   (ring/ring-handler router default-handler))
 
 
-;; === Middleware chain ==========================================================
+;; === Middleware factory ========================================================
 ;;
 ;; Reitit middleware is a spec `{:name … :wrap (fn [handler] (fn [req] …))}`.
 ;; At route-compile time reitit folds `(:wrap mw)` around the route handler
 ;; producing a composed Ring callable per route.
 ;;
-;; In graph terms a middleware has a BODY (a fn-graph taking free `:request`).
-;; The body is a normal Ring-shaped handler that either returns its own
-;; response (early-return) or delegates to the next link in the chain via
-;; `proceed`.  `proceed` reads the current next-handler off a dynvar that
-;; `middleware`'s impl installs for the duration of each body call.
-
-(def ^:dynamic ^:private *next-handler* nil)
-
+;; The graph-level `body` is a fn-graph with one leftover free arg `:ctx`
+;; — a context map. We populate it with `{:request <ring-request>,
+;; :next-handler <next-link>}` on each invocation. `:proceed` (a fn-def,
+;; not an impl) pulls both pieces out of `:ctx` via `:get`. No dynvar.
 
 (defbase middleware
   "Produces a reitit-compatible middleware spec. `body` is a fn-graph
-   (callable taking one request argument) that runs PER REQUEST with
-   `*next-handler*` bound to the next link in the chain — invoke it via
-   `proceed` from inside `body` to continue."
+   with TWO leftover free args (`:request` and `:next-handler`) — the
+   compiler builds a map-callable for it. We populate both keys per
+   request: `:request` is reitit's request, `:next-handler` is the
+   next link in the chain. `body` is responsible for routing them via
+   `:proceed` (a fn-def, not an impl)."
   [name body]
   {:name name
    :wrap (fn [handler]
            (fn [request]
-             (binding [*next-handler* handler]
-               (body request))))})
-
-
-(defbase proceed
-  "Delegate to the next handler in the middleware chain. Must be called
-   from inside a middleware body (`*next-handler*` is bound there)."
-  [request]
-  (when (nil? *next-handler*)
-    (throw (ex-info "`proceed` called outside a middleware chain"
-                    {:type :runtime-error/proceed-without-middleware})))
-  (*next-handler* request))
+             (body {:request request, :next-handler handler})))})
 
 
 ;; === Registry ===
@@ -82,5 +70,4 @@
   {:ring-router                 ring-router-fn
    :ring-create-default-handler ring-create-default-handler-fn
    :ring-handler                ring-handler-fn
-   :middleware                  middleware
-   :proceed                     proceed})
+   :middleware                  middleware})

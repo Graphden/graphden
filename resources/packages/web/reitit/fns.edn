@@ -47,21 +47,30 @@
   ;; MIDDLEWARE CHAIN
   ;; =============================================================================
 
-  ;; Middleware factory. `:body` is a Ring-shaped fn-graph (one free
-  ;; arg `:request`). The produced spec is consumed by `:router` and
-  ;; folded around a route's handler. Inside `:body`, use `:proceed` to
-  ;; delegate to the next link in the chain.
+  ;; Middleware factory. `:body` is a Ring-shaped fn-graph with one
+  ;; leftover free arg `:ctx` — a context map that the middleware impl
+  ;; populates as `{:request <ring-request>, :next-handler <next-link>}`.
+  ;; The produced spec is consumed by `:router` and folded around a
+  ;; route's handler. Inside `:body`, use `:proceed` to delegate to the
+  ;; next link in the chain (it pulls both `:request` and `:next-handler`
+  ;; out of `:ctx`).
   {:name :middleware
    :args {:name :any
           :body :fn}
    :return-type :jsonb}
 
-  ;; Delegate to the next handler in the middleware chain. Only valid
-  ;; inside a middleware `:body`. Takes the request to pass along
-  ;; (commonly the caller's own `:request` free arg, untransformed).
+  ;; Delegate to the next handler in the middleware chain. Replaces
+  ;; the ex-`:proceed` base-fn (which sat on a `*next-handler*` dynvar).
+  ;; Pure fn-def: composes `:invoke` over two free args directly. The
+  ;; map-callable hof-wrap binds them by name from middleware impl's
+  ;; `(body {:request _ :next-handler _})`. The `{:as :request}` rename
+  ;; here means `:proceed`'s call-site free arg name for the request
+  ;; is `:request` — which lines up with `:ring-request`'s rename, so
+  ;; reuse of the existing extraction chain works naturally.
   {:name :proceed
-   :args {:request :any}
-   :return-type :jsonb}
+   :parent :invoke
+   :args {:func {:as :next-handler}
+          :arg :ring-request}}
 
   ;; =============================================================================
   ;; ROUTER ASSEMBLY (fn-def composition)

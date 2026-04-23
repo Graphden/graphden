@@ -26,30 +26,52 @@
 
 
 (defn deep-free-ext-names
-  "Collect free-arg external names reachable from `fn-id`, walking across
-   ref bindings (but NOT through :seq items — those are closed). Without
-   this, a fn whose own primary slots are all bound (e.g. a composed
-   Ring handler whose `:if` test/then/else are all fixed) would appear
-   as 0-arg, even though its ref-chain exposes `:request`."
+  "Collect TRULY-unbound free-arg external names reachable from `fn-id`,
+   walking across ref bindings (but NOT through :seq items — those are
+   closed). As we descend into a ref target we accumulate the env-bound
+   names of every fn we passed through; if a deeper fn lists a `:free`
+   binding whose ext-name was env-bound by an OUTER fn, that slot is
+   satisfied by the outer fn's `augment-env` and is NOT a true
+   HOF-input.
+
+   Without this, a Ring-handler chain like `:_app-ring-response` would
+   report propagated names (`:func`, `:item1`, `:default`, …) that are
+   actually bound by env-bindings at intermediate ref levels —
+   `hof-wrap` would then think the HOF call must inject them.
+
+   `deep-free-ext-names` exists for the case where a fn's own primary
+   slots are all bound but its ref-chain still exposes a genuinely
+   unbound free arg (the canonical case: a handler graph propagating
+   `:ctx` up from `:ring-request`)."
   [fn-id lookups]
   (let [result (atom [])
         seen (atom #{})]
     (letfn [(walk
-              [fid]
+              [fid env-covered]
               (when-not (contains? @seen fid)
                 (swap! seen conj fid)
-                (doseq [bnd (b/collect-bindings fid lookups)]
-                  (case (:kind bnd)
-                    :free (let [n (:ext-name bnd)]
-                            (when-not (some #{n} @result)
-                              (swap! result conj n)))
-                    :ref (when-not (:is-fn bnd)
-                           (walk (:ref-id bnd)))
-                    :seq (doseq [item (:items bnd)
-                                 :when (:ref-id item)]
-                           (walk (:ref-id item)))
-                    :value nil))))]
-      (walk fn-id))
+                (let [own-env (set (map :env-name
+                                        (b/collect-env-bindings fid lookups)))
+                      covered (into env-covered own-env)]
+                  (doseq [bnd (b/collect-bindings fid lookups)]
+                    (case (:kind bnd)
+                      :free (let [n (:ext-name bnd)]
+                              ;; Optional free args (`:required false` on
+                              ;; the base primary, e.g. `:get :default`)
+                              ;; don't need to come from the caller — they
+                              ;; default to nil if absent. Don't count
+                              ;; them toward HOF leftover.
+                              (when-not (or (covered n)
+                                            (not (:required bnd))
+                                            (some #{n} @result))
+                                (swap! result conj n)))
+                      :ref (when-not (:is-fn bnd)
+                             (walk (:ref-id bnd) covered))
+                      :seq (doseq [item (:items bnd)
+                                   :when (:ref-id item)]
+                             (walk (:ref-id item) covered))
+                      :value nil)))))]
+      (walk fn-id #{}))
     @result))
 
 

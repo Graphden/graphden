@@ -89,37 +89,30 @@
 
 (defn- hof-wrap
   "Wrap a compiled closure into a callable for use as a HOF argument
-   (`:fn`-type arg). Preference order for the wrap shape:
+   (`:fn`-type arg). Shape is determined by the wrapped fn-graph's
+   free-arg count (`free-names` — already env-aware via
+   `deep-free-ext-names`). The compiler does NOT inspect names;
+   whatever the author called their free args is what gets used.
 
-   - If `:request` is among the free args → single-arg callable feeding
-     the item under `:request`. This covers the Ring-handler case
-     (e.g. `:http-server.handler` — the fn-graph has many propagated
-     deep free args, but the caller only ever has the request to pass).
-   - 0 free args → variadic callable that ignores its input. Handlers
-     built from `:make-data-handler` still pass `request` through even
-     when the data-fn is a constant (e.g. `:list-all-graph-entities`
-     takes no args); arity-1 calls to a strict 0-arg fn would blow up.
-   - 1 free arg  → `(fn [item] …)` — typical (map/filter reducer).
-   - N≥2 free args → `(fn [items-seq] …)` — vec convention (reduce's
-     `[acc item]` pair). Items are zipmapped to free arg names in order.
+   - 0 free names → variadic callable that ignores its input (impl can
+     call with anything, even when the wrapped graph is constant).
+   - 1 free name → `(fn [item] …)` — single-arg callable; the item is
+     bound to that name. Impls call as `(f value)`. The author's name
+     choice becomes the binding key — no compiler magic.
+   - 2+ free names → `(fn [m] …)` — map-callable. Impl passes
+     `{name v ...}` (e.g. middleware passes
+     `{:request _ :next-handler _}`). The user-fn's free arg names
+     must match impl's chosen keys (ordinary API contract).
 
-   All wrapped calls pass `outer-free-args` through (merged), so
-   propagated inputs from the caller reach the HOF target."
+   `outer-free-args` (caller's runtime free-args) is propagated
+   through; when the HOF call provides a value for a name already in
+   `outer`, the HOF call OVERRIDES (assoc/merge semantics)."
   [compiled free-names all-fns outer-free-args]
-  (cond
-    (some #{:request} free-names)
-    (fn [item] (compiled all-fns (assoc outer-free-args :request item)))
-
-    (zero? (count free-names))
-    (fn [& _] (compiled all-fns outer-free-args))
-
-    (= 1 (count free-names))
-    (let [n (first free-names)]
-      (fn [item] (compiled all-fns (assoc outer-free-args n item))))
-
-    :else
-    (let [names (vec free-names)]
-      (fn [items] (compiled all-fns (merge outer-free-args (zipmap names items)))))))
+  (case (count free-names)
+    0 (fn [& _] (compiled all-fns outer-free-args))
+    1 (let [n (first free-names)]
+        (fn [item] (compiled all-fns (assoc outer-free-args n item))))
+    (fn [m] (compiled all-fns (merge outer-free-args m)))))
 
 
 (defn- resolve-seq-item
@@ -194,7 +187,11 @@
 
 (defn- enrich-ref-bindings
   "Precompute per-binding metadata that depends only on the graph shape:
-   - `:hof-free-names` for `:is-fn` refs (used by `hof-wrap`).
+   - `:hof-free-names` for `:is-fn` refs (used by `hof-wrap`). These
+     are the TRULY-unbound free args of the ref target —
+     `deep-free-ext-names` already drops names that intermediate
+     env-bindings will fill, so what's left is what HOF callers must
+     inject.
    - `:ref-renames`   for non-HOF refs (used at call-site by
      `apply-renames` to map F's free-arg names onto R's). Refs without
      renames get an empty map."

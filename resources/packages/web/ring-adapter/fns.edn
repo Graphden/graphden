@@ -1,7 +1,8 @@
 ;; Reusable Ring-request handler pipeline.
 ;;
 ;; Produces the `:router-ring-response` building block that:
-;;   1. Receives a raw Ring request (free arg, `value/as :request`).
+;;   1. Receives a raw Ring request via the single leftover free arg
+;;      `:request` (populated by `hof-wrap`'s single-arg callable).
 ;;   2. Extracts common fields (method/uri/query-string/headers/body) into
 ;;      an internal map via `:pairs->map`.
 ;;   3. Invokes a router (free arg `:func`) on that internal request.
@@ -10,8 +11,8 @@
 ;;
 ;; Consumers supply the concrete router via `:func` (bound on a child of
 ;; `:router-ring-response`) and pass that child directly to
-;; `:http-server.handler` (`:fn`-typed, so compile's hof-wrap produces the
-;; Ring callable).
+;; `:http-server.handler` (`:fn`-typed; the compile-time hof-wrap turns
+;; the fn-graph into a single-arg Ring callable).
 ;;
 ;; Auth is expressed per-route via reitit middleware (see
 ;; `:auth-required-middleware` below) — no pre-router path-gating layer.
@@ -23,11 +24,15 @@
   ;; RING REQUEST EXTRACTION
   ;; =============================================================================
 
-  ;; Single holder for the Ring request. All field extractors reference this
-  ;; one fn so the same request value flows into each `get`. The rename
-  ;; `value/as :request` exposes it as a free arg named `:request` — but its
-  ;; ROOT name (walking source-id chain) is still `:value`, which is what
-  ;; `make-single-arg-callable` binds.
+  ;; Single holder for the Ring request. All field extractors reference
+  ;; this one fn so the same request value flows into each `get`. The
+  ;; rename `value/as :request` exposes `:value` as the free arg
+  ;; `:request`. Ring HOFs that pass ONE request (`:http-server`,
+  ;; `:make-data-handler`, `:make-action-handler`) hand the callable a
+  ;; raw request — single-leftover wrap routes it under `:request`.
+  ;; Middleware (which also needs to inject `:next-handler`) uses the
+  ;; map-callable wrap and supplies both keys; this fn still picks
+  ;; `:request` out of the resulting free-args map.
   {:name :ring-request
    :parent :identity
    :args {:value {:as :request}}}

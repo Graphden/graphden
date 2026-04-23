@@ -149,13 +149,18 @@
 ;; =============================================================================
 
 (defn make-single-arg-callable
-  "Build a `(fn [item] result)` callable over `fn-id`. Routes the item to
-   the target's single free arg (or to `:request` if present, matching
-   compile's `hof-wrap` `:request` special-case for Ring handlers).
+  "Build a callable over `fn-id`. Mirrors `compile/hof-wrap`'s
+   leftover-logic: 0 free args → variadic ignore; 1 free arg →
+   single-arg callable (item bound to that name); 2+ → map-callable
+   (caller passes `{name value}` map matching the target's free-arg
+   names). The compiler picks no names — author and caller agree.
 
-   If `fn-id` is already a callable (e.g. a compile-produced `hof-wrap`
-   result handed to a legacy-style impl that calls this helper), returns
-   it as-is."
+   If `fn-id` is already a callable (e.g. a compile-produced wrap
+   result handed to a helper that calls this), returns it as-is.
+
+   This entry point has no `outer-free-args` to subtract — it builds
+   a top-level callable. So `leftover` here is the full set of
+   free-arg names of the target."
   [ctx fn-id]
   (if (fn? fn-id)
     fn-id
@@ -166,20 +171,11 @@
         (throw (ex-info (str "Function not found: " fn-id)
                         {:type :execution-error/fn-not-found
                          :fn-id fn-id})))
-      (cond
-        (some #{:request} free-names)
-        (fn [item] (closure reg {:request item}))
-
-        (zero? (count free-names))
-        (fn [& _] (closure reg {}))
-
-        (= 1 (count free-names))
-        (let [n (first free-names)]
-          (fn [item] (closure reg {n item})))
-
-        :else
-        (let [names (vec free-names)]
-          (fn [items] (closure reg (zipmap names items))))))))
+      (case (count free-names)
+        0 (fn [& _] (closure reg {}))
+        1 (let [n (first free-names)]
+            (fn [item] (closure reg {n item})))
+        (fn [m] (closure reg m))))))
 
 
 ;; Re-export — so this namespace is the canonical entry surface.

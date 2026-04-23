@@ -112,7 +112,12 @@
        :items (walk-anchor-chain anchor arg-map)}
 
       :else
-      {:kind :free :base-name base-name :ext-name ext-name})))
+      {:kind :free :base-name base-name :ext-name ext-name
+       ;; Treat NULL `:required` as required (the default in production
+       ;; data — only base-fns with `{:type ... :required false}` get
+       ;; explicit `false`). Optional free args don't have to be
+       ;; supplied by the HOF call site.
+       :required (not (false? (:required primary-arg)))})))
 
 
 (defn collect-bindings

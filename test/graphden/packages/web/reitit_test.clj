@@ -1,9 +1,10 @@
 (ns graphden.packages.web.reitit-test
-  "Unit tests for web/reitit base-fns: middleware factory, proceed
-   (next-in-chain delegate), and router middleware-chain composition.
+  "Unit tests for the `:middleware` factory impl. `:proceed` is now a
+   pure fn-def composition (no impl) — its behavior is exercised by
+   the auth integration tests via the actual fn-graph executor.
 
-   Loads impls dynamically from `resources/packages/` and exercises
-   them directly, matching the pattern used by layout-test."
+   Loads impls dynamically from `resources/packages/`, matching the
+   pattern used by layout-test."
   (:require
     [clojure.java.io :as io]
     [clojure.test :refer [deftest is testing]]))
@@ -22,100 +23,83 @@
 
 (defn- unwrap
   "defbase wraps impls as `(fn [args ctx] ...)` where `args` is a
-   map keyed by symbols (the arg names). Return a thin wrapper that
-   accepts a plain map and calls the underlying impl."
+   keyword-keyed map. Return the underlying impl."
   [sym]
   (when reitit-ns
     @(ns-resolve reitit-ns sym)))
 
 
 (def ^:private middleware-impl (unwrap 'middleware))
-(def ^:private proceed-impl (unwrap 'proceed))
 
-
-;; =============================================================================
-;; HELPERS
-;; =============================================================================
 
 (defn- call-mw
-  "Call the middleware factory impl. Body is a Ring-shaped fn `(fn [req] resp)`.
-   defbase compiles arg-lookups against __args keyed by keywords."
+  "Call the middleware factory impl. `body` is now a 1-arg callable
+   that takes a context map `{:request _ :next-handler _}`."
   [name body]
   (middleware-impl {:name name :body body} nil))
 
 
-(defn- call-proceed
-  "Call proceed with a request."
-  [request]
-  (proceed-impl {:request request} nil))
-
-
 ;; =============================================================================
-;; TESTS — middleware factory
+;; TESTS — middleware factory shape
 ;; =============================================================================
 
 (deftest middleware-produces-reitit-spec
   (testing "middleware returns a map with :name and :wrap"
-    (let [spec (call-mw :test-mw (fn [_req] {:status 200}))]
+    (let [spec (call-mw :test-mw (fn [_ctx] {:status 200}))]
       (is (map? spec))
       (is (= :test-mw (:name spec)))
       (is (fn? (:wrap spec))))))
 
 
-(deftest middleware-wrap-calls-body
-  (testing "the composed handler invokes body with the incoming request"
+(deftest middleware-wrap-passes-context-map
+  (testing "wrapped handler invokes body with {:request _, :next-handler _}"
     (let [captured (atom nil)
-          body (fn [req] (reset! captured req) {:status 204 :body "ok"})
+          body (fn [ctx] (reset! captured ctx) {:status 204 :body "ok"})
           spec (call-mw :capture body)
-          wrapped ((:wrap spec) (fn [_] {:status 500 :body "should not reach"}))
-          resp (wrapped {:uri "/x" :method :get})]
-      (is (= {:uri "/x" :method :get} @captured))
-      (is (= 204 (:status resp)))
-      (is (= "ok" (:body resp))))))
+          next-handler (fn [_] {:status 500 :body "should not reach"})
+          wrapped ((:wrap spec) next-handler)
+          resp (wrapped {:uri "/x" :request-method :get})]
+      (is (= {:uri "/x" :request-method :get} (:request @captured))
+          "the original request is passed under :request key")
+      (is (identical? next-handler (:next-handler @captured))
+          "the next link in the chain is passed under :next-handler key")
+      (is (= 204 (:status resp))))))
 
 
 (deftest middleware-early-return
-  (testing "body can short-circuit by returning a response without proceeding"
-    (let [handler-called (atom false)
-          body (fn [_req] {:status 401 :body "nope"})
+  (testing "body short-circuits by returning a response without invoking next-handler"
+    (let [next-called (atom false)
+          body (fn [_ctx] {:status 401 :body "nope"})
           spec (call-mw :deny body)
-          handler (fn [_] (reset! handler-called true) {:status 200})
-          wrapped ((:wrap spec) handler)
+          next-handler (fn [_] (reset! next-called true) {:status 200})
+          wrapped ((:wrap spec) next-handler)
           resp (wrapped {:uri "/x"})]
       (is (= 401 (:status resp)))
       (is (= "nope" (:body resp)))
-      (is (false? @handler-called)
-          "early-return body must not trigger the next handler"))))
+      (is (false? @next-called)
+          "early-return body must not trigger next-handler"))))
 
 
-;; =============================================================================
-;; TESTS — proceed
-;; =============================================================================
-
-(deftest proceed-throws-outside-middleware
-  (testing "proceed outside a middleware context throws"
-    (is (thrown? clojure.lang.ExceptionInfo
-                 (call-proceed {:uri "/x"})))))
-
-
-(deftest proceed-delegates-to-next-handler
-  (testing "proceed inside a middleware body invokes the wrapped handler"
-    (let [body (fn [req] (call-proceed (assoc req :tagged true)))
+(deftest middleware-body-can-delegate-via-context
+  (testing "body invokes next-handler from the ctx map (mirrors what :proceed fn-def does)"
+    (let [body (fn [{:keys [request next-handler]}]
+                 (next-handler (assoc request :tagged true)))
           spec (call-mw :pass-through body)
           handler (fn [req] {:status 200 :req req})
           wrapped ((:wrap spec) handler)
           resp (wrapped {:uri "/x"})]
       (is (= 200 (:status resp)))
       (is (true? (get-in resp [:req :tagged]))
-          "proceed carried the transformed request into the handler"))))
+          "next-handler received the body-modified request"))))
 
 
 (deftest middleware-chain-composition
-  (testing "two middlewares chain outer-to-inner; proceed walks down the stack"
-    (let [outer-body (fn [req] (call-proceed (assoc req :outer-saw true)))
-          inner-body (fn [req] (call-proceed (assoc req :inner-saw true)))
-          outer ((:wrap (call-mw :outer outer-body))
-                 ((:wrap (call-mw :inner inner-body))
+  (testing "two middlewares chain outer-to-inner; each delegates via its ctx"
+    (let [tag (fn [k]
+                (fn [{:keys [request next-handler]}]
+                  (next-handler (assoc request k true))))
+          outer ((:wrap (call-mw :outer (tag :outer-saw)))
+                 ((:wrap (call-mw :inner (tag :inner-saw)))
                   (fn [req] {:status 200 :req req})))
           resp (outer {:uri "/x"})]
       (is (= 200 (:status resp)))
@@ -127,9 +111,10 @@
 (deftest middleware-short-circuits-inner
   (testing "outer middleware returning a response stops the chain"
     (let [inner-called (atom false)
-          outer-body (fn [_req] {:status 403 :body "forbidden"})
-          inner-body (fn [req] (reset! inner-called true)
-                               (call-proceed req))
+          outer-body (fn [_ctx] {:status 403 :body "forbidden"})
+          inner-body (fn [{:keys [request next-handler]}]
+                       (reset! inner-called true)
+                       (next-handler request))
           outer ((:wrap (call-mw :gate outer-body))
                  ((:wrap (call-mw :trace inner-body))
                   (fn [_] {:status 200})))

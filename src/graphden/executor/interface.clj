@@ -142,10 +142,10 @@
 ;; === HOF Helpers ===
 
 (defn make-single-arg-callable
-  "Builds a `(fn [value] result)` callable over `fn-id`. Routes `value`
-   to the target's single free arg — or to `:request` when present (Ring
-   handler convention). Multi-free-arg targets receive a vector routed
-   by position."
+  "Builds a callable over `fn-id` whose shape mirrors `compile/hof-wrap`'s
+   leftover-logic: 0 free args → variadic ignore; 1 free arg → single-arg
+   callable (item bound to that name); 2+ → map-callable (caller passes
+   `{name value}`). Compiler picks no names — author and caller agree."
   [context fn-id]
   (cr/make-single-arg-callable context fn-id))
 

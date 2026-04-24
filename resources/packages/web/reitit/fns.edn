@@ -7,7 +7,9 @@
 ;; expressed here as a fn-def so the assembly is visible in the graph.
 ;;
 ;; `:middleware` / `:proceed` are the middleware primitives consumed by
-;; reitit's per-route chain (see reitit/impls.clj for the dynvar plumbing).
+;; reitit's per-route chain (see reitit/impls.clj for the per-request
+;; map-callable that injects `:request` + `:next-handler` into the body
+;; fn-graph).
 
 
 {:namespace "web.reitit"

@@ -74,17 +74,21 @@
    :args {:map :jsonb}
    :return-type :jsonb}
 
+  ;; `(apply merge maps)` — variadic merge like Clojure's. `:maps` is a
+  ;; sequence-arg so callers can inline refs: `{:maps [:a-ref :b-ref]}`.
   {:name :merge
-   :args {:maps :jsonb}
+   :args {:maps {:type :sequence :of :any}}
    :return-type :jsonb}
-
-  {:name :merge2
-   :args {:a :any, :b :any}
-   :return-type :any}
 
   {:name :into
    :args {:to :jsonb, :from :jsonb}
    :return-type :jsonb}
+
+  {:name :assoc-in
+   :args {:m :any
+          :path :jsonb
+          :v :any}
+   :return-type :any}
 
   {:name :range
    :args {:start {:type :int :value 0}
@@ -142,4 +146,18 @@
 
   {:name :update-vals
    :args {:m :any, :f :fn}
-   :return-type :any}]}
+   :return-type :any}
+
+  ;; Like Clojure's `(update-in m path #(merge defaults %))`. Declared as
+  ;; a base-fn because decomposing it into `assoc-in` + `get-in` + `merge`
+  ;; runs into a primary-vs-env binding-classification issue: `:m` and
+  ;; `:path` at the composing level resolve as primary-bindings of
+  ;; `:assoc-in`, which don't flow through `augment-env` to the inner
+  ;; `:get-in` that needs them as free args. One-line wrapper is the
+  ;; pragmatic path until the compiler's binding classification learns
+  ;; to propagate primaries as free-args where needed.
+  {:name :merge-in
+   :args {:m :jsonb
+          :path :jsonb
+          :defaults :jsonb}
+   :return-type :jsonb}]}

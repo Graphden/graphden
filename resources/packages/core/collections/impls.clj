@@ -97,6 +97,14 @@
   (into to from))
 
 
+(defbase assoc-in-fn [m path v]
+  (assoc-in m path v))
+
+
+(defbase merge-in-fn [m path defaults]
+  (update-in m path #(merge defaults %)))
+
+
 (defbase range-fn [start end step]
   (let [max-size sp/*max-range-size*]
     (validate-non-zero! step :step "step cannot be zero (would cause infinite loop)")
@@ -176,10 +184,6 @@
   (select-keys m ks))
 
 
-(defbase merge2-fn [a b]
-  (merge a b))
-
-
 (defbase zipmap-fn [keys vals]
   (zipmap keys vals))
 
@@ -218,6 +222,8 @@
    :vals vals-fn
    :merge merge-fn
    :into into-fn
+   :assoc-in assoc-in-fn
+   :merge-in merge-in-fn
    :range range-fn
    :repeat repeat-fn
    :take take-fn
@@ -230,7 +236,6 @@
    :stringify-map-keys stringify-map-keys-fn
    :keywordize-map-keys keywordize-map-keys-fn
    :select-keys select-keys-fn
-   :merge2 merge2-fn
    :zipmap zipmap-fn
    :update-vals update-vals-fn
    :list list-fn

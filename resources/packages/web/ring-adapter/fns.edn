@@ -1,13 +1,17 @@
 ;; Reusable Ring-request handler pipeline.
 ;;
-;; Produces the `:router-ring-response` building block that:
-;;   1. Receives a raw Ring request via the single leftover free arg
-;;      `:request` (populated by `hof-wrap`'s single-arg callable).
-;;   2. Extracts common fields (method/uri/query-string/headers/body) into
-;;      an internal map via `:pairs->map`.
-;;   3. Invokes a router (free arg `:func`) on that internal request.
-;;   4. Wraps the router result in a ring-response with default security
-;;      headers merged in.
+;; Produces the `:router-ring-response` building block — the handler
+;; bound to `:http-server.handler`. Pipeline:
+;;
+;;   1. Receives a raw Ring request (single leftover free arg `:request`
+;;      via `hof-wrap`'s single-arg callable).
+;;   2. Extracts common fields (method/uri/query-string/headers/body)
+;;      into an internal map via `:pairs->map` — `:internal-request`.
+;;   3. Invokes a router (free arg `:func`) on that internal request
+;;      → `:router-result` is a Ring response map.
+;;   4. Adds default security headers on top of the router's headers
+;;      (`(update response :headers #(merge defaults %))`). Status and
+;;      body pass through untouched.
 ;;
 ;; Consumers supply the concrete router via `:func` (bound on a child of
 ;; `:router-ring-response`) and pass that child directly to
@@ -110,54 +114,28 @@
    :parent :invoke
    :args {:arg :internal-request}}
 
-  ;; Shared `:coll :router-result` lookup — same factoring pattern as
-  ;; `:ring-request-field` above. Subclasses only declare which field (and
-  ;; their fallback default) they want.
-  {:name :router-result-field
-   :parent :get
-   :args {:coll :router-result}}
-
-  {:name :router-response-status
-   :parent :router-result-field
-   :args {:key {:value :status} :default 200}}
-
-  {:name :router-response-headers
-   :parent :router-result-field
-   :args {:key {:value :headers} :default {}}}
-
-  {:name :router-response-body
-   :parent :router-result-field
-   :args {:key {:value :body} :default ""}}
-
   ;; Opinionated default security headers — merged into every response.
-  {:name :default-security-headers
+  ;; Stringified once (JSONB roundtrip turns string keys into keywords;
+  ;; http-kit needs strings).
+  {:name :_default-security-headers-raw
    :parent :const
    :args {:value {"X-Content-Type-Options" "nosniff"
                   "X-Frame-Options" "DENY"
                   "X-XSS-Protection" "1; mode=block"
                   "Referrer-Policy" "strict-origin-when-cross-origin"}}}
 
-  ;; Ring response built from router-result + merged headers.
-  ;;
-  ;; Structural split: `merged-response-headers` preloads default security
-  ;; headers on top of `merge2`; `router-ring-response` inherits those
-  ;; (+ a fixed `:status`) via `_router-ring-response-envelope` so the
-  ;; editor-visible level of `router-ring-response` shows only the body
-  ;; binding (the slot that carries the actual router computation).
+  {:name :default-security-headers
+   :parent :stringify-map-keys
+   :args {:m :_default-security-headers-raw}}
 
-  {:name :merged-response-headers
-   :parent :merge2
-   :args {:a :default-security-headers
-          :b :router-response-headers}}
-
-  {:name :_router-ring-response-envelope
-   :parent :ring-response
-   :args {:status :router-response-status
-          :headers :merged-response-headers}}
-
+  ;; Take the router-result (a Ring response map) and merge default
+  ;; security headers into its `:headers`. One node, no re-assembly:
+  ;;   (update response :headers #(merge defaults %))
   {:name :router-ring-response
-   :parent :_router-ring-response-envelope
-   :args {:body :router-response-body}}
+   :parent :merge-in
+   :args {:m :router-result
+          :path [:headers]
+          :defaults :default-security-headers}}
 
   ;; =============================================================================
   ;; AUTH — Bearer token primitives (opinionated defaults)

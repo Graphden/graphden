@@ -41,23 +41,29 @@
 ;; of the wrapped target). The factory just assembles them.
 
 (defbase make-data-handler [data-fn body-fn status headers]
-  (fn [request]
-    (let [data (data-fn request)
-          body (body-fn data)]
-      {:status status
-       :headers headers
-       :body body})))
+  ;; Headers from a JSONB-roundtripped literal map come back keyword-
+  ;; keyed; http-kit needs string keys. Stringify here so every
+  ;; response producer hands downstream code a Ring-shaped response.
+  (let [string-headers (stringify-keys headers)]
+    (fn [request]
+      (let [data (data-fn request)
+            body (body-fn data)]
+        {:status status
+         :headers string-headers
+         :body body}))))
 
 
 (defbase make-action-handler [action-fn base-headers]
-  (fn [request]
-    (let [result (action-fn request)
-          resp-status (or (:status result) 200)
-          resp-headers (merge base-headers (or (:headers result) {}))
-          resp-body (or (:body result) "")]
-      {:status resp-status
-       :headers resp-headers
-       :body resp-body})))
+  (let [string-base-headers (stringify-keys base-headers)]
+    (fn [request]
+      (let [result (action-fn request)
+            resp-status (or (:status result) 200)
+            resp-headers (merge string-base-headers
+                                (stringify-keys (or (:headers result) {})))
+            resp-body (or (:body result) "")]
+        {:status resp-status
+         :headers resp-headers
+         :body resp-body}))))
 
 
 (defbase to-json-string [data]

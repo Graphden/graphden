@@ -3,11 +3,10 @@
 
 {:namespace "web.http"
  :fns
- [;; Starts http-kit server. handler must be a Ring handler
-  ;; :handler is :fn — compile's hof-wrap applies at the call-site. The
-  ;; target is a fn-graph whose impl uses `:request` free-arg (Ring
-  ;; convention); hof-wrap's :request-branch turns it into `(fn [req] …)`
-  ;; ready for http-kit. No adapter fn needed in between.
+ [;; Starts http-kit server. `:handler` is `:fn`-typed — compile's
+  ;; `hof-wrap` runs at the call-site, turning the bound fn-graph into
+  ;; a Ring callable based on its leftover free-args (one leftover →
+  ;; `(fn [request] …)`). No adapter fn needed in between.
   {:name :http-server
    :args {:handler :fn
           :port :int}

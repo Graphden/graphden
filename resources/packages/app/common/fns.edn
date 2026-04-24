@@ -40,9 +40,13 @@
    :args {:map {}}}
 
   ;; Level 2: assoc-handler (free: handler) - sets key="handler", renames value->handler
-  ;; handler is executed and result (Clojure fn) is stored in map
+  ;; Diamond inheritance from :assoc: :assoc-fn refines :value to :fn-typed
+  ;; (its arg wins for `:value` because it appears first in :parents — the
+  ;; child arg name `value` resolves through `:assoc-fn.value` which has
+  ;; is-fn=true). :assoc-empty contributes :map={}. Result: handler ref
+  ;; becomes a hof-wrap'd Ring callable stored in the route's method-map.
   {:name :assoc-handler
-   :parent :assoc-empty
+   :parents [:assoc-fn :assoc-empty]
    :args {:key "handler"
           :value {:as :handler}}}
 

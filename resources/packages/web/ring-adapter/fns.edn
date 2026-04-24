@@ -32,11 +32,11 @@
   ;; this one fn so the same request value flows into each `get`. The
   ;; rename `value/as :request` exposes `:value` as the free arg
   ;; `:request`. Ring HOFs that pass ONE request (`:http-server`,
-  ;; `:make-data-handler`, `:make-action-handler`) hand the callable a
-  ;; raw request — single-leftover wrap routes it under `:request`.
-  ;; Middleware (which also needs to inject `:next-handler`) uses the
-  ;; map-callable wrap and supplies both keys; this fn still picks
-  ;; `:request` out of the resulting free-args map.
+  ;; per-route handlers via `:assoc-fn`) hand the callable a raw request
+  ;; — single-leftover wrap routes it under `:request`. Middleware (which
+  ;; also needs to inject `:next-handler`) uses the map-callable wrap and
+  ;; supplies both keys; this fn still picks `:request` out of the
+  ;; resulting free-args map.
   {:name :ring-request
    :parent :identity
    :args {:value {:as :request}}}

@@ -143,43 +143,85 @@
 
   ;; =============================================================================
   ;; FN-DEFS: Response handlers composed from base functions
+  ;;
+  ;; Handlers are fn-graphs. At the route binding (:assoc-handler.value
+  ;; → :fn-typed via :assoc-fn) the compiler hof-wrap's them into Ring
+  ;; callables. Free arg `:request` propagates from inner refs (those
+  ;; whose primary `:request` arg isn't bound here) up through the
+  ;; chain; hof-wrap turns the leftover into a single-arg callable.
   ;; =============================================================================
 
+  ;; --- Data handlers: data-fn -> body-fn -> response wrapper ---
+
   {:name :all-entities-json-handler
-   :parent :make-json-response-handler
-   :args {:data-fn :list-all-graph-entities}}
+   :parent :json-ok-response
+   :args {:body :_all-entities-json-body}}
+
+  {:name :_all-entities-json-body
+   :parent :to-json-string
+   :args {:data :list-all-graph-entities}}
 
   {:name :entity-details-handler
-   :parent :make-html-response-handler
-   :args {:render-fn :render-entity-details-view}}
+   :parent :html-ok-response
+   :args {:body :_entity-details-body}}
 
-  {:name :_entity-form-create-view
-   :parent :render-entity-form-view}
+  {:name :_entity-details-body
+   :parent :render-hiccup
+   :args {:hiccup :render-entity-details-view}}
 
   {:name :entity-form-create-handler
-   :parent :make-html-response-handler
-   :args {:render-fn :_entity-form-create-view}}
-
-  {:name :_entity-form-edit-view
-   :parent :render-entity-form-view}
+   :parent :html-ok-response
+   :args {:body :_entity-form-body}}
 
   {:name :entity-form-edit-handler
-   :parent :make-html-response-handler
-   :args {:render-fn :_entity-form-edit-view}}
+   :parent :html-ok-response
+   :args {:body :_entity-form-body}}
+
+  {:name :_entity-form-body
+   :parent :render-hiccup
+   :args {:hiccup :render-entity-form-view}}
+
+  ;; --- Action handlers: action-fn returns partial response, defaults
+  ;; (status 200, body "", html headers) supplied by composition. ---
+
+  {:name :_html-action-base-headers
+   :parent :const
+   :args {:value {"Content-Type" "text/html; charset=utf-8"}}}
+
+  {:name :_action-status
+   :parent :get
+   :args {:coll {:as :result} :key {:value :status} :default 200}}
+
+  {:name :_action-body
+   :parent :get
+   :args {:coll {:as :result} :key {:value :body} :default ""}}
+
+  {:name :_action-headers-raw
+   :parent :get
+   :args {:coll {:as :result} :key {:value :headers} :default {}}}
+
+  {:name :_action-headers
+   :parent :merge
+   :args {:maps [:_html-action-base-headers :_action-headers-raw]}}
+
+  {:name :html-action-response
+   :parent :ring-response
+   :args {:status :_action-status
+          :headers :_action-headers
+          :body :_action-body}}
 
   {:name :create-entity-api-handler
-   :parent :make-html-action-handler
-   :args {:action-fn :process-create-entity}}
+   :parent :html-action-response
+   :args {:result :process-create-entity}}
 
   {:name :delete-entity-api-handler
-   :parent :make-html-action-handler
-   :args {:action-fn :process-delete-entity}}
+   :parent :html-action-response
+   :args {:result :process-delete-entity}}
 
-  ;; Sequence-op handlers: return JSON, not HTML partials.
   {:name :sequence-append-handler
-   :parent :make-html-action-handler
-   :args {:action-fn :process-sequence-append}}
+   :parent :html-action-response
+   :args {:result :process-sequence-append}}
 
   {:name :sequence-remove-handler
-   :parent :make-html-action-handler
-   :args {:action-fn :process-sequence-remove}}]}
+   :parent :html-action-response
+   :args {:result :process-sequence-remove}}]}

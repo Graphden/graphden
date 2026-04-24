@@ -35,29 +35,6 @@
     (fn [_request] r)))
 
 
-(defbase make-data-handler [data-fn body-fn status headers]
-  (let [string-headers (stringify-keys headers)]
-    (fn [request]
-      (let [data (data-fn request)
-            body (body-fn data)]
-        {:status status
-         :headers string-headers
-         :body body}))))
-
-
-(defbase make-action-handler [action-fn base-headers]
-  (let [string-base-headers (stringify-keys base-headers)]
-    (fn [request]
-      (let [result (action-fn request)
-            resp-status (or (:status result) 200)
-            resp-headers (merge string-base-headers
-                                (stringify-keys (or (:headers result) {})))
-            resp-body (or (:body result) "")]
-        {:status resp-status
-         :headers resp-headers
-         :body resp-body}))))
-
-
 (defbase to-json-string [data]
   (json/generate-string data))
 
@@ -150,8 +127,6 @@
 (def impls
   {:ring-response ring-response
    :make-handler make-handler
-   :make-data-handler make-data-handler
-   :make-action-handler make-action-handler
    :to-json-string to-json-string
    :parse-json parse-json
    :jvm-version jvm-version

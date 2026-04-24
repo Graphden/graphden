@@ -10,62 +10,15 @@
           :body :text}
    :return-type :jsonb}
 
+  ;; `:make-handler` wraps a constant response into a Ring callable
+  ;; `(fn [_request] response)`. Used by reitit's default-handler trio
+  ;; (`:not-found`, `:method-not-allowed`, `:not-acceptable`) where the
+  ;; route-data slot is `:any`-typed (no hof-wrap), so we need a real
+  ;; Clojure callable. Per-route handlers go through `:assoc-fn` and
+  ;; are hof-wrap'd directly — they don't need this wrapper.
   {:name :make-handler
    :args {:response :jsonb}
    :return-type :fn}
-
-  ;; =============================================================================
-  ;; HANDLER FACTORIES (base-fns)
-  ;;
-  ;; These stay as base-fns because their JOB is to bridge our graph
-  ;; world (fn-graphs that compute a response for a given request) to
-  ;; reitit's route-data world (which stores plain Clojure Ring
-  ;; callables and invokes them per request). The factory hof-wraps
-  ;; the user's fn-graph into a single-arg Ring callable, constructs
-  ;; the response around it, and returns the callable that reitit
-  ;; stores. Expressing this as a pure fn-def would require turning
-  ;; route's :handler slot into a :fn-typed arg (so hof-wrap fires
-  ;; there) — which would mean restructuring :assoc / :method-map /
-  ;; route templates, not a local change.
-  ;; =============================================================================
-
-  {:name :make-data-handler
-   :args {:data-fn :fn
-          :body-fn :fn
-          :status :int
-          :headers :jsonb}
-   :return-type :fn}
-
-  {:name :make-action-handler
-   :args {:action-fn :fn
-          :base-headers :jsonb}
-   :return-type :fn}
-
-  ;; =============================================================================
-  ;; FN-DEFS: Specialized handlers via inheritance
-  ;; =============================================================================
-
-  ;; JSON data handler - data-fn returns data, serialized to JSON
-  {:name :make-json-response-handler
-   :parent :make-data-handler
-   :args {:body-fn :to-json-string
-          :status 200
-          :headers {"Content-Type" "application/json"}
-          :data-fn {:as :data-fn}}}
-
-  ;; HTML data handler - data-fn returns hiccup, rendered to HTML
-  {:name :make-html-response-handler
-   :parent :make-data-handler
-   :args {:body-fn :render-hiccup
-          :status 200
-          :headers {"Content-Type" "text/html; charset=utf-8"}
-          :data-fn {:as :render-fn}}}
-
-  ;; HTML action handler - action-fn returns full response map
-  {:name :make-html-action-handler
-   :parent :make-action-handler
-   :args {:base-headers {"Content-Type" "text/html; charset=utf-8"}
-          :action-fn {:as :action-fn}}}
 
   {:name :to-json-string
    :args {:data :any}

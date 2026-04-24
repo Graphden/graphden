@@ -15,13 +15,9 @@
    :parent :to-json-string
    :args {:data :health-status}}
 
-  {:name :_health-response
+  {:name :_health-handler
    :parent :json-ok-response
    :args {:body :_health-json-body}}
-
-  {:name :_health-handler
-   :parent :make-handler
-   :args {:response :_health-response}}
 
   {:name :health-route
    :parent :get-route
@@ -31,13 +27,9 @@
    :parent :to-json-string
    :args {:data :jvm-info}}
 
-  {:name :_metrics-response
+  {:name :_metrics-handler
    :parent :json-ok-response
    :args {:body :_metrics-json-body}}
-
-  {:name :_metrics-handler
-   :parent :make-handler
-   :args {:response :_metrics-response}}
 
   {:name :metrics-route
    :parent :get-route

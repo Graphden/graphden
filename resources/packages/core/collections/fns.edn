@@ -50,6 +50,14 @@
    :args {:map :any, :key :any, :value :any}
    :return-type :any}
 
+  ;; Same as `:assoc` but the `:value` slot is `:fn`-typed — the bound
+  ;; ref is hof-wrap'd into a callable instead of being executed and
+  ;; merged as a value. Used for routes where the assoc'd value must
+  ;; remain a Ring callable (handler).
+  {:name :assoc-fn
+   :parent :assoc
+   :args {:value {:as :value :type :fn}}}
+
   {:name :dissoc
    :args {:map :jsonb, :key :any}
    :return-type :jsonb}

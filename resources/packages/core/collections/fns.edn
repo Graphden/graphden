@@ -148,16 +148,23 @@
    :args {:m :any, :f :fn}
    :return-type :any}
 
-  ;; Like Clojure's `(update-in m path #(merge defaults %))`. Declared as
-  ;; a base-fn because decomposing it into `assoc-in` + `get-in` + `merge`
-  ;; runs into a primary-vs-env binding-classification issue: `:m` and
-  ;; `:path` at the composing level resolve as primary-bindings of
-  ;; `:assoc-in`, which don't flow through `augment-env` to the inner
-  ;; `:get-in` that needs them as free args. One-line wrapper is the
-  ;; pragmatic path until the compiler's binding classification learns
-  ;; to propagate primaries as free-args where needed.
+  ;; (assoc-in m path (merge defaults (get-in m path))) — pure
+  ;; composition over existing primitives.
   {:name :merge-in
-   :args {:m :jsonb
-          :path :jsonb
-          :defaults :jsonb}
-   :return-type :jsonb}]}
+   :parent :assoc-in
+   :args {:m {:as :m}
+          :path {:as :path}
+          :v :_merge-in-merged}}
+
+  {:name :_merge-in-merged
+   :parent :merge
+   :args {:maps [:_merge-in-defaults :_merge-in-existing]}}
+
+  {:name :_merge-in-defaults
+   :parent :identity
+   :args {:value {:as :defaults}}}
+
+  {:name :_merge-in-existing
+   :parent :get-in
+   :args {:map {:as :m}
+          :path {:as :path}}}]}

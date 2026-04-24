@@ -120,53 +120,66 @@
     :else nil))
 
 
-(defn- build-args-map
-  "Given enriched bindings plus runtime `all-fns` and `free-args`, build
-   the args map passed to the impl (keyed by base-arg-names).
+(defn- build-args-and-aug
+  "Produce `{:args _ :aug _}` from a fn's bindings in one pass.
 
-   Ref bindings become 0-arity thunks that, when invoked, look the ref
-   target up in `all-fns` and run its compiled closure with the same
-   `free-args` (so propagated free values reach the callee). The thunk
-   is wrapped with `rt/thunk` so `rt/resolve-arg` knows to call it.
+   `:args` is keyed by **base-name** — handed to the impl.
+   `:aug` is keyed by **ext-name** — merged into free-args so inner
+   ref-chains that reference a parameter by its external name see
+   the same value the impl sees. This is how we give fn-defs
+   lexical-scope semantics (param is visible both to impl and to
+   anything it composes into).
+
+   `fa-ref` is a volatile holding the final free-args map (base +
+   aug). Ref-thunks and HOF-wrap callables deref it at invoke time
+   so they see every parameter, including ones whose aug entry was
+   created in the same pass.
 
    Call-site rename: when ref R's free-arg ext-names differ from F's
    (e.g. `:path` vs `:item1`), `:ref-renames` translates keys before
    handing `free-args` to R's compiled closure.
 
-   `:fn`-type refs (HOF) bypass the thunk and use `hof-wrap` to produce
-   a single-arg/multi-arg callable for the HOF impl to apply.
+   `:fn`-type refs (HOF) go through `hof-wrap` for HOF-style invoke.
 
    `:seq` bindings (linked-list-encoded sequences) materialise the item
-   chain: each item is either a literal or a ref-call that runs the
-   compiled target. Under a thunk wrapper so impls wanting lazy access
-   (e.g. potentially empty sequence collected on demand) still behave."
-  [bindings all-fns free-args]
+   chain under a thunk wrapper for lazy access."
+  [bindings all-fns fa-ref]
   (reduce
-    (fn [acc {:keys [kind base-name ext-name value ref-id is-fn hof-free-names ref-renames items]}]
+    (fn [{:keys [args aug] :as acc}
+         {:keys [kind base-name ext-name value ref-id is-fn hof-free-names ref-renames items]}]
       (case kind
-        :value (assoc acc base-name value)
+        :value {:args (assoc args base-name value)
+                :aug (assoc aug ext-name value)}
 
-        :free (if (contains? free-args ext-name)
-                (assoc acc base-name (get free-args ext-name))
-                acc)
+        :free (let [fa @fa-ref]
+                (if (contains? fa ext-name)
+                  {:args (assoc args base-name (get fa ext-name))
+                   :aug aug}        ; already in fa under ext-name
+                  acc))
 
-        :ref (let [callee (get all-fns ref-id)]
-               (when-not callee
-                 (throw (ex-info "Ref target not found in all-fns"
-                                 {:type :runtime-error/missing-ref
-                                  :base-name base-name
-                                  :ref-id ref-id})))
-               (if is-fn
-                 (assoc acc base-name (hof-wrap callee hof-free-names all-fns free-args))
-                 (let [r-args (if (seq ref-renames)
-                                (r/apply-renames free-args ref-renames)
-                                free-args)]
-                   (assoc acc base-name
-                          (rt/thunk #(call-with-cache ref-id callee all-fns r-args))))))
+        :ref (let [callee (get all-fns ref-id)
+                   _ (when-not callee
+                       (throw (ex-info "Ref target not found in all-fns"
+                                       {:type :runtime-error/missing-ref
+                                        :base-name base-name
+                                        :ref-id ref-id})))
+                   entry (if is-fn
+                           (hof-wrap callee hof-free-names all-fns @fa-ref)
+                           (rt/thunk
+                             #(let [fa @fa-ref
+                                    r-args (if (seq ref-renames)
+                                             (r/apply-renames fa ref-renames)
+                                             fa)]
+                                (call-with-cache ref-id callee all-fns r-args))))]
+               {:args (assoc args base-name entry)
+                :aug (assoc aug ext-name entry)})
 
-        :seq (assoc acc base-name
-                    (rt/thunk #(mapv (fn [i] (resolve-seq-item i all-fns free-args)) items)))))
-    {}
+        :seq (let [entry (rt/thunk
+                           #(mapv (fn [i] (resolve-seq-item i all-fns @fa-ref))
+                                  items))]
+               {:args (assoc args base-name entry)
+                :aug (assoc aug ext-name entry)})))
+    {:args {} :aug {}}
     bindings))
 
 
@@ -245,15 +258,44 @@
 (defn- build-closure
   "Produce the compiled closure for one fn-id given its precomputed
    bindings and env-bindings. Wraps the call with the shared call-cache
-   entry point."
+   entry point.
+
+   Flow:
+   1. Start with caller's `free-args`, add env-bindings → `fa-base`.
+   2. Point `fa-ref` at `fa-base` so ref-thunks / HOF wraps that
+      reference free-args in the next step can already deref something.
+   3. Build args-map + aug in one pass (`build-args-and-aug`).
+   4. Merge aug into fa-base → the FINAL free-args visible to anything
+      inside this fn's body (both impl, and inner ref-chains that
+      propagate free-arg names outward).
+   5. Reset `fa-ref` to the final map so the thunks / wraps created in
+      step 3 see the complete lexical environment when they fire."
   [impl bindings env-bindings ctx]
   (wrap-top-level
-    (if (seq env-bindings)
-      (fn [all-fns free-args]
-        (let [aug (augment-env env-bindings all-fns free-args)]
-          (impl (build-args-map bindings all-fns aug) ctx)))
-      (fn [all-fns free-args]
-        (impl (build-args-map bindings all-fns free-args) ctx)))))
+    (fn [all-fns free-args]
+      (let [fa-base (if (seq env-bindings)
+                      (augment-env env-bindings all-fns free-args)
+                      free-args)
+            fa-ref (volatile! fa-base)
+            {:keys [args aug]} (build-args-and-aug bindings all-fns fa-ref)
+            ;; Primary bindings go into aug keyed by ext-name so inner
+            ;; refs that reference a parameter by its external name see
+            ;; the value. We merge WITHOUT shadowing entries already in
+            ;; fa-base: a caller-provided free-arg wins over a local
+            ;; primary binding that happens to use the same ext-name.
+            ;; This matters for chains like :_router-compiled binding
+            ;; `:routes :_router-normalized-routes` — the outer
+            ;; :routes (the actual routes list from :_router) must
+            ;; still flow through to the inner filter, otherwise the
+            ;; primary-binding creates a cycle (inner filter sees the
+            ;; thunk that computes `normalized-routes`, which itself
+            ;; needs routes, which resolves back to the same thunk).
+            final-fa (reduce-kv (fn [acc k v]
+                                  (if (contains? acc k) acc (assoc acc k v)))
+                                fa-base
+                                aug)]
+        (vreset! fa-ref final-fa)
+        (impl args ctx)))))
 
 
 (defn compile-fn

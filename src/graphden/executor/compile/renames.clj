@@ -47,13 +47,23 @@
   (let [result (atom [])
         seen (atom #{})]
     (letfn [(walk
-              [fid env-covered]
+              [fid covered]
               (when-not (contains? @seen fid)
                 (swap! seen conj fid)
-                (let [own-env (set (map :env-name
+                (let [bindings (b/collect-bindings fid lookups)
+                      own-env (set (map :env-name
                                         (b/collect-env-bindings fid lookups)))
-                      covered (into env-covered own-env)]
-                  (doseq [bnd (b/collect-bindings fid lookups)]
+                      ;; Primary-level bindings (`:value`, `:ref`, `:seq`)
+                      ;; are satisfied by the outer fn's build-args-and-aug,
+                      ;; same as env-bindings — they're NOT things the HOF
+                      ;; caller must inject. Only genuinely-unbound `:free`
+                      ;; primaries propagate outward.
+                      own-primaries (into #{}
+                                          (comp (remove #(= :free (:kind %)))
+                                                (map :ext-name))
+                                          bindings)
+                      next-covered (into (into covered own-env) own-primaries)]
+                  (doseq [bnd bindings]
                     (case (:kind bnd)
                       :free (let [n (:ext-name bnd)]
                               ;; Optional free args (`:required false` on
@@ -61,15 +71,15 @@
                               ;; don't need to come from the caller — they
                               ;; default to nil if absent. Don't count
                               ;; them toward HOF leftover.
-                              (when-not (or (covered n)
+                              (when-not (or (next-covered n)
                                             (not (:required bnd))
                                             (some #{n} @result))
                                 (swap! result conj n)))
                       :ref (when-not (:is-fn bnd)
-                             (walk (:ref-id bnd) covered))
+                             (walk (:ref-id bnd) next-covered))
                       :seq (doseq [item (:items bnd)
                                    :when (:ref-id item)]
-                             (walk (:ref-id item) covered))
+                             (walk (:ref-id item) next-covered))
                       :value nil)))))]
       (walk fn-id #{}))
     @result))

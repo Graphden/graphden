@@ -101,10 +101,6 @@
   (assoc-in m path v))
 
 
-(defbase merge-in-fn [m path defaults]
-  (update-in m path #(merge defaults %)))
-
-
 (defbase range-fn [start end step]
   (let [max-size sp/*max-range-size*]
     (validate-non-zero! step :step "step cannot be zero (would cause infinite loop)")
@@ -223,7 +219,6 @@
    :merge merge-fn
    :into into-fn
    :assoc-in assoc-in-fn
-   :merge-in merge-in-fn
    :range range-fn
    :repeat repeat-fn
    :take take-fn

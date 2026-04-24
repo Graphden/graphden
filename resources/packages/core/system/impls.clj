@@ -35,15 +35,7 @@
     (fn [_request] r)))
 
 
-;; Ring handler factories. `:fn`-type args arrive as already-wrapped
-;; Ring-handler callables (compile.clj/hof-wrap has a `:request`
-;; special-case that routes the item to the deep `:request` free arg
-;; of the wrapped target). The factory just assembles them.
-
 (defbase make-data-handler [data-fn body-fn status headers]
-  ;; Headers from a JSONB-roundtripped literal map come back keyword-
-  ;; keyed; http-kit needs string keys. Stringify here so every
-  ;; response producer hands downstream code a Ring-shaped response.
   (let [string-headers (stringify-keys headers)]
     (fn [request]
       (let [data (data-fn request)
@@ -144,6 +136,10 @@
   (func arg))
 
 
+(defbase call-fn [func arg]
+  (func arg))
+
+
 (defbase slurp-fn [input]
   (when (instance? java.io.InputStream input)
     (clojure.core/slurp input)))
@@ -168,4 +164,5 @@
    :throw throw-fn
    :read-resource-or-nil read-resource-or-nil
    :invoke invoke-fn
+   :call call-fn
    :slurp slurp-fn})

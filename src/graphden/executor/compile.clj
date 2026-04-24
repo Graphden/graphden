@@ -208,17 +208,21 @@
 
 (defn- augment-env
   "Merge env-bindings into `free-args`. Ref bindings become thunks
-   captured over the OUTER (pre-augmentation) env. is-fn refs pass the
-   compiled callable raw — consumers decide how to invoke it."
+   captured over the OUTER (pre-augmentation) env. `:is-fn` refs are
+   `hof-wrap`'d into callables so deeper consumers that see the
+   binding through their `:fn`-typed primary can invoke it with a
+   single arg (matching what inner `build-args-and-aug` would do for
+   a directly-reached `:is-fn` primary binding)."
   [env-bindings all-fns free-args]
   (reduce
-    (fn [acc {:keys [kind env-name value ref-id is-fn items]}]
+    (fn [acc {:keys [kind env-name value ref-id is-fn hof-free-names items]}]
       (case kind
         :value (assoc acc env-name value)
 
         :ref (let [callee (get all-fns ref-id)]
                (if is-fn
-                 (assoc acc env-name callee)
+                 (assoc acc env-name
+                        (hof-wrap callee hof-free-names all-fns free-args))
                  (assoc acc env-name
                         (rt/thunk #(call-with-cache ref-id callee all-fns free-args)))))
 
@@ -308,7 +312,12 @@
   [fn-id lookups ctx]
   (let [impl (resolve-impl fn-id lookups)
         bindings (enrich-ref-bindings fn-id (b/collect-bindings fn-id lookups) lookups)
-        env-bindings (b/collect-env-bindings fn-id lookups)]
+        env-bindings (mapv (fn [b]
+                             (if (and (= :ref (:kind b)) (:is-fn b))
+                               (assoc b :hof-free-names
+                                      (r/deep-free-ext-names (:ref-id b) lookups))
+                               b))
+                           (b/collect-env-bindings fn-id lookups))]
     (build-closure impl bindings env-bindings ctx)))
 
 

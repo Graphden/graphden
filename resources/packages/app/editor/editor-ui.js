@@ -385,24 +385,34 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
  * This keeps clicks reliable even with hover preview active.
  */
 function applyHoverSpec(nodeId, depth, fnId, allFnsAtDepth) {
-  const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
-  const oldPreview = previewState.get(nodeId);
   if (previewDebounceTimer) {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = null;
   }
-  // Skip if preview unchanged
-  if (oldPreview && newSpec
-      && oldPreview.fullDepth === newSpec.fullDepth
-      && oldPreview.partialFns.size === newSpec.partialFns.size
-      && [...oldPreview.partialFns].every(f => newSpec.partialFns.has(f))) {
-    return;
-  }
+  const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
+  const committed = expansionState.get(nodeId);
+  const oldPreview = previewState.get(nodeId);
+
+  // What the layout actually needs to render under this hover. If hover
+  // reproduces the committed state, no preview is needed — clear it (or
+  // do nothing if there was none). This avoids hammering the backend
+  // with no-op layouts for hovers that wouldn't change anything.
+  const matchesCommitted = specsEqual(committed, newSpec);
+  const effectiveSpec = matchesCommitted
+    ? null
+    : (newSpec || { fullDepth: 0, partialFns: new Set() });
+
+  // Already in the desired preview state? Skip.
+  if (effectiveSpec === null && !previewState.has(nodeId)) return;
+  if (effectiveSpec && oldPreview && specsEqual(oldPreview, effectiveSpec)) return;
+
   previewDebounceTimer = setTimeout(() => {
     anchorNodeId = nodeId;
-    // null spec means "collapse everything" — use {fullDepth:0} so the
-    // preview render shows the collapsed graph (not the committed state).
-    previewState.set(nodeId, newSpec || { fullDepth: 0, partialFns: new Set() });
+    if (effectiveSpec === null) {
+      previewState.delete(nodeId);
+    } else {
+      previewState.set(nodeId, effectiveSpec);
+    }
     renderGraph(false);
     anchorNodeId = null;
   }, PREVIEW_DEBOUNCE_MS);

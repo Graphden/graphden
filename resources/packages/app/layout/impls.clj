@@ -851,7 +851,15 @@
                 sorted-args (sort-by #(get type-order (:type %) 3) deduped-args)
                 ;; Append sequence slot entries (expanded from anchor chains).
                 ;; They come after the scalar args so the scalar order is unchanged.
-                final-args (into sorted-args sequence-slot-entries)]
+                ;; `sort-by` returns a seq, and `(into seq vec)` reverses the
+                ;; appended elements because `conj` on a seq prepends. Coerce
+                ;; the base to a vector so sequence slot entries land in
+                ;; declaration order (matters for layout child placement —
+                ;; children of a sequence-bound parent like merge-in's :maps
+                ;; were rendered in reverse and shifted around as soon as
+                ;; preview spec promoted the path through the expanded code
+                ;; branch).
+                final-args (into (vec sorted-args) sequence-slot-entries)]
             final-args))
 
         ;; Collect args from a set of expand-fns with proper ordering:

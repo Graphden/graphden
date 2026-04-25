@@ -1,6 +1,6 @@
 // Editor State - Global variables, constants, and configuration
 // Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-25 17:27';
+const BUILD_TIMESTAMP = '2026-04-25 17:50';
 console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================

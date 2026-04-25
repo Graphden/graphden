@@ -153,31 +153,44 @@
   "Prepares a fn record for batch upsert.
    Returns {:id :name :parent-ids} or nil if already exists.
 
-   Local fns (names starting with _) are stored with name=nil in DB.
-   They can only be referenced within the same package by their local name."
+   Local fns (names starting with `_`) are stored with name=nil in DB.
+   Their fn-id is derived deterministically from `namespace.local-name`
+   so re-syncs (without DB truncation) reuse the same row instead of
+   accumulating fresh anonymous shadows. Without this, every sync added
+   N new copies of every local; the layout pass then saw, e.g., 16
+   instances of `_text-500-body` after a few rebuilds and rendered each
+   as its own duplicated subtree."
   [fn-name-cache fn-id-cache created-fns fn-def ns-id-map]
   (let [fn-name (:name fn-def)
         fn-name-str (clojure.core/name fn-name)
-        is-local? (parsing/local-fn-name? fn-name)]
-    ;; Local fns are never "existing" - they're always created fresh
-    ;; (since they have name=nil in DB and can't be looked up by name)
-    (if (and (not is-local?)
-             (get fn-name-cache fn-name-str))
-      ;; Already exists (only for non-local fns)
-      {:existing (get fn-name-cache fn-name-str)}
-      ;; Need to create
+        is-local? (parsing/local-fn-name? fn-name)
+        existing-named (when-not is-local?
+                         (get fn-name-cache fn-name-str))]
+    (cond
+      ;; Already in DB with same name (named only).
+      existing-named {:existing existing-named}
+
+      :else
       (let [parent-names (fn-def-parent-names fn-def)
             parent-ids (mapv #(resolve-parent-fn-id-cached
                                 fn-name-cache fn-id-cache created-fns %)
                              parent-names)
-            ;; Local fns get name=nil in DB
             db-name (when-not is-local? fn-name-str)
-            ns-id (when-let [ns-path (:namespace fn-def)]
-                    (get ns-id-map ns-path))]
-        {:new (cond-> {:id (random-uuid)
-                       :name db-name
-                       :parent-ids (when (seq parent-ids) parent-ids)}
-                ns-id (assoc :namespace-id ns-id))}))))
+            ns-path (:namespace fn-def)
+            ns-id (when ns-path (get ns-id-map ns-path))
+            ;; Locals: deterministic UUID by namespace+name so the row
+            ;; survives re-sync. Named: random UUID (matched by name on
+            ;; subsequent syncs, never re-inserted).
+            fn-id (if is-local?
+                    (registry/local-fn-uuid ns-path fn-name-str)
+                    (random-uuid))
+            existing-local (when is-local? (get fn-id-cache fn-id))]
+        (if existing-local
+          {:existing existing-local}
+          {:new (cond-> {:id fn-id
+                         :name db-name
+                         :parent-ids (when (seq parent-ids) parent-ids)}
+                  ns-id (assoc :namespace-id ns-id))})))))
 
 
 (defn prepare-propagated-arg-record

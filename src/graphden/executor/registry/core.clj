@@ -161,6 +161,17 @@
   (memoized-uuid-v5 (str "fn:" (name fn-name))))
 
 
+(defn local-fn-uuid
+  "Generates a deterministic UUID for a local (anonymous-in-DB) fn-def
+   keyed by namespace + local name, so re-syncs without DB truncation
+   reuse the same row instead of dropping a fresh anonymous shadow on
+   every call. Doesn't go through `validate-identifier!` because the
+   composed key (ns + `_`-prefixed name) intentionally violates the
+   single-identifier pattern."
+  [ns-path local-name]
+  (memoized-uuid-v5 (str "local:" (or ns-path "") "/" (name local-name))))
+
+
 (defn arg-uuid
   "Generates deterministic UUID for a base function's arg."
   [fn-name arg-name]

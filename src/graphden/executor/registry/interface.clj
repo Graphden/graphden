@@ -42,6 +42,14 @@
   (core/fn-uuid fn-name))
 
 
+(defn local-fn-uuid
+  "Generates a deterministic UUID for a local fn-def (the kind whose
+   `:name` starts with `_` and is stored as nil in DB). Keyed by
+   namespace + local name so re-syncs reuse the same row."
+  [ns-path local-name]
+  (core/local-fn-uuid ns-path local-name))
+
+
 (defn arg-uuid
   "Generates deterministic UUID for a base function's arg.
    Uses UUID v5 (name-based) for reproducible IDs."

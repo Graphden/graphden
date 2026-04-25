@@ -253,7 +253,13 @@ function getSpec(nodeId) {
  * Apply a click/hover on an ancestor row.
  *
  * SINGLE-FN at depth L → spec = {fullDepth: L, partial: empty}
- *   "expand exactly to L" (always set, no toggle)
+ *   "expand exactly to L" — pure SET, no toggle. Clicking a row already
+ *   inside the expansion is a no-op; to collapse a level the user clicks
+ *   a SHALLOWER row (which sets fullDepth to that shallower level, hiding
+ *   anything deeper). The visual model treats a grouped block (e.g.
+ *   merge-in + assoc-in joined into one cell) as a single unit — hovering
+ *   inside an already-expanded block must NOT preview an asymmetric
+ *   half-collapse like "merge-in stays, assoc-in disappears".
  *
  * MULTI-FN parent (MI) → toggle membership in partial:
  *   - Currently NOT in expansion: ADD this fn (cascade through shallower
@@ -275,13 +281,9 @@ function computeSpecAfterClick(currentSpec, depth, fnId, allFnsAtDepth) {
   const fullDepth = currentSpec.fullDepth || 0;
 
   if (!isMI) {
-    // Toggle: if already expanded to this depth or deeper → collapse.
-    // Otherwise → expand to this depth.
-    if (depth <= fullDepth) {
-      const newFull = depth - 1;
-      if (newFull <= 0) return null;
-      return { fullDepth: newFull, partialFns: new Set() };
-    }
+    // Pure SET: expand to exactly this depth. If already there or deeper,
+    // the spec is unchanged (no asymmetric collapse). To shrink, the user
+    // clicks a shallower row.
     return { fullDepth: depth, partialFns: new Set() };
   }
 
@@ -323,6 +325,22 @@ function computeSpecAfterClick(currentSpec, depth, fnId, allFnsAtDepth) {
 }
 
 /**
+ * True when two specs (or absence-of-spec) describe the same expansion.
+ * `null` and a missing entry both behave like {fullDepth: 0, partialFns: ∅}.
+ */
+function specsEqual(a, b) {
+  const aFull = a ? a.fullDepth : 0;
+  const bFull = b ? b.fullDepth : 0;
+  if (aFull !== bFull) return false;
+  const aPartial = (a && a.partialFns) || new Set();
+  const bPartial = (b && b.partialFns) || new Set();
+  if (aPartial.size !== bPartial.size) return false;
+  for (const f of aPartial) if (!bPartial.has(f)) return false;
+  return true;
+}
+
+
+/**
  * Apply spec change for click on a fn at a depth.
  */
 function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
@@ -332,7 +350,17 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
   }
   anchorNodeId = nodeId;
 
+  const currentSpec = expansionState.get(nodeId);
   const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
+  // No-op if the click would leave the expansion unchanged. Important now
+  // that non-MI clicks are pure SET — re-clicking an already-expanded row
+  // would otherwise clear savedUserPositions and trigger a needless re-render.
+  if (specsEqual(currentSpec, newSpec)) {
+    suppressPreviewOnClick();
+    previewState.delete(nodeId);
+    anchorNodeId = null;
+    return;
+  }
   if (newSpec === null) {
     expansionState.delete(nodeId);
   } else {

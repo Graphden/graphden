@@ -82,16 +82,11 @@ function createOverlay(nodeId, options = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'node-overlay';
   overlay.dataset.nodeId = nodeId;
-  // Container bg is BLACK, not white. Black rows tile perfectly against
-  // each other at sub-pixel boundaries because the container shows the
-  // same colour through any rounding gap. Non-black rows must set their
-  // own bg explicitly (we do — see paintWithSpec / row creation paths)
-  // so they don't end up showing the black through.
   Object.assign(overlay.style, {
     position: 'absolute',
     pointerEvents: 'auto',
     zIndex: '10',
-    background: options.background || '#000',
+    background: options.background || 'white',
     border: options.border || '2px solid black',
     borderRadius: options.borderRadius || '8px',
     overflow: 'hidden',
@@ -154,7 +149,11 @@ function createFnOverlay(node, container) {
   const partialFns = spec.partialFns;
   const visibleLevels = ancestorLevels.slice(0, MAX_VISIBLE_ANCESTORS + 1);
 
-  const overlay = createOverlay(nodeId);
+  // Black container bg so adjacent black rows tile perfectly at sub-pixel
+  // boundaries — any rounding slack shows the same colour, no white seam.
+  // Non-black rows set their own bg explicitly (paintWithSpec / row
+  // creation paths) so they don't bleed black through.
+  const overlay = createOverlay(nodeId, { background: '#000' });
   overlay.dataset.originalFnId = originalFnId;
   overlay.dataset.nodeId = nodeId;
   overlay.style.cursor = 'default';
@@ -179,6 +178,16 @@ function createFnOverlay(node, container) {
   // Default non-root row bg — explicit white so the black overlay container
   // can't bleed through sub-pixel gaps between adjacent rows.
   const DEFAULT_BG = '#fff';
+
+  // Sub-pixel-gap mitigation: a 1px box-shadow with the row's own colour
+  // fills any rounding slack between this row and the next. When two
+  // adjacent rows share the same colour the gap reads as that colour
+  // (i.e. invisible). Without this, the black overlay container shows
+  // through the gap between two white rows (and vice-versa).
+  const setRowBg = (el, bg) => {
+    el.style.background = bg;
+    el.style.boxShadow = bg ? `0 1px 0 0 ${bg}` : '';
+  };
   const linesByDepth = new Map();   // depth -> { line, spansByFnId, levelInfo }
 
   // Returns true if a particular fn at a given depth would be highlighted
@@ -215,8 +224,8 @@ function createFnOverlay(node, container) {
         const miLevel = visibleLevels[levelInfo.followsMI];
         const miIsRoot = miLevel ? miLevel.blockIsRoot : false;
         colDivs.forEach(({ col, miFn }) => {
-          const { bg, fg } = miFnBg(miFn, miLevel.depth, miIsRoot, sFull, sPartial);
-          col.style.background = bg;
+          const { bg } = miFnBg(miFn, miLevel.depth, miIsRoot, sFull, sPartial);
+          setRowBg(col, bg);
         });
         // Text overlay: use the color from the first column (or black if mixed)
         const firstBg = miFnBg(colDivs[0].miFn, miLevel.depth, miIsRoot, sFull, sPartial);
@@ -226,11 +235,11 @@ function createFnOverlay(node, container) {
         // MI line: per-fn styling. Line itself stays the DEFAULT bg so any
         // sub-pixel slack between line and overlay container shows white.
         line.style.fontWeight = 'normal';
-        line.style.background = DEFAULT_BG;
+        setRowBg(line, DEFAULT_BG);
         line.style.color = '';
         spansByFnId.forEach(({ span, fn }, fnId) => {
           const { bg, fg } = miFnBg(fn, depth, isRoot, sFull, sPartial);
-          span.style.background = bg;
+          setRowBg(span, bg);
           span.style.color = fg;
           span.style.fontWeight = (bg === ROOT_BG || fnIsHighlighted(depth, fnId, sFull, sPartial))
             ? 'bold' : 'normal';
@@ -240,15 +249,15 @@ function createFnOverlay(node, container) {
         const fn = levelInfo.fns[0];
         const highlighted = fn && fnIsHighlighted(depth, fn.fnId, sFull, sPartial);
         if (isRoot) {
-          line.style.background = ROOT_BG;
+          setRowBg(line, ROOT_BG);
           line.style.color = ROOT_FG;
           line.style.fontWeight = 'bold';
         } else if (highlighted) {
-          line.style.background = HIGHLIGHT_BG;
+          setRowBg(line, HIGHLIGHT_BG);
           line.style.color = '';
           line.style.fontWeight = 'bold';
         } else {
-          line.style.background = DEFAULT_BG;
+          setRowBg(line, DEFAULT_BG);
           line.style.color = '';
           line.style.fontWeight = 'normal';
         }
@@ -274,7 +283,6 @@ function createFnOverlay(node, container) {
     useSite.dataset.useSite = 'true';
     const hasExpansion = expansionState.has(nodeId);
     Object.assign(useSite.style, {
-      background: ROOT_BG,
       color: ROOT_FG,
       borderBottom: 'none',
       cursor: hasExpansion ? 'pointer' : 'default',
@@ -282,6 +290,7 @@ function createFnOverlay(node, container) {
       userSelect: 'none',
       WebkitUserSelect: 'none'
     });
+    setRowBg(useSite, ROOT_BG);
     const onUseSiteMouseDown = (e) => {
       e.stopPropagation();
       e.preventDefault();
@@ -440,14 +449,14 @@ function createFnOverlay(node, container) {
         // Initial styling: root-block or highlighted
         const fnInRootBlock = levelInfo.blockIsRoot && !f.isClickable;
         if (fnInRootBlock) {
-          span.style.background = ROOT_BG;
+          setRowBg(span, ROOT_BG);
           span.style.color = ROOT_FG;
           span.style.fontWeight = 'bold';
         } else if (fnIsHighlighted(levelInfo.depth, f.fnId, fullDepth, partialFns)) {
           span.style.fontWeight = 'bold';
-          span.style.background = HIGHLIGHT_BG;
+          setRowBg(span, HIGHLIGHT_BG);
         } else {
-          span.style.background = DEFAULT_BG;
+          setRowBg(span, DEFAULT_BG);
         }
         spansByFnId.set(f.fnId, { span, fn: f });
 
@@ -507,14 +516,14 @@ function createFnOverlay(node, container) {
       const targetDepth = levelInfo.groupMaxDepth;
       // Initial styling: root-block or highlighted
       if (levelInfo.blockIsRoot) {
-        line.style.background = ROOT_BG;
+        setRowBg(line, ROOT_BG);
         line.style.color = ROOT_FG;
         line.style.fontWeight = 'bold';
       } else if (fnIsHighlighted(levelInfo.depth, fnIdForLine, fullDepth, partialFns)) {
         line.style.fontWeight = 'bold';
-        line.style.background = HIGHLIGHT_BG;
+        setRowBg(line, HIGHLIGHT_BG);
       } else {
-        line.style.background = DEFAULT_BG;
+        setRowBg(line, DEFAULT_BG);
       }
       const onMouseDown = (e) => {
         e.stopPropagation();

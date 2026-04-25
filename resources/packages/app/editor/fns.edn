@@ -106,12 +106,17 @@
           :body :editor-body
           :scripts :_editor-scripts}}
 
-  ;; Handler — html-response builds the Ring map (status 200, html
-  ;; content-type, hiccup-rendered body). With :assoc-fn at the route
-  ;; binding, this fn-graph is hof-wrap'd into a constant Ring callable.
+  ;; Handler — :html-ok-response sets status 200 + html content-type;
+  ;; :render-hiccup converts the hiccup page to an HTML string. With
+  ;; :assoc-fn at the route binding the whole graph is hof-wrap'd into
+  ;; a constant Ring callable.
+  {:name :_editor-rendered-page
+   :parent :render-hiccup
+   :args {:hiccup :editor-page}}
+
   {:name :_editor-handler
-   :parent :html-response
-   :args {:body :editor-page}}
+   :parent :html-ok-response
+   :args {:body :_editor-rendered-page}}
 
   ;; =============================================================================
   ;; FAVICON (SVG icon with caching)

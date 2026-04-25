@@ -9,11 +9,6 @@
    :args {:hiccup :jsonb}
    :return-type :text}
 
-  {:name :html-response
-   :args {:body :any
-          :status {:type :int :required false}}
-   :return-type :jsonb}
-
   {:name :html-page
    :args {:title :text
           :head {:type :jsonb :required false}
@@ -48,22 +43,108 @@
           :extra-attrs {:type :jsonb :required false}}
    :return-type :jsonb}
 
+  ;; <button type="..." ...extra-attrs>btn-text</button>
+  ;; pure :hiccup composition with :coalesce default for btn-type
   {:name :button
-   :args {:btn-text :text
-          :btn-type {:type :text :required false}
-          :extra-attrs {:type :jsonb :required false}}
-   :return-type :jsonb}
+   :parent :hiccup
+   :args {:tag "button"
+          :attrs :_button-attrs
+          :children :_button-children}}
 
-  ;; Field display helpers
+  {:name :_button-type
+   :parent :coalesce
+   :args {:value {:as :btn-type} :default "button"}}
+
+  {:name :_button-base-attrs
+   :parent :assoc-empty
+   :args {:key "type" :value :_button-type}}
+
+  {:name :_button-attrs
+   :parent :merge
+   :args {:maps [:_button-base-attrs :_button-extra-attrs-echo]}}
+
+  {:name :_button-extra-attrs-echo
+   :parent :identity
+   :args {:value {:as :extra-attrs}}}
+
+  {:name :_button-children
+   :parent :conj
+   :args {:coll [] :item {:as :btn-text}}}
+
+  ;; <div class="field-row"><span class="field-label">label</span>
+  ;;                        <span class="field-value">value-or-dash</span></div>
   {:name :field-row
-   :args {:label :text
-          :value :any}
-   :return-type :jsonb}
+   :parent :hiccup
+   :args {:tag "div"
+          :attrs {:class "field-row"}
+          :children :_field-row-children}}
 
+  {:name :_field-row-label-span
+   :parent :hiccup
+   :args {:tag "span"
+          :attrs {:class "field-label"}
+          :children :_field-row-label-children}}
+
+  {:name :_field-row-label-children
+   :parent :conj
+   :args {:coll [] :item {:as :label}}}
+
+  {:name :_field-row-value-span
+   :parent :hiccup
+   :args {:tag "span"
+          :attrs {:class "field-value"}
+          :children :_field-row-value-children}}
+
+  {:name :_field-row-value-children
+   :parent :conj
+   :args {:coll [] :item :_field-row-display-value}}
+
+  {:name :_field-row-display-value
+   :parent :if
+   :args {:test :_field-row-value-nil?
+          :then "-"
+          :else :_field-row-value-str}}
+
+  {:name :_field-row-value-nil?
+   :parent :nil?
+   :args {:value {:as :value}}}
+
+  {:name :_field-row-value-str
+   :parent :to-str
+   :args {:value {:as :value}}}
+
+  {:name :_field-row-children
+   :parent :list
+   :args {:items [:_field-row-label-span :_field-row-value-span]}}
+
+  ;; <span class="badge[ badge-<type>]">badge-text</span>
   {:name :badge
-   :args {:badge-text :text
-          :badge-type {:type :text :required false}}
-   :return-type :jsonb}
+   :parent :hiccup
+   :args {:tag "span"
+          :attrs :_badge-attrs
+          :children :_badge-children}}
+
+  {:name :_badge-attrs
+   :parent :assoc-empty
+   :args {:key "class" :value :_badge-class}}
+
+  {:name :_badge-class
+   :parent :if
+   :args {:test {:as :badge-type}
+          :then :_badge-class-typed
+          :else "badge"}}
+
+  {:name :_badge-class-typed
+   :parent :str
+   :args {:parts [{:value "badge badge-"} :_badge-type-echo]}}
+
+  {:name :_badge-type-echo
+   :parent :identity
+   :args {:value {:as :badge-type}}}
+
+  {:name :_badge-children
+   :parent :conj
+   :args {:coll [] :item {:as :badge-text}}}
 
   ;; Entity field rows - renders multiple field-rows from entity using field-specs
   ;; field-specs: [[label key] ...] or [[label key transform-fn] ...]
@@ -72,11 +153,15 @@
           :field-specs :jsonb}
    :return-type :jsonb}
 
-  ;; Wrap text content in an HTML element
+  ;; Wrap text content in an HTML element. fn-def composition over
+  ;; :hiccup (tag + nil attrs + single-element children list).
+  {:name :_wrap-element-children
+   :parent :conj
+   :args {:coll [] :item {:as :content}}}
+
   {:name :wrap-element
-   :args {:tag :text
-          :content :text}
-   :return-type :jsonb}
+   :parent :hiccup
+   :args {:children :_wrap-element-children}}
 
   {:name :wrap-style
    :parent :wrap-element
@@ -93,11 +178,16 @@
           :children {:type :jsonb :required false}}
    :return-type :jsonb}
 
-  ;; Horizontal flex container for buttons
+  ;; <div style="...">button1 button2 ...</div>  -- horizontal flex container.
   {:name :button-row
-   :args {:buttons :jsonb
-          :style :jsonb}
-   :return-type :jsonb}
+   :parent :hiccup
+   :args {:tag "div"
+          :attrs :_button-row-attrs
+          :children {:as :buttons}}}
+
+  {:name :_button-row-attrs
+   :parent :assoc-empty
+   :args {:key "style" :value {:as :style}}}
 
   ;; Transform a value for display: :keyword-to-str, :pr-str, :bool-to-yesno
   {:name :apply-transform

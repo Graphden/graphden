@@ -162,12 +162,6 @@
             [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
 
 
-(defbase truncate-fn [string max-length]
-  (if (> (count string) max-length)
-    (str (subs string 0 max-length) "...")
-    string))
-
-
 (defbase blank?-fn [string]
   (str/blank? string))
 
@@ -200,7 +194,6 @@
    :pr-str pr-str-fn
    :to-str to-str-fn
    :parse-query-string parse-query-string-fn
-   :truncate truncate-fn
    :blank? blank?-fn
    :url-decode url-decode-fn
    :str-contains? str-contains?-fn

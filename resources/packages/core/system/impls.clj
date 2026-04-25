@@ -109,11 +109,11 @@
     (clojure.core/slurp r)))
 
 
-(defbase invoke-fn [func arg]
-  (func arg))
-
-
-(defbase call-fn [func arg]
+(defbase invoke-fn
+  "Invoke a one-arg callable with `arg`. Shared body between :invoke
+   and :call — they differ only in arg-type schema (`:any` vs `:fn`,
+   which controls hof-wrapping at the binding site, not the impl)."
+  [func arg]
   (func arg))
 
 
@@ -139,5 +139,5 @@
    :throw throw-fn
    :read-resource-or-nil read-resource-or-nil
    :invoke invoke-fn
-   :call call-fn
+   :call invoke-fn
    :slurp slurp-fn})

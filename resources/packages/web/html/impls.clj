@@ -106,13 +106,6 @@
   (str (h/html hiccup)))
 
 
-(defbase html-response
-  [body status]
-  {:status (or status 200)
-   :headers {"Content-Type" "text/html; charset=utf-8"}
-   :body (if (string? body) body (str (h/html body)))})
-
-
 (defbase html-page
   [title head body scripts]
   (let [head-elements (flatten-head head)
@@ -158,21 +151,23 @@
            [:option (cond-> {:value v} (= v selected-value) (assoc :selected true)) l]))])
 
 
-(defbase button
-  [btn-text btn-type extra-attrs]
+;; Plain Clojure helpers — used by crud's render code. No longer base-fns
+;; (see web/html/fns.edn for the graph-level fn-def equivalents). Single
+;; map-arg signature so callers like `(html/button {:btn-text "..."})` work.
+(defn button
+  [{:keys [btn-text btn-type extra-attrs]}]
   [:button (merge {:type (or btn-type "button")} extra-attrs) btn-text])
 
 
-(defbase field-row
-  "Renders a label-value field row."
-  [label value]
+(defn field-row
+  [{:keys [label value]}]
   [:div {:class "field-row"}
    [:span {:class "field-label"} label]
    [:span {:class "field-value"} (if (nil? value) "-" (str value))]])
 
 
-(defbase badge
-  [badge-text badge-type]
+(defn badge
+  [{:keys [badge-text badge-type]}]
   [:span {:class (if badge-type (str "badge badge-" badge-type) "badge")} badge-text])
 
 
@@ -194,21 +189,14 @@
              [:span {:class "field-value"} (if (nil? value) "-" (str value))]]))))
 
 
-(defbase wrap-element
-  "Wraps text content in an HTML element."
-  [tag content]
-  [(keyword tag) content])
-
-
 (defbase hiccup-element
   [tag attrs children]
   (let [tag-kw (if (keyword? tag) tag (keyword tag))]
     (into (if attrs [tag-kw attrs] [tag-kw]) children)))
 
 
-(defbase button-row
-  "Creates a horizontal flex container for buttons."
-  [buttons style]
+(defn button-row
+  [{:keys [buttons style]}]
   (into [:div {:style style}] buttons))
 
 
@@ -221,17 +209,11 @@
 
 (def impls
   {:render-hiccup render-hiccup
-   :html-response html-response
    :html-page html-page
    :with-cdn-script with-cdn-script
    :cytoscape-container cytoscape-container
    :form-input form-input
    :form-select form-select
-   :button button
-   :field-row field-row
-   :badge badge
    :entity-field-rows entity-field-rows
-   :wrap-element wrap-element
    :hiccup hiccup-element
-   :button-row button-row
    :apply-transform apply-transform-fn})

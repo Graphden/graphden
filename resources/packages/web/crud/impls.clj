@@ -395,17 +395,6 @@
 
 ;; === Pure Functions ===
 
-(defbase get-path-param
-  [request param-name]
-  (get-in request [:path-params (keyword param-name)]))
-
-
-(defbase get-query-param
-  [request param-name default]
-  (let [params (parse-query-string (:query-string request))]
-    (get params param-name default)))
-
-
 (defbase parse-form-body
   [request]
   (let [body (:body request)
@@ -448,8 +437,6 @@
    :render-entity-actions render-entity-actions
    :parse-fn-from-form parse-fn-from-form
    :parse-arg-from-form parse-arg-from-form
-   :get-path-param get-path-param
-   :get-query-param get-query-param
    :parse-form-body parse-form-body
    :parse-json-body parse-json-body
    :str-to-uuid str-to-uuid})

@@ -60,10 +60,34 @@
    :args {:string :text}
    :return-type :jsonb}
 
+  ;; (if (> (count s) n) (str (subs s 0 n) "...") s) — pure composition.
   {:name :truncate
-   :args {:string :text
-          :max-length :int}
-   :return-type :text}
+   :parent :if
+   :args {:test :_truncate-too-long?
+          :then :_truncate-suffixed
+          :else {:as :string}}}
+
+  {:name :_truncate-len
+   :parent :str-len
+   :args {:string {:as :string}}}
+
+  {:name :_truncate-max-length-echo
+   :parent :identity
+   :args {:value {:as :max-length}}}
+
+  {:name :_truncate-too-long?
+   :parent :gt
+   :args {:nums [:_truncate-len :_truncate-max-length-echo]}}
+
+  {:name :_truncate-prefix
+   :parent :subs
+   :args {:string {:as :string}
+          :start 0
+          :end {:as :max-length}}}
+
+  {:name :_truncate-suffixed
+   :parent :str
+   :args {:parts [:_truncate-prefix {:value "..."}]}}
 
   {:name :blank?
    :args {:string {:type :text :required false}}

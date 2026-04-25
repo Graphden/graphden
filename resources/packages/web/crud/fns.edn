@@ -55,18 +55,6 @@
    :args {:request :jsonb}
    :return-type :jsonb}
 
-  ;; Request parameter helpers (pure functions)
-  {:name :get-path-param
-   :args {:request :jsonb
-          :param-name :text}
-   :return-type :any}
-
-  {:name :get-query-param
-   :args {:request :jsonb
-          :param-name :text
-          :default {:type :any :required false}}
-   :return-type :any}
-
   {:name :parse-form-body
    :args {:request :jsonb}
    :return-type :jsonb}

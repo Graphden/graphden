@@ -194,12 +194,24 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   //     whole outgoing bundle, same as hovering the fn itself. The circle
   //     visually represents the "pin on the fn" so hovering it should act
   //     at the fn level.
-  //   - Anywhere else along the edge → light up ONLY this edge, so you can
-  //     follow one specific connection through a busy area.
+  //   - Anywhere else along the edge → light up every sibling edge whose
+  //     taxi path actually passes under the cursor. Sibling verticals
+  //     overlap when several children stack on the same side of the source;
+  //     Cytoscape's hit-test only picks one of them, so without this we'd
+  //     light up just one of the two-or-more lines drawn at that pixel —
+  //     looking random to the user. Edges whose vertical run lies on the
+  //     opposite side of the cursor (i.e. children above when cursor is
+  //     below source) are correctly excluded by the segment-containment
+  //     check.
   // SOURCE_CIRCLE_RADIUS is in graph units (matches arrow-scale 0.9 × default
   // triangle half-length plus a small slack) so the hit-zone feels consistent
   // across zoom levels — Cytoscape reports `evt.position` in graph coords.
   const SOURCE_CIRCLE_RADIUS = 14;
+  // Cursor-to-segment tolerance (graph units). Generous enough that the
+  // user doesn't have to be pixel-perfect on the line; small enough that
+  // we don't catch edges in adjacent rows.
+  const SEGMENT_TOL = 4;
+
   function edgeSourceHit(evt) {
     const p = evt.position;
     const src = evt.target.sourceEndpoint();
@@ -208,35 +220,71 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     const dy = p.y - src.y;
     return (dx * dx + dy * dy) <= SOURCE_CIRCLE_RADIUS * SOURCE_CIRCLE_RADIUS;
   }
-  function applyHover(edge, bundle) {
-    if (bundle) {
-      const sourceNode = edge.source();
-      sourceNode.outgoers('edge').addClass('edge-hovered');
-    } else {
-      edge.addClass('edge-hovered');
-    }
+
+  // The taxi-turn formula here mirrors the stylesheet's. Same source = same
+  // bend X, so we can compute it once per source-node.
+  function bendXFor(sourceNode) {
+    const srcRight = sourceNode.position().x + sourceNode.width() / 2;
+    const colRight = sourceNode.data('colRightX');
+    const turn = colRight === undefined ? 40 : Math.max(20, colRight - srcRight + 20);
+    return srcRight + turn;
   }
+
+  // Returns the collection of sibling edges whose taxi path (any of the three
+  // segments) passes within SEGMENT_TOL of the cursor.
+  function siblingEdgesUnderCursor(sourceNode, cursor) {
+    const srcRight = sourceNode.position().x + sourceNode.width() / 2;
+    const srcY = sourceNode.position().y;
+    const bendX = bendXFor(sourceNode);
+    return sourceNode.outgoers('edge').filter(e => {
+      const tgt = e.target();
+      const tgtLeft = tgt.position().x - tgt.width() / 2;
+      const tgtY = tgt.position().y;
+      const yLo = Math.min(srcY, tgtY);
+      const yHi = Math.max(srcY, tgtY);
+      // Segment 1: first horizontal (src.right → bendX) — shared by all
+      // sibling edges from this source, so any hit here lights the bundle.
+      if (cursor.x >= srcRight - SEGMENT_TOL && cursor.x <= bendX + SEGMENT_TOL
+          && Math.abs(cursor.y - srcY) <= SEGMENT_TOL) return true;
+      // Segment 2: vertical at bendX from src.y to tgt.y — overlaps with
+      // siblings on the same side of source.y. The bounds-check naturally
+      // excludes edges that turn the OTHER way before reaching cursor.y.
+      if (Math.abs(cursor.x - bendX) <= SEGMENT_TOL
+          && cursor.y >= yLo - SEGMENT_TOL && cursor.y <= yHi + SEGMENT_TOL) return true;
+      // Segment 3: second horizontal (bendX → tgt.left) — unique per edge.
+      if (cursor.x >= bendX - SEGMENT_TOL && cursor.x <= tgtLeft + SEGMENT_TOL
+          && Math.abs(cursor.y - tgtY) <= SEGMENT_TOL) return true;
+      return false;
+    });
+  }
+
+  function setHovered(desired) {
+    const desiredIds = new Set(desired.map(e => e.id()));
+    cy.edges('.edge-hovered').forEach(e => {
+      if (!desiredIds.has(e.id())) e.removeClass('edge-hovered');
+    });
+    desired.forEach(e => {
+      if (!e.hasClass('edge-hovered')) e.addClass('edge-hovered');
+    });
+  }
+
   function clearHover() {
     cy.edges('.edge-hovered').removeClass('edge-hovered');
   }
+
+  function hoveredFor(edge, evt) {
+    if (edgeSourceHit(evt)) return edge.source().outgoers('edge');
+    const matched = siblingEdgesUnderCursor(edge.source(), evt.position);
+    // Fallback to just the hovered edge if our segment model doesn't catch it
+    // (shouldn't happen for taxi edges but defensive).
+    return matched.length > 0 ? matched : edge;
+  }
+
   cy.on('mouseover', 'edge', function (evt) {
-    applyHover(evt.target, edgeSourceHit(evt));
+    setHovered(hoveredFor(evt.target, evt));
   });
   cy.on('mousemove', 'edge', function (evt) {
-    const wantBundle = edgeSourceHit(evt);
-    const edge = evt.target;
-    const sourceNode = edge.source();
-    const bundleAlready = sourceNode.outgoers('edge').hasClass('edge-hovered');
-    const singleAlready = edge.hasClass('edge-hovered') && !bundleAlready;
-    if (wantBundle && !bundleAlready) {
-      clearHover();
-      applyHover(edge, true);
-    } else if (!wantBundle && bundleAlready) {
-      clearHover();
-      applyHover(edge, false);
-    } else if (!wantBundle && !singleAlready && !bundleAlready) {
-      applyHover(edge, false);
-    }
+    setHovered(hoveredFor(evt.target, evt));
   });
   cy.on('mouseout', 'edge', function () {
     clearHover();

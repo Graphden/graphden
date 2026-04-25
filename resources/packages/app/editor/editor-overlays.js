@@ -82,11 +82,16 @@ function createOverlay(nodeId, options = {}) {
   const overlay = document.createElement('div');
   overlay.className = 'node-overlay';
   overlay.dataset.nodeId = nodeId;
+  // Container bg is BLACK, not white. Black rows tile perfectly against
+  // each other at sub-pixel boundaries because the container shows the
+  // same colour through any rounding gap. Non-black rows must set their
+  // own bg explicitly (we do — see paintWithSpec / row creation paths)
+  // so they don't end up showing the black through.
   Object.assign(overlay.style, {
     position: 'absolute',
     pointerEvents: 'auto',
     zIndex: '10',
-    background: 'white',
+    background: options.background || '#000',
     border: options.border || '2px solid black',
     borderRadius: options.borderRadius || '8px',
     overflow: 'hidden',
@@ -120,8 +125,30 @@ function createFnOverlay(node, container) {
   if (!originalFnId) return;
 
   const nodeId = node.id();  // Full node ID including expansion context
+  // Navigation root vs expanded child: the root's nodeId is just `fn-{uuid}`
+  // (single fn-id segment); expanded children carry the full ancestry path
+  // (`fn-{root}-{intermediate}…-{leaf}`). Used below to decide whether to
+  // prepend the "use-site" header row.
+  const isNavRoot = nodeId === 'fn-' + originalFnId;
+  const ownFn = lookups.fnMap.get(originalFnId);
+  const isLocalFn = !(ownFn && ownFn.name);
+
   const levels = getInheritanceLevels(originalFnId);
   const ancestorLevels = buildAncestorLevels(levels);
+  // When a use-site row will be prepended (named non-root), it takes over
+  // the role of "root header". The ancestor levels then start outside the
+  // root-block — a clickable depth-0 like `all-routes` reads as a normal
+  // expandable row (white) rather than a passive black header. Non-clickable
+  // depths still propagate the root-block treatment (so `list` below
+  // `all-routes` stays black until a clickable level breaks the chain).
+  const willPrependUseSite = !isNavRoot && !isLocalFn;
+  if (willPrependUseSite) {
+    let currentBlockIsRoot = true;
+    ancestorLevels.forEach((lv) => {
+      if (lv.anyClickable) currentBlockIsRoot = false;
+      lv.blockIsRoot = currentBlockIsRoot;
+    });
+  }
   const spec = expansionState.get(nodeId) || { fullDepth: 0, partialFns: new Set() };
   const fullDepth = spec.fullDepth;
   const partialFns = spec.partialFns;
@@ -137,19 +164,31 @@ function createFnOverlay(node, container) {
   // the visual stays the same; only when the user leaves and re-enters
   // does the new state become visible.
   // Visual model:
-  //   Depth 0 (root name): black bg, white text — ALWAYS.
-  //   Non-clickable levels merge with the level above: same bg, no separator.
-  //   If the non-clickable chain reaches depth 0, the level is ALSO black bg.
-  //   Clickable levels: white bg normally, #f0f0f0 when expanded/previewed.
+  //   Nav-root / local-non-root: depth 0 is the "root header" (black bg,
+  //     white text). Non-clickable levels below it inherit that black-block
+  //     treatment until a clickable level breaks the chain.
+  //   Named-non-root: a separate empty "use-site" row IS the root header.
+  //     Ancestor levels start outside the root-block — depth 0 (the fn name)
+  //     reads as a regular content row, white by default, #f0f0f0 only when
+  //     it's actually inside the currently-applied expansion.
+  //   Within a group: same bg, no horizontal separator.
   //   MI: each parent's cell is independently styled.
   const ROOT_BG = '#000';
   const ROOT_FG = '#fff';
   const HIGHLIGHT_BG = '#f0f0f0';
+  // Default non-root row bg — explicit white so the black overlay container
+  // can't bleed through sub-pixel gaps between adjacent rows.
+  const DEFAULT_BG = '#fff';
   const linesByDepth = new Map();   // depth -> { line, spansByFnId, levelInfo }
 
   // Returns true if a particular fn at a given depth would be highlighted
-  // under the given preview/committed spec.
+  // under the given preview/committed spec. With NO expansion at all
+  // (sFull=0 and partial empty) NOTHING is highlighted — including depth 0.
+  // Otherwise depth 0 would always read as gray "expanded", confusing the
+  // signal that highlighting is meant to carry: "this level is part of
+  // the currently-displayed expansion".
   const fnIsHighlighted = (depth, fnId, sFull, sPartial) => {
+    if (sFull <= 0 && (!sPartial || sPartial.size === 0)) return false;
     if (depth <= sFull) return true;
     if (depth === sFull + 1 && sPartial.has(fnId)) return true;
     return false;
@@ -163,7 +202,7 @@ function createFnOverlay(node, container) {
     const highlighted = fnIsHighlighted(miDepth, miFn.fnId, sFull, sPartial);
     if (fnInRootBlock) return { bg: ROOT_BG, fg: ROOT_FG };
     if (highlighted)   return { bg: HIGHLIGHT_BG, fg: '' };
-    return { bg: '', fg: '' };
+    return { bg: DEFAULT_BG, fg: '' };
   };
 
   const paintWithSpec = (sFull, sPartial) => {
@@ -184,9 +223,10 @@ function createFnOverlay(node, container) {
         textOverlay.style.color = firstBg.bg === ROOT_BG ? ROOT_FG : '';
         textOverlay.style.fontWeight = isRoot ? 'bold' : 'normal';
       } else if (spansByFnId) {
-        // MI line: per-fn styling
+        // MI line: per-fn styling. Line itself stays the DEFAULT bg so any
+        // sub-pixel slack between line and overlay container shows white.
         line.style.fontWeight = 'normal';
-        line.style.background = '';
+        line.style.background = DEFAULT_BG;
         line.style.color = '';
         spansByFnId.forEach(({ span, fn }, fnId) => {
           const { bg, fg } = miFnBg(fn, depth, isRoot, sFull, sPartial);
@@ -208,7 +248,7 @@ function createFnOverlay(node, container) {
           line.style.color = '';
           line.style.fontWeight = 'bold';
         } else {
-          line.style.background = '';
+          line.style.background = DEFAULT_BG;
           line.style.color = '';
           line.style.fontWeight = 'normal';
         }
@@ -221,6 +261,59 @@ function createFnOverlay(node, container) {
     paintWithSpec(sFull, sPartial);
   };
   const restoreStyles = () => paintWithSpec(fullDepth, partialFns);
+
+  // Use-site header for named non-root nodes. The use-site is the position
+  // this fn occupies in the parent's expansion — it has no name of its own,
+  // so we render an empty black row to mirror what local fns get for free
+  // (their depth-0 row is already empty because the fn itself is anonymous).
+  // Click collapses every expansion currently on this node; cursor reflects
+  // whether there's anything to collapse.
+  if (!isNavRoot && !isLocalFn) {
+    const useSite = document.createElement('div');
+    useSite.className = 'ancestor-line';
+    useSite.dataset.useSite = 'true';
+    const hasExpansion = expansionState.has(nodeId);
+    Object.assign(useSite.style, {
+      background: ROOT_BG,
+      color: ROOT_FG,
+      borderBottom: 'none',
+      cursor: hasExpansion ? 'pointer' : 'default',
+      touchAction: 'none',
+      userSelect: 'none',
+      WebkitUserSelect: 'none'
+    });
+    const onUseSiteMouseDown = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      if (!expansionState.has(nodeId)) return;
+      anchorNodeId = nodeId;
+      expansionState.delete(nodeId);
+      previewState.delete(nodeId);
+      suppressPreviewOnClick();
+      savedUserPositions.clear();
+      renderGraph(false);
+      anchorNodeId = null;
+    };
+    useSite.addEventListener('mousedown', onUseSiteMouseDown);
+    useSite.addEventListener('touchend', onUseSiteMouseDown);
+    // Hover preview: when there IS something to collapse, show what the
+    // overlay (recoloring) and the graph (layout drop) would look like
+    // post-click. No-op when nothing to collapse — the row is a passive
+    // header in that state.
+    const triggerUseSitePreview = () => {
+      if (isGrabbing || shouldSuppressPreview()) return;
+      if (!expansionState.has(nodeId)) return;
+      const collapsedSpec = { fullDepth: 0, partialFns: new Set() };
+      applyPreviewStyle(collapsedSpec);
+      // depth=0 → computeSpecAfterClick returns null → applyHoverSpec
+      // stores {fullDepth:0, empty} in previewState (the layout fallback).
+      applyHoverSpec(nodeId, 0, originalFnId, [originalFnId]);
+    };
+    useSite.addEventListener('mouseenter', triggerUseSitePreview);
+    useSite.addEventListener('mousemove', triggerUseSitePreview);
+    useSite.addEventListener('mouseleave', () => { onPreviewLeave(); restoreStyles(); });
+    overlay.appendChild(useSite);
+  }
 
   visibleLevels.forEach((levelInfo, idx) => {
     const line = document.createElement('div');
@@ -353,6 +446,8 @@ function createFnOverlay(node, container) {
         } else if (fnIsHighlighted(levelInfo.depth, f.fnId, fullDepth, partialFns)) {
           span.style.fontWeight = 'bold';
           span.style.background = HIGHLIGHT_BG;
+        } else {
+          span.style.background = DEFAULT_BG;
         }
         spansByFnId.set(f.fnId, { span, fn: f });
 
@@ -418,6 +513,8 @@ function createFnOverlay(node, container) {
       } else if (fnIsHighlighted(levelInfo.depth, fnIdForLine, fullDepth, partialFns)) {
         line.style.fontWeight = 'bold';
         line.style.background = HIGHLIGHT_BG;
+      } else {
+        line.style.background = DEFAULT_BG;
       }
       const onMouseDown = (e) => {
         e.stopPropagation();

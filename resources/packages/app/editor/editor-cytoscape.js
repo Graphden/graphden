@@ -207,10 +207,13 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   // triangle half-length plus a small slack) so the hit-zone feels consistent
   // across zoom levels — Cytoscape reports `evt.position` in graph coords.
   const SOURCE_CIRCLE_RADIUS = 14;
-  // Cursor-to-segment tolerance (graph units). Generous enough that the
-  // user doesn't have to be pixel-perfect on the line; small enough that
-  // we don't catch edges in adjacent rows.
-  const SEGMENT_TOL = 4;
+  // Cursor-to-segment tolerance (graph units). Mouse: tight, since the
+  // cursor lands on a single pixel. Touch: looser to compensate for
+  // finger imprecision (a tap on the overlap zone may register a few
+  // graph units off the line) but still small enough to not catch
+  // unrelated rows above or below.
+  const SEGMENT_TOL_MOUSE = 4;
+  const SEGMENT_TOL_TOUCH = 14;
 
   function edgeSourceHit(evt) {
     const p = evt.position;
@@ -231,8 +234,8 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   }
 
   // Returns the collection of sibling edges whose taxi path (any of the three
-  // segments) passes within SEGMENT_TOL of the cursor.
-  function siblingEdgesUnderCursor(sourceNode, cursor) {
+  // segments) passes within `tol` of the cursor.
+  function siblingEdgesUnderCursor(sourceNode, cursor, tol) {
     const srcRight = sourceNode.position().x + sourceNode.width() / 2;
     const srcY = sourceNode.position().y;
     const bendX = bendXFor(sourceNode);
@@ -244,16 +247,16 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
       const yHi = Math.max(srcY, tgtY);
       // Segment 1: first horizontal (src.right → bendX) — shared by all
       // sibling edges from this source, so any hit here lights the bundle.
-      if (cursor.x >= srcRight - SEGMENT_TOL && cursor.x <= bendX + SEGMENT_TOL
-          && Math.abs(cursor.y - srcY) <= SEGMENT_TOL) return true;
+      if (cursor.x >= srcRight - tol && cursor.x <= bendX + tol
+          && Math.abs(cursor.y - srcY) <= tol) return true;
       // Segment 2: vertical at bendX from src.y to tgt.y — overlaps with
       // siblings on the same side of source.y. The bounds-check naturally
       // excludes edges that turn the OTHER way before reaching cursor.y.
-      if (Math.abs(cursor.x - bendX) <= SEGMENT_TOL
-          && cursor.y >= yLo - SEGMENT_TOL && cursor.y <= yHi + SEGMENT_TOL) return true;
+      if (Math.abs(cursor.x - bendX) <= tol
+          && cursor.y >= yLo - tol && cursor.y <= yHi + tol) return true;
       // Segment 3: second horizontal (bendX → tgt.left) — unique per edge.
-      if (cursor.x >= bendX - SEGMENT_TOL && cursor.x <= tgtLeft + SEGMENT_TOL
-          && Math.abs(cursor.y - tgtY) <= SEGMENT_TOL) return true;
+      if (cursor.x >= bendX - tol && cursor.x <= tgtLeft + tol
+          && Math.abs(cursor.y - tgtY) <= tol) return true;
       return false;
     });
   }
@@ -272,21 +275,41 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
     cy.edges('.edge-hovered').removeClass('edge-hovered');
   }
 
-  function hoveredFor(edge, evt) {
+  function hoveredFor(edge, evt, tol) {
     if (edgeSourceHit(evt)) return edge.source().outgoers('edge');
-    const matched = siblingEdgesUnderCursor(edge.source(), evt.position);
+    const matched = siblingEdgesUnderCursor(edge.source(), evt.position, tol);
     // Fallback to just the hovered edge if our segment model doesn't catch it
     // (shouldn't happen for taxi edges but defensive).
     return matched.length > 0 ? matched : edge;
   }
 
   cy.on('mouseover', 'edge', function (evt) {
-    setHovered(hoveredFor(evt.target, evt));
+    setHovered(hoveredFor(evt.target, evt, SEGMENT_TOL_MOUSE));
   });
   cy.on('mousemove', 'edge', function (evt) {
-    setHovered(hoveredFor(evt.target, evt));
+    setHovered(hoveredFor(evt.target, evt, SEGMENT_TOL_MOUSE));
   });
   cy.on('mouseout', 'edge', function () {
+    clearHover();
+  });
+  // Touch (iPad/iPhone): a finger doesn't "hover", so we wire tapstart +
+  // tapdrag to mirror mouseover with a wider tolerance — finger taps
+  // register a few graph units off the pixel-precise line, and SEGMENT_TOL
+  // for mouse would miss the overlap. Lifting the finger clears.
+  function isTouchEvent(evt) {
+    const oe = evt && evt.originalEvent;
+    return !!(oe && (oe.touches !== undefined || oe.pointerType === 'touch'));
+  }
+  cy.on('tapstart', 'edge', function (evt) {
+    if (!isTouchEvent(evt)) return;
+    setHovered(hoveredFor(evt.target, evt, SEGMENT_TOL_TOUCH));
+  });
+  cy.on('tapdrag', 'edge', function (evt) {
+    if (!isTouchEvent(evt)) return;
+    setHovered(hoveredFor(evt.target, evt, SEGMENT_TOL_TOUCH));
+  });
+  cy.on('tapend', function (evt) {
+    if (!isTouchEvent(evt)) return;
     clearHover();
   });
 

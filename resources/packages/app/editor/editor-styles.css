@@ -1,5 +1,5 @@
 /* Graph editor CSS styles - monochrome design */
-* { box-sizing: border-box; margin: 0; padding: 0; }
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #fff; color: #000; }
 
 /* ID-based layout (matches editor-body hiccup structure) */

@@ -4,6 +4,7 @@
 
 
 {:namespace "app.editor"
+ :description "Graph-editor application — HTML/CSS/JS assembly via fn-defs (no base-fns), plus the routes for editor UI + API endpoints."
  :fns
  [;; =============================================================================
   ;; CSS + JS asset loading (fn-def compositions)

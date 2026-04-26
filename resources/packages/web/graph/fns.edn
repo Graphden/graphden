@@ -3,6 +3,7 @@
 
 
 {:namespace "web.graph"
+ :description "Graph-shape adapters between graphden entities and Cytoscape.js's nodes/edges format."
  :fns
  [{:name :entities-to-cytoscape
    :args {:entities :jsonb}

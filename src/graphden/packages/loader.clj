@@ -181,9 +181,10 @@
    `defbase`). The executor always calls them with both args, so the
    loader simply hands impl-fn through."
   [fn-def impl-fn]
-  {:args (normalize-args (:args fn-def))
-   :return-type (:return-type fn-def)
-   :impl impl-fn})
+  (cond-> {:args (normalize-args (:args fn-def))
+           :return-type (:return-type fn-def)
+           :impl impl-fn}
+    (:description fn-def) (assoc :description (:description fn-def))))
 
 
 (defn- process-module

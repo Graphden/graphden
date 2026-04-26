@@ -3,49 +3,58 @@
 
 
 {:namespace "core.system"
+ :description "System primitives — Ring response shape, JSON, JVM info, timing, env, resources."
  :fns
  [{:name :ring-response
-   :args {:status :int
-          :headers :jsonb
-          :body :text}
+   :description "Build a Ring response map: {:status :headers :body}. Consumed directly by http-kit."
+   :args {:status {:type :int :description "HTTP status code (e.g. 200, 404)."}
+          :headers {:type :jsonb :description "Header map; keys must be strings (http-kit convention)."}
+          :body {:type :text :description "Response body — a string the client receives verbatim."}}
    :return-type :jsonb}
 
-  ;; `:make-handler` wraps a constant response into a Ring callable
-  ;; `(fn [_request] response)`. Used by reitit's default-handler trio
-  ;; (`:not-found`, `:method-not-allowed`, `:not-acceptable`) where the
-  ;; route-data slot is `:any`-typed (no hof-wrap), so we need a real
-  ;; Clojure callable. Per-route handlers go through `:assoc-fn` and
-  ;; are hof-wrap'd directly — they don't need this wrapper.
   {:name :make-handler
-   :args {:response :jsonb}
+   :description "Wrap a constant value as a Ring callable `(fn [_request] response)`. Used for reitit's default-handler trio (:not-found etc.) where the slot is :any-typed and needs a real Clojure callable; per-route handlers use :assoc-fn instead."
+   :args {:response {:type :jsonb :description "The fixed Ring response to return for every call."}}
    :return-type :fn}
 
   {:name :to-json-string
-   :args {:data :any}
+   :description "Serialize a Clojure value to a JSON string."
+   :args {:data {:type :any :description "Any JSON-encodable value."}}
    :return-type :text}
 
   {:name :parse-json
-   :args {:string :text
-          :keywordize {:type :bool :value true}}
+   :description "Parse a JSON string into a Clojure value."
+   :args {:string {:type :text :description "JSON text to parse."}
+          :keywordize {:type :bool :value true
+                       :description "When true, convert string keys to keywords."}}
    :return-type :jsonb}
 
   {:name :jvm-version
+   :description "Java runtime version string (`java.version` system property)."
    :args {}
    :return-type :jsonb}
 
   {:name :heap-memory
+   :description "JVM heap usage snapshot — `{:used :committed :max}` in bytes."
    :args {}
    :return-type :jsonb}
 
   {:name :thread-count
+   :description "Live thread count from the JVM ThreadMXBean."
    :args {}
    :return-type :int}
 
   {:name :os-info
+   :description "Host operating-system info — name, arch, version."
    :args {}
    :return-type :jsonb}
 
   ;; jvm-info composed from atomic base-fns via assoc chain
+  {:name :jvm-info
+   :description "Aggregate JVM/system snapshot — version, heap, threads, OS."
+   :parent :assoc
+   :args {:map :_threads-section :key "os" :value :os-info}}
+
   {:name :_jvm-section
    :parent :assoc-empty
    :args {:key "jvm" :value :jvm-version}}
@@ -58,17 +67,14 @@
    :parent :assoc
    :args {:map :_memory-section :key "threads" :value :thread-count}}
 
-  {:name :jvm-info
-   :parent :assoc
-   :args {:map :_threads-section :key "os" :value :os-info}}
-
   {:name :current-time-ms
+   :description "Wall-clock milliseconds since Unix epoch."
    :args {}
    :return-type :int}
 
-  ;; Read environment variable
   {:name :env
-   :args {:name :text}
+   :description "Read an OS environment variable. Returns nil if unset."
+   :args {:name {:type :text :description "Environment variable name."}}
    :return-type :text}
 
   ;; Construct an ExceptionInfo. Paired with :throw to raise from

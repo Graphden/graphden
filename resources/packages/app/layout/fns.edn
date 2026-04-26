@@ -6,6 +6,7 @@
 
 
 {:namespace "app.layout"
+ :description "Graph-layout pass — turns raw fn/arg entities + per-call expansion specs into the {:nodes :edges :grid-pos :validation} cytoscape response."
  :fns
  [;; Layout data function - fetches from DB, builds graph, computes layout
   ;; Context-aware: receives storage from ctx

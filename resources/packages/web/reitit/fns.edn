@@ -13,6 +13,7 @@
 
 
 {:namespace "web.reitit"
+ :description "Reitit routing primitives (router/handler/middleware) plus the `:router` assembly that compiles routes + default-handler trio into a Ring callable."
  :fns
  [;; =============================================================================
   ;; REITIT-LIBRARY WRAPPERS (base-fns)

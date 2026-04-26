@@ -91,6 +91,10 @@
   #uuid "28293031-3233-4678-5d6e-7f8a9b0c1d2e")
 
 
+(def ^:private fn-version-description-field-uuid
+  #uuid "3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f")
+
+
 ;; Field UUIDs for :arg-version
 (def ^:private arg-version-arg-id-field-uuid
   #uuid "31323334-3536-4789-8c9d-0e1f2a3b4c5d")
@@ -152,6 +156,10 @@
   #uuid "43444546-4748-4901-0c1d-2e3f4a5b6c7d")
 
 
+(def ^:private arg-version-description-field-uuid
+  #uuid "4d5e6f7a-8b9c-4d0e-1f2a-3b4c5d6e7f8a")
+
+
 (def versioned-entities
   #{:branch :branch-merge :fn-version :arg-version})
 
@@ -209,6 +217,9 @@
                       :impl-hash {:uuid fn-version-impl-hash-field-uuid
                                   :type :text
                                   :nullable? true}
+                      :description {:uuid fn-version-description-field-uuid
+                                    :type :text
+                                    :nullable? true}
                       :created-at {:uuid fn-version-created-at-field-uuid
                                    :type :timestamptz}
                       :deleted-at {:uuid fn-version-deleted-at-field-uuid
@@ -253,6 +264,9 @@
                                     :nullable? true}
                       :prev-arg-id {:uuid arg-version-prev-arg-id-field-uuid
                                     :type :uuid
+                                    :nullable? true}
+                      :description {:uuid arg-version-description-field-uuid
+                                    :type :text
                                     :nullable? true}
                       :created-at {:uuid arg-version-created-at-field-uuid
                                    :type :timestamptz}

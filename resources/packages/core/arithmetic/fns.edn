@@ -3,57 +3,72 @@
 
 
 {:namespace "core.arithmetic"
+ :description "Arithmetic and comparison primitives over numbers."
  :fns
  [;; === Arithmetic ===
   {:name :add
-   :args {:nums :jsonb}
+   :description "Sum a vector of numbers."
+   :args {:nums {:type :jsonb :description "Vector of numbers to add."}}
    :return-type :numeric}
 
   {:name :sub
-   :args {:nums :jsonb}
+   :description "Subtract — first number minus the rest. `[10 3 2]` → 5."
+   :args {:nums {:type :jsonb :description "Vector of numbers; first is the minuend."}}
    :return-type :numeric}
 
   {:name :mul
-   :args {:nums :jsonb}
+   :description "Multiply a vector of numbers."
+   :args {:nums {:type :jsonb :description "Vector of numbers to multiply."}}
    :return-type :numeric}
 
   {:name :div
-   :args {:nums :jsonb}
+   :description "Divide — first number by the product of the rest. Throws on zero divisor."
+   :args {:nums {:type :jsonb :description "Vector of numbers; first is the dividend."}}
    :return-type :numeric}
 
   {:name :mod
-   :args {:dividend :numeric, :divisor :numeric}
+   :description "Remainder of `dividend / divisor` (Clojure's `mod`, follows divisor sign)."
+   :args {:dividend {:type :numeric :description "Number being divided."}
+          :divisor {:type :numeric :description "Non-zero divisor."}}
    :return-type :numeric}
 
   {:name :neg
-   :args {:number :numeric}
+   :description "Negate a number."
+   :args {:number {:type :numeric :description "Number to negate."}}
    :return-type :numeric}
 
   {:name :abs
-   :args {:number :numeric}
+   :description "Absolute value."
+   :args {:number {:type :numeric :description "Number whose absolute value to return."}}
    :return-type :numeric}
 
   ;; === Comparison ===
   {:name :eq
-   :args {:values :jsonb}
+   :description "Test all values for equality (Clojure's `=`)."
+   :args {:values {:type :jsonb :description "Vector of values; all must be equal."}}
    :return-type :bool}
 
   {:name :neq
-   :args {:values :jsonb}
+   :description "True iff at least one pair differs."
+   :args {:values {:type :jsonb :description "Vector of values; comparison is pairwise."}}
    :return-type :bool}
 
   {:name :lt
-   :args {:nums :jsonb}
+   :description "Strictly increasing — `nums[0] < nums[1] < …`."
+   :args {:nums {:type :jsonb :description "Vector of numbers in expected order."}}
    :return-type :bool}
 
   {:name :lte
-   :args {:nums :jsonb}
+   :description "Non-decreasing — `nums[0] <= nums[1] <= …`."
+   :args {:nums {:type :jsonb :description "Vector of numbers in expected order."}}
    :return-type :bool}
 
   {:name :gt
-   :args {:nums :jsonb}
+   :description "Strictly decreasing — `nums[0] > nums[1] > …`."
+   :args {:nums {:type :jsonb :description "Vector of numbers in expected order."}}
    :return-type :bool}
 
   {:name :gte
-   :args {:nums :jsonb}
+   :description "Non-increasing — `nums[0] >= nums[1] >= …`."
+   :args {:nums {:type :jsonb :description "Vector of numbers in expected order."}}
    :return-type :bool}]}

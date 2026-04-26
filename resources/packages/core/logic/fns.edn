@@ -3,61 +3,75 @@
 
 
 {:namespace "core.logic"
+ :description "Boolean logic, branching, defaults, and constant primitives."
  :fns
  [;; === Logic ===
   {:name :and
-   :args {:values :jsonb}
+   :description "Logical AND over a vector — true iff every value is truthy."
+   :args {:values {:type :jsonb :description "Vector of values to AND."}}
    :return-type :bool}
 
   {:name :or
-   :args {:values :jsonb}
+   :description "Logical OR over a vector — true iff at least one value is truthy."
+   :args {:values {:type :jsonb :description "Vector of values to OR."}}
    :return-type :bool}
 
   {:name :not
-   :args {:value :any}
+   :description "Boolean negation."
+   :args {:value {:type :any :description "Any value; truthy → false, falsy → true."}}
    :return-type :bool}
 
   {:name :some?
-   :args {:value :any}
+   :description "True iff value is non-nil."
+   :args {:value {:type :any :description "Value to test for nilness."}}
    :return-type :bool}
 
   {:name :nil?
-   :args {:value :any}
+   :description "True iff value is nil."
+   :args {:value {:type :any :description "Value to test for nilness."}}
    :return-type :bool}
 
   ;; === Conditionals ===
   {:name :if
-   :args {:test :any
-          :then :any
-          :else {:type :any :required false}}
+   :description "Two-branch conditional. Returns `then` when `test` is truthy, else `else` (nil if omitted)."
+   :args {:test {:type :any :description "Truthy/falsy expression."}
+          :then {:type :any :description "Returned when test is truthy."}
+          :else {:type :any :required false
+                 :description "Returned when test is falsy. Defaults to nil."}}
    :return-type :any}
 
   {:name :cond
-   :args {:clauses :jsonb}
+   :description "Multi-branch — evaluates pairs `[test result …]`, returns the first result whose test is truthy."
+   :args {:clauses {:type :jsonb :description "Vector of alternating tests and result expressions."}}
    :return-type :any}
 
   {:name :case
-   :args {:value :any
-          :clauses :jsonb
-          :default {:type :any :required false}}
+   :description "Constant-time dispatch on `value`; returns the matching clause's result, else `default`."
+   :args {:value {:type :any :description "Value to match."}
+          :clauses {:type :jsonb :description "Vector of `[match result …]` pairs."}
+          :default {:type :any :required false
+                    :description "Fallback when no clause matches. Defaults to nil."}}
    :return-type :any}
 
   ;; === Defaults ===
   {:name :coalesce
-   :args {:value :any
-          :default :any}
+   :description "Returns `value` if non-nil, else `default`."
+   :args {:value {:type :any :description "Primary value; used when non-nil."}
+          :default {:type :any :description "Fallback used when value is nil."}}
    :return-type :any}
 
   ;; === Constants ===
   {:name :const
-   :args {:value :any}
+   :description "Identity-style passthrough — returns `:value` unchanged. Building block for capture renames `{:as :name}`."
+   :args {:value {:type :any :description "Value to return as-is."}}
    :return-type :any}
 
-  ;; identity is just const with a different name
   {:name :identity
+   :description "Alias of `:const`."
    :parent :const}
 
-  ;; Two-arg equality (for fn-def composition; :eq uses array which can't hold fn-refs)
   {:name :equal?
-   :args {:a :any, :b :any}
+   :description "Two-arg equality (Clojure's `=`). Composition-friendly variant of `:eq`."
+   :args {:a {:type :any :description "Left operand."}
+          :b {:type :any :description "Right operand."}}
    :return-type :bool}]}

@@ -23,6 +23,7 @@
 
 
 {:namespace "web.ring-adapter"
+ :description "Ring request → router → response pipeline, plus bearer-token auth middleware. The `:router-ring-response` fn-def is the canonical shape bound to `:http-server.handler`."
  :fns
  [;; =============================================================================
   ;; RING REQUEST EXTRACTION

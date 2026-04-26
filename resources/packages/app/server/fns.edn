@@ -6,6 +6,7 @@
 
 
 {:namespace "app.server"
+ :description "Application web-server entry point — this app's routes, router binding, and the `:web-server` root fn-def started by the runtime."
  :fns
  [;; =============================================================================
   ;; MONITORING: Health & Metrics (app-specific)

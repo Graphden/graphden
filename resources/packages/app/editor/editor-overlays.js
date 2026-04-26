@@ -2,6 +2,28 @@
 // Depends on: editor-state.js, editor-data.js
 
 // ============================================================================
+// DESCRIPTION TOOLTIP
+// ============================================================================
+
+/**
+ * Creates a small "ⓘ" indicator that exposes `description` as a native
+ * tooltip on hover. Returns nil-equivalent (null) when no description is
+ * available so callers can `if (badge) container.appendChild(badge)`.
+ */
+function createDescriptionBadge(description) {
+  if (!description) return null;
+  const badge = document.createElement('span');
+  badge.className = 'description-badge';
+  badge.textContent = ' ⓘ';
+  badge.title = description;
+  badge.style.color = '#999';
+  badge.style.cursor = 'help';
+  badge.style.fontSize = '10px';
+  badge.style.marginLeft = '2px';
+  return badge;
+}
+
+// ============================================================================
 // DRAG HANDLE
 // ============================================================================
 
@@ -376,6 +398,8 @@ function createFnOverlay(node, container) {
       // The fn name floats over the column backgrounds
       const textOverlay = document.createElement('span');
       textOverlay.textContent = levelInfo.fns[0].name;
+      const colDescBadge = createDescriptionBadge(levelInfo.fns[0].description);
+      if (colDescBadge) textOverlay.appendChild(colDescBadge);
       Object.assign(textOverlay.style, {
         position: 'absolute', left: '0', right: '0', top: '4px',
         textAlign: 'center',
@@ -455,6 +479,8 @@ function createFnOverlay(node, container) {
       levelInfo.fns.forEach((f, i) => {
         const span = document.createElement('span');
         span.textContent = f.name;
+        const miDescBadge = createDescriptionBadge(f.description);
+        if (miDescBadge) span.appendChild(miDescBadge);
         span.style.cursor = 'pointer';
         span.style.padding = '4px 8px';
         span.style.flex = '1 1 0';
@@ -528,6 +554,8 @@ function createFnOverlay(node, container) {
       // (so empty grouped levels expand together).
       line.style.cursor = 'pointer';
       line.textContent = levelInfo.fns[0].name;
+      const lineDescBadge = createDescriptionBadge(levelInfo.fns[0].description);
+      if (lineDescBadge) line.appendChild(lineDescBadge);
       const fnIdForLine = levelInfo.fns[0].fnId;
       const allFnsAtDepth = [fnIdForLine];
       const targetDepth = levelInfo.groupMaxDepth;
@@ -686,9 +714,22 @@ function createEdgeLabelOverlay(edge, container) {
   overlay.className = 'edge-label-overlay';
   overlay.dataset.edgeId = edge.id();
   overlay.textContent = label;
+  // Description via the source-arg's primary slot. Walk source-id chain
+  // to the terminal arg (the primary that owns the slot); use its
+  // :description if any. Falls back to the source-arg's own description.
+  const sourceArgId = edge.data('sourceArgId');
+  if (sourceArgId && lookups && lookups.argMap) {
+    let cur = lookups.argMap.get(sourceArgId);
+    let description = cur && cur.description;
+    while (!description && cur && cur['source-id']) {
+      cur = lookups.argMap.get(cur['source-id']);
+      description = cur && cur.description;
+    }
+    if (description) overlay.title = description;
+  }
   Object.assign(overlay.style, {
     position: 'absolute',
-    pointerEvents: 'none',
+    pointerEvents: 'auto',
     zIndex: '5',
     background: '#ffffff',
     color: '#666666',
@@ -700,7 +741,8 @@ function createEdgeLabelOverlay(edge, container) {
     textAlign: 'left',
     transformOrigin: 'top left',
     userSelect: 'none',
-    WebkitUserSelect: 'none'
+    WebkitUserSelect: 'none',
+    cursor: overlay.title ? 'help' : 'default'
   });
   container.appendChild(overlay);
 }

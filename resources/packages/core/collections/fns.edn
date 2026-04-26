@@ -5,6 +5,7 @@
 
 
 {:namespace "core.collections"
+ :description "Collection primitives — first/rest/conj/get/assoc/merge/range/take/drop and other Clojure-equivalent operations over maps/vectors/seqs."
  :fns
  [{:name :first
    :args {:coll :jsonb}

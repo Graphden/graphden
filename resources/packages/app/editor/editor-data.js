@@ -174,6 +174,7 @@ function buildAncestorLevels(levels) {
       return {
         fnId,
         name: displayName || (topLevel ? '' : '(anonymous)'),
+        description: fn && fn.description,
         setsArgs: fnSetsArgs(fnId),
         isClickable: fnSetsArgs(fnId)  // has value or ref-id → produces new nodes on expand
       };

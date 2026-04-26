@@ -3,6 +3,7 @@
 
 
 {:namespace "core.hof"
+ :description "Higher-order primitives — map/filter/reduce/comp/partial and friends. The `:func` slot is `:fn`-typed so the executor passes a HOF-wrapped callable, not a value."
  :fns
  [{:name :map
    :args {:func :fn

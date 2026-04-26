@@ -3,6 +3,7 @@
 
 
 {:namespace "app.common"
+ :description "Shared application building blocks — route assembly, response status × content-type matrix, health status."
  :fns
  [;; =============================================================================
   ;; COLLECTION BUILDING BLOCKS

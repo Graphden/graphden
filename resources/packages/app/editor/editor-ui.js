@@ -24,7 +24,15 @@ let searchFilter = '';
  * Returns: { children: Map<string, subtree>, fns: [fn, ...] }
  */
 function buildNsTree(data) {
-  const root = { children: new Map(), fns: [] };
+  const root = { children: new Map(), fns: [], description: null };
+
+  // Build {ns-path → description} from the namespace entities so the
+  // rendered tree nodes can carry their description tooltip.
+  const descByPath = new Map();
+  (data.namespaces || []).forEach(ns => {
+    const path = (lookups.nsPathMap && lookups.nsPathMap.get(ns.id)) || ns.name;
+    if (path) descByPath.set(path, ns.description);
+  });
 
   (data.fns || []).forEach(fn => {
     if (!fn.name) return; // skip anonymous/local fns
@@ -32,9 +40,15 @@ function buildNsTree(data) {
     const parts = qname.split('.');
     const fnName = parts.pop();
     let node = root;
+    let cumulativePath = '';
     for (const part of parts) {
+      cumulativePath = cumulativePath ? cumulativePath + '.' + part : part;
       if (!node.children.has(part)) {
-        node.children.set(part, { children: new Map(), fns: [] });
+        node.children.set(part, {
+          children: new Map(),
+          fns: [],
+          description: descByPath.get(cumulativePath) || null
+        });
       }
       node = node.children.get(part);
     }
@@ -94,6 +108,10 @@ function renderNsNode(container, name, node, path) {
   const label = document.createElement('span');
   label.className = 'ns-label';
   label.textContent = name;
+  if (node && node.description) {
+    label.title = node.description;
+    label.style.cursor = 'help';
+  }
   header.appendChild(label);
 
   header.onclick = (e) => {
@@ -126,7 +144,14 @@ function renderNsNode(container, name, node, path) {
     item.className = 'entity-item';
     if (fn.id === selectedFnId) item.className += ' selected';
     item.dataset.fnId = fn.id;
-    item.innerHTML = '<span class="name">' + fn.displayName + '</span>';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = fn.displayName;
+    if (fn.description) {
+      nameSpan.title = fn.description;
+      nameSpan.style.cursor = 'help';
+    }
+    item.appendChild(nameSpan);
     item.onclick = () => selectFn(fn.id);
     childGroup.appendChild(item);
   }
@@ -176,7 +201,14 @@ function updateEntityList(data) {
     item.className = 'entity-item';
     if (fn.id === selectedFnId) item.className += ' selected';
     item.dataset.fnId = fn.id;
-    item.innerHTML = '<span class="name">' + fn.displayName + '</span>';
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'name';
+    nameSpan.textContent = fn.displayName;
+    if (fn.description) {
+      nameSpan.title = fn.description;
+      nameSpan.style.cursor = 'help';
+    }
+    item.appendChild(nameSpan);
     item.onclick = () => selectFn(fn.id);
     list.appendChild(item);
   }

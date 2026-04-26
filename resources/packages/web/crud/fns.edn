@@ -4,6 +4,7 @@
 
 
 {:namespace "web.crud"
+ :description "Storage CRUD primitives for the web UI — query/render/dispatch entity create/update/delete via context-aware impls."
  :fns
  [;; Query functions (context-aware)
   {:name :list-entities

@@ -4,6 +4,7 @@
 
 
 {:namespace "web.html"
+ :description "HTML/Hiccup primitives — render, page scaffolding, form helpers, common UI blocks (button, badge, field-row)."
  :fns
  [{:name :render-hiccup
    :args {:hiccup :jsonb}

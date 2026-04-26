@@ -4,6 +4,7 @@
 
 
 {:namespace "core.strings"
+ :description "String primitives — concat/subs/length/case/trim/split/join, plus keyword↔string conversions."
  :fns
  [{:name :str
    :args {:parts :jsonb}

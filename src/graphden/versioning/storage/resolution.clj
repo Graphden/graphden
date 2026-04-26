@@ -48,12 +48,12 @@
    column on the fn entity. Junction rows are not versioned currently."
   {:fn {:version-entity :fn-version
         :version-id-field :fn-id
-        :version-data-fields #{:name :return-type :impl-hash}}
+        :version-data-fields #{:name :return-type :impl-hash :description}}
 
    :arg {:version-entity :arg-version
          :version-id-field :arg-id
          :version-data-fields #{:fn-id :name :type :source-id :value :ref-id :is-fn :required
-                                :next-arg-id :prev-arg-id}}})
+                                :next-arg-id :prev-arg-id :description}}})
 
 
 (defn versioned-entity?

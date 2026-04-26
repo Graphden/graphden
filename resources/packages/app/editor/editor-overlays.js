@@ -53,28 +53,118 @@ function hideDescriptionTooltip() {
   if (descriptionTooltipEl) descriptionTooltipEl.style.display = 'none';
 }
 
-function createDescriptionBadge(description) {
+// Shared box styling for the right-edge action icons (description ⓘ
+// and open-in-new-tab ↗). A 1-px border around each glyph turns them
+// into clearly-clickable buttons instead of bare characters that the
+// user can easily miss when aiming.
+function applyActionIconBox(el) {
+  el.style.display = 'inline-flex';
+  el.style.alignItems = 'center';
+  el.style.justifyContent = 'center';
+  el.style.boxSizing = 'border-box';
+  el.style.width = '15px';
+  el.style.height = '15px';
+  el.style.lineHeight = '1';
+  el.style.border = '1px solid currentColor';
+  el.style.borderRadius = '3px';
+  el.style.fontSize = '10px';
+}
+
+function createDescriptionBadge(description, opts) {
   if (!description) return null;
+  opts = opts || {};
   const badge = document.createElement('span');
   badge.className = 'description-badge';
-  badge.textContent = 'ⓘ';
+  badge.textContent = 'i';
   // Inherit color from the parent row — default text is dark → black
   // badge, root-block rows that flip to ROOT_FG (white) get a white
   // badge automatically without per-site logic.
   badge.style.color = 'currentColor';
   badge.style.cursor = 'help';
-  badge.style.fontSize = '11px';
   badge.style.fontWeight = 'normal';
-  badge.style.marginLeft = '4px';
-  badge.style.opacity = '0.7';
+  badge.style.fontStyle = 'italic';
+  badge.style.opacity = '0.85';
+  applyActionIconBox(badge);
   // Override pointer-events: some overlay containers opt out (e.g.
   // the floating column-below-MI text overlay) but we need the
   // hover events here.
   badge.style.pointerEvents = 'auto';
-  badge.addEventListener('mouseenter', (e) => { showDescriptionTooltip(description, e); });
-  badge.addEventListener('mousemove', (e) => { showDescriptionTooltip(description, e); });
+  if (opts.pinRight) {
+    // Pinned to the right edge so the centered fn name stays centered
+    // and the badge never overlaps the click-target text.
+    // Parent must be position:relative.
+    badge.style.position = 'absolute';
+    badge.style.right = '6px';
+    badge.style.top = '50%';
+    badge.style.transform = 'translateY(-50%)';
+  } else {
+    badge.style.marginLeft = '4px';
+    badge.style.verticalAlign = 'middle';
+  }
+  badge.addEventListener('mouseenter', (e) => {
+    // Hover on the badge must NOT trigger a row-level expansion preview.
+    // The parent's mouseenter still fires on first entry — the optional
+    // onEnter callback is the row's preview-clear, undoing that preview.
+    if (opts.onEnter) opts.onEnter();
+    showDescriptionTooltip(description, e);
+  });
+  badge.addEventListener('mousemove', (e) => {
+    // mousemove bubbles, so without stopPropagation the row's mousemove
+    // would re-fire its preview while the cursor sits on the badge.
+    e.stopPropagation();
+    showDescriptionTooltip(description, e);
+  });
   badge.addEventListener('mouseleave', hideDescriptionTooltip);
+  // Click on the badge must not commit an expansion either — swallow
+  // mousedown/touchend so the row's click handler doesn't fire.
+  badge.addEventListener('mousedown', (e) => e.stopPropagation());
+  badge.addEventListener('touchend', (e) => e.stopPropagation());
   return badge;
+}
+
+// "Open in new tab" link for an ancestor row. Returns null when the fn
+// has no globally-resolvable name (anonymous local fns can't be linked
+// to via the URL hash). Pinned to the right edge alongside the
+// description badge.
+function createOpenInNewTabButton(fn, opts) {
+  if (!fn) return null;
+  const qualified = getQualifiedFnName(fn);
+  if (!qualified || qualified === '(anonymous)') return null;
+  opts = opts || {};
+  const link = document.createElement('a');
+  link.className = 'open-in-new-tab';
+  link.href = '#' + encodeURIComponent(qualified);
+  link.target = '_blank';
+  link.rel = 'noopener';
+  link.title = 'Open ' + qualified + ' in a new tab';
+  link.textContent = '↗';
+  link.style.color = 'currentColor';
+  link.style.cursor = 'pointer';
+  link.style.fontWeight = 'normal';
+  link.style.textDecoration = 'none';
+  link.style.opacity = '0.85';
+  applyActionIconBox(link);
+  link.style.fontSize = '11px';  // ↗ glyph reads better a hair larger
+  link.style.pointerEvents = 'auto';
+  if (opts.pinRight) {
+    // Sits just left of the description badge (which is at right:6px).
+    link.style.position = 'absolute';
+    link.style.right = '24px';
+    link.style.top = '50%';
+    link.style.transform = 'translateY(-50%)';
+  } else {
+    link.style.marginLeft = '4px';
+    link.style.verticalAlign = 'middle';
+  }
+  link.addEventListener('mouseenter', () => {
+    if (opts.onEnter) opts.onEnter();
+  });
+  link.addEventListener('mousemove', (e) => { e.stopPropagation(); });
+  // Anchor handles navigation natively; just make sure mousedown/touchend
+  // don't bubble into the row's expansion handler.
+  link.addEventListener('mousedown', (e) => e.stopPropagation());
+  link.addEventListener('touchend', (e) => e.stopPropagation());
+  return link;
 }
 
 // ============================================================================
@@ -449,13 +539,27 @@ function createFnOverlay(node, container) {
       line.style.display = 'flex';
       line.style.padding = '0';
       line.style.position = 'relative';
-      // The fn name floats over the column backgrounds
+      // The fn name floats over the column backgrounds. When the row owns
+      // a description badge or an open-in-new-tab link pinned to the
+      // right we shrink the text area symmetrically so wrapped text
+      // never spills under those controls — and the centering point
+      // stays unchanged.
+      const colFn = levelInfo.fns[0];
+      const colHasDesc = !!colFn.description;
+      const colShowOpen = !!colFn.name && !(isNavRoot && levelInfo.depth === 0);
+      // Asymmetric: only the right side reserves room for the action
+      // icons. Symmetric reservation eats too much width in narrow MI
+      // cells and wraps the name behind the icons.
+      const colRightInset = (colHasDesc && colShowOpen) ? '42px'
+                          : (colHasDesc || colShowOpen) ? '24px'
+                          : '0';
       const textOverlay = document.createElement('span');
-      textOverlay.textContent = levelInfo.fns[0].name;
-      const colDescBadge = createDescriptionBadge(levelInfo.fns[0].description);
-      if (colDescBadge) textOverlay.appendChild(colDescBadge);
+      textOverlay.textContent = colFn.name;
       Object.assign(textOverlay.style, {
-        position: 'absolute', left: '0', right: '0', top: '4px',
+        position: 'absolute',
+        left: '0',
+        right: colRightInset,
+        top: '4px',
         textAlign: 'center',
         pointerEvents: 'none', zIndex: '1'
       });
@@ -474,6 +578,25 @@ function createFnOverlay(node, container) {
         line.appendChild(col);
       });
       line.appendChild(textOverlay);
+      const colClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
+      const colDescBadge = createDescriptionBadge(colFn.description, {
+        pinRight: true,
+        onEnter: colClearPreview
+      });
+      if (colDescBadge) {
+        colDescBadge.style.zIndex = '2';
+        line.appendChild(colDescBadge);
+      }
+      if (colShowOpen) {
+        const colOpenBtn = createOpenInNewTabButton(lookups.fnMap.get(colFn.fnId), {
+          pinRight: true,
+          onEnter: colClearPreview
+        });
+        if (colOpenBtn) {
+          colOpenBtn.style.zIndex = '2';
+          line.appendChild(colOpenBtn);
+        }
+      }
       // Store column info for paintWithSpec
       linesByDepth.set(levelInfo.depth, { line, spansByFnId: null, levelInfo, colDivs, textOverlay });
 
@@ -533,13 +656,33 @@ function createFnOverlay(node, container) {
       levelInfo.fns.forEach((f, i) => {
         const span = document.createElement('span');
         span.textContent = f.name;
-        const miDescBadge = createDescriptionBadge(f.description);
-        if (miDescBadge) span.appendChild(miDescBadge);
         span.style.cursor = 'pointer';
-        span.style.padding = '4px 8px';
+        const miShowOpen = !!f.name && !(isNavRoot && levelInfo.depth === 0);
+        // Asymmetric right padding leaves the action icons their own
+        // zone without halving the cell's text width on both sides.
+        const miInset = (f.description && miShowOpen) ? '4px 42px 4px 8px'
+                      : (f.description || miShowOpen) ? '4px 24px 4px 8px'
+                      : '4px 8px';
+        // When right-pinned controls are present, widen the horizontal
+        // padding symmetrically so wrapped names never spill under them.
+        span.style.padding = miInset;
         span.style.flex = '1 1 0';
         span.style.minWidth = '0';
         span.style.textAlign = 'center';
+        span.style.position = 'relative';
+        const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
+        const miDescBadge = createDescriptionBadge(f.description, {
+          pinRight: true,
+          onEnter: miClearPreview
+        });
+        if (miDescBadge) span.appendChild(miDescBadge);
+        if (miShowOpen) {
+          const miOpenBtn = createOpenInNewTabButton(lookups.fnMap.get(f.fnId), {
+            pinRight: true,
+            onEnter: miClearPreview
+          });
+          if (miOpenBtn) span.appendChild(miOpenBtn);
+        }
         if (i < levelInfo.fns.length - 1) {
           span.style.borderRight = '1px solid #eee';
         }
@@ -601,15 +744,35 @@ function createFnOverlay(node, container) {
         line.appendChild(span);
       });
     } else {
-      // Non-MI line: padding on the line itself
-      line.style.padding = '4px 8px';
+      // Non-MI line: padding on the line itself.
+      // Reserve symmetric horizontal room when right-pinned controls
+      // are present, so wrapped names stay clear of them and the
+      // visual centering point doesn't shift.
+      const lineFn = levelInfo.fns[0];
+      const lineHasDesc = !!lineFn.description;
+      const lineShowOpen = !!lineFn.name && !(isNavRoot && levelInfo.depth === 0);
+      line.style.padding = (lineHasDesc && lineShowOpen) ? '4px 42px 4px 8px'
+                         : (lineHasDesc || lineShowOpen) ? '4px 24px 4px 8px'
+                         : '4px 8px';
       line.style.textAlign = 'center';
+      line.style.position = 'relative';
       // Single-fn level — whole-line click cascading to groupMaxDepth
       // (so empty grouped levels expand together).
       line.style.cursor = 'pointer';
-      line.textContent = levelInfo.fns[0].name;
-      const lineDescBadge = createDescriptionBadge(levelInfo.fns[0].description);
+      line.textContent = lineFn.name;
+      const lineClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
+      const lineDescBadge = createDescriptionBadge(lineFn.description, {
+        pinRight: true,
+        onEnter: lineClearPreview
+      });
       if (lineDescBadge) line.appendChild(lineDescBadge);
+      if (lineShowOpen) {
+        const lineOpenBtn = createOpenInNewTabButton(lookups.fnMap.get(lineFn.fnId), {
+          pinRight: true,
+          onEnter: lineClearPreview
+        });
+        if (lineOpenBtn) line.appendChild(lineOpenBtn);
+      }
       const fnIdForLine = levelInfo.fns[0].fnId;
       const allFnsAtDepth = [fnIdForLine];
       const targetDepth = levelInfo.groupMaxDepth;

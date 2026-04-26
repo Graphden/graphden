@@ -27,7 +27,5 @@
    :parent :to-json-string
    :args {:data :get-layout-data}}
 
-  ;; POST /api/graph/layout - accepts root-id and expansions
-  {:name :layout-api-route
-   :parent :post-route
-   :args {:path "/api/graph/layout" :handler :_layout-api-handler}}]}
+  ;; The concrete `/api/graph/layout` route lives in `app.routes`.
+  ]}

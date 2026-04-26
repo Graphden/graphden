@@ -1,0 +1,73 @@
+;; All concrete app routes — one fn-def per HTTP endpoint reitit serves.
+;; Names drop the redundant `-route` suffix because the namespace
+;; (`app.routes`) and the parent fn-def (`get-route`, `post-auth-required-route`,
+;; …) already say "this is a route".
+;;
+;; Handlers and request-body fn-defs live in their feature modules
+;; (`app/editor`, `app/layout`); this module only assembles
+;; `path + handler` into the route shape reitit consumes via the parent.
+
+
+{:namespace "app.routes"
+ :description "Concrete HTTP routes — one fn-def per endpoint. The leaf assembled from a method-template parent (`get-route`, `post-auth-required-route`, …) plus a `:path` and a `:handler` ref into `app/editor` or `app/layout`."
+ :fns
+ [{:name :health
+   :description "GET /health — returns the current health status as JSON."
+   :parent :get-route
+   :args {:path "/health" :handler :_health-handler}}
+
+  {:name :metrics
+   :description "GET /metrics — returns JVM info (heap, threads, uptime) as JSON."
+   :parent :get-route
+   :args {:path "/metrics" :handler :_metrics-handler}}
+
+  {:name :favicon
+   :parent :get-route
+   :args {:path "/favicon.ico" :handler :_favicon-handler}}
+
+  {:name :editor
+   :parent :get-route
+   :args {:path "/" :handler :_editor-handler}}
+
+  {:name :api-entities
+   :parent :get-route
+   :args {:path "/api/graph/entities" :handler :all-entities-json-handler}}
+
+  {:name :entity-details
+   :parent :get-route
+   :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler}}
+
+  {:name :entity-form-create
+   :parent :get-route
+   :args {:path "/partials/entity-form/:type" :handler :entity-form-create-handler}}
+
+  {:name :entity-form-edit
+   :parent :get-route
+   :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-edit-handler}}
+
+  ;; Write-facing endpoints — gated by auth-required-middleware via
+  ;; post/delete-auth-required-route templates (see app/server).
+  ;; Verb-at-end (`entity-create` over `create-entity`) avoids the
+  ;; name clash with the `web.crud` base-fns of the same root verb.
+  {:name :entity-create
+   :parent :post-auth-required-route
+   :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
+
+  {:name :entity-delete
+   :parent :delete-auth-required-route
+   :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
+
+  ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
+  ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).
+  {:name :sequence-append
+   :parent :post-auth-required-route
+   :args {:path "/api/sequence/append/:fn-id" :handler :sequence-append-handler}}
+
+  {:name :sequence-remove
+   :parent :delete-auth-required-route
+   :args {:path "/api/sequence/item/:item-id" :handler :sequence-remove-handler}}
+
+  ;; POST /api/graph/layout - accepts root-id and expansions
+  {:name :layout-api
+   :parent :post-route
+   :args {:path "/api/graph/layout" :handler :_layout-api-handler}}]}

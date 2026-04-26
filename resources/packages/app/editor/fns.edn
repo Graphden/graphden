@@ -131,50 +131,7 @@
    :parent :cached-svg-ok-response
    :args {:body :_favicon-svg-body}}
 
-  ;; =============================================================================
-  ;; ROUTES
-  ;; =============================================================================
-
-  {:name :favicon-route
-   :parent :get-route
-   :args {:path "/favicon.ico" :handler :_favicon-handler}}
-
-  {:name :editor-route
-   :parent :get-route
-   :args {:path "/" :handler :_editor-handler}}
-
-  {:name :api-entities-route
-   :parent :get-route
-   :args {:path "/api/graph/entities" :handler :all-entities-json-handler}}
-
-  {:name :entity-details-route
-   :parent :get-route
-   :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler}}
-
-  {:name :entity-form-create-route
-   :parent :get-route
-   :args {:path "/partials/entity-form/:type" :handler :entity-form-create-handler}}
-
-  {:name :entity-form-edit-route
-   :parent :get-route
-   :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-edit-handler}}
-
-  ;; Write-facing endpoints — gated by auth-required-middleware via
-  ;; post/delete-auth-required-route templates (see app/server).
-  {:name :create-entity-route
-   :parent :post-auth-required-route
-   :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
-
-  {:name :delete-entity-route
-   :parent :delete-auth-required-route
-   :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
-
-  ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
-  ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).
-  {:name :sequence-append-route
-   :parent :post-auth-required-route
-   :args {:path "/api/sequence/append/:fn-id" :handler :sequence-append-handler}}
-
-  {:name :sequence-remove-route
-   :parent :delete-auth-required-route
-   :args {:path "/api/sequence/item/:item-id" :handler :sequence-remove-handler}}]}
+  ;; Concrete editor routes (`/`, `/favicon.ico`, `/partials/...`,
+  ;; `/api/entities/...`, `/api/sequence/...`) live in `app.routes`;
+  ;; they reference the handler fn-defs above by name.
+  ]}

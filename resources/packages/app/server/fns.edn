@@ -28,51 +28,10 @@
    :parent :json-ok-response
    :args {:body :_metrics-json-body}}
 
-  ;; =============================================================================
-  ;; ROUTE GROUPS (named — user navigates to each from sidebar).
-  ;; Concrete leaf routes live in `app.routes`.
-  ;; =============================================================================
-
-  {:name :ui-routes
-   :description "User-facing UI route group — favicon and the editor page."
-   :parent :list
-   :args {:items [:favicon :editor]}}
-
-  {:name :entity-crud-routes
-   :description "Entity CRUD route group — details/form pages and create/delete handlers used by the editor's right-hand panel."
-   :parent :list
-   :args {:items [:entity-details
-                  :entity-form-create
-                  :entity-form-edit
-                  :entity-create
-                  :entity-delete]}}
-
-  {:name :graph-api-routes
-   :description "Graph-data API routes — `/api/entities` (raw graph dump) and `/api/graph/layout` (layout pipeline)."
-   :parent :list
-   :args {:items [:api-entities :layout-api]}}
-
-  {:name :monitoring-routes
-   :description "Health + metrics route group consumed by the docker healthcheck and external scrapers."
-   :parent :list
-   :args {:items [:health :metrics]}}
-
-  {:name :all-routes
-   :description "Flat list of every route reitit serves. Bound into `:_router` — order is irrelevant since reitit dispatches by `[path method]`."
-   :parent :list
-   :args {:items [:favicon
-                  :editor
-                  :api-entities
-                  :entity-details
-                  :entity-form-create
-                  :entity-form-edit
-                  :entity-create
-                  :entity-delete
-                  :sequence-append
-                  :sequence-remove
-                  :health
-                  :metrics
-                  :layout-api]}}
+  ;; Concrete leaf routes live in `app.routes`; route groups
+  ;; (`monitoring`, `entity-crud`, `graph-api`, `ui`, `all`) live in
+  ;; `app.routes.groups`. This module only owns the auth presets +
+  ;; the web-server root chain.
 
   ;; =============================================================================
   ;; AUTH-REQUIRED ROUTE SHORTCUTS
@@ -103,7 +62,7 @@
   {:name :_router
    :description "This app's compiled reitit router — text-error-router bound to all of this app's routes."
    :parent :text-error-router
-   :args {:routes :all-routes}}
+   :args {:routes :all}}
 
   {:name :_app-ring-response
    :description "Final Ring handler — invokes the router on the parsed request and merges default security headers. Bound to `:http-server.handler`."

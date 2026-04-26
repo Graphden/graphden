@@ -1,0 +1,54 @@
+;; Route groups — sidebar-visible bundles of `app.routes` leaves.
+;;
+;; These exist purely to give the user navigable headings ("monitoring",
+;; "ui", "entity-crud", …) that resolve to a list of routes; the names
+;; lose the `-routes` suffix because the namespace
+;; `app.routes.groups` already says "this is a routes bundle".
+;;
+;; `app.routes.groups.all` is the full flat list reitit dispatches on
+;; via `app.server._router`.
+
+
+{:namespace "app.routes.groups"
+ :description "Route bundles — `:list`-typed fn-defs collecting subsets of `app.routes` for sidebar navigation. `all` is the canonical flat list bound into the `_router`."
+ :fns
+ [{:name :ui
+   :description "User-facing UI route group — favicon and the editor page."
+   :parent :list
+   :args {:items [:favicon :editor]}}
+
+  {:name :entity-crud
+   :description "Entity CRUD route group — details/form pages and create/delete handlers used by the editor's right-hand panel."
+   :parent :list
+   :args {:items [:entity-details
+                  :entity-form-create
+                  :entity-form-edit
+                  :entity-create
+                  :entity-delete]}}
+
+  {:name :graph-api
+   :description "Graph-data API routes — `/api/graph/entities` (raw graph dump) and `/api/graph/layout` (layout pipeline)."
+   :parent :list
+   :args {:items [:api-entities :layout-api]}}
+
+  {:name :monitoring
+   :description "Health + metrics route group consumed by the docker healthcheck and external scrapers."
+   :parent :list
+   :args {:items [:health :metrics]}}
+
+  {:name :all
+   :description "Flat list of every route reitit serves. Bound into `app.server._router` — order is irrelevant since reitit dispatches by `[path method]`."
+   :parent :list
+   :args {:items [:favicon
+                  :editor
+                  :api-entities
+                  :entity-details
+                  :entity-form-create
+                  :entity-form-edit
+                  :entity-create
+                  :entity-delete
+                  :sequence-append
+                  :sequence-remove
+                  :health
+                  :metrics
+                  :layout-api]}}]}

@@ -113,11 +113,11 @@ function renderNsNode(container, name, node, path) {
     const desc = document.createElement('span');
     desc.textContent = 'ⓘ';
     desc.title = node.description;
-    desc.style.color = '#0066cc';
+    desc.style.color = 'currentColor';
     desc.style.cursor = 'help';
     desc.style.fontSize = '11px';
     desc.style.marginLeft = '4px';
-    desc.style.opacity = '0.8';
+    desc.style.opacity = '0.7';
     header.appendChild(desc);
   }
 

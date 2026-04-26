@@ -16,12 +16,15 @@ function createDescriptionBadge(description) {
   badge.className = 'description-badge';
   badge.textContent = 'ⓘ';
   badge.title = description;
-  badge.style.color = '#0066cc';
+  // Inherit color from the parent row — default text is dark → black
+  // badge, root-block rows that flip to ROOT_FG (white) get a white
+  // badge automatically without per-site logic.
+  badge.style.color = 'currentColor';
   badge.style.cursor = 'help';
   badge.style.fontSize = '11px';
   badge.style.fontWeight = 'normal';
   badge.style.marginLeft = '4px';
-  badge.style.opacity = '0.8';
+  badge.style.opacity = '0.7';
   // Some overlay containers carry `pointer-events: none` (e.g. the
   // floating column-below-MI text overlay). Override on the badge so
   // the native title-tooltip can fire on hover.
@@ -759,11 +762,11 @@ function createEdgeLabelOverlay(edge, container) {
     const desc = document.createElement('span');
     desc.textContent = 'ⓘ';
     desc.title = description;
-    desc.style.color = '#0066cc';
+    desc.style.color = 'currentColor';
     desc.style.cursor = 'help';
     desc.style.fontSize = '11px';
     desc.style.marginLeft = '4px';
-    desc.style.opacity = '0.8';
+    desc.style.opacity = '0.7';
     overlay.appendChild(desc);
   }
 

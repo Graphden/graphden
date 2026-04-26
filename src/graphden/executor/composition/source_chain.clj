@@ -92,32 +92,37 @@
    1. Direct free args on this fn
    2. Free args from fns referenced in arg values (via ref-id)
 
+   `walk-hof?`: when true (used by find-available-arg name resolution),
+   descends through `:is-fn` ref-bindings as well — captured-from-outer
+   names inside HOF subgraphs become reachable for explicit binding.
+   When false (used by sync propagation), `:is-fn` refs are a BOUNDARY,
+   so lambda-param names don't leak as new propagated free args of the
+   caller.
+
    args-data contains :by-fn and :by-id indexes."
-  [fn-cache args-data fn-id visited-fns depth]
+  [fn-cache args-data fn-id visited-fns depth walk-hof?]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Free arg collection chain too deep"
                     {:type :fn-composition/chain-too-deep
                      :fn-id fn-id
                      :max-depth sp/*max-graph-iterations*})))
   (if (contains? visited-fns fn-id)
-    ;; Cycle detected, return empty to avoid infinite loop
     []
     (let [visited' (conj visited-fns fn-id)
           fn-args (get (:by-fn args-data) fn-id [])
           {:keys [free-args bound-args]} (partition-args-by-freedom fn-args)]
-      ;; Free args are:
-      ;; 1. Own free args
-      ;; 2. Free args from fns referenced via ref-id (recursively)
       (into free-args
             (mapcat (fn [arg]
-                      (when-let [ref-fn-id (:ref-id arg)]
-                        (collect-free-args-from-fn fn-cache args-data ref-fn-id visited' (inc depth)))))
+                      (when (and (:ref-id arg)
+                                 (or walk-hof? (not (:is-fn arg))))
+                        (collect-free-args-from-fn fn-cache args-data (:ref-id arg)
+                                                   visited' (inc depth) walk-hof?))))
             bound-args))))
 
 
 (defn- collect-parent-free-args-for-one
   "Collects free args from a single parent fn (internal helper)."
-  [fn-cache args-data parent-fn-id depth]
+  [fn-cache args-data parent-fn-id depth walk-hof?]
   (when (> depth sp/*max-graph-iterations*)
     (throw (ex-info "Parent chain too deep while collecting free args"
                     {:type :fn-composition/parent-chain-too-deep
@@ -125,10 +130,11 @@
                      :max-depth sp/*max-graph-iterations*})))
   (let [fn-args (get (:by-fn args-data) parent-fn-id [])
         {:keys [free-args bound-args]} (partition-args-by-freedom fn-args)
-        ;; Collect free args from referenced fns (only bound args have ref-id)
         ref-free-args (mapcat (fn [arg]
-                                (when-let [ref-fn-id (:ref-id arg)]
-                                  (collect-free-args-from-fn fn-cache args-data ref-fn-id #{} (inc depth))))
+                                (when (and (:ref-id arg)
+                                           (or walk-hof? (not (:is-fn arg))))
+                                  (collect-free-args-from-fn fn-cache args-data (:ref-id arg)
+                                                             #{} (inc depth) walk-hof?)))
                               bound-args)]
     (into free-args ref-free-args)))
 
@@ -137,28 +143,26 @@
   "Collects free args from all parent fns.
    Returns vector of arg entities that are free in the parents.
 
-   Accepts a collection of parent fn-ids (multiple inheritance).
-   args-data contains :by-fn and :by-id indexes.
+   `walk-hof?` (default true): see `collect-free-args-from-fn`. Sync's
+   propagation pass passes false to keep lambda-param names sealed
+   inside their HOF target; name-resolution callers (find-available-arg)
+   use the default to traverse cross-HOF for explicit captures.
 
-   Dedupes by [terminal-source-id, resolved-name]. With diamond inheritance
-   (two parents sharing a common ancestor), the same root free arg is
-   reachable via both parents as different propagated arg entities — they
-   must collapse to one. But the cascade pattern (pair-1, pair, triple, ...)
-   intentionally creates multiple propagated copies of the same root arg
-   under different rename targets (item1, item2, item3, ...), so the
-   resolved name is part of the dedup key to keep them distinct."
-  [fn-cache args-data parent-fn-ids depth]
-  (let [args-by-id (:by-id args-data)
-        seen (atom #{})]
-    (into []
-          (comp
-            (mapcat (fn [pid]
-                      (collect-parent-free-args-for-one fn-cache args-data pid depth)))
-            (remove (fn [a]
-                      (let [root (terminal-source-id args-by-id a)
-                            resolved-name (resolve-arg-name-cached args-by-id a 0)
-                            k [root resolved-name]]
-                        (if (contains? @seen k)
-                          true
-                          (do (swap! seen conj k) false))))))
-          (remove nil? parent-fn-ids))))
+   Dedupes by [terminal-source-id, resolved-name] across MI parents."
+  ([fn-cache args-data parent-fn-ids depth]
+   (collect-parent-free-args fn-cache args-data parent-fn-ids depth true))
+  ([fn-cache args-data parent-fn-ids depth walk-hof?]
+   (let [args-by-id (:by-id args-data)
+         seen (atom #{})]
+     (into []
+           (comp
+             (mapcat (fn [pid]
+                       (collect-parent-free-args-for-one fn-cache args-data pid depth walk-hof?)))
+             (remove (fn [a]
+                       (let [root (terminal-source-id args-by-id a)
+                             resolved-name (resolve-arg-name-cached args-by-id a 0)
+                             k [root resolved-name]]
+                         (if (contains? @seen k)
+                           true
+                           (do (swap! seen conj k) false))))))
+           (remove nil? parent-fn-ids)))))

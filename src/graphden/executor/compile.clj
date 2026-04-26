@@ -102,7 +102,9 @@
 (defn- resolve-seq-item
   "Resolve a single item-arg from a sequence chain into a runtime value.
    Literal items return their :value; ref items call the compiled ref
-   with the caller's free-args (memoized via `*call-cache*`)."
+   with the caller's free-args (memoized via `*call-cache*`); named
+   free-slot items (`{:as :name}` syntax — no value, no ref) read the
+   value from `free-args` by name."
   [item all-fns free-args]
   (cond
     (some? (:value item)) (:value item)
@@ -115,6 +117,17 @@
                         {:type :runtime-error/missing-ref
                          :ref-id ref-id})))
       (call-with-cache ref-id callee all-fns free-args))
+
+    (:name item)
+    (let [v (get free-args (keyword (:name item)))]
+      ;; Captured value may be a ref-thunk (when caller bound the
+      ;; named slot to a fn-ref); deref so the impl receives the
+      ;; computed value, matching the identity-wrapper pattern this
+      ;; replaces.
+      (cond
+        (rt/thunk? v) (v)
+        (instance? clojure.lang.IDeref v) @v
+        :else v))
 
     :else nil))
 

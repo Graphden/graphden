@@ -265,13 +265,18 @@
 
 
 (defn- resolve-sequence-item
-  "Resolves one element of a sequence arg's value vector into {:value … :ref-id …}.
-   Keywords that name a known fn become refs; other keywords become literal values.
-   Maps with :ref or :value behave as one-shot overrides."
+  "Resolves one element of a sequence arg's value vector into {:value …
+   :ref-id … :name …}. Keywords that name a known fn become refs;
+   other keywords become literal values. Maps with :ref or :value
+   behave as one-shot overrides. A bare `{:as :name}` (no value/ref)
+   produces a NAMED FREE SLOT — at runtime its value is read from
+   `outer-free-args` by name; cross-HOF callers source-id directly to
+   this item, so identity-wrappers around `{:value {:as :name}}` are
+   no longer needed."
   [fn-name-cache created-fns item]
   (cond
     (uuid? item)
-    {:value nil :ref-id item}
+    {:value nil :ref-id item :name nil}
 
     (keyword? item)
     (let [nm (name item)]
@@ -279,18 +284,26 @@
         (if-let [entry (or (get created-fns item)
                            (when-let [existing (get fn-name-cache nm)]
                              (:id existing)))]
-          {:value nil :ref-id entry}
-          {:value item :ref-id nil})
-        {:value item :ref-id nil}))
+          {:value nil :ref-id entry :name nil}
+          {:value item :ref-id nil :name nil})
+        {:value item :ref-id nil :name nil}))
 
     (and (map? item) (contains? item :ref))
-    {:value nil :ref-id (resolve-fn-id-cached fn-name-cache created-fns (:ref item))}
+    {:value nil
+     :ref-id (resolve-fn-id-cached fn-name-cache created-fns (:ref item))
+     :name (when-let [a (:as item)] (clojure.core/name a))}
 
     (and (map? item) (contains? item :value))
-    {:value (:value item) :ref-id nil}
+    {:value (:value item)
+     :ref-id nil
+     :name (when-let [a (:as item)] (clojure.core/name a))}
+
+    ;; Bare `{:as :name}` — named free slot. No value, no ref.
+    (and (map? item) (contains? item :as))
+    {:value nil :ref-id nil :name (clojure.core/name (:as item))}
 
     :else
-    {:value item :ref-id nil}))
+    {:value item :ref-id nil :name nil}))
 
 
 (defn- walk-anchor-chain-ids
@@ -320,19 +333,38 @@
 
    Anchor.source-id points at the base-fn's sequence template arg; its
    next-arg-id points at the first item (or nil for an empty sequence).
-   Items have source-id=nil, name=nil, and their own next-arg-id chain."
+   Items have source-id=nil and their own next-arg-id chain. Named
+   items (`{:as :name}`) carry their name and reuse the existing
+   item-id for stable cross-HOF source-id chains across re-syncs;
+   unnamed items position-match the existing chain."
   [fn-name-cache created-fns args-data fn-id parent-arg items]
   (let [template-id (:id parent-arg)
         existing-anchor (get (:by-fn-source args-data) [fn-id template-id])
         anchor-id (or (:id existing-anchor) (random-uuid))
         element-type (or (:of parent-arg) :any)
+        existing-item-ids (if existing-anchor
+                            (walk-anchor-chain-ids (:by-id args-data) existing-anchor)
+                            [])
+        existing-by-id (:by-id args-data)
+        existing-by-name (into {}
+                               (keep (fn [eid]
+                                       (when-let [e (get existing-by-id eid)]
+                                         (when (:name e)
+                                           [(:name e) eid]))))
+                               existing-item-ids)
         item-records (mapv (fn [item]
-                             (let [{:keys [value ref-id]} (resolve-sequence-item
-                                                            fn-name-cache created-fns item)]
-                               {:id (random-uuid)
+                             (let [{:keys [value ref-id name]} (resolve-sequence-item
+                                                                 fn-name-cache created-fns item)
+                                   ;; Named items reuse their existing id by
+                                   ;; name match → stable cross-HOF source-id
+                                   ;; targets across re-syncs. Unnamed items
+                                   ;; always get a fresh id (positional reuse
+                                   ;; would lock callers to position).
+                                   reuse-id (when name (get existing-by-name name))]
+                               {:id (or reuse-id (random-uuid))
                                 :fn-id fn-id
                                 :source-id nil
-                                :name nil
+                                :name name
                                 :type element-type
                                 :value value
                                 :ref-id ref-id
@@ -362,8 +394,9 @@
                 :is-fn nil
                 :next-arg-id (when (seq linked) (:id (first linked)))
                 :prev-arg-id nil}
+        reused-ids (into #{} (map :id) item-records)
         delete-items (if existing-anchor
-                       (walk-anchor-chain-ids (:by-id args-data) existing-anchor)
+                       (filterv #(not (contains? reused-ids %)) existing-item-ids)
                        [])]
     {:new-chain (into [anchor] linked)
      :delete-items delete-items

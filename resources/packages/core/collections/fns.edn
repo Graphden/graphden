@@ -168,14 +168,10 @@
    :return-type :any}
 
   ;; (update-in m path #(merge defaults %)) — Clojure-style closure.
-  ;; `:defaults` is captured from caller's outer scope: callers bind it
-  ;; via merge-in's primary-binding propagation (router-ring-response
-  ;; sets `:defaults :default-security-headers`), which lands in
-  ;; outer-free-args at the `:f` hof-wrap site. `:existing` is the
-  ;; lambda's per-call param; update-in's impl calls `(f existing-val)`,
-  ;; and hof-wrap's call-time dispatch routes the single non-map arg to
-  ;; the only leftover name (= `:existing` after subtracting the captured
-  ;; `:defaults`).
+  ;; `:defaults` is captured from caller's outer scope (callers source-id
+  ;; cross-HOF directly to the named seq-item below); `:existing` is the
+  ;; lambda's per-call param injected by update-in's impl. Sync derives
+  ;; both via `partition-args-by-freedom` over the named items.
   {:name :merge-in
    :parent :update-in
    :args {:m {:as :m}
@@ -184,12 +180,4 @@
 
   {:name :_merge-in-fn
    :parent :merge
-   :args {:maps [:_merge-in-defaults-arg :_merge-in-existing-arg]}}
-
-  {:name :_merge-in-defaults-arg
-   :parent :identity
-   :args {:value {:as :defaults}}}
-
-  {:name :_merge-in-existing-arg
-   :parent :identity
-   :args {:value {:as :existing}}}]}
+   :args {:maps [{:as :defaults} {:as :existing}]}}]}

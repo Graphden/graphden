@@ -78,9 +78,23 @@
                                   (swap! result conj [n oid]))))
                       :ref (when-not (:is-fn bnd)
                              (walk (:ref-id bnd) next-covered))
-                      :seq (doseq [item (:items bnd)
-                                   :when (:ref-id item)]
-                             (walk (:ref-id item) next-covered))
+                      :seq (doseq [item (:items bnd)]
+                             (cond
+                               ;; Ref-item: descend through (non-HOF
+                               ;; refs already bypass the boundary).
+                               (:ref-id item)
+                               (walk (:ref-id item) next-covered)
+                               ;; Named free slot inside the sequence
+                               ;; (`{:as :name}` syntax). The item itself
+                               ;; introduces the ext-name; its arg-id is
+                               ;; the structural origin callers source-id
+                               ;; against.
+                               (and (:name item)
+                                    (nil? (:value item)))
+                               (let [n (keyword (:name item))]
+                                 (when-not (or (next-covered n)
+                                               (some #(= n (first %)) @result))
+                                   (swap! result conj [n (:id item)])))))
                       :value nil)))))]
       (walk fn-id #{}))
     @result))

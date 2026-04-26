@@ -223,7 +223,7 @@
           args-data {:by-fn {fn-id [free-arg bound-arg]}
                      :by-id {(:id free-arg) free-arg
                              (:id bound-arg) bound-arg}}
-          result (#'sc/collect-free-args-from-fn {} args-data fn-id #{} 0)]
+          result (#'sc/collect-free-args-from-fn {} args-data fn-id #{} 0 true)]
       (is (= [free-arg] result))))
 
   (testing "follows ref-id to collect transitive free args"
@@ -237,23 +237,23 @@
                              fn-b [free-b]}
                      :by-id {(:id bound-a) bound-a
                              (:id free-b) free-b}}
-          result (#'sc/collect-free-args-from-fn {} args-data fn-a #{} 0)]
+          result (#'sc/collect-free-args-from-fn {} args-data fn-a #{} 0 true)]
       (is (= [free-b] result))))
 
   (testing "handles cycle in visited-fns"
     (let [fn-id (random-uuid)
-          result (#'sc/collect-free-args-from-fn {} {:by-fn {}} fn-id #{fn-id} 0)]
+          result (#'sc/collect-free-args-from-fn {} {:by-fn {}} fn-id #{fn-id} 0 true)]
       (is (= [] result))))
 
   (testing "returns empty for fn with no args"
     (let [fn-id (random-uuid)
-          result (#'sc/collect-free-args-from-fn {} {:by-fn {}} fn-id #{} 0)]
+          result (#'sc/collect-free-args-from-fn {} {:by-fn {}} fn-id #{} 0 true)]
       (is (= [] result))))
 
   (testing "throws when chain too deep"
     (binding [sp/*max-graph-iterations* 2]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"too deep"
-            (#'sc/collect-free-args-from-fn {} {:by-fn {}} (random-uuid) #{} 10))))))
+            (#'sc/collect-free-args-from-fn {} {:by-fn {}} (random-uuid) #{} 10 true))))))
 
 
 ;; === collect-parent-free-args ===
@@ -771,27 +771,27 @@
 
 (deftest resolve-sequence-item-uuid
   (let [id (random-uuid)]
-    (is (= {:value nil :ref-id id}
+    (is (= {:value nil :ref-id id :name nil}
            (#'records/resolve-sequence-item {} {} id)))))
 
 
 (deftest resolve-sequence-item-keyword-matching-created
   (testing "keyword matching a freshly-created fn resolves to a ref"
     (let [id (random-uuid)]
-      (is (= {:value nil :ref-id id}
+      (is (= {:value nil :ref-id id :name nil}
              (#'records/resolve-sequence-item {} {:my-fn id} :my-fn))))))
 
 
 (deftest resolve-sequence-item-keyword-matching-registry
   (testing "keyword matching an existing fn in the name-cache resolves"
     (let [id (random-uuid)]
-      (is (= {:value nil :ref-id id}
+      (is (= {:value nil :ref-id id :name nil}
              (#'records/resolve-sequence-item {"my-fn" {:id id}} {} :my-fn))))))
 
 
 (deftest resolve-sequence-item-keyword-unknown-fn-is-literal
   (testing "keyword that doesn't name any known fn stays as a literal value"
-    (is (= {:value :not-a-fn :ref-id nil}
+    (is (= {:value :not-a-fn :ref-id nil :name nil}
            (#'records/resolve-sequence-item {} {} :not-a-fn)))))
 
 
@@ -799,31 +799,41 @@
   (testing "keyword with invalid identifier (e.g. contains `/`) stays literal"
     ;; Namespaced keywords produce names with `/` which `valid-identifier?`
     ;; rejects. The item is still valid as a literal keyword value.
-    (is (= {:value :ns/kw :ref-id nil}
+    (is (= {:value :ns/kw :ref-id nil :name nil}
            (#'records/resolve-sequence-item {} {} :ns/kw)))))
 
 
 (deftest resolve-sequence-item-map-with-ref-override
   (let [id (random-uuid)]
-    (is (= {:value nil :ref-id id}
+    (is (= {:value nil :ref-id id :name nil}
            (#'records/resolve-sequence-item {"target" {:id id}} {} {:ref :target})))))
 
 
 (deftest resolve-sequence-item-map-with-value-override
   (testing "explicit `:value` bypasses fn-ref resolution"
-    (is (= {:value :keyword-as-literal :ref-id nil}
+    (is (= {:value :keyword-as-literal :ref-id nil :name nil}
            (#'records/resolve-sequence-item {} {} {:value :keyword-as-literal})))
-    (is (= {:value [1 2 3] :ref-id nil}
+    (is (= {:value [1 2 3] :ref-id nil :name nil}
            (#'records/resolve-sequence-item {} {} {:value [1 2 3]})))))
+
+
+(deftest resolve-sequence-item-as-only-named-free-slot
+  (testing "{:as :name} alone produces a named free slot — no value, no ref"
+    (is (= {:value nil :ref-id nil :name "defaults"}
+           (#'records/resolve-sequence-item {} {} {:as :defaults}))))
+  (testing "{:as :name :ref :fn} carries both ref-id and name"
+    (let [id (random-uuid)]
+      (is (= {:value nil :ref-id id :name "tagged"}
+             (#'records/resolve-sequence-item {"f" {:id id}} {} {:ref :f :as :tagged}))))))
 
 
 (deftest resolve-sequence-item-literals
   (testing "non-keyword, non-map, non-uuid values pass through as literal :value"
-    (is (= {:value 42 :ref-id nil}
+    (is (= {:value 42 :ref-id nil :name nil}
            (#'records/resolve-sequence-item {} {} 42)))
-    (is (= {:value "string" :ref-id nil}
+    (is (= {:value "string" :ref-id nil :name nil}
            (#'records/resolve-sequence-item {} {} "string")))
-    (is (= {:value [1 2] :ref-id nil}
+    (is (= {:value [1 2] :ref-id nil :name nil}
            (#'records/resolve-sequence-item {} {} [1 2])))))
 
 

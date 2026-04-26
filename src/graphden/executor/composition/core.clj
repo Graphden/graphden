@@ -230,8 +230,13 @@
                        ;; The executor handles transitive arg propagation at runtime via trace-source-to-fn.
                        ;; This prevents internal free args (like html-response.status) from leaking
                        ;; through bound refs (like editor-route.handler).
+                       ;; Propagation pass — DON'T walk through is-fn refs,
+                       ;; so lambda-param names of HOF targets stay sealed
+                       ;; inside the lambda. Cross-HOF captures still get
+                       ;; resolved at explicit-binding time via
+                       ;; find-available-arg (which defaults walk-hof?=true).
                        parent-free-args (sc/collect-parent-free-args
-                                          fn-id-cache-final args-data parent-fn-ids 0)
+                                          fn-id-cache-final args-data parent-fn-ids 0 false)
 
                        ;; Use parent-free-args directly (no combination with explicit-ref-free-args)
                        all-free-args parent-free-args

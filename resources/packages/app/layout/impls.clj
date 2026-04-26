@@ -319,17 +319,65 @@
             (swap! optional-unsets-by-node update node-id
                    (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
 
-        ;; Free args on HOF-reachable nodes (descendants reached through an
-        ;; `is-fn=true` arg boundary) are supplied by the HOF invocation, not
-        ;; by the graph-level caller. Collect their names here and surface
-        ;; them on node data; frontend renders them as a compact badge
-        ;; separate from interface free args.
+        ;; Lambda-param free args on HOF-reachable nodes — supplied by the
+        ;; HOF invocation per call (no caller-chain anchor). `λname` badge.
+        ;; `:capture` free args (caller's chain has a bound arg whose
+        ;; source-id chain reaches this arg's origin) are NOT recorded
+        ;; here — their binding is rendered as an ordinary edge on the
+        ;; capturing caller node.
         hof-captured-by-node (atom {})
         record-hof-captured!
         (fn [node-id arg-name]
           (when (and node-id arg-name)
             (swap! hof-captured-by-node update node-id
                    (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
+
+        ;; Reverse source-id index: arg-id → vector of args whose
+        ;; `:source-id` points directly here. Used to walk DOWNWARD from
+        ;; a HOF-target's free arg to find caller-side bindings via
+        ;; structural source-id chains (cross-HOF).
+        inverse-source-map
+        (reduce (fn [m a]
+                  (if-let [sid (:source-id a)]
+                    (update m sid (fnil conj []) a)
+                    m))
+                {}
+                (vals arg-map))
+
+        ;; Reverse source-id BFS from `target-arg-id`: returns the FIRST
+        ;; downstream arg with `value` or `ref-id` (structurally bound by
+        ;; some caller via cross-HOF source-id chain), or nil. Used both
+        ;; to classify captures and to migrate the rendered edge from
+        ;; the caller down to the inner consumer node.
+        caller-bound-arg
+        (fn [target-arg-id]
+          (loop [queue [target-arg-id]
+                 visited #{}]
+            (if (empty? queue)
+              nil
+              (let [cur (peek queue)
+                    rest-q (pop queue)]
+                (if (contains? visited cur)
+                  (recur rest-q visited)
+                  (let [children (get inverse-source-map cur [])
+                        bound (some (fn [a]
+                                      (when (or (some? (:value a))
+                                                (some? (:ref-id a)))
+                                        a))
+                                    children)]
+                    (if bound
+                      bound
+                      (recur (into rest-q (map :id) children)
+                             (conj visited cur)))))))))
+
+        ;; Edge-migration map: caller-side arg-id → inside-consumer
+        ;; node-id. Populated when an unset arg inside an expanded HOF
+        ;; subgraph is structurally captured. Post-processing rewrites
+        ;; edges whose `:source-arg-id` matches a key here so the
+        ;; rendered edge originates from the inside consumer (the leaf
+        ;; that actually reads the value) instead of the outer caller
+        ;; node.
+        captured-edge-migrations (atom {})
 
         ;; Does `arg-entity` propagate an `is-fn=true` marker anywhere in its
         ;; source-id chain? Used to decide whether a ref-binding to another
@@ -530,15 +578,21 @@
           ([arg-name arg-type arg-id source-node-id expanded-fns]
            (add-unset-arg-node arg-name arg-type arg-id source-node-id expanded-fns false))
           ([arg-name arg-type arg-id source-node-id expanded-fns is-hof]
-           ;; Three routing cases, in priority order:
+           ;; Routing cases, in priority order:
            ;;
            ;;   1. Optional (root `:required=false`, e.g. `:get.default`) —
            ;;      compact `?name` badge via `:optionalArgs`. Sane fallback
            ;;      exists, not part of the interface.
-           ;;   2. HOF-captured (the node sits under an `is-fn=true` ref
-           ;;      boundary) — compact `λname` badge via `:hofCapturedArgs`.
-           ;;      The enclosing HOF invocation will supply the value.
-           ;;   3. Otherwise — visible dashed placeholder node. This IS the
+           ;;   2. Lambda-param of an enclosing HOF (`is-hof=true` AND no
+           ;;      caller-side structural binding via cross-HOF source-id
+           ;;      chain) — compact `λname` badge via `:hofCapturedArgs`.
+           ;;      The HOF impl supplies it per call.
+           ;;   3. HOF capture — `is-hof=true` but a caller's chain DOES
+           ;;      bind this arg structurally (cross-HOF source-id). The
+           ;;      binding is rendered on the capturing caller's edge;
+           ;;      we emit nothing inside the lambda body so the slot
+           ;;      doesn't double-count.
+           ;;   4. Otherwise — visible dashed placeholder node. This IS the
            ;;      caller's interface; the caller must fill it.
            (let [arg-rec (get arg-map arg-id)
                  optional? (arg-is-optional? arg-rec)
@@ -549,7 +603,15 @@
                (record-optional-unset! source-node-id displayed-name)
 
                is-hof
-               (record-hof-captured! source-node-id displayed-name)
+               (if-let [bound (caller-bound-arg arg-id)]
+                 ;; Structural capture: caller has a bound arg whose
+                 ;; source-id chain reaches us. Mark migration target
+                 ;; so post-processing rewrites the caller's edge to
+                 ;; originate from THIS inside-consumer node (the leaf
+                 ;; that actually reads the captured value).
+                 (swap! captured-edge-migrations assoc (:id bound) source-node-id)
+                 ;; True lambda-param: HOF impl supplies it per call.
+                 (record-hof-captured! source-node-id displayed-name))
 
                :else
                (let [node-id (str "unset-" source-node-id "-" arg-id)
@@ -1080,6 +1142,7 @@
                                {:data {:id edge-id
                                        :source source-node-id
                                        :target node-id
+                                       :sourceArgId source-arg-id
                                        :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                     (when edge-arg-name (name edge-arg-name)))}}))))
 
@@ -1195,6 +1258,7 @@
                                    {:data {:id edge-id
                                            :source source-node-id
                                            :target node-id
+                                           :sourceArgId source-arg-id
                                            :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                         (when edge-arg-name (name edge-arg-name)))}}))))
                       node-id)
@@ -1249,6 +1313,7 @@
                                {:data {:id edge-id
                                        :source source-node-id
                                        :target node-id
+                                       :sourceArgId source-arg-id
                                        :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                     (when edge-arg-name (name edge-arg-name)))}}))))
 
@@ -1429,6 +1494,7 @@
                                    {:data {:id edge-id
                                            :source source-node-id
                                            :target node-id
+                                           :sourceArgId source-arg-id
                                            :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
                                                         (when edge-arg-name (name edge-arg-name)))}}))))
                       (let [raw-own-args (get args-by-fn fn-id [])
@@ -1538,9 +1604,29 @@
 
                                   (seq hof-captured)
                                   (assoc-in [:data :hofCapturedArgs] (vec (distinct hof-captured))))))
-                            @nodes)]
+                            @nodes)
+          ;; Edge migration: when an unset arg inside an expanded HOF
+          ;; was structurally captured, rewrite the caller's edge so it
+          ;; originates from the inside-consumer node. The captured
+          ;; mapping was filled by `add-unset-arg-node`'s capture branch.
+          ;; Edges keep their target/argName; only `:source` and `:id`
+          ;; are rewritten so the edge visually starts at the leaf
+          ;; that actually reads the value.
+          migrations @captured-edge-migrations
+          final-edges (mapv (fn [e]
+                              (let [data (:data e)
+                                    sai (:sourceArgId data)
+                                    new-src (when sai (get migrations sai))]
+                                (if new-src
+                                  (assoc e :data
+                                         (-> data
+                                             (assoc :source new-src
+                                                    :id (str "e-cap-" new-src "-" (:target data)))
+                                             (dissoc :sourceArgId)))
+                                  (assoc e :data (dissoc data :sourceArgId)))))
+                            @edges)]
       {:nodes final-nodes
-       :edges @edges})))
+       :edges final-edges})))
 
 
 ;; =============================================================================

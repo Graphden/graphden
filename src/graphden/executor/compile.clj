@@ -74,56 +74,29 @@
 
 (defn- hof-wrap
   "Wrap a compiled closure into a callable for use as a HOF argument
-   (`:fn`-type arg). The shape of the call is decided at CALL-TIME by
-   the value the impl passes — not statically by `(count free-names)` —
-   so a single hof-wrap supports both single-arg lambdas
-   (`(f existing)` from `update-in`) and named map-callables
-   (`(body {:request _ :next-handler _})` from middleware), even when
-   the wrapped fn-graph reads names that ALSO live in
-   `outer-free-args` (capture).
+   (`:fn`-type arg). Shape is **statically** determined by the
+   classified `lambda-params` count (computed at compile time via
+   `r/classify-hof-free`):
 
-   - 0 free names → variadic, ignores input (constant-in-this-scope
-     graph).
-   - else, on each call (with one positional arg):
-     1. Map whose keys are a SUPERSET of `free-names` → multi-bind
-        (merge into outer; map keys override).
-     2. Single free name → bind whole arg to it (override outer).
-     3. 2+ free names, non-matching arg → compute leftover
-        `free-names \\ outer-free-args`; if exactly 1, bind arg to it
-        (the captured names stay from outer, the leftover takes the
-        per-call value).
-     4. Otherwise → throw `:execution-error/ambiguous-hof-call`.
+   - 0 lambda-params → variadic callable that ignores its input
+     (constant-in-this-scope graph).
+   - 1 lambda-param → `(fn [item] …)` — single-arg callable; impls
+     call as `(f value)`. Item is bound to the lambda-param's name.
+   - 2+ lambda-params → `(fn [m] …)` — map-callable; impls pass
+     `{name v ...}` (e.g. middleware passes
+     `{:request _ :next-handler _}`).
 
-   The dispatch keeps the compiler name-agnostic AND restores Clojure
-   closure semantics: lambda-params shadow outer (override on collision),
-   captured names come from outer when the impl provides nothing for
-   them. No `:request`-name hardcode, no per-arg arity annotation
-   needed in fns.edn — the impl's call shape is the source of truth."
-  [compiled free-names all-fns outer-free-args]
-  (if (zero? (count free-names))
-    (fn [& _] (compiled all-fns outer-free-args))
-    (fn [arg]
-      (cond
-        ;; Map whose keys cover all free-names → multi-bind.
-        (and (map? arg)
-             (every? #(contains? arg %) free-names))
-        (compiled all-fns (merge outer-free-args arg))
-
-        ;; Single free name → bind whole arg to it (lambda shadows outer).
-        (= 1 (count free-names))
-        (compiled all-fns (assoc outer-free-args (first free-names) arg))
-
-        ;; 2+ free names but arg isn't a covering map: the captured
-        ;; names live in outer; the LEFTOVER is the lambda param.
-        :else
-        (let [leftover (filterv #(not (contains? outer-free-args %)) free-names)]
-          (if (= 1 (count leftover))
-            (compiled all-fns (assoc outer-free-args (first leftover) arg))
-            (throw (ex-info "Ambiguous HOF call — leftover != 1 and arg isn't a covering map"
-                            {:type :execution-error/ambiguous-hof-call
-                             :free-names free-names
-                             :leftover leftover
-                             :arg-type (type arg)}))))))))
+   `outer-free-args` carries CAPTURED names — values bound by the
+   caller's chain via source-id. Lambda-param keys override on merge,
+   so a name that happens to collide with an outer key still gets the
+   per-call value (Clojure closure semantics: lambda-params shadow
+   outer)."
+  [compiled lambda-params all-fns outer-free-args]
+  (case (count lambda-params)
+    0 (fn [& _] (compiled all-fns outer-free-args))
+    1 (let [n (first lambda-params)]
+        (fn [item] (compiled all-fns (assoc outer-free-args n item))))
+    (fn [m] (compiled all-fns (merge outer-free-args m)))))
 
 
 (defn- resolve-seq-item
@@ -172,7 +145,7 @@
   [bindings all-fns fa-ref]
   (reduce
     (fn [{:keys [args aug] :as acc}
-         {:keys [kind base-name ext-name value ref-id is-fn hof-free-names ref-renames items]}]
+         {:keys [kind base-name ext-name value ref-id is-fn hof-lambda-params ref-renames items]}]
       (case kind
         :value {:args (assoc args base-name value)
                 :aug (assoc aug ext-name value)}
@@ -190,7 +163,7 @@
                                         :base-name base-name
                                         :ref-id ref-id})))
                    entry (if is-fn
-                           (hof-wrap callee hof-free-names all-fns @fa-ref)
+                           (hof-wrap callee hof-lambda-params all-fns @fa-ref)
                            (rt/thunk
                              #(let [fa @fa-ref
                                     r-args (if (seq ref-renames)
@@ -211,11 +184,12 @@
 
 (defn- enrich-ref-bindings
   "Precompute per-binding metadata that depends only on the graph shape:
-   - `:hof-free-names` for `:is-fn` refs (used by `hof-wrap`). These
-     are the TRULY-unbound free args of the ref target —
-     `deep-free-ext-names` already drops names that intermediate
-     env-bindings will fill, so what's left is what HOF callers must
-     inject.
+   - `:hof-lambda-params` for `:is-fn` refs (used by `hof-wrap`).
+     `r/classify-hof-free` partitions the target's deep-free names
+     into structural CAPTURES (the caller's chain has a bound arg
+     reaching the name's origin via source-id) and LAMBDA-PARAMS
+     (no anchor — must be filled per HOF call). Captures stay in
+     outer-free-args; only lambda-params determine the HOF call shape.
    - `:ref-renames`   for non-HOF refs (used at call-site by
      `apply-renames` to map F's free-arg names onto R's). Refs without
      renames get an empty map."
@@ -223,7 +197,8 @@
   (mapv (fn [b]
           (cond
             (and (= :ref (:kind b)) (:is-fn b))
-            (assoc b :hof-free-names (r/deep-free-ext-names (:ref-id b) lookups))
+            (assoc b :hof-lambda-params
+                   (:lambda-params (r/classify-hof-free (:ref-id b) fn-id lookups)))
 
             (= :ref (:kind b))
             (assoc b :ref-renames (r/build-ref-renames (:ref-id b) fn-id lookups))
@@ -241,14 +216,14 @@
    a directly-reached `:is-fn` primary binding)."
   [env-bindings all-fns free-args]
   (reduce
-    (fn [acc {:keys [kind env-name value ref-id is-fn hof-free-names items]}]
+    (fn [acc {:keys [kind env-name value ref-id is-fn hof-lambda-params items]}]
       (case kind
         :value (assoc acc env-name value)
 
         :ref (let [callee (get all-fns ref-id)]
                (if is-fn
                  (assoc acc env-name
-                        (hof-wrap callee hof-free-names all-fns free-args))
+                        (hof-wrap callee hof-lambda-params all-fns free-args))
                  (assoc acc env-name
                         (rt/thunk #(call-with-cache ref-id callee all-fns free-args)))))
 
@@ -340,8 +315,8 @@
         bindings (enrich-ref-bindings fn-id (b/collect-bindings fn-id lookups) lookups)
         env-bindings (mapv (fn [b]
                              (if (and (= :ref (:kind b)) (:is-fn b))
-                               (assoc b :hof-free-names
-                                      (r/deep-free-ext-names (:ref-id b) lookups))
+                               (assoc b :hof-lambda-params
+                                      (:lambda-params (r/classify-hof-free (:ref-id b) fn-id lookups)))
                                b))
                            (b/collect-env-bindings fn-id lookups))]
     (build-closure impl bindings env-bindings ctx)))

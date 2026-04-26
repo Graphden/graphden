@@ -25,26 +25,34 @@
     [graphden.executor.compile.lookups :as l]))
 
 
-(defn deep-free-ext-names
-  "Collect TRULY-unbound free-arg external names reachable from `fn-id`,
-   walking across non-HOF ref bindings and descending into :seq items
-   via their refs. As we descend into a ref target we accumulate
-   env-bound names so a deeper :free binding satisfied by an OUTER
-   env-binding is correctly excluded.
+(defn- chain-arg-id-for-ext-name
+  "On `fn-id`'s inheritance chain, find the first arg whose own ext-name
+   (walked via source-id) matches `ext-name`. Returns the arg-id of that
+   originating chain-arg — i.e. the arg that introduces the rename
+   (`{:as :ext-name}`) or whose primary name is `ext-name` directly.
+   This is the structural anchor a caller's source-id must reach to
+   bind that free name."
+  [fn-id ext-name {:keys [fn-map args-by-fn arg-map]}]
+  (let [chain (l/inheritance-chain fn-id fn-map)]
+    (some (fn [fid]
+            (some (fn [arg]
+                    (when (= ext-name (l/arg-ext-name (:id arg) arg-map))
+                      (:id arg)))
+                  (get args-by-fn fid [])))
+          chain)))
 
-   `:is-fn` refs are a BOUNDARY — we do NOT walk inside them. The inner
-   hof-wrap consumes its own leftover names at wrap-time using the
-   outer's free-args (captured names get satisfied by closure, the
-   rest land in the lambda-param signature). Surfacing those inner
-   leftovers as outer-fn frees would falsely widen the outer's
-   interface — e.g. middleware bodies' `:next-handler` would leak up
-   to the http-server handler and turn its 1-arg call shape into a
-   map-callable.
 
-   `deep-free-ext-names` exists for the case where a fn's own primary
-   slots are all bound but its ref-chain still exposes a genuinely
-   unbound free arg (canonical case: a handler graph propagating
-   `:request` from `:ring-request`)."
+(defn deep-free-ext-args
+  "Like `deep-free-ext-names` but returns a vector of `[ext-name origin-arg-id]`
+   pairs. `origin-arg-id` is the id of the chain-arg that introduces the
+   ext-name (via `:as` rename or as a primary), so callers can match
+   their own source-id chains against it for structural classification
+   (capture vs lambda-param).
+
+   Walks the same shape as `deep-free-ext-names`: through non-HOF refs
+   and `:seq` ref-items, with `:is-fn` refs treated as a BOUNDARY (the
+   inner hof-wrap consumes its own leftovers, so they don't widen the
+   outer interface)."
   [fn-id lookups]
   (let [result (atom [])
         seen (atom #{})]
@@ -55,11 +63,6 @@
                 (let [bindings (b/collect-bindings fid lookups)
                       own-env (set (map :env-name
                                         (b/collect-env-bindings fid lookups)))
-                      ;; Primary-level bindings (`:value`, `:ref`, `:seq`)
-                      ;; are satisfied by the outer fn's build-args-and-aug,
-                      ;; same as env-bindings — they're NOT things the HOF
-                      ;; caller must inject. Only genuinely-unbound `:free`
-                      ;; primaries propagate outward.
                       own-primaries (into #{}
                                           (comp (remove #(= :free (:kind %)))
                                                 (map :ext-name))
@@ -68,15 +71,11 @@
                   (doseq [bnd bindings]
                     (case (:kind bnd)
                       :free (let [n (:ext-name bnd)]
-                              ;; Optional free args (`:required false` on
-                              ;; the base primary, e.g. `:get :default`)
-                              ;; don't need to come from the caller — they
-                              ;; default to nil if absent. Don't count
-                              ;; them toward HOF leftover.
                               (when-not (or (next-covered n)
                                             (not (:required bnd))
-                                            (some #{n} @result))
-                                (swap! result conj n)))
+                                            (some #(= n (first %)) @result))
+                                (when-let [oid (chain-arg-id-for-ext-name fid n lookups)]
+                                  (swap! result conj [n oid]))))
                       :ref (when-not (:is-fn bnd)
                              (walk (:ref-id bnd) next-covered))
                       :seq (doseq [item (:items bnd)
@@ -87,19 +86,53 @@
     @result))
 
 
-(defn- r-origin-arg-id
-  "Find the arg-id in R's inheritance chain whose `:name` field (walked
-   via source-id, first-name-wins) matches `ext-name`. This is the arg
-   that *establishes* R's external name — typically a rename arg inside
-   R's chain."
-  [r-fn-id ext-name {:keys [fn-map args-by-fn arg-map]}]
-  (let [chain (l/inheritance-chain r-fn-id fn-map)]
-    (some (fn [fid]
-            (some (fn [arg]
-                    (when (= ext-name (l/arg-ext-name (:id arg) arg-map))
-                      (:id arg)))
-                  (get args-by-fn fid [])))
-          chain)))
+(defn deep-free-ext-names
+  "Collect TRULY-unbound free-arg external names reachable from `fn-id`,
+   walking across non-HOF ref bindings and descending into :seq items
+   via their refs. `:is-fn` refs are a BOUNDARY — see
+   `deep-free-ext-args` for the underlying walk and the rationale.
+
+   Convenience wrapper: drops the origin-arg-ids that
+   `deep-free-ext-args` carries."
+  [fn-id lookups]
+  (mapv first (deep-free-ext-args fn-id lookups)))
+
+
+(defn classify-hof-free
+  "For a HOF target `r-fn-id` invoked from `f-fn-id`, partition the
+   target's deep-free names into structural CAPTURES (the caller's
+   inheritance chain has a BOUND arg whose source-id chain reaches the
+   free name's origin) and LAMBDA-PARAMS (no such anchor — the HOF
+   call site must inject the value per invocation).
+
+   Returns `{:captured [names…] :lambda-params [names…]}`. Order
+   preserved from `deep-free-ext-args`. Empty/missing keys = empty
+   vectors.
+
+   Used by `hof-wrap` to pick a static call shape (`(count
+   lambda-params)` → 0/1/N) and by the layout to render captured
+   names as ordinary cross-HOF edges instead of `λname` lambda-param
+   badges."
+  [r-fn-id f-fn-id lookups]
+  (let [{:keys [fn-map arg-map args-by-fn]} lookups
+        f-chain (l/inheritance-chain f-fn-id fn-map)
+        bound-source-targets
+        (reduce (fn [acc fid]
+                  (reduce (fn [a arg]
+                            (if (or (some? (:value arg)) (some? (:ref-id arg)))
+                              (into a (l/walk-source-chain (:id arg) arg-map))
+                              a))
+                          acc
+                          (get args-by-fn fid [])))
+                #{}
+                f-chain)
+        free-pairs (deep-free-ext-args r-fn-id lookups)]
+    (reduce (fn [acc [nm oid]]
+              (if (contains? bound-source-targets oid)
+                (update acc :captured conj nm)
+                (update acc :lambda-params conj nm)))
+            {:captured [] :lambda-params []}
+            free-pairs)))
 
 
 (defn- f-arg-for-r-origin
@@ -125,7 +158,7 @@
         r-frees (deep-free-ext-names r-fn-id lookups)]
     (into {}
           (keep (fn [r-ext]
-                  (when-let [origin (r-origin-arg-id r-fn-id r-ext lookups)]
+                  (when-let [origin (chain-arg-id-for-ext-name r-fn-id r-ext lookups)]
                     (when-let [f-arg (f-arg-for-r-origin origin f-fn-id lookups)]
                       (let [f-ext (l/arg-ext-name (:id f-arg) arg-map)]
                         (when (and f-ext (not= f-ext r-ext))

@@ -33,26 +33,7 @@
   ;; `app.routes.groups`. This module only owns the auth presets +
   ;; the web-server root chain.
 
-  ;; =============================================================================
-  ;; AUTH-REQUIRED ROUTE SHORTCUTS
-  ;; App-specific wiring: bind `auth-required-middleware` as the route's
-  ;; middleware list. Third-party apps with different auth policies
-  ;; define their own shortcuts in the same style.
-  ;; =============================================================================
-
-  {:name :_auth-middleware-list
-   :parent :list
-   :args {:items [:auth-required-middleware]}}
-
-  {:name :post-auth-required-route
-   :description "POST route preset wired with `:auth-required-middleware`. Caller provides `:path` and `:handler`."
-   :parent :post-route-with-middleware
-   :args {:middleware :_auth-middleware-list}}
-
-  {:name :delete-auth-required-route
-   :description "DELETE route preset wired with `:auth-required-middleware`. Caller provides `:path` and `:handler`."
-   :parent :delete-route-with-middleware
-   :args {:middleware :_auth-middleware-list}}
+  ;; Auth-required route templates live in `app.routes.auth`.
 
   ;; =============================================================================
   ;; WEB SERVER

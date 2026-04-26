@@ -1,0 +1,23 @@
+;; Auth-required route templates — bind `:auth-required-middleware`
+;; into the per-method route shape so concrete routes only need to
+;; supply their `:path` and `:handler`. Names are just the HTTP
+;; method because the namespace `app.routes.auth` already says
+;; "this is an auth-required route template".
+
+
+{:namespace "app.routes.auth"
+ :description "Auth-required route templates — `auth-required-middleware` baked into the per-method route shape. Concrete `app.routes` leaves use these as their parent."
+ :fns
+ [{:name :_middleware-list
+   :parent :list
+   :args {:items [:auth-required-middleware]}}
+
+  {:name :post
+   :description "POST route template wired with `auth-required-middleware`. Caller provides `:path` and `:handler`."
+   :parent :post-route-with-middleware
+   :args {:middleware :_middleware-list}}
+
+  {:name :delete
+   :description "DELETE route template wired with `auth-required-middleware`. Caller provides `:path` and `:handler`."
+   :parent :delete-route-with-middleware
+   :args {:middleware :_middleware-list}}]}

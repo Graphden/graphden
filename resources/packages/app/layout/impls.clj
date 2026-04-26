@@ -460,14 +460,23 @@
             node-id))
 
         ;; Compute terminal source-id of an arg (walk source chain to root)
-        terminal-source-of
+        ;; Walks `:source-id` chain from `arg-id` to the terminal arg
+        ;; (one with no source-id, or the deepest id we can resolve in
+        ;; arg-map). Returns the terminal arg ENTITY, or nil if the
+        ;; starting id has no entry. Use `terminal-source-of` for the
+        ;; id-only variant with passthrough fallback.
+        terminal-arg-of
         (fn [arg-id]
           (loop [cur (get arg-map arg-id)]
             (if (and cur (:source-id cur))
               (if-let [src (get arg-map (:source-id cur))]
                 (recur src)
-                (:id cur))
-              (or (:id cur) arg-id))))
+                cur)
+              cur)))
+
+        terminal-source-of
+        (fn [arg-id]
+          (or (:id (terminal-arg-of arg-id)) arg-id))
 
         ;; Compute edge label showing the rename history through the arg's
         ;; inheritance chain — but only for fns that are "expanded" at the
@@ -748,23 +757,9 @@
                 ;; of them apply to THIS `:get` instance unless they sit in
                 ;; its ancestry).
                 fn-ancestry (set (get-inheritance-chain fn-id fn-map))
-                ;; Walk the target arg's source-id chain to its terminal —
-                ;; the PRIMARY arg (source-id=nil) on whatever base fn owns
-                ;; the slot. That base fn is what decides whether a binding
-                ;; propagating from above is truly landing on this fn's
-                ;; own inherited slot (`:invoke.func` reaching `router-result`
-                ;; which inherits from `:invoke`) or just passing through a
-                ;; ref-chain relay (`:invoke.func` reaching `router-response-body`
-                ;; via a `:coll → router-result` hop — not an inheritance parent).
-                terminal-primary-arg (fn [start-id]
-                                       (loop [sid start-id]
-                                         (let [a (get arg-map sid)]
-                                           (if (:source-id a)
-                                             (recur (:source-id a))
-                                             a))))
                 binding-reaches? (fn [b target-id]
                                    (let [barg (some-> (:arg-id b) arg-map)
-                                         terminal (terminal-primary-arg target-id)]
+                                         terminal (terminal-arg-of target-id)]
                                      (and (contains? fn-ancestry (:fn-id terminal))
                                           (loop [sid (:source-id barg)]
                                             (cond
@@ -930,7 +925,7 @@
                 ;; by this fn's own args, and emit each as a synthetic :ref.
                 own-slot-terminals (into #{}
                                          (keep (fn [a]
-                                                 (:id (terminal-primary-arg (:id a)))))
+                                                 (terminal-source-of (:id a))))
                                          raw-args)
                 inherited-ref-args
                 (if-not is-structural
@@ -950,7 +945,7 @@
                       (keep
                         (fn [a]
                           (when (:ref-id a)
-                            (let [terminal-id (:id (terminal-primary-arg (:id a)))]
+                            (let [terminal-id (terminal-source-of (:id a))]
                               (when-not (contains? @seen-terminals terminal-id)
                                 (swap! seen-terminals conj terminal-id)
                                 {:type :ref
@@ -969,7 +964,7 @@
                 (let [seen (atom #{})]
                   (into []
                         (keep (fn [arg]
-                                (let [terminal-id (:id (terminal-primary-arg (:arg-id arg)))]
+                                (let [terminal-id (terminal-source-of (:arg-id arg))]
                                   (when-not (and terminal-id (contains? @seen terminal-id))
                                     (when terminal-id (swap! seen conj terminal-id))
                                     arg))))
@@ -1015,21 +1010,13 @@
                 ;; render a spurious unset placeholder for a slot that's
                 ;; clearly filled. Precompute the set of slot terminals that
                 ;; are bound anywhere in expand-set.
-                terminal-of
-                (fn [start-id]
-                  (loop [sid start-id]
-                    (if-let [a (get arg-map sid)]
-                      (if (:source-id a)
-                        (recur (:source-id a))
-                        (:id a))
-                      sid)))
                 bound-slot-terminals
                 (reduce
                   (fn [acc fn-id]
                     (reduce
                       (fn [acc2 arg]
                         (if (or (some? (:value arg)) (some? (:ref-id arg)))
-                          (conj acc2 (terminal-of (:id arg)))
+                          (conj acc2 (terminal-source-of (:id arg)))
                           acc2))
                       acc
                       (get args-by-fn fn-id [])))
@@ -1070,7 +1057,7 @@
                         shadow-of-bound
                         (and (not has-value) (not has-ref)
                              (contains? bound-slot-terminals
-                                        (terminal-of arg-id)))]
+                                        (terminal-source-of arg-id)))]
                     (when (and (not already-covered) (not shadow-of-bound))
                       (loop [sid source-id]
                         (when sid
@@ -1527,15 +1514,7 @@
                                     (if-let [b (get parent-bindings sid)]
                                       b
                                       (recur (:source-id (get arg-map sid))))))))]
-                        (let [slot-terminal
-                              (fn [sid]
-                                (loop [cur sid]
-                                  (if-let [a (get arg-map cur)]
-                                    (if (:source-id a)
-                                      (recur (:source-id a))
-                                      (:id a))
-                                    cur)))
-                              ;; Dedup by (terminal-slot, rendered-kind).
+                        (let [;; Dedup by (terminal-slot, rendered-kind).
                               ;; Propagation materializes many shadows per
                               ;; semantic slot; only emit one edge per slot.
                               seen (atom #{})
@@ -1548,7 +1527,7 @@
                                   has-ref (some? (:ref-id arg))
                                   migrated (when-not (or has-value has-ref)
                                              (find-migrated (:id arg)))
-                                  terminal (slot-terminal (:id arg))]
+                                  terminal (terminal-source-of (:id arg))]
                               (cond
                                 has-value
                                 (when (mark-once! [terminal :value (:value arg)])

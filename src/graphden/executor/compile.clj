@@ -132,6 +132,34 @@
     :else nil))
 
 
+(defn- make-ref-entry
+  "Runtime value for a `:ref` binding. HOF refs (`is-fn=true`) get
+   `hof-wrap`'d immediately against the env snapshot. Non-HOF refs
+   become thunks: each invocation resolves env via `env-fn`, applies
+   `ref-renames` (R's free-arg names → F's), and calls the compiled
+   ref via the shared call-cache."
+  [{:keys [ref-id is-fn hof-lambda-params ref-renames]} all-fns env-fn]
+  (let [callee (get all-fns ref-id)]
+    (when-not callee
+      (throw (ex-info "Ref target not found in all-fns"
+                      {:type :runtime-error/missing-ref
+                       :ref-id ref-id})))
+    (if is-fn
+      (hof-wrap callee hof-lambda-params all-fns (env-fn))
+      (rt/thunk
+        #(let [fa (env-fn)
+               r-args (if (seq ref-renames) (r/apply-renames fa ref-renames) fa)]
+           (call-with-cache ref-id callee all-fns r-args))))))
+
+
+(defn- make-seq-entry
+  "Runtime value for a `:seq` binding — a thunk that materialises the
+   linked-list items into a vector. Each item resolves via
+   `resolve-seq-item` against the env snapshot at call time."
+  [items all-fns env-fn]
+  (rt/thunk #(mapv (fn [i] (resolve-seq-item i all-fns (env-fn))) items)))
+
+
 (defn- build-args-and-aug
   "Produce `{:args _ :aug _}` from a fn's bindings in one pass.
 
@@ -156,43 +184,29 @@
    `:seq` bindings (linked-list-encoded sequences) materialise the item
    chain under a thunk wrapper for lazy access."
   [bindings all-fns fa-ref]
-  (reduce
-    (fn [{:keys [args aug] :as acc}
-         {:keys [kind base-name ext-name value ref-id is-fn hof-lambda-params ref-renames items]}]
-      (case kind
-        :value {:args (assoc args base-name value)
-                :aug (assoc aug ext-name value)}
+  (let [env-fn #(deref fa-ref)]
+    (reduce
+      (fn [{:keys [args aug] :as acc}
+           {:keys [kind base-name ext-name value items] :as b}]
+        (case kind
+          :value {:args (assoc args base-name value)
+                  :aug (assoc aug ext-name value)}
 
-        :free (let [fa @fa-ref]
-                (if (contains? fa ext-name)
-                  {:args (assoc args base-name (get fa ext-name))
-                   :aug aug}        ; already in fa under ext-name
-                  acc))
+          :free (let [fa @fa-ref]
+                  (if (contains? fa ext-name)
+                    {:args (assoc args base-name (get fa ext-name))
+                     :aug aug}        ; already in fa under ext-name
+                    acc))
 
-        :ref (let [callee (get all-fns ref-id)
-                   _ (when-not callee
-                       (throw (ex-info "Ref target not found in all-fns"
-                                       {:type :runtime-error/missing-ref
-                                        :base-name base-name
-                                        :ref-id ref-id})))
-                   entry (if is-fn
-                           (hof-wrap callee hof-lambda-params all-fns @fa-ref)
-                           (rt/thunk
-                             #(let [fa @fa-ref
-                                    r-args (if (seq ref-renames)
-                                             (r/apply-renames fa ref-renames)
-                                             fa)]
-                                (call-with-cache ref-id callee all-fns r-args))))]
-               {:args (assoc args base-name entry)
-                :aug (assoc aug ext-name entry)})
+          :ref (let [entry (make-ref-entry b all-fns env-fn)]
+                 {:args (assoc args base-name entry)
+                  :aug (assoc aug ext-name entry)})
 
-        :seq (let [entry (rt/thunk
-                           #(mapv (fn [i] (resolve-seq-item i all-fns @fa-ref))
-                                  items))]
-               {:args (assoc args base-name entry)
-                :aug (assoc aug ext-name entry)})))
-    {:args {} :aug {}}
-    bindings))
+          :seq (let [entry (make-seq-entry items all-fns env-fn)]
+                 {:args (assoc args base-name entry)
+                  :aug (assoc aug ext-name entry)})))
+      {:args {} :aug {}}
+      bindings)))
 
 
 (defn- enrich-is-fn-ref
@@ -232,22 +246,15 @@
    single arg (matching what inner `build-args-and-aug` would do for
    a directly-reached `:is-fn` primary binding)."
   [env-bindings all-fns free-args]
-  (reduce
-    (fn [acc {:keys [kind env-name value ref-id is-fn hof-lambda-params items]}]
-      (case kind
-        :value (assoc acc env-name value)
-
-        :ref (let [callee (get all-fns ref-id)]
-               (if is-fn
-                 (assoc acc env-name
-                        (hof-wrap callee hof-lambda-params all-fns free-args))
-                 (assoc acc env-name
-                        (rt/thunk #(call-with-cache ref-id callee all-fns free-args)))))
-
-        :seq (assoc acc env-name
-                    (rt/thunk #(mapv (fn [i] (resolve-seq-item i all-fns free-args)) items)))))
-    free-args
-    env-bindings))
+  (let [env-fn (constantly free-args)]
+    (reduce
+      (fn [acc {:keys [kind env-name value items] :as b}]
+        (case kind
+          :value (assoc acc env-name value)
+          :ref (assoc acc env-name (make-ref-entry b all-fns env-fn))
+          :seq (assoc acc env-name (make-seq-entry items all-fns env-fn))))
+      free-args
+      env-bindings)))
 
 
 (defn- resolve-impl

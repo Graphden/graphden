@@ -108,11 +108,18 @@ function renderNsNode(container, name, node, path) {
   const label = document.createElement('span');
   label.className = 'ns-label';
   label.textContent = name;
-  if (node && node.description) {
-    label.title = node.description;
-    label.style.cursor = 'help';
-  }
   header.appendChild(label);
+  if (node && node.description) {
+    const desc = document.createElement('span');
+    desc.textContent = 'ⓘ';
+    desc.title = node.description;
+    desc.style.color = '#0066cc';
+    desc.style.cursor = 'help';
+    desc.style.fontSize = '11px';
+    desc.style.marginLeft = '4px';
+    desc.style.opacity = '0.8';
+    header.appendChild(desc);
+  }
 
   header.onclick = (e) => {
     e.stopPropagation();
@@ -147,11 +154,18 @@ function renderNsNode(container, name, node, path) {
     const nameSpan = document.createElement('span');
     nameSpan.className = 'name';
     nameSpan.textContent = fn.displayName;
-    if (fn.description) {
-      nameSpan.title = fn.description;
-      nameSpan.style.cursor = 'help';
-    }
     item.appendChild(nameSpan);
+    if (fn.description) {
+      const desc = document.createElement('span');
+      desc.textContent = 'ⓘ';
+      desc.title = fn.description;
+      desc.style.color = '#0066cc';
+      desc.style.cursor = 'help';
+      desc.style.fontSize = '11px';
+      desc.style.marginLeft = '4px';
+      desc.style.opacity = '0.8';
+      item.appendChild(desc);
+    }
     item.onclick = () => selectFn(fn.id);
     childGroup.appendChild(item);
   }
@@ -204,11 +218,18 @@ function updateEntityList(data) {
     const nameSpan = document.createElement('span');
     nameSpan.className = 'name';
     nameSpan.textContent = fn.displayName;
-    if (fn.description) {
-      nameSpan.title = fn.description;
-      nameSpan.style.cursor = 'help';
-    }
     item.appendChild(nameSpan);
+    if (fn.description) {
+      const desc = document.createElement('span');
+      desc.textContent = 'ⓘ';
+      desc.title = fn.description;
+      desc.style.color = '#0066cc';
+      desc.style.cursor = 'help';
+      desc.style.fontSize = '11px';
+      desc.style.marginLeft = '4px';
+      desc.style.opacity = '0.8';
+      item.appendChild(desc);
+    }
     item.onclick = () => selectFn(fn.id);
     list.appendChild(item);
   }

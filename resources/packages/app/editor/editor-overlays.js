@@ -14,12 +14,18 @@ function createDescriptionBadge(description) {
   if (!description) return null;
   const badge = document.createElement('span');
   badge.className = 'description-badge';
-  badge.textContent = ' ⓘ';
+  badge.textContent = 'ⓘ';
   badge.title = description;
-  badge.style.color = '#999';
+  badge.style.color = '#0066cc';
   badge.style.cursor = 'help';
-  badge.style.fontSize = '10px';
-  badge.style.marginLeft = '2px';
+  badge.style.fontSize = '11px';
+  badge.style.fontWeight = 'normal';
+  badge.style.marginLeft = '4px';
+  badge.style.opacity = '0.8';
+  // Some overlay containers carry `pointer-events: none` (e.g. the
+  // floating column-below-MI text overlay). Override on the badge so
+  // the native title-tooltip can fire on hover.
+  badge.style.pointerEvents = 'auto';
   return badge;
 }
 

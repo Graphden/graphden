@@ -10,7 +10,7 @@
   ;; CSS + JS asset loading (fn-def compositions)
   ;; =============================================================================
 
-  {:name :editor-styles
+  {:name :styles
    :parent :read-resource
    :args {:path "packages/app/editor/editor-styles.css"}}
 
@@ -25,7 +25,7 @@
                   "packages/app/editor/editor-cytoscape.js"
                   "packages/app/editor/editor-main.js"]}}
 
-  {:name :editor-script
+  {:name :script
    :parent :concat-resources
    :args {:paths :_editor-script-paths}}
 
@@ -34,7 +34,7 @@
   ;; =============================================================================
 
   ;; Editor body — HTML structure as hiccup constant
-  {:name :editor-body
+  {:name :body
    :parent :const
    :args {:value
           [:div {:id "app"}
@@ -65,46 +65,46 @@
                [:button {:class "nav-btn" :onclick "navResetZoom()" :title "Reset zoom"} "\u2299"]]]]]]}}
 
   ;; Wrapped elements — fn-defs using wrap-style/wrap-script
-  {:name :editor-style-element
+  {:name :style-element
    :parent :wrap-style
-   :args {:content :editor-styles}}
+   :args {:content :styles}}
 
-  {:name :editor-script-element
+  {:name :script-element
    :parent :wrap-script
-   :args {:content :editor-script}}
+   :args {:content :script}}
 
   ;; =============================================================================
   ;; PAGE COMPOSITION (fn-defs)
   ;; =============================================================================
 
   ;; Build head elements list for cytoscape
-  {:name :editor-head-elements-0
+  {:name :head-elements-0
    :parent :conj
-   :args {:coll [] :item :editor-style-element}}
+   :args {:coll [] :item :style-element}}
 
   ;; Head elements for Cytoscape (adds cytoscape scripts)
-  {:name :editor-cytoscape-head
+  {:name :cytoscape-head
    :parent :with-cdn-script
-   :args {:head :editor-head-elements-0
+   :args {:head :head-elements-0
           :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
 
   ;; Head elements with HTMX (adds htmx script)
-  {:name :editor-head
+  {:name :head
    :parent :with-cdn-script
-   :args {:head :editor-cytoscape-head
+   :args {:head :cytoscape-head
           :url "https://unpkg.com/htmx.org@2.0.4"}}
 
   ;; Complete HTML page
   ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)
   {:name :_editor-scripts
    :parent :conj-empty
-   :args {:item :editor-script-element}}
+   :args {:item :script-element}}
 
-  {:name :editor-page
+  {:name :page
    :parent :html-page
    :args {:title "Graphden - Graph Editor"
-          :head :editor-head
-          :body :editor-body
+          :head :head
+          :body :body
           :scripts :_editor-scripts}}
 
   ;; Handler — :html-ok-response sets status 200 + html content-type;
@@ -113,7 +113,7 @@
   ;; a constant Ring callable.
   {:name :_editor-rendered-page
    :parent :render-hiccup
-   :args {:hiccup :editor-page}}
+   :args {:hiccup :page}}
 
   {:name :_editor-handler
    :parent :html-ok-response

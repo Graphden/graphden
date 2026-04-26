@@ -110,15 +110,8 @@ function renderNsNode(container, name, node, path) {
   label.textContent = name;
   header.appendChild(label);
   if (node && node.description) {
-    const desc = document.createElement('span');
-    desc.textContent = 'ⓘ';
-    desc.title = node.description;
-    desc.style.color = 'currentColor';
-    desc.style.cursor = 'help';
-    desc.style.fontSize = '11px';
-    desc.style.marginLeft = '4px';
-    desc.style.opacity = '0.7';
-    header.appendChild(desc);
+    const desc = createDescriptionBadge(node.description);
+    if (desc) header.appendChild(desc);
   }
 
   header.onclick = (e) => {
@@ -156,15 +149,8 @@ function renderNsNode(container, name, node, path) {
     nameSpan.textContent = fn.displayName;
     item.appendChild(nameSpan);
     if (fn.description) {
-      const desc = document.createElement('span');
-      desc.textContent = 'ⓘ';
-      desc.title = fn.description;
-      desc.style.color = '#0066cc';
-      desc.style.cursor = 'help';
-      desc.style.fontSize = '11px';
-      desc.style.marginLeft = '4px';
-      desc.style.opacity = '0.8';
-      item.appendChild(desc);
+      const desc = createDescriptionBadge(fn.description);
+      if (desc) item.appendChild(desc);
     }
     item.onclick = () => selectFn(fn.id);
     childGroup.appendChild(item);
@@ -220,15 +206,8 @@ function updateEntityList(data) {
     nameSpan.textContent = fn.displayName;
     item.appendChild(nameSpan);
     if (fn.description) {
-      const desc = document.createElement('span');
-      desc.textContent = 'ⓘ';
-      desc.title = fn.description;
-      desc.style.color = '#0066cc';
-      desc.style.cursor = 'help';
-      desc.style.fontSize = '11px';
-      desc.style.marginLeft = '4px';
-      desc.style.opacity = '0.8';
-      item.appendChild(desc);
+      const desc = createDescriptionBadge(fn.description);
+      if (desc) item.appendChild(desc);
     }
     item.onclick = () => selectFn(fn.id);
     list.appendChild(item);

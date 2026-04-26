@@ -4,18 +4,60 @@
 // ============================================================================
 // DESCRIPTION TOOLTIP
 // ============================================================================
+//
+// Native `title` attribute is unreliable inside Cytoscape overlays —
+// the cy canvas + parent mouseenter/leave handlers swallow the hover
+// before the browser's tooltip delay fires. We render our own tooltip
+// element on mouseenter/leave instead.
 
-/**
- * Creates a small "ⓘ" indicator that exposes `description` as a native
- * tooltip on hover. Returns nil-equivalent (null) when no description is
- * available so callers can `if (badge) container.appendChild(badge)`.
- */
+let descriptionTooltipEl = null;
+
+function ensureDescriptionTooltip() {
+  if (descriptionTooltipEl) return descriptionTooltipEl;
+  const el = document.createElement('div');
+  el.className = 'description-tooltip';
+  Object.assign(el.style, {
+    position: 'fixed',
+    zIndex: '10000',
+    background: 'rgba(0,0,0,0.88)',
+    color: '#fff',
+    fontFamily: 'system-ui, sans-serif',
+    fontSize: '12px',
+    lineHeight: '1.4',
+    padding: '6px 10px',
+    borderRadius: '4px',
+    maxWidth: '360px',
+    pointerEvents: 'none',
+    boxShadow: '0 2px 8px rgba(0,0,0,0.25)',
+    display: 'none',
+    whiteSpace: 'pre-wrap'
+  });
+  document.body.appendChild(el);
+  descriptionTooltipEl = el;
+  return el;
+}
+
+function showDescriptionTooltip(text, evt) {
+  const el = ensureDescriptionTooltip();
+  el.textContent = text;
+  el.style.display = 'block';
+  // Position next to the cursor; clamp to viewport.
+  const margin = 12;
+  const x = Math.min(evt.clientX + margin, window.innerWidth - el.offsetWidth - margin);
+  const y = Math.min(evt.clientY + margin, window.innerHeight - el.offsetHeight - margin);
+  el.style.left = x + 'px';
+  el.style.top = y + 'px';
+}
+
+function hideDescriptionTooltip() {
+  if (descriptionTooltipEl) descriptionTooltipEl.style.display = 'none';
+}
+
 function createDescriptionBadge(description) {
   if (!description) return null;
   const badge = document.createElement('span');
   badge.className = 'description-badge';
   badge.textContent = 'ⓘ';
-  badge.title = description;
   // Inherit color from the parent row — default text is dark → black
   // badge, root-block rows that flip to ROOT_FG (white) get a white
   // badge automatically without per-site logic.
@@ -25,10 +67,13 @@ function createDescriptionBadge(description) {
   badge.style.fontWeight = 'normal';
   badge.style.marginLeft = '4px';
   badge.style.opacity = '0.7';
-  // Some overlay containers carry `pointer-events: none` (e.g. the
-  // floating column-below-MI text overlay). Override on the badge so
-  // the native title-tooltip can fire on hover.
+  // Override pointer-events: some overlay containers opt out (e.g.
+  // the floating column-below-MI text overlay) but we need the
+  // hover events here.
   badge.style.pointerEvents = 'auto';
+  badge.addEventListener('mouseenter', (e) => { showDescriptionTooltip(description, e); });
+  badge.addEventListener('mousemove', (e) => { showDescriptionTooltip(description, e); });
+  badge.addEventListener('mouseleave', hideDescriptionTooltip);
   return badge;
 }
 
@@ -759,15 +804,8 @@ function createEdgeLabelOverlay(edge, container) {
   overlay.appendChild(labelSpan);
 
   if (description) {
-    const desc = document.createElement('span');
-    desc.textContent = 'ⓘ';
-    desc.title = description;
-    desc.style.color = 'currentColor';
-    desc.style.cursor = 'help';
-    desc.style.fontSize = '11px';
-    desc.style.marginLeft = '4px';
-    desc.style.opacity = '0.7';
-    overlay.appendChild(desc);
+    const desc = createDescriptionBadge(description);
+    if (desc) overlay.appendChild(desc);
   }
 
   container.appendChild(overlay);

@@ -37,9 +37,26 @@ function ensureDescriptionTooltip() {
   return el;
 }
 
-function showDescriptionTooltip(text, evt) {
+function showDescriptionTooltip(content, evt) {
   const el = ensureDescriptionTooltip();
-  el.textContent = text;
+  el.textContent = '';
+  // Accept either a plain string (legacy callers) or {namespace, description}.
+  const ns = (content && typeof content === 'object') ? content.namespace : null;
+  const text = (content && typeof content === 'object') ? content.description : content;
+  if (ns) {
+    const nsRow = document.createElement('div');
+    nsRow.textContent = ns;
+    nsRow.style.fontStyle = 'italic';
+    nsRow.style.opacity = '0.7';
+    nsRow.style.fontSize = '11px';
+    nsRow.style.marginBottom = text ? '4px' : '0';
+    el.appendChild(nsRow);
+  }
+  if (text) {
+    const body = document.createElement('div');
+    body.textContent = text;
+    el.appendChild(body);
+  }
   el.style.display = 'block';
   // Position next to the cursor; clamp to viewport.
   const margin = 12;
@@ -101,18 +118,21 @@ function createDescriptionBadge(description, opts) {
     badge.style.marginLeft = '4px';
     badge.style.verticalAlign = 'middle';
   }
+  // Tooltip payload — namespace appears as a small italic header above
+  // the description body when both are present.
+  const tooltipContent = { namespace: opts.namespace || null, description };
   badge.addEventListener('mouseenter', (e) => {
     // Hover on the badge must NOT trigger a row-level expansion preview.
     // The parent's mouseenter still fires on first entry — the optional
     // onEnter callback is the row's preview-clear, undoing that preview.
     if (opts.onEnter) opts.onEnter();
-    showDescriptionTooltip(description, e);
+    showDescriptionTooltip(tooltipContent, e);
   });
   badge.addEventListener('mousemove', (e) => {
     // mousemove bubbles, so without stopPropagation the row's mousemove
     // would re-fire its preview while the cursor sits on the badge.
     e.stopPropagation();
-    showDescriptionTooltip(description, e);
+    showDescriptionTooltip(tooltipContent, e);
   });
   badge.addEventListener('mouseleave', hideDescriptionTooltip);
   // Click on the badge must not commit an expansion either — swallow
@@ -581,7 +601,8 @@ function createFnOverlay(node, container) {
       const colClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
       const colDescBadge = createDescriptionBadge(colFn.description, {
         pinRight: true,
-        onEnter: colClearPreview
+        onEnter: colClearPreview,
+        namespace: getFnNamespace(lookups.fnMap.get(colFn.fnId))
       });
       if (colDescBadge) {
         colDescBadge.style.zIndex = '2';
@@ -673,7 +694,8 @@ function createFnOverlay(node, container) {
         const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
         const miDescBadge = createDescriptionBadge(f.description, {
           pinRight: true,
-          onEnter: miClearPreview
+          onEnter: miClearPreview,
+          namespace: getFnNamespace(lookups.fnMap.get(f.fnId))
         });
         if (miDescBadge) span.appendChild(miDescBadge);
         if (miShowOpen) {
@@ -763,7 +785,8 @@ function createFnOverlay(node, container) {
       const lineClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
       const lineDescBadge = createDescriptionBadge(lineFn.description, {
         pinRight: true,
-        onEnter: lineClearPreview
+        onEnter: lineClearPreview,
+        namespace: getFnNamespace(lookups.fnMap.get(lineFn.fnId))
       });
       if (lineDescBadge) line.appendChild(lineDescBadge);
       if (lineShowOpen) {

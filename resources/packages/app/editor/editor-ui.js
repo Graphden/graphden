@@ -149,7 +149,9 @@ function renderNsNode(container, name, node, path) {
     nameSpan.textContent = fn.displayName;
     item.appendChild(nameSpan);
     if (fn.description) {
-      const desc = createDescriptionBadge(fn.description);
+      const desc = createDescriptionBadge(fn.description, {
+        namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id))
+      });
       if (desc) item.appendChild(desc);
     }
     item.onclick = () => selectFn(fn.id);
@@ -206,7 +208,9 @@ function updateEntityList(data) {
     nameSpan.textContent = fn.displayName;
     item.appendChild(nameSpan);
     if (fn.description) {
-      const desc = createDescriptionBadge(fn.description);
+      const desc = createDescriptionBadge(fn.description, {
+        namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id))
+      });
       if (desc) item.appendChild(desc);
     }
     item.onclick = () => selectFn(fn.id);

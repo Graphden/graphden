@@ -49,6 +49,13 @@ function buildLookups(data) {
   return { fnMap, argMap, argsByFn, nsMap, nsPathMap };
 }
 
+// Look up a fn's namespace as a dotted path (e.g. "core.collections")
+// or null if the fn has no namespace assigned.
+function getFnNamespace(fn) {
+  if (!fn || !fn['namespace-id'] || !lookups || !lookups.nsPathMap) return null;
+  return lookups.nsPathMap.get(fn['namespace-id']) || null;
+}
+
 // Get the qualified name for a fn (ns.path.name or just name if no ns)
 function getQualifiedFnName(fn) {
   if (!fn) return '(anonymous)';

@@ -8,48 +8,60 @@
  :description "Collection primitives — first/rest/conj/get/assoc/merge/range/take/drop and other Clojure-equivalent operations over maps/vectors/seqs."
  :fns
  [{:name :first
-   :args {:coll :jsonb}
+   :description "First item of a collection (Clojure's `first`). Returns nil for empty/nil."
+   :args {:coll {:type :jsonb :description "Collection to take the first of."}}
    :return-type :any}
 
   {:name :rest
-   :args {:coll :jsonb}
+   :description "Everything after the first item (Clojure's `rest`). Empty for nil/empty input."
+   :args {:coll {:type :jsonb :description "Collection to take the rest of."}}
    :return-type :jsonb}
 
   {:name :cons
-   :args {:item :any, :coll :jsonb}
+   :description "Prepend an item to a collection (Clojure's `cons`). Returns a new seq."
+   :args {:item {:type :any :description "Item placed at the head."}
+          :coll {:type :jsonb :description "Collection placed after the head."}}
    :return-type :jsonb}
 
   ;; First-class list primitive. :items is a sequence-arg; items live in
   ;; linked arg entities chained via arg.next_arg_id.
   {:name :list
    :description "Construct a vector from a sequence-arg. Each item is a separate arg entity chained via `next-arg-id`, so refs and literals can be freely mixed."
-   :args {:items {:type :sequence :of :any}}
+   :args {:items {:type :sequence :of :any :description "Items in order. Each can be a literal or a fn-ref."}}
    :return-type :jsonb}
 
   ;; Converts a list of 2-element pairs into a map. :entries is a sequence-arg
   ;; where each item is either a :pair fn-def result or a literal [k v] vector.
   {:name :pairs->map
-   :args {:entries {:type :sequence :of :any}}
+   :description "Build a map from a sequence of `[key value]` pairs (or `:pair` results). Later pairs override earlier ones with the same key."
+   :args {:entries {:type :sequence :of :any :description "Sequence of two-element pairs."}}
    :return-type :jsonb}
 
   {:name :conj
-   :args {:coll :any, :item :any}
+   :description "Append/prepend an item depending on collection type (Clojure's `conj`). Vectors append; lists/seqs prepend; maps add a `[k v]` entry."
+   :args {:coll {:type :any :description "Collection to add to."}
+          :item {:type :any :description "Item to add."}}
    :return-type :any}
 
   {:name :get
-   :args {:coll :jsonb
-          :key :any
-          :default {:type :any :required false}}
+   :description "Look up a key in a map/vector (Clojure's `get`). Falls back to `:default` when the key is missing."
+   :args {:coll {:type :jsonb :description "Map or vector to read from."}
+          :key {:type :any :description "Lookup key (or vector index)."}
+          :default {:type :any :required false :description "Returned when the key is absent."}}
    :return-type :any}
 
   {:name :get-in
-   :args {:map :jsonb
-          :path :jsonb
-          :default {:type :any :required false}}
+   :description "Look up a value at a nested path (Clojure's `get-in`). Falls back to `:default` if any segment is missing."
+   :args {:map {:type :jsonb :description "Map to read from."}
+          :path {:type :jsonb :description "Vector of keys identifying the path."}
+          :default {:type :any :required false :description "Returned when the path is absent."}}
    :return-type :any}
 
   {:name :assoc
-   :args {:map :any, :key :any, :value :any}
+   :description "Set a single key in a map (Clojure's `assoc`). Returns a new map."
+   :args {:map {:type :any :description "Map to update (nil treated as empty)."}
+          :key {:type :any :description "Key to set."}
+          :value {:type :any :description "Value to write."}}
    :return-type :any}
 
   ;; Same as `:assoc` but the `:value` slot is `:fn`-typed — the bound
@@ -57,41 +69,53 @@
   ;; merged as a value. Used for routes where the assoc'd value must
   ;; remain a Ring callable (handler).
   {:name :assoc-fn
+   :description "Variant of `:assoc` whose `:value` is `:fn`-typed — the bound fn-graph is hof-wrap'd into a callable rather than executed and stored. Used where the value must remain a function (e.g. Ring handlers in route maps)."
    :parent :assoc
    :args {:value {:as :value :type :fn}}}
 
   {:name :dissoc
-   :args {:map :jsonb, :key :any}
+   :description "Remove a single key from a map (Clojure's `dissoc`)."
+   :args {:map {:type :jsonb :description "Map to remove from."}
+          :key {:type :any :description "Key to remove."}}
    :return-type :jsonb}
 
   {:name :count
-   :args {:coll :jsonb}
+   :description "Count items in a collection (Clojure's `count`). Returns 0 for nil."
+   :args {:coll {:type :jsonb :description "Collection to size."}}
    :return-type :int}
 
   {:name :empty?
-   :args {:coll :jsonb}
+   :description "True iff the collection has no items (Clojure's `empty?`). True for nil."
+   :args {:coll {:type :jsonb :description "Collection to test."}}
    :return-type :bool}
 
   {:name :contains?
-   :args {:coll :jsonb, :key :any}
+   :description "True iff the collection contains the given key (Clojure's `contains?`). For vectors this checks the index, NOT the value."
+   :args {:coll {:type :jsonb :description "Collection to test."}
+          :key {:type :any :description "Key (or index) to look up."}}
    :return-type :bool}
 
   {:name :keys
-   :args {:map :jsonb}
+   :description "Vector of map keys (Clojure's `keys`). Order is unspecified for unsorted maps."
+   :args {:map {:type :jsonb :description "Map to enumerate."}}
    :return-type :jsonb}
 
   {:name :vals
-   :args {:map :jsonb}
+   :description "Vector of map values (Clojure's `vals`). Order matches `:keys`."
+   :args {:map {:type :jsonb :description "Map to enumerate."}}
    :return-type :jsonb}
 
   ;; `(apply merge maps)` — variadic merge like Clojure's. `:maps` is a
   ;; sequence-arg so callers can inline refs: `{:maps [:a-ref :b-ref]}`.
   {:name :merge
-   :args {:maps {:type :sequence :of :any}}
+   :description "Merge a sequence of maps left-to-right (Clojure's `(apply merge maps)`); later keys override earlier ones."
+   :args {:maps {:type :sequence :of :any :description "Maps to merge in order."}}
    :return-type :jsonb}
 
   {:name :into
-   :args {:to :jsonb, :from :jsonb}
+   :description "Pour items from one collection into another (Clojure's `into`). The destination's type is preserved."
+   :args {:to {:type :jsonb :description "Destination collection."}
+          :from {:type :jsonb :description "Source items."}}
    :return-type :jsonb}
 
   {:name :assoc-in
@@ -114,61 +138,81 @@
    :return-type :any}
 
   {:name :range
-   :args {:start {:type :int :value 0}
-          :end :int
-          :step {:type :int :value 1}}
+   :description "Generate a vector of integers in `[start, end)` stepping by `step` (Clojure's `range`)."
+   :args {:start {:type :int :value 0 :description "Inclusive lower bound. Defaults to 0."}
+          :end {:type :int :description "Exclusive upper bound."}
+          :step {:type :int :value 1 :description "Step between successive values. Defaults to 1; must be non-zero."}}
    :return-type :jsonb}
 
   {:name :repeat
-   :args {:count :int, :item :any}
+   :description "Vector of `count` copies of `item` (Clojure's `(into [] (repeat count item))`)."
+   :args {:count {:type :int :description "Number of copies."}
+          :item {:type :any :description "Value repeated."}}
    :return-type :jsonb}
 
   {:name :take
-   :args {:count :int, :coll :jsonb}
+   :description "First `count` items of a collection (Clojure's `take`). Realises a lazy seq."
+   :args {:count {:type :int :description "Maximum number of items to take."}
+          :coll {:type :jsonb :description "Source collection."}}
    :return-type :jsonb}
 
   {:name :drop
-   :args {:count :int, :coll :jsonb}
+   :description "Skip the first `count` items (Clojure's `drop`). Returns a vector of the remainder."
+   :args {:count {:type :int :description "Number of items to skip."}
+          :coll {:type :jsonb :description "Source collection."}}
    :return-type :jsonb}
 
   {:name :reverse
-   :args {:coll :jsonb}
+   :description "Reverse a sequence (Clojure's `reverse`)."
+   :args {:coll {:type :jsonb :description "Collection to reverse."}}
    :return-type :jsonb}
 
   {:name :sort
-   :args {:coll :jsonb}
+   :description "Sort a sequence in natural order (Clojure's `sort`). For mixed types use a custom comparator via composition."
+   :args {:coll {:type :jsonb :description "Collection to sort."}}
    :return-type :jsonb}
 
   {:name :concat
-   :args {:colls :jsonb}
+   :description "Concatenate a sequence of sequences into one (Clojure's `(apply concat colls)`)."
+   :args {:colls {:type :jsonb :description "Sequence of sequences to concatenate."}}
    :return-type :jsonb}
 
   {:name :flatten
-   :args {:coll :jsonb}
+   :description "Flatten nested sequences into a single flat one (Clojure's `flatten`)."
+   :args {:coll {:type :jsonb :description "Possibly-nested collection."}}
    :return-type :jsonb}
 
   {:name :distinct
-   :args {:coll :jsonb}
+   :description "Drop duplicate items, preserving first occurrence (Clojure's `distinct`)."
+   :args {:coll {:type :jsonb :description "Collection that may contain duplicates."}}
    :return-type :jsonb}
 
   {:name :stringify-map-keys
-   :args {:m :jsonb}
+   :description "Walk a map and convert each keyword key into a string key. Useful at JSON/string boundaries."
+   :args {:m {:type :jsonb :description "Map whose keys to stringify."}}
    :return-type :jsonb}
 
   {:name :keywordize-map-keys
-   :args {:m :any}
+   :description "Walk a map and convert each string key into a keyword. Inverse of `:stringify-map-keys`."
+   :args {:m {:type :any :description "Map whose keys to keywordize."}}
    :return-type :any}
 
   {:name :select-keys
-   :args {:m :any, :ks :jsonb}
+   :description "Submap containing only the specified keys (Clojure's `select-keys`)."
+   :args {:m {:type :any :description "Source map."}
+          :ks {:type :jsonb :description "Vector of keys to keep."}}
    :return-type :any}
 
   {:name :zipmap
-   :args {:keys :jsonb, :vals :jsonb}
+   :description "Build a map from parallel `keys` and `vals` sequences (Clojure's `zipmap`)."
+   :args {:keys {:type :jsonb :description "Vector of map keys."}
+          :vals {:type :jsonb :description "Vector of corresponding values."}}
    :return-type :any}
 
   {:name :update-vals
-   :args {:m :any, :f :fn}
+   :description "Apply a function to every value in a map (Clojure's `update-vals`). Keys are preserved."
+   :args {:m {:type :any :description "Map whose values to transform."}
+          :f {:type :fn :description "Callable applied to each value."}}
    :return-type :any}
 
   ;; (update-in m path #(merge defaults %)) — Clojure-style closure.

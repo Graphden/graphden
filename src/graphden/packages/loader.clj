@@ -231,11 +231,19 @@
 ;; =============================================================================
 
 (defn- load-single-package
-  "Loads a single package and returns its functions."
+  "Loads a single package and returns its functions.
+
+   The package's top-level namespace (the bare package name, e.g. `core`)
+   inherits its description from `package.edn`'s `:description`. Module
+   namespaces (`core.arithmetic`, …) get theirs from each module's
+   `fns.edn` `:description`."
   [package-name]
   (log/info "Loading package:" package-name)
   (let [pkg-meta (load-package-meta package-name)
-        modules (:modules pkg-meta)]
+        modules (:modules pkg-meta)
+        seed-ns-descriptions (cond-> {}
+                               (:description pkg-meta)
+                               (assoc package-name (:description pkg-meta)))]
 
     (reduce
       (fn [acc module-name]
@@ -247,7 +255,7 @@
               (update :ns-descriptions merge ns-descriptions))))
       {:base-fn-defs {}
        :fn-defs []
-       :ns-descriptions {}
+       :ns-descriptions seed-ns-descriptions
        :meta pkg-meta}
       modules)))
 

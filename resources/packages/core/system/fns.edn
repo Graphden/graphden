@@ -81,20 +81,23 @@
   ;; graph code; also usable as a plain value if something wants a
   ;; ready-made exception without raising.
   {:name :ex-info
-   :args {:message :text
-          :data :jsonb}
+   :description "Construct a Clojure `clojure.lang.ExceptionInfo` from a message + data map. Pair with `:throw` to raise; the value can also flow through the graph as a plain exception object."
+   :args {:message {:type :text :description "Human-readable error message."}
+          :data {:type :jsonb :description "Structured `:data` payload attached to the exception."}}
    :return-type :any}
 
   ;; Raise the given exception. :return-type is :any because control
   ;; flow never returns, but the graph-level caller needs a placeholder.
   {:name :throw
-   :args {:exception :any}
+   :description "Raise an exception from graph code. Control flow never returns; `:return-type :any` is a placeholder so callers can wire it where any value would do."
+   :args {:exception {:type :any :description "Exception to raise (typically built via `:ex-info`)."}}
    :return-type :any}
 
   ;; `:env-required` is now a fn-def (see below) composing :env with
   ;; :if + :throw + :ex-info — kept here as a forward declaration so
   ;; consumers reading fns.edn see the spec in one place.
   {:name :env-required
+   :description "Read an OS environment variable, throwing `execution-error/missing-env-var` if it's unset or blank. Pure composition over `:if`/`:env`/`:blank?`/`:throw`/`:ex-info`."
    :parent :if
    :args {:test :_env-blank?
           :then :_env-missing-throw
@@ -133,13 +136,15 @@
 
   ;; Look up a classpath resource and slurp it. Returns nil if missing.
   {:name :read-resource-or-nil
-   :args {:path :text}
+   :description "Read a classpath resource as a string, or return nil if the path doesn't resolve. Building block for `:read-resource` (which throws on miss)."
+   :args {:path {:type :text :description "Resource path relative to the classpath root."}}
    :return-type :text}
 
   ;; Read file from classpath resources, or throw with a clear message
   ;; if the path doesn't resolve. fn-def composition on top of
   ;; `:read-resource-or-nil` + `:if` + `:throw` + `:ex-info`.
   {:name :read-resource
+   :description "Read a classpath resource as a string, throwing `execution-error/resource-not-found` when the path doesn't resolve. Pure composition over `:read-resource-or-nil`/`:if`/`:throw`/`:ex-info`."
    :parent :if
    :args {:test :_resource-nil?
           :then :_resource-not-found-throw
@@ -178,6 +183,7 @@
   ;; Load multiple resource files and concatenate with separator.
   ;; Pure composition over `:map :read-resource` + `:str-join`.
   {:name :concat-resources
+   :description "Read each path in `:paths` via `:read-resource` and join the contents with a separator (default `\\n\\n`). Used to bundle CSS/JS asset modules."
    :parent :str-join
    :args {:coll :_concat-resources-list
           :separator {:type :text :value "\n\n"}}}
@@ -192,6 +198,7 @@
   ;; :func is a fn-graph that PRODUCES a callable (e.g. :_router
   ;; returns a reitit ring-handler).
   {:name :invoke
+   :description "Invoke a value that's already a Clojure callable with one argument. The `:func` slot is `:any` so the value flows through as-is — use this when `:func` is a fn-graph that PRODUCES a callable. For fn-graphs that ARE callables, use `:call`."
    :args {:func {:type :any :description "Already-built Clojure callable (e.g. produced by another fn-graph). Used as-is — no hof-wrap."}
           :arg {:type :any :description "Single argument passed to the callable."}}
    :return-type :any}
@@ -202,10 +209,13 @@
   ;; callable (Ring-handler-shaped: has `:request` or similar free arg,
   ;; returns a response).
   {:name :call
-   :args {:func :fn, :arg :any}
+   :description "Invoke a fn-graph (hof-wrap'd into a Clojure callable) with one argument. Use when `:func` IS a callable; for already-built Clojure fns use `:invoke`."
+   :args {:func {:type :fn :description "Fn-graph to wrap into a callable."}
+          :arg {:type :any :description "Single argument passed to the callable."}}
    :return-type :any}
 
   ;; Read an InputStream/Reader to string
   {:name :slurp
-   :args {:input :any}
+   :description "Read an InputStream/Reader to a string (Clojure's `slurp`). Used to materialise Ring request bodies."
+   :args {:input {:type :any :description "InputStream, Reader, or any source `clojure.core/slurp` accepts."}}
    :return-type :text}]}

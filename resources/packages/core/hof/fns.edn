@@ -6,56 +6,76 @@
  :description "Higher-order primitives — map/filter/reduce/comp/partial and friends. The `:func` slot is `:fn`-typed so the executor passes a HOF-wrapped callable, not a value."
  :fns
  [{:name :map
-   :args {:func :fn
-          :coll {:type :jsonb :required false}}
+   :description "Apply a callable to each item in a collection (Clojure's `map`). When `:coll` is omitted, returns a transducer."
+   :args {:func {:type :fn :description "Callable applied to each item."}
+          :coll {:type :jsonb :required false :description "Collection to map over. When omitted, returns a transducer."}}
    :return-type :any}
 
   {:name :filter
+   :description "Keep items where `(pred item)` is truthy (Clojure's `filter`). When `:coll` is omitted, returns a transducer."
    :args {:pred {:type :fn :description "Predicate callable; items where `(pred item)` is truthy are kept."}
           :coll {:type :jsonb :required false :description "Collection to filter. When omitted, returns a transducer."}}
    :return-type :any}
 
   {:name :reduce
-   :args {:func :fn, :init :any, :coll :jsonb}
+   :description "Left fold over a collection (Clojure's `reduce`). `(func acc item)` is invoked for each item, starting from `init`."
+   :args {:func {:type :fn :description "Reducing callable `(acc, item) → acc`."}
+          :init {:type :any :description "Seed accumulator."}
+          :coll {:type :jsonb :description "Collection to fold."}}
    :return-type :any}
 
   {:name :some
-   :args {:pred :fn, :coll :jsonb}
+   :description "First truthy result of `(pred item)` over the collection, else nil (Clojure's `some`)."
+   :args {:pred {:type :fn :description "Predicate callable."}
+          :coll {:type :jsonb :description "Collection to scan."}}
    :return-type :any}
 
   {:name :every?
-   :args {:pred :fn, :coll :jsonb}
+   :description "True iff `(pred item)` is truthy for every item (Clojure's `every?`). True for empty input."
+   :args {:pred {:type :fn :description "Predicate callable."}
+          :coll {:type :jsonb :description "Collection to scan."}}
    :return-type :bool}
 
   {:name :find-first
-   :args {:pred :fn, :coll :jsonb}
+   :description "First item where `(pred item)` is truthy, else nil. Like Clojure's `(first (filter pred coll))` but eager-shortcut."
+   :args {:pred {:type :fn :description "Predicate callable."}
+          :coll {:type :jsonb :description "Collection to scan."}}
    :return-type :any}
 
   {:name :group-by
-   :args {:key-fn :fn, :coll :jsonb}
+   :description "Group items by the result of `(key-fn item)` (Clojure's `group-by`). Returns `{key [items …]}`."
+   :args {:key-fn {:type :fn :description "Callable producing the grouping key per item."}
+          :coll {:type :jsonb :description "Collection to group."}}
    :return-type :jsonb}
 
   {:name :sort-by
-   :args {:key-fn :fn, :coll :jsonb}
+   :description "Sort by the result of `(key-fn item)` in natural order (Clojure's `sort-by`)."
+   :args {:key-fn {:type :fn :description "Callable producing the sort key per item."}
+          :coll {:type :jsonb :description "Collection to sort."}}
    :return-type :jsonb}
 
   {:name :apply
-   :args {:func :fn, :args :jsonb}
+   :description "Call a fn with a vector of args (Clojure's `apply`). Equivalent to `(func arg1 arg2 …)`."
+   :args {:func {:type :fn :description "Callable to invoke."}
+          :args {:type :jsonb :description "Vector of positional arguments."}}
    :return-type :any}
 
   ;; Returns value, ignoring _item — usable as HOF argument
   {:name :constantly
-   :args {:value :any
-          :_item {:type :any :required false}}
+   :description "Return `:value` unchanged regardless of input (Clojure's `constantly`). Shaped as a HOF callable."
+   :args {:value {:type :any :description "Constant value to return."}
+          :_item {:type :any :required false :description "Ignored input slot — present so the fn-graph satisfies a HOF callable signature."}}
    :return-type :any}
 
   {:name :comp
-   :args {:functions :jsonb}
+   :description "Right-to-left composition of functions/transducers (Clojure's `comp`)."
+   :args {:functions {:type :jsonb :description "Vector of callables; rightmost is applied first."}}
    :return-type :any}
 
   {:name :transduce
-   :args {:transducer :any
-          :reducer :fn
-          :init :any
-          :coll :jsonb}
+   :description "Single-pass transducer pipeline with a reducing fn (Clojure's `transduce`). `transducer` typically comes from `:comp`-ing `:filter`/`:map` without `:coll`."
+   :args {:transducer {:type :any :description "Composed transducer."}
+          :reducer {:type :fn :description "Final reducing callable `(acc, item) → acc`."}
+          :init {:type :any :description "Seed accumulator."}
+          :coll {:type :jsonb :description "Collection to consume."}}
    :return-type :any}]}

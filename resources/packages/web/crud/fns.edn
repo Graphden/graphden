@@ -142,11 +142,11 @@
 
   ;; --- Data handlers: data-fn -> body-fn -> response wrapper ---
 
-  {:name :all-entities-json-handler
+  {:name :all-entities-handler
    :parent :json-ok-response
-   :args {:body :_all-entities-json-body}}
+   :args {:body :_all-entities-body}}
 
-  {:name :_all-entities-json-body
+  {:name :_all-entities-body
    :parent :to-json-string
    :args {:data :list-all-graph-entities}}
 
@@ -199,11 +199,11 @@
           :headers :_action-headers
           :body :_action-body}}
 
-  {:name :create-entity-api-handler
+  {:name :create-entity-handler
    :parent :html-action-response
    :args {:result :process-create-entity}}
 
-  {:name :delete-entity-api-handler
+  {:name :delete-entity-handler
    :parent :html-action-response
    :args {:result :process-delete-entity}}
 

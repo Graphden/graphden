@@ -31,7 +31,7 @@
 
   {:name :api-entities
    :parent :get-route
-   :args {:path "/api/graph/entities" :handler :all-entities-json-handler}}
+   :args {:path "/api/graph/entities" :handler :all-entities-handler}}
 
   {:name :entity-details
    :parent :get-route
@@ -51,11 +51,11 @@
   ;; name clash with the `web.crud` base-fns of the same root verb.
   {:name :entity-create
    :parent :post
-   :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
+   :args {:path "/api/entities/:type" :handler :create-entity-handler}}
 
   {:name :entity-delete
    :parent :delete
-   :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
+   :args {:path "/api/entities/:type/:id" :handler :delete-entity-handler}}
 
   ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
   ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).

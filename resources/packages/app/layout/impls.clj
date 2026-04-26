@@ -1417,14 +1417,41 @@
                     (swap! expansion-bindings assoc original-fn-id
                            {:has-ancestor-refs has-ancestor-refs})
 
-                    (do
+                    (let [;; When this fn was reached as an ancestor-ref of an
+                          ;; outer expansion, parent-bindings carries entries
+                          ;; whose source-chain terminates at one of THIS fn's
+                          ;; slots. For an unset slot, walk its source-chain
+                          ;; through parent-bindings; first hit fills the slot
+                          ;; (matches the leaf-path's `find-migrated`).
+                          find-migrated
+                          (fn [arg-id]
+                            (when parent-bindings
+                              (loop [sid arg-id]
+                                (when sid
+                                  (if-let [b (get parent-bindings sid)]
+                                    b
+                                    (recur (:source-id (get arg-map sid))))))))]
                       (doseq [arg (filter #(= (:type %) :ref) level-0-stay)]
                         (let [arg-entity (get arg-map (:arg-id arg))
                               child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
                           (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set child-is-hof)))
 
                       (doseq [arg level-0-unsets]
-                        (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof))
+                        (if-let [m (find-migrated (:arg-id arg))]
+                          (cond
+                            (:ref-id m)
+                            (let [arg-entity (get arg-map (:arg-id arg))
+                                  child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
+                              (process-any-fn (:ref-id m) node-id
+                                              (or (:arg-name m) (:arg-name arg))
+                                              false parent-bindings (:arg-id arg)
+                                              parent-expansion-root expand-set child-is-hof))
+                            (some? (:value m))
+                            (add-arg-value-node (or (:arg-name m) (:arg-name arg))
+                                                (:value m) (:arg-id arg) node-id expand-set)
+                            :else
+                            (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof))
+                          (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof)))
 
                       (doseq [arg (filter #(= (:type %) :value) level-0-stay)]
                         (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))
@@ -1441,7 +1468,21 @@
                           (process-any-fn ref-target-id node-id (:arg-name arg) false leaf-bindings (:arg-id arg) effective-expansion-root expand-set child-is-hof)))
 
                       (doseq [arg ancestor-unsets]
-                        (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof))
+                        (if-let [m (find-migrated (:arg-id arg))]
+                          (cond
+                            (:ref-id m)
+                            (let [arg-entity (get arg-map (:arg-id arg))
+                                  child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
+                              (process-any-fn (:ref-id m) node-id
+                                              (or (:arg-name m) (:arg-name arg))
+                                              false parent-bindings (:arg-id arg)
+                                              parent-expansion-root expand-set child-is-hof))
+                            (some? (:value m))
+                            (add-arg-value-node (or (:arg-name m) (:arg-name arg))
+                                                (:value m) (:arg-id arg) node-id expand-set)
+                            :else
+                            (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof))
+                          (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id expand-set is-hof)))
 
                       (doseq [arg ancestor-values]
                         (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))))

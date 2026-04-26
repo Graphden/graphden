@@ -70,6 +70,101 @@ function hideDescriptionTooltip() {
   if (descriptionTooltipEl) descriptionTooltipEl.style.display = 'none';
 }
 
+// ============================================================================
+// FULL-NAME POPOVER
+// ============================================================================
+//
+// Ancestor rows truncate long names with an ellipsis. Hovering a row
+// whose name doesn't fit the row width pops a small bubble above the
+// node showing the full name. Singleton element, fixed position,
+// fades in/out via opacity + translateY transition.
+
+let fullNameTooltipEl = null;
+
+function ensureFullNameTooltip() {
+  if (fullNameTooltipEl) return fullNameTooltipEl;
+  const el = document.createElement('div');
+  el.className = 'full-name-tooltip';
+  Object.assign(el.style, {
+    position: 'fixed',
+    zIndex: '9999',
+    background: '#ffffff',
+    color: '#000000',
+    border: '1px solid #ccc',
+    boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
+    padding: '4px 10px',
+    borderRadius: '4px',
+    fontFamily: 'inherit',
+    fontSize: '12px',
+    fontWeight: '600',
+    whiteSpace: 'nowrap',
+    pointerEvents: 'none',
+    opacity: '0',
+    transform: 'translateY(4px)',
+    transition: 'opacity 110ms ease-out, transform 110ms ease-out',
+    display: 'none'
+  });
+  document.body.appendChild(el);
+  fullNameTooltipEl = el;
+  return el;
+}
+
+function showFullNameTooltip(name, anchorEl) {
+  const el = ensureFullNameTooltip();
+  el.textContent = name;
+  el.style.display = 'block';
+  // Reset to entry state so re-show animates again even if previously
+  // shown without leaving in between.
+  el.style.opacity = '0';
+  el.style.transform = 'translateY(4px)';
+  // Force layout so offsetWidth/Height reflect the new text.
+  void el.offsetWidth;
+  const anchorRect = anchorEl.getBoundingClientRect();
+  const gap = 6;
+  let top = anchorRect.top - el.offsetHeight - gap;
+  // Flip below when there's no room above.
+  if (top < 8) top = anchorRect.bottom + gap;
+  let left = anchorRect.left;
+  if (left + el.offsetWidth > window.innerWidth - 8) {
+    left = window.innerWidth - el.offsetWidth - 8;
+  }
+  if (left < 8) left = 8;
+  el.style.left = left + 'px';
+  el.style.top = top + 'px';
+  requestAnimationFrame(() => {
+    el.style.opacity = '1';
+    el.style.transform = 'translateY(0)';
+  });
+}
+
+function hideFullNameTooltip() {
+  if (!fullNameTooltipEl) return;
+  fullNameTooltipEl.style.opacity = '0';
+  fullNameTooltipEl.style.transform = 'translateY(4px)';
+  // Remove from layout once the fade has played out so it doesn't
+  // catch hit-tests on stale geometry.
+  setTimeout(() => {
+    if (fullNameTooltipEl && fullNameTooltipEl.style.opacity === '0') {
+      fullNameTooltipEl.style.display = 'none';
+    }
+  }, 130);
+}
+
+// Binds hover handlers that pop the full name when the visible text is
+// truncated. `hoverEl` is the element whose mouseenter/leave we listen
+// to; `measureEl` is where we measure scrollWidth vs clientWidth (often
+// the same element, but for column-below-MI rows the measurement target
+// is the floating textOverlay while the hover target is the line).
+function bindFullNameHover(hoverEl, measureEl, fullName) {
+  if (!fullName) return;
+  hoverEl.addEventListener('mouseenter', () => {
+    if (measureEl.scrollWidth > measureEl.clientWidth + 1) {
+      showFullNameTooltip(fullName, measureEl);
+    }
+  });
+  hoverEl.addEventListener('mouseleave', hideFullNameTooltip);
+}
+
 // Shared box styling for the right-edge action icons (description ⓘ
 // and open-in-new-tab ↗). A 1-px border around each glyph turns them
 // into clearly-clickable buttons instead of bare characters that the
@@ -126,6 +221,7 @@ function createDescriptionBadge(description, opts) {
     // The parent's mouseenter still fires on first entry — the optional
     // onEnter callback is the row's preview-clear, undoing that preview.
     if (opts.onEnter) opts.onEnter();
+    hideFullNameTooltip();
     showDescriptionTooltip(tooltipContent, e);
   });
   badge.addEventListener('mousemove', (e) => {
@@ -178,6 +274,7 @@ function createOpenInNewTabButton(fn, opts) {
   }
   link.addEventListener('mouseenter', () => {
     if (opts.onEnter) opts.onEnter();
+    hideFullNameTooltip();
   });
   link.addEventListener('mousemove', (e) => { e.stopPropagation(); });
   // Anchor handles navigation natively; just make sure mousedown/touchend
@@ -577,10 +674,13 @@ function createFnOverlay(node, container) {
       textOverlay.textContent = colFn.name;
       Object.assign(textOverlay.style, {
         position: 'absolute',
-        left: '0',
+        left: '8px',
         right: colRightInset,
         top: '4px',
-        textAlign: 'center',
+        textAlign: 'left',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
         pointerEvents: 'none', zIndex: '1'
       });
       // Create invisible column divs for bg + vertical border
@@ -618,6 +718,7 @@ function createFnOverlay(node, container) {
           line.appendChild(colOpenBtn);
         }
       }
+      bindFullNameHover(line, textOverlay, colFn.name);
       // Store column info for paintWithSpec
       linesByDepth.set(levelInfo.depth, { line, spansByFnId: null, levelInfo, colDivs, textOverlay });
 
@@ -684,13 +785,18 @@ function createFnOverlay(node, container) {
         const miInset = (f.description && miShowOpen) ? '4px 42px 4px 8px'
                       : (f.description || miShowOpen) ? '4px 24px 4px 8px'
                       : '4px 8px';
-        // When right-pinned controls are present, widen the horizontal
-        // padding symmetrically so wrapped names never spill under them.
+        // Right padding reserves room for the action icons; text is
+        // left-aligned and truncated with an ellipsis when the cell is
+        // narrower than the name. Hover reveals the full name.
         span.style.padding = miInset;
         span.style.flex = '1 1 0';
         span.style.minWidth = '0';
-        span.style.textAlign = 'center';
+        span.style.textAlign = 'left';
+        span.style.whiteSpace = 'nowrap';
+        span.style.overflow = 'hidden';
+        span.style.textOverflow = 'ellipsis';
         span.style.position = 'relative';
+        bindFullNameHover(span, span, f.name);
         const miClearPreview = () => { onPreviewLeave(); clearPreview(nodeId); restoreStyles(); };
         const miDescBadge = createDescriptionBadge(f.description, {
           pinRight: true,
@@ -776,7 +882,10 @@ function createFnOverlay(node, container) {
       line.style.padding = (lineHasDesc && lineShowOpen) ? '4px 42px 4px 8px'
                          : (lineHasDesc || lineShowOpen) ? '4px 24px 4px 8px'
                          : '4px 8px';
-      line.style.textAlign = 'center';
+      line.style.textAlign = 'left';
+      line.style.whiteSpace = 'nowrap';
+      line.style.overflow = 'hidden';
+      line.style.textOverflow = 'ellipsis';
       line.style.position = 'relative';
       // Single-fn level — whole-line click cascading to groupMaxDepth
       // (so empty grouped levels expand together).
@@ -796,6 +905,7 @@ function createFnOverlay(node, container) {
         });
         if (lineOpenBtn) line.appendChild(lineOpenBtn);
       }
+      bindFullNameHover(line, line, lineFn.name);
       const fnIdForLine = levelInfo.fns[0].fnId;
       const allFnsAtDepth = [fnIdForLine];
       const targetDepth = levelInfo.groupMaxDepth;

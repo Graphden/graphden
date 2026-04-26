@@ -20,26 +20,15 @@
 // (comma-separated names) split into N flex cells of width/N each; each cell
 // wraps its name to multiple lines if the name is wider than the cell content
 // area. The overlay height = sum of row heights + drag handle.
-function computeFnOverlayHeight(label, width) {
+function computeFnOverlayHeight(label, _width) {
+  // All ancestor rows render single-line (white-space:nowrap +
+  // text-overflow:ellipsis); the full name is revealed on hover via
+  // the floating full-name popover. Height is therefore
+  // line-count × per-line-height, no per-cell wrap math.
   const LINE_H = 13;     // 11px font @ ~1.2 line-height
   const ROW_PAD = 8;     // 4px top + 4px bottom inside each ancestor-line
-  const CHAR_W = 7;
-  const CELL_PAD = 16;   // 8px left + 8px right inside each MI cell
   const lines = label.split('\n');
-  let h = 0;
-  for (const line of lines) {
-    if (line.includes(', ')) {
-      const cells = line.split(', ');
-      const cellW = width / cells.length;
-      const cellContentW = Math.max(1, cellW - CELL_PAD);
-      const wrapPerCell = cells.map(c =>
-        Math.max(1, Math.ceil(c.length * CHAR_W / cellContentW)));
-      h += Math.max(...wrapPerCell) * LINE_H + ROW_PAD;
-    } else {
-      h += LINE_H + ROW_PAD;
-    }
-  }
-  return h + DRAG_HANDLE_HEIGHT;
+  return lines.length * (LINE_H + ROW_PAD) + DRAG_HANDLE_HEIGHT;
 }
 
 // Optional-args strip rendered by editor-overlays.js right above the drag
@@ -60,8 +49,10 @@ function calculateNodeSize(nodeData) {
     };
   } else {
     // Both fn and placeholder use fn-overlay rendering with potential MI rows.
+    // Cap visible row width — names beyond this are truncated with an
+    // ellipsis at render time and revealed in full via the hover popover.
     const lines = label.split('\n');
-    const maxLineLen = 30;
+    const maxLineLen = 36;
     const maxLen = Math.max(...lines.map(l => {
       const cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
       return Math.min(cleanLen, maxLineLen);
@@ -71,7 +62,10 @@ function calculateNodeSize(nodeData) {
       ? optionalArgs.map(n => '?' + n).join(' ')
       : '';
     const widthFromOptional = optionalText ? optionalText.length * 6 + 24 : 0;
-    const width = Math.max(80, maxLen * 7 + 24, widthFromOptional);
+    // Slack budget = inner padding + room for the right-pinned action
+    // icons (i + ↗ ≈ 42px) so the longest full name actually fits and
+    // doesn't get prematurely ellipsised.
+    const width = Math.max(80, maxLen * 7 + 60, widthFromOptional);
     const extra = optionalText ? OPTIONAL_STRIP_HEIGHT : 0;
     const height = Math.max(30 + DRAG_HANDLE_HEIGHT,
                             computeFnOverlayHeight(label, width) + extra);

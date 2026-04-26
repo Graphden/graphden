@@ -74,30 +74,56 @@
 
 (defn- hof-wrap
   "Wrap a compiled closure into a callable for use as a HOF argument
-   (`:fn`-type arg). Shape is determined by the wrapped fn-graph's
-   free-arg count (`free-names` — already env-aware via
-   `deep-free-ext-names`). The compiler does NOT inspect names;
-   whatever the author called their free args is what gets used.
+   (`:fn`-type arg). The shape of the call is decided at CALL-TIME by
+   the value the impl passes — not statically by `(count free-names)` —
+   so a single hof-wrap supports both single-arg lambdas
+   (`(f existing)` from `update-in`) and named map-callables
+   (`(body {:request _ :next-handler _})` from middleware), even when
+   the wrapped fn-graph reads names that ALSO live in
+   `outer-free-args` (capture).
 
-   - 0 free names → variadic callable that ignores its input (impl can
-     call with anything, even when the wrapped graph is constant).
-   - 1 free name → `(fn [item] …)` — single-arg callable; the item is
-     bound to that name. Impls call as `(f value)`. The author's name
-     choice becomes the binding key — no compiler magic.
-   - 2+ free names → `(fn [m] …)` — map-callable. Impl passes
-     `{name v ...}` (e.g. middleware passes
-     `{:request _ :next-handler _}`). The user-fn's free arg names
-     must match impl's chosen keys (ordinary API contract).
+   - 0 free names → variadic, ignores input (constant-in-this-scope
+     graph).
+   - else, on each call (with one positional arg):
+     1. Map whose keys are a SUPERSET of `free-names` → multi-bind
+        (merge into outer; map keys override).
+     2. Single free name → bind whole arg to it (override outer).
+     3. 2+ free names, non-matching arg → compute leftover
+        `free-names \\ outer-free-args`; if exactly 1, bind arg to it
+        (the captured names stay from outer, the leftover takes the
+        per-call value).
+     4. Otherwise → throw `:execution-error/ambiguous-hof-call`.
 
-   `outer-free-args` (caller's runtime free-args) is propagated
-   through; when the HOF call provides a value for a name already in
-   `outer`, the HOF call OVERRIDES (assoc/merge semantics)."
+   The dispatch keeps the compiler name-agnostic AND restores Clojure
+   closure semantics: lambda-params shadow outer (override on collision),
+   captured names come from outer when the impl provides nothing for
+   them. No `:request`-name hardcode, no per-arg arity annotation
+   needed in fns.edn — the impl's call shape is the source of truth."
   [compiled free-names all-fns outer-free-args]
-  (case (count free-names)
-    0 (fn [& _] (compiled all-fns outer-free-args))
-    1 (let [n (first free-names)]
-        (fn [item] (compiled all-fns (assoc outer-free-args n item))))
-    (fn [m] (compiled all-fns (merge outer-free-args m)))))
+  (if (zero? (count free-names))
+    (fn [& _] (compiled all-fns outer-free-args))
+    (fn [arg]
+      (cond
+        ;; Map whose keys cover all free-names → multi-bind.
+        (and (map? arg)
+             (every? #(contains? arg %) free-names))
+        (compiled all-fns (merge outer-free-args arg))
+
+        ;; Single free name → bind whole arg to it (lambda shadows outer).
+        (= 1 (count free-names))
+        (compiled all-fns (assoc outer-free-args (first free-names) arg))
+
+        ;; 2+ free names but arg isn't a covering map: the captured
+        ;; names live in outer; the LEFTOVER is the lambda param.
+        :else
+        (let [leftover (filterv #(not (contains? outer-free-args %)) free-names)]
+          (if (= 1 (count leftover))
+            (compiled all-fns (assoc outer-free-args (first leftover) arg))
+            (throw (ex-info "Ambiguous HOF call — leftover != 1 and arg isn't a covering map"
+                            {:type :execution-error/ambiguous-hof-call
+                             :free-names free-names
+                             :leftover leftover
+                             :arg-type (type arg)}))))))))
 
 
 (defn- resolve-seq-item

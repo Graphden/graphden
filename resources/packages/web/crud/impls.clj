@@ -109,20 +109,40 @@
    ["Value" :value :pr-str] ["Ref ID" :ref-id]])
 
 
+(defn- form-input-h
+  [{:keys [field-name label-text field-value extra-attrs]}]
+  [:div {:class "form-group"}
+   [:label {:for field-name} label-text]
+   [:input (merge {:type "text" :name field-name :id field-name}
+                  (when field-value {:value field-value})
+                  extra-attrs)]])
+
+
+(defn- form-select-h
+  [{:keys [field-name label-text options selected-value extra-attrs]}]
+  [:div {:class "form-group"}
+   [:label {:for field-name} label-text]
+   (into [:select (merge {:name field-name :id field-name} extra-attrs)]
+         (for [[v l] options]
+           [:option (cond-> {:value v} (= v selected-value) (assoc :selected true)) l]))])
+
+
 (defn- render-fn-form
   [entity all-fns]
   (let [editing? (some? entity)
         parent-options (into [["" "None"]]
-                             (mapv (fn [f] [(str (:id f)) (name (:name f))]) all-fns))]
+                             (->> all-fns
+                                  (filter :name)
+                                  (mapv (fn [f] [(str (:id f)) (name (:name f))]))))]
     [:form {:hx-post (if editing? (str "/api/entities/fn/" (:id entity)) "/api/entities/fn")
             :hx-target "#modal-content" :hx-swap "innerHTML"
             :_ "on htmx:afterRequest if event.detail.successful trigger entityCreated on body then call hideModal()"}
-     (html/form-input {:field-name "name" :label-text "Name"
-                       :field-value (when entity (name (:name entity)))
-                       :extra-attrs {:required true}})
-     (html/form-select {:field-name "parent-id" :label-text "Parent (optional)"
-                        :options parent-options
-                        :selected-value (when entity (str (:parent-id entity)))})
+     (form-input-h {:field-name "name" :label-text "Name"
+                    :field-value (when entity (name (:name entity)))
+                    :extra-attrs {:required true}})
+     (form-select-h {:field-name "parent-id" :label-text "Parent (optional)"
+                     :options parent-options
+                     :selected-value (when entity (str (:parent-id entity)))})
      (html/button-row {:buttons [[:button {:type "button" :class "btn btn-secondary" :onclick "hideModal()"} "Cancel"]
                                  [:button {:type "submit" :class "btn btn-primary"} (if editing? "Save" "Create")]]
                        :style {:display "flex" :gap "8px" :justify-content "flex-end" :margin-top "16px"}})]))
@@ -132,29 +152,33 @@
   [entity all-fns all-args]
   (let [editing? (some? entity)
         fn-options (into [["" "Select function..."]]
-                         (mapv (fn [f] [(str (:id f)) (name (:name f))]) all-fns))
+                         (->> all-fns
+                              (filter :name)
+                              (mapv (fn [f] [(str (:id f)) (name (:name f))]))))
         arg-options (into [["" "None (primary arg)"]]
-                          (mapv (fn [a] [(str (:id a)) (name (:name a))]) all-args))
+                          (->> all-args
+                               (filter :name)
+                               (mapv (fn [a] [(str (:id a)) (name (:name a))]))))
         type-options (mapv (fn [t] [t t]) ["int" "text" "bool" "uuid" "jsonb" "any" "fn"])]
     [:form {:hx-post (if editing? (str "/api/entities/arg/" (:id entity)) "/api/entities/arg")
             :hx-target "#modal-content" :hx-swap "innerHTML"
             :_ "on htmx:afterRequest if event.detail.successful trigger entityCreated on body then call hideModal()"}
-     (html/form-input {:field-name "name" :label-text "Name"
-                       :field-value (when (and entity (:name entity)) (name (:name entity)))
-                       :extra-attrs {:required true}})
-     (html/form-select {:field-name "fn-id" :label-text "Function"
-                        :options fn-options
-                        :selected-value (when entity (str (:fn-id entity)))
-                        :extra-attrs {:required true}})
-     (html/form-select {:field-name "source-id" :label-text "Source Arg (for inheritance)"
-                        :options arg-options
-                        :selected-value (when entity (str (:source-id entity)))})
-     (html/form-select {:field-name "type" :label-text "Type"
-                        :options type-options
-                        :selected-value (when (and entity (:type entity)) (name (:type entity)))
-                        :extra-attrs {:required true}})
-     (html/form-input {:field-name "value" :label-text "Value (JSON)"
-                       :field-value (when entity (json/generate-string (:value entity)))})
+     (form-input-h {:field-name "name" :label-text "Name"
+                    :field-value (when (and entity (:name entity)) (name (:name entity)))
+                    :extra-attrs {:required true}})
+     (form-select-h {:field-name "fn-id" :label-text "Function"
+                     :options fn-options
+                     :selected-value (when entity (str (:fn-id entity)))
+                     :extra-attrs {:required true}})
+     (form-select-h {:field-name "source-id" :label-text "Source Arg (for inheritance)"
+                     :options arg-options
+                     :selected-value (when entity (str (:source-id entity)))})
+     (form-select-h {:field-name "type" :label-text "Type"
+                     :options type-options
+                     :selected-value (when (and entity (:type entity)) (name (:type entity)))
+                     :extra-attrs {:required true}})
+     (form-input-h {:field-name "value" :label-text "Value (JSON)"
+                    :field-value (when entity (json/generate-string (:value entity)))})
      (html/button-row {:buttons [[:button {:type "button" :class "btn btn-secondary" :onclick "hideModal()"} "Cancel"]
                                  [:button {:type "submit" :class "btn btn-primary"} (if editing? "Save" "Create")]]
                        :style {:display "flex" :gap "8px" :justify-content "flex-end" :margin-top "16px"}})]))

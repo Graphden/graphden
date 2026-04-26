@@ -98,6 +98,17 @@
           :v :any}
    :return-type :any}
 
+  ;; (update-in m path f) — apply `f` to value at path. `:f` is `:fn`-typed
+  ;; so the bound fn-graph is hof-wrap'd; when caller binds `:defaults`
+  ;; (or any other captured name), hof-wrap's call-time dispatch picks
+  ;; the per-call lambda param dynamically (single non-map arg → bind to
+  ;; the only leftover; map arg whose keys match all hof-free → merge).
+  {:name :update-in
+   :args {:m :any
+          :path :jsonb
+          :f :fn}
+   :return-type :any}
+
   {:name :range
    :args {:start {:type :int :value 0}
           :end :int
@@ -156,23 +167,29 @@
    :args {:m :any, :f :fn}
    :return-type :any}
 
-  ;; (assoc-in m path (merge defaults (get-in m path))) — pure
-  ;; composition over existing primitives.
+  ;; (update-in m path #(merge defaults %)) — Clojure-style closure.
+  ;; `:defaults` is captured from caller's outer scope: callers bind it
+  ;; via merge-in's primary-binding propagation (router-ring-response
+  ;; sets `:defaults :default-security-headers`), which lands in
+  ;; outer-free-args at the `:f` hof-wrap site. `:existing` is the
+  ;; lambda's per-call param; update-in's impl calls `(f existing-val)`,
+  ;; and hof-wrap's call-time dispatch routes the single non-map arg to
+  ;; the only leftover name (= `:existing` after subtracting the captured
+  ;; `:defaults`).
   {:name :merge-in
-   :parent :assoc-in
+   :parent :update-in
    :args {:m {:as :m}
           :path {:as :path}
-          :v :_merge-in-merged}}
+          :f :_merge-in-fn}}
 
-  {:name :_merge-in-merged
+  {:name :_merge-in-fn
    :parent :merge
-   :args {:maps [:_merge-in-defaults :_merge-in-existing]}}
+   :args {:maps [:_merge-in-defaults-arg :_merge-in-existing-arg]}}
 
-  {:name :_merge-in-defaults
+  {:name :_merge-in-defaults-arg
    :parent :identity
    :args {:value {:as :defaults}}}
 
-  {:name :_merge-in-existing
-   :parent :get-in
-   :args {:map {:as :m}
-          :path {:as :path}}}]}
+  {:name :_merge-in-existing-arg
+   :parent :identity
+   :args {:value {:as :existing}}}]}

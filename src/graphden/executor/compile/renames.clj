@@ -27,22 +27,24 @@
 
 (defn deep-free-ext-names
   "Collect TRULY-unbound free-arg external names reachable from `fn-id`,
-   walking across ref bindings (but NOT through :seq items — those are
-   closed). As we descend into a ref target we accumulate the env-bound
-   names of every fn we passed through; if a deeper fn lists a `:free`
-   binding whose ext-name was env-bound by an OUTER fn, that slot is
-   satisfied by the outer fn's `augment-env` and is NOT a true
-   HOF-input.
+   walking across non-HOF ref bindings and descending into :seq items
+   via their refs. As we descend into a ref target we accumulate
+   env-bound names so a deeper :free binding satisfied by an OUTER
+   env-binding is correctly excluded.
 
-   Without this, a Ring-handler chain like `:_app-ring-response` would
-   report propagated names (`:func`, `:item1`, `:default`, …) that are
-   actually bound by env-bindings at intermediate ref levels —
-   `hof-wrap` would then think the HOF call must inject them.
+   `:is-fn` refs are a BOUNDARY — we do NOT walk inside them. The inner
+   hof-wrap consumes its own leftover names at wrap-time using the
+   outer's free-args (captured names get satisfied by closure, the
+   rest land in the lambda-param signature). Surfacing those inner
+   leftovers as outer-fn frees would falsely widen the outer's
+   interface — e.g. middleware bodies' `:next-handler` would leak up
+   to the http-server handler and turn its 1-arg call shape into a
+   map-callable.
 
    `deep-free-ext-names` exists for the case where a fn's own primary
    slots are all bound but its ref-chain still exposes a genuinely
-   unbound free arg (the canonical case: a handler graph propagating
-   `:ctx` up from `:ring-request`)."
+   unbound free arg (canonical case: a handler graph propagating
+   `:request` from `:ring-request`)."
   [fn-id lookups]
   (let [result (atom [])
         seen (atom #{})]

@@ -92,7 +92,11 @@
 
 
 (deftest deep-free-ext-names-does-not-recurse-through-is-fn-refs
-  (testing "HOF :fn-type refs are treated as closed — their frees do NOT surface"
+  (testing "HOF :fn-type refs are a boundary — the inner hof-wrap consumes
+            its own leftover at wrap time, so the inner's free names must
+            NOT bubble up as the outer fn's leftover. Captured names that
+            the outer DOES want to expose come in through other (non-HOF)
+            paths or its own primaries."
     (let [base-map (random-uuid)
           base-id (random-uuid)
           p-func (random-uuid)
@@ -111,7 +115,8 @@
                  :ref-id target-fn-id :is-fn true}]
           lookups (mk-lookups fns args)]
       (is (= [] (r/deep-free-ext-names map-fn-id lookups))
-          ":item inside HOF target does NOT propagate up"))))
+          ":item is a leftover/lambda-param at the inner hof-wrap site,
+           not part of the outer caller's free-arg surface."))))
 
 
 (deftest deep-free-ext-names-walks-seq-ref-items

@@ -433,6 +433,27 @@
         ;; Returns:
         ;;   - single name string (no rename detected through expanded chain)
         ;;   - multi-line "name1 (fn1, fn2)\nname2 (fn3, fn4)" (renames visible)
+        ;; Target-side interface: names of the target fn's OWN renamed
+        ;; free args. E.g. `_merge-in-defaults` parents `identity` and
+        ;; declares `:value {:as :defaults}`, so its interface is
+        ;; ["defaults"]. Used to enrich edge labels in cases where the
+        ;; source-side label is uninformative — most notably sequence
+        ;; chain items, whose own arg has source-id=nil and no name, so
+        ;; the source-chain walk yields nil and the edge falls back to
+        ;; the synthetic `maps[0]`-style index.
+        target-interface-names
+        (fn [target-fn-id]
+          (when target-fn-id
+            (->> (get args-by-fn target-fn-id [])
+                 (keep (fn [a]
+                         (when (and (:name a)
+                                    (nil? (:value a))
+                                    (nil? (:ref-id a))
+                                    (:source-id a))
+                           (:name a))))
+                 (distinct)
+                 (vec))))
+
         compute-edge-label
         (fn [arg-id source-node-id expanded-fns]
           (when arg-id
@@ -441,6 +462,7 @@
                                    (recur (conj acc cur)
                                           (some-> (:source-id cur) arg-map))
                                    acc))
+                  source-arg (get arg-map arg-id)
                   ;; Keep only args whose fn-id is in the expanded set
                   visible (filter #(contains? expanded-fns (:fn-id %)) source-chain)
                   labeled (mapv (fn [arg]
@@ -451,20 +473,35 @@
                               (partition-by :arg-name)
                               (mapv (fn [grp]
                                       {:name (:arg-name (first grp))
-                                       :fns (vec (keep :fn grp))})))]
+                                       :fns (vec (keep :fn grp))})))
+                  source-label
+                  (cond
+                    (empty? groups) nil
+                    ;; Single arg name across every visible ancestor — no rename
+                    ;; along the chain, so no fn-name disambiguation is needed.
+                    ;; (Matches the docstring contract: a single-group label is
+                    ;; just `name`; only multi-group labels carry fn-names.)
+                    (= 1 (count groups)) (:name (first groups))
+                    :else (->> groups
+                               (map (fn [{:keys [name fns]}]
+                                      (if (seq fns)
+                                        (str name " (" (str/join ", " fns) ")")
+                                        name)))
+                               (str/join "\n")))]
               (cond
-                (empty? groups) nil
-                ;; Single arg name across every visible ancestor — no rename
-                ;; along the chain, so no fn-name disambiguation is needed.
-                ;; (Matches the docstring contract: a single-group label is
-                ;; just `name`; only multi-group labels carry fn-names.)
-                (= 1 (count groups)) (:name (first groups))
-                :else (->> groups
-                           (map (fn [{:keys [name fns]}]
-                                  (if (seq fns)
-                                    (str name " (" (str/join ", " fns) ")")
-                                    name)))
-                           (str/join "\n"))))))
+                ;; Source-chain gave a non-blank label — keep it, it's the
+                ;; most precise we can do (covers inheritance-renames).
+                (and source-label (not (str/blank? source-label))) source-label
+
+                ;; No useful source-side name (typically a chain item with
+                ;; source-id=nil). Fall back to the target's renamed free
+                ;; args so the edge tells the user WHICH semantic slot of
+                ;; the target this is feeding (e.g. `defaults` for the
+                ;; identity wrapper, `m, path` for the get-in wrapper).
+                :else
+                (let [interface-names (target-interface-names (:ref-id source-arg))]
+                  (when (seq interface-names)
+                    (str/join ", " interface-names)))))))
 
         add-arg-value-node
         (fn [arg-name value arg-id source-node-id expanded-fns]

@@ -101,6 +101,10 @@
   (assoc-in m path v))
 
 
+(defbase update-in-fn [m path f]
+  (update-in m path f))
+
+
 (defbase range-fn [start end step]
   (let [max-size sp/*max-range-size*]
     (validate-non-zero! step :step "step cannot be zero (would cause infinite loop)")
@@ -233,5 +237,6 @@
    :select-keys select-keys-fn
    :zipmap zipmap-fn
    :update-vals update-vals-fn
+   :update-in update-in-fn
    :list list-fn
    :pairs->map pairs->map-fn})

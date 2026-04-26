@@ -353,18 +353,18 @@
                                            [(:name e) eid]))))
                                existing-item-ids)
         item-records (mapv (fn [item]
-                             (let [{:keys [value ref-id name]} (resolve-sequence-item
-                                                                 fn-name-cache created-fns item)
+                             (let [{nm :name :keys [value ref-id]}
+                                   (resolve-sequence-item fn-name-cache created-fns item)
                                    ;; Named items reuse their existing id by
                                    ;; name match → stable cross-HOF source-id
                                    ;; targets across re-syncs. Unnamed items
                                    ;; always get a fresh id (positional reuse
                                    ;; would lock callers to position).
-                                   reuse-id (when name (get existing-by-name name))]
+                                   reuse-id (when nm (get existing-by-name nm))]
                                {:id (or reuse-id (random-uuid))
                                 :fn-id fn-id
                                 :source-id nil
-                                :name name
+                                :name nm
                                 :type element-type
                                 :value value
                                 :ref-id ref-id

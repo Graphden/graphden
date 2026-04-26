@@ -25,21 +25,26 @@
     [graphden.executor.compile.lookups :as l]))
 
 
+(defn- find-in-chain
+  "BFS F's inheritance chain (closest first); return the first
+   `(pred arg)` that's truthy. `pred` is called with each arg entity."
+  [fn-id pred {:keys [fn-map args-by-fn]}]
+  (some (fn [fid]
+          (some pred (get args-by-fn fid [])))
+        (l/inheritance-chain fn-id fn-map)))
+
+
 (defn- chain-arg-id-for-ext-name
-  "On `fn-id`'s inheritance chain, find the first arg whose own ext-name
-   (walked via source-id) matches `ext-name`. Returns the arg-id of that
-   originating chain-arg — i.e. the arg that introduces the rename
-   (`{:as :ext-name}`) or whose primary name is `ext-name` directly.
-   This is the structural anchor a caller's source-id must reach to
-   bind that free name."
-  [fn-id ext-name {:keys [fn-map args-by-fn arg-map]}]
-  (let [chain (l/inheritance-chain fn-id fn-map)]
-    (some (fn [fid]
-            (some (fn [arg]
-                    (when (= ext-name (l/arg-ext-name (:id arg) arg-map))
-                      (:id arg)))
-                  (get args-by-fn fid [])))
-          chain)))
+  "Arg-id of the first chain-arg on `fn-id` whose own ext-name (walked
+   via source-id) matches `ext-name` — i.e. the structural origin of
+   the rename (`{:as :ext-name}`) or the primary that bears the name.
+   Callers source-id chains to this id to bind the free slot."
+  [fn-id ext-name {:keys [arg-map] :as lookups}]
+  (find-in-chain fn-id
+                 (fn [arg]
+                   (when (= ext-name (l/arg-ext-name (:id arg) arg-map))
+                     (:id arg)))
+                 lookups))
 
 
 (defn deep-free-ext-args
@@ -55,7 +60,9 @@
    outer interface)."
   [fn-id lookups]
   (let [result (atom [])
-        seen (atom #{})]
+        seen (atom #{})
+        already-collected? (fn [n] (some #(= n (first %)) @result))
+        emit! (fn [n oid] (swap! result conj [n oid]))]
     (letfn [(walk
               [fid covered]
               (when-not (contains? @seen fid)
@@ -73,28 +80,23 @@
                       :free (let [n (:ext-name bnd)]
                               (when-not (or (next-covered n)
                                             (not (:required bnd))
-                                            (some #(= n (first %)) @result))
+                                            (already-collected? n))
                                 (when-let [oid (chain-arg-id-for-ext-name fid n lookups)]
-                                  (swap! result conj [n oid]))))
+                                  (emit! n oid))))
                       :ref (when-not (:is-fn bnd)
                              (walk (:ref-id bnd) next-covered))
                       :seq (doseq [item (:items bnd)]
                              (cond
-                               ;; Ref-item: descend through (non-HOF
-                               ;; refs already bypass the boundary).
                                (:ref-id item)
                                (walk (:ref-id item) next-covered)
                                ;; Named free slot inside the sequence
-                               ;; (`{:as :name}` syntax). The item itself
-                               ;; introduces the ext-name; its arg-id is
-                               ;; the structural origin callers source-id
-                               ;; against.
-                               (and (:name item)
-                                    (nil? (:value item)))
+                               ;; (`{:as :name}` syntax) — the item
+                               ;; itself is the structural origin
+                               ;; callers source-id against.
+                               (and (:name item) (nil? (:value item)))
                                (let [n (keyword (:name item))]
-                                 (when-not (or (next-covered n)
-                                               (some #(= n (first %)) @result))
-                                   (swap! result conj [n (:id item)])))))
+                                 (when-not (or (next-covered n) (already-collected? n))
+                                   (emit! n (:id item))))))
                       :value nil)))))]
       (walk fn-id #{}))
     @result))
@@ -141,17 +143,15 @@
 
 
 (defn- f-arg-for-r-origin
-  "Walk F's inheritance chain and return the arg whose source-id chain
-   includes `r-origin-id` — i.e. the arg on F (or an F-ancestor) that
-   propagates R's free slot up to F's external interface."
-  [r-origin-id f-fn-id {:keys [fn-map args-by-fn arg-map]}]
-  (let [chain (l/inheritance-chain f-fn-id fn-map)]
-    (some (fn [fid]
-            (some (fn [arg]
-                    (when (contains? (l/source-chain-set (:id arg) arg-map) r-origin-id)
-                      arg))
-                  (get args-by-fn fid [])))
-          chain)))
+  "Arg on F (or an F-ancestor) whose source-id chain includes
+   `r-origin-id` — the arg that propagates R's free slot up to F's
+   external interface."
+  [r-origin-id f-fn-id {:keys [arg-map] :as lookups}]
+  (find-in-chain f-fn-id
+                 (fn [arg]
+                   (when (contains? (l/source-chain-set (:id arg) arg-map) r-origin-id)
+                     arg))
+                 lookups))
 
 
 (defn build-ref-renames

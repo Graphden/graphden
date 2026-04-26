@@ -210,13 +210,13 @@
 
 
 (defn- enrich-is-fn-ref
-  "Attach `:hof-lambda-params` to `binding` (a :ref binding with
+  "Attach `:hof-lambda-params` to `bnd` (a :ref binding with
    :is-fn=true). The list comes from `r/hof-lambda-params` —
    structurally-classified per-call slots of the HOF target as seen
    from the caller `fn-id`."
-  [fn-id lookups binding]
-  (assoc binding :hof-lambda-params
-         (r/hof-lambda-params (:ref-id binding) fn-id lookups)))
+  [fn-id lookups bnd]
+  (assoc bnd :hof-lambda-params
+         (r/hof-lambda-params (:ref-id bnd) fn-id lookups)))
 
 
 (defn- enrich-ref-bindings

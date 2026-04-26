@@ -391,6 +391,14 @@
               (:is-fn a) true
               :else (recur (get arg-map (:source-id a)) (inc depth)))))
 
+        ;; HOF context to thread into a child render: OR the parent's
+        ;; `is-hof` with whether `arg-id` crosses the HOF boundary
+        ;; (any source-id chain step has `:is-fn=true`). Once HOF,
+        ;; descendants stay HOF.
+        child-hof
+        (fn [arg-id is-hof]
+          (or is-hof (arg-marks-hof? (get arg-map arg-id))))
+
         add-fn-node
         (fn [original-fn-id is-root source-node-id source-arg-id]
           ;; Node ID strategy: each call-site is distinct. A call-site in
@@ -1218,14 +1226,8 @@
                       (doseq [arg filtered-args]
                         (case (:type arg)
                           :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
-                                     ref-bindings bindings
-                                     ;; HOF-reachability crosses this edge if the
-                                     ;; arg binding (or any in its source chain)
-                                     ;; is is-fn=true. Otherwise inherit caller's
-                                     ;; is-hof context.
-                                     arg-entity (get arg-map (:arg-id arg))
-                                     child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
-                                 (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} child-is-hof))
+                                     ref-bindings bindings]
+                                 (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} (child-hof (:arg-id arg) is-hof)))
                           :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id #{display-fn-id})
                           :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id} is-hof)
                           nil))))
@@ -1406,12 +1408,10 @@
                             (let [m (find-migrated (:arg-id arg))]
                               (cond
                                 (and m (:ref-id m))
-                                (let [arg-entity (get arg-map (:arg-id arg))
-                                      child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
-                                  (process-any-fn (:ref-id m) node-id
-                                                  (or (:arg-name m) (:arg-name arg))
-                                                  false parent-bindings (:arg-id arg)
-                                                  parent-expansion-root expand-set child-is-hof))
+                                (process-any-fn (:ref-id m) node-id
+                                                (or (:arg-name m) (:arg-name arg))
+                                                false parent-bindings (:arg-id arg)
+                                                parent-expansion-root expand-set (child-hof (:arg-id arg) is-hof))
                                 (and m (some? (:value m)))
                                 (add-arg-value-node (or (:arg-name m) (:arg-name arg))
                                                     (:value m) (:arg-id arg) node-id expand-set)
@@ -1419,9 +1419,7 @@
                                 (add-unset-arg-node (:arg-name arg) (:arg-type arg)
                                                     (:arg-id arg) node-id expand-set is-hof))))]
                       (doseq [arg (filter #(= (:type %) :ref) level-0-stay)]
-                        (let [arg-entity (get arg-map (:arg-id arg))
-                              child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
-                          (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set child-is-hof)))
+                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set (child-hof (:arg-id arg) is-hof)))
 
                       (doseq [arg level-0-unsets] (render-unset arg))
 
@@ -1432,12 +1430,10 @@
                       ;; any) as the leaf's parent-bindings so it picks them
                       ;; up via find-migrated without seeing siblings'.
                       (doseq [arg ancestor-refs]
-                        (let [arg-entity (get arg-map (:arg-id arg))
-                              child-is-hof (or is-hof (arg-marks-hof? arg-entity))
-                              ref-target-id (:ref-id arg)
+                        (let [ref-target-id (:ref-id arg)
                               migrated-to-this-ref (get migrated-by-ref ref-target-id [])
                               leaf-bindings (migrated-bindings-for migrated-to-this-ref)]
-                          (process-any-fn ref-target-id node-id (:arg-name arg) false leaf-bindings (:arg-id arg) effective-expansion-root expand-set child-is-hof)))
+                          (process-any-fn ref-target-id node-id (:arg-name arg) false leaf-bindings (:arg-id arg) effective-expansion-root expand-set (child-hof (:arg-id arg) is-hof))))
 
                       (doseq [arg ancestor-unsets] (render-unset arg))
 
@@ -1536,13 +1532,11 @@
 
                                 (and migrated (:ref-id migrated))
                                 (when (mark-once! [terminal :ref (:ref-id migrated)])
-                                  (let [arg-entity (get arg-map (:id arg))
-                                        child-is-hof (or is-hof (arg-marks-hof? arg-entity))]
-                                    (process-any-fn (:ref-id migrated) node-id
-                                                    (or (:arg-name migrated)
-                                                        (resolve-arg-name arg arg-map))
-                                                    false parent-bindings (:id arg)
-                                                    nil #{fn-id} child-is-hof)))
+                                  (process-any-fn (:ref-id migrated) node-id
+                                                  (or (:arg-name migrated)
+                                                      (resolve-arg-name arg arg-map))
+                                                  false parent-bindings (:id arg)
+                                                  nil #{fn-id} (child-hof (:id arg) is-hof)))
 
                                 (and migrated (some? (:value migrated)))
                                 (when (mark-once! [terminal :value (:value migrated)])

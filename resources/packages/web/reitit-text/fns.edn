@@ -1,0 +1,37 @@
+;; Reitit router presets that wire plain-text bodies into reitit's
+;; three default-handler slots (404, 405, not-acceptable/500).
+;;
+;; Names are just the HTTP code (`r404`/`r405`/`r500`) because the
+;; namespace `web.reitit.text` already says "text-default reitit
+;; router preset"; the parent fn-def says "this is a router".
+
+
+{:namespace "web.reitit.text"
+ :description "Reitit router presets with plain-text bodies for the 404, 405 and not-acceptable/500 fallback slots."
+ :fns
+ [{:name :r404
+   :description "Router preset with a plain-text \"Not Found\" body for the 404 slot."
+   :parent :router
+   :args {:not-found-response :_r404-body}}
+
+  {:name :_r404-body
+   :parent :text-not-found-response
+   :args {:body "Not Found"}}
+
+  {:name :r405
+   :description "Router preset with a plain-text \"Method Not Allowed\" body for the 405 slot."
+   :parent :router
+   :args {:method-not-allowed-response :_r405-body}}
+
+  {:name :_r405-body
+   :parent :text-method-not-allowed-response
+   :args {:body "Method Not Allowed"}}
+
+  {:name :r500
+   :description "Router preset with a plain-text \"Handler not configured\" body for the not-acceptable/500 slot."
+   :parent :router
+   :args {:error-response :_r500-body}}
+
+  {:name :_r500-body
+   :parent :text-error-response
+   :args {:body "Handler not configured"}}]}

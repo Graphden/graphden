@@ -165,38 +165,11 @@
 
   ;; =============================================================================
   ;; ROUTER TEXT-DEFAULT PRESETS
+  ;; Per-slot text-default presets + their body fn-defs live in
+  ;; `web.reitit.text`. The MI composition below stays here because it
+  ;; IS the canonical text-default router consumed by app.server.
   ;; =============================================================================
 
-  ;; Router with individual text defaults — each sets one error response.
-  {:name :router-with-text-404
-   :description "Router preset with a plain-text \"Not Found\" body for the 404 slot."
-   :parent :router
-   :args {:not-found-response :_text-404-body}}
-
-  ;; Response bodies: use ring-response directly (all args explicit, no free arg leakage).
-  {:name :_text-404-body
-   :parent :text-not-found-response
-   :args {:body "Not Found"}}
-
-  {:name :router-with-text-405
-   :description "Router preset with a plain-text \"Method Not Allowed\" body for the 405 slot."
-   :parent :router
-   :args {:method-not-allowed-response :_text-405-body}}
-
-  {:name :_text-405-body
-   :parent :text-method-not-allowed-response
-   :args {:body "Method Not Allowed"}}
-
-  {:name :router-with-text-500
-   :description "Router preset with a plain-text \"Handler not configured\" body for the 500/not-acceptable slot."
-   :parent :router
-   :args {:error-response :_text-500-body}}
-
-  {:name :_text-500-body
-   :parent :text-error-response
-   :args {:body "Handler not configured"}}
-
-  ;; Router with all text defaults via MI.
   {:name :text-error-router
    :description "Router with plain-text bodies wired into all three reitit fallback slots (404, 405, 500). Multiple-inheritance composition of the per-slot presets — caller only supplies `:routes`."
-   :parents [:router-with-text-404 :router-with-text-405 :router-with-text-500]}]}
+   :parents [:r404 :r405 :r500]}]}

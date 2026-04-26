@@ -62,10 +62,19 @@ function calculateNodeSize(nodeData) {
       ? optionalArgs.map(n => '?' + n).join(' ')
       : '';
     const widthFromOptional = optionalText ? optionalText.length * 6 + 24 : 0;
+    // Per-MI-cell floor so each cell still fits at least one icon-pair
+    // worth of slack even when the names are very short. Without this,
+    // a 3-cell MI row of `r404, r405, r500` collapses each cell to ~50px
+    // and even the 4-character name truncates to "r…".
+    const MIN_MI_CELL = 90;
+    const widthFromMI = Math.max(...lines.map(l => {
+      if (!l.includes(', ')) return 0;
+      return l.split(', ').length * MIN_MI_CELL;
+    }));
     // Slack budget = inner padding + room for the right-pinned action
     // icons (i + ↗ ≈ 42px) so the longest full name actually fits and
     // doesn't get prematurely ellipsised.
-    const width = Math.max(80, maxLen * 7 + 60, widthFromOptional);
+    const width = Math.max(80, maxLen * 7 + 60, widthFromOptional, widthFromMI);
     const extra = optionalText ? OPTIONAL_STRIP_HEIGHT : 0;
     const height = Math.max(30 + DRAG_HANDLE_HEIGHT,
                             computeFnOverlayHeight(label, width) + extra);

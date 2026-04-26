@@ -112,24 +112,18 @@
   (mapv first (deep-free-ext-args fn-id lookups)))
 
 
-(defn classify-hof-free
-  "For a HOF target `r-fn-id` invoked from `f-fn-id`, partition the
-   target's deep-free names into structural CAPTURES (the caller's
-   inheritance chain has a BOUND arg whose source-id chain reaches the
-   free name's origin) and LAMBDA-PARAMS (no such anchor — the HOF
-   call site must inject the value per invocation).
+(defn hof-lambda-params
+  "Lambda-param names of HOF target `r-fn-id` when invoked from
+   `f-fn-id`. A deep-free name of R is a LAMBDA PARAM iff F's
+   inheritance chain has no bound arg whose source-id chain reaches
+   the name's origin (no structural anchor → must be filled per
+   call). Captures (the rest) flow in via `outer-free-args` and are
+   not the HOF impl's responsibility.
 
-   Returns `{:captured [names…] :lambda-params [names…]}`. Order
-   preserved from `deep-free-ext-args`. Empty/missing keys = empty
-   vectors.
-
-   Used by `hof-wrap` to pick a static call shape (`(count
-   lambda-params)` → 0/1/N) and by the layout to render captured
-   names as ordinary cross-HOF edges instead of `λname` lambda-param
-   badges."
+   `hof-wrap` picks its call shape from `(count lambda-params)` —
+   0/1/N → variadic / single-arg / map-callable."
   [r-fn-id f-fn-id lookups]
   (let [{:keys [fn-map arg-map args-by-fn]} lookups
-        f-chain (l/inheritance-chain f-fn-id fn-map)
         bound-source-targets
         (reduce (fn [acc fid]
                   (reduce (fn [a arg]
@@ -139,14 +133,11 @@
                           acc
                           (get args-by-fn fid [])))
                 #{}
-                f-chain)
-        free-pairs (deep-free-ext-args r-fn-id lookups)]
-    (reduce (fn [acc [nm oid]]
-              (if (contains? bound-source-targets oid)
-                (update acc :captured conj nm)
-                (update acc :lambda-params conj nm)))
-            {:captured [] :lambda-params []}
-            free-pairs)))
+                (l/inheritance-chain f-fn-id fn-map))]
+    (into []
+          (comp (remove (fn [[_ oid]] (contains? bound-source-targets oid)))
+                (map first))
+          (deep-free-ext-args r-fn-id lookups))))
 
 
 (defn- f-arg-for-r-origin
@@ -168,16 +159,14 @@
    includes entries where the name actually differs (identity entries are
    elided so callers can skip the rename work when the map is empty)."
   [r-fn-id f-fn-id lookups]
-  (let [arg-map (:arg-map lookups)
-        r-frees (deep-free-ext-names r-fn-id lookups)]
+  (let [arg-map (:arg-map lookups)]
     (into {}
-          (keep (fn [r-ext]
-                  (when-let [origin (chain-arg-id-for-ext-name r-fn-id r-ext lookups)]
-                    (when-let [f-arg (f-arg-for-r-origin origin f-fn-id lookups)]
-                      (let [f-ext (l/arg-ext-name (:id f-arg) arg-map)]
-                        (when (and f-ext (not= f-ext r-ext))
-                          [r-ext f-ext]))))))
-          r-frees)))
+          (keep (fn [[r-ext origin]]
+                  (when-let [f-arg (f-arg-for-r-origin origin f-fn-id lookups)]
+                    (let [f-ext (l/arg-ext-name (:id f-arg) arg-map)]
+                      (when (and f-ext (not= f-ext r-ext))
+                        [r-ext f-ext])))))
+          (deep-free-ext-args r-fn-id lookups))))
 
 
 (defn apply-renames

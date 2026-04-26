@@ -195,23 +195,27 @@
     bindings))
 
 
+(defn- enrich-is-fn-ref
+  "Attach `:hof-lambda-params` to `binding` (a :ref binding with
+   :is-fn=true). The list comes from `r/hof-lambda-params` —
+   structurally-classified per-call slots of the HOF target as seen
+   from the caller `fn-id`."
+  [fn-id lookups binding]
+  (assoc binding :hof-lambda-params
+         (r/hof-lambda-params (:ref-id binding) fn-id lookups)))
+
+
 (defn- enrich-ref-bindings
   "Precompute per-binding metadata that depends only on the graph shape:
-   - `:hof-lambda-params` for `:is-fn` refs (used by `hof-wrap`).
-     `r/classify-hof-free` partitions the target's deep-free names
-     into structural CAPTURES (the caller's chain has a bound arg
-     reaching the name's origin via source-id) and LAMBDA-PARAMS
-     (no anchor — must be filled per HOF call). Captures stay in
-     outer-free-args; only lambda-params determine the HOF call shape.
-   - `:ref-renames`   for non-HOF refs (used at call-site by
+   - `:hof-lambda-params` for `:is-fn` refs (consumed by `hof-wrap`).
+   - `:ref-renames`       for non-HOF refs (consumed at call-site by
      `apply-renames` to map F's free-arg names onto R's). Refs without
      renames get an empty map."
   [fn-id bindings lookups]
   (mapv (fn [b]
           (cond
             (and (= :ref (:kind b)) (:is-fn b))
-            (assoc b :hof-lambda-params
-                   (:lambda-params (r/classify-hof-free (:ref-id b) fn-id lookups)))
+            (enrich-is-fn-ref fn-id lookups b)
 
             (= :ref (:kind b))
             (assoc b :ref-renames (r/build-ref-renames (:ref-id b) fn-id lookups))
@@ -328,8 +332,7 @@
         bindings (enrich-ref-bindings fn-id (b/collect-bindings fn-id lookups) lookups)
         env-bindings (mapv (fn [b]
                              (if (and (= :ref (:kind b)) (:is-fn b))
-                               (assoc b :hof-lambda-params
-                                      (:lambda-params (r/classify-hof-free (:ref-id b) fn-id lookups)))
+                               (enrich-is-fn-ref fn-id lookups b)
                                b))
                            (b/collect-env-bindings fn-id lookups))]
     (build-closure impl bindings env-bindings ctx)))

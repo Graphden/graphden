@@ -165,10 +165,19 @@
         fn-name-str (clojure.core/name fn-name)
         is-local? (parsing/local-fn-name? fn-name)
         existing-named (when-not is-local?
-                         (get fn-name-cache fn-name-str))]
+                         (get fn-name-cache fn-name-str))
+        new-description (:description fn-def)
+        description-changed? (fn [existing]
+                               (not= new-description (:description existing)))]
     (cond
-      ;; Already in DB with same name (named only).
-      existing-named {:existing existing-named}
+      ;; Already in DB with same name. Update only when description drifted —
+      ;; lets authors edit `:description` in fns.edn without truncating the
+      ;; DB. Other fn fields (parent-ids, namespace) on named fns are stable
+      ;; once created (changing them would require a separate migration).
+      existing-named
+      (if (description-changed? existing-named)
+        {:update (assoc existing-named :description new-description)}
+        {:existing existing-named})
 
       :else
       (let [parent-names (fn-def-parent-names fn-def)
@@ -186,11 +195,14 @@
                     (random-uuid))
             existing-local (when is-local? (get fn-id-cache fn-id))]
         (if existing-local
-          {:existing existing-local}
+          (if (description-changed? existing-local)
+            {:update (assoc existing-local :description new-description)}
+            {:existing existing-local})
           {:new (cond-> {:id fn-id
                          :name db-name
                          :parent-ids (when (seq parent-ids) parent-ids)}
-                  ns-id (assoc :namespace-id ns-id))})))))
+                  ns-id (assoc :namespace-id ns-id)
+                  new-description (assoc :description new-description))})))))
 
 
 (defn prepare-propagated-arg-record

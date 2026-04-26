@@ -61,6 +61,10 @@
   #uuid "f6a7b8c9-2345-4d0e-1f2a-aabbccddeeff")
 
 
+(def ^:private ns-description-field-uuid
+  #uuid "0a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d")
+
+
 ;; Field UUIDs for :fn
 (def ^:private fn-name-field-uuid
   #uuid "c3d4e5f6-a7b8-4c9d-0e1f-2a3b4c5d6e7f")
@@ -80,6 +84,10 @@
 
 (def ^:private fn-impl-hash-field-uuid
   #uuid "f6a7b8c9-d0e1-4f2a-3b4c-5d6e7f8a9b0c")
+
+
+(def ^:private fn-description-field-uuid
+  #uuid "1b2c3d4e-5f6a-4b7c-8d9e-0f1a2b3c4d5e")
 
 
 ;; Field UUIDs for :arg
@@ -127,6 +135,10 @@
   #uuid "e7f8a9b0-c1d2-4e3f-4a5b-6c7d8e9f0011")
 
 
+(def ^:private arg-description-field-uuid
+  #uuid "2c3d4e5f-6a7b-4c8d-9e0f-1a2b3c4d5e6f")
+
+
 (defn- value-kind-enum-values
   []
   (into [{:uuid (get value-kind-values :null) :value :null}
@@ -152,7 +164,10 @@
                       :parent-id {:uuid ns-parent-id-field-uuid
                                   :type :ref
                                   :ref-entity :ns
-                                  :nullable? true}})
+                                  :nullable? true}
+                      :description {:uuid ns-description-field-uuid
+                                    :type :text
+                                    :nullable? true}})
       (ds/add-constraint :ns {:type :unique :fields [:parent-id :name]})
 
       ;; fn: function entity
@@ -179,7 +194,10 @@
                                     :nullable? true}
                       :impl-hash {:uuid fn-impl-hash-field-uuid
                                   :type :text
-                                  :nullable? true}})
+                                  :nullable? true}
+                      :description {:uuid fn-description-field-uuid
+                                    :type :text
+                                    :nullable? true}})
       (ds/add-constraint :fn {:type :unique :fields [:namespace-id :name]})
 
       ;; arg: argument entity
@@ -234,6 +252,9 @@
                       :prev-arg-id {:uuid arg-prev-arg-id-field-uuid
                                     :type :ref
                                     :ref-entity :arg
+                                    :nullable? true}
+                      :description {:uuid arg-description-field-uuid
+                                    :type :text
                                     :nullable? true}})
       (ds/add-constraint :arg {:type :unique :fields [:fn-id :source-id]})
       (ds/add-constraint :arg {:type :unique :fields [:fn-id :name]})))

@@ -110,7 +110,8 @@
   (log/info "Registering base functions...")
   (let [base-fn-defs (:base-fn-defs packages)
         ;; Sync namespace entities first (creates ns hierarchy in DB)
-        ns-id-map (pkg/sync-namespaces! storage (:namespaces packages))]
+        ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
+                                        (:ns-descriptions packages))]
     (registry/register-base-fns! base-fn-defs)
     (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map)
     (log/info "Base functions registered:" (count base-fn-defs))

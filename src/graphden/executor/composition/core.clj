@@ -136,16 +136,23 @@
                     :created-fn-entities created-entities})
                  (let [fn-def (first remaining)
                        result (records/prepare-fn-record fn-name-cache' fn-id-cache created fn-def ns-id-map)
-                       fn-entity (or (:existing result) (:new result))
+                       ;; Pick the fn-entity to track downstream — for
+                       ;; description-only updates we use the updated
+                       ;; record so the in-memory cache reflects the
+                       ;; new description immediately.
+                       fn-entity (or (:update result) (:existing result) (:new result))
                        fn-id (:id fn-entity)
                        new-created (assoc created (:name fn-def) fn-id)
-                       ;; Track full entity for parent-ids lookup
                        new-created-entities (assoc created-entities fn-id fn-entity)
-                       new-fns' (if (:new result)
-                                  (conj new-fns (:new result))
-                                  new-fns)
-                       ;; Update cache with new fn
-                       fn-name-cache'' (if (:new result)
+                       ;; New rows go into the upsert batch as before.
+                       ;; Updates (description drift on existing fns) ride
+                       ;; the same upsert — same id → INSERT-ON-CONFLICT
+                       ;; resolves to UPDATE.
+                       new-fns' (cond
+                                  (:new result) (conj new-fns (:new result))
+                                  (:update result) (conj new-fns (:update result))
+                                  :else new-fns)
+                       fn-name-cache'' (if (or (:new result) (:update result))
                                          (assoc fn-name-cache' (name (:name fn-def)) fn-entity)
                                          fn-name-cache')]
                    (recur (rest remaining) new-created new-created-entities new-fns' fn-name-cache''))))

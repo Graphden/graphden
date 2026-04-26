@@ -78,13 +78,15 @@
   "Loads fns.edn for a module. Expected shape:
 
      {:namespace \"core.arithmetic\"
+      :description \"Arithmetic primitives — add/sub/mul/div/mod\"
       :fns [{:name :add :args {...}} ...]}
 
-   Returns {:ns-path string :fns [fn-defs]}."
+   Returns {:ns-path string :ns-description string-or-nil :fns [fn-defs]}."
   [package-name module-name]
   (let [path (str "packages/" package-name "/" module-name "/fns.edn")]
     (if-let [raw (read-resource-edn path)]
       {:ns-path (:namespace raw)
+       :ns-description (:description raw)
        :fns (vec (:fns raw))}
       (throw (ex-info (str "Module fns not found: " package-name "/" module-name)
                       {:type :package-error/module-not-found
@@ -189,7 +191,8 @@
    Each fn-def and base-fn-def receives a :namespace key from the module's
    fns.edn declaration (nil if no namespace declared)."
   [package-name module-name]
-  (let [{ns-path :ns-path fns :fns} (load-module-fns package-name module-name)
+  (let [{ns-path :ns-path ns-description :ns-description fns :fns}
+        (load-module-fns package-name module-name)
         impls (load-module-impls package-name module-name)
 
         ;; Separate base functions from fn-defs
@@ -216,7 +219,10 @@
                               fn-defs)]
 
     {:base-fn-defs base-fn-defs
-     :fn-defs fn-defs-with-ns}))
+     :fn-defs fn-defs-with-ns
+     :ns-descriptions (if (and ns-path ns-description)
+                        {ns-path ns-description}
+                        {})}))
 
 
 ;; =============================================================================
@@ -232,12 +238,15 @@
 
     (reduce
       (fn [acc module-name]
-        (let [{:keys [base-fn-defs fn-defs]} (process-module package-name module-name)]
+        (let [{:keys [base-fn-defs fn-defs ns-descriptions]}
+              (process-module package-name module-name)]
           (-> acc
               (update :base-fn-defs merge base-fn-defs)
-              (update :fn-defs into fn-defs))))
+              (update :fn-defs into fn-defs)
+              (update :ns-descriptions merge ns-descriptions))))
       {:base-fn-defs {}
        :fn-defs []
+       :ns-descriptions {}
        :meta pkg-meta}
       modules)))
 
@@ -292,10 +301,12 @@
                            (-> acc
                                (update :base-fn-defs merge (:base-fn-defs result))
                                (update :fn-defs into (:fn-defs result))
+                               (update :ns-descriptions merge (:ns-descriptions result))
                                (update :packages conj (:meta result))
                                (cond-> (get-in result [:meta :startup-fn])
                                  (assoc :startup-fn (get-in result [:meta :startup-fn])))))
-                         {:base-fn-defs {} :fn-defs [] :packages [] :startup-fn nil}
+                         {:base-fn-defs {} :fn-defs [] :ns-descriptions {}
+                          :packages [] :startup-fn nil}
                          results)
         ;; Collect all namespace paths declared in modules.
         ;; A path like "core.arithmetic" also implies "core" as a parent ns.
@@ -329,39 +340,48 @@
 (defn sync-namespaces!
   "Creates namespace entities in storage for all declared namespace paths.
    Builds the parent-child hierarchy (e.g. 'core.arithmetic' creates both
-   'core' and 'core.arithmetic' with parent link).
+   'core' and 'core.arithmetic' with parent link). Optional
+   `descriptions` map (`{ns-path → string}`) seeds and updates the
+   `:description` field on matching namespace entities; undeclared
+   intermediate parents (`core` when only `core.arithmetic` is in the
+   map) keep `nil`.
 
    Returns a map {ns-path-string → ns-entity-id} for downstream use."
-  [storage namespace-paths]
-  (if (empty? namespace-paths)
-    {}
-    (let [;; Sort paths by depth so parents are created before children
-          sorted (sort-by #(count (str/split % #"\.")) namespace-paths)
-          ;; Existing ns entities by [parent-id name]
-          existing (into {}
-                         (map (fn [ns-entity]
-                                [(str (:parent-id ns-entity) ":" (:name ns-entity))
-                                 ns-entity]))
-                         (sp/query-entities storage :ns {}))
-          result (atom {})  ; ns-path → id
-          ]
-      (doseq [ns-path sorted]
-        (let [segments (str/split ns-path #"\.")
-              ;; Resolve parent: for "core.arithmetic", parent = result["core"]
-              parent-path (when (> (count segments) 1)
-                            (str/join "." (butlast segments)))
-              parent-id (when parent-path (get @result parent-path))
-              seg-name (last segments)
-              lookup-key (str parent-id ":" seg-name)
-              existing-entity (get existing lookup-key)]
-          (if existing-entity
-            (swap! result assoc ns-path (:id existing-entity))
-            (let [new-entity (sp/create-entity storage :ns
-                                               {:name seg-name
-                                                :parent-id parent-id})]
-              (swap! result assoc ns-path (:id new-entity))))))
-      (log/info "Synced" (count @result) "namespaces:" (keys @result))
-      @result)))
+  ([storage namespace-paths]
+   (sync-namespaces! storage namespace-paths {}))
+  ([storage namespace-paths descriptions]
+   (if (empty? namespace-paths)
+     {}
+     (let [sorted (sort-by #(count (str/split % #"\.")) namespace-paths)
+           existing (into {}
+                          (map (fn [ns-entity]
+                                 [(str (:parent-id ns-entity) ":" (:name ns-entity))
+                                  ns-entity]))
+                          (sp/query-entities storage :ns {}))
+           result (atom {})]
+       (doseq [ns-path sorted]
+         (let [segments (str/split ns-path #"\.")
+               parent-path (when (> (count segments) 1)
+                             (str/join "." (butlast segments)))
+               parent-id (when parent-path (get @result parent-path))
+               seg-name (last segments)
+               lookup-key (str parent-id ":" seg-name)
+               existing-entity (get existing lookup-key)
+               description (get descriptions ns-path)]
+           (if existing-entity
+             (do
+               (when (and description
+                          (not= description (:description existing-entity)))
+                 (sp/update-entity storage :ns (:id existing-entity)
+                                   {:description description}))
+               (swap! result assoc ns-path (:id existing-entity)))
+             (let [new-entity (sp/create-entity storage :ns
+                                                (cond-> {:name seg-name
+                                                         :parent-id parent-id}
+                                                  description (assoc :description description)))]
+               (swap! result assoc ns-path (:id new-entity))))))
+       (log/info "Synced" (count @result) "namespaces:" (keys @result))
+       @result))))
 
 
 ;; =============================================================================

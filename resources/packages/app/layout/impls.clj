@@ -1260,17 +1260,7 @@
                 (let [in-progress-key [original-fn-id parent-expansion-root]]
                   (if (contains? @in-progress-expansions in-progress-key)
                     (let [node-id (add-fn-node original-fn-id is-root source-node-id source-arg-id)]
-                      (when (and source-node-id edge-arg-name)
-                        (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
-                          (when-not (contains? @added-node-ids edge-id)
-                            (swap! added-node-ids conj edge-id)
-                            (swap! edges conj
-                                   {:data {:id edge-id
-                                           :source source-node-id
-                                           :target node-id
-                                           :sourceArgId source-arg-id
-                                           :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
-                                                        (when edge-arg-name (name edge-arg-name)))}}))))
+                      (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
                       node-id)
                     (do
                       (swap! in-progress-expansions conj in-progress-key)
@@ -1507,17 +1497,7 @@
                     ;; No recursion into refs: user must explicitly expand to
                     ;; see the leaf's body.
                     (let [node-id (add-fn-node fn-id false source-node-id source-arg-id)]
-                      (when (and source-node-id edge-arg-name)
-                        (let [edge-id (str "e-ref-" source-node-id "-" node-id)]
-                          (when-not (contains? @added-node-ids edge-id)
-                            (swap! added-node-ids conj edge-id)
-                            (swap! edges conj
-                                   {:data {:id edge-id
-                                           :source source-node-id
-                                           :target node-id
-                                           :sourceArgId source-arg-id
-                                           :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
-                                                        (when edge-arg-name (name edge-arg-name)))}}))))
+                      (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
                       (let [raw-own-args (get args-by-fn fn-id [])
                             seq-anchors (filterv #(= :sequence (:type %)) raw-own-args)
                             seq-chain-ids (into #{}

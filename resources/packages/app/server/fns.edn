@@ -21,6 +21,7 @@
    :args {:body :_health-json-body}}
 
   {:name :health-route
+   :description "GET /health — returns the current health status as JSON."
    :parent :get-route
    :args {:path "/health" :handler :_health-handler}}
 
@@ -33,6 +34,7 @@
    :args {:body :_metrics-json-body}}
 
   {:name :metrics-route
+   :description "GET /metrics — returns JVM info (heap, threads, uptime) as JSON."
    :parent :get-route
    :args {:path "/metrics" :handler :_metrics-handler}}
 
@@ -41,10 +43,12 @@
   ;; =============================================================================
 
   {:name :ui-routes
+   :description "User-facing UI route group — favicon and the editor page."
    :parent :list
    :args {:items [:favicon-route :editor-route]}}
 
   {:name :entity-crud-routes
+   :description "Entity CRUD route group — details/form pages and create/delete handlers used by the editor's right-hand panel."
    :parent :list
    :args {:items [:entity-details-route
                   :entity-form-create-route
@@ -53,14 +57,17 @@
                   :delete-entity-route]}}
 
   {:name :graph-api-routes
+   :description "Graph-data API routes — `/api/entities` (raw graph dump) and `/api/graph/layout` (layout pipeline)."
    :parent :list
    :args {:items [:api-entities-route :layout-api-route]}}
 
   {:name :monitoring-routes
+   :description "Health + metrics route group consumed by the docker healthcheck and external scrapers."
    :parent :list
    :args {:items [:health-route :metrics-route]}}
 
   {:name :all-routes
+   :description "Flat list of every route reitit serves. Bound into `:_router` — order is irrelevant since reitit dispatches by `[path method]`."
    :parent :list
    :args {:items [:favicon-route
                   :editor-route
@@ -88,10 +95,12 @@
    :args {:items [:auth-required-middleware]}}
 
   {:name :post-auth-required-route
+   :description "POST route preset wired with `:auth-required-middleware`. Caller provides `:path` and `:handler`."
    :parent :post-route-with-middleware
    :args {:middleware :_auth-middleware-list}}
 
   {:name :delete-auth-required-route
+   :description "DELETE route preset wired with `:auth-required-middleware`. Caller provides `:path` and `:handler`."
    :parent :delete-route-with-middleware
    :args {:middleware :_auth-middleware-list}}
 

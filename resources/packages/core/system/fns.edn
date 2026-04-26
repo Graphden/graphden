@@ -192,7 +192,8 @@
   ;; :func is a fn-graph that PRODUCES a callable (e.g. :_router
   ;; returns a reitit ring-handler).
   {:name :invoke
-   :args {:func :any, :arg :any}
+   :args {:func {:type :any :description "Already-built Clojure callable (e.g. produced by another fn-graph). Used as-is — no hof-wrap."}
+          :arg {:type :any :description "Single argument passed to the callable."}}
    :return-type :any}
 
   ;; Call a fn-graph-as-callable with one arg. `:func :fn` — the ref is

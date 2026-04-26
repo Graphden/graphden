@@ -614,6 +614,7 @@
                      {:data {:id edge-id
                              :source source-node-id
                              :target node-id
+                             :sourceArgId arg-id
                              :argName (or (compute-edge-label arg-id source-node-id expanded-fns)
                                           (when arg-name (name arg-name)))}}))
             node-id))
@@ -1593,11 +1594,10 @@
                                     new-src (when sai (get migrations sai))]
                                 (if new-src
                                   (assoc e :data
-                                         (-> data
-                                             (assoc :source new-src
-                                                    :id (str "e-cap-" new-src "-" (:target data)))
-                                             (dissoc :sourceArgId)))
-                                  (assoc e :data (dissoc data :sourceArgId)))))
+                                         (assoc data
+                                                :source new-src
+                                                :id (str "e-cap-" new-src "-" (:target data))))
+                                  e)))
                             @edges)]
       {:nodes final-nodes
        :edges final-edges})))

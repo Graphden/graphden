@@ -22,6 +22,7 @@
   ;; First-class list primitive. :items is a sequence-arg; items live in
   ;; linked arg entities chained via arg.next_arg_id.
   {:name :list
+   :description "Construct a vector from a sequence-arg. Each item is a separate arg entity chained via `next-arg-id`, so refs and literals can be freely mixed."
    :args {:items {:type :sequence :of :any}}
    :return-type :jsonb}
 

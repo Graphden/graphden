@@ -23,6 +23,7 @@
   ;; expects: `[[path {:method {:handler …}} …] …]` with keyword keys
   ;; at every level of the route-data map.
   {:name :ring-router
+   :description "Compile a vector of `[path method-data]` route entries into a reitit router. Wraps `reitit.ring/router`."
    :args {:routes :any}
    :return-type :any}
 
@@ -30,6 +31,7 @@
   ;; `handlers` is a map with `:not-found`, `:method-not-allowed`,
   ;; `:not-acceptable` keys; each value is a Ring-shaped handler fn.
   {:name :ring-create-default-handler
+   :description "Build a Ring fallback handler from a `{:not-found :method-not-allowed :not-acceptable}` map of per-slot Ring callables."
    :args {:handlers :jsonb}
    :return-type :fn}
 
@@ -42,6 +44,7 @@
   ;; through. `:fn` would trigger `hof-wrap` and re-wrap the fn-graph
   ;; — wrong here, because the value IS already a callable.
   {:name :ring-handler
+   :description "Compose a compiled reitit router and a default handler into the single Ring callable invoked per request."
    :args {:router :any
           :default-handler :any}
    :return-type :fn}
@@ -155,6 +158,7 @@
   ;; so all downstream fn-defs (`:router-with-text-404`, etc.) keep
   ;; their existing bindings.
   {:name :router
+   :description "Full router assembly — filter nils, keywordize keys, compile reitit router, and wire up a default-handler trio. Public free args: `:routes`, `:not-found-response`, `:method-not-allowed-response`, `:error-response`."
    :parent :ring-handler
    :args {:router :_router-compiled
           :default-handler :_router-default-handler}}
@@ -165,6 +169,7 @@
 
   ;; Router with individual text defaults — each sets one error response.
   {:name :router-with-text-404
+   :description "Router preset with a plain-text \"Not Found\" body for the 404 slot."
    :parent :router
    :args {:not-found-response :_text-404-body}}
 
@@ -174,6 +179,7 @@
    :args {:body "Not Found"}}
 
   {:name :router-with-text-405
+   :description "Router preset with a plain-text \"Method Not Allowed\" body for the 405 slot."
    :parent :router
    :args {:method-not-allowed-response :_text-405-body}}
 
@@ -182,6 +188,7 @@
    :args {:body "Method Not Allowed"}}
 
   {:name :router-with-text-500
+   :description "Router preset with a plain-text \"Handler not configured\" body for the 500/not-acceptable slot."
    :parent :router
    :args {:error-response :_text-500-body}}
 
@@ -191,4 +198,5 @@
 
   ;; Router with all text defaults via MI.
   {:name :text-error-router
+   :description "Router with plain-text bodies wired into all three reitit fallback slots (404, 405, 500). Multiple-inheritance composition of the per-slot presets — caller only supplies `:routes`."
    :parents [:router-with-text-404 :router-with-text-405 :router-with-text-500]}]}

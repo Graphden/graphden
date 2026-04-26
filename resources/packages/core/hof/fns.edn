@@ -11,8 +11,8 @@
    :return-type :any}
 
   {:name :filter
-   :args {:pred :fn
-          :coll {:type :jsonb :required false}}
+   :args {:pred {:type :fn :description "Predicate callable; items where `(pred item)` is truthy are kept."}
+          :coll {:type :jsonb :required false :description "Collection to filter. When omitted, returns a transducer."}}
    :return-type :any}
 
   {:name :reduce

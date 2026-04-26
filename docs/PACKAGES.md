@@ -12,7 +12,8 @@
 3. [Module Files](#module-files)
 4. [Package Loading](#package-loading)
 5. [Composition Best Practices](#composition-best-practices)
-6. [Adding New Functions](#adding-new-functions)
+6. [Naming Guidelines](#naming-guidelines)
+7. [Adding New Functions](#adding-new-functions)
 
 ---
 
@@ -369,6 +370,86 @@ Each level should:
 | Contains hardcoded values? | No (except defaults) | Yes |
 | Can be composed from existing functions? | No | Yes |
 | Implementation > 20 lines? | Reconsider | N/A |
+
+---
+
+## Naming Guidelines
+
+A fn-def's name should be **short** and add only the **last bit of distinction**. Surrounding context — the namespace path, the parent fn-def, the arg names visible on incoming edges — already conveys most of the meaning. The name's job is to disambiguate within that context, not to repeat it.
+
+### Drop affixes the context already conveys
+
+| Avoid | Prefer | Why |
+|---|---|---|
+| `app.server.health-route` | `app.routes.health` | NS already says "this is a route" |
+| `app.editor.editor-page` | `app.editor.page` | NS prefix duplicates |
+| `web.reitit.router-with-text-404` | `web.reitit.text.r404` | Move to sub-NS, drop the path prefix |
+| `app.server.post-auth-required-route` | `app.routes.auth.post` | NS says "auth-required template", parent says "route" |
+| `web.crud.create-entity-api-handler` | `web.crud.create-entity-handler` | Parent `:html-action-response` already conveys "action API" |
+| `app.server.all-routes` | `app.routes.groups.all` | NS already says "this is a routes bundle" |
+
+### When affixes earn their keep
+
+Some suffixes survive because they distinguish the fn-def from a sibling that would otherwise share the same name:
+
+| Keep | Why |
+|---|---|
+| `*-handler` (web.crud) | Distinguishes the response builder from the route fn-def of the same logical endpoint. `app.routes.entity-details` (route) vs `web.crud.entity-details-handler` (Ring response builder). |
+| `get-route`, `post-route` (templates) | Marks them as method templates, distinct from concrete routes that *drop* the suffix. The asymmetry — templates have `-route`, leaves don't — is the signal. |
+
+### Globally unique fn names — grep before you rename
+
+The composition validator enforces globally-unique fn names at sync time (`:fn-composition/duplicate-names`). Even **local** fn-defs (those with a leading `_` whose stored `name` is `nil`) need a unique declared name in `fns.edn`.
+
+Before shortening a name, check:
+
+```bash
+grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages/
+```
+
+Common collision sources:
+- Base fn-defs in `core.*` (e.g. `core.collections.get`, `core.collections.list`).
+- Base fn-defs in `web.crud` (e.g. `create-entity`, `delete-entity` — both base-fns).
+- Sibling namespaces touching the same domain (e.g. `app.routes.entity-details` vs a hypothetical `web.crud.handlers.entity-details`).
+
+### Verb-at-end when the prefix form clashes
+
+When the natural verb-prefix form clashes with a base-fn or sibling, swap to verb-at-end. The graph reads almost identically; the sidebar bonus is alphabetical clustering by domain:
+
+| Was | Renamed | Reason |
+|---|---|---|
+| `create-entity-route` | `entity-create` | `create-entity` is a `web.crud` base-fn |
+| `delete-entity-route` | `entity-delete` | `delete-entity` is a `web.crud` base-fn |
+
+In the sidebar, `entity-create`, `entity-delete`, `entity-details`, `entity-form-create`, `entity-form-edit` cluster together; `create-entity`, `delete-entity`, `entity-details`, … would split the domain in two.
+
+### Extract a sub-namespace when a group shares a long prefix
+
+If ~5 or more fn-defs share a long common prefix that just describes their group, that's the signal to extract a sub-namespace and drop the prefix.
+
+Decision rule: if the group has a coherent semantic boundary AND ≥ ~5 members, extract a sub-NS; otherwise just drop the redundant in-place affix.
+
+| Group | Members | Action |
+|---|---|---|
+| `*-route` leaves | 13 | New NS `app.routes`, drop suffix |
+| `*-routes` bundles | 5 | New NS `app.routes.groups`, drop suffix |
+| `router-with-text-*` presets | 6 | New NS `web.reitit.text`, drop prefix (`r404`/`r405`/`r500`) |
+| `*-auth-required-route` templates | 2 | New NS `app.routes.auth`, drop both ends (`post`/`delete`) |
+| `editor-*` in `app.editor` | 9 | Already in the right NS — drop prefix in place |
+
+### Locals (`_*`) still need globally-unique names
+
+Local fn-defs are stored with `name=nil` and don't appear in the sidebar or graph navigation, but their **declared** name in `fns.edn` is validated for uniqueness across the whole loaded package set. Keep their names descriptive enough to avoid clashes:
+
+- ✅ `_health-handler`, `_metrics-handler`, `_favicon-handler` — each carries the endpoint context.
+- ❌ `_handler`, `_body`, `_response` — would clash the moment a second module needs the same shape.
+
+### Quick checklist before naming a new fn-def
+
+1. Does the surrounding namespace already say what kind of thing this is? Drop that part of the name.
+2. Does the parent fn-def already say what shape this is? Drop that part too.
+3. After dropping, does the bare name still uniquely identify the fn-def? If not, restore the smallest disambiguating affix.
+4. Will the fn-def be referenced unqualified (`:name`) from another module? Grep for collisions across `resources/packages/`.
 
 ---
 

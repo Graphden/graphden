@@ -542,6 +542,17 @@ Each level should:
 - `http-server`: Base function (wraps http-kit)
 - `web-server`: Fn-def (composes http-server with router and port)
 - `router`: Base function (wraps reitit)
+
+### 6. Naming (short names, context carries meaning)
+
+Names should add the **last bit of distinction** — the namespace, the parent fn-def, and the arg names already convey most of the meaning. Drop affixes the context already conveys; keep affixes that disambiguate vs a sibling that would otherwise share the name. Verb-at-end (`entity-create`) when the prefix form (`create-entity`) clashes with a base-fn or sibling. Extract a sub-NS when ≥ ~5 fn-defs share a long common prefix. Names are validated for **global** uniqueness at sync time, **including locals** (`_*`).
+
+Before renaming, grep:
+```bash
+grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages/
+```
+
+See [docs/PACKAGES.md § Naming Guidelines](docs/PACKAGES.md#naming-guidelines) for the full rationale, decision matrix, and worked examples.
 - `editor-router`: Fn-def (composes router with specific routes)
 
 ## CI Workflow

@@ -101,17 +101,16 @@
 
   ;; This app's router instance — bound to all-routes.
   {:name :_router
+   :description "This app's compiled reitit router — text-error-router bound to all of this app's routes."
    :parent :text-error-router
    :args {:routes :all-routes}}
 
-  ;; Wrap the router in the Ring-response envelope and bind it directly
-  ;; to http-server's :fn-typed :handler slot. Auth happens per-route via
-  ;; reitit middleware (see protected-* routes below); no separate
-  ;; path-gating layer before the router.
   {:name :_app-ring-response
+   :description "Final Ring handler — invokes the router on the parsed request and merges default security headers. Bound to `:http-server.handler`."
    :parent :router-ring-response
    :args {:func :_router}}
 
   {:name :web-server
+   :description "Application root — starts the http-kit server on port 8080 with this app's full Ring handler chain."
    :parent :http-server
    :args {:handler :_app-ring-response :port 8080}}]}

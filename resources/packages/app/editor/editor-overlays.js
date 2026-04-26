@@ -716,23 +716,24 @@ function createEdgeLabelOverlay(edge, container) {
   const label = edge.data('argName');
   if (!label) return;
 
-  const overlay = document.createElement('div');
-  overlay.className = 'edge-label-overlay';
-  overlay.dataset.edgeId = edge.id();
-  overlay.textContent = label;
-  // Description via the source-arg's primary slot. Walk source-id chain
-  // to the terminal arg (the primary that owns the slot); use its
-  // :description if any. Falls back to the source-arg's own description.
+  // Walk source-id chain from the edge's source-arg to the primary
+  // (terminal source-id=nil) and pick the first :description we hit.
+  // The primary owns the slot's canonical description; intermediate
+  // renames may override it for clarity.
+  let description = null;
   const sourceArgId = edge.data('sourceArgId');
   if (sourceArgId && lookups && lookups.argMap) {
     let cur = lookups.argMap.get(sourceArgId);
-    let description = cur && cur.description;
+    description = cur && cur.description;
     while (!description && cur && cur['source-id']) {
       cur = lookups.argMap.get(cur['source-id']);
       description = cur && cur.description;
     }
-    if (description) overlay.title = description;
   }
+
+  const overlay = document.createElement('div');
+  overlay.className = 'edge-label-overlay';
+  overlay.dataset.edgeId = edge.id();
   Object.assign(overlay.style, {
     position: 'absolute',
     pointerEvents: 'auto',
@@ -747,9 +748,25 @@ function createEdgeLabelOverlay(edge, container) {
     textAlign: 'left',
     transformOrigin: 'top left',
     userSelect: 'none',
-    WebkitUserSelect: 'none',
-    cursor: overlay.title ? 'help' : 'default'
+    WebkitUserSelect: 'none'
   });
+
+  const labelSpan = document.createElement('span');
+  labelSpan.textContent = label;
+  overlay.appendChild(labelSpan);
+
+  if (description) {
+    const desc = document.createElement('span');
+    desc.textContent = 'ⓘ';
+    desc.title = description;
+    desc.style.color = '#0066cc';
+    desc.style.cursor = 'help';
+    desc.style.fontSize = '11px';
+    desc.style.marginLeft = '4px';
+    desc.style.opacity = '0.8';
+    overlay.appendChild(desc);
+  }
+
   container.appendChild(overlay);
 }
 

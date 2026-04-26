@@ -94,9 +94,10 @@
    :return-type :jsonb}
 
   {:name :assoc-in
-   :args {:m :any
-          :path :jsonb
-          :v :any}
+   :description "Set the value at a nested path in a map (Clojure's `assoc-in`). Creates intermediate maps as needed."
+   :args {:m {:type :any :description "Map to update (nil treated as empty)."}
+          :path {:type :jsonb :description "Vector of keys identifying the slot."}
+          :v {:type :any :description "Value to write at the path."}}
    :return-type :any}
 
   ;; (update-in m path f) — apply `f` to value at path. `:f` is `:fn`-typed
@@ -105,9 +106,10 @@
   ;; the per-call lambda param dynamically (single non-map arg → bind to
   ;; the only leftover; map arg whose keys match all hof-free → merge).
   {:name :update-in
-   :args {:m :any
-          :path :jsonb
-          :f :fn}
+   :description "Apply a callable to the value at a nested path (Clojure's `update-in`). The `:f` slot is :fn-typed; impl invokes `(f existing-value)` per call."
+   :args {:m {:type :any :description "Map to update (nil treated as empty)."}
+          :path {:type :jsonb :description "Vector of keys identifying the slot."}
+          :f {:type :fn :description "Callable receiving the existing value, returning the new one."}}
    :return-type :any}
 
   {:name :range
@@ -174,6 +176,7 @@
   ;; lambda's per-call param injected by update-in's impl. Sync derives
   ;; both via `partition-args-by-freedom` over the named items.
   {:name :merge-in
+   :description "Merge `defaults` into the map at `path` inside `m`. Equivalent to `(update-in m path #(merge defaults %))` — existing keys win."
    :parent :update-in
    :args {:m {:as :m}
           :path {:as :path}

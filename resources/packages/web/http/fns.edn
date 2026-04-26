@@ -9,10 +9,14 @@
   ;; a Ring callable based on its leftover free-args (one leftover →
   ;; `(fn [request] …)`). No adapter fn needed in between.
   {:name :http-server
-   :args {:handler :fn
-          :port :int}
+   :description "Start an http-kit HTTP server. `:handler` is :fn-typed — the executor's hof-wrap turns the bound fn-graph into a single-arg Ring callable per request."
+   :args {:handler {:type :fn
+                    :description "Ring-style handler — receives the request map, returns the response map."}
+          :port {:type :int
+                 :description "TCP port to listen on (e.g., 8080)."}}
    :return-type :any}
 
   {:name :http-stop
-   :args {:server :any}
+   :description "Stop a running http-kit server returned by `:http-server`."
+   :args {:server {:type :any :description "Server handle returned by `:http-server`."}}
    :return-type :any}]}

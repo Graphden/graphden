@@ -1066,6 +1066,37 @@
                                           {:as :buttons :value 5})))))))
 
 
+(deftest prepare-arg-record-sequence-arg-single-ref
+  (testing "single fn-ref keyword on :sequence parent → anchor with :ref-id"
+    (let [tmpl-id (random-uuid)
+          fn-id (random-uuid)
+          target-fn-id (random-uuid)
+          parent-arg {:id tmpl-id :name "items" :type :sequence :of :any}
+          args-data {:by-id {tmpl-id parent-arg} :by-fn {} :by-fn-source {}}
+          fn-name-cache {"my-list" {:id target-fn-id}}]
+      (with-redefs [records/find-available-arg (fn [_ _ _ _] parent-arg)]
+        (let [result (records/prepare-arg-record {} args-data fn-name-cache {}
+                                                 fn-id [] :items :my-list)
+              [anchor] (:new-chain result)]
+          (is (= 1 (count (:new-chain result))))
+          (is (= :sequence (:type anchor)))
+          (is (= target-fn-id (:ref-id anchor)))
+          (is (nil? (:next-arg-id anchor)))
+          (is (nil? (:name anchor)))
+          (is (= tmpl-id (:source-id anchor)))))))
+
+  (testing "unresolved fn-ref keyword throws (via resolve-fn-id-cached)"
+    (let [tmpl-id (random-uuid)
+          fn-id (random-uuid)
+          parent-arg {:id tmpl-id :name "items" :type :sequence :of :any}
+          args-data {:by-id {tmpl-id parent-arg} :by-fn {} :by-fn-source {}}]
+      (with-redefs [records/find-available-arg (fn [_ _ _ _] parent-arg)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Referenced fn not found"
+              (records/prepare-arg-record {} args-data {} {}
+                                          fn-id [] :items :no-such-fn)))))))
+
+
 ;; =============================================================================
 ;; prepare-scalar-arg-record — override-forbidden error path
 ;; =============================================================================

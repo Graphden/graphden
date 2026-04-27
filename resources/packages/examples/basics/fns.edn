@@ -32,4 +32,17 @@
   {:name :ex-status-keyword
    :description "Carries the *keyword value* `:ok`. Without `:literal? true` the executor would resolve `:ok` as a fn-ref and fail; the escape `{:value :ok :literal? true}` forces literal interpretation."
    :parent :const
-   :args {:value {:value :ok :literal? true}}}]}
+   :args {:value {:value :ok :literal? true}}}
+
+  ;; Three forms of binding a sequence-typed slot:
+  ;;   1. inline vector  → items (covered by examples.collections)
+  ;;   2. {:as :name}    → whole-arg rename, caller passes the vector
+  ;;   3. fn-ref         → ref's RESULT is the entire vector
+  {:name :_ex-three-numbers
+   :parent :list
+   :args {:items [{:value 1} {:value 2} {:value 3}]}}
+
+  {:name :ex-str-of-three
+   :description "Sequence slot bound to a SINGLE fn-ref — `:str/:parts` receives the whole vector returned by `:_ex-three-numbers`. Result: `\"123\"`."
+   :parent :str
+   :args {:parts :_ex-three-numbers}}]}

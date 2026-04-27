@@ -447,6 +447,37 @@
      :source-id template-id}))
 
 
+(defn- prepare-sequence-ref-anchor
+  "Single fn-ref binding for a sequence-typed slot (`:children :_some-fn`)
+   — the referenced fn computes the entire vector. Creates an anchor with
+   `:ref-id` set and no item chain; closest-binding picks it up as a
+   regular `:ref` kind, so runtime resolves the ref and feeds its result
+   straight to the impl. `resolve-fn-id-cached` throws with a clear
+   message if the referenced fn doesn't exist."
+  [args-data fn-name-cache created-fns fn-id parent-arg ref-keyword]
+  (let [template-id (:id parent-arg)
+        existing-anchor (get (:by-fn-source args-data) [fn-id template-id])
+        anchor-id (or (:id existing-anchor) (random-uuid))
+        existing-item-ids (if existing-anchor
+                            (walk-anchor-chain-ids (:by-id args-data) existing-anchor)
+                            [])
+        ref-fn-name (parsing/parse-fn-ref ref-keyword)
+        ref-fn-id (resolve-fn-id-cached fn-name-cache created-fns ref-fn-name)
+        anchor {:id anchor-id
+                :fn-id fn-id
+                :source-id template-id
+                :name nil
+                :type :sequence
+                :value nil
+                :ref-id ref-fn-id
+                :is-fn nil
+                :next-arg-id nil
+                :prev-arg-id nil}]
+    {:new-chain [anchor]
+     :delete-items existing-item-ids
+     :source-id template-id}))
+
+
 (defn prepare-arg-record
   "Prepares an arg record for batch upsert.
    Uses find-available-arg to support pass-through args from nested refs.
@@ -480,9 +511,15 @@
              (not (contains? arg-value :ref)))
         (prepare-sequence-rename-anchor args-data fn-id parent-arg (:as arg-value))
 
+        ;; Single fn-ref keyword — the ref's result IS the whole vector.
+        (keyword? arg-value)
+        (prepare-sequence-ref-anchor args-data fn-name-cache created-fns
+                                     fn-id parent-arg arg-value)
+
         :else
-        (throw (ex-info (str "Sequence arg '" arg-name "' requires a vector value or a "
-                             "bare `{:as :name}` rename, got " (type arg-value))
+        (throw (ex-info (str "Sequence arg '" arg-name "' requires a vector value, a "
+                             "bare `{:as :name}` rename, or a fn-ref keyword, got "
+                             (type arg-value))
                         {:type :fn-composition/invalid-sequence-value
                          :arg-name arg-name
                          :arg-value arg-value})))

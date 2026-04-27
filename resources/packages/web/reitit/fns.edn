@@ -24,7 +24,7 @@
   ;; at every level of the route-data map.
   {:name :ring-router
    :description "Compile a vector of `[path method-data]` route entries into a reitit router. Wraps `reitit.ring/router`."
-   :args {:routes :any}
+   :args {:routes {:type :any :description "Vector of `[path {:method {:handler …}}]` entries — already keywordized."}}
    :return-type :any}
 
   ;; Build a Ring handler reitit falls back to when no route matches.
@@ -32,7 +32,7 @@
   ;; `:not-acceptable` keys; each value is a Ring-shaped handler fn.
   {:name :ring-create-default-handler
    :description "Build a Ring fallback handler from a `{:not-found :method-not-allowed :not-acceptable}` map of per-slot Ring callables."
-   :args {:handlers :jsonb}
+   :args {:handlers {:type :jsonb :description "Map with `:not-found`, `:method-not-allowed`, `:not-acceptable` keys; each value a Ring callable."}}
    :return-type :fn}
 
   ;; Compose a compiled reitit router and a default handler into the
@@ -45,8 +45,8 @@
   ;; — wrong here, because the value IS already a callable.
   {:name :ring-handler
    :description "Compose a compiled reitit router and a default handler into the single Ring callable invoked per request."
-   :args {:router :any
-          :default-handler :any}
+   :args {:router {:type :any :description "Compiled reitit router (e.g. from `:ring-router`)."}
+          :default-handler {:type :any :description "Already-built Ring callable invoked when no route matches (e.g. from `:ring-create-default-handler`). `:any` because the value flows through unchanged."}}
    :return-type :fn}
 
   ;; =============================================================================

@@ -11,6 +11,7 @@
   ;; =============================================================================
 
   {:name :styles
+   :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css`. Wrapped into `<style>` by `:style-element`."
    :parent :read-resource
    :args {:path "packages/app/editor/editor-styles.css"}}
 
@@ -26,6 +27,7 @@
                   "packages/app/editor/editor-main.js"]}}
 
   {:name :script
+   :description "Concatenated editor JS — every module under `packages/app/editor/editor-*.js` joined into one bundle. Wrapped into `<script>` by `:script-element`."
    :parent :concat-resources
    :args {:paths :_editor-script-paths}}
 
@@ -35,6 +37,7 @@
 
   ;; Editor body — HTML structure as hiccup constant
   {:name :body
+   :description "Hiccup constant for the editor's `<body>` content — sidebar (filter input + entity list), graph container, and zoom/home/reset nav controls."
    :parent :const
    :args {:value
           [:div {:id "app"}
@@ -66,10 +69,12 @@
 
   ;; Wrapped elements — fn-defs using wrap-style/wrap-script
   {:name :style-element
+   :description "`<style>…</style>` element wrapping `:styles` (the editor CSS bundle)."
    :parent :wrap-style
    :args {:content :styles}}
 
   {:name :script-element
+   :description "`<script>…</script>` element wrapping `:script` (the editor JS bundle)."
    :parent :wrap-script
    :args {:content :script}}
 
@@ -79,17 +84,20 @@
 
   ;; Build head elements list for cytoscape
   {:name :head-elements-0
+   :description "Initial head-elements vector — single entry: `:style-element`. Subsequent fn-defs append CDN scripts."
    :parent :conj
    :args {:coll [] :item :style-element}}
 
   ;; Head elements for Cytoscape (adds cytoscape scripts)
   {:name :cytoscape-head
+   :description "`:head-elements-0` plus the Cytoscape.js CDN `<script>` — Cytoscape becomes available as `window.cytoscape`."
    :parent :with-cdn-script
    :args {:head :head-elements-0
           :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
 
   ;; Head elements with HTMX (adds htmx script)
   {:name :head
+   :description "Final editor `<head>` element vector — style + Cytoscape + HTMX CDN scripts."
    :parent :with-cdn-script
    :args {:head :cytoscape-head
           :url "https://unpkg.com/htmx.org@2.0.4"}}
@@ -101,6 +109,7 @@
    :args {:item :script-element}}
 
   {:name :page
+   :description "Full editor HTML page — title, head (styles + CDN scripts), body (sidebar + graph), and the editor JS bundle as a `<script>` at end of body. Rendered by `:_editor-handler` on `GET /`."
    :parent :html-page
    :args {:title "Graphden - Graph Editor"
           :head :head

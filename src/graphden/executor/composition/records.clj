@@ -303,19 +303,22 @@
     (and (map? item) (contains? item :ref))
     {:value nil
      :ref-id (resolve-fn-id-cached fn-name-cache created-fns (:ref item))
-     :name (when-let [a (:as item)] (clojure.core/name a))}
+     :name (when-let [a (:as item)] (clojure.core/name a))
+     :description (:description item)}
 
     (and (map? item) (contains? item :value))
     {:value (:value item)
      :ref-id nil
-     :name (when-let [a (:as item)] (clojure.core/name a))}
+     :name (when-let [a (:as item)] (clojure.core/name a))
+     :description (:description item)}
 
     ;; Bare `{:as :name}` — named free slot. No value, no ref.
     (and (map? item) (contains? item :as))
-    {:value nil :ref-id nil :name (clojure.core/name (:as item))}
+    {:value nil :ref-id nil :name (clojure.core/name (:as item))
+     :description (:description item)}
 
     :else
-    {:value item :ref-id nil :name nil}))
+    {:value item :ref-id nil :name nil :description nil}))
 
 
 (defn- walk-anchor-chain-ids
@@ -365,7 +368,7 @@
                                            [(:name e) eid]))))
                                existing-item-ids)
         item-records (mapv (fn [item]
-                             (let [{nm :name :keys [value ref-id]}
+                             (let [{nm :name desc :description :keys [value ref-id]}
                                    (resolve-sequence-item fn-name-cache created-fns item)
                                    ;; Named items reuse their existing id by
                                    ;; name match → stable cross-HOF source-id
@@ -373,16 +376,17 @@
                                    ;; always get a fresh id (positional reuse
                                    ;; would lock callers to position).
                                    reuse-id (when nm (get existing-by-name nm))]
-                               {:id (or reuse-id (random-uuid))
-                                :fn-id fn-id
-                                :source-id nil
-                                :name nm
-                                :type element-type
-                                :value value
-                                :ref-id ref-id
-                                :is-fn nil
-                                :next-arg-id nil
-                                :prev-arg-id nil}))
+                               (cond-> {:id (or reuse-id (random-uuid))
+                                        :fn-id fn-id
+                                        :source-id nil
+                                        :name nm
+                                        :type element-type
+                                        :value value
+                                        :ref-id ref-id
+                                        :is-fn nil
+                                        :next-arg-id nil
+                                        :prev-arg-id nil}
+                                 desc (assoc :description desc))))
                            items)
         ;; Wire up the doubly-linked list: item[i].next → item[i+1].id and
         ;; item[i+1].prev → item[i].id. Head.prev points back at the anchor,

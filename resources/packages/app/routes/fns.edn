@@ -22,26 +22,32 @@
    :args {:path "/metrics" :handler :_metrics-handler}}
 
   {:name :favicon
+   :description "GET /favicon.ico — returns the inlined SVG icon, cached for 24 hours."
    :parent :get-route
    :args {:path "/favicon.ico" :handler :_favicon-handler}}
 
   {:name :editor
+   :description "GET / — serves the graph-editor HTML page."
    :parent :get-route
    :args {:path "/" :handler :_editor-handler}}
 
   {:name :api-entities
+   :description "GET /api/graph/entities — full graph dump as JSON (every fn, arg, ns)."
    :parent :get-route
    :args {:path "/api/graph/entities" :handler :all-entities-handler}}
 
   {:name :entity-details
+   :description "GET /partials/entity-details/:type/:id — HTML partial showing one entity's fields."
    :parent :get-route
    :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler}}
 
   {:name :entity-form-create
+   :description "GET /partials/entity-form/:type — HTML partial with the create form for an entity type."
    :parent :get-route
    :args {:path "/partials/entity-form/:type" :handler :entity-form-create-handler}}
 
   {:name :entity-form-edit
+   :description "GET /partials/entity-form/:type/:id — HTML partial with the edit form for one entity."
    :parent :get-route
    :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-edit-handler}}
 
@@ -50,24 +56,29 @@
   ;; Verb-at-end (`entity-create` over `create-entity`) avoids the
   ;; name clash with the `web.crud` base-fns of the same root verb.
   {:name :entity-create
+   :description "POST /api/entities/:type — creates an entity from the form-encoded body. Auth-required."
    :parent :post
    :args {:path "/api/entities/:type" :handler :create-entity-handler}}
 
   {:name :entity-delete
+   :description "DELETE /api/entities/:type/:id — soft-deletes an entity by id. Auth-required."
    :parent :delete
    :args {:path "/api/entities/:type/:id" :handler :delete-entity-handler}}
 
   ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
   ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).
   {:name :sequence-append
+   :description "POST /api/sequence/append/:fn-id — appends an item to a `:sequence`-typed arg. Auth-required."
    :parent :post
    :args {:path "/api/sequence/append/:fn-id" :handler :sequence-append-handler}}
 
   {:name :sequence-remove
+   :description "DELETE /api/sequence/item/:item-id — removes an item from its sequence-arg by item id. Auth-required."
    :parent :delete
    :args {:path "/api/sequence/item/:item-id" :handler :sequence-remove-handler}}
 
   ;; POST /api/graph/layout - accepts root-id and expansions
   {:name :layout-api
+   :description "POST /api/graph/layout — accepts `{root-id, expansions}` and returns the laid-out graph (nodes + edges + grid positions)."
    :parent :post-route
    :args {:path "/api/graph/layout" :handler :_layout-api-handler}}]}

@@ -229,4 +229,7 @@
 
   {:name :_merge-in-fn
    :parent :merge
-   :args {:maps [{:as :defaults} {:as :existing}]}}]}
+   :args {:maps [{:as :defaults
+                  :description "Map of fallback entries — supplied by the caller; merged FIRST so existing keys win."}
+                 {:as :existing
+                  :description "Map currently at the path — supplied by `:update-in`'s impl as the lambda's per-call input; merged LAST so its keys override."}]}}]}

@@ -11,17 +11,20 @@
 
   ;; conj to empty vector - first element of a list (free: item)
   {:name :conj-empty
+   :description "`:conj` with `:coll` pre-bound to `[]` — start a fresh vector with one item. Free arg: `:item`."
    :parent :conj
    :args {:coll []}}
 
   ;; pair: builds [item1, item2] - a 2-element vector
   ;; pair-1 starts chain, renames item->item1 (free: item1)
   {:name :pair-1
+   :description "First half of `:pair` — `[item1]` as a single-element vector. Internal building block."
    :parent :conj-empty
    :args {:item {:as :item1}}}
 
   ;; pair adds second item (free: item1 from pair-1, item2)
   {:name :pair
+   :description "Two-element vector `[item1 item2]`. Used everywhere a `[k v]` pair is needed (route as `[path method-data]`, map entry, etc.)."
    :parent :conj
    :args {:coll :pair-1
           :item {:as :item2}}}
@@ -37,6 +40,7 @@
 
   ;; Level 1: assoc with empty map preset (free: key, value)
   {:name :assoc-empty
+   :description "`:assoc` with `:map` pre-bound to `{}` — start with a fresh map and add one entry. Free args: `:key`, `:value`."
    :parent :assoc
    :args {:map {}}}
 
@@ -47,6 +51,7 @@
   ;; is-fn=true). :assoc-empty contributes :map={}. Result: handler ref
   ;; becomes a hof-wrap'd Ring callable stored in the route's method-map.
   {:name :assoc-handler
+   :description "Build `{\"handler\" <handler-fn>}` — sets `:key=\"handler\"` and the value slot is `:fn`-typed via `:assoc-fn` so the bound fn-graph stays a Ring callable rather than being executed."
    :parents [:assoc-fn :assoc-empty]
    :args {:key "handler"
           :value {:as :handler}}}
@@ -54,6 +59,7 @@
   ;; Level 2: method-map (free: method, handler via pass-through from assoc-handler)
   ;; Renames key -> method (HTTP method) and value -> handler (the bound handler fn)
   {:name :method-map
+   :description "Build the method-data map reitit consumes — `{<method> {\"handler\" <handler-fn>}}`. Free args: `:method` (HTTP verb string), `:handler` (Ring fn-graph)."
    :parent :assoc-empty
    :args {:value {:as :handler :ref :assoc-handler}
           :key {:as :method}}}
@@ -61,28 +67,34 @@
   ;; Level 3: route = [path, method-map] using pair
   ;; Rename item1 -> path (handler is already renamed in method-map)
   {:name :route
+   :description "Generic reitit route — `[path method-data]`. Free args: `:path`, `:method`, `:handler`. Method-specific shortcuts below bind `:method`."
    :parent :pair
    :args {:item2 :method-map
           :item1 {:as :path}}}
 
   ;; Level 4: HTTP method routes (free: path, handler)
   {:name :get-route
+   :description "Method template for `GET` routes. Caller supplies `:path` and `:handler`."
    :parent :route
    :args {:method "get"}}
 
   {:name :post-route
+   :description "Method template for `POST` routes. Caller supplies `:path` and `:handler`."
    :parent :route
    :args {:method "post"}}
 
   {:name :put-route
+   :description "Method template for `PUT` routes. Caller supplies `:path` and `:handler`."
    :parent :route
    :args {:method "put"}}
 
   {:name :delete-route
+   :description "Method template for `DELETE` routes. Caller supplies `:path` and `:handler`."
    :parent :route
    :args {:method "delete"}}
 
   {:name :patch-route
+   :description "Method template for `PATCH` routes. Caller supplies `:path` and `:handler`."
    :parent :route
    :args {:method "patch"}}
 
@@ -103,27 +115,33 @@
 
   ;; Route carrying its own middleware list (free: path, handler, middleware).
   {:name :route-with-middleware
+   :description "Reitit route that carries its own `:middleware` list — `[path {<method> {\"handler\" h \"middleware\" mw}}]`. Free args: `:path`, `:method`, `:handler`, `:middleware`."
    :parent :pair
    :args {:item2 :_method-map-with-middleware
           :item1 {:as :path}}}
 
   {:name :get-route-with-middleware
+   :description "Method template for `GET` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
    :parent :route-with-middleware
    :args {:method "get"}}
 
   {:name :post-route-with-middleware
+   :description "Method template for `POST` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
    :parent :route-with-middleware
    :args {:method "post"}}
 
   {:name :put-route-with-middleware
+   :description "Method template for `PUT` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
    :parent :route-with-middleware
    :args {:method "put"}}
 
   {:name :delete-route-with-middleware
+   :description "Method template for `DELETE` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
    :parent :route-with-middleware
    :args {:method "delete"}}
 
   {:name :patch-route-with-middleware
+   :description "Method template for `PATCH` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
    :parent :route-with-middleware
    :args {:method "patch"}}
 
@@ -142,40 +160,49 @@
   ;; --- STATUS axis ---
 
   {:name :ok-response
+   :description "Status axis: 200. Combine with a content-type fn-def to get a concrete response (e.g. `:json-ok-response`)."
    :parent :ring-response
    :args {:status 200}}
 
   {:name :bad-request-response
+   :description "Status axis: 400 Bad Request."
    :parent :ring-response
    :args {:status 400}}
 
   {:name :not-found-response
+   :description "Status axis: 404 Not Found."
    :parent :ring-response
    :args {:status 404}}
 
   {:name :method-not-allowed-response
+   :description "Status axis: 405 Method Not Allowed."
    :parent :ring-response
    :args {:status 405}}
 
   {:name :error-response
+   :description "Status axis: 500 Internal Server Error."
    :parent :ring-response
    :args {:status 500}}
 
   ;; --- CONTENT-TYPE axis ---
 
   {:name :json-content-type
+   :description "Content-type axis: `application/json`. Combine with a status fn-def via MI to make a concrete response."
    :parent :ring-response
    :args {:headers {"Content-Type" "application/json"}}}
 
   {:name :html-content-type
+   :description "Content-type axis: `text/html; charset=utf-8`."
    :parent :ring-response
    :args {:headers {"Content-Type" "text/html; charset=utf-8"}}}
 
   {:name :text-content-type
+   :description "Content-type axis: `text/plain`."
    :parent :ring-response
    :args {:headers {"Content-Type" "text/plain"}}}
 
   {:name :svg-content-type
+   :description "Content-type axis: `image/svg+xml`."
    :parent :ring-response
    :args {:headers {"Content-Type" "image/svg+xml"}}}
 
@@ -183,29 +210,56 @@
   ;; own content-type fn (the :headers map cannot be merged via MI — it is a
   ;; single arg, so the whole map must be set in one place).
   {:name :cached-svg-content-type
+   :description "Content-type axis: `image/svg+xml` + `Cache-Control: public, max-age=86400`. Separate fn because the headers map can't be merged via MI."
    :parent :ring-response
    :args {:headers {"Content-Type" "image/svg+xml"
                     "Cache-Control" "public, max-age=86400"}}}
 
   ;; --- MATRIX (status × content-type) ---
 
-  {:name :json-ok-response          :parents [:json-content-type :ok-response]}
-  {:name :html-ok-response          :parents [:html-content-type :ok-response]}
-  {:name :text-ok-response          :parents [:text-content-type :ok-response]}
-  {:name :svg-ok-response           :parents [:svg-content-type  :ok-response]}
-  {:name :cached-svg-ok-response    :parents [:cached-svg-content-type :ok-response]}
+  {:name :json-ok-response
+   :description "200 OK with `application/json` content-type. Free arg: `:body` (already a JSON string)."
+   :parents [:json-content-type :ok-response]}
+  {:name :html-ok-response
+   :description "200 OK with `text/html` content-type. Free arg: `:body` (already an HTML string)."
+   :parents [:html-content-type :ok-response]}
+  {:name :text-ok-response
+   :description "200 OK with `text/plain` content-type. Free arg: `:body`."
+   :parents [:text-content-type :ok-response]}
+  {:name :svg-ok-response
+   :description "200 OK with `image/svg+xml` content-type. Free arg: `:body` (raw SVG)."
+   :parents [:svg-content-type  :ok-response]}
+  {:name :cached-svg-ok-response
+   :description "200 OK with `image/svg+xml` content-type and a 24-hour `Cache-Control` header. Used for the favicon."
+   :parents [:cached-svg-content-type :ok-response]}
 
-  {:name :html-bad-request-response :parents [:html-content-type :bad-request-response]}
+  {:name :html-bad-request-response
+   :description "400 Bad Request with `text/html` content-type."
+   :parents [:html-content-type :bad-request-response]}
 
-  {:name :text-method-not-allowed-response :parents [:text-content-type :method-not-allowed-response]}
+  {:name :text-method-not-allowed-response
+   :description "405 Method Not Allowed with `text/plain` content-type. Used by the reitit fallback handler."
+   :parents [:text-content-type :method-not-allowed-response]}
 
-  {:name :json-not-found-response   :parents [:json-content-type :not-found-response]}
-  {:name :html-not-found-response   :parents [:html-content-type :not-found-response]}
-  {:name :text-not-found-response   :parents [:text-content-type :not-found-response]}
+  {:name :json-not-found-response
+   :description "404 Not Found with `application/json` content-type."
+   :parents [:json-content-type :not-found-response]}
+  {:name :html-not-found-response
+   :description "404 Not Found with `text/html` content-type."
+   :parents [:html-content-type :not-found-response]}
+  {:name :text-not-found-response
+   :description "404 Not Found with `text/plain` content-type. Used by the reitit fallback handler."
+   :parents [:text-content-type :not-found-response]}
 
-  {:name :json-error-response       :parents [:json-content-type :error-response]}
-  {:name :html-error-response       :parents [:html-content-type :error-response]}
-  {:name :text-error-response       :parents [:text-content-type :error-response]}
+  {:name :json-error-response
+   :description "500 Internal Server Error with `application/json` content-type."
+   :parents [:json-content-type :error-response]}
+  {:name :html-error-response
+   :description "500 Internal Server Error with `text/html` content-type."
+   :parents [:html-content-type :error-response]}
+  {:name :text-error-response
+   :description "500 Internal Server Error with `text/plain` content-type. Used by the reitit fallback handler."
+   :parents [:text-content-type :error-response]}
 
   ;; =============================================================================
   ;; HEALTH STATUS COMPOSITION
@@ -213,21 +267,25 @@
 
   ;; Renames value -> status (the status string being assoc'd)
   {:name :assoc-status
+   :description "Add a `\"status\" <status-string>` entry to a fresh map. Free arg: `:status`."
    :parent :assoc-empty
    :args {:key "status"
           :value {:as :status}}}
 
   ;; Renames value -> timestamp (the timestamp value being assoc'd)
   {:name :assoc-timestamp
+   :description "Add a `\"timestamp\" <ts>` entry to a map. Free args: `:map`, `:timestamp`."
    :parent :assoc
    :args {:key "timestamp"
           :value {:as :timestamp}}}
 
   {:name :health-status-base
+   :description "Base health-status map — `{\"status\" \"healthy\"}`. Used as the seed for the timestamped `:health-status`."
    :parent :assoc-status
    :args {:status "healthy"}}
 
   {:name :health-status
+   :description "Full health-status payload — `{\"status\" \"healthy\" \"timestamp\" <ms-since-epoch>}`. Bound under `/health` via the `:_health-handler`."
    :parent :assoc-timestamp
    :args {:map :health-status-base
           :timestamp :current-time-ms}}]}

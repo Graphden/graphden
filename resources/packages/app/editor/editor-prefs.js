@@ -110,9 +110,8 @@ function installResizeHandle() {
     document.body.classList.remove('resizing-sidebar');
     const finalW = sidebar.getBoundingClientRect().width;
     setStoredWidth(Math.round(finalW));
-    // Cytoscape needs to recompute its container size after the
-    // sidebar width changes — the canvas is fixed-pixel.
-    if (window.cy && typeof window.cy.resize === 'function') window.cy.resize();
+    // No cy.resize needed: the cytoscape canvas is anchored to the
+    // full-viewport graph-container, not the shrinking sidebar.
   });
 }
 
@@ -120,26 +119,50 @@ function installResizeHandle() {
 // HEADER ACTION BUTTONS (collapse + theme)
 // =============================================================================
 
+// Toggles the sidebar collapsed state. With overlay layout the sidebar
+// slides via CSS `transform: translateX(...)` over a graph-container
+// that never reflows — cytoscape stays completely idle, edges don't
+// recompute, and no pan compensation is needed. The whole animation
+// is GPU-composited.
+function toggleCollapsed(targetCollapsed) {
+  if (document.body.classList.contains('sidebar-collapsed') === targetCollapsed) return;
+  applyCollapsed(targetCollapsed);
+  setCollapsedStored(targetCollapsed);
+}
+
 function buildPrefsButtons() {
   const mount = document.getElementById('prefs-mount');
-  if (!mount) return;
+  const actions = document.querySelector('.menu-header-actions');
+  if (!mount || !actions) return;
+  // Theme toggle goes in #prefs-mount (leftmost). The collapse button
+  // is appended to the actions row directly, AFTER #auth-mount, so
+  // the visual order is: theme | lock | collapse.
   mount.innerHTML =
-    '<button id="theme-toggle-btn"     class="prefs-btn" title="Toggle theme"></button>' +
-    '<button id="sidebar-collapse-btn" class="prefs-btn" title="Collapse sidebar"></button>';
+    '<button id="theme-toggle-btn" class="prefs-btn" title="Toggle theme"></button>';
+  const collapseBtn = document.createElement('button');
+  collapseBtn.id = 'sidebar-collapse-btn';
+  collapseBtn.className = 'prefs-btn';
+  collapseBtn.title = 'Collapse sidebar';
+  actions.appendChild(collapseBtn);
   document.getElementById('theme-toggle-btn').addEventListener('click', () => {
     const dark = !document.body.classList.contains('theme-dark');
     applyTheme(dark);
     setDarkStored(dark);
   });
-  document.getElementById('sidebar-collapse-btn').addEventListener('click', () => {
-    const collapsed = !document.body.classList.contains('sidebar-collapsed');
-    applyCollapsed(collapsed);
-    setCollapsedStored(collapsed);
-    if (window.cy && typeof window.cy.resize === 'function') {
-      // Cytoscape redraw after the width transition settles.
-      setTimeout(() => window.cy.resize(), 220);
-    }
-  });
+  collapseBtn.addEventListener('click', () => toggleCollapsed(true));
+}
+
+// Floating expand button shown only when the sidebar is collapsed. Lives
+// outside #side-menu so it isn't clipped when the sidebar shrinks to 0.
+function installFloatingExpandBtn() {
+  if (document.getElementById('sidebar-expand-floating')) return;
+  const btn = document.createElement('button');
+  btn.id = 'sidebar-expand-floating';
+  btn.className = 'sidebar-expand-floating';
+  btn.title = 'Expand sidebar';
+  btn.innerHTML = EXPAND_SVG;
+  btn.addEventListener('click', () => toggleCollapsed(false));
+  document.body.appendChild(btn);
 }
 
 // =============================================================================
@@ -159,6 +182,7 @@ function initPrefsEarly() {
 
 function initPrefsLate() {
   buildPrefsButtons();
+  installFloatingExpandBtn();
   installResizeHandle();
   // Re-apply collapsed/theme so the freshly-mounted buttons show the
   // correct icon + title.

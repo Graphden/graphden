@@ -575,7 +575,7 @@ function updateZoomSlider() {
 /** Reset zoom to fit all nodes in viewport. */
 function navResetZoom() {
   if (!cy || cy.nodes().length === 0) return;
-  cy.fit(50);
+  fitInVisibleArea(50);
   updateOverlayPositions();
   updateZoomSlider();
 }

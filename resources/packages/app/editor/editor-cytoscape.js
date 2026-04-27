@@ -172,6 +172,48 @@ function updateEdgeWidthForZoom() {
 }
 
 /**
+ * `cy.fit` thinks of the canvas as the full container, but with the
+ * overlay layout the leftmost slice of the canvas sits behind the
+ * sidebar and isn't actually visible. We fit-to-visible by computing
+ * zoom and pan ourselves: zoom to the bounding box that fits in
+ * (canvasWidth − sidebarWidth − 2*padding), then pan so the bbox
+ * centre lands at the centre of the visible area (right of the
+ * sidebar).
+ */
+function fitInVisibleArea(padding) {
+  if (!cy || cy.nodes().length === 0) return;
+  const cyContainer = document.getElementById('cy');
+  if (!cyContainer) { cy.fit(padding); return; }
+  const canvasW = cyContainer.clientWidth;
+  const canvasH = cyContainer.clientHeight;
+  const sidebar = document.getElementById('side-menu');
+  const collapsed = document.body.classList.contains('sidebar-collapsed');
+  const sidebarW = (sidebar && !collapsed) ? sidebar.getBoundingClientRect().width : 0;
+  const visibleW = Math.max(canvasW - sidebarW, 100);
+  const visibleH = canvasH;
+
+  const bb = cy.elements().boundingBox();
+  if (bb.w <= 0 || bb.h <= 0) { cy.fit(padding); return; }
+
+  const targetZoom = Math.min(
+    (visibleW - 2 * padding) / bb.w,
+    (visibleH - 2 * padding) / bb.h
+  );
+  const minZ = (typeof cy.minZoom === 'function') ? cy.minZoom() : 0.1;
+  const maxZ = (typeof cy.maxZoom === 'function') ? cy.maxZoom() : 3;
+  const zoom = Math.min(Math.max(targetZoom, minZ), maxZ);
+  const visibleCenterX = sidebarW + visibleW / 2;
+  const visibleCenterY = canvasH / 2;
+  const bbCx = (bb.x1 + bb.x2) / 2;
+  const bbCy = (bb.y1 + bb.y2) / 2;
+  cy.zoom(zoom);
+  cy.pan({
+    x: visibleCenterX - bbCx * zoom,
+    y: visibleCenterY - bbCy * zoom
+  });
+}
+
+/**
  * Create Cytoscape instance with initial elements and layout
  */
 async function createCytoscape(nodes, edges, layout, shouldFit) {
@@ -209,7 +251,7 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   window.cy = cy;
 
   if (shouldFit && cy.nodes().length > 0) {
-    cy.fit(50);
+    fitInVisibleArea(50);
   }
 
   // Event handlers for pan/zoom
@@ -551,7 +593,7 @@ async function renderGraph(shouldFit = true) {
       suppressEdgeWarnings = false;
       updateOverlayPositions();
       if (shouldFit && cy.nodes().length > 0) {
-        cy.fit(50);
+        fitInVisibleArea(50);
         updateZoomSlider();
       }
     });

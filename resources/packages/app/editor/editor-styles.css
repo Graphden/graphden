@@ -67,40 +67,67 @@ body.theme-dark {
 body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
   background: var(--bg); color: var(--fg); }
 
-/* ID-based layout (matches editor-body hiccup structure) */
+/* ID-based layout (matches editor-body hiccup structure).
+ *
+ * The sidebar is absolute-positioned ON TOP of a full-viewport
+ * graph-container. Collapse / expand is a `transform: translateX(...)`
+ * slide — graph-container never reflows, cytoscape never resizes,
+ * edges never get recomputed. That keeps the animation perfectly
+ * smooth (the only thing moving is the sidebar layer, GPU-composited
+ * via transform) and frees us from juggling a pan compensation in
+ * lockstep with the CSS transition.
+ *
+ * Trade-off: when the sidebar is open it covers the leftmost slice of
+ * the graph. We compensate at fit time (editor-cytoscape.js) by
+ * panning the freshly-fitted graph half the sidebar width to the
+ * right so the visible portion stays centered. */
 #app { height: 100vh; }
-#main-container { display: flex; height: 100%; }
+#main-container { position: relative; height: 100%; }
 #side-menu {
+  position: absolute; top: 0; left: 0; height: 100%;
   width: var(--sidebar-width); background: var(--sidebar-bg);
-  border-right: 2px solid var(--border); overflow-y: auto; position: relative;
-  z-index: 200; transition: width 0.18s ease;
+  border-right: 2px solid var(--border); overflow-y: auto;
+  z-index: 200;
+  transform: translateX(0);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
 }
 body.resizing-sidebar #side-menu { transition: none; user-select: none; }
 body.resizing-sidebar { user-select: none; cursor: col-resize; }
-/* Collapsed: sidebar disappears entirely; only the expand button floats in
-   the top-left corner of the graph area. The button stays in DOM so the
-   click handler keeps working — we just reposition it absolutely. */
+/* Collapsed: slide the sidebar one full width to the left so it sits
+   off-screen. Width stays the same in the underlying layout, but
+   nothing reflows since the sidebar is absolute-positioned anyway.
+   The expand affordance is a separate floating button — see
+   `.sidebar-expand-floating`. */
 body.sidebar-collapsed #side-menu {
-  width: 0; border-right: none; background: transparent; overflow: visible;
-}
-body.sidebar-collapsed #side-menu > *:not(.menu-header) { display: none; }
-body.sidebar-collapsed .menu-header {
-  position: absolute; top: 8px; left: 8px;
-  padding: 0; background: transparent; border: none;
-  z-index: 250;
-}
-body.sidebar-collapsed .menu-header > *:not(.menu-header-actions) { display: none; }
-body.sidebar-collapsed .menu-header-actions > *:not(#prefs-mount) { display: none; }
-body.sidebar-collapsed #prefs-mount > #theme-toggle-btn { display: none; }
-body.sidebar-collapsed #sidebar-collapse-btn {
-  background: var(--bg); color: var(--fg); border-color: var(--fg);
-}
-body.sidebar-collapsed #sidebar-collapse-btn:hover {
-  background: var(--fg); color: var(--bg);
+  transform: translateX(calc(-1 * var(--sidebar-width) - 2px));
 }
 body.sidebar-collapsed #sidebar-resizer { display: none; }
-#graph-container { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+#graph-container {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; flex-direction: column; overflow: hidden;
+}
 #cy { width: 100%; height: 100%; }
+
+/* Floating expand button — visible only when sidebar is collapsed. Sits
+   in viewport top-left, fades in once the shrink animation has cleared
+   space for it so the icon doesn't appear over a still-shrinking
+   sidebar. */
+.sidebar-expand-floating {
+  position: fixed; top: 8px; left: 8px; z-index: 250;
+  width: 26px; height: 26px; padding: 3px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--fg); border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+body.sidebar-collapsed .sidebar-expand-floating {
+  opacity: 1; pointer-events: auto;
+  transition: opacity 0.18s ease 0.2s; /* wait for the shrink to clear */
+}
+.sidebar-expand-floating:hover { background: var(--fg); color: var(--bg); }
 
 /* Right-edge resize handle. 4 px wide, centred on the sidebar's
    trailing border so the cursor lands on it before the user has to
@@ -145,8 +172,10 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 #entity-list .entity-item.selected { background: var(--selected-bg); }
 #entity-list .entity-item .name { font-weight: 400; font-size: 13px; }
 
-/* Menu header */
-.menu-header { padding: 12px 16px; border-bottom: 2px solid var(--border);
+/* Menu header — asymmetric padding pulls the action buttons closer to
+   the right edge while keeping the title comfortably indented on the
+   left. */
+.menu-header { padding: 12px 8px 12px 16px; border-bottom: 2px solid var(--border);
   background: var(--header-bg); color: var(--header-fg);
   display: flex; align-items: center; justify-content: space-between; position: relative; }
 .menu-header h2 { font-size: 13px; font-weight: 500; margin: 0; }
@@ -286,11 +315,12 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   padding: 1px 5px; display: none;
 }
 
-/* Full-width "+ New namespace" button at the bottom of the sidebar. */
+/* "+ New namespace" button at the bottom of the sidebar. Side margins
+   keep the dashed border off the sidebar edges. */
 .create-root-ns-btn {
   display: flex; align-items: center; justify-content: center; gap: 6px;
-  width: 100%; box-sizing: border-box;
-  padding: 10px 12px; margin-top: 8px;
+  width: calc(100% - 24px); box-sizing: border-box;
+  padding: 10px 12px; margin: 8px 12px 12px;
   background: var(--bg); color: var(--fg);
   border: 1px dashed var(--fg); border-radius: 3px;
   font-size: 12px; cursor: pointer;

@@ -352,6 +352,76 @@
     node-id))
 
 
+(defn- arg-marks-hof?
+  "Does `arg-entity` propagate an `:is-fn=true` marker anywhere in its
+   source-id chain? Used to decide whether a ref-binding to another fn
+   crosses a HOF boundary."
+  [arg-map arg-entity]
+  (loop [a arg-entity, depth 0]
+    (cond
+      (nil? a) false
+      (> depth 200) false
+      (:is-fn a) true
+      :else (recur (get arg-map (:source-id a)) (inc depth)))))
+
+
+(defn- child-hof
+  "HOF context to thread into a child render: ORs the parent's `is-hof`
+   with whether `arg-id` crosses the HOF boundary (any source-id chain
+   step has `:is-fn=true`). Once HOF, descendants stay HOF."
+  [arg-map arg-id is-hof]
+  (or is-hof (arg-marks-hof? arg-map (get arg-map arg-id))))
+
+
+(defn- terminal-arg-of
+  "Walks `:source-id` chain from `arg-id` to the terminal arg (one with
+   no source-id, or the deepest id we can resolve in `arg-map`).
+   Returns the terminal arg ENTITY, or nil if the starting id has no
+   entry. Use `terminal-source-of` for the id-only variant."
+  [arg-map arg-id]
+  (loop [cur (get arg-map arg-id)]
+    (if (and cur (:source-id cur))
+      (if-let [src (get arg-map (:source-id cur))]
+        (recur src)
+        cur)
+      cur)))
+
+
+(defn- terminal-source-of
+  "Id of `arg-id`'s terminal arg, or `arg-id` itself if no chain entry."
+  [arg-map arg-id]
+  (or (:id (terminal-arg-of arg-map arg-id)) arg-id))
+
+
+(defn- add-ref-edge!
+  "Emit a ref-style edge from `source-node-id` to `node-id` if not
+   already present. Dedup by edge-id (no double draw of the same
+   source→target line) AND by `(source-node-id + source-arg-id →
+   node-id)` (the same caller-arg can produce multiple synthetic edges
+   through different MI paths; `processed-arg-targets` collapses them
+   to one). Carries `:sourceArgId` so the post-process edge-migration
+   pass can rewrite `:source` for cross-HOF captures."
+  [state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns]
+  (when (and source-node-id edge-arg-name)
+    (let [edge-id (str "e-ref-" source-node-id "-" node-id)
+          arg-target-key (when source-arg-id
+                           (str source-node-id "-" source-arg-id "->" node-id))
+          is-duplicate (and arg-target-key
+                            (contains? (:processed-arg-targets @state) arg-target-key))]
+      (when (and (not (contains? (:added-node-ids @state) edge-id))
+                 (not is-duplicate))
+        (swap! state update :added-node-ids conj edge-id)
+        (when arg-target-key
+          (swap! state update :processed-arg-targets conj arg-target-key))
+        (swap! state update :edges conj
+               {:data {:id edge-id
+                       :source source-node-id
+                       :target node-id
+                       :sourceArgId source-arg-id
+                       :argName (or (compute-edge-label lookups source-arg-id source-node-id source-expanded-fns)
+                                    (when edge-arg-name (name edge-arg-name)))}})))))
+
+
 (def ^:private max-visible-ancestors
   "Cap on the number of ancestor BFS levels rendered in a fn-node's
    header label before we collapse the rest into `…`."
@@ -621,87 +691,6 @@
 
         inverse-source-map (build-inverse-source-map arg-map)
 
-        ;; Does `arg-entity` propagate an `is-fn=true` marker anywhere in its
-        ;; source-id chain? Used to decide whether a ref-binding to another
-        ;; fn crosses a HOF boundary.
-        arg-marks-hof?
-        (fn [arg-entity]
-          (loop [a arg-entity, depth 0]
-            (cond
-              (nil? a) false
-              (> depth 200) false
-              (:is-fn a) true
-              :else (recur (get arg-map (:source-id a)) (inc depth)))))
-
-        ;; HOF context to thread into a child render: OR the parent's
-        ;; `is-hof` with whether `arg-id` crosses the HOF boundary
-        ;; (any source-id chain step has `:is-fn=true`). Once HOF,
-        ;; descendants stay HOF.
-        child-hof
-        (fn [arg-id is-hof]
-          (or is-hof (arg-marks-hof? (get arg-map arg-id))))
-
-        ;; Compute terminal source-id of an arg (walk source chain to root)
-        ;; Walks `:source-id` chain from `arg-id` to the terminal arg
-        ;; (one with no source-id, or the deepest id we can resolve in
-        ;; arg-map). Returns the terminal arg ENTITY, or nil if the
-        ;; starting id has no entry. Use `terminal-source-of` for the
-        ;; id-only variant with passthrough fallback.
-        terminal-arg-of
-        (fn [arg-id]
-          (loop [cur (get arg-map arg-id)]
-            (if (and cur (:source-id cur))
-              (if-let [src (get arg-map (:source-id cur))]
-                (recur src)
-                cur)
-              cur)))
-
-        terminal-source-of
-        (fn [arg-id]
-          (or (:id (terminal-arg-of arg-id)) arg-id))
-
-        ;; Compute edge label showing the rename history through the arg's
-        ;; inheritance chain — but only for fns that are "expanded" at the
-        ;; source node (visible structurally). Without expansions only the
-        ;; source fn's own arg is considered, giving a single name.
-        ;;
-        ;; expanded-fns: set of fn-ids visible structurally at the source node.
-        ;;   - For leaf / non-expanded source: just #{source-fn-id}
-        ;;   - For expanded source: the expand-set
-        ;;
-        ;; Returns:
-        ;;   - single name string (no rename detected through expanded chain)
-        ;;   - multi-line "name1 (fn1, fn2)\nname2 (fn3, fn4)" (renames visible)
-        add-ref-edge!
-        ;; Emit a ref-style edge from `source-node-id` to `node-id` if
-        ;; not already present. Dedup by edge-id (no double draw of the
-        ;; same source→target line) AND by `(source-node-id +
-        ;; source-arg-id → node-id)` (the same caller-arg can produce
-        ;; multiple synthetic edges through different MI paths;
-        ;; `processed-arg-targets` collapses them to one). Carries
-        ;; `:sourceArgId` so the post-process edge-migration pass can
-        ;; rewrite `:source` for cross-HOF captures.
-        (fn [source-node-id node-id source-arg-id edge-arg-name source-expanded-fns]
-          (when (and source-node-id edge-arg-name)
-            (let [edge-id (str "e-ref-" source-node-id "-" node-id)
-                  arg-target-key (when source-arg-id
-                                   (str source-node-id "-" source-arg-id "->" node-id))
-                  is-duplicate (and arg-target-key
-                                    (contains? (:processed-arg-targets @state) arg-target-key))]
-              (when (and (not (contains? (:added-node-ids @state) edge-id))
-                         (not is-duplicate))
-                (swap! state update :added-node-ids conj edge-id)
-                (when arg-target-key
-                  (swap! state update :processed-arg-targets conj arg-target-key))
-                (swap! state update :edges conj
-                       {:data {:id edge-id
-                               :source source-node-id
-                               :target node-id
-                               :sourceArgId source-arg-id
-                               :argName (or (compute-edge-label lookups source-arg-id source-node-id source-expanded-fns)
-                                            (when edge-arg-name (name edge-arg-name)))}})))))
-
-
         ;; For each fn, the set of terminal-source-ids bound by its parent
         ;; inheritance closure (including itself). Bindings in ref-id targets
         ;; are NOT included — those are scoped to the ref's call context.
@@ -717,7 +706,7 @@
                                (swap! visited conj fid)
                                (doseq [a (get args-by-fn fid [])]
                                  (when (or (some? (:value a)) (some? (:ref-id a)))
-                                   (swap! terms conj (terminal-source-of (:id a)))))
+                                   (swap! terms conj (terminal-source-of arg-map (:id a)))))
                                (when-let [f (get fn-map fid)]
                                  (doseq [pid (:parent-ids f)]
                                    (walk pid)))))]
@@ -739,7 +728,7 @@
         ;; scoped to assoc-handler's own call, not method-map.key).
         arg-determined?
         (fn [arg-id]
-          (let [terminal (terminal-source-of arg-id)]
+          (let [terminal (terminal-source-of arg-map arg-id)]
             (loop [cur (get arg-map arg-id)]
               (if (nil? cur)
                 false
@@ -793,7 +782,7 @@
                 fn-ancestry (set (get-inheritance-chain fn-id fn-map))
                 binding-reaches? (fn [b target-id]
                                    (let [barg (some-> (:arg-id b) arg-map)
-                                         terminal (terminal-arg-of target-id)]
+                                         terminal (terminal-arg-of arg-map target-id)]
                                      (and (contains? fn-ancestry (:fn-id terminal))
                                           (loop [sid (:source-id barg)]
                                             (cond
@@ -959,7 +948,7 @@
                 ;; by this fn's own args, and emit each as a synthetic :ref.
                 own-slot-terminals (into #{}
                                          (keep (fn [a]
-                                                 (terminal-source-of (:id a))))
+                                                 (terminal-source-of arg-map (:id a))))
                                          raw-args)
                 inherited-ref-args
                 (if-not is-structural
@@ -979,7 +968,7 @@
                       (keep
                         (fn [a]
                           (when (:ref-id a)
-                            (let [terminal-id (terminal-source-of (:id a))]
+                            (let [terminal-id (terminal-source-of arg-map (:id a))]
                               (when-not (contains? @seen-terminals terminal-id)
                                 (swap! seen-terminals conj terminal-id)
                                 {:type :ref
@@ -998,7 +987,7 @@
                 (let [seen (atom #{})]
                   (into []
                         (keep (fn [arg]
-                                (let [terminal-id (terminal-source-of (:arg-id arg))]
+                                (let [terminal-id (terminal-source-of arg-map (:arg-id arg))]
                                   (when-not (and terminal-id (contains? @seen terminal-id))
                                     (when terminal-id (swap! seen conj terminal-id))
                                     arg))))
@@ -1050,7 +1039,7 @@
                     (reduce
                       (fn [acc2 arg]
                         (if (or (some? (:value arg)) (some? (:ref-id arg)))
-                          (conj acc2 (terminal-source-of (:id arg)))
+                          (conj acc2 (terminal-source-of arg-map (:id arg)))
                           acc2))
                       acc
                       (get args-by-fn fn-id [])))
@@ -1091,7 +1080,7 @@
                         shadow-of-bound
                         (and (not has-value) (not has-ref)
                              (contains? bound-slot-terminals
-                                        (terminal-source-of arg-id)))]
+                                        (terminal-source-of arg-map arg-id)))]
                     (when (and (not already-covered) (not shadow-of-bound))
                       (loop [sid source-id]
                         (when sid
@@ -1175,7 +1164,7 @@
                 (let [node-id (add-fn-node state lookups original-fn-id is-root source-node-id source-arg-id)
                       ;; Key for tracking fully processed nodes - includes expansion context
                       process-key (str node-id "-" (hash bindings))]
-                  (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
+                  (add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
 
                   ;; Only process children if this node wasn't already fully processed
                   ;; This prevents infinite recursion when same fn is reached via different paths
@@ -1253,7 +1242,7 @@
                         (case (:type arg)
                           :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
                                      ref-bindings bindings]
-                                 (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} (child-hof (:arg-id arg) is-hof)))
+                                 (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} (child-hof arg-map (:arg-id arg) is-hof)))
                           :value (add-arg-value-node state lookups (:arg-name arg) (:value arg) (:arg-id arg) node-id #{display-fn-id})
                           :unset (add-unset-arg-node state lookups inverse-source-map (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id} is-hof)
                           nil))))
@@ -1275,7 +1264,7 @@
                 (let [in-progress-key [original-fn-id parent-expansion-root]]
                   (if (contains? (:in-progress-expansions @state) in-progress-key)
                     (let [node-id (add-fn-node state lookups original-fn-id is-root source-node-id source-arg-id)]
-                      (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
+                      (add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
                       node-id)
                     (do
                       (swap! state update :in-progress-expansions conj in-progress-key)
@@ -1309,7 +1298,7 @@
                       ;;   this fn becomes the expansion root
                       effective-expansion-root (or parent-expansion-root original-fn-id)
                       node-id (add-fn-node state lookups original-fn-id is-root source-node-id source-arg-id)]
-                  (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
+                  (add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
 
                   ;; For expanded mode, collect args from entire chain [0..level]
                   ;;
@@ -1437,7 +1426,7 @@
                                 (process-any-fn (:ref-id m) node-id
                                                 (or (:arg-name m) (:arg-name arg))
                                                 false parent-bindings (:arg-id arg)
-                                                parent-expansion-root expand-set (child-hof (:arg-id arg) is-hof))
+                                                parent-expansion-root expand-set (child-hof arg-map (:arg-id arg) is-hof))
                                 (and m (some? (:value m)))
                                 (add-arg-value-node state lookups
                                                     (or (:arg-name m) (:arg-name arg))
@@ -1447,7 +1436,7 @@
                                                     (:arg-name arg) (:arg-type arg)
                                                     (:arg-id arg) node-id expand-set is-hof))))]
                       (doseq [arg (filter #(= (:type %) :ref) level-0-stay)]
-                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set (child-hof (:arg-id arg) is-hof)))
+                        (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set (child-hof arg-map (:arg-id arg) is-hof)))
 
                       (doseq [arg level-0-unsets] (render-unset arg))
 
@@ -1461,7 +1450,7 @@
                         (let [ref-target-id (:ref-id arg)
                               migrated-to-this-ref (get migrated-by-ref ref-target-id [])
                               leaf-bindings (migrated-bindings-for migrated-to-this-ref)]
-                          (process-any-fn ref-target-id node-id (:arg-name arg) false leaf-bindings (:arg-id arg) effective-expansion-root expand-set (child-hof (:arg-id arg) is-hof))))
+                          (process-any-fn ref-target-id node-id (:arg-name arg) false leaf-bindings (:arg-id arg) effective-expansion-root expand-set (child-hof arg-map (:arg-id arg) is-hof))))
 
                       (doseq [arg ancestor-unsets] (render-unset arg))
 
@@ -1508,7 +1497,7 @@
                     ;; No recursion into refs: user must explicitly expand to
                     ;; see the leaf's body.
                     (let [node-id (add-fn-node state lookups fn-id false source-node-id source-arg-id)]
-                      (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
+                      (add-ref-edge! state lookups source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
                       (let [raw-own-args (get args-by-fn fn-id [])
                             seq-anchors (filterv #(= :sequence (:type %)) raw-own-args)
                             seq-chain-ids (into #{}
@@ -1551,7 +1540,7 @@
                                   has-ref (some? (:ref-id arg))
                                   migrated (when-not (or has-value has-ref)
                                              (find-migrated (:id arg)))
-                                  terminal (terminal-source-of (:id arg))]
+                                  terminal (terminal-source-of arg-map (:id arg))]
                               (cond
                                 has-value
                                 (when (mark-once! [terminal :value (:value arg)])
@@ -1565,7 +1554,7 @@
                                                   (or (:arg-name migrated)
                                                       (resolve-arg-name arg arg-map))
                                                   false parent-bindings (:id arg)
-                                                  nil #{fn-id} (child-hof (:id arg) is-hof)))
+                                                  nil #{fn-id} (child-hof arg-map (:id arg) is-hof)))
 
                                 (and migrated (some? (:value migrated)))
                                 (when (mark-once! [terminal :value (:value migrated)])

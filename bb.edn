@@ -23,9 +23,53 @@
   ;; === DEVELOPMENT ===
 
   repl
-  {:doc "Start REPL"
+  {:doc "Start headless nREPL server (writes .nrepl-port for clients to discover)"
    :override-builtin true
    :task (clojure "-A:dev -A:nrepl")}
+
+  nrepl
+  {:doc "Synonym for `bb repl` — clearer name when used by tools (Cider, clojure-mcp)"
+   :task (clojure "-A:dev -A:nrepl")}
+
+  nrepl-bg
+  {:doc "Start headless nREPL in background. Logs → .nrepl.log, PID → .nrepl.pid. Stop via `bb nrepl-stop`."
+   :task (let [pid-file (fs/file ".nrepl.pid")
+               port-file (fs/file ".nrepl-port")
+               running? (and (fs/exists? pid-file)
+                             (zero? (:exit (p/shell {:continue true :out nil :err nil}
+                                                    "kill" "-0" (str/trim (slurp pid-file))))))]
+           (if running?
+             (do (println (str red "nREPL already running (PID " (str/trim (slurp pid-file)) ")" reset))
+                 (println "  Stop it first via `bb nrepl-stop`."))
+             (do
+               (when (fs/exists? port-file) (fs/delete port-file))
+               ;; setsid + nohup fully detach; redirects free stdin/out/err
+               (p/shell "bash" "-c"
+                        "nohup setsid clojure -A:dev -A:nrepl >.nrepl.log 2>&1 </dev/null & echo $! >.nrepl.pid")
+               (println (str "Starting nREPL... (PID " (str/trim (slurp pid-file)) ")"))
+               (loop [tries 0]
+                 (cond
+                   (>= tries 30)
+                   (println (str red "WARN: .nrepl-port did not appear within 30s; check .nrepl.log" reset))
+                   (fs/exists? port-file)
+                   (println (str green "✓ nREPL ready on port " (str/trim (slurp port-file)) reset
+                                 "\n  log:  .nrepl.log"
+                                 "\n  pid:  .nrepl.pid"
+                                 "\n  stop: bb nrepl-stop"))
+                   :else (do (Thread/sleep 1000) (recur (inc tries))))))))}
+
+  nrepl-stop
+  {:doc "Stop the backgrounded nREPL started by `bb nrepl-bg`"
+   :task (let [pid-file (fs/file ".nrepl.pid")]
+           (if (fs/exists? pid-file)
+             (let [pid (str/trim (slurp pid-file))]
+               (p/shell {:continue true :out nil :err nil} "kill" pid)
+               ;; JVM shutdown hook deletes .nrepl-port itself, so use
+               ;; delete-if-exists to avoid a race-condition crash.
+               (fs/delete-if-exists pid-file)
+               (fs/delete-if-exists (fs/file ".nrepl-port"))
+               (println (str green "✓ Stopped nREPL (PID " pid ")" reset)))
+             (println "No .nrepl.pid found — nothing to stop")))}
 
   ;; === LINTERS (each takes optional path) ===
 

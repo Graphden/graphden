@@ -1,5 +1,6 @@
-# Claude Code (local settings, worktrees)
-.claude/
+# Claude Code (local settings, worktrees) — except shared project skills
+.claude/*
+!.claude/skills/
 
 # Build artifacts
 /target/
@@ -21,6 +22,8 @@ pom.xml.asc
 
 # REPL
 .nrepl-port
+.nrepl.log
+.nrepl.pid
 
 # IDE
 .idea/

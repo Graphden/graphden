@@ -15,12 +15,18 @@
    :parent :read-resource
    :args {:path "packages/app/editor/editor-styles.css"}}
 
-  ;; Editor JS modules — loaded from resources and concatenated in order
+  ;; Editor JS modules — loaded from resources and concatenated in order.
+  ;; Order matters: tooltips/icons/drag must come BEFORE overlays (which
+  ;; calls into them); ui/cytoscape come after overlays (they call
+  ;; into the overlay management API).
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
                   "packages/app/editor/editor-data.js"
                   "packages/app/editor/editor-layout.js"
+                  "packages/app/editor/editor-tooltips.js"
+                  "packages/app/editor/editor-icons.js"
+                  "packages/app/editor/editor-drag.js"
                   "packages/app/editor/editor-overlays.js"
                   "packages/app/editor/editor-ui.js"
                   "packages/app/editor/editor-cytoscape.js"

@@ -146,13 +146,15 @@ The editor frontend is split into modules for better maintainability:
 | `editor-state.js` | Global variables, constants, timestamp | - |
 | `editor-data.js` | Data utilities, lookups, inheritance | state |
 | `editor-layout.js` | Grid layout algorithm, positioning | state |
-| `editor-graph.js` | Building graph elements (nodes, edges) | state, data |
-| `editor-overlays.js` | HTML overlays, drag handles | state, data |
-| `editor-ui.js` | Sidebar, selection, expansion controls | state, data, cytoscape |
-| `editor-cytoscape.js` | Cytoscape initialization, rendering | state, layout, overlays, graph |
+| `editor-tooltips.js` | Description-tooltip + full-name popover singletons | state |
+| `editor-icons.js` | Right-edge action icons (`i`, `↗`) | state, data, tooltips |
+| `editor-drag.js` | Drag handle for any overlay | state |
+| `editor-overlays.js` | HTML overlays for cy nodes (rows, edges, placeholders, args) | state, data, tooltips, icons, drag |
+| `editor-ui.js` | Sidebar, selection, expansion controls | state, data, icons, cytoscape |
+| `editor-cytoscape.js` | Cytoscape initialization, rendering | state, layout, overlays |
 | `editor-main.js` | Entry point, init | all |
 
-**Load order** (in `impls.clj`): state → data → layout → graph → overlays → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → data → layout → tooltips → icons → drag → overlays → ui → cytoscape → main
 
 ### Browser Test Tool
 

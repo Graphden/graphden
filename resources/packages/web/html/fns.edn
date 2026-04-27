@@ -57,7 +57,7 @@
    :parent :hiccup
    :args {:tag "button"
           :attrs :_button-attrs
-          :children :_button-children}}
+          :children [{:as :btn-text}]}}
 
   {:name :_button-type
    :parent :coalesce
@@ -71,11 +71,6 @@
    :parent :merge
    :args {:maps [:_button-base-attrs {:as :extra-attrs}]}}
 
-
-  {:name :_button-children
-   :parent :conj
-   :args {:coll [] :item {:as :btn-text}}}
-
   ;; <div class="field-row"><span class="field-label">label</span>
   ;;                        <span class="field-value">value-or-dash</span></div>
   {:name :field-row
@@ -83,27 +78,19 @@
    :parent :hiccup
    :args {:tag "div"
           :attrs {:class "field-row"}
-          :children :_field-row-children}}
+          :children [:_field-row-label-span :_field-row-value-span]}}
 
   {:name :_field-row-label-span
    :parent :hiccup
    :args {:tag "span"
           :attrs {:class "field-label"}
-          :children :_field-row-label-children}}
-
-  {:name :_field-row-label-children
-   :parent :conj
-   :args {:coll [] :item {:as :label}}}
+          :children [{:as :label}]}}
 
   {:name :_field-row-value-span
    :parent :hiccup
    :args {:tag "span"
           :attrs {:class "field-value"}
-          :children :_field-row-value-children}}
-
-  {:name :_field-row-value-children
-   :parent :conj
-   :args {:coll [] :item :_field-row-display-value}}
+          :children [:_field-row-display-value]}}
 
   {:name :_field-row-display-value
    :parent :if
@@ -119,17 +106,13 @@
    :parent :to-str
    :args {:value {:as :value}}}
 
-  {:name :_field-row-children
-   :parent :list
-   :args {:items [:_field-row-label-span :_field-row-value-span]}}
-
   ;; <span class="badge[ badge-<type>]">badge-text</span>
   {:name :badge
    :description "`<span class=\"badge[ badge-<type>]\">badge-text</span>` — coloured pill for entity-type tags etc. Class becomes `\"badge badge-<type>\"` when `:badge-type` is set, else just `\"badge\"`."
    :parent :hiccup
    :args {:tag "span"
           :attrs :_badge-attrs
-          :children :_badge-children}}
+          :children [{:as :badge-text}]}}
 
   {:name :_badge-attrs
    :parent :assoc-empty
@@ -145,10 +128,6 @@
    :parent :str
    :args {:parts [{:value "badge badge-"} {:as :badge-type}]}}
 
-  {:name :_badge-children
-   :parent :conj
-   :args {:coll [] :item {:as :badge-text}}}
-
   ;; Entity field rows - renders multiple field-rows from entity using field-specs
   ;; field-specs: [[label key] ...] or [[label key transform-fn] ...]
   {:name :entity-field-rows
@@ -157,16 +136,12 @@
           :field-specs {:type :jsonb :description "Vector of `[label key]` or `[label key transform-fn]` specs."}}
    :return-type :jsonb}
 
-  ;; Wrap text content in an HTML element. fn-def composition over
-  ;; :hiccup (tag + nil attrs + single-element children list).
-  {:name :_wrap-element-children
-   :parent :conj
-   :args {:coll [] :item {:as :content}}}
-
+  ;; Wrap text content in an HTML element. Pure composition over
+  ;; :hiccup with a single-item children sequence.
   {:name :wrap-element
    :description "Build a single-child hiccup element `[tag content]` — pure composition over `:hiccup`. Used as the parent of `:wrap-style` / `:wrap-script`."
    :parent :hiccup
-   :args {:children :_wrap-element-children}}
+   :args {:children [{:as :content}]}}
 
   {:name :wrap-style
    :description "Wrap a CSS string into `<style>content</style>` hiccup."
@@ -183,20 +158,14 @@
    :description "Build a hiccup vector `[tag attrs & children]`. `attrs` and `children` are optional."
    :args {:tag {:type :text :description "HTML tag name."}
           :attrs {:type :jsonb :required false :description "Attribute map (string keys). Omit/nil for no attributes."}
-          :children {:type :jsonb :required false :description "Vector of child hiccup nodes or text."}}
+          :children {:type :sequence :of :any :required false :description "Child hiccup nodes — each item may be a literal node or a fn-ref."}}
    :return-type :jsonb}
 
-  ;; <div style="...">button1 button2 ...</div>  -- horizontal flex container.
-  {:name :button-row
-   :description "`<div style=…>btn1 btn2 …</div>` — horizontal flex container for action buttons. Caller supplies `:style` and `:buttons` (already-rendered hiccup)."
-   :parent :hiccup
-   :args {:tag "div"
-          :attrs :_button-row-attrs
-          :children {:as :buttons}}}
-
-  {:name :_button-row-attrs
-   :parent :assoc-empty
-   :args {:key "style" :value {:as :style}}}
+  ;; (`button-row` is a Clojure helper in `web.html.impls`, used directly
+  ;;  by `:render-entity-form-view` etc. The fn-def composition was removed
+  ;;  during the :hiccup/:children → :sequence migration — `:children {:as :buttons}`
+  ;;  whole-arg rename isn't supported for sequence-typed slots, and the
+  ;;  fn-def had no callers.)
 
   ;; Transform a value for display: :keyword-to-str, :pr-str, :bool-to-yesno
   {:name :apply-transform

@@ -17,6 +17,23 @@
        (nil? (:ref-id arg))))
 
 
+(defn in-sequence-chain?
+  "True for args that live INSIDE a sequence-arg's linked-list chain —
+   i.e. the anchor itself (when it has `:next-arg-id` set, meaning the
+   chain is bound) and any chain item (with `:prev-arg-id` set).
+
+   Such args still participate in name lookup via the parent chain (so
+   a named item inside a parent's anchor remains findable by callers
+   that bind `{:as :item-name}`), but propagating them as STANDALONE
+   copies onto a child fn's args breaks the chain — the child's anchor
+   copy loses its `:next-arg-id` and the item copy loses its `:name`.
+   Use this predicate to skip those copies during propagation."
+  [arg]
+  (or (some? (:prev-arg-id arg))
+      (and (= :sequence (:type arg))
+           (some? (:next-arg-id arg)))))
+
+
 (defn partition-args-by-freedom
   "Partitions args into {:free-args [...] :bound-args [...]} in single pass."
   [args]

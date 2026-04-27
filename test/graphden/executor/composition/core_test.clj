@@ -107,6 +107,26 @@
     (is (not (sc/free-arg? {:ref-id (random-uuid)})))))
 
 
+;; === in-sequence-chain? ===
+
+(deftest in-sequence-chain?-test
+  (testing "sequence-anchor with bound chain (next-arg-id set) is in-chain"
+    (is (sc/in-sequence-chain? {:type :sequence :next-arg-id (random-uuid)})))
+
+  (testing "sequence-anchor with empty chain (next-arg-id nil) is NOT in-chain"
+    ;; Empty anchor is propagatable as a free slot — child can re-bind it.
+    (is (not (sc/in-sequence-chain? {:type :sequence :next-arg-id nil}))))
+
+  (testing "any arg with prev-arg-id set is in-chain (it's a sequence item)"
+    (is (sc/in-sequence-chain? {:type :any :prev-arg-id (random-uuid) :name "content"}))
+    (is (sc/in-sequence-chain? {:type :text :prev-arg-id (random-uuid)})))
+
+  (testing "scalar args (no chain links) are NOT in-chain"
+    (is (not (sc/in-sequence-chain? {:type :any})))
+    (is (not (sc/in-sequence-chain? {:type :text :value "x"})))
+    (is (not (sc/in-sequence-chain? {:type :any :ref-id (random-uuid)})))))
+
+
 ;; === partition-args-by-freedom ===
 
 (deftest partition-args-by-freedom-test

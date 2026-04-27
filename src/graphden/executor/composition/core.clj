@@ -264,6 +264,12 @@
                                (remove (fn [arg]
                                          (when-let [root-name (get-root-name arg)]
                                            (contains? explicit-arg-names root-name))))
+                               ;; Filter 3: Skip args that live inside a parent's sequence-arg
+                               ;; chain. The anchor (with :next-arg-id set) is bound, not free —
+                               ;; copying it onto the child loses the chain link. Chain items
+                               ;; (with :prev-arg-id set) are reachable via classify-binding's
+                               ;; parent-chain walk and don't need a standalone child copy.
+                               (remove sc/in-sequence-chain?)
                                (keep #(when-let [rec (records/prepare-propagated-arg-record args-data fn-id %)]
                                         (:new rec))))
                              all-free-args)

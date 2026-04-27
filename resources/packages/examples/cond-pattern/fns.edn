@@ -1,0 +1,48 @@
+;; Multi-branch dispatch via `:cond`.
+;;
+;; `:cond/:clauses` is a sequence of `[test result]` PAIRS. Each pair
+;; itself is a literal vector at the sequence-item level, which means
+;; keywords inside it are stored as data, NOT resolved as fn-refs (the
+;; same trap as `:str/:parts` had before its migration).
+;;
+;; Workaround: build each pair via a `:list`-helper, then reference the
+;; helper from `:clauses`. `:list/:items` IS a sequence slot, so fn-refs
+;; inside a pair-helper resolve correctly.
+
+
+{:namespace "examples.cond-pattern"
+ :description "Multi-branch dispatch with `:cond` — pairs built via `:list` so fn-refs inside resolve."
+ :fns
+ [;; Classifier: -1 / 0 / +1 by sign of `:n`. Demonstrates :cond with
+  ;; THREE branches; falls through to a default literal in the last
+  ;; clause (test=true).
+
+  {:name :ex-sign
+   :description "Returns `\"neg\"` / `\"zero\"` / `\"pos\"` depending on the sign of free arg `:n`. Three `:cond` branches via list-of-pairs."
+   :parent :cond
+   :args {:clauses [:_ex-sign-neg-pair
+                    :_ex-sign-zero-pair
+                    :_ex-sign-default-pair]}}
+
+  {:name :_ex-sign-neg-pair
+   :description "Pair `[(< n 0) \"neg\"]`."
+   :parent :list
+   :args {:items [:_ex-n-negative? {:value "neg"}]}}
+
+  {:name :_ex-sign-zero-pair
+   :description "Pair `[(= n 0) \"zero\"]`."
+   :parent :list
+   :args {:items [:_ex-n-zero? {:value "zero"}]}}
+
+  ;; Default branch — `test = true` always matches if previous fell through.
+  {:name :_ex-sign-default-pair
+   :parent :list
+   :args {:items [{:value true} {:value "pos"}]}}
+
+  {:name :_ex-n-negative?
+   :parent :lt
+   :args {:nums [{:as :n} {:value 0}]}}
+
+  {:name :_ex-n-zero?
+   :parent :eq
+   :args {:values [{:as :n} {:value 0}]}}]}

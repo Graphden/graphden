@@ -1,0 +1,43 @@
+;; Error handling via `:if` + `:throw` + `:ex-info`.
+;;
+;; Pattern (mirrors the production `:env-required` and `:read-resource`):
+;;
+;;     :if (some-precondition? input)
+;;       (throw (ex-info "human message" {"type" "domain/error-key"}))
+;;       input  ; pass-through on success
+;;
+;; `:throw/:exception` is `:any`-typed — receives the constructed
+;; ExceptionInfo from `:ex-info` and raises it. `:ex-info/:data` is a
+;; literal map with STRING keys (the `feedback_jsonb_roundtrip` memory
+;; rule applies — JSONB roundtrip would keywordize them anyway, but
+;; using strings keeps the intent explicit).
+
+
+{:namespace "examples.error-handling"
+ :description "Raising structured errors from a fn-graph via `:if`/`:throw`/`:ex-info`."
+ :fns
+ [;; Public: throw a typed error if `:age` is negative; otherwise echo it.
+  {:name :ex-validate-age
+   :description "Throws `examples/invalid-age` when `:age` is negative; otherwise returns `:age` unchanged. Demonstrates: `:if` test branch wraps `:throw`+`:ex-info`, else branch passes the input through via `{:as :age}`."
+   :parent :if
+   :args {:test :_ex-age-negative?
+          :then :_ex-age-throw
+          :else {:as :age}}}
+
+  {:name :_ex-age-negative?
+   :parent :lt
+   :args {:nums [{:as :age} {:value 0}]}}
+
+  {:name :_ex-age-throw
+   :parent :throw
+   :args {:exception :_ex-age-error}}
+
+  {:name :_ex-age-error
+   :parent :ex-info
+   :args {:message :_ex-age-message
+          :data {"type" "examples/invalid-age"}}}
+
+  {:name :_ex-age-message
+   :parent :str
+   :args {:parts [{:value "age must be non-negative, got: "}
+                  {:as :age}]}}]}

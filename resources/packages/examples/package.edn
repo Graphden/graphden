@@ -9,4 +9,7 @@
            "hof"
            "shared-vs-isolated"
            "invoke-vs-call"
-           "literal-keyword-in-sequence"]}
+           "literal-keyword-in-sequence"
+           "cond-pattern"
+           "reduce-pattern"
+           "error-handling"]}

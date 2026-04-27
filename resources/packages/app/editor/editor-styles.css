@@ -200,8 +200,12 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
 }
 .auth-lock-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 .auth-lock-btn.auth-lock-open { background: var(--header-fg); color: var(--header-bg); }
+/* Popover positioned with `position: fixed` (relative to viewport,
+   set via JS in `positionAuthPopover`) so it can escape #side-menu's
+   scroll context — focusing the input would otherwise cause the
+   browser to horizontally scroll the sidebar to reveal it. */
 .auth-popover {
-  position: absolute; right: 0; top: calc(100% + 6px); z-index: 300;
+  position: fixed; z-index: 300;
   background: var(--bg); color: var(--fg); border: 1px solid var(--fg); border-radius: 3px;
   padding: 8px; min-width: 200px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
@@ -214,6 +218,19 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   background: var(--bg); color: var(--fg);
 }
 .auth-popover input:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
+/* Wrapper that lets the eye-toggle button float over the right edge
+   of the password input. The input gets extra right-padding so the
+   typed text doesn't run under the icon. */
+.auth-input-wrap { position: relative; }
+.auth-input-wrap input { padding-right: 28px; }
+.auth-toggle-visibility {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; border: 0; border-radius: 2px;
+  cursor: pointer; color: var(--muted-fg);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.auth-toggle-visibility:hover { color: var(--fg); }
 .auth-popover-row { display: flex; gap: 6px; }
 .auth-popover-btn {
   flex: 1; font-size: 12px; padding: 4px 8px; cursor: pointer;

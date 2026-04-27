@@ -298,6 +298,16 @@
     (false? (:required root))))
 
 
+;; Forward declarations — these defn-s reference each other. The
+;; pure-helper block (target-interface-names / compute-edge-label /
+;; build-inverse-source-map / caller-bound-arg) lives below the
+;; mutating helpers but is used by them.
+(declare target-interface-names
+         compute-edge-label
+         build-inverse-source-map
+         caller-bound-arg)
+
+
 (defn- record-optional-unset!
   "Append `arg-name` to `state.optional-unsets-by-node[node-id]`. Used
    to populate a node's `+default, +else` badge with the names of
@@ -316,6 +326,199 @@
   (when (and node-id arg-name)
     (swap! state update-in [:hof-captured-by-node node-id]
            (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
+
+
+(defn- add-arg-value-node
+  "Emit a value-style arg node + edge linking it to `source-node-id`.
+   No-op when the node is already present (dedup by `:added-node-ids`).
+   Returns the emitted node-id."
+  [state lookups arg-name value arg-id source-node-id expanded-fns]
+  (let [node-id (str "arg-" source-node-id "-" arg-id)
+        edge-id (str "e-val-" source-node-id "-" arg-id)]
+    (when-not (contains? (:added-node-ids @state) node-id)
+      (swap! state update :added-node-ids conj node-id)
+      (let [display-value (truncate-label (json/generate-string value) 20)]
+        (swap! state update :nodes conj
+               {:data {:id node-id
+                       :label display-value
+                       :type "arg"}}))
+      (swap! state update :edges conj
+             {:data {:id edge-id
+                     :source source-node-id
+                     :target node-id
+                     :sourceArgId arg-id
+                     :argName (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
+                                  (when arg-name (name arg-name)))}}))
+    node-id))
+
+
+(defn- add-unset-arg-node
+  "Emit a placeholder for an unset arg, choosing one of four routings:
+
+     1. Optional (root `:required=false`) — compact `?name` badge via
+        `:optionalArgs`; the caller's fn has a sensible fallback baked in.
+     2. Lambda-param of an enclosing HOF (`is-hof=true` AND no caller-side
+        structural binding via cross-HOF source-id chain) — compact
+        `λname` badge via `:hofCapturedArgs`. The HOF impl supplies it
+        per call.
+     3. HOF capture — `is-hof=true` but a caller's chain DOES bind this
+        arg structurally (cross-HOF source-id). The binding is rendered
+        on the capturing caller's edge; we record a migration target so
+        post-processing rewrites the edge to originate from THIS inside-
+        consumer node (the leaf that actually reads the value). Nothing
+        new is emitted in the lambda body to avoid double-counting.
+     4. Otherwise — a visible dashed placeholder node. This IS the
+        caller's interface; the caller must fill it.
+
+   Recursive 4-arity exists for back-compat with call-sites that don't
+   know whether the slot is inside a HOF subtree (defaults to false)."
+  ([state lookups inverse-source-map arg-name arg-type arg-id source-node-id expanded-fns]
+   (add-unset-arg-node state lookups inverse-source-map
+                       arg-name arg-type arg-id source-node-id expanded-fns false))
+  ([state lookups inverse-source-map arg-name arg-type arg-id source-node-id expanded-fns is-hof]
+   (let [arg-map (:arg-map lookups)
+         arg-rec (get arg-map arg-id)
+         optional? (arg-is-optional? arg-map arg-rec)
+         displayed-name (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
+                            (when arg-name (name arg-name)))]
+     (cond
+       optional?
+       (record-optional-unset! state source-node-id displayed-name)
+
+       is-hof
+       (if-let [bound (caller-bound-arg inverse-source-map arg-id)]
+         (swap! state update :captured-edge-migrations assoc (:id bound) source-node-id)
+         (record-hof-captured! state source-node-id displayed-name))
+
+       :else
+       (let [node-id (str "unset-" source-node-id "-" arg-id)
+             edge-id (str "e-unset-" source-node-id "-" arg-id)]
+         (when-not (contains? (:added-node-ids @state) node-id)
+           (swap! state update :added-node-ids conj node-id)
+           (swap! state update :nodes conj
+                  {:data {:id node-id
+                          :label (if arg-type (name arg-type) "any")
+                          :type "fn"
+                          :isPlaceholder true}})
+           (swap! state update :edges conj
+                  {:data {:id edge-id
+                          :source source-node-id
+                          :target node-id
+                          :argName displayed-name
+                          :isUnset true}})))))))
+
+
+(defn- target-interface-names
+  "Distinct external names of `target-fn-id`'s named free slots. E.g.
+   `merge-in` declares `:value {:as :defaults}`, so its interface is
+   `[\"defaults\"]`. Used to enrich edge labels when the source-side
+   label is uninformative — most notably sequence chain items whose
+   own arg has `:source-id=nil` and no name, so the source-chain walk
+   yields nil and the edge falls back to the synthetic `maps[0]`-style
+   index."
+  [lookups target-fn-id]
+  (when target-fn-id
+    (->> (get (:args-by-fn lookups) target-fn-id [])
+         (keep (fn [a]
+                 (when (and (:name a)
+                            (nil? (:value a))
+                            (nil? (:ref-id a))
+                            (:source-id a))
+                   (:name a))))
+         (distinct)
+         (vec))))
+
+
+(defn- build-inverse-source-map
+  "Reverse source-id index: arg-id → vector of args whose `:source-id`
+   points directly here. Used to walk DOWNWARD from a HOF-target's free
+   arg to find caller-side bindings via structural source-id chains
+   (cross-HOF)."
+  [arg-map]
+  (reduce (fn [m a]
+            (if-let [sid (:source-id a)]
+              (update m sid (fnil conj []) a)
+              m))
+          {}
+          (vals arg-map)))
+
+
+(defn- caller-bound-arg
+  "Reverse source-id BFS from `target-arg-id` over `inverse-source-map`:
+   returns the FIRST downstream arg with `:value` or `:ref-id` set
+   (structurally bound by some caller via cross-HOF source-id chain),
+   or nil. Used both to classify captures and to migrate the rendered
+   edge from the caller down to the inner consumer node."
+  [inverse-source-map target-arg-id]
+  (loop [queue [target-arg-id]
+         visited #{}]
+    (if (empty? queue)
+      nil
+      (let [cur (peek queue)
+            rest-q (pop queue)]
+        (if (contains? visited cur)
+          (recur rest-q visited)
+          (let [children (get inverse-source-map cur [])
+                bound (some (fn [a]
+                              (when (or (some? (:value a))
+                                        (some? (:ref-id a)))
+                                a))
+                            children)]
+            (if bound
+              bound
+              (recur (into rest-q (map :id) children)
+                     (conj visited cur)))))))))
+
+
+(defn- compute-edge-label
+  "Pick the most informative label for an edge sourced at `arg-id`,
+   given the current set of `expanded-fns`. Walks the source-id chain
+   and prefers names from fns the user actually expanded; falls back
+   to the target fn's interface names so the user sees WHICH slot of
+   the target this edge is feeding."
+  [lookups arg-id source-node-id expanded-fns]
+  (let [{:keys [fn-map arg-map]} lookups]
+    (when arg-id
+      (let [source-chain (loop [acc [], cur (get arg-map arg-id)]
+                           (if cur
+                             (recur (conj acc cur)
+                                    (some-> (:source-id cur) arg-map))
+                             acc))
+            source-arg (get arg-map arg-id)
+            ;; Keep only args whose fn-id is in the expanded set
+            visible (filter #(contains? expanded-fns (:fn-id %)) source-chain)
+            labeled (mapv (fn [arg]
+                            {:fn (some-> (:fn-id arg) fn-map :name name)
+                             :arg-name (resolve-arg-name arg arg-map)})
+                          visible)
+            groups (->> labeled
+                        (partition-by :arg-name)
+                        (mapv (fn [grp]
+                                {:name (:arg-name (first grp))
+                                 :fns (vec (keep :fn grp))})))
+            source-label
+            (cond
+              (empty? groups) nil
+              ;; Single arg name across every visible ancestor — no rename
+              ;; along the chain, so no fn-name disambiguation is needed.
+              (= 1 (count groups)) (:name (first groups))
+              :else (->> groups
+                         (map (fn [{:keys [name fns]}]
+                                (if (seq fns)
+                                  (str name " (" (str/join ", " fns) ")")
+                                  name)))
+                         (str/join "\n")))]
+        (cond
+          ;; Source-chain gave a non-blank label — keep it.
+          (and source-label (not (str/blank? source-label))) source-label
+
+          ;; No useful source-side name (typically a chain item with
+          ;; source-id=nil). Fall back to the target's renamed free
+          ;; args.
+          :else
+          (let [interface-names (target-interface-names lookups (:ref-id source-arg))]
+            (when (seq interface-names)
+              (str/join ", " interface-names))))))))
 
 
 (defn- build-graph-elements
@@ -353,43 +556,7 @@
                      :captured-edge-migrations {}})
         max-visible-ancestors 4
 
-        ;; Reverse source-id index: arg-id → vector of args whose
-        ;; `:source-id` points directly here. Used to walk DOWNWARD from
-        ;; a HOF-target's free arg to find caller-side bindings via
-        ;; structural source-id chains (cross-HOF).
-        inverse-source-map
-        (reduce (fn [m a]
-                  (if-let [sid (:source-id a)]
-                    (update m sid (fnil conj []) a)
-                    m))
-                {}
-                (vals arg-map))
-
-        ;; Reverse source-id BFS from `target-arg-id`: returns the FIRST
-        ;; downstream arg with `value` or `ref-id` (structurally bound by
-        ;; some caller via cross-HOF source-id chain), or nil. Used both
-        ;; to classify captures and to migrate the rendered edge from
-        ;; the caller down to the inner consumer node.
-        caller-bound-arg
-        (fn [target-arg-id]
-          (loop [queue [target-arg-id]
-                 visited #{}]
-            (if (empty? queue)
-              nil
-              (let [cur (peek queue)
-                    rest-q (pop queue)]
-                (if (contains? visited cur)
-                  (recur rest-q visited)
-                  (let [children (get inverse-source-map cur [])
-                        bound (some (fn [a]
-                                      (when (or (some? (:value a))
-                                                (some? (:ref-id a)))
-                                        a))
-                                    children)]
-                    (if bound
-                      bound
-                      (recur (into rest-q (map :id) children)
-                             (conj visited cur)))))))))
+        inverse-source-map (build-inverse-source-map arg-map)
 
         ;; Does `arg-entity` propagate an `is-fn=true` marker anywhere in its
         ;; source-id chain? Used to decide whether a ref-binding to another
@@ -510,76 +677,6 @@
         ;; Returns:
         ;;   - single name string (no rename detected through expanded chain)
         ;;   - multi-line "name1 (fn1, fn2)\nname2 (fn3, fn4)" (renames visible)
-        ;; Target-side interface: names of the target fn's OWN renamed
-        ;; free args. E.g. `_merge-in-defaults` parents `identity` and
-        ;; declares `:value {:as :defaults}`, so its interface is
-        ;; ["defaults"]. Used to enrich edge labels in cases where the
-        ;; source-side label is uninformative — most notably sequence
-        ;; chain items, whose own arg has source-id=nil and no name, so
-        ;; the source-chain walk yields nil and the edge falls back to
-        ;; the synthetic `maps[0]`-style index.
-        target-interface-names
-        (fn [target-fn-id]
-          (when target-fn-id
-            (->> (get args-by-fn target-fn-id [])
-                 (keep (fn [a]
-                         (when (and (:name a)
-                                    (nil? (:value a))
-                                    (nil? (:ref-id a))
-                                    (:source-id a))
-                           (:name a))))
-                 (distinct)
-                 (vec))))
-
-        compute-edge-label
-        (fn [arg-id source-node-id expanded-fns]
-          (when arg-id
-            (let [source-chain (loop [acc [], cur (get arg-map arg-id)]
-                                 (if cur
-                                   (recur (conj acc cur)
-                                          (some-> (:source-id cur) arg-map))
-                                   acc))
-                  source-arg (get arg-map arg-id)
-                  ;; Keep only args whose fn-id is in the expanded set
-                  visible (filter #(contains? expanded-fns (:fn-id %)) source-chain)
-                  labeled (mapv (fn [arg]
-                                  {:fn (some-> (:fn-id arg) fn-map :name name)
-                                   :arg-name (resolve-arg-name arg arg-map)})
-                                visible)
-                  groups (->> labeled
-                              (partition-by :arg-name)
-                              (mapv (fn [grp]
-                                      {:name (:arg-name (first grp))
-                                       :fns (vec (keep :fn grp))})))
-                  source-label
-                  (cond
-                    (empty? groups) nil
-                    ;; Single arg name across every visible ancestor — no rename
-                    ;; along the chain, so no fn-name disambiguation is needed.
-                    ;; (Matches the docstring contract: a single-group label is
-                    ;; just `name`; only multi-group labels carry fn-names.)
-                    (= 1 (count groups)) (:name (first groups))
-                    :else (->> groups
-                               (map (fn [{:keys [name fns]}]
-                                      (if (seq fns)
-                                        (str name " (" (str/join ", " fns) ")")
-                                        name)))
-                               (str/join "\n")))]
-              (cond
-                ;; Source-chain gave a non-blank label — keep it, it's the
-                ;; most precise we can do (covers inheritance-renames).
-                (and source-label (not (str/blank? source-label))) source-label
-
-                ;; No useful source-side name (typically a chain item with
-                ;; source-id=nil). Fall back to the target's renamed free
-                ;; args so the edge tells the user WHICH semantic slot of
-                ;; the target this is feeding (e.g. `defaults` for the
-                ;; identity wrapper, `m, path` for the get-in wrapper).
-                :else
-                (let [interface-names (target-interface-names (:ref-id source-arg))]
-                  (when (seq interface-names)
-                    (str/join ", " interface-names)))))))
-
         add-ref-edge!
         ;; Emit a ref-style edge from `source-node-id` to `node-id` if
         ;; not already present. Dedup by edge-id (no double draw of the
@@ -606,88 +703,9 @@
                                :source source-node-id
                                :target node-id
                                :sourceArgId source-arg-id
-                               :argName (or (compute-edge-label source-arg-id source-node-id source-expanded-fns)
+                               :argName (or (compute-edge-label lookups source-arg-id source-node-id source-expanded-fns)
                                             (when edge-arg-name (name edge-arg-name)))}})))))
 
-        add-arg-value-node
-        (fn [arg-name value arg-id source-node-id expanded-fns]
-          ;; Node ID must include source-node-id to ensure uniqueness per expansion
-          ;; Different fns expanding to same ancestor should get separate arg nodes
-          (let [node-id (str "arg-" source-node-id "-" arg-id)
-                edge-id (str "e-val-" source-node-id "-" arg-id)]
-            (when-not (contains? (:added-node-ids @state) node-id)
-              (swap! state update :added-node-ids conj node-id)
-              (let [display-value (truncate-label (json/generate-string value) 20)]
-                (swap! state update :nodes conj
-                       {:data {:id node-id
-                               :label display-value
-                               :type "arg"}}))
-              (swap! state update :edges conj
-                     {:data {:id edge-id
-                             :source source-node-id
-                             :target node-id
-                             :sourceArgId arg-id
-                             :argName (or (compute-edge-label arg-id source-node-id expanded-fns)
-                                          (when arg-name (name arg-name)))}}))
-            node-id))
-
-        add-unset-arg-node
-        (fn add-unset-arg-node
-          ;; 4-arity kept for back-compat; 6-arity adds `is-hof` flag.
-          ([arg-name arg-type arg-id source-node-id expanded-fns]
-           (add-unset-arg-node arg-name arg-type arg-id source-node-id expanded-fns false))
-          ([arg-name arg-type arg-id source-node-id expanded-fns is-hof]
-           ;; Routing cases, in priority order:
-           ;;
-           ;;   1. Optional (root `:required=false`, e.g. `:get.default`) —
-           ;;      compact `?name` badge via `:optionalArgs`. Sane fallback
-           ;;      exists, not part of the interface.
-           ;;   2. Lambda-param of an enclosing HOF (`is-hof=true` AND no
-           ;;      caller-side structural binding via cross-HOF source-id
-           ;;      chain) — compact `λname` badge via `:hofCapturedArgs`.
-           ;;      The HOF impl supplies it per call.
-           ;;   3. HOF capture — `is-hof=true` but a caller's chain DOES
-           ;;      bind this arg structurally (cross-HOF source-id). The
-           ;;      binding is rendered on the capturing caller's edge;
-           ;;      we emit nothing inside the lambda body so the slot
-           ;;      doesn't double-count.
-           ;;   4. Otherwise — visible dashed placeholder node. This IS the
-           ;;      caller's interface; the caller must fill it.
-           (let [arg-rec (get arg-map arg-id)
-                 optional? (arg-is-optional? arg-map arg-rec)
-                 displayed-name (or (compute-edge-label arg-id source-node-id expanded-fns)
-                                    (when arg-name (name arg-name)))]
-             (cond
-               optional?
-               (record-optional-unset! state source-node-id displayed-name)
-
-               is-hof
-               (if-let [bound (caller-bound-arg arg-id)]
-                 ;; Structural capture: caller has a bound arg whose
-                 ;; source-id chain reaches us. Mark migration target
-                 ;; so post-processing rewrites the caller's edge to
-                 ;; originate from THIS inside-consumer node (the leaf
-                 ;; that actually reads the captured value).
-                 (swap! state update :captured-edge-migrations assoc (:id bound) source-node-id)
-                 ;; True lambda-param: HOF impl supplies it per call.
-                 (record-hof-captured! state source-node-id displayed-name))
-
-               :else
-               (let [node-id (str "unset-" source-node-id "-" arg-id)
-                     edge-id (str "e-unset-" source-node-id "-" arg-id)]
-                 (when-not (contains? (:added-node-ids @state) node-id)
-                   (swap! state update :added-node-ids conj node-id)
-                   (swap! state update :nodes conj
-                          {:data {:id node-id
-                                  :label (if arg-type (name arg-type) "any")
-                                  :type "fn"
-                                  :isPlaceholder true}})
-                   (swap! state update :edges conj
-                          {:data {:id edge-id
-                                  :source source-node-id
-                                  :target node-id
-                                  :argName displayed-name
-                                  :isUnset true}})))))))
 
         ;; For each fn, the set of terminal-source-ids bound by its parent
         ;; inheritance closure (including itself). Bindings in ref-id targets
@@ -1241,8 +1259,8 @@
                           :ref (let [ref-expansion-root (when-not (:is-binding arg) expansion-root)
                                      ref-bindings bindings]
                                  (process-any-fn (:ref-id arg) node-id (:arg-name arg) false ref-bindings (:arg-id arg) ref-expansion-root #{display-fn-id} (child-hof (:arg-id arg) is-hof)))
-                          :value (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id #{display-fn-id})
-                          :unset (add-unset-arg-node (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id} is-hof)
+                          :value (add-arg-value-node state lookups (:arg-name arg) (:value arg) (:arg-id arg) node-id #{display-fn-id})
+                          :unset (add-unset-arg-node state lookups inverse-source-map (:arg-name arg) (:arg-type arg) (:arg-id arg) node-id #{display-fn-id} is-hof)
                           nil))))
                   node-id))
 
@@ -1426,10 +1444,12 @@
                                                 false parent-bindings (:arg-id arg)
                                                 parent-expansion-root expand-set (child-hof (:arg-id arg) is-hof))
                                 (and m (some? (:value m)))
-                                (add-arg-value-node (or (:arg-name m) (:arg-name arg))
+                                (add-arg-value-node state lookups
+                                                    (or (:arg-name m) (:arg-name arg))
                                                     (:value m) (:arg-id arg) node-id expand-set)
                                 :else
-                                (add-unset-arg-node (:arg-name arg) (:arg-type arg)
+                                (add-unset-arg-node state lookups inverse-source-map
+                                                    (:arg-name arg) (:arg-type arg)
                                                     (:arg-id arg) node-id expand-set is-hof))))]
                       (doseq [arg (filter #(= (:type %) :ref) level-0-stay)]
                         (process-any-fn (:ref-id arg) node-id (:arg-name arg) false chain-bindings (:arg-id arg) parent-expansion-root expand-set (child-hof (:arg-id arg) is-hof)))
@@ -1437,7 +1457,7 @@
                       (doseq [arg level-0-unsets] (render-unset arg))
 
                       (doseq [arg (filter #(= (:type %) :value) level-0-stay)]
-                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))
+                        (add-arg-value-node state lookups (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))
 
                       ;; Ancestor refs: pass ONLY their migrated bindings (if
                       ;; any) as the leaf's parent-bindings so it picks them
@@ -1451,7 +1471,7 @@
                       (doseq [arg ancestor-unsets] (render-unset arg))
 
                       (doseq [arg ancestor-values]
-                        (add-arg-value-node (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))))
+                        (add-arg-value-node state lookups (:arg-name arg) (:value arg) (:arg-id arg) node-id expand-set))))
 
                   node-id))
 
@@ -1540,7 +1560,8 @@
                               (cond
                                 has-value
                                 (when (mark-once! [terminal :value (:value arg)])
-                                  (add-arg-value-node (resolve-arg-name arg arg-map)
+                                  (add-arg-value-node state lookups
+                                                      (resolve-arg-name arg arg-map)
                                                       (:value arg) (:id arg) node-id #{fn-id}))
 
                                 (and migrated (:ref-id migrated))

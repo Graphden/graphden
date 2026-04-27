@@ -173,27 +173,31 @@
    :parent :to-json-string
    :args {:data :list-all-graph-entities}}
 
+  ;; Template for HTML-rendering Ring handlers. Free arg `:hiccup`
+  ;; propagates up from the body fn-def's `:render-hiccup`-typed slot,
+  ;; so concrete handlers below set `:hiccup :render-…-view` directly
+  ;; instead of each defining its own private `_*-body` fn-def.
+  {:name :hiccup-handler
+   :description "Template Ring handler — renders a hiccup tree (free arg `:hiccup`) and returns it as a 200 OK with `text/html` content-type."
+   :parent :html-ok-response
+   :args {:body :_hiccup-handler-body}}
+
+  {:name :_hiccup-handler-body
+   :parent :render-hiccup}
+
   {:name :entity-details-handler
    :description "Ring handler that returns the entity-details HTML partial. Bound by `app.routes.entity-details`."
-   :parent :html-ok-response
-   :args {:body :_entity-details-body}}
-
-  {:name :_entity-details-body
-   :parent :render-hiccup
+   :parent :hiccup-handler
    :args {:hiccup :render-entity-details-view}}
 
   {:name :entity-form-create-handler
    :description "Ring handler that returns the create-form HTML partial. Bound by `app.routes.entity-form-create`."
-   :parent :html-ok-response
-   :args {:body :_entity-form-body}}
+   :parent :hiccup-handler
+   :args {:hiccup :render-entity-form-view}}
 
   {:name :entity-form-edit-handler
    :description "Ring handler that returns the edit-form HTML partial. Bound by `app.routes.entity-form-edit`."
-   :parent :html-ok-response
-   :args {:body :_entity-form-body}}
-
-  {:name :_entity-form-body
-   :parent :render-hiccup
+   :parent :hiccup-handler
    :args {:hiccup :render-entity-form-view}}
 
   ;; --- Action handlers: action-fn returns partial response, defaults

@@ -72,31 +72,9 @@
    :args {:item2 :method-map
           :item1 {:as :path}}}
 
-  ;; Level 4: HTTP method routes (free: path, handler)
-  {:name :get-route
-   :description "Method template for `GET` routes. Caller supplies `:path` and `:handler`."
-   :parent :route
-   :args {:method "get"}}
-
-  {:name :post-route
-   :description "Method template for `POST` routes. Caller supplies `:path` and `:handler`."
-   :parent :route
-   :args {:method "post"}}
-
-  {:name :put-route
-   :description "Method template for `PUT` routes. Caller supplies `:path` and `:handler`."
-   :parent :route
-   :args {:method "put"}}
-
-  {:name :delete-route
-   :description "Method template for `DELETE` routes. Caller supplies `:path` and `:handler`."
-   :parent :route
-   :args {:method "delete"}}
-
-  {:name :patch-route
-   :description "Method template for `PATCH` routes. Caller supplies `:path` and `:handler`."
-   :parent :route
-   :args {:method "patch"}}
+  ;; Level 4: HTTP method shortcuts (`get-route`, `post-route`, …) live in
+  ;; `app.routes.method`. They keep the `-route` suffix because bare
+  ;; `:get`/`:post` would clash with base-fns and the auth presets.
 
   ;; =============================================================================
   ;; ROUTES WITH MIDDLEWARE
@@ -120,30 +98,8 @@
    :args {:item2 :_method-map-with-middleware
           :item1 {:as :path}}}
 
-  {:name :get-route-with-middleware
-   :description "Method template for `GET` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
-   :parent :route-with-middleware
-   :args {:method "get"}}
-
-  {:name :post-route-with-middleware
-   :description "Method template for `POST` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
-   :parent :route-with-middleware
-   :args {:method "post"}}
-
-  {:name :put-route-with-middleware
-   :description "Method template for `PUT` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
-   :parent :route-with-middleware
-   :args {:method "put"}}
-
-  {:name :delete-route-with-middleware
-   :description "Method template for `DELETE` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
-   :parent :route-with-middleware
-   :args {:method "delete"}}
-
-  {:name :patch-route-with-middleware
-   :description "Method template for `PATCH` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
-   :parent :route-with-middleware
-   :args {:method "patch"}}
+  ;; Method shortcuts (`get-route-with-middleware`, …) live in
+  ;; `app.routes.method` next to their plain-method twins.
 
   ;; =============================================================================
   ;; RESPONSE MATRIX (status × content-type via multiple inheritance)

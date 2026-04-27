@@ -1558,14 +1558,16 @@
 
                                 (and migrated (some? (:value migrated)))
                                 (when (mark-once! [terminal :value (:value migrated)])
-                                  (add-arg-value-node (or (:arg-name migrated)
+                                  (add-arg-value-node state lookups
+                                                      (or (:arg-name migrated)
                                                           (resolve-arg-name arg arg-map))
                                                       (:value migrated) (:id arg)
                                                       node-id #{fn-id}))
 
                                 (and (not has-ref) (not (arg-determined? (:id arg))))
                                 (when (mark-once! [terminal :unset])
-                                  (add-unset-arg-node (resolve-arg-name arg arg-map)
+                                  (add-unset-arg-node state lookups inverse-source-map
+                                                      (resolve-arg-name arg arg-map)
                                                       (:type arg) (:id arg) node-id #{fn-id} is-hof)))))))
                       node-id)
                     ;; Normal processing

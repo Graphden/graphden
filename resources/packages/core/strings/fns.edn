@@ -87,13 +87,9 @@
    :parent :str-len
    :args {:string {:as :string}}}
 
-  {:name :_truncate-max-length-echo
-   :parent :identity
-   :args {:value {:as :max-length}}}
-
   {:name :_truncate-too-long?
    :parent :gt
-   :args {:nums [:_truncate-len :_truncate-max-length-echo]}}
+   :args {:nums [:_truncate-len {:as :max-length}]}}
 
   {:name :_truncate-prefix
    :parent :subs

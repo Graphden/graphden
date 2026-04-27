@@ -114,12 +114,8 @@
   {:name :_env-missing-message
    :parent :str
    :args {:parts [{:value "Required env var "}
-                  :_env-name-as-string
+                  {:as :name}
                   {:value " is not set"}]}}
-
-  {:name :_env-name-as-string
-   :parent :identity
-   :args {:value {:as :name}}}
 
   {:name :_env-missing-error
    :parent :ex-info
@@ -157,11 +153,7 @@
   {:name :_resource-not-found-message
    :parent :str
    :args {:parts [{:value "Resource not found: "}
-                  :_resource-path-echo]}}
-
-  {:name :_resource-path-echo
-   :parent :identity
-   :args {:value {:as :path}}}
+                  {:as :path}]}}
 
   {:name :_resource-not-found-error
    :parent :ex-info

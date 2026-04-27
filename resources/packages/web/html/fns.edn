@@ -69,11 +69,8 @@
 
   {:name :_button-attrs
    :parent :merge
-   :args {:maps [:_button-base-attrs :_button-extra-attrs-echo]}}
+   :args {:maps [:_button-base-attrs {:as :extra-attrs}]}}
 
-  {:name :_button-extra-attrs-echo
-   :parent :identity
-   :args {:value {:as :extra-attrs}}}
 
   {:name :_button-children
    :parent :conj
@@ -146,11 +143,7 @@
 
   {:name :_badge-class-typed
    :parent :str
-   :args {:parts [{:value "badge badge-"} :_badge-type-echo]}}
-
-  {:name :_badge-type-echo
-   :parent :identity
-   :args {:value {:as :badge-type}}}
+   :args {:parts [{:value "badge badge-"} {:as :badge-type}]}}
 
   {:name :_badge-children
    :parent :conj

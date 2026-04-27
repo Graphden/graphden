@@ -307,7 +307,8 @@
          build-inverse-source-map
          caller-bound-arg
          terminal-arg-of
-         terminal-source-of)
+         terminal-source-of
+         child-covered-sources-for-fn)
 
 
 (defn- record-optional-unset!
@@ -408,6 +409,203 @@
           (if (and fid (contains? (parent-bound-terminals fid) terminal))
             true
             (recur (get arg-map (:source-id cur)))))))))
+
+
+(defn- collect-fn-args
+  "Collect renderable arg entries for `fn-id` given the active
+   `bindings` map. Each entry is `{:type :ref|:value|:unset :arg-name
+   :arg-id …}`. Pure — no state mutation.
+
+   Options:
+     :is-structural          — true for structural nodes inside an
+                                expansion. Unbound refs (no binding)
+                                become `:unset` instead of `:ref` so
+                                we don't false-share with sibling fns.
+     :displayed-ref-arg-ids  — set of arg-ids belonging to fns shown
+                                as nodes in the current expansion.
+                                Bindings whose source-chain leads
+                                here are deferred to the leaf node.
+     :expansion-root-chain   — set of fn-ids in the expansion root's
+                                inheritance chain. Forwarded into
+                                `child-covered-sources-for-fn`."
+  [lookups fn-id bindings & {:keys [is-structural displayed-ref-arg-ids expansion-root-chain]
+                             :or {is-structural false displayed-ref-arg-ids #{} expansion-root-chain #{}}}]
+  (let [{:keys [fn-map arg-map args-by-fn]} lookups
+        fn-ancestry (set (get-inheritance-chain fn-id fn-map))
+        binding-reaches? (fn [b target-id]
+                           (let [barg (some-> (:arg-id b) arg-map)
+                                 terminal (terminal-arg-of arg-map target-id)]
+                             (and (contains? fn-ancestry (:fn-id terminal))
+                                  (loop [sid (:source-id barg)]
+                                    (cond
+                                      (nil? sid) false
+                                      (or (= sid target-id)
+                                          (= sid (:id terminal))) true
+                                      :else (recur (:source-id (get arg-map sid))))))))
+        binding-applies? (fn [b current-arg-id]
+                           (let [barg (some-> (:arg-id b) arg-map)]
+                             (or (nil? barg)
+                                 (contains? fn-ancestry (:fn-id barg))
+                                 (binding-reaches? b current-arg-id))))
+        bound-by-chain? (fn [arg]
+                          (loop [sid (:source-id arg)]
+                            (when sid
+                              (if (contains? bindings sid)
+                                true
+                                (recur (:source-id (get arg-map sid)))))))
+        raw-args (get args-by-fn fn-id [])
+        sequence-anchors (filterv #(= :sequence (:type %)) raw-args)
+        chain-item-ids (into #{}
+                             (mapcat (fn [anchor]
+                                       (map :id (walk-anchor-chain anchor arg-map))))
+                             sequence-anchors)
+        anchor-ids (set (map :id sequence-anchors))
+        sequence-slot-entries
+        (vec (mapcat
+               (fn [anchor]
+                 (expand-sequence-anchor
+                   anchor
+                   (or (resolve-arg-name anchor arg-map) "items")
+                   arg-map))
+               sequence-anchors))
+        args (filterv (fn [a]
+                        (not (or (contains? anchor-ids (:id a))
+                                 (contains? chain-item-ids (:id a)))))
+                      raw-args)
+        child-sources (child-covered-sources-for-fn lookups fn-id :expansion-root-chain expansion-root-chain)
+        all-covered-sources (into child-sources displayed-ref-arg-ids)
+        binding-goes-to-child?
+        (fn [binding-key]
+          (loop [sid binding-key]
+            (when sid
+              (if (contains? all-covered-sources sid)
+                true
+                (let [src-arg (get arg-map sid)]
+                  (recur (:source-id src-arg)))))))
+        all-args (mapv (fn [arg]
+                         (let [arg-name (resolve-arg-name arg arg-map)
+                               has-value (some? (:value arg))
+                               has-ref (some? (:ref-id arg))
+                               source-has-ref (when-let [sid (:source-id arg)]
+                                                (let [source-arg (get arg-map sid)]
+                                                  (some? (:ref-id source-arg))))
+                               defines-own-ref (and has-ref (not source-has-ref))
+                               binding-key (or (:id arg) (:source-id arg))
+                               raw-binding (loop [sid (:id arg)]
+                                             (if-let [b (get bindings sid)]
+                                               (if (binding-applies? b (:id arg))
+                                                 b
+                                                 (when-let [src-arg (get arg-map sid)]
+                                                   (when-let [next-sid (:source-id src-arg)]
+                                                     (recur next-sid))))
+                                               (when-let [src-arg (get arg-map sid)]
+                                                 (when-let [next-sid (:source-id src-arg)]
+                                                   (recur next-sid)))))
+                               binding (when (and raw-binding
+                                                  (not (binding-goes-to-child? binding-key)))
+                                         raw-binding)]
+                           (cond
+                             (or (and has-ref defines-own-ref)
+                                 (and binding (:ref-id binding) (= (:ref-id binding) (:ref-id arg))))
+                             {:type :ref :arg-name arg-name
+                              :ref-id (:ref-id arg) :arg-id (:id arg)
+                              :is-binding false}
+
+                             (and binding (:ref-id binding)
+                                  (or (and has-ref (not= (:ref-id binding) (:ref-id arg)))
+                                      (and (not has-ref) (not has-value))))
+                             {:type :ref :arg-name (:arg-name binding)
+                              :ref-id (:ref-id binding) :arg-id (:arg-id binding)
+                              :is-binding true}
+
+                             (and binding (some? (:value binding)))
+                             {:type :value :arg-name (:arg-name binding)
+                              :value (:value binding) :arg-id (:arg-id binding)}
+
+                             (and has-ref (not is-structural))
+                             {:type :ref :arg-name arg-name
+                              :ref-id (:ref-id arg) :arg-id (:id arg)
+                              :is-binding false}
+
+                             (and has-ref is-structural (not defines-own-ref))
+                             {:type :unset :arg-name arg-name
+                              :arg-type (:type arg) :arg-id (:id arg)}
+
+                             has-value
+                             {:type :value :arg-name arg-name
+                              :value (:value arg) :arg-id (:id arg)}
+
+                             (or raw-binding (bound-by-chain? arg))
+                             nil
+
+                             :else
+                             {:type :unset :arg-name arg-name
+                              :arg-type (:type arg) :arg-id (:id arg)})))
+                       args)
+        own-slot-terminals (into #{}
+                                 (keep (fn [a]
+                                         (terminal-source-of arg-map (:id a))))
+                                 raw-args)
+        inherited-ref-args
+        (if-not is-structural
+          []
+          (let [ancestors (rest (get-inheritance-chain fn-id fn-map))
+                seen-terminals (atom own-slot-terminals)]
+            (vec
+              (keep
+                (fn [a]
+                  (when (:ref-id a)
+                    (let [terminal-id (terminal-source-of arg-map (:id a))]
+                      (when-not (contains? @seen-terminals terminal-id)
+                        (swap! seen-terminals conj terminal-id)
+                        {:type :ref
+                         :arg-name (resolve-arg-name a arg-map)
+                         :ref-id (:ref-id a)
+                         :arg-id (:id a)
+                         :is-binding false}))))
+                (mapcat #(get args-by-fn % []) ancestors)))))
+        deduped-args
+        (let [seen (atom #{})]
+          (into []
+                (keep (fn [arg]
+                        (let [terminal-id (terminal-source-of arg-map (:arg-id arg))]
+                          (when-not (and terminal-id (contains? @seen terminal-id))
+                            (when terminal-id (swap! seen conj terminal-id))
+                            arg))))
+                (into (filterv some? all-args) inherited-ref-args)))
+        type-order {:ref 0 :value 1 :unset 2}
+        sorted-args (sort-by #(get type-order (:type %) 3) deduped-args)]
+    (into (vec sorted-args) sequence-slot-entries)))
+
+
+(defn- child-covered-sources-for-fn
+  "Source-ids that `fn-id`'s child refs already render — used for binding
+   deduplication so the same upstream binding isn't drawn twice (once on
+   `fn-id` and once on the child node it actually feeds).
+
+   `expansion-root-chain` (optional): set of fn-ids in the expansion
+   root's inheritance chain. Source-ids pointing INTO that chain are
+   excluded — they're shared-ancestor args, not child-owned, so the
+   parent should still render them."
+  [lookups fn-id & {:keys [expansion-root-chain] :or {expansion-root-chain #{}}}]
+  (let [{:keys [fn-map args-by-fn]} lookups
+        fn-args (get args-by-fn fn-id [])
+        child-ref-ids (keep :ref-id fn-args)
+        expansion-chain-arg-ids (when (seq expansion-root-chain)
+                                  (set (mapcat (fn [eid]
+                                                 (map :id (get args-by-fn eid [])))
+                                               expansion-root-chain)))]
+    (set (mapcat (fn [child-ref-id]
+                   (let [child-chain (get-inheritance-chain child-ref-id fn-map)]
+                     (mapcat (fn [child-fn-id]
+                               (keep (fn [arg]
+                                       (when-let [sid (:source-id arg)]
+                                         (when-not (and expansion-chain-arg-ids
+                                                        (contains? expansion-chain-arg-ids sid))
+                                           sid)))
+                                     (get args-by-fn child-fn-id [])))
+                             child-chain)))
+                 child-ref-ids))))
 
 
 (defn- arg-marks-hof?
@@ -751,276 +949,6 @@
         parent-bound-terminals (make-parent-bound-terminals lookups)
 
 
-        ;; Compute sources covered by child refs of a fn
-        ;; Returns set of source-ids that child refs will handle (for binding deduplication)
-        child-covered-sources-for-fn
-        ;; expansion-root-chain: set of fn-ids in expansion root's inheritance chain
-        ;; Used to exclude source-ids that point to args owned by shared ancestors
-        (fn [fn-id & {:keys [expansion-root-chain] :or {expansion-root-chain #{}}}]
-          (let [fn-args (get args-by-fn fn-id [])
-                child-ref-ids (keep :ref-id fn-args)
-                ;; Collect arg-ids that belong to fns in expansion-root-chain
-                ;; These are "shared ancestor args" that shouldn't be treated as covered
-                expansion-chain-arg-ids (when (seq expansion-root-chain)
-                                          (set (mapcat (fn [eid]
-                                                         (map :id (get args-by-fn eid [])))
-                                                       expansion-root-chain)))]
-            (set (mapcat (fn [child-ref-id]
-                           (let [child-chain (get-inheritance-chain child-ref-id fn-map)]
-                             (mapcat (fn [child-fn-id]
-                                       ;; Collect source-ids from args, but exclude those pointing
-                                       ;; to shared ancestor args (they're not "owned" by the child)
-                                       (keep (fn [arg]
-                                               (when-let [sid (:source-id arg)]
-                                                 (when-not (and expansion-chain-arg-ids
-                                                                (contains? expansion-chain-arg-ids sid))
-                                                   sid)))
-                                             (get args-by-fn child-fn-id [])))
-                                     child-chain)))
-                         child-ref-ids))))
-
-        collect-fn-args
-        ;; is-structural: true when collecting args for a structural node inside expansion
-        ;; For structural nodes, unbound refs (no binding) should be shown as unset, not as direct refs
-        ;; This prevents false sharing with other fns that happen to have the same ancestor ref-id
-        ;; displayed-ref-arg-ids: set of arg-ids belonging to fns that are displayed as nodes in current expansion
-        ;;   If a binding's source chain leads to one of these arg-ids, the binding should be shown there, not here
-        (fn [fn-id bindings & {:keys [is-structural displayed-ref-arg-ids expansion-root-chain]
-                               :or {is-structural false displayed-ref-arg-ids #{} expansion-root-chain #{}}}]
-          (let [;; Inheritance ancestry of the fn we're rendering. Used to
-                ;; filter out sibling bindings that would otherwise flow in
-                ;; through a shared base-fn's source-id chain (e.g. three
-                ;; other `:get` instances binding their own `:default` — none
-                ;; of them apply to THIS `:get` instance unless they sit in
-                ;; its ancestry).
-                fn-ancestry (set (get-inheritance-chain fn-id fn-map))
-                binding-reaches? (fn [b target-id]
-                                   (let [barg (some-> (:arg-id b) arg-map)
-                                         terminal (terminal-arg-of arg-map target-id)]
-                                     (and (contains? fn-ancestry (:fn-id terminal))
-                                          (loop [sid (:source-id barg)]
-                                            (cond
-                                              (nil? sid) false
-                                              (or (= sid target-id)
-                                                  (= sid (:id terminal))) true
-                                              :else (recur (:source-id (get arg-map sid))))))))
-                binding-applies? (fn [b current-arg-id]
-                                   (let [barg (some-> (:arg-id b) arg-map)]
-                                     (or (nil? barg)
-                                         (contains? fn-ancestry (:fn-id barg))
-                                         (binding-reaches? b current-arg-id))))
-                ;; Does the arg's source-id chain pass through any binding
-                ;; key? If yes, the upstream caller already shows the
-                ;; binding, so this downstream arg should not emit a free
-                ;; placeholder. Used to suppress shadows like `:func` on
-                ;; `router-response-*` when `_app-path-gated-response`
-                ;; already binds it.
-                bound-by-chain? (fn [arg]
-                                  (loop [sid (:source-id arg)]
-                                    (when sid
-                                      (if (contains? bindings sid)
-                                        true
-                                        (recur (:source-id (get arg-map sid)))))))
-                raw-args (get args-by-fn fn-id [])
-                ;; Sequence handling: find anchors (type=:sequence) and their chain items.
-                ;; Anchor + items get EXCLUDED from normal scalar processing; instead the
-                ;; chain expands to N synthetic slot entries (labeled `<slot>[idx]`).
-                sequence-anchors (filterv #(= :sequence (:type %)) raw-args)
-                chain-item-ids (into #{}
-                                     (mapcat (fn [anchor]
-                                               (map :id (walk-anchor-chain anchor arg-map))))
-                                     sequence-anchors)
-                anchor-ids (set (map :id sequence-anchors))
-                sequence-slot-entries
-                (vec (mapcat
-                       (fn [anchor]
-                         (expand-sequence-anchor
-                           anchor
-                           (or (resolve-arg-name anchor arg-map) "items")
-                           arg-map))
-                       sequence-anchors))
-                args (filterv (fn [a]
-                                (not (or (contains? anchor-ids (:id a))
-                                         (contains? chain-item-ids (:id a)))))
-                              raw-args)
-                ;; Collect sources that child refs will handle (static)
-                ;; This catches direct children of this fn
-                child-sources (child-covered-sources-for-fn fn-id :expansion-root-chain expansion-root-chain)
-                ;; Combined set: both static child sources AND dynamically displayed ref arg-ids
-                all-covered-sources (into child-sources displayed-ref-arg-ids)
-                ;; Check if a binding's source chain leads to covered sources
-                binding-goes-to-child?
-                (fn [binding-key]
-                  (loop [sid binding-key]
-                    (when sid
-                      (if (contains? all-covered-sources sid)
-                        true
-                        (let [src-arg (get arg-map sid)]
-                          (recur (:source-id src-arg)))))))
-                all-args (mapv (fn [arg]
-                                 (let [arg-name (resolve-arg-name arg arg-map)
-                                       has-value (some? (:value arg))
-                                       has-ref (some? (:ref-id arg))
-                                       ;; Check if this fn DEFINES the ref (source has no ref)
-                                       ;; vs INHERITS the ref (source also has ref)
-                                       ;; Only structural nodes with INHERITED unbound refs should be unset
-                                       source-has-ref (when-let [sid (:source-id arg)]
-                                                        (let [source-arg (get arg-map sid)]
-                                                          (some? (:ref-id source-arg))))
-                                       defines-own-ref (and has-ref (not source-has-ref))
-                                       ;; Check for binding - applies to UNSET args
-                                       ;; For structural nodes, also check binding for args with ref
-                                       binding-key (or (:id arg) (:source-id arg))
-                                       ;; Walk the FULL source-id chain to find a binding.
-                                       ;; With multiple inheritance the bound arg may be on a
-                                       ;; sibling parent, so the binding ends up keyed by an
-                                       ;; ancestor source-id deep in the chain. Skip bindings
-                                       ;; that don't belong to this fn's ancestry — those come
-                                       ;; from siblings sharing the same base-fn's source-id
-                                       ;; (e.g. router-response-body.default piggybacking onto
-                                       ;; ring-method-kw via `:get.default`).
-                                       raw-binding (loop [sid (:id arg)]
-                                                     (if-let [b (get bindings sid)]
-                                                       (if (binding-applies? b (:id arg))
-                                                         b
-                                                         (when-let [src-arg (get arg-map sid)]
-                                                           (when-let [next-sid (:source-id src-arg)]
-                                                             (recur next-sid))))
-                                                       (when-let [src-arg (get arg-map sid)]
-                                                         (when-let [next-sid (:source-id src-arg)]
-                                                           (recur next-sid)))))
-                                       ;; If binding goes to a child ref, don't use it here
-                                       binding (when (and raw-binding
-                                                          (not (binding-goes-to-child? binding-key)))
-                                                 raw-binding)]
-                                   (cond
-                                     ;; CRITICAL: Any node with ref DEFINED HERE takes precedence
-                                     ;; over any binding! The arg's own ref-id is what matters, not
-                                     ;; an ancestor binding that has a DIFFERENT ref-id.
-                                     ;; Example: list-10.coll -> list-10-9 (defines own ref)
-                                     ;;   binding from list-11.coll -> list-10 should NOT override
-                                     ;; Example: editor-scripts.item1 -> dagre-script (defines own ref)
-                                     ;;   binding from editor-routes.item1 -> favicon-route should NOT override
-                                     ;; NOTE: This applies to BOTH structural AND canonical nodes!
-                                     ;; Own ref takes precedence, OR binding matches own ref (structural)
-                                     (or (and has-ref defines-own-ref)
-                                         (and binding (:ref-id binding) (= (:ref-id binding) (:ref-id arg))))
-                                     {:type :ref :arg-name arg-name
-                                      :ref-id (:ref-id arg) :arg-id (:id arg)
-                                      :is-binding false}
-
-                                     ;; Binding ref: overrides existing ref OR fills unset arg
-                                     ;; Mark with :is-binding true so process-fn uses canonical mode
-                                     ;; CRITICAL: arg with value should NOT be overridden by binding ref
-                                     (and binding (:ref-id binding)
-                                          (or (and has-ref (not= (:ref-id binding) (:ref-id arg)))
-                                              (and (not has-ref) (not has-value))))
-                                     {:type :ref :arg-name (:arg-name binding)
-                                      :ref-id (:ref-id binding) :arg-id (:arg-id binding)
-                                      :is-binding true}
-
-                                     (and binding (some? (:value binding)))
-                                     {:type :value :arg-name (:arg-name binding)
-                                      :value (:value binding) :arg-id (:arg-id binding)}
-
-                                     ;; Direct ref - non-structural always shows as ref
-                                     (and has-ref (not is-structural))
-                                     {:type :ref :arg-name arg-name
-                                      :ref-id (:ref-id arg) :arg-id (:id arg)
-                                      :is-binding false}
-
-                                     ;; Structural node with INHERITED unbound ref - treat as unset
-                                     ;; Example: if parent has ref to X and child inherits it without binding
-                                     (and has-ref is-structural (not defines-own-ref))
-                                     {:type :unset :arg-name arg-name
-                                      :arg-type (:type arg) :arg-id (:id arg)}
-
-                                     has-value
-                                     {:type :value :arg-name arg-name
-                                      :value (:value arg) :arg-id (:id arg)}
-
-                                     ;; Either (a) binding existed but went to child (treat as
-                                     ;; inlined at point of use), or (b) arg unbound here but an
-                                     ;; upstream in its source chain has a binding. Both cases
-                                     ;; hide this arg from the rendered subtree.
-                                     (or raw-binding (bound-by-chain? arg))
-                                     nil
-
-                                     :else
-                                     {:type :unset :arg-name arg-name
-                                      :arg-type (:type arg) :arg-id (:id arg)})))
-                               args)
-                ;; Include ref-bindings that live on inheritance ancestors
-                ;; but have no corresponding own arg on this fn. Without this
-                ;; pass, bindings like `:coll :router-result` on
-                ;; `router-result-field` never surface as edges from
-                ;; `router-response-body` (which only stores its overrides
-                ;; `:key`/`:default`), so the node `router-result` never
-                ;; appears and propagated args like `:func` have nowhere to
-                ;; migrate to. We walk every ancestor, collect bound ref args
-                ;; whose slot (terminal primary arg-id) isn't already covered
-                ;; by this fn's own args, and emit each as a synthetic :ref.
-                own-slot-terminals (into #{}
-                                         (keep (fn [a]
-                                                 (terminal-source-of arg-map (:id a))))
-                                         raw-args)
-                inherited-ref-args
-                (if-not is-structural
-                  ;; Level-0 renders show only OWN bindings of the displayed
-                  ;; fn. Ancestor bindings become visible as the user expands
-                  ;; to that ancestor level. Inside a structural expansion
-                  ;; context (is-structural=true) we do surface ancestor
-                  ;; ref-bindings — e.g. router-response-body's ancestor
-                  ;; router-result-field binds `:coll :router-result`, and
-                  ;; without this pass router-result would never become a
-                  ;; node so propagated args like `:func` have no consumption
-                  ;; point to migrate to.
-                  []
-                  (let [ancestors (rest (get-inheritance-chain fn-id fn-map))
-                        seen-terminals (atom own-slot-terminals)]
-                    (vec
-                      (keep
-                        (fn [a]
-                          (when (:ref-id a)
-                            (let [terminal-id (terminal-source-of arg-map (:id a))]
-                              (when-not (contains? @seen-terminals terminal-id)
-                                (swap! seen-terminals conj terminal-id)
-                                {:type :ref
-                                 :arg-name (resolve-arg-name a arg-map)
-                                 :ref-id (:ref-id a)
-                                 :arg-id (:id a)
-                                 :is-binding false}))))
-                        (mapcat #(get args-by-fn % []) ancestors)))))
-                ;; Dedup by terminal primary arg-id. Propagation creates
-                ;; multiple shadows per free arg (one per ref-path it flowed
-                ;; through), and rendering each as a separate placeholder
-                ;; turns a single `:request` free arg into 5+ identical
-                ;; edges to the `any` placeholder. Collapse shadows that
-                ;; share a terminal primary slot into one.
-                deduped-args
-                (let [seen (atom #{})]
-                  (into []
-                        (keep (fn [arg]
-                                (let [terminal-id (terminal-source-of arg-map (:arg-id arg))]
-                                  (when-not (and terminal-id (contains? @seen terminal-id))
-                                    (when terminal-id (swap! seen conj terminal-id))
-                                    arg))))
-                        (into (filterv some? all-args) inherited-ref-args)))
-                ;; Sort args: refs first (fn type), then values (fixed), then unset (free)
-                type-order {:ref 0 :value 1 :unset 2}
-                sorted-args (sort-by #(get type-order (:type %) 3) deduped-args)
-                ;; Append sequence slot entries (expanded from anchor chains).
-                ;; They come after the scalar args so the scalar order is unchanged.
-                ;; `sort-by` returns a seq, and `(into seq vec)` reverses the
-                ;; appended elements because `conj` on a seq prepends. Coerce
-                ;; the base to a vector so sequence slot entries land in
-                ;; declaration order (matters for layout child placement —
-                ;; children of a sequence-bound parent like merge-in's :maps
-                ;; were rendered in reverse and shifted around as soon as
-                ;; preview spec promoted the path through the expanded code
-                ;; branch).
-                final-args (into (vec sorted-args) sequence-slot-entries)]
-            final-args))
 
         ;; Collect args from a set of expand-fns with proper ordering:
         ;; For each fn in expand-set (descendants first by BFS order):
@@ -1215,7 +1143,7 @@
                                            ref-fn-ids))))
                           exp-root-chain (when expansion-root
                                            (set (get-inheritance-chain expansion-root fn-map)))
-                          all-args (collect-fn-args display-fn-id bindings
+                          all-args (collect-fn-args lookups display-fn-id bindings
                                                     :is-structural (some? expansion-root)
                                                     :displayed-ref-arg-ids (or displayed-ref-arg-ids #{})
                                                     :expansion-root-chain (or exp-root-chain #{}))

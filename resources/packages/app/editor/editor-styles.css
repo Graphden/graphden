@@ -106,14 +106,22 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 
 /* Disabled (greyed-out) state for the delete button when the entity
    can't be removed safely. The button stays in the row layout so its
-   absence doesn't shift the icon group; tooltip carries the reason. */
+   absence doesn't shift the icon group; tooltip carries the reason.
+   Hover doesn't change anything — no background flip, no color change,
+   no SVG colour swap — the row's hover rule still raises opacity to
+   make the button visible, but everything else stays at the disabled
+   palette so it reads as "not clickable". */
 .create-btn-inline.create-btn-disabled,
-.create-btn-inline:disabled {
-  color: #888; cursor: not-allowed;
-}
 .create-btn-inline.create-btn-disabled:hover,
+.create-btn-inline:disabled,
 .create-btn-inline:disabled:hover {
-  background: transparent; color: #888;
+  color: #888;
+  background: transparent;
+  cursor: not-allowed;
+}
+.create-btn-inline.create-btn-disabled:hover svg,
+.create-btn-inline:disabled:hover svg {
+  color: #888;
 }
 
 /* Create-child popover menu (ns / fn). Floated above the sidebar. */

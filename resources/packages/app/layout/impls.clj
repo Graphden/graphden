@@ -241,6 +241,63 @@
           items)))
 
 
+;; =============================================================================
+;; PURE HELPERS used by build-graph-elements
+;; =============================================================================
+
+(defn- get-effective-spec
+  "Look up expansion spec by cytoscape node-id string. The `expansions`
+   map is keyed by the same node-id that `add-fn-node` emits, so the
+   match is exact."
+  [expansions node-id]
+  (or (get expansions node-id) 0))
+
+
+(defn- spec->expand-set
+  "Convert any expansion spec into a set of fn-ids that should be
+   `merged into` the focus fn's display (always includes fn-id itself)."
+  [fn-map fn-id spec]
+  (let [levels (get-inheritance-levels fn-id fn-map)
+        full-depth (cond
+                     (integer? spec) spec
+                     (map? spec) (or (:full-depth spec) 0)
+                     :else 0)
+        partial-fns (when (map? spec)
+                      (set (map (fn [id]
+                                  (if (uuid? id)
+                                    id
+                                    (parse-uuid (str id))))
+                                (:partial-fns spec))))
+        cascade-fns (set (mapcat identity
+                                 (take (inc full-depth) levels)))]
+    (cond-> cascade-fns
+      (seq partial-fns) (into partial-fns))))
+
+
+(defn- spec-trivial?
+  "True for specs that don't expand anything beyond the focus fn."
+  [spec]
+  (cond
+    (integer? spec) (zero? spec)
+    (map? spec) (and (zero? (or (:full-depth spec) 0))
+                     (empty? (:partial-fns spec)))
+    :else true))
+
+
+(defn- arg-is-optional?
+  "Walk the source-id chain to the root arg and return its `:required`
+   value. Propagated shadows have `:required=nil`, so we need to look at
+   the base-fn's primary arg to know whether an unbound slot is truly
+   optional (`:required false` → caller may leave it blank) or required
+   (no explicit `:required false` → caller must supply it)."
+  [arg-map arg]
+  (let [root (loop [a arg, depth 0]
+               (if (or (> depth 200) (not (:source-id a)))
+                 a
+                 (recur (get arg-map (:source-id a)) (inc depth))))]
+    (false? (:required root))))
+
+
 (defn- build-graph-elements
   "Build graph elements (nodes, edges) from selected function.
    Returns {:nodes [...] :edges [...]}"
@@ -259,54 +316,6 @@
         ;; whose binding chain leads back to method-map) would otherwise loop.
         in-progress-expansions (atom #{})
         max-visible-ancestors 4
-
-        get-effective-spec
-        ;; Look up expansion spec by cytoscape node-id string. The
-        ;; `expansions` map is keyed by the same node-id that
-        ;; `add-fn-node` emits, so the match is exact.
-        (fn [node-id]
-          (or (get expansions node-id) 0))
-
-        ;; Convert any expansion spec into a set of fn-ids that should be
-        ;; "merged into" the focus fn's display (always includes fn-id itself).
-        spec->expand-set
-        (fn [fn-id spec]
-          (let [levels (get-inheritance-levels fn-id fn-map)
-                full-depth (cond
-                             (integer? spec) spec
-                             (map? spec) (or (:full-depth spec) 0)
-                             :else 0)
-                partial-fns (when (map? spec)
-                              (set (map (fn [id]
-                                          (if (uuid? id)
-                                            id
-                                            (parse-uuid (str id))))
-                                        (:partial-fns spec))))
-                cascade-fns (set (mapcat identity
-                                         (take (inc full-depth) levels)))]
-            (cond-> cascade-fns
-              (seq partial-fns) (into partial-fns))))
-
-        spec-trivial?
-        (fn [spec]
-          (cond
-            (integer? spec) (zero? spec)
-            (map? spec) (and (zero? (or (:full-depth spec) 0))
-                             (empty? (:partial-fns spec)))
-            :else true))
-
-        ;; Walk the source-id chain to the root arg and return its :required
-        ;; value. Propagated shadows have :required=nil, so we need to look at
-        ;; the base-fn's primary arg to know whether an unbound slot is truly
-        ;; optional (`:required false` → caller may leave it blank) or required
-        ;; (no explicit `:required false` → caller must supply it).
-        arg-is-optional?
-        (fn [arg]
-          (let [root (loop [a arg, depth 0]
-                       (if (or (> depth 200) (not (:source-id a)))
-                         a
-                         (recur (get arg-map (:source-id a)) (inc depth))))]
-            (false? (:required root))))
 
         ;; Optional unbound args don't deserve their own placeholder node — the
         ;; caller's fn has a sensible fallback baked in. We collect the NAMES
@@ -642,7 +651,7 @@
            ;;   4. Otherwise — visible dashed placeholder node. This IS the
            ;;      caller's interface; the caller must fill it.
            (let [arg-rec (get arg-map arg-id)
-                 optional? (arg-is-optional? arg-rec)
+                 optional? (arg-is-optional? arg-map arg-rec)
                  displayed-name (or (compute-edge-label arg-id source-node-id expanded-fns)
                                     (when arg-name (name arg-name)))]
              (cond
@@ -1263,7 +1272,7 @@
                 [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns is-hof]
                 (let [levels (get-inheritance-levels original-fn-id fn-map)
                       chain (vec (mapcat identity levels))  ; flat for set ops
-                      expand-set (spec->expand-set original-fn-id spec)
+                      expand-set (spec->expand-set fn-map original-fn-id spec)
                       ;; TWO binding maps:
                       ;; 1. display-bindings: from EXPAND-SET fns only. Used for
                       ;;    collect-expanded-args to render values/refs. Only shows
@@ -1464,7 +1473,7 @@
                                                  (subs source-node-id 3)
                                                  (str source-node-id))]
                                 (str "fn-" caller-tag "-" source-arg-id)))
-                      spec (get-effective-spec node-id-for-lookup)
+                      spec (get-effective-spec expansions node-id-for-lookup)
                       ;; Named fns are boundaries. Expanding a fn substitutes
                       ;; only THAT fn's impl — its ref-targets stay leaves
                       ;; until the user explicitly expands them. Holds inside

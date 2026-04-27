@@ -1037,6 +1037,35 @@
           (is (= tmpl-id (:source-id result))))))))
 
 
+(deftest prepare-arg-record-sequence-arg-rename
+  (testing "bare {:as :name} on :sequence parent → empty anchor with rename"
+    (let [tmpl-id (random-uuid)
+          fn-id (random-uuid)
+          parent-arg {:id tmpl-id :name "items" :type :sequence :of :any}
+          args-data {:by-id {tmpl-id parent-arg} :by-fn {} :by-fn-source {}}]
+      (with-redefs [records/find-available-arg (fn [_ _ _ _] parent-arg)]
+        (let [result (records/prepare-arg-record {} args-data {} {} fn-id [] :items
+                                                 {:as :buttons})
+              [anchor] (:new-chain result)]
+          (is (= 1 (count (:new-chain result))))
+          (is (= :sequence (:type anchor)))
+          (is (= "buttons" (:name anchor)))
+          (is (nil? (:next-arg-id anchor)))
+          (is (= tmpl-id (:source-id anchor)))))))
+
+  (testing "{:as :name :value …} (with explicit :value) is NOT a whole-arg rename"
+    ;; Falls through to the error branch — that combination isn't supported.
+    (let [tmpl-id (random-uuid)
+          fn-id (random-uuid)
+          parent-arg {:id tmpl-id :name "items" :type :sequence :of :any}
+          args-data {:by-id {tmpl-id parent-arg} :by-fn {} :by-fn-source {}}]
+      (with-redefs [records/find-available-arg (fn [_ _ _ _] parent-arg)]
+        (is (thrown-with-msg? clojure.lang.ExceptionInfo
+                              #"Sequence arg ':items' requires a vector"
+              (records/prepare-arg-record {} args-data {} {} fn-id [] :items
+                                          {:as :buttons :value 5})))))))
+
+
 ;; =============================================================================
 ;; prepare-scalar-arg-record — override-forbidden error path
 ;; =============================================================================

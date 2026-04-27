@@ -419,6 +419,34 @@
      :source-id template-id}))
 
 
+(defn- prepare-sequence-rename-anchor
+  "`{:as :name}` whole-arg rename for a sequence-typed slot — caller will
+   pass the entire vector under `:name`. Creates an empty sequence-anchor
+   carrying the rename; classify-binding treats this as a `:free` slot
+   keyed by the rename, so the caller's vector flows through verbatim
+   into the impl. Reuses the existing anchor's id when one is present."
+  [args-data fn-id parent-arg rename-name]
+  (let [template-id (:id parent-arg)
+        existing-anchor (get (:by-fn-source args-data) [fn-id template-id])
+        anchor-id (or (:id existing-anchor) (random-uuid))
+        existing-item-ids (if existing-anchor
+                            (walk-anchor-chain-ids (:by-id args-data) existing-anchor)
+                            [])
+        anchor {:id anchor-id
+                :fn-id fn-id
+                :source-id template-id
+                :name (clojure.core/name rename-name)
+                :type :sequence
+                :value nil
+                :ref-id nil
+                :is-fn nil
+                :next-arg-id nil
+                :prev-arg-id nil}]
+    {:new-chain [anchor]
+     :delete-items existing-item-ids
+     :source-id template-id}))
+
+
 (defn prepare-arg-record
   "Prepares an arg record for batch upsert.
    Uses find-available-arg to support pass-through args from nested refs.
@@ -428,6 +456,8 @@
    - Map with :as: {:as :new-name} to rename, optionally with :value or :ref
    - Vector (when parent arg type is :sequence): expands to anchor + linked
      items. Returns {:new-chain [...] :delete-items [...] :source-id …}.
+   - Bare `{:as :new-name}` for a sequence-arg: empty anchor with rename;
+     caller's whole vector flows through under the new name.
 
    args-data contains :by-fn, :by-id, and :by-fn-source indexes."
   [fn-cache args-data fn-name-cache created-fns fn-id parent-fn-ids arg-name arg-value]
@@ -439,14 +469,23 @@
   ;; Use find-available-arg which searches both parent chain AND propagated free args
   (let [parent-arg (find-available-arg fn-cache args-data parent-fn-ids arg-name)]
     (if (= :sequence (:type parent-arg))
-      (do
-        (when-not (vector? arg-value)
-          (throw (ex-info (str "Sequence arg '" arg-name "' requires a vector value, got "
-                               (type arg-value))
-                          {:type :fn-composition/invalid-sequence-value
-                           :arg-name arg-name
-                           :arg-value arg-value})))
-        (prepare-sequence-arg-chain fn-name-cache created-fns args-data fn-id parent-arg arg-value))
+      (cond
+        (vector? arg-value)
+        (prepare-sequence-arg-chain fn-name-cache created-fns args-data fn-id parent-arg arg-value)
+
+        ;; {:as :name} (no :value, no :ref) — whole-arg rename for the sequence.
+        (and (map? arg-value)
+             (contains? arg-value :as)
+             (not (contains? arg-value :value))
+             (not (contains? arg-value :ref)))
+        (prepare-sequence-rename-anchor args-data fn-id parent-arg (:as arg-value))
+
+        :else
+        (throw (ex-info (str "Sequence arg '" arg-name "' requires a vector value or a "
+                             "bare `{:as :name}` rename, got " (type arg-value))
+                        {:type :fn-composition/invalid-sequence-value
+                         :arg-name arg-name
+                         :arg-value arg-value})))
       (prepare-scalar-arg-record args-data fn-name-cache created-fns fn-id parent-arg arg-name arg-value))))
 
 

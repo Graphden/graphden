@@ -161,11 +161,17 @@
           :children {:type :sequence :of :any :required false :description "Child hiccup nodes — each item may be a literal node or a fn-ref."}}
    :return-type :jsonb}
 
-  ;; (`button-row` is a Clojure helper in `web.html.impls`, used directly
-  ;;  by `:render-entity-form-view` etc. The fn-def composition was removed
-  ;;  during the :hiccup/:children → :sequence migration — `:children {:as :buttons}`
-  ;;  whole-arg rename isn't supported for sequence-typed slots, and the
-  ;;  fn-def had no callers.)
+  ;; <div style="...">button1 button2 ...</div>  -- horizontal flex container.
+  {:name :button-row
+   :description "`<div style=…>btn1 btn2 …</div>` — horizontal flex container for action buttons. Caller supplies `:style` and `:buttons` (already-rendered hiccup)."
+   :parent :hiccup
+   :args {:tag "div"
+          :attrs :_button-row-attrs
+          :children {:as :buttons}}}
+
+  {:name :_button-row-attrs
+   :parent :assoc-empty
+   :args {:key "style" :value {:as :style}}}
 
   ;; Transform a value for display: :keyword-to-str, :pr-str, :bool-to-yesno
   {:name :apply-transform

@@ -108,8 +108,16 @@
        :is-fn (boolean (:is-fn bnd))}
 
       anchor
-      {:kind :seq :base-name base-name :ext-name ext-name
-       :items (walk-anchor-chain anchor arg-map)}
+      (let [items (walk-anchor-chain anchor arg-map)]
+        (if (and (empty? items) (:name anchor))
+          ;; Empty anchor with a rename — `{:as :new-name}` whole-arg
+          ;; binding for a sequence-typed slot. Treat as :free keyed by
+          ;; the rename: the caller passes the whole vector under
+          ;; the new name, and it flows verbatim into the impl.
+          {:kind :free :base-name base-name :ext-name (keyword (:name anchor))
+           :required (not (false? (:required primary-arg)))}
+          {:kind :seq :base-name base-name :ext-name ext-name
+           :items items}))
 
       :else
       {:kind :free :base-name base-name :ext-name ext-name

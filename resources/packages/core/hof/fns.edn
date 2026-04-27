@@ -57,7 +57,7 @@
   {:name :apply
    :description "Call a fn with a vector of args (Clojure's `apply`). Equivalent to `(func arg1 arg2 …)`."
    :args {:func {:type :fn :description "Callable to invoke."}
-          :args {:type :jsonb :description "Vector of positional arguments."}}
+          :args {:type :sequence :of :any :description "Positional arguments — each item may be a literal or a fn-ref."}}
    :return-type :any}
 
   ;; Returns value, ignoring _item — usable as HOF argument
@@ -69,7 +69,7 @@
 
   {:name :comp
    :description "Right-to-left composition of functions/transducers (Clojure's `comp`)."
-   :args {:functions {:type :jsonb :description "Vector of callables; rightmost is applied first."}}
+   :args {:functions {:type :sequence :of :any :description "Callables; rightmost is applied first. Each item may be a literal callable or a fn-ref."}}
    :return-type :any}
 
   {:name :transduce

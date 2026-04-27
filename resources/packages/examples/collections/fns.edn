@@ -1,52 +1,43 @@
 ;; Building collections from mixed literals and fn-refs.
 ;;
-;; Two arg-shapes for collections, with VERY different semantics:
+;; All sequence-typed slots (`:list/:items`, `:concat/:colls`, `:str/:parts`,
+;; `:add/:nums`, `:cond/:clauses`, `:apply/:args`, `:get-in/:path`,
+;; `:assoc-in/:path`, `:select-keys/:ks`, …) accept inline `[lit ref lit]`
+;; vectors — each item is its own arg-entity, fn-refs are resolved per item.
 ;;
-;;   :type :sequence  →  each item is its own arg-entity, fn-refs resolve.
-;;                       This is `:list/:items`, `:cond/:clauses` (sort of),
-;;                       and the `:items`-as-vector form anywhere.
-;;
-;;   :type :jsonb     →  the whole vector is one JSONB blob. Keywords inside
-;;                       are DATA, not fn-refs. Used for `:str/:parts`,
-;;                       `:concat/:colls`, `:transduce/:coll`, etc.
-;;
-;; To put a mixed literal+fn-ref collection into a `:jsonb`-typed slot,
-;; build it via `:list` first and pass the resulting fn-ref. See
-;; examples.sequence-vs-jsonb for the bare contrast.
+;; The few remaining `:jsonb`-typed collection slots are accept-collection
+;; slots — `:filter/:coll`, `:map/:coll`, `:str-join/:coll`, `:sort/:coll`,
+;; etc. — where the slot expects ONE already-built collection (typically a
+;; computed fn-ref). For literal keywords inside a `:sequence` slot, see
+;; examples.literal-keyword-in-sequence.
 
 
 {:namespace "examples.collections"
- :description "`:list` with mixed items, `:concat` over computed colls, and stacked `:assoc` for map-building."
+ :description "`:list` with mixed items, `:concat` with inline collections, stacked `:assoc` for map-building."
  :fns
- [;; SEQUENCE arg — each item is a separate arg entity. Mix literals and refs.
-  {:name :ex-mixed-list
-   :description "A vector with two literals and one fn-ref interleaved. The `:items` slot of `:list` is sequence-typed: each entry becomes its own arg-entity, so a fn-ref can sit next to a literal."
+ [{:name :ex-mixed-list
+   :description "A vector with two literals and one fn-ref interleaved. Each `:items` entry is its own arg-entity, so fn-refs resolve per item."
    :parent :list
    :args {:items [{:value 1}
-                  {:value 2}
-                  :_ex-three]}}
+                  :_ex-three
+                  {:value 5}]}}
 
   {:name :_ex-three
    :description "Local helper providing the value 3."
    :parent :const
    :args {:value 3}}
 
-  ;; :concat — `:colls` is `:jsonb`. Each entry must be a single fn-ref
-  ;; (or a single literal vector). Interleaving inside :colls' inline
-  ;; vector would NOT work; we route through a `:list` helper instead.
+  ;; :concat — `:colls` is sequence-typed. Inline mix works: each entry is
+  ;; either a literal collection or a fn-ref to a computed one.
   {:name :ex-prepended
-   :description "Prepend `[0]` in front of `:ex-mixed-list`. The two collections are wrapped via `:_ex-prepended-colls` (a `:list`) so fn-refs resolve correctly. `:concat/:colls` is `:jsonb`-typed — passing `[{:value [0]} :ex-mixed-list]` directly would store the keyword as data."
+   :description "Prepend `[0]` in front of `:ex-mixed-list`. Inline `[{:value [0]} :ex-mixed-list]` — the literal vector and the fn-ref to a computed list both resolve as separate items."
    :parent :concat
-   :args {:colls :_ex-prepended-colls}}
-
-  {:name :_ex-prepended-colls
-   :parent :list
-   :args {:items [{:value [0]}
+   :args {:colls [{:value [0]}
                   :ex-mixed-list]}}
 
   ;; Stacked :assoc — `:map`/`:value` are `:any`-typed, fn-refs resolve directly.
   {:name :ex-status-map
-   :description "Builds `{\"version\" \"1.0\" \"status\" \"ok\"}` by stacking two `:assoc` calls. `:assoc/:map` is `:any`-typed, so `:_ex-status-stage-1` resolves cleanly without a `:list` helper."
+   :description "Builds `{\"version\" \"1.0\" \"status\" \"ok\"}` by stacking two `:assoc` calls. `:assoc/:map` is `:any`-typed, so `:_ex-status-stage-1` resolves cleanly."
    :parent :assoc
    :args {:map :_ex-status-stage-1
           :key "status"
@@ -61,6 +52,14 @@
 
   ;; :count over a computed collection
   {:name :ex-count-prepended
-   :description "Number of items in `:ex-prepended`. Confirms the prepended collection has 4 items: 0, 1, 2, 3."
+   :description "Number of items in `:ex-prepended`. Confirms the prepended collection has 4 items: 0, 1, 3, 5."
    :parent :count
-   :args {:coll :ex-prepended}}]}
+   :args {:coll :ex-prepended}}
+
+  ;; Numeric :nums slot — also sequence-typed. Same inline rule.
+  {:name :ex-sum-mixed
+   :description "Sum `[10, ex-three=3, 100]`. `:add/:nums` is sequence-typed, so a fn-ref sitting next to literals resolves correctly."
+   :parent :add
+   :args {:nums [{:value 10}
+                 :_ex-three
+                 {:value 100}]}}]}

@@ -9,4 +9,4 @@
            "hof"
            "shared-vs-isolated"
            "invoke-vs-call"
-           "sequence-vs-jsonb"]}
+           "literal-keyword-in-sequence"]}

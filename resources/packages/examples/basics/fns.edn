@@ -3,13 +3,12 @@
 ;; Demonstrates:
 ;;   - a literal value carried by `:const`
 ;;   - a keyword in arg position is a fn-REFERENCE (not a literal keyword)
-;;   - a single fn-ref filling an `:any`-typed slot
+;;   - a single fn-ref filling a scalar slot
 ;;   - the escape for a *literal keyword*: `{:value :kw :literal? true}`
 ;;
-;; NOT shown here (deliberately): mixing literals and fn-refs inside one
-;; collection. That requires `:list`-routing — see examples.sequence-vs-jsonb
-;; for why an inline `[ref lit ref]` doesn't do what you expect when the
-;; receiving slot is `:jsonb`-typed.
+;; For mixing literals and fn-refs inside a collection see examples.collections
+;; (sequence-typed slots accept `[lit ref lit]` directly). For literal keywords
+;; inside a sequence slot see examples.literal-keyword-in-sequence.
 
 
 {:namespace "examples.basics"

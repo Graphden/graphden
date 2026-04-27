@@ -53,7 +53,7 @@
   {:name :get-in
    :description "Look up a value at a nested path (Clojure's `get-in`). Falls back to `:default` if any segment is missing."
    :args {:map {:type :jsonb :description "Map to read from."}
-          :path {:type :jsonb :description "Vector of keys identifying the path."}
+          :path {:type :sequence :of :any :description "Path to traverse — each item may be a literal key or a fn-ref."}
           :default {:type :any :required false :description "Returned when the path is absent."}}
    :return-type :any}
 
@@ -121,7 +121,7 @@
   {:name :assoc-in
    :description "Set the value at a nested path in a map (Clojure's `assoc-in`). Creates intermediate maps as needed."
    :args {:m {:type :any :description "Map to update (nil treated as empty)."}
-          :path {:type :jsonb :description "Vector of keys identifying the slot."}
+          :path {:type :sequence :of :any :description "Path to traverse — each item may be a literal key or a fn-ref."}
           :v {:type :any :description "Value to write at the path."}}
    :return-type :any}
 
@@ -133,7 +133,7 @@
   {:name :update-in
    :description "Apply a callable to the value at a nested path (Clojure's `update-in`). The `:f` slot is :fn-typed; impl invokes `(f existing-value)` per call."
    :args {:m {:type :any :description "Map to update (nil treated as empty)."}
-          :path {:type :jsonb :description "Vector of keys identifying the slot."}
+          :path {:type :sequence :of :any :description "Path to traverse — each item may be a literal key or a fn-ref."}
           :f {:type :fn :description "Callable receiving the existing value, returning the new one."}}
    :return-type :any}
 
@@ -174,7 +174,7 @@
 
   {:name :concat
    :description "Concatenate a sequence of sequences into one (Clojure's `(apply concat colls)`)."
-   :args {:colls {:type :jsonb :description "Sequence of sequences to concatenate."}}
+   :args {:colls {:type :sequence :of :any :description "Sequence of sequences to concatenate; each item may be a literal collection or a fn-ref."}}
    :return-type :jsonb}
 
   {:name :flatten
@@ -200,7 +200,7 @@
   {:name :select-keys
    :description "Submap containing only the specified keys (Clojure's `select-keys`)."
    :args {:m {:type :any :description "Source map."}
-          :ks {:type :jsonb :description "Vector of keys to keep."}}
+          :ks {:type :sequence :of :any :description "Keys to keep — each item may be a literal key or a fn-ref."}}
    :return-type :any}
 
   {:name :zipmap
@@ -221,11 +221,9 @@
   ;; lambda's per-call param injected by update-in's impl. Sync derives
   ;; both via `partition-args-by-freedom` over the named items.
   {:name :merge-in
-   :description "Merge `defaults` into the map at `path` inside `m`. Equivalent to `(update-in m path #(merge defaults %))` — existing keys win."
+   :description "Merge `defaults` into the map at `path` inside `m`. Equivalent to `(update-in m path #(merge defaults %))` — existing keys win. `:m` and `:path` propagate up as free args of `:update-in`."
    :parent :update-in
-   :args {:m {:as :m}
-          :path {:as :path}
-          :f :_merge-in-fn}}
+   :args {:f :_merge-in-fn}}
 
   {:name :_merge-in-fn
    :parent :merge

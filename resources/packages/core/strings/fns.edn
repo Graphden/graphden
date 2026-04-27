@@ -8,7 +8,7 @@
  :fns
  [{:name :str
    :description "Concatenate a sequence of values into a single string (Clojure's `(apply str parts)`). Each part is stringified."
-   :args {:parts {:type :jsonb :description "Vector of values to stringify and concatenate."}}
+   :args {:parts {:type :sequence :of :any :description "Items to stringify and concatenate. Each item may be a literal or a fn-ref."}}
    :return-type :text}
 
   {:name :subs

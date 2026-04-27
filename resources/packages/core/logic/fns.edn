@@ -8,12 +8,12 @@
  [;; === Logic ===
   {:name :and
    :description "Logical AND over a vector — true iff every value is truthy."
-   :args {:values {:type :jsonb :description "Vector of values to AND."}}
+   :args {:values {:type :sequence :of :any :description "Vector of values to AND."}}
    :return-type :bool}
 
   {:name :or
    :description "Logical OR over a vector — true iff at least one value is truthy."
-   :args {:values {:type :jsonb :description "Vector of values to OR."}}
+   :args {:values {:type :sequence :of :any :description "Vector of values to OR."}}
    :return-type :bool}
 
   {:name :not
@@ -42,13 +42,13 @@
 
   {:name :cond
    :description "Multi-branch — evaluates pairs `[test result …]`, returns the first result whose test is truthy."
-   :args {:clauses {:type :jsonb :description "Vector of alternating tests and result expressions."}}
+   :args {:clauses {:type :sequence :of :any :description "Vector of alternating tests and result expressions."}}
    :return-type :any}
 
   {:name :case
    :description "Constant-time dispatch on `value`; returns the matching clause's result, else `default`."
    :args {:value {:type :any :description "Value to match."}
-          :clauses {:type :jsonb :description "Vector of `[match result …]` pairs."}
+          :clauses {:type :sequence :of :any :description "Vector of `[match result …]` pairs."}
           :default {:type :any :required false
                     :description "Fallback when no clause matches. Defaults to nil."}}
    :return-type :any}

@@ -10,11 +10,6 @@
 ;; share the SAME free arg (single value, two consumers). When you need
 ;; two INDEPENDENT values, instantiate two separate fn-defs with different
 ;; names — see examples.shared-vs-isolated.
-;;
-;; All `:str` examples in this module route their `:parts` through a
-;; `:list`-parented helper because `:str/:parts` is `:jsonb`-typed and
-;; would NOT resolve fn-refs inside an inline vector. That's the reason
-;; for the `_*-parts` helpers everywhere — see examples.sequence-vs-jsonb.
 
 
 {:namespace "examples.free-args"
@@ -25,28 +20,20 @@
   {:name :ex-shout
    :description "Upper-case + exclamation. `:str-upper`'s `:string` arg is unbound through `:_ex-shout-upper`, so it propagates up — callers must pass `:string`."
    :parent :str
-   :args {:parts :_ex-shout-parts}}
-
-  {:name :_ex-shout-parts
-   :parent :list
-   :args {:items [:_ex-shout-upper
+   :args {:parts [:_ex-shout-upper
                   {:value "!"}]}}
 
   {:name :_ex-shout-upper
    :parent :str-upper}
-   ;; ↑ NO :args at all → `:string` is a free arg of `:_ex-shout-upper` →
-   ;; which propagates up through `:_ex-shout-parts` to `:ex-shout`.
+   ;; ↑ NO :args at all → `:string` is a free arg of `:_ex-shout-upper`,
+   ;; propagating up to `:ex-shout`.
 
   ;; Rename via {:as ...}: caller now passes `:name`, not `:string`.
   ;; The rename happens at the slot where we bind the parent's arg.
   {:name :ex-greet
    :description "Greeting template `\"Hello, <NAME>!\"`. The free `:string` arg of `:str-upper` is renamed to `:name` via `{:as :name}` — that's the public arg now."
    :parent :str
-   :args {:parts :_ex-greet-parts}}
-
-  {:name :_ex-greet-parts
-   :parent :list
-   :args {:items [{:value "Hello, "}
+   :args {:parts [{:value "Hello, "}
                   :_ex-greet-name-up
                   {:value "!"}]}}
 
@@ -56,16 +43,10 @@
    :args {:string {:as :name}}}
 
   ;; Same fn-ref reused twice: both call-sites share the SAME free `:name`.
-  ;; The `:list/:items` slot is `:type :sequence`, so the two `:_ex-greet-name-up`
-  ;; entries DO resolve as fn-refs (unlike `:str/:parts` directly).
   {:name :ex-double-greet
-   :description "References `:_ex-greet-name-up` TWICE inside `:_ex-double-greet-parts`. Both refs share the same free `:name`, so the caller passes `:name` once and it flows to both positions. Result is `\"<NAME> & <NAME>\"` — same value in both slots."
+   :description "References `:_ex-greet-name-up` TWICE. Both refs share the same free `:name`, so the caller passes `:name` once and it flows to both positions. Result is `\"<NAME> & <NAME>\"` — same value in both slots."
    :parent :str
-   :args {:parts :_ex-double-greet-parts}}
-
-  {:name :_ex-double-greet-parts
-   :parent :list
-   :args {:items [:_ex-greet-name-up
+   :args {:parts [:_ex-greet-name-up
                   {:value " & "}
                   :_ex-greet-name-up]}}
 
@@ -73,11 +54,7 @@
   {:name :ex-pair-greet
    :description "Two different free args — `:first` and `:second` — produced by two separate helper fn-defs. Each helper renames the underlying `:string` to a different external name."
    :parent :str
-   :args {:parts :_ex-pair-greet-parts}}
-
-  {:name :_ex-pair-greet-parts
-   :parent :list
-   :args {:items [:_ex-pair-first
+   :args {:parts [:_ex-pair-first
                   {:value " meets "}
                   :_ex-pair-second]}}
 

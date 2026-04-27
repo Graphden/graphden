@@ -152,7 +152,7 @@
    :description "Run the router (`:func`) on the parsed `:internal-request` and merge default security headers into the response. The fn-graph bound to `:http-server.handler`."
    :parent :merge-in
    :args {:m :router-result
-          :path [:headers]
+          :path [{:value :headers :literal? true}]
           :defaults :default-security-headers}}
 
   ;; =============================================================================

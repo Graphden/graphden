@@ -301,24 +301,24 @@
         {:value item :ref-id nil :name nil}))
 
     (and (map? item) (contains? item :ref))
-    {:value nil
-     :ref-id (resolve-fn-id-cached fn-name-cache created-fns (:ref item))
-     :name (when-let [a (:as item)] (clojure.core/name a))
-     :description (:description item)}
+    (cond-> {:value nil
+             :ref-id (resolve-fn-id-cached fn-name-cache created-fns (:ref item))
+             :name (when-let [a (:as item)] (clojure.core/name a))}
+      (:description item) (assoc :description (:description item)))
 
     (and (map? item) (contains? item :value))
-    {:value (:value item)
-     :ref-id nil
-     :name (when-let [a (:as item)] (clojure.core/name a))
-     :description (:description item)}
+    (cond-> {:value (:value item)
+             :ref-id nil
+             :name (when-let [a (:as item)] (clojure.core/name a))}
+      (:description item) (assoc :description (:description item)))
 
     ;; Bare `{:as :name}` — named free slot. No value, no ref.
     (and (map? item) (contains? item :as))
-    {:value nil :ref-id nil :name (clojure.core/name (:as item))
-     :description (:description item)}
+    (cond-> {:value nil :ref-id nil :name (clojure.core/name (:as item))}
+      (:description item) (assoc :description (:description item)))
 
     :else
-    {:value item :ref-id nil :name nil :description nil}))
+    {:value item :ref-id nil :name nil}))
 
 
 (defn- walk-anchor-chain-ids

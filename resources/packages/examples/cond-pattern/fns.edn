@@ -45,4 +45,44 @@
 
   {:name :_ex-n-zero?
    :parent :eq
-   :args {:values [{:as :n} {:value 0}]}}]}
+   :args {:values [{:as :n} {:value 0}]}}
+
+  ;; ==========================================================================
+  ;; :case — exact-match dispatch via a `{match-value result}` map.
+  ;; ==========================================================================
+  ;;
+  ;; Different shape from :cond. `:case/:clauses` is `:jsonb` — pass a
+  ;; literal map (or a fn-ref that returns one). At runtime impl does
+  ;; `(get clauses value default)` for O(1) lookup.
+
+  ;; Dispatch on a STRING key (typical: query-string param, form value).
+  ;; A literal map written with string keys gets keywordized by JSONB
+  ;; roundtrip (see auto-memory `feedback_jsonb_roundtrip`), so `:case`
+  ;; would otherwise miss when caller passes the raw string. Routing
+  ;; the literal through `:stringify-map-keys` re-stringifies the keys
+  ;; at runtime so the dispatch matches.
+  {:name :ex-status-label
+   :description "Map a status string (`\"active\"` / `\"banned\"` / `\"pending\"`) to a human label via `:case`. Routes the literal clauses map through `:stringify-map-keys` to undo the keyword-key roundtrip. Defaults to `\"Unknown\"`."
+   :parent :case
+   :args {:value {:as :status}
+          :clauses :_ex-status-table-strings
+          :default "Unknown"}}
+
+  {:name :_ex-status-table-strings
+   :description "Status table with re-stringified keys. JSONB stored the literal as `{:active …}`; this re-coerces back to `{\"active\" …}` so a string `:value` matches."
+   :parent :stringify-map-keys
+   :args {:m {:value {"active" "Active"
+                      "banned" "Banned"
+                      "pending" "Pending"}}}}
+
+  ;; Dispatch on a KEYWORD key — straightforward, no JSONB workaround
+  ;; needed because the keywordized roundtrip matches the keyword input.
+  {:name :ex-status-label-by-kw
+   :description "Same dispatch but the caller's `:status-kw` is a keyword. The literal clauses keep their keyword keys after JSONB roundtrip, so the lookup matches directly."
+   :parent :case
+   :args {:value {:as :status-kw}
+          :clauses {:value {:active "Active"
+                            :banned "Banned"
+                            :pending "Pending"}}
+          :default "Unknown"}}]}
+

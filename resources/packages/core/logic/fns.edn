@@ -46,11 +46,11 @@
    :return-type :any}
 
   {:name :case
-   :description "Constant-time dispatch on `value`; returns the matching clause's result, else `default`."
-   :args {:value {:type :any :description "Value to match."}
-          :clauses {:type :sequence :of :any :description "Vector of `[match result …]` pairs."}
+   :description "Constant-time dispatch on `value` via a `{match-value result}` map (Clojure's `(get clauses value default)`). Falls back to `:default` when the value isn't a key. Note: keys in a literal `:clauses` map come back keywordized after JSONB roundtrip — use string keys when matching against caller-supplied strings."
+   :args {:value {:type :any :description "Value to look up in the clauses map."}
+          :clauses {:type :jsonb :description "Map of `{match-value result}` — the dispatch table. Pass either a literal map or a fn-ref that returns one."}
           :default {:type :any :required false
-                    :description "Fallback when no clause matches. Defaults to nil."}}
+                    :description "Fallback when `value` isn't a key in `:clauses`. Defaults to nil."}}
    :return-type :any}
 
   ;; === Defaults ===

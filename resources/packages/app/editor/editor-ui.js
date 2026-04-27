@@ -110,7 +110,7 @@ function renderNsNode(container, name, node, path) {
   label.textContent = name;
   header.appendChild(label);
   if (node && node.description) {
-    const desc = createDescriptionBadge(node.description);
+    const desc = createDescriptionBadge(node.description, { name: nsPath });
     if (desc) header.appendChild(desc);
   }
 
@@ -150,6 +150,7 @@ function renderNsNode(container, name, node, path) {
     item.appendChild(nameSpan);
     if (fn.description) {
       const desc = createDescriptionBadge(fn.description, {
+        name: fn.displayName,
         namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id))
       });
       if (desc) item.appendChild(desc);
@@ -209,6 +210,7 @@ function updateEntityList(data) {
     item.appendChild(nameSpan);
     if (fn.description) {
       const desc = createDescriptionBadge(fn.description, {
+        name: fn.displayName,
         namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id))
       });
       if (desc) item.appendChild(desc);

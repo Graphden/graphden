@@ -37,12 +37,29 @@ function ensureDescriptionTooltip() {
   return el;
 }
 
+// "sticky" mode keeps the description tooltip visible after a click on
+// the i-badge (so iPad / touch users can read the full name + ns +
+// description even after the touch ends and mouseleave fires from the
+// browser's emulated mouse events).
+let descriptionTooltipSticky = false;
+
 function showDescriptionTooltip(content, evt) {
   const el = ensureDescriptionTooltip();
   el.textContent = '';
-  // Accept either a plain string (legacy callers) or {namespace, description}.
-  const ns = (content && typeof content === 'object') ? content.namespace : null;
-  const text = (content && typeof content === 'object') ? content.description : content;
+  // Accept either a plain string (legacy callers) or
+  // {name, namespace, description}.
+  const isObj = content && typeof content === 'object';
+  const name = isObj ? content.name : null;
+  const ns = isObj ? content.namespace : null;
+  const text = isObj ? content.description : content;
+  if (name) {
+    const nameRow = document.createElement('div');
+    nameRow.textContent = name;
+    nameRow.style.fontWeight = '600';
+    nameRow.style.fontSize = '13px';
+    nameRow.style.marginBottom = (ns || text) ? '4px' : '0';
+    el.appendChild(nameRow);
+  }
   if (ns) {
     const nsRow = document.createElement('div');
     nsRow.textContent = ns;
@@ -66,8 +83,25 @@ function showDescriptionTooltip(content, evt) {
   el.style.top = y + 'px';
 }
 
-function hideDescriptionTooltip() {
+function hideDescriptionTooltip(force) {
+  if (descriptionTooltipSticky && !force) return;
   if (descriptionTooltipEl) descriptionTooltipEl.style.display = 'none';
+}
+
+// Document-level click closes any sticky tooltip. Installed once on
+// first use (idempotent guard via the function itself).
+function ensureDescriptionTooltipDismissHandler() {
+  if (ensureDescriptionTooltipDismissHandler._installed) return;
+  ensureDescriptionTooltipDismissHandler._installed = true;
+  document.addEventListener('click', (e) => {
+    if (!descriptionTooltipSticky) return;
+    if (e.target.closest && (e.target.closest('.description-badge')
+                             || e.target.closest('.description-tooltip'))) {
+      return;
+    }
+    descriptionTooltipSticky = false;
+    hideDescriptionTooltip(true);
+  });
 }
 
 // ============================================================================
@@ -213,9 +247,15 @@ function createDescriptionBadge(description, opts) {
     badge.style.marginLeft = '4px';
     badge.style.verticalAlign = 'middle';
   }
-  // Tooltip payload — namespace appears as a small italic header above
-  // the description body when both are present.
-  const tooltipContent = { namespace: opts.namespace || null, description };
+  // Tooltip payload — full name (bold), namespace (italic dim), description.
+  // The full name lets touch users read truncated names from the i-tooltip
+  // since on iPad there's no row-hover.
+  const tooltipContent = {
+    name: opts.name || null,
+    namespace: opts.namespace || null,
+    description
+  };
+  ensureDescriptionTooltipDismissHandler();
   badge.addEventListener('mouseenter', (e) => {
     // Hover on the badge must NOT trigger a row-level expansion preview.
     // The parent's mouseenter still fires on first entry — the optional
@@ -230,11 +270,28 @@ function createDescriptionBadge(description, opts) {
     e.stopPropagation();
     showDescriptionTooltip(tooltipContent, e);
   });
-  badge.addEventListener('mouseleave', hideDescriptionTooltip);
+  badge.addEventListener('mouseleave', () => hideDescriptionTooltip());
   // Click on the badge must not commit an expansion either — swallow
   // mousedown/touchend so the row's click handler doesn't fire.
   badge.addEventListener('mousedown', (e) => e.stopPropagation());
   badge.addEventListener('touchend', (e) => e.stopPropagation());
+  // Click toggles "sticky" display so touch users can read the tooltip
+  // after their finger leaves. On desktop this is a no-op for hovering
+  // users (tooltip is already visible from mouseenter); a deliberate
+  // click pins it. The document-level click handler dismisses it on
+  // tap-elsewhere.
+  badge.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    descriptionTooltipSticky = !descriptionTooltipSticky;
+    if (descriptionTooltipSticky) {
+      if (opts.onEnter) opts.onEnter();
+      hideFullNameTooltip();
+      showDescriptionTooltip(tooltipContent, e);
+    } else {
+      hideDescriptionTooltip(true);
+    }
+  });
   return badge;
 }
 
@@ -702,6 +759,7 @@ function createFnOverlay(node, container) {
       const colDescBadge = createDescriptionBadge(colFn.description, {
         pinRight: true,
         onEnter: colClearPreview,
+        name: colFn.name,
         namespace: getFnNamespace(lookups.fnMap.get(colFn.fnId))
       });
       if (colDescBadge) {
@@ -801,6 +859,7 @@ function createFnOverlay(node, container) {
         const miDescBadge = createDescriptionBadge(f.description, {
           pinRight: true,
           onEnter: miClearPreview,
+          name: f.name,
           namespace: getFnNamespace(lookups.fnMap.get(f.fnId))
         });
         if (miDescBadge) span.appendChild(miDescBadge);
@@ -895,6 +954,7 @@ function createFnOverlay(node, container) {
       const lineDescBadge = createDescriptionBadge(lineFn.description, {
         pinRight: true,
         onEnter: lineClearPreview,
+        name: lineFn.name,
         namespace: getFnNamespace(lookups.fnMap.get(lineFn.fnId))
       });
       if (lineDescBadge) line.appendChild(lineDescBadge);
@@ -1100,7 +1160,7 @@ function createEdgeLabelOverlay(edge, container) {
   overlay.appendChild(labelSpan);
 
   if (description) {
-    const desc = createDescriptionBadge(description);
+    const desc = createDescriptionBadge(description, { name: label });
     if (desc) overlay.appendChild(desc);
   }
 

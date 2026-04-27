@@ -35,10 +35,23 @@
                   "packages/app/editor/editor-cytoscape.js"
                   "packages/app/editor/editor-main.js"]}}
 
-  {:name :script
-   :description "Concatenated editor JS — every module under `packages/app/editor/editor-*.js` joined into one bundle. Wrapped into `<script>` by `:script-element`."
+  ;; Raw concatenation of every editor module — still contains the
+  ;; literal `__BUILD_HASH__` placeholder from `editor-state.js`.
+  {:name :_script-raw
+   :description "Concatenated editor JS bundle, BEFORE the build-hash substitution."
    :parent :concat-resources
    :args {:paths :_editor-script-paths}}
+
+  ;; The placeholder is replaced with the FRONTEND-section build hash
+  ;; (see `:build-hash-frontend-short` in core.system). The console
+  ;; marker thus reflects exactly which JS/CSS the browser is running
+  ;; — and matches the `frontend` key returned by `GET /version`.
+  {:name :script
+   :description "Bundled editor JS with `__BUILD_HASH__` substituted by `:build-hash-frontend-short`. The in-page console marker mirrors the `frontend` value returned by `GET /version`, so the browser bundle's identity is never out of step with what the server reports."
+   :parent :str-replace
+   :args {:s :_script-raw
+          :match "__BUILD_HASH__"
+          :replacement :build-hash-frontend-short}}
 
   ;; =============================================================================
   ;; FN-DEFS: Editor UI structure

@@ -122,6 +122,13 @@
     (clojure.core/slurp input)))
 
 
+(defbase sha256-hex-fn [s]
+  (when s
+    (let [md (java.security.MessageDigest/getInstance "SHA-256")
+          bs (.digest md (.getBytes ^String s "UTF-8"))]
+      (apply str (map #(format "%02x" (bit-and ^byte % 0xff)) bs)))))
+
+
 ;; === Registry ===
 
 (def impls
@@ -140,4 +147,5 @@
    :read-resource-or-nil read-resource-or-nil
    :invoke invoke-fn
    :call invoke-fn
-   :slurp slurp-fn})
+   :slurp slurp-fn
+   :sha256-hex sha256-hex-fn})

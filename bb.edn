@@ -203,7 +203,13 @@
              (let [result (p/shell {:continue true :out :string :err :string}
                                    "docker exec graphden-executor curl -sf http://localhost:8080/health")]
                (if (= 0 (:exit result))
-                 (println (str green "✓ Server ready at http://localhost:9002/" reset))
+                 (do (println (str green "✓ Server ready at http://localhost:9002/" reset))
+                     (let [verify (p/shell {:continue true} "bb" "verify")]
+                       (when-not (zero? (:exit verify))
+                         (System/exit (:exit verify))))
+                     (let [smoke (p/shell {:continue true} "bb" "smoke")]
+                       (when-not (zero? (:exit smoke))
+                         (System/exit (:exit smoke)))))
                  (if (< attempts 30)
                    (do (print ".") (flush) (recur (inc attempts)))
                    (do (println (str red "✗ Server failed to start" reset))
@@ -234,11 +240,138 @@
              (let [result (p/shell {:continue true :out :string :err :string}
                                    "docker exec graphden-executor curl -sf http://localhost:8080/health")]
                (if (= 0 (:exit result))
-                 (println (str green "✓ Server ready at http://localhost:9002/" reset))
+                 (do (println (str green "✓ Server ready at http://localhost:9002/" reset))
+                     (let [verify (p/shell {:continue true} "bb" "verify")]
+                       (when-not (zero? (:exit verify))
+                         (System/exit (:exit verify))))
+                     (let [smoke (p/shell {:continue true} "bb" "smoke")]
+                       (when-not (zero? (:exit smoke))
+                         (System/exit (:exit smoke)))))
                  (if (< attempts 30)
                    (do (print ".") (flush) (recur (inc attempts)))
                    (do (println (str red "✗ Server failed to start" reset))
                        (System/exit 1)))))))}
+
+  smoke
+  {:doc "Run smoke tests against a running instance: editor page, graph layout (collapsed + expanded), auth challenge. Usage: bb smoke [http://host:port]"
+   :requires ([babashka.http-client :as http]
+              [cheshire.core :as json])
+   :task
+   (let [raw-url (or (first *command-line-args*) "http://localhost:9002")
+         base-url (if (str/ends-with? raw-url "/") (subs raw-url 0 (dec (count raw-url))) raw-url)
+         token (System/getenv "AUTH_TOKEN")
+         results (atom [])
+         step (fn [name pred-fn]
+                (let [outcome (try (pred-fn) (catch Throwable e {:ok? false :detail (.getMessage e)}))
+                      {:keys [ok? detail]} outcome
+                      mark (if ok? (str green "✓" reset) (str red "✗" reset))]
+                  (println (format "  %s %s%s" mark name (if detail (str " — " detail) "")))
+                  (swap! results conj ok?)
+                  outcome))
+         get* (fn [path & [opts]]
+                (http/get (str base-url path) (merge {:throw false} opts)))
+         post-json (fn [path payload & [opts]]
+                     (http/post (str base-url path)
+                                (merge {:throw false
+                                        :headers {"Content-Type" "application/json"}
+                                        :body (json/generate-string payload)}
+                                       opts)))]
+     (println (str cyan "Smoke testing " base-url reset))
+
+     (step "GET /                          editor page renders"
+       (fn []
+         (let [r (get* "/")]
+           (cond
+             (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+             (not (str/includes? (:body r) "id=\"cy\"")) {:ok? false :detail "no #cy in body"}
+             :else {:ok? true}))))
+
+     (let [entities-resp (step "GET /api/graph/entities       returns JSON with fns"
+                           (fn []
+                             (let [r (get* "/api/graph/entities")]
+                               (cond
+                                 (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                                 :else
+                                 (let [parsed (json/parse-string (:body r) true)
+                                       fns (:fns parsed)]
+                                   (if (and (sequential? fns) (seq fns))
+                                     {:ok? true :data parsed}
+                                     {:ok? false :detail "no :fns / empty"}))))))
+           ;; Pick a "rich" fn to expand — one that actually has children
+           ;; via parent-id chains. `web-server` is a stable choice on
+           ;; this codebase.
+           target-fn (when (:ok? entities-resp)
+                       (->> entities-resp :data :fns
+                            (filter (fn [f] (= "web-server" (:name f))))
+                            first))
+           target-id (some-> target-fn :id)
+           collapsed-resp (step "POST /api/graph/layout (no expansions)  returns nodes"
+                            (fn []
+                              (if-not target-id
+                                {:ok? false :detail "couldn't find :web-server fn for layout test"}
+                                (let [r (post-json "/api/graph/layout"
+                                                   {"root-id" target-id "expansions" {}})]
+                                  (cond
+                                    (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                                    :else
+                                    (let [parsed (json/parse-string (:body r) true)
+                                          nodes (:nodes parsed)]
+                                      (if (and (sequential? nodes) (>= (count nodes) 1))
+                                        {:ok? true :node-count (count nodes)}
+                                        {:ok? false :detail "no nodes returned"})))))))]
+       (step "POST /api/graph/layout (with expansion)  endpoint accepts spec"
+         (fn []
+           (cond
+             (not (:ok? collapsed-resp)) {:ok? false :detail "skipped — collapsed layout failed"}
+             :else
+             (let [root-node-id (str "fn-" target-id)
+                   r (post-json "/api/graph/layout"
+                                {"root-id" target-id
+                                 "expansions" {root-node-id {"full-depth" 3
+                                                             "partial-fns" []}}})]
+               (cond
+                 (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+                 :else
+                 (let [parsed (json/parse-string (:body r) true)
+                       n (count (:nodes parsed))]
+                   (if (and (sequential? (:nodes parsed)) (>= n 1))
+                     {:ok? true :detail (str n " nodes")}
+                     {:ok? false :detail "no nodes in expanded layout"}))))))))
+
+     (step "GET /api/auth/check (no token)      → 401 challenge"
+       (fn []
+         (let [r (get* "/api/auth/check")]
+           (if (= 401 (:status r))
+             {:ok? true}
+             {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
+
+     (step "GET /api/auth/check (wrong token)   → 401 challenge"
+       (fn []
+         (let [r (get* "/api/auth/check"
+                       {:headers {"Authorization" "Bearer this-is-not-the-token"}})]
+           (if (= 401 (:status r))
+             {:ok? true}
+             {:ok? false :detail (str "HTTP " (:status r) " (expected 401)")}))))
+
+     (when token
+       (step "GET /api/auth/check (env AUTH_TOKEN)  → 200 ok"
+         (fn []
+           (let [r (get* "/api/auth/check"
+                         {:headers {"Authorization" (str "Bearer " token)}})]
+             (cond
+               (not= 200 (:status r)) {:ok? false :detail (str "HTTP " (:status r))}
+               (not= "ok" (str/trim (or (:body r) ""))) {:ok? false :detail (str "body=" (pr-str (:body r)))}
+               :else {:ok? true}))))
+       nil)
+     (when-not token
+       (println (str cyan "  (set AUTH_TOKEN env to also test successful login)" reset)))
+
+     (let [ok-count (count (filter true? (deref results)))
+           fail-count (count (filter false? (deref results)))]
+       (if (zero? fail-count)
+         (println (str green "✓ smoke OK — " ok-count " checks passed" reset))
+         (do (println (str red "✗ smoke FAILED — " fail-count " of " (+ ok-count fail-count) " checks failed" reset))
+             (System/exit 1)))))}
 
   clean
   {:doc "Clean generated files"
@@ -246,4 +379,83 @@
            (fs/delete-tree "target")
            (fs/delete-tree ".cpcache")
            (fs/delete-tree ".clj-kondo/.cache")
-           (println (str green "✓ Cleaned" reset)))}}}
+           (println (str green "✓ Cleaned" reset)))}
+
+  verify
+  {:doc "Compare a running instance's /version per-section build hashes with the local source tree. Usage: bb verify [http://host:port]"
+   :requires ([babashka.http-client :as http]
+              [cheshire.core :as json])
+   :task
+   (let [raw-url (or (first *command-line-args*) "http://localhost:9002")
+         base-url (if (str/ends-with? raw-url "/") (subs raw-url 0 (dec (count raw-url))) raw-url)
+         version-url (str base-url "/version")
+         ;; Section partitioning — must mirror `section-of` in build.clj.
+         in-packages? (fn [rel] (str/starts-with? rel "packages/"))
+         section-of (fn [rel]
+                      (let [front-suffixes [".js" ".css" ".html" ".svg"]
+                            pkg-suffixes [".edn" ".clj" ".cljc"]
+                            back-suffixes [".clj" ".cljc" ".cljs" ".edn" ".sql" ".xml" ".sh"]
+                            ends? (fn [suffixes] (some (fn [s] (str/ends-with? rel s)) suffixes))]
+                        (cond
+                          (and (in-packages? rel) (ends? front-suffixes)) :frontend
+                          (and (in-packages? rel) (ends? pkg-suffixes))   :packages
+                          (ends? back-suffixes)                           :backend)))
+         walk-tree (fn [^String root]
+                     ;; Returns [rel-path File] tuples; rel-path is
+                     ;; relative to `root`, matching build.clj's
+                     ;; class-dir-relative layout (copy-dir flattens
+                     ;; src/ and resources/ into class-dir).
+                     (let [root-file (java.io.File. root)
+                           root-path (.toPath root-file)]
+                       (when (.exists root-file)
+                         (->> (file-seq root-file)
+                              (filter (fn [^java.io.File f] (.isFile f)))
+                              (map (fn [^java.io.File f]
+                                     [(-> (.relativize root-path (.toPath f)) str
+                                          (str/replace java.io.File/separator "/"))
+                                      f]))))))
+         entries (->> (concat (walk-tree "src") (walk-tree "resources"))
+                      (sort-by first))
+         init-mds {:frontend (java.security.MessageDigest/getInstance "SHA-256")
+                   :packages (java.security.MessageDigest/getInstance "SHA-256")
+                   :backend  (java.security.MessageDigest/getInstance "SHA-256")}
+         sep (byte-array 1 (byte 0))
+         _ (doseq [[rel ^java.io.File f] entries
+                   :let [sec (section-of rel)]
+                   :when sec]
+             (let [^java.security.MessageDigest md (get init-mds sec)]
+               (.update md (.getBytes ^String rel "UTF-8"))
+               (.update md sep)
+               (.update md (java.nio.file.Files/readAllBytes (.toPath f)))
+               (.update md sep)))
+         hex (fn [^java.security.MessageDigest md]
+               (apply str (map (fn [b] (format "%02x" (bit-and ^byte b 0xff))) (.digest md))))
+         local {:frontend (hex (:frontend init-mds))
+                :backend  (hex (:backend init-mds))
+                :packages (hex (:packages init-mds))}
+         resp (try (http/get version-url {:throw false})
+                   (catch Throwable e {:error (.getMessage e)}))
+         remote (when (and (= 200 (:status resp)) (:body resp))
+                  (try (json/parse-string (:body resp) true)
+                       (catch Throwable _ nil)))
+         row (fn [label local-h remote-h]
+               (let [match? (= local-h remote-h)]
+                 (println (format "  %-9s %s %s"
+                                  (str (name label) ":")
+                                  (subs local-h 0 12)
+                                  (if match?
+                                    (str green "✓ matches" reset)
+                                    (str red "✗ differs (remote " (when remote-h (subs remote-h 0 12)) ")" reset))))
+                 match?))]
+     (println (str cyan "URL: " reset version-url))
+     (cond
+       (nil? remote)
+       (do (println (str red "✗ couldn't fetch /version: " (or (:error resp) (:status resp)) reset))
+           (System/exit 2))
+       :else
+       (let [results (mapv (fn [k] (row k (get local k) (get remote k)))
+                           [:frontend :packages :backend])]
+         (if (every? identity results)
+           (println (str green "✓ MATCH — every section ships exactly this source" reset))
+           (do (println (str red "✗ MISMATCH — some section is out of date or different" reset))
+               (System/exit 1))))))}}}

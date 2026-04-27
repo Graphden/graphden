@@ -1,7 +1,10 @@
 // Editor State - Global variables, constants, and configuration
-// Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-27 16:00';
-console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
+// BUILD_HASH is substituted at bundle-time (see :script in
+// `app/editor/fns.edn`) — first 8 hex chars of the SHA-256 of the
+// concatenated raw JS bundle. Changes only when one of the editor
+// source files actually changes, so no manual bumping is needed.
+const BUILD_HASH = '__BUILD_HASH__';
+console.log('%c[Graphden Editor] Build: ' + BUILD_HASH, 'color: #0066cc; font-weight: bold');
 
 // ============================================================================
 // GLOBAL STATE

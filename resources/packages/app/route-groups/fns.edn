@@ -36,9 +36,9 @@
    :args {:items [:api-entities :layout-api]}}
 
   {:name :monitoring
-   :description "Health + metrics route group consumed by the docker healthcheck and external scrapers."
+   :description "Health + metrics + version route group consumed by docker healthcheck, external scrapers, and `bb verify`."
    :parent :list
-   :args {:items [:health :metrics]}}
+   :args {:items [:health :metrics :version]}}
 
   {:name :all
    :description "Top-level reitit entries — the small list of standalone leaves and prefix groups that the router walks. Adding a new path = either drop a new leaf in here (if it has no prefix-mate) or extend the appropriate sub-group inside `:partials-routes` / `:api-routes`."
@@ -47,5 +47,6 @@
                   :editor
                   :health
                   :metrics
+                  :version
                   :partials-routes
                   :api-routes]}}]}

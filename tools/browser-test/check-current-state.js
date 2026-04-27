@@ -8,11 +8,10 @@ const puppeteer = require('puppeteer');
   await page.goto('http://example.com:9002/#editor-routes');
   await new Promise(r => setTimeout(r, 4000));
 
-  // Check BUILD_TIMESTAMP
-  const buildTimestamp = await page.evaluate(() => {
-    return window.BUILD_TIMESTAMP || 'not found';
-  });
-  console.log('BUILD_TIMESTAMP in browser:', buildTimestamp);
+  // Check BUILD_HASH (top-level `const` isn't on window — read it
+  // from the [Graphden Editor] Build: <hash> console log instead).
+  const buildHash = await page.evaluate(() => window.BUILD_HASH || 'see console log');
+  console.log('BUILD_HASH in browser:', buildHash);
 
   // Find entity-form-edit-route and check its children positions
   const result = await page.evaluate(() => {

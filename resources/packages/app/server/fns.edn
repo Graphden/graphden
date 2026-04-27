@@ -28,6 +28,28 @@
    :parent :json-ok-response
    :args {:body :_metrics-json-body}}
 
+  ;; ============================================================================
+  ;; VERSION (deploy verification)
+  ;; ============================================================================
+  ;; `/version` returns the full three-section build-hash map:
+  ;;     {"frontend": "<hex>", "backend": "<hex>", "packages": "<hex>"}
+  ;; Each is the SHA-256 of one slice of the deploy at build time
+  ;; (see build.clj). `bb verify` recomputes the same three hashes
+  ;; from the local checkout and reports per-section match/mismatch,
+  ;; so a failing deploy can be diagnosed by section rather than as
+  ;; one opaque "something didn't match".
+  ;;
+  ;; The handler just JSON-encodes the already-parsed `:build-hashes`
+  ;; map.
+
+  {:name :_version-json-body
+   :parent :to-json-string
+   :args {:data :build-hashes}}
+
+  {:name :_version-handler
+   :parent :json-ok-response
+   :args {:body :_version-json-body}}
+
   ;; Concrete leaf routes live in `app.routes`; route groups
   ;; (`monitoring`, `entity-crud`, `graph-api`, `ui`, `all`) live in
   ;; `app.routes.groups`. This module only owns the auth presets +

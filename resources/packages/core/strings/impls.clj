@@ -178,6 +178,10 @@
   (boolean (and string (str/starts-with? string prefix))))
 
 
+(defbase str-replace-fn [s match replacement]
+  (when s (str/replace s match replacement)))
+
+
 ;; === Registry ===
 
 (def impls
@@ -197,4 +201,5 @@
    :blank? blank?-fn
    :url-decode url-decode-fn
    :str-contains? str-contains?-fn
-   :str-starts-with? str-starts-with?-fn})
+   :str-starts-with? str-starts-with?-fn
+   :str-replace str-replace-fn})

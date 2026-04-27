@@ -121,4 +121,11 @@
    :description "True iff `string` starts with `prefix` (Java `String.startsWith`). Nil-safe — returns false for nil input."
    :args {:string {:type :text :description "String to test."}
           :prefix {:type :text :description "Required leading substring."}}
-   :return-type :bool}]}
+   :return-type :bool}
+
+  {:name :str-replace
+   :description "Replace every occurrence of `:match` with `:replacement` in `:s` (Clojure's `clojure.string/replace`). All three args are plain strings — no regex."
+   :args {:s {:type :text :description "Source string."}
+          :match {:type :text :description "Literal substring to find."}
+          :replacement {:type :text :description "Replacement string."}}
+   :return-type :text}]}

@@ -117,25 +117,51 @@ clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test
 clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test/execute-test
 ```
 
-### Frontend Build Verification
+### Deploy verification — `bb verify`
 
-The editor frontend has a build timestamp to verify deployments:
+Every uberjar carries a `graphden-build-hashes.json` resource with
+three SHA-256 digests, written by `build.clj`'s
+`compute-section-hashes` step:
 
-1. **After ANY frontend change** (any `editor-*.js` or `editor-styles.css`):
-   - Update `BUILD_TIMESTAMP` in `resources/packages/app/editor/editor-state.js`
-   - Use format: `'YYYY-MM-DD HH:MM'` (UTC+3 timezone)
-   - Rebuild: `clojure -T:build uber && docker compose build --no-cache executor && docker compose up -d executor`
-   - Tell user the new timestamp
+| Section | Files |
+|---------|-------|
+| `frontend` | `.js` / `.css` / `.html` / `.svg` under `resources/packages/` |
+| `packages` | `.edn` / `.clj` under `resources/packages/` |
+| `backend`  | `src/**/*.clj` plus non-package resources |
 
-2. **Verification flow**:
-   - User opens browser console and sees: `[Graphden Editor] Build: YYYY-MM-DD HH:MM`
-   - If user reports a different timestamp → changes did NOT deploy
-   - Fix deployment before making more code changes
+Three consumers read those hashes:
 
-3. **If deployment fails**:
-   - Check JAR contains changes: `unzip -p target/executor-server.jar packages/app/editor/editor-state.js | grep BUILD_TIMESTAMP`
-   - Check Docker image timestamp: `docker inspect graphden-executor --format '{{.Created}}'`
-   - Ensure JAR was built BEFORE Docker image
+- `GET /version` → `{"frontend": "<hex>", "packages": "<hex>", "backend": "<hex>"}`
+- The editor's `BUILD_HASH` console marker — first 12 chars of the
+  `frontend` hash, substituted into the `__BUILD_HASH__` placeholder
+  in `editor-state.js` at bundle time.
+- `bb verify [<base-url>]` — recomputes the same three hashes from
+  the local checkout, fetches `<base-url>/version`, and reports each
+  section's match/mismatch independently.
+
+Workflow:
+
+```bash
+bb rebuild           # rebuild JAR + docker image
+bb verify            # per-section ✓/✗ — tells you WHICH part of the
+                     # deploy didn't ship: e.g. frontend matches but
+                     # backend differs → docker image rebuilt with a
+                     # stale jar
+bb verify https://prod.example.com   # any URL
+```
+
+Exit codes: 0 (every section matches), 1 (at least one mismatch),
+2 (`/version` unreachable).
+
+The console marker and the `frontend` field of `/version` always
+agree because they both come from the same baked-in resource. If
+`bb verify` reports backend match + frontend stale only in the
+browser, that's a browser-cache issue (offer the in-app reload
+button or Ctrl+Shift+R).
+
+The placeholder is `__BUILD_HASH__` — it lives only in
+`editor-state.js`. Don't delete it; the substitution step would have
+nothing to replace and the browser would log the literal string.
 
 ### Frontend Module Structure
 

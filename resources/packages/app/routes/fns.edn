@@ -29,6 +29,11 @@
    :parent :get-route
    :args {:path "/metrics" :handler :_metrics-handler}}
 
+  {:name :version
+   :description "GET /version — `{\"build-hash\": \"<hex>\"}`. Hash is SHA-256 of every source file at build time; compare with `bb verify` to confirm a deploy actually shipped your changes."
+   :parent :get-route
+   :args {:path "/version" :handler :_version-handler}}
+
   {:name :favicon
    :description "GET /favicon.ico — inlined SVG icon, cached for 24 hours."
    :parent :get-route

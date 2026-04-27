@@ -177,6 +177,65 @@
    :args {:func :read-resource
           :coll {:as :paths}}}
 
+  ;; SHA-256 of a UTF-8 string, returned as 64 hex chars. Used as a
+  ;; lower-level primitive when a one-off content hash is needed
+  ;; somewhere; deploy verification uses the build-time hash below
+  ;; instead (single source of truth across front- and back-end).
+  {:name :sha256-hex
+   :description "Lower-case 64-char hex SHA-256 digest of a UTF-8 string. Use `:subs` to take a shorter prefix when a concise build identifier is needed."
+   :args {:s {:type :text :description "Input string. Returns nil for nil input."}}
+   :return-type :text}
+
+  ;; ============================================================================
+  ;; Build identifiers (3-section)
+  ;;
+  ;; The uberjar carries `graphden-build-hashes.json`, written at build
+  ;; time by `build.clj`'s `compute-section-hashes` step. It splits the
+  ;; deploy into three independently-hashed sections so a `/version`
+  ;; check tells you WHAT moved, not just whether anything did:
+  ;;
+  ;;   :frontend  — every `.js` / `.css` / `.html` / `.svg` under
+  ;;                `resources/packages/` (the editor browser bundle)
+  ;;   :packages  — every `.edn` / `.clj` under `resources/packages/`
+  ;;                (graph fn-defs + their base-fn impls)
+  ;;   :backend   — `src/**/*.clj` plus non-package resources
+  ;;                (`system-*.edn`, `logback.xml`, …)
+  ;;
+  ;; All three flow into `GET /version`; the editor's console marker
+  ;; uses the frontend hash specifically (it's the bit the user can
+  ;; visually verify against what they have open in the editor).
+  ;; ============================================================================
+
+  {:name :_build-hashes-raw
+   :parent :read-resource
+   :args {:path "graphden-build-hashes.json"}}
+
+  {:name :build-hashes
+   :description "Map `{\"frontend\" … \"backend\" … \"packages\" …}` — each value is the lower-case 64-char hex SHA-256 of that section of the deploy at build time. Keys stay strings (`:keywordize false`) so the `:get` lookups below match the JSON shape verbatim."
+   :parent :parse-json
+   :args {:string :_build-hashes-raw
+          :keywordize false}}
+
+  {:name :build-hash-frontend
+   :description "Frontend-section SHA-256 — every `.js` / `.css` under `resources/packages/`. Changes only when a browser-side asset changes."
+   :parent :get
+   :args {:coll :build-hashes :key "frontend"}}
+
+  {:name :build-hash-backend
+   :description "Backend-section SHA-256 — `src/**/*.clj` plus non-package resources. Changes only when Clojure server code or system config changes."
+   :parent :get
+   :args {:coll :build-hashes :key "backend"}}
+
+  {:name :build-hash-packages
+   :description "Packages-section SHA-256 — every `.edn` and `.clj` under `resources/packages/`. Changes only when graph fn-defs or base-fn impls change."
+   :parent :get
+   :args {:coll :build-hashes :key "packages"}}
+
+  {:name :build-hash-frontend-short
+   :description "First 12 chars of `:build-hash-frontend` — used by the editor's `BUILD_HASH` console marker so the in-page identifier reflects exactly which JS/CSS the user is running."
+   :parent :subs
+   :args {:string :build-hash-frontend :start 0 :end 12}}
+
   ;; Invoke a value (that happens to be a Clojure fn) with one arg.
   ;; `:func :any` — the value is deref'd and used as-is. Use this when
   ;; :func is a fn-graph that PRODUCES a callable (e.g. :_router

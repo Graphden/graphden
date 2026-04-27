@@ -5,7 +5,24 @@
 // CYTOSCAPE STYLES
 // ============================================================================
 
-const CYTOSCAPE_STYLES = [
+// Cytoscape renders to canvas — it doesn't honour `var(--*)` references the
+// way HTML overlays do. We resolve the CSS vars at style-build time and
+// re-apply on theme change (see `applyThemeToCytoscape`).
+//
+// Read from `document.body` because the dark-theme overrides are scoped
+// there (`body.theme-dark { --bg: ...; }`); reading from documentElement
+// would always return the `:root` defaults regardless of theme.
+function cssVar(name) {
+  return getComputedStyle(document.body).getPropertyValue(name).trim();
+}
+
+function buildCytoscapeStyles() {
+  const cardBg = cssVar('--card-bg');
+  const cardBorder = cssVar('--card-border');
+  const cardFg = cssVar('--card-fg');
+  const edgeColor = cssVar('--fg');
+  const accent = cssVar('--accent');
+  return [
   // fn node (base dimensions, used for calculating size).
   // Width/height come from precomputed layoutWidth/layoutHeight on node.data
   // (computed in editor-layout.js so CY node size MATCHES the actual rendered
@@ -18,10 +35,10 @@ const CYTOSCAPE_STYLES = [
     'font-size': '11px',
     'font-family': 'SF Mono, Monaco, monospace',
     'shape': 'round-rectangle',
-    'background-color': '#ffffff',
+    'background-color': cardBg,
     'border-width': 2,
-    'border-color': '#000000',
-    'color': '#000000',
+    'border-color': cardBorder,
+    'color': cardFg,
     'padding': '0px',
     'width': function(node) {
       return node.data('layoutWidth') || 80;
@@ -62,7 +79,7 @@ const CYTOSCAPE_STYLES = [
   // Edge - taxi style
   { selector: 'edge', style: {
     'width': 2,
-    'line-color': '#000000',
+    'line-color': edgeColor,
     'line-style': 'solid',
     'curve-style': 'taxi',
     'taxi-direction': 'rightward',
@@ -72,10 +89,10 @@ const CYTOSCAPE_STYLES = [
     //   target: triangle arrow = points at the referenced (value-producing) fn
     // Subtle at default scale; scales with line width via `arrow-scale`.
     'source-arrow-shape': 'circle',
-    'source-arrow-color': '#000',
+    'source-arrow-color': edgeColor,
     'source-arrow-fill': 'filled',
     'target-arrow-shape': 'triangle',
-    'target-arrow-color': '#000',
+    'target-arrow-color': edgeColor,
     'target-arrow-fill': 'filled',
     'arrow-scale': 0.9,
     // Bend AFTER the source node's column ends, so the vertical segment lands
@@ -107,12 +124,28 @@ const CYTOSCAPE_STYLES = [
   // (all edges that share the hovered edge's source OR target). Accent blue
   // reads as "interactive" without fighting the monochrome node aesthetic.
   { selector: 'edge.edge-hovered', style: {
-    'line-color': '#0066cc',
-    'source-arrow-color': '#0066cc',
-    'target-arrow-color': '#0066cc',
+    'line-color': accent,
+    'source-arrow-color': accent,
+    'target-arrow-color': accent,
     'z-index': 999
   }}
-];
+  ];
+}
+
+// Re-apply cytoscape style with current theme colors. Called by editor-prefs
+// when the user toggles the theme — without this, edges and node borders
+// keep their old (black/white) colors after the body class flips.
+function applyThemeToCytoscape() {
+  // window.cy starts undefined and only becomes a cytoscape instance after
+  // createCytoscape runs. Theme can flip before that (the early-init pass
+  // applies stored theme on every page load). Bail until the instance is
+  // ready and offers the `.style()` API.
+  const c = window.cy;
+  if (!c || typeof c.style !== 'function') return;
+  c.style().fromJson(buildCytoscapeStyles()).update();
+  if (typeof updateEdgeWidthForZoom === 'function') updateEdgeWidthForZoom();
+}
+window.applyThemeToCytoscape = applyThemeToCytoscape;
 
 // ============================================================================
 // CYTOSCAPE INITIALIZATION
@@ -164,7 +197,7 @@ async function createCytoscape(nodes, edges, layout, shouldFit) {
   cy = cytoscape({
     container: document.getElementById('cy'),
     elements: { nodes: nodesWithPos, edges: edges },
-    style: CYTOSCAPE_STYLES,
+    style: buildCytoscapeStyles(),
     layout: { name: 'preset' },
     minZoom: 0.1,
     maxZoom: 3,

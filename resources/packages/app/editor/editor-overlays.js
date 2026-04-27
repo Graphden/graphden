@@ -20,8 +20,8 @@ function createOverlay(nodeId, options = {}) {
     position: 'absolute',
     pointerEvents: 'auto',
     zIndex: '10',
-    background: options.background || 'white',
-    border: options.border || '2px solid black',
+    background: options.background || 'var(--card-bg)',
+    border: options.border || '2px solid var(--card-border)',
     borderRadius: options.borderRadius || '8px',
     overflow: 'hidden',
     fontFamily: 'SF Mono, Monaco, monospace',
@@ -87,7 +87,7 @@ function createFnOverlay(node, container) {
   // boundaries — any rounding slack shows the same colour, no white seam.
   // Non-black rows set their own bg explicitly (paintWithSpec / row
   // creation paths) so they don't bleed black through.
-  const overlay = createOverlay(nodeId, { background: '#000' });
+  const overlay = createOverlay(nodeId, { background: 'var(--card-header-bg)' });
   overlay.dataset.originalFnId = originalFnId;
   overlay.dataset.nodeId = nodeId;
   overlay.style.cursor = 'default';
@@ -106,12 +106,12 @@ function createFnOverlay(node, container) {
   //     it's actually inside the currently-applied expansion.
   //   Within a group: same bg, no horizontal separator.
   //   MI: each parent's cell is independently styled.
-  const ROOT_BG = '#000';
-  const ROOT_FG = '#fff';
-  const HIGHLIGHT_BG = '#f0f0f0';
-  // Default non-root row bg — explicit white so the black overlay container
-  // can't bleed through sub-pixel gaps between adjacent rows.
-  const DEFAULT_BG = '#fff';
+  const ROOT_BG = 'var(--card-header-bg)';
+  const ROOT_FG = 'var(--card-header-fg)';
+  const HIGHLIGHT_BG = 'var(--card-row-highlight)';
+  // Default non-root row bg — matches the card body so the overlay
+  // container (header-coloured) can't bleed through sub-pixel gaps.
+  const DEFAULT_BG = 'var(--card-bg)';
 
   // Sub-pixel-gap mitigation: a 1px box-shadow with the row's own colour
   // fills any rounding slack between this row and the next. When two
@@ -271,7 +271,7 @@ function createFnOverlay(node, container) {
     const isLast = idx === visibleLevels.length - 1;
     const nextIsColumnBelow = nextLevel && nextLevel.followsMI >= 0;
     const lineBorderBottom = (isLast || !isLastInGroup || nextIsColumnBelow)
-      ? 'none' : '1px solid #eee';
+      ? 'none' : '1px solid var(--light-border)';
     Object.assign(line.style, {
       borderBottom: lineBorderBottom,
       touchAction: 'none',
@@ -448,7 +448,7 @@ function createFnOverlay(node, container) {
           if (miOpenBtn) span.appendChild(miOpenBtn);
         }
         if (i < levelInfo.fns.length - 1) {
-          span.style.borderRight = '1px solid #eee';
+          span.style.borderRight = '1px solid var(--light-border)';
         }
         // Initial styling: root-block or highlighted
         const fnInRootBlock = levelInfo.blockIsRoot && !f.isClickable;
@@ -589,7 +589,7 @@ function createFnOverlay(node, container) {
 
   if (ancestorLevels.length > MAX_VISIBLE_ANCESTORS + 1) {
     const more = document.createElement('div');
-    Object.assign(more.style, { padding: '2px 8px', color: '#999', fontSize: '10px' });
+    Object.assign(more.style, { padding: '2px 8px', color: 'var(--light-fg)', fontSize: '10px' });
     more.textContent = '...';
     overlay.appendChild(more);
   }
@@ -603,11 +603,11 @@ function createFnOverlay(node, container) {
     const strip = document.createElement('div');
     Object.assign(strip.style, {
       padding: '2px 8px',
-      color: '#888',
+      color: 'var(--light-fg)',
       fontSize: '10px',
       fontStyle: 'italic',
-      borderTop: '1px dashed #ccc',
-      background: '#fafafa',
+      borderTop: '1px dashed var(--input-border)',
+      background: 'var(--sidebar-bg)',
       whiteSpace: 'nowrap',
       overflow: 'hidden',
       textOverflow: 'ellipsis'
@@ -627,11 +627,11 @@ function createFnOverlay(node, container) {
     const strip = document.createElement('div');
     Object.assign(strip.style, {
       padding: '2px 8px',
-      color: '#557',
+      color: 'var(--hof-fg)',
       fontSize: '10px',
       fontStyle: 'italic',
-      borderTop: '1px dashed #b8c0e0',
-      background: '#f4f6fc',
+      borderTop: '1px dashed var(--hof-border)',
+      background: 'var(--hof-bg)',
       whiteSpace: 'nowrap',
       overflow: 'hidden',
       textOverflow: 'ellipsis'
@@ -719,8 +719,8 @@ function createEdgeLabelOverlay(edge, container) {
     position: 'absolute',
     pointerEvents: 'auto',
     zIndex: '5',
-    background: '#ffffff',
-    color: '#666666',
+    background: 'var(--bg)',
+    color: 'var(--muted-fg)',
     fontFamily: 'SF Mono, Monaco, monospace',
     fontSize: '10px',
     lineHeight: '1.2',

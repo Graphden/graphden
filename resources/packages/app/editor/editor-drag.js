@@ -9,13 +9,13 @@ function createDragHandle(overlay, cyNode) {
   const dragHandle = document.createElement('div');
   dragHandle.className = 'drag-handle';
   dragHandle.style.height = '12px';
-  dragHandle.style.background = 'linear-gradient(to bottom, #f0f0f0, #ddd)';
-  dragHandle.style.borderTop = '1px solid #ccc';
+  dragHandle.style.background = 'linear-gradient(to bottom, var(--hover-bg), var(--selected-bg))';
+  dragHandle.style.borderTop = '1px solid var(--input-border)';
   dragHandle.style.cursor = 'grab';
   dragHandle.style.display = 'flex';
   dragHandle.style.alignItems = 'center';
   dragHandle.style.justifyContent = 'center';
-  dragHandle.innerHTML = '<span style="color:#999;font-size:8px;">⋮⋮⋮</span>';
+  dragHandle.innerHTML = '<span style="color:var(--light-fg);font-size:8px;">⋮⋮⋮</span>';
 
   // Shared drag logic for mouse and touch
   const startDrag = (startX, startY, moveEvent, endEvent, getXY, isTouch) => {

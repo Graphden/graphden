@@ -1,83 +1,200 @@
-/* Graph editor CSS styles - monochrome design */
+/* Graph editor CSS styles - monochrome design.
+ * Theme variables live on `:root`; `body.theme-dark` overrides. The
+ * full sidebar respects `--sidebar-width` so the resize handle and
+ * the collapse button can change one number to retheme + relayout. */
+:root {
+  --bg: #fff;
+  --fg: #000;
+  --muted-fg: #555;
+  --light-fg: #888;
+  --border: #000;
+  --light-border: #ddd;
+  --input-border: #ccc;
+  --hover-bg: #eee;
+  --selected-bg: #ddd;
+  --sidebar-bg: #fafafa;
+  --header-bg: #000;
+  --header-fg: #fff;
+  --accent: #0066cc;
+  /* Graph node ("card") palette — keeps the same visual hierarchy in both
+     themes (slightly-raised body + distinct header band + visible outline)
+     instead of inverting to bright gray. */
+  --card-bg: #fff;
+  --card-fg: #000;
+  --card-border: #000;
+  --card-header-bg: #000;
+  --card-header-fg: #fff;
+  --card-row-highlight: #f0f0f0;
+  /* HOF-captured arg strip — subtle blue tint that survives both themes. */
+  --hof-fg: #557;
+  --hof-bg: #f4f6fc;
+  --hof-border: #b8c0e0;
+  /* Description tooltip — high-contrast bubble that sits over both
+     overlay rows and the cy canvas, so it must read against any bg. */
+  --tooltip-bg: rgba(0,0,0,0.88);
+  --tooltip-fg: #fff;
+  --sidebar-width: 280px;
+}
+body.theme-dark {
+  --bg: #1a1a1a;
+  --fg: #e8e8e8;
+  --muted-fg: #aaa;
+  --light-fg: #888;
+  --border: #888;
+  --light-border: #444;
+  --input-border: #555;
+  --hover-bg: #2a2a2a;
+  --selected-bg: #3a3a3a;
+  --sidebar-bg: #1f1f1f;
+  --header-bg: #2c2c2c;
+  --header-fg: #e8e8e8;
+  --accent: #4d9fff;
+  /* Card body slightly raised vs body bg, header still distinct but not
+     bright; outline subtle so the node frame isn't a glaring white box. */
+  --card-bg: #242424;
+  --card-fg: #e8e8e8;
+  --card-border: #555;
+  --card-header-bg: #3a3a3a;
+  --card-header-fg: #e8e8e8;
+  --card-row-highlight: #2e2e2e;
+  --hof-fg: #aab8e8;
+  --hof-bg: #1e2030;
+  --hof-border: #3a4070;
+  --tooltip-bg: rgba(232,232,232,0.92);
+  --tooltip-fg: #1a1a1a;
+}
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
-body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #fff; color: #000; }
+body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  background: var(--bg); color: var(--fg); }
 
 /* ID-based layout (matches editor-body hiccup structure) */
 #app { height: 100vh; }
 #main-container { display: flex; height: 100%; }
-#side-menu { width: 280px; background: #fafafa; border-right: 2px solid #000; overflow-y: auto; position: relative; z-index: 200; }
+#side-menu {
+  width: var(--sidebar-width); background: var(--sidebar-bg);
+  border-right: 2px solid var(--border); overflow-y: auto; position: relative;
+  z-index: 200; transition: width 0.18s ease;
+}
+body.resizing-sidebar #side-menu { transition: none; user-select: none; }
+body.resizing-sidebar { user-select: none; cursor: col-resize; }
+/* Collapsed: sidebar disappears entirely; only the expand button floats in
+   the top-left corner of the graph area. The button stays in DOM so the
+   click handler keeps working — we just reposition it absolutely. */
+body.sidebar-collapsed #side-menu {
+  width: 0; border-right: none; background: transparent; overflow: visible;
+}
+body.sidebar-collapsed #side-menu > *:not(.menu-header) { display: none; }
+body.sidebar-collapsed .menu-header {
+  position: absolute; top: 8px; left: 8px;
+  padding: 0; background: transparent; border: none;
+  z-index: 250;
+}
+body.sidebar-collapsed .menu-header > *:not(.menu-header-actions) { display: none; }
+body.sidebar-collapsed .menu-header-actions > *:not(#prefs-mount) { display: none; }
+body.sidebar-collapsed #prefs-mount > #theme-toggle-btn { display: none; }
+body.sidebar-collapsed #sidebar-collapse-btn {
+  background: var(--bg); color: var(--fg); border-color: var(--fg);
+}
+body.sidebar-collapsed #sidebar-collapse-btn:hover {
+  background: var(--fg); color: var(--bg);
+}
+body.sidebar-collapsed #sidebar-resizer { display: none; }
 #graph-container { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }
 #cy { width: 100%; height: 100%; }
 
-/* Search bar */
-#search-bar { display: flex; padding: 6px 8px; border-bottom: 1px solid #ddd; gap: 4px; }
-#search-input {
-  flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px;
-  font-family: inherit; font-size: 13px; outline: none; background: #fff;
+/* Right-edge resize handle. 4 px wide, centred on the sidebar's
+   trailing border so the cursor lands on it before the user has to
+   nail the 2 px border itself. */
+#sidebar-resizer {
+  position: absolute; top: 0; right: -2px; width: 6px; height: 100%;
+  cursor: col-resize; z-index: 250; user-select: none;
 }
-#search-input:focus { border-color: #888; }
+#sidebar-resizer:hover { background: rgba(0, 0, 0, 0.08); }
+body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); }
+
+/* Search bar */
+#search-bar { display: flex; padding: 6px 8px;
+  border-bottom: 1px solid var(--light-border); gap: 4px; }
+#search-input {
+  flex: 1; min-width: 0; padding: 4px 8px;
+  border: 1px solid var(--input-border); border-radius: 3px;
+  font-family: inherit; font-size: 13px; outline: none;
+  background: var(--bg); color: var(--fg);
+}
+#search-input:focus { border-color: var(--light-fg); }
 #search-clear {
-  /* Match the input's height: drop the explicit `height: 24px` and
-     let flex `align-items: stretch` (the default on `#search-bar`)
-     pull the button up to whatever the input renders at. Result is
-     pixel-aligned regardless of font/line-height changes. */
-  width: 24px; align-self: stretch; border: 1px solid #ccc; border-radius: 3px;
-  background: #fff; font-size: 16px; cursor: pointer; color: #666;
+  width: 24px; align-self: stretch;
+  border: 1px solid var(--input-border); border-radius: 3px;
+  background: var(--bg); color: var(--muted-fg);
+  font-size: 16px; cursor: pointer;
   display: flex; align-items: center; justify-content: center; padding: 0;
   flex-shrink: 0; box-sizing: border-box;
 }
-#search-clear:hover { background: #eee; color: #000; }
+#search-clear:hover { background: var(--hover-bg); color: var(--fg); }
 
 /* Namespace tree in sidebar */
 #entity-list { padding: 4px 0; margin: 0; }
 .ns-header { display: flex; align-items: center; padding: 3px 8px; cursor: pointer; user-select: none; }
-.ns-header:hover { background: #eee; }
-.ns-arrow { width: 16px; font-size: 10px; color: #555; flex-shrink: 0; text-align: center; }
-.ns-label { font-size: 13px; font-weight: 600; color: #222; }
+.ns-header:hover { background: var(--hover-bg); }
+.ns-arrow { width: 16px; font-size: 10px; color: var(--muted-fg); flex-shrink: 0; text-align: center; }
+.ns-label { font-size: 13px; font-weight: 600; color: var(--fg); }
 .ns-children { padding-left: 16px; }
 #entity-list .entity-item { padding: 2px 8px 2px 24px; cursor: pointer;
   display: flex; align-items: center; }
-#entity-list .entity-item:hover { background: #eee; }
-#entity-list .entity-item.selected { background: #ddd; }
+#entity-list .entity-item:hover { background: var(--hover-bg); }
+#entity-list .entity-item.selected { background: var(--selected-bg); }
 #entity-list .entity-item .name { font-weight: 400; font-size: 13px; }
 
 /* Menu header */
-.menu-header { padding: 12px 16px; border-bottom: 2px solid #000; background: #000; color: #fff;
+.menu-header { padding: 12px 16px; border-bottom: 2px solid var(--border);
+  background: var(--header-bg); color: var(--header-fg);
   display: flex; align-items: center; justify-content: space-between; position: relative; }
 .menu-header h2 { font-size: 13px; font-weight: 500; margin: 0; }
+.menu-header-actions { display: inline-flex; align-items: center; gap: 6px; line-height: 0; }
+
+/* Prefs (theme + collapse) buttons — same shape/size as auth lock. */
+#prefs-mount { display: inline-flex; gap: 6px; }
+.prefs-btn {
+  background: transparent; color: var(--header-fg);
+  border: 1px solid var(--header-fg); border-radius: 3px;
+  width: 26px; height: 26px; padding: 3px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.prefs-btn:hover { background: var(--header-fg); color: var(--header-bg); }
 
 /* Auth lock — sits on the right of the menu header, opens a popover. */
 #auth-mount { position: relative; line-height: 0; }
 .auth-lock-btn {
-  background: transparent; color: #fff; border: 1px solid #fff; border-radius: 3px;
+  background: transparent; color: var(--header-fg); border: 1px solid var(--header-fg); border-radius: 3px;
   width: 26px; height: 26px; padding: 3px; cursor: pointer; display: inline-flex;
   align-items: center; justify-content: center;
 }
-.auth-lock-btn:hover { background: #fff; color: #000; }
-.auth-lock-btn.auth-lock-open { background: #fff; color: #000; }
+.auth-lock-btn:hover { background: var(--header-fg); color: var(--header-bg); }
+.auth-lock-btn.auth-lock-open { background: var(--header-fg); color: var(--header-bg); }
 .auth-popover {
   position: absolute; right: 0; top: calc(100% + 6px); z-index: 300;
-  background: #fff; color: #000; border: 1px solid #000; border-radius: 3px;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--fg); border-radius: 3px;
   padding: 8px; min-width: 200px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
   display: flex; flex-direction: column; gap: 6px;
 }
 .auth-popover.hidden { display: none; }
 .auth-popover input {
-  font-size: 12px; padding: 4px 6px; border: 1px solid #000; border-radius: 3px;
+  font-size: 12px; padding: 4px 6px; border: 1px solid var(--fg); border-radius: 3px;
   outline: none; width: 100%; box-sizing: border-box;
+  background: var(--bg); color: var(--fg);
 }
-.auth-popover input:focus { box-shadow: 0 0 0 1px #000 inset; }
+.auth-popover input:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
 .auth-popover-row { display: flex; gap: 6px; }
 .auth-popover-btn {
   flex: 1; font-size: 12px; padding: 4px 8px; cursor: pointer;
-  background: #000; color: #fff; border: 1px solid #000; border-radius: 3px;
+  background: var(--fg); color: var(--bg); border: 1px solid var(--fg); border-radius: 3px;
 }
-.auth-popover-btn:hover { background: #fff; color: #000; }
-.auth-popover-btn-secondary { background: #fff; color: #000; }
-.auth-popover-btn-secondary:hover { background: #000; color: #fff; }
+.auth-popover-btn:hover { background: var(--bg); color: var(--fg); }
+.auth-popover-btn-secondary { background: var(--bg); color: var(--fg); }
+.auth-popover-btn-secondary:hover { background: var(--fg); color: var(--bg); }
 .auth-error {
-  font-size: 11px; color: #000; background: #f4f4f4; border: 1px solid #000;
+  font-size: 11px; color: var(--fg); background: var(--hover-bg); border: 1px solid var(--fg);
   padding: 4px 6px; border-radius: 3px;
 }
 .auth-error.hidden { display: none; }
@@ -93,7 +210,7 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
   display: inline-flex; align-items: center; justify-content: center;
 }
 .create-btn:hover { background: currentColor; }
-.create-btn:hover svg { color: #fff; }
+.create-btn:hover svg { color: var(--bg); }
 /* Match `applyActionIconBox` (description-badge `i`) so the row's
    icons line up: same 15×15 frame, same 1px border. The action
    buttons stay hover-only — `i` is informational and harmless to
@@ -102,11 +219,11 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 .create-btn-inline {
   width: 15px; height: 15px;
   opacity: 0; transition: opacity 0.1s;
-  color: #000;
+  color: var(--fg);
 }
 .ns-header:hover .ns-row-actions .create-btn-inline,
 .entity-item:hover .ns-row-actions .create-btn-inline { opacity: 1; }
-.create-btn-inline:hover { background: #000; color: #fff; }
+.create-btn-inline:hover { background: var(--fg); color: var(--bg); }
 
 /* Disabled (greyed-out) state for the delete button when the entity
    can't be removed safely. The button stays in the row layout so its
@@ -119,26 +236,27 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 .create-btn-inline.create-btn-disabled:hover,
 .create-btn-inline:disabled,
 .create-btn-inline:disabled:hover {
-  color: #888;
+  color: var(--light-fg);
   background: transparent;
   cursor: not-allowed;
 }
 .create-btn-inline.create-btn-disabled:hover svg,
 .create-btn-inline:disabled:hover svg {
-  color: #888;
+  color: var(--light-fg);
 }
 
 /* Create-child popover menu (ns / fn). Floated above the sidebar. */
 .create-menu {
-  background: #fff; color: #000; border: 1px solid #000; border-radius: 3px;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--fg); border-radius: 3px;
   min-width: 180px; padding: 4px; display: flex; flex-direction: column; gap: 2px;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
 }
 .create-menu-item {
   background: transparent; border: 0; border-radius: 2px;
   padding: 6px 10px; text-align: left; font-size: 12px; cursor: pointer;
+  color: inherit;
 }
-.create-menu-item:hover { background: #000; color: #fff; }
+.create-menu-item:hover { background: var(--fg); color: var(--bg); }
 
 /* Inline input row — used both for create (indented under a parent ns)
    and for rename (replaces the ns-header label in place). */
@@ -148,23 +266,23 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 }
 .inline-input {
   flex: 1; font-size: 12px; padding: 3px 6px;
-  border: 1px solid #000; border-radius: 3px; outline: none;
-  background: #fff; color: #000;
+  border: 1px solid var(--fg); border-radius: 3px; outline: none;
+  background: var(--bg); color: var(--fg);
 }
-.inline-input:focus { box-shadow: 0 0 0 1px #000 inset; }
+.inline-input:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
 .inline-input:disabled { opacity: 0.6; }
 .inline-btn {
   width: 22px; height: 22px; padding: 0;
-  background: #fff; color: #000; border: 1px solid #000;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--fg);
   border-radius: 3px; cursor: pointer;
   display: inline-flex; align-items: center; justify-content: center;
 }
-.inline-btn:hover { background: #000; color: #fff; }
-.inline-btn-save:hover { background: #000; color: #fff; }
+.inline-btn:hover { background: var(--fg); color: var(--bg); }
+.inline-btn-save:hover { background: var(--fg); color: var(--bg); }
 .inline-btn:disabled { opacity: 0.4; cursor: default; }
 .inline-error {
-  font-size: 10px; color: #000;
-  background: #f4f4f4; border: 1px solid #000; border-radius: 3px;
+  font-size: 10px; color: var(--fg);
+  background: var(--hover-bg); border: 1px solid var(--fg); border-radius: 3px;
   padding: 1px 5px; display: none;
 }
 
@@ -173,11 +291,11 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
   display: flex; align-items: center; justify-content: center; gap: 6px;
   width: 100%; box-sizing: border-box;
   padding: 10px 12px; margin-top: 8px;
-  background: #fff; color: #000;
-  border: 1px dashed #000; border-radius: 3px;
+  background: var(--bg); color: var(--fg);
+  border: 1px dashed var(--fg); border-radius: 3px;
   font-size: 12px; cursor: pointer;
 }
-.create-root-ns-btn:hover { background: #000; color: #fff; }
+.create-root-ns-btn:hover { background: var(--fg); color: var(--bg); }
 .create-root-ns-plus { display: inline-flex; align-items: center; }
 .create-root-ns-text { font-weight: 500; }
 
@@ -193,6 +311,19 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
   transition: color 0.1s, font-weight 0.1s;
 }
 
+/* Right-edge action icons — `i` (description) and `↗` (open in new tab).
+   Highlight on hover so the click-target is obvious; the tint uses
+   `currentColor` so it picks up whichever fg the row has (white on a
+   header row, dark on a body row) without needing to know the theme. */
+.description-badge, .open-in-new-tab {
+  opacity: 0.85;
+  transition: opacity 0.1s, background-color 0.1s;
+}
+.description-badge:hover, .open-in-new-tab:hover {
+  opacity: 1;
+  background-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+
 /* Navigation controls — zoom slider hugs right edge, buttons left of reset */
 #nav-controls {
   position: absolute; bottom: 16px; right: 12px; z-index: 100;
@@ -201,14 +332,14 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 }
 .nav-btn {
   width: 28px; height: 28px;
-  border: 1px solid #ccc; border-radius: 4px;
-  background: #fff; color: #000;
+  border: 1px solid var(--input-border); border-radius: 4px;
+  background: var(--bg); color: var(--fg);
   font-size: 24px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   padding: 0; user-select: none; flex-shrink: 0;
 }
-.nav-btn:hover { background: #f0f0f0; }
-.nav-btn:active { background: #ddd; }
+.nav-btn:hover { background: var(--hover-bg); }
+.nav-btn:active { background: var(--selected-bg); }
 
 /* Vertical zoom: + slider − stacked, right-aligned */
 .nav-zoom-col {
@@ -218,7 +349,7 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
   writing-mode: vertical-lr;
   direction: rtl;
   height: 120px; width: 20px;
-  cursor: pointer; accent-color: #000;
+  cursor: pointer; accent-color: var(--fg);
   margin: 0;
 }
 

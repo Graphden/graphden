@@ -31,7 +31,7 @@ function createDescriptionBadge(description, opts) {
   badge.style.cursor = 'help';
   badge.style.fontWeight = 'normal';
   badge.style.fontStyle = 'italic';
-  badge.style.opacity = '0.85';
+  // opacity comes from CSS so the :hover override can boost it to 1.
   applyActionIconBox(badge);
   // Override pointer-events: some overlay containers opt out (e.g.
   // the floating column-below-MI text overlay) but we need the
@@ -117,7 +117,7 @@ function createOpenInNewTabButton(fn, opts) {
   link.style.cursor = 'pointer';
   link.style.fontWeight = 'normal';
   link.style.textDecoration = 'none';
-  link.style.opacity = '0.85';
+  // opacity comes from CSS so the :hover override can boost it to 1.
   applyActionIconBox(link);
   link.style.fontSize = '11px';  // ↗ glyph reads better a hair larger
   link.style.pointerEvents = 'auto';

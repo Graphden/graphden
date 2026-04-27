@@ -195,7 +195,7 @@
       (log/debug "Full table scan query (no where clause)" {:entity-name entity-name}))
     (util/with-sql-error-handling "Database error" :query-entities {:entity-name entity-name :where where}
                                   (let [rows (jdbc/execute! ds query (util/query-opts))
-                                        records (mapv codec/row->entity rows)]
+                                        records (mapv #(codec/row->entity % fields) rows)]
                                     (if (and fields (junction/has-ref-many? fields))
                                       (junction/populate-ref-many-fields ds entity-name records fields)
                                       records)))))

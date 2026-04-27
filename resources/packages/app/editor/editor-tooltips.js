@@ -20,8 +20,8 @@ function ensureDescriptionTooltip() {
   Object.assign(el.style, {
     position: 'fixed',
     zIndex: '10000',
-    background: 'rgba(0,0,0,0.88)',
-    color: '#fff',
+    background: 'var(--tooltip-bg)',
+    color: 'var(--tooltip-fg)',
     fontFamily: 'system-ui, sans-serif',
     fontSize: '12px',
     lineHeight: '1.4',
@@ -123,9 +123,9 @@ function ensureFullNameTooltip() {
   Object.assign(el.style, {
     position: 'fixed',
     zIndex: '9999',
-    background: '#ffffff',
-    color: '#000000',
-    border: '1px solid #ccc',
+    background: 'var(--bg)',
+    color: 'var(--fg)',
+    border: '1px solid var(--input-border)',
     boxShadow: '0 4px 12px rgba(0,0,0,0.18)',
     padding: '4px 10px',
     borderRadius: '4px',

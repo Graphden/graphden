@@ -22,6 +22,7 @@
   {:name :_editor-script-paths
    :parent :const
    :args {:value ["packages/app/editor/editor-state.js"
+                  "packages/app/editor/editor-prefs.js"
                   "packages/app/editor/editor-auth.js"
                   "packages/app/editor/editor-create.js"
                   "packages/app/editor/editor-data.js"
@@ -54,12 +55,14 @@
             [:div {:id "side-menu"}
              [:div {:class "menu-header"}
               [:h2 "Graphden"]
-              ;; Auth lock — mounted from `editor-auth.js` on
-              ;; DOMContentLoaded. The "+ New namespace" affordance
-              ;; lives at the bottom of `#entity-list` (full-width)
-              ;; and per-row create/edit buttons render inside each
-              ;; namespace row from `renderNsNode`.
-              [:div {:id "auth-mount"}]]
+              ;; Right-side header buttons. `editor-prefs.js` mounts
+              ;; theme + collapse buttons here on DOMContentLoaded;
+              ;; `editor-auth.js` mounts the lock + popover next to
+              ;; them. The "+ New namespace" affordance lives at the
+              ;; bottom of `#entity-list`.
+              [:div {:class "menu-header-actions"}
+               [:div {:id "prefs-mount"}]
+               [:div {:id "auth-mount"}]]]
              [:div {:id "search-bar"}
               [:input {:id "search-input" :type "text" :placeholder "Filter..."
                        :oninput "onSearchInput(this.value)"}]

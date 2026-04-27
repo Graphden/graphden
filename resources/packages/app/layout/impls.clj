@@ -298,6 +298,26 @@
     (false? (:required root))))
 
 
+(defn- record-optional-unset!
+  "Append `arg-name` to `state.optional-unsets-by-node[node-id]`. Used
+   to populate a node's `+default, +else` badge with the names of
+   unbound optional args the caller chose to leave blank."
+  [state node-id arg-name]
+  (when (and node-id arg-name)
+    (swap! state update-in [:optional-unsets-by-node node-id]
+           (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
+
+
+(defn- record-hof-captured!
+  "Append `arg-name` to `state.hof-captured-by-node[node-id]`. Used to
+   populate the λname HOF capture badge on nodes whose lambda-param
+   free arg is supplied per-call by the surrounding HOF invocation."
+  [state node-id arg-name]
+  (when (and node-id arg-name)
+    (swap! state update-in [:hof-captured-by-node node-id]
+           (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
+
+
 (defn- build-graph-elements
   "Build graph elements (nodes, edges) from selected function.
    Returns {:nodes [...] :edges [...]}"
@@ -332,28 +352,6 @@
                      :hof-captured-by-node {}
                      :captured-edge-migrations {}})
         max-visible-ancestors 4
-
-        ;; Optional unbound args don't deserve their own placeholder node — the
-        ;; caller's fn has a sensible fallback baked in. The names are
-        ;; collected per displayed node-id and surfaced on the node's `:data`
-        ;; so the client can render a compact badge like "+default, +else".
-        record-optional-unset!
-        (fn [node-id arg-name]
-          (when (and node-id arg-name)
-            (swap! state update-in [:optional-unsets-by-node node-id]
-                   (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
-
-        ;; Lambda-param free args on HOF-reachable nodes — supplied by the
-        ;; HOF invocation per call (no caller-chain anchor). `λname` badge.
-        ;; `:capture` free args (caller's chain has a bound arg whose
-        ;; source-id chain reaches this arg's origin) are NOT recorded
-        ;; here — their binding is rendered as an ordinary edge on the
-        ;; capturing caller node.
-        record-hof-captured!
-        (fn [node-id arg-name]
-          (when (and node-id arg-name)
-            (swap! state update-in [:hof-captured-by-node node-id]
-                   (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
 
         ;; Reverse source-id index: arg-id → vector of args whose
         ;; `:source-id` points directly here. Used to walk DOWNWARD from
@@ -661,7 +659,7 @@
                                     (when arg-name (name arg-name)))]
              (cond
                optional?
-               (record-optional-unset! source-node-id displayed-name)
+               (record-optional-unset! state source-node-id displayed-name)
 
                is-hof
                (if-let [bound (caller-bound-arg arg-id)]
@@ -672,7 +670,7 @@
                  ;; that actually reads the captured value).
                  (swap! state update :captured-edge-migrations assoc (:id bound) source-node-id)
                  ;; True lambda-param: HOF impl supplies it per call.
-                 (record-hof-captured! source-node-id displayed-name))
+                 (record-hof-captured! state source-node-id displayed-name))
 
                :else
                (let [node-id (str "unset-" source-node-id "-" arg-id)

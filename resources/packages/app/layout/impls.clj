@@ -352,6 +352,70 @@
     node-id))
 
 
+(def ^:private max-visible-ancestors
+  "Cap on the number of ancestor BFS levels rendered in a fn-node's
+   header label before we collapse the rest into `…`."
+  4)
+
+
+(defn- add-fn-node
+  "Emit (or reuse) a cytoscape fn-node for `original-fn-id`. The node-id
+   uniquely identifies the call-site: root fns key by `\"fn-<id>\"`; nested
+   fns key by `(caller-node-id, source-arg-id)` so two usages of the
+   same fn from different bindings are distinct nodes (matches Clojure
+   call-site semantics). Returns the resolved node-id."
+  [state lookups original-fn-id is-root source-node-id source-arg-id]
+  (let [{:keys [fn-map]} lookups
+        node-id (cond
+                  (or is-root (nil? source-arg-id))
+                  (str "fn-" original-fn-id)
+
+                  ;; Strip "fn-" from caller-node-id so we don't keep
+                  ;; doubling the prefix at each nesting.
+                  :else
+                  (let [caller-tag (if (and source-node-id
+                                            (str/starts-with? source-node-id "fn-"))
+                                     (subs source-node-id 3)
+                                     (str source-node-id))]
+                    (str "fn-" caller-tag "-" source-arg-id)))]
+    (when-not (contains? (:added-node-ids @state) node-id)
+      (swap! state update :added-node-ids conj node-id)
+      (let [levels (get-inheritance-levels original-fn-id fn-map)
+            ;; Name of a fn for label rendering. For level 0 (`top-level?`)
+            ;; we do NOT substitute the nearest named ancestor: an anonymous
+            ;; fn's "name slot" stays empty so the black header bar visually
+            ;; signals "no own name". For levels ≥ 1 we DO substitute so each
+            ;; ancestor row still shows something meaningful.
+            fn-name-of (fn [fid top-level?]
+                         (let [f (get fn-map fid)]
+                           (or (when (:name f) (name (:name f)))
+                               (when-not top-level?
+                                 (some (fn [pid]
+                                         (when-let [p (get fn-map pid)]
+                                           (when (:name p) (name (:name p)))))
+                                       (rest (get-inheritance-chain fid fn-map))))
+                               (if top-level? "" "(anonymous)"))))
+            visible-levels (take (inc max-visible-ancestors) levels)
+            raw-lines (vec
+                        (map-indexed
+                          (fn [lvl-idx level-fn-ids]
+                            (str/join ", "
+                                      (map #(fn-name-of % (zero? lvl-idx))
+                                           level-fn-ids)))
+                          visible-levels))
+            label-lines (if (> (count levels) (inc max-visible-ancestors))
+                          (conj raw-lines "...")
+                          raw-lines)
+            label (str/join "\n" label-lines)]
+        (swap! state update :nodes conj
+               {:data {:id node-id
+                       :label label
+                       :type "fn"
+                       :isRoot is-root
+                       :originalFnId (str original-fn-id)}})))
+    node-id))
+
+
 (defn- add-unset-arg-node
   "Emit a placeholder for an unset arg, choosing one of four routings:
 
@@ -554,7 +618,6 @@
                      :optional-unsets-by-node {}
                      :hof-captured-by-node {}
                      :captured-edge-migrations {}})
-        max-visible-ancestors 4
 
         inverse-source-map (build-inverse-source-map arg-map)
 
@@ -577,74 +640,6 @@
         child-hof
         (fn [arg-id is-hof]
           (or is-hof (arg-marks-hof? (get arg-map arg-id))))
-
-        add-fn-node
-        (fn [original-fn-id is-root source-node-id source-arg-id]
-          ;; Node ID strategy: each call-site is distinct. A call-site in
-          ;; the expanded tree is uniquely identified by (caller-node-id,
-          ;; source-arg-id) — WHO called and THROUGH WHICH arg binding.
-          ;; The arg binding alone isn't enough: when the binding lives on
-          ;; an inherited ancestor (e.g. `:pair.coll :pair-1`), two
-          ;; different callers inherit the SAME arg entity but each call
-          ;; is its own independent computation.
-          ;;
-          ;; The root is the one exception: no caller, keyed by fn-id.
-          ;;
-          ;; Matches clojure semantics: two usages of the same fn in
-          ;; different places in a body are two independent call-sites
-          ;; with their own bindings.
-          (let [node-id (cond
-                          (or is-root (nil? source-arg-id))
-                          (str "fn-" original-fn-id)
-
-                          ;; Strip "fn-" from caller-node-id so we don't
-                          ;; keep doubling the prefix at each nesting.
-                          :else
-                          (let [caller-tag (if (and source-node-id
-                                                    (clojure.string/starts-with?
-                                                      source-node-id "fn-"))
-                                             (subs source-node-id 3)
-                                             (str source-node-id))]
-                            (str "fn-" caller-tag "-" source-arg-id)))]
-            (when-not (contains? (:added-node-ids @state) node-id)
-              (swap! state update :added-node-ids conj node-id)
-              (let [levels (get-inheritance-levels original-fn-id fn-map)
-                    ;; Name of a fn for label rendering. For level 0 (`top-level?`)
-                    ;; we do NOT substitute the nearest named ancestor: if the fn
-                    ;; is anonymous, its own "name slot" stays empty so the black
-                    ;; header bar visually signals "no own name" and the real
-                    ;; parent chain keeps rendering on the rows below.
-                    ;; For levels >= 1 we preserve the old substitution so each
-                    ;; ancestor row shows something meaningful even if the fid
-                    ;; at that BFS level happens to be anonymous.
-                    fn-name-of (fn [fid top-level?]
-                                 (let [f (get fn-map fid)]
-                                   (or (when (:name f) (name (:name f)))
-                                       (when-not top-level?
-                                         (some (fn [pid]
-                                                 (when-let [p (get fn-map pid)]
-                                                   (when (:name p) (name (:name p)))))
-                                               (rest (get-inheritance-chain fid fn-map))))
-                                       (if top-level? "" "(anonymous)"))))
-                    visible-levels (take (inc max-visible-ancestors) levels)
-                    raw-lines (vec
-                                (map-indexed
-                                  (fn [lvl-idx level-fn-ids]
-                                    (str/join ", "
-                                              (map #(fn-name-of % (zero? lvl-idx))
-                                                   level-fn-ids)))
-                                  visible-levels))
-                    label-lines (if (> (count levels) (inc max-visible-ancestors))
-                                  (conj raw-lines "...")
-                                  raw-lines)
-                    label (str/join "\n" label-lines)]
-                (swap! state update :nodes conj
-                       {:data {:id node-id
-                               :label label
-                               :type "fn"
-                               :isRoot is-root
-                               :originalFnId (str original-fn-id)}})))
-            node-id))
 
         ;; Compute terminal source-id of an arg (walk source chain to root)
         ;; Walks `:source-id` chain from `arg-id` to the terminal arg
@@ -1177,7 +1172,7 @@
       ;; expansion-root: the original-fn-id of the expanded function we're inside (nil if not in expansion)
       (letfn [(process-fn
                 [original-fn-id display-fn-id bindings source-node-id edge-arg-name is-root source-arg-id expansion-root source-expanded-fns is-hof]
-                (let [node-id (add-fn-node original-fn-id is-root source-node-id source-arg-id)
+                (let [node-id (add-fn-node state lookups original-fn-id is-root source-node-id source-arg-id)
                       ;; Key for tracking fully processed nodes - includes expansion context
                       process-key (str node-id "-" (hash bindings))]
                   (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
@@ -1279,7 +1274,7 @@
                 ;; whose binding chain leads back to method-map.
                 (let [in-progress-key [original-fn-id parent-expansion-root]]
                   (if (contains? (:in-progress-expansions @state) in-progress-key)
-                    (let [node-id (add-fn-node original-fn-id is-root source-node-id source-arg-id)]
+                    (let [node-id (add-fn-node state lookups original-fn-id is-root source-node-id source-arg-id)]
                       (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
                       node-id)
                     (do
@@ -1313,7 +1308,7 @@
                       ;; - If this is a top-level expansion (parent-expansion-root is nil),
                       ;;   this fn becomes the expansion root
                       effective-expansion-root (or parent-expansion-root original-fn-id)
-                      node-id (add-fn-node original-fn-id is-root source-node-id source-arg-id)]
+                      node-id (add-fn-node state lookups original-fn-id is-root source-node-id source-arg-id)]
                   (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
 
                   ;; For expanded mode, collect args from entire chain [0..level]
@@ -1512,7 +1507,7 @@
                     ;; optional-? badge) and its own literal value bindings.
                     ;; No recursion into refs: user must explicitly expand to
                     ;; see the leaf's body.
-                    (let [node-id (add-fn-node fn-id false source-node-id source-arg-id)]
+                    (let [node-id (add-fn-node state lookups fn-id false source-node-id source-arg-id)]
                       (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
                       (let [raw-own-args (get args-by-fn fn-id [])
                             seq-anchors (filterv #(= :sequence (:type %)) raw-own-args)

@@ -378,15 +378,70 @@
       {:status 400 :body "<p class=\"error\">Invalid update request</p>"})))
 
 
+(defn- ns-non-empty-reason
+  "Returns a human-readable reason if `ns-id` still has nested
+   namespaces or fns living under it; nil if empty (and therefore
+   safe to delete)."
+  [storage ns-id]
+  (let [child-ns (count (sp/query-entities storage :ns {:parent-id ns-id}))
+        child-fns (count (sp/query-entities storage :fn {:namespace-id ns-id}))]
+    (when (or (pos? child-ns) (pos? child-fns))
+      (str "Namespace contains "
+           (when (pos? child-ns) (str child-ns " sub-namespace" (when (> child-ns 1) "s")))
+           (when (and (pos? child-ns) (pos? child-fns)) " and ")
+           (when (pos? child-fns) (str child-fns " graph" (when (> child-fns 1) "s")))
+           " — remove the contents first."))))
+
+
+(defn- fn-in-use-reason
+  "Returns a human-readable reason if `fn-id` is referenced by another
+   fn (as a parent or via an arg ref-id); nil if unreferenced."
+  [storage fn-id]
+  (let [used-as-parent (count (filter (fn [f]
+                                        (and (not= (:id f) fn-id)
+                                             (some #(= % fn-id) (:parent-ids f))))
+                                      (sp/query-entities storage :fn {})))
+        ref-args (count (sp/query-entities storage :arg {:ref-id fn-id}))]
+    (when (or (pos? used-as-parent) (pos? ref-args))
+      (str "Graph is "
+           (when (pos? used-as-parent) (str "a parent of " used-as-parent " other graph"
+                                            (when (> used-as-parent 1) "s")))
+           (when (and (pos? used-as-parent) (pos? ref-args)) " and ")
+           (when (pos? ref-args) (str "referenced by " ref-args " arg" (when (> ref-args 1) "s")))
+           " — remove the dependents first."))))
+
+
 (defbase process-delete-entity
   [request]
   (let [storage (require-storage ctx)
-        {:keys [id-str entity-type]} (extract-entity-params request)]
-    (if (and entity-type id-str)
-      (do (sp/delete-entity storage entity-type (java.util.UUID/fromString id-str))
+        {:keys [entity-type id-str]} (extract-entity-params request)
+        id (when id-str (try (java.util.UUID/fromString id-str)
+                             (catch Exception _ nil)))]
+    (cond
+      (or (nil? entity-type) (nil? id))
+      {:status 400 :body "<p class=\"error\">Invalid request</p>"}
+
+      ;; Namespace delete — must be empty.
+      (= entity-type :ns)
+      (if-let [reason (ns-non-empty-reason storage id)]
+        {:status 409 :body (str "<p class=\"error\">" reason "</p>")}
+        (do (sp/delete-entity storage entity-type id)
+            (exec-ctx/invalidate-graph-cache! ctx)
+            {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""}))
+
+      ;; Fn delete — must be unreferenced.
+      (= entity-type :fn)
+      (if-let [reason (fn-in-use-reason storage id)]
+        {:status 409 :body (str "<p class=\"error\">" reason "</p>")}
+        (do (sp/delete-entity storage entity-type id)
+            (exec-ctx/invalidate-graph-cache! ctx)
+            {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""}))
+
+      ;; Arg or other entity types — no extra constraint.
+      :else
+      (do (sp/delete-entity storage entity-type id)
           (exec-ctx/invalidate-graph-cache! ctx)
-          {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""})
-      {:status 400 :body "<p class=\"error\">Invalid request</p>"})))
+          {:status 200 :headers {"HX-Trigger" "entityDeleted"} :body ""}))))
 
 
 ;; === Sequence operations =====================================================

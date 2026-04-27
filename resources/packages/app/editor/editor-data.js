@@ -46,7 +46,26 @@ function buildLookups(data) {
     nsPathMap.set(id, parts.join('.'));
   });
 
-  return { fnMap, argMap, argsByFn, nsMap, nsPathMap };
+  // Deletability sets — used by the sidebar's ✕ button to grey out
+  // entities that can't be safely removed and surface the reason in
+  // the button's tooltip. The backend enforces these same rules
+  // (`process-delete-entity` returns 409 + an explanation), so the
+  // frontend computation is just for ahead-of-time UX feedback.
+  const fnUsedAsParent = new Map();   // fn-id → count
+  const fnUsedAsRef    = new Map();   // fn-id → count
+  const nsHasChildNs   = new Map();   // ns-id → count
+  const nsHasChildFn   = new Map();   // ns-id → count
+  const bump = (m, k) => { if (k) m.set(k, (m.get(k) || 0) + 1); };
+
+  (data.fns || []).forEach(f => {
+    (f['parent-ids'] || []).forEach(pid => bump(fnUsedAsParent, pid));
+    bump(nsHasChildFn, f['namespace-id']);
+  });
+  (data.args || []).forEach(a => bump(fnUsedAsRef, a['ref-id']));
+  (data.namespaces || []).forEach(ns => bump(nsHasChildNs, ns['parent-id']));
+
+  return { fnMap, argMap, argsByFn, nsMap, nsPathMap,
+           fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn };
 }
 
 // Look up a fn's namespace as a dotted path (e.g. "core.collections")

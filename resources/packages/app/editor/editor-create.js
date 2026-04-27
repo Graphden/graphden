@@ -20,6 +20,7 @@ const PLUS_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" st
 const PENCIL_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 const CHECK_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
 const X_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+const TRASH_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M6 6l1 14a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-14"/></svg>';
 
 // =============================================================================
 // API HELPERS
@@ -37,6 +38,14 @@ async function postEntity(type, fields) {
   });
   return response;
 }
+
+async function deleteEntity(type, id) {
+  const response = await authFetch('/api/entities/' + type + '/' + id, {
+    method: 'DELETE'
+  });
+  return response;
+}
+
 
 async function putEntity(type, id, fields) {
   const body = new URLSearchParams();
@@ -170,6 +179,10 @@ function buildNsRowButtons(actionsEl, nsId, nsPath) {
   });
 
   actionsEl.appendChild(editBtn);
+  actionsEl.appendChild(buildDeleteButton({
+    type: 'ns', id: nsId, displayName: nsPath.split('.').pop(),
+    blockReason: nsDeleteBlockReason(nsId)
+  }));
   actionsEl.appendChild(plusBtn);
 }
 
@@ -179,8 +192,70 @@ function ensureAuth() {
   return false;
 }
 
-// Append the rename button (✎) into `actionsEl` for a fn row. fns
-// have no children to add inline, so there's no `+` here.
+// Compute "why can't this fn be deleted?" — backend enforces the
+// same rules but the UI can show the disabled state up-front.
+// Returns a string reason or null when deletion is safe.
+function fnDeleteBlockReason(fnId) {
+  if (!lookups) return null;
+  const reasons = [];
+  const asParent = (lookups.fnUsedAsParent && lookups.fnUsedAsParent.get(fnId)) || 0;
+  const asRef    = (lookups.fnUsedAsRef    && lookups.fnUsedAsRef.get(fnId))    || 0;
+  if (asParent) reasons.push('parent of ' + asParent + ' graph' + (asParent > 1 ? 's' : ''));
+  if (asRef)    reasons.push('referenced by ' + asRef + ' arg' + (asRef > 1 ? 's' : ''));
+  if (!reasons.length) return null;
+  return 'Cannot delete: ' + reasons.join(' + ') + '. Remove dependents first.';
+}
+
+function nsDeleteBlockReason(nsId) {
+  if (!lookups) return null;
+  const reasons = [];
+  const subNs = (lookups.nsHasChildNs && lookups.nsHasChildNs.get(nsId)) || 0;
+  const subFn = (lookups.nsHasChildFn && lookups.nsHasChildFn.get(nsId)) || 0;
+  if (subNs) reasons.push('contains ' + subNs + ' nested namespace' + (subNs > 1 ? 's' : ''));
+  if (subFn) reasons.push('contains ' + subFn + ' graph' + (subFn > 1 ? 's' : ''));
+  if (!reasons.length) return null;
+  return 'Cannot delete: ' + reasons.join(' + ') + '. Remove the contents first.';
+}
+
+// Build a delete (✕) button. When `blockReason` is null, the button
+// is active and clicking it confirms + deletes; when set, the button
+// is greyed-out, non-interactive, and the reason is shown via the
+// `title` tooltip. The backend enforces the same constraints, so an
+// active click that races with a concurrent change still gets a 409.
+function buildDeleteButton({ type, id, displayName, blockReason }) {
+  const btn = document.createElement('button');
+  btn.className = 'create-btn create-btn-inline ns-delete-btn';
+  btn.innerHTML = TRASH_SVG;
+  if (blockReason) {
+    btn.classList.add('create-btn-disabled');
+    btn.disabled = true;
+    btn.title = blockReason;
+  } else {
+    btn.title = 'Delete ' + (type === 'ns' ? 'namespace' : 'graph');
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      if (!ensureAuth()) return;
+      if (!confirm('Delete ' + (type === 'ns' ? 'namespace' : 'graph')
+                   + ' "' + displayName + '"?')) return;
+      try {
+        const response = await deleteEntity(type, id);
+        if (response.status >= 200 && response.status < 300) {
+          await initGraph();
+        } else {
+          const text = await response.text().catch(() => '');
+          alert('Delete failed (' + response.status + '): '
+                + text.replace(/<[^>]+>/g, '').trim().slice(0, 200));
+        }
+      } catch (err) {
+        alert('Network error: ' + err.message);
+      }
+    });
+  }
+  return btn;
+}
+
+// Append the rename + delete buttons into `actionsEl` for a fn row.
+// fns have no children to add inline, so there's no `+` here.
 function buildFnRowButtons(actionsEl, fnId, fnName) {
   const itemEl = actionsEl.parentNode || actionsEl;
   const editBtn = document.createElement('button');
@@ -193,6 +268,10 @@ function buildFnRowButtons(actionsEl, fnId, fnName) {
     startFnRename(itemEl, fnId, fnName);
   });
   actionsEl.appendChild(editBtn);
+  actionsEl.appendChild(buildDeleteButton({
+    type: 'fn', id: fnId, displayName: fnName,
+    blockReason: fnDeleteBlockReason(fnId)
+  }));
 }
 
 

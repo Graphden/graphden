@@ -104,6 +104,18 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 .entity-item:hover .ns-row-actions .create-btn-inline { opacity: 1; }
 .create-btn-inline:hover { background: #000; color: #fff; }
 
+/* Disabled (greyed-out) state for the delete button when the entity
+   can't be removed safely. The button stays in the row layout so its
+   absence doesn't shift the icon group; tooltip carries the reason. */
+.create-btn-inline.create-btn-disabled,
+.create-btn-inline:disabled {
+  color: #888; cursor: not-allowed;
+}
+.create-btn-inline.create-btn-disabled:hover,
+.create-btn-inline:disabled:hover {
+  background: transparent; color: #888;
+}
+
 /* Create-child popover menu (ns / fn). Floated above the sidebar. */
 .create-menu {
   background: #fff; color: #000; border: 1px solid #000; border-radius: 3px;

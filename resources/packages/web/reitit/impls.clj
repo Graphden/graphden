@@ -17,19 +17,23 @@
 
 ;; === Reitit library wrappers ====================================================
 
+(defn- merge-routes-by-path
+  "Pre-process routes: group entries that share `path` and merge their
+   method-data maps into one. We declare each (path, method) pair as a
+   separate fn-def, but reitit's router needs each path declared ONCE
+   with ALL its methods — even with `:conflicts nil` it silently drops
+   all but the first duplicate. This collapses the vector before
+   handing it to reitit."
+  [routes]
+  (vec (for [[path entries] (group-by first routes)]
+         [path (apply merge (map second entries))])))
+
+
 (defbase ring-router-fn
   "Compile routes into a reitit router. Consumes reitit-shaped route
-   data `[[path {:method {:handler …}} …]]` with keyword keys.
-
-   `:conflicts nil` disables reitit's same-path-conflict check — we
-   declare each (path, method) pair as a separate fn-def, so the
-   compiled routes vector legitimately has duplicate paths with
-   different methods (e.g. PUT and DELETE on
-   `/api/entities/:type/:id`). Reitit dispatches by `[path method]`
-   regardless, so the conflict check is just a paranoia guard for
-   hand-written routes."
+   data `[[path {:method {:handler …}} …]]` with keyword keys."
   [routes]
-  (ring/router routes {:conflicts nil}))
+  (ring/router (merge-routes-by-path routes)))
 
 
 (defbase ring-create-default-handler-fn

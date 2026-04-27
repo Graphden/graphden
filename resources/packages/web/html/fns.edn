@@ -7,46 +7,53 @@
  :description "HTML/Hiccup primitives — render, page scaffolding, form helpers, common UI blocks (button, badge, field-row)."
  :fns
  [{:name :render-hiccup
-   :args {:hiccup :jsonb}
+   :description "Render a hiccup tree to an HTML string (`hiccup2.core/html`)."
+   :args {:hiccup {:type :jsonb :description "Hiccup expression — vector of `[tag attrs? & children]`."}}
    :return-type :text}
 
   {:name :html-page
-   :args {:title :text
-          :head {:type :jsonb :required false}
-          :body :jsonb
-          :scripts {:type :jsonb :required false}}
+   :description "Build a full HTML page hiccup tree — `<!DOCTYPE html>` + `<head>` (title + head elements) + `<body>` (body + script tags)."
+   :args {:title {:type :text :description "Document title (rendered in `<title>`)."}
+          :head {:type :jsonb :required false :description "Vector of additional `<head>` hiccup elements."}
+          :body {:type :jsonb :description "Hiccup tree placed inside `<body>`."}
+          :scripts {:type :jsonb :required false :description "Vector of `<script>` hiccup elements appended at end of body."}}
    :return-type :jsonb}
 
   ;; Append a CDN script tag to head elements
   {:name :with-cdn-script
-   :args {:head {:type :jsonb :required false}
-          :url :text}
+   :description "Append a `<script src=\"url\">` element to a head-elements vector."
+   :args {:head {:type :jsonb :required false :description "Existing head-elements vector (nil treated as empty)."}
+          :url {:type :text :description "CDN URL of the script to load."}}
    :return-type :jsonb}
 
   {:name :cytoscape-container
-   :args {:id :text
-          :style :jsonb}
+   :description "Hiccup snippet for a Cytoscape.js mount point — `<div id=… style=…>` ready for the JS to attach to."
+   :args {:id {:type :text :description "DOM id used by the JS to find this container."}
+          :style {:type :jsonb :description "Inline-style map (e.g. `{\"width\" \"100%\"}`)."}}
    :return-type :jsonb}
 
   {:name :form-input
-   :args {:field-name :text
-          :label-text :text
-          :input-type {:type :text :value "text"}
-          :field-value {:type :any :required false}
-          :extra-attrs {:type :jsonb :required false}}
+   :description "Hiccup snippet for a labelled `<input>` field — `<label> + <input>` wrapped in a div."
+   :args {:field-name {:type :text :description "Form field name (becomes `name` and `for` attributes)."}
+          :label-text {:type :text :description "Visible label text."}
+          :input-type {:type :text :value "text" :description "HTML `type` attribute. Defaults to `\"text\"`."}
+          :field-value {:type :any :required false :description "Pre-filled `value` for edit-style forms."}
+          :extra-attrs {:type :jsonb :required false :description "Extra attributes merged onto the `<input>`."}}
    :return-type :jsonb}
 
   {:name :form-select
-   :args {:field-name :text
-          :label-text :text
-          :options :jsonb
-          :selected-value {:type :any :required false}
-          :extra-attrs {:type :jsonb :required false}}
+   :description "Hiccup snippet for a labelled `<select>` field with an options list."
+   :args {:field-name {:type :text :description "Form field name."}
+          :label-text {:type :text :description "Visible label text."}
+          :options {:type :jsonb :description "Vector of `[value label]` pairs (or just values — re-used as labels)."}
+          :selected-value {:type :any :required false :description "Pre-selected option value."}
+          :extra-attrs {:type :jsonb :required false :description "Extra attributes merged onto the `<select>`."}}
    :return-type :jsonb}
 
   ;; <button type="..." ...extra-attrs>btn-text</button>
   ;; pure :hiccup composition with :coalesce default for btn-type
   {:name :button
+   :description "`<button type=… …extra-attrs>btn-text</button>` — pure composition over `:hiccup` with `:coalesce` defaulting `btn-type` to `\"button\"`."
    :parent :hiccup
    :args {:tag "button"
           :attrs :_button-attrs
@@ -75,6 +82,7 @@
   ;; <div class="field-row"><span class="field-label">label</span>
   ;;                        <span class="field-value">value-or-dash</span></div>
   {:name :field-row
+   :description "`<div class=\"field-row\"><span class=\"field-label\">label</span><span class=\"field-value\">value</span></div>`. nil values render as `-` so empty rows look intentional."
    :parent :hiccup
    :args {:tag "div"
           :attrs {:class "field-row"}
@@ -120,6 +128,7 @@
 
   ;; <span class="badge[ badge-<type>]">badge-text</span>
   {:name :badge
+   :description "`<span class=\"badge[ badge-<type>]\">badge-text</span>` — coloured pill for entity-type tags etc. Class becomes `\"badge badge-<type>\"` when `:badge-type` is set, else just `\"badge\"`."
    :parent :hiccup
    :args {:tag "span"
           :attrs :_badge-attrs
@@ -150,8 +159,9 @@
   ;; Entity field rows - renders multiple field-rows from entity using field-specs
   ;; field-specs: [[label key] ...] or [[label key transform-fn] ...]
   {:name :entity-field-rows
-   :args {:entity :jsonb
-          :field-specs :jsonb}
+   :description "Render a vector of `:field-row`s from a single entity, driven by a list of `[label key transform?]` specs."
+   :args {:entity {:type :jsonb :description "Source entity map."}
+          :field-specs {:type :jsonb :description "Vector of `[label key]` or `[label key transform-fn]` specs."}}
    :return-type :jsonb}
 
   ;; Wrap text content in an HTML element. fn-def composition over
@@ -161,26 +171,31 @@
    :args {:coll [] :item {:as :content}}}
 
   {:name :wrap-element
+   :description "Build a single-child hiccup element `[tag content]` — pure composition over `:hiccup`. Used as the parent of `:wrap-style` / `:wrap-script`."
    :parent :hiccup
    :args {:children :_wrap-element-children}}
 
   {:name :wrap-style
+   :description "Wrap a CSS string into `<style>content</style>` hiccup."
    :parent :wrap-element
    :args {:tag "style"}}
 
   {:name :wrap-script
+   :description "Wrap a JS string into `<script>content</script>` hiccup."
    :parent :wrap-element
    :args {:tag "script"}}
 
   ;; Generic hiccup element constructor
   {:name :hiccup
-   :args {:tag :text
-          :attrs {:type :jsonb :required false}
-          :children {:type :jsonb :required false}}
+   :description "Build a hiccup vector `[tag attrs & children]`. `attrs` and `children` are optional."
+   :args {:tag {:type :text :description "HTML tag name."}
+          :attrs {:type :jsonb :required false :description "Attribute map (string keys). Omit/nil for no attributes."}
+          :children {:type :jsonb :required false :description "Vector of child hiccup nodes or text."}}
    :return-type :jsonb}
 
   ;; <div style="...">button1 button2 ...</div>  -- horizontal flex container.
   {:name :button-row
+   :description "`<div style=…>btn1 btn2 …</div>` — horizontal flex container for action buttons. Caller supplies `:style` and `:buttons` (already-rendered hiccup)."
    :parent :hiccup
    :args {:tag "div"
           :attrs :_button-row-attrs
@@ -192,6 +207,7 @@
 
   ;; Transform a value for display: :keyword-to-str, :pr-str, :bool-to-yesno
   {:name :apply-transform
-   :args {:value {:type :any :required false}
-          :transform {:type :text :required false}}
+   :description "Apply a named display transform — `:keyword-to-str`, `:pr-str`, `:bool-to-yesno` — to a single value. Identity when `:transform` is nil."
+   :args {:value {:type :any :required false :description "Value to transform (nil-safe)."}
+          :transform {:type :text :required false :description "Transform name (e.g. `\"keyword-to-str\"`)."}}
    :return-type :any}]}

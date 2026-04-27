@@ -39,36 +39,44 @@
   ;; supplies both keys; this fn still picks `:request` out of the
   ;; resulting free-args map.
   {:name :ring-request
+   :description "Single holder for the inbound Ring request — identity rename that exposes `:value` as the free arg `:request`. All field extractors below source from this one fn so each request flows through it once."
    :parent :identity
    :args {:value {:as :request}}}
 
   ;; Shared `:coll :ring-request` lookup — factor out the common binding so
   ;; each field extractor below just names the key it wants.
   {:name :ring-request-field
+   :description "Helper that binds `:coll :ring-request` once. Children name the field they want via `:key` instead of repeating the request binding."
    :parent :get
    :args {:coll :ring-request}}
 
   {:name :ring-method
+   :description "HTTP method keyword from the Ring request (e.g. `:get`, `:post`)."
    :parent :ring-request-field
    :args {:key {:value :request-method}}}
 
   {:name :ring-uri
+   :description "Path portion of the request URI (e.g. `\"/api/entities\"`)."
    :parent :ring-request-field
    :args {:key {:value :uri}}}
 
   {:name :ring-query-string
+   :description "Raw query string from the request (without leading `?`), nil if absent."
    :parent :ring-request-field
    :args {:key {:value :query-string}}}
 
   {:name :ring-headers
+   :description "Header map from the Ring request — string keys, lower-cased per Ring convention."
    :parent :ring-request-field
    :args {:key {:value :headers}}}
 
   {:name :ring-body-input-stream
+   :description "Raw body InputStream from the Ring request — feed into `:slurp` to get a string, or directly into a parser."
    :parent :ring-request-field
    :args {:key {:value :body}}}
 
   {:name :ring-body
+   :description "Request body slurped to a string."
    :parent :slurp
    :args {:input :ring-body-input-stream}}
 
@@ -77,26 +85,32 @@
   ;; =============================================================================
 
   {:name :ring-method-entry
+   :description "`[:request-method <method>]` entry for the internal-request map."
    :parent :pair
    :args {:item1 {:value :request-method} :item2 :ring-method}}
 
   {:name :ring-uri-entry
+   :description "`[:uri <path>]` entry for the internal-request map."
    :parent :pair
    :args {:item1 {:value :uri} :item2 :ring-uri}}
 
   {:name :ring-query-string-entry
+   :description "`[:query-string <qs>]` entry for the internal-request map."
    :parent :pair
    :args {:item1 {:value :query-string} :item2 :ring-query-string}}
 
   {:name :ring-headers-entry
+   :description "`[:headers <headers>]` entry for the internal-request map."
    :parent :pair
    :args {:item1 {:value :headers} :item2 :ring-headers}}
 
   {:name :ring-body-entry
+   :description "`[:body <body-string>]` entry for the internal-request map."
    :parent :pair
    :args {:item1 {:value :body} :item2 :ring-body}}
 
   {:name :internal-request
+   :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`."
    :parent :pairs->map
    :args {:entries [:ring-method-entry
                     :ring-uri-entry
@@ -112,6 +126,7 @@
   ;; =============================================================================
 
   {:name :router-result
+   :description "Invoke the router callable (`:func`, free arg supplied by the consuming fn) on the parsed `:internal-request`. The result is a Ring response map."
    :parent :invoke
    :args {:arg :internal-request}}
 
@@ -126,6 +141,7 @@
                   "Referrer-Policy" "strict-origin-when-cross-origin"}}}
 
   {:name :default-security-headers
+   :description "Default security-header map merged into every response — `X-Content-Type-Options`, `X-Frame-Options`, `X-XSS-Protection`, `Referrer-Policy`. Keys are stringified for http-kit."
    :parent :stringify-map-keys
    :args {:m :_default-security-headers-raw}}
 
@@ -147,6 +163,7 @@
   ;; bypass where an unset AUTH_TOKEN would make `token-valid?` return
   ;; true for requests without an Authorization header.
   {:name :auth-token-from-env
+   :description "Required `AUTH_TOKEN` env var. Throws on empty/unset to prevent the `(= nil nil)` bypass where requests with no Authorization header would otherwise validate."
    :parent :env-required
    :args {:name "AUTH_TOKEN"}}
 
@@ -154,22 +171,27 @@
   ;; `has-bearer-prefix?` is nil-safe (returns false), so no default
   ;; needed here. Keeps the node free of literal-default clutter.
   {:name :authorization-header
+   :description "Raw `Authorization` header from the request (nil when absent)."
    :parent :get
    :args {:coll :ring-headers :key "authorization"}}
 
   {:name :has-bearer-prefix?
+   :description "True iff the `Authorization` header starts with `\"Bearer \"`. Nil-safe — false for missing header."
    :parent :str-starts-with?
    :args {:string :authorization-header :prefix "Bearer "}}
 
   {:name :bearer-token-raw
+   :description "Substring of the `Authorization` header after the `\"Bearer \"` prefix — only meaningful when `:has-bearer-prefix?` is true."
    :parent :subs
    :args {:string :authorization-header :start 7}}
 
   {:name :bearer-token
+   :description "Bearer token value when the header has the `\"Bearer \"` prefix, else nil. Guards against treating arbitrary header content as a token."
    :parent :if
    :args {:test :has-bearer-prefix? :then :bearer-token-raw :else nil}}
 
   {:name :token-valid?
+   :description "True iff the request's bearer token equals the `AUTH_TOKEN` env var."
    :parent :equal?
    :args {:a :bearer-token :b :auth-token-from-env}}
 
@@ -180,6 +202,7 @@
           :headers {"Content-Type" "text/plain"}}}
 
   {:name :default-auth-fail-response
+   :description "Canonical 401 response used by `auth-required-middleware` when the bearer token is missing or wrong — `{:status 401 :body \"Unauthorized\"}` with text content-type."
    :parent :_default-auth-fail-body
    :args {:body "Unauthorized"}}
 
@@ -200,6 +223,7 @@
           :else :default-auth-fail-response}}
 
   {:name :auth-required-middleware
+   :description "Bearer-token auth middleware. When the request's token matches `AUTH_TOKEN`, calls `:proceed` (next handler in the chain); otherwise returns the 401 response directly. Attached per-route via `:middleware [:auth-required-middleware]` in route-data."
    :parent :middleware
    :args {:name {:value :auth-required}
           :body :_auth-required-body}}

@@ -61,8 +61,9 @@
   ;; Inside `:body`, use `:proceed` to delegate to the next link in
   ;; the chain (it just runs `:invoke` over those two free args).
   {:name :middleware
-   :args {:name :any
-          :body :fn}
+   :description "Build a reitit middleware spec. `:body` is a Ring-shaped fn-graph with two leftover free args (`:request` and `:next-handler`) — the executor map-callable-wraps it. Inside the body, use `:proceed` to delegate to the next link."
+   :args {:name {:type :any :description "Identifier (keyword or string) shown in reitit's middleware chain log."}
+          :body {:type :fn :description "Ring-shaped fn-graph; receives `:request` and `:next-handler` as free args."}}
    :return-type :jsonb}
 
   ;; Delegate to the next handler in the middleware chain. Replaces
@@ -74,6 +75,7 @@
   ;; is `:request` — which lines up with `:ring-request`'s rename, so
   ;; reuse of the existing extraction chain works naturally.
   {:name :proceed
+   :description "Delegate to the next handler in the middleware chain. `:func` resolves to the chain's `:next-handler` free arg; `:arg` resolves to `:ring-request`. Use inside a `:middleware` body when the request should pass through."
    :parent :invoke
    :args {:func {:as :next-handler}
           :arg :ring-request}}

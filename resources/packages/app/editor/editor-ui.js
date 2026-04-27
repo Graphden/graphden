@@ -137,13 +137,15 @@ function buildFnItem(fn) {
   if (typeof buildFnRowButtons === 'function') {
     buildFnRowButtons(actions, fn.id, fn.displayName);
   }
-  if (fn.description) {
-    const desc = createDescriptionBadge(fn.description, {
-      name: fn.displayName,
-      namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id))
-    });
-    if (desc) actions.appendChild(desc);
-  }
+  // Always render the badge so the user has an entry point to ADD a
+  // description to entities that don't have one yet.
+  const desc = createDescriptionBadge(fn.description, {
+    name: fn.displayName,
+    namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id)),
+    entityType: 'fn',
+    entityId: fn.id
+  });
+  if (desc) actions.appendChild(desc);
   if (actions.children.length > 0) item.appendChild(actions);
 
   item.onclick = () => selectFn(fn.id);
@@ -180,8 +182,12 @@ function renderNsNode(container, name, node, path) {
   if (node && node.nsId && typeof buildNsRowButtons === 'function') {
     buildNsRowButtons(actions, node.nsId, nsPath);
   }
-  if (node && node.description) {
-    const desc = createDescriptionBadge(node.description, { name: nsPath });
+  if (node && node.nsId) {
+    const desc = createDescriptionBadge(node.description, {
+      name: nsPath,
+      entityType: 'ns',
+      entityId: node.nsId
+    });
     if (desc) actions.appendChild(desc);
   }
   if (actions.children.length > 0) header.appendChild(actions);

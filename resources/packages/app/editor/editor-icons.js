@@ -19,7 +19,6 @@ function applyActionIconBox(el) {
 }
 
 function createDescriptionBadge(description, opts) {
-  if (!description) return null;
   opts = opts || {};
   const badge = document.createElement('span');
   badge.className = 'description-badge';
@@ -49,13 +48,17 @@ function createDescriptionBadge(description, opts) {
     badge.style.marginLeft = '4px';
     badge.style.verticalAlign = 'middle';
   }
-  // Tooltip payload — full name (bold), namespace (italic dim), description.
-  // The full name lets touch users read truncated names from the i-tooltip
-  // since on iPad there's no row-hover.
+  // Tooltip payload — full name (bold), namespace (italic dim),
+  // description, plus entity (type, id) so the tooltip can offer an
+  // Edit affordance when pinned. The badge ALWAYS renders now (even
+  // for empty descriptions), so users have a click-target to ADD a
+  // description to entities that don't have one yet.
   const tooltipContent = {
     name: opts.name || null,
     namespace: opts.namespace || null,
-    description
+    description: description || '',
+    entityType: opts.entityType || null,
+    entityId: opts.entityId || null
   };
   ensureDescriptionTooltipDismissHandler();
   badge.addEventListener('mouseenter', (e) => {

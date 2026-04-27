@@ -337,7 +337,9 @@ function createFnOverlay(node, container) {
         pinRight: true,
         onEnter: colClearPreview,
         name: colFn.name,
-        namespace: getFnNamespace(lookups.fnMap.get(colFn.fnId))
+        namespace: getFnNamespace(lookups.fnMap.get(colFn.fnId)),
+        entityType: 'fn',
+        entityId: colFn.fnId
       });
       if (colDescBadge) {
         colDescBadge.style.zIndex = '2';
@@ -437,7 +439,9 @@ function createFnOverlay(node, container) {
           pinRight: true,
           onEnter: miClearPreview,
           name: f.name,
-          namespace: getFnNamespace(lookups.fnMap.get(f.fnId))
+          namespace: getFnNamespace(lookups.fnMap.get(f.fnId)),
+          entityType: 'fn',
+          entityId: f.fnId
         });
         if (miDescBadge) span.appendChild(miDescBadge);
         if (miShowOpen) {
@@ -532,7 +536,9 @@ function createFnOverlay(node, container) {
         pinRight: true,
         onEnter: lineClearPreview,
         name: lineFn.name,
-        namespace: getFnNamespace(lookups.fnMap.get(lineFn.fnId))
+        namespace: getFnNamespace(lookups.fnMap.get(lineFn.fnId)),
+        entityType: 'fn',
+        entityId: lineFn.fnId
       });
       if (lineDescBadge) line.appendChild(lineDescBadge);
       if (lineShowOpen) {
@@ -700,15 +706,27 @@ function createEdgeLabelOverlay(edge, container) {
   // Walk source-id chain from the edge's source-arg to the primary
   // (terminal source-id=nil) and pick the first :description we hit.
   // The primary owns the slot's canonical description; intermediate
-  // renames may override it for clarity.
+  // renames may override it for clarity. Track the arg whose
+  // description we end up showing — that's the one Edit will PUT to.
   let description = null;
+  let descriptionArgId = null;
   const sourceArgId = edge.data('sourceArgId');
   if (sourceArgId && lookups && lookups.argMap) {
     let cur = lookups.argMap.get(sourceArgId);
     description = cur && cur.description;
+    descriptionArgId = cur && cur.id;
     while (!description && cur && cur['source-id']) {
       cur = lookups.argMap.get(cur['source-id']);
       description = cur && cur.description;
+      descriptionArgId = cur && cur.id;
+    }
+    // If no description was found anywhere along the chain, the
+    // canonical place to ATTACH a new description is the primary
+    // (terminal) arg — walk to it explicitly.
+    if (!description) {
+      cur = lookups.argMap.get(sourceArgId);
+      while (cur && cur['source-id']) cur = lookups.argMap.get(cur['source-id']);
+      descriptionArgId = cur && cur.id;
     }
   }
 
@@ -736,8 +754,12 @@ function createEdgeLabelOverlay(edge, container) {
   labelSpan.textContent = label;
   overlay.appendChild(labelSpan);
 
-  if (description) {
-    const desc = createDescriptionBadge(description, { name: label });
+  if (descriptionArgId) {
+    const desc = createDescriptionBadge(description, {
+      name: label,
+      entityType: 'arg',
+      entityId: descriptionArgId
+    });
     if (desc) overlay.appendChild(desc);
   }
 

@@ -12,6 +12,13 @@
 // element on mouseenter/leave instead.
 
 let descriptionTooltipEl = null;
+// Last-shown tooltip content — kept around so the Edit button (which
+// only appears in sticky mode) can read entityType/entityId without
+// having to thread them through every render call.
+let descriptionTooltipContent = null;
+// While editing, neither hover-out NOR document-level outside-click
+// should dismiss the tooltip — the user is mid-typing.
+let descriptionTooltipEditing = false;
 
 function ensureDescriptionTooltip() {
   if (descriptionTooltipEl) return descriptionTooltipEl;
@@ -41,24 +48,54 @@ function ensureDescriptionTooltip() {
 // "sticky" mode keeps the description tooltip visible after a click on
 // the i-badge (so iPad / touch users can read the full name + ns +
 // description even after the touch ends and mouseleave fires from the
-// browser's emulated mouse events).
+// browser's emulated mouse events). Sticky mode is also the prerequisite
+// for the Edit affordance — clicking the badge first pins, then the
+// user can click Edit to start typing.
 let descriptionTooltipSticky = false;
 
 function showDescriptionTooltip(content, evt) {
+  // Don't ever rebuild the tooltip while the user is mid-typing —
+  // a stray hover would otherwise wipe out the textarea.
+  if (descriptionTooltipEditing) return;
+  descriptionTooltipContent = content;
   const el = ensureDescriptionTooltip();
+  // Read mode: tooltip is purely informational, so it shouldn't
+  // intercept clicks. Edit mode flips this so the textarea is usable.
+  el.style.pointerEvents = 'none';
+  renderDescriptionTooltip();
+  positionDescriptionTooltipAt(el, evt.clientX, evt.clientY);
+}
+
+// Render the tooltip body in READ mode using `descriptionTooltipContent`.
+// Pulled out of showDescriptionTooltip so the Edit / Save / Cancel
+// buttons can re-render after a save without needing a fresh evt.
+function renderDescriptionTooltip() {
+  const el = descriptionTooltipEl;
+  const content = descriptionTooltipContent;
+  if (!el || !content) return;
   el.textContent = '';
-  // Accept either a plain string (legacy callers) or
-  // {name, namespace, description}.
   const isObj = content && typeof content === 'object';
   const name = isObj ? content.name : null;
   const ns = isObj ? content.namespace : null;
-  const text = isObj ? content.description : content;
+  const text = isObj ? (content.description || '') : (content || '');
+  // When pinned, the tooltip needs to capture clicks (for the Edit
+  // button and the close ×). Hover-mode keeps pointer-events:none so
+  // the floating bubble doesn't intercept anything.
+  if (descriptionTooltipSticky) {
+    el.style.pointerEvents = 'auto';
+    el.appendChild(buildCloseButton());
+  } else {
+    el.style.pointerEvents = 'none';
+  }
   if (name) {
     const nameRow = document.createElement('div');
     nameRow.textContent = name;
     nameRow.style.fontWeight = '600';
     nameRow.style.fontSize = '13px';
-    nameRow.style.marginBottom = (ns || text) ? '4px' : '0';
+    // Reserve space on the right so the close × doesn't overlap
+    // long names. 18px = 12px button + 6px gap.
+    nameRow.style.paddingRight = descriptionTooltipSticky ? '18px' : '0';
+    nameRow.style.marginBottom = '4px';
     el.appendChild(nameRow);
   }
   if (ns) {
@@ -67,34 +104,216 @@ function showDescriptionTooltip(content, evt) {
     nsRow.style.fontStyle = 'italic';
     nsRow.style.opacity = '0.7';
     nsRow.style.fontSize = '11px';
-    nsRow.style.marginBottom = text ? '4px' : '0';
+    nsRow.style.marginBottom = '4px';
     el.appendChild(nsRow);
   }
+  const body = document.createElement('div');
+  body.className = 'description-tooltip-body';
   if (text) {
-    const body = document.createElement('div');
     body.textContent = text;
-    el.appendChild(body);
+  } else {
+    body.textContent = '(no description)';
+    body.style.opacity = '0.55';
+    body.style.fontStyle = 'italic';
+  }
+  el.appendChild(body);
+  // Edit affordance only when (a) the tooltip is pinned (sticky) and
+  // (b) we know which entity this is. Hover-mode tooltips skip the
+  // button entirely so the read-only floating tip stays compact.
+  if (descriptionTooltipSticky
+      && content && content.entityType && content.entityId) {
+    const editRow = document.createElement('div');
+    editRow.style.marginTop = '6px';
+    editRow.style.textAlign = 'right';
+    const editBtn = document.createElement('button');
+    editBtn.type = 'button';
+    editBtn.className = 'description-tooltip-btn';
+    editBtn.textContent = '✎ Edit';
+    editBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      enterDescriptionEditMode();
+    });
+    editRow.appendChild(editBtn);
+    el.appendChild(editRow);
   }
   el.style.display = 'block';
-  // Position next to the cursor; clamp to viewport.
+}
+
+// Close button (×) sits absolute in the tooltip's top-right corner.
+// Touch users need an explicit dismiss target — outside-tap is a
+// fallback, but a visible × is the obvious affordance.
+function buildCloseButton() {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'description-tooltip-close';
+  btn.setAttribute('aria-label', 'Close');
+  btn.title = 'Close';
+  btn.textContent = '×';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    descriptionTooltipSticky = false;
+    descriptionTooltipEditing = false;
+    hideDescriptionTooltip(true);
+  });
+  return btn;
+}
+
+function positionDescriptionTooltipAt(el, clientX, clientY) {
   const margin = 12;
-  const x = Math.min(evt.clientX + margin, window.innerWidth - el.offsetWidth - margin);
-  const y = Math.min(evt.clientY + margin, window.innerHeight - el.offsetHeight - margin);
-  el.style.left = x + 'px';
-  el.style.top = y + 'px';
+  const x = Math.min(clientX + margin, window.innerWidth - el.offsetWidth - margin);
+  const y = Math.min(clientY + margin, window.innerHeight - el.offsetHeight - margin);
+  el.style.left = Math.max(margin, x) + 'px';
+  el.style.top = Math.max(margin, y) + 'px';
+}
+
+// EDIT MODE — body becomes a textarea + Save/Cancel. PUT to
+// /api/entities/<type>/<id> on save (auth-required), then patch the
+// in-memory copy of the entity so subsequent tooltip opens reflect the
+// new description without a graph refetch.
+function enterDescriptionEditMode() {
+  const el = descriptionTooltipEl;
+  const content = descriptionTooltipContent;
+  if (!el || !content || !content.entityType || !content.entityId) return;
+  descriptionTooltipEditing = true;
+  el.textContent = '';
+  el.style.pointerEvents = 'auto';
+
+  if (content.name) {
+    const nameRow = document.createElement('div');
+    nameRow.textContent = content.name;
+    nameRow.style.fontWeight = '600';
+    nameRow.style.fontSize = '13px';
+    nameRow.style.marginBottom = '4px';
+    el.appendChild(nameRow);
+  }
+
+  const ta = document.createElement('textarea');
+  ta.className = 'description-tooltip-textarea';
+  ta.value = content.description || '';
+  ta.rows = Math.max(3, Math.min(8, (ta.value.match(/\n/g) || []).length + 2));
+  el.appendChild(ta);
+
+  const errEl = document.createElement('div');
+  errEl.className = 'description-tooltip-error';
+  errEl.style.display = 'none';
+  el.appendChild(errEl);
+
+  const row = document.createElement('div');
+  row.style.marginTop = '6px';
+  row.style.display = 'flex';
+  row.style.gap = '6px';
+  row.style.justifyContent = 'flex-end';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'description-tooltip-btn description-tooltip-btn-secondary';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    descriptionTooltipEditing = false;
+    renderDescriptionTooltip();
+  });
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'description-tooltip-btn';
+  save.textContent = 'Save';
+  save.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    save.disabled = true;
+    cancel.disabled = true;
+    errEl.style.display = 'none';
+    const newDesc = ta.value;
+    const ok = await saveEntityDescription(content.entityType, content.entityId, newDesc);
+    if (ok) {
+      content.description = newDesc;
+      patchEntityDescriptionInState(content.entityType, content.entityId, newDesc);
+      descriptionTooltipEditing = false;
+      renderDescriptionTooltip();
+    } else {
+      save.disabled = false;
+      cancel.disabled = false;
+      errEl.textContent = 'Save failed — check that you\'re signed in.';
+      errEl.style.display = 'block';
+    }
+  });
+  row.appendChild(cancel);
+  row.appendChild(save);
+  el.appendChild(row);
+
+  // Focus the textarea so the user can start typing immediately.
+  // preventScroll keeps the page from jumping if the tooltip is near
+  // the edge.
+  if (typeof ta.focus === 'function') {
+    try { ta.focus({ preventScroll: true }); } catch (_) { ta.focus(); }
+  }
+  // Position the tooltip might need to grow vertically — re-measure
+  // and clamp so it doesn't fall off the bottom of the viewport.
+  const rect = el.getBoundingClientRect();
+  if (rect.bottom > window.innerHeight - 8) {
+    el.style.top = Math.max(8, window.innerHeight - rect.height - 8) + 'px';
+  }
+}
+
+// Posts the new description as a form-encoded PUT. The backend's
+// permissive `parse-*-from-form` impls only update fields actually
+// present in the body, so we don't have to send name/parent/etc.
+async function saveEntityDescription(entityType, entityId, description) {
+  try {
+    const body = 'description=' + encodeURIComponent(description);
+    const r = await authFetch('/api/entities/' + encodeURIComponent(entityType)
+                              + '/' + encodeURIComponent(entityId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body
+    });
+    return r && r.ok;
+  } catch (_) {
+    return false;
+  }
+}
+
+// Patch the local in-memory record so subsequent tooltip opens (and
+// any other readers) see the new description without a graph refetch.
+function patchEntityDescriptionInState(entityType, entityId, description) {
+  if (!graphData) return;
+  const collKey = entityType === 'fn' ? 'fns'
+                : entityType === 'arg' ? 'args'
+                : entityType === 'ns'  ? 'ns'
+                : null;
+  if (!collKey) return;
+  const coll = graphData[collKey];
+  if (!Array.isArray(coll)) return;
+  for (const e of coll) {
+    if (e && e.id === entityId) { e.description = description; break; }
+  }
+  // Lookups (fnMap, argMap) may hold the same object references the
+  // arrays do (common after rebuild), but rebuild defensively.
+  if (typeof buildLookups === 'function') {
+    lookups = buildLookups(graphData);
+  }
 }
 
 function hideDescriptionTooltip(force) {
+  if (descriptionTooltipEditing) return;
   if (descriptionTooltipSticky && !force) return;
   if (descriptionTooltipEl) descriptionTooltipEl.style.display = 'none';
 }
 
-// Document-level click closes any sticky tooltip. Installed once on
-// first use (idempotent guard via the function itself).
+// Document-level dismiss for any pinned tooltip. Listens for
+// `pointerdown` (not `click`) so iPad taps on non-interactive page
+// background — where Safari often skips the click event — still
+// close the tooltip reliably. Installed once, idempotent.
 function ensureDescriptionTooltipDismissHandler() {
   if (ensureDescriptionTooltipDismissHandler._installed) return;
   ensureDescriptionTooltipDismissHandler._installed = true;
-  document.addEventListener('click', (e) => {
+  document.addEventListener('pointerdown', (e) => {
+    // While editing, NEVER auto-close — a stray tap outside the
+    // tooltip would otherwise destroy in-progress text. (User has
+    // the explicit × close button if they want to abandon.)
+    if (descriptionTooltipEditing) return;
     if (!descriptionTooltipSticky) return;
     if (e.target.closest && (e.target.closest('.description-badge')
                              || e.target.closest('.description-tooltip'))) {

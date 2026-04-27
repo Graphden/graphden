@@ -270,32 +270,53 @@
 
 ;; === Form Parsing (pure) ===
 
+;; All three parse-*-from-form impls are permissive — fields are
+;; only assoc'd when the key is actually present in the form. That
+;; way both create (full form) and update (partial form, e.g.
+;; description-only) flow through the same code without partial
+;; updates blanking the unsent fields. Empty strings are kept (so
+;; a submitted-empty `description=` clears the field rather than
+;; leaving the old value).
+
+
 (defbase parse-fn-from-form
   [form-data]
-  (cond-> {:name (str (:name form-data))}
+  (cond-> {}
+    (contains? form-data :name)
+    (assoc :name (str (:name form-data)))
     (not (str/blank? (:parent-id form-data)))
     (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data)))
     (not (str/blank? (:namespace-id form-data)))
-    (assoc :namespace-id (java.util.UUID/fromString (:namespace-id form-data)))))
+    (assoc :namespace-id (java.util.UUID/fromString (:namespace-id form-data)))
+    (contains? form-data :description)
+    (assoc :description (:description form-data))))
 
 
 (defbase parse-arg-from-form
   [form-data]
-  (cond-> {:name (keyword (:name form-data))
-           :fn-id (java.util.UUID/fromString (:fn-id form-data))
-           :type (keyword (:type form-data))}
+  (cond-> {}
+    (contains? form-data :name)
+    (assoc :name (keyword (:name form-data)))
+    (contains? form-data :fn-id)
+    (assoc :fn-id (java.util.UUID/fromString (:fn-id form-data)))
+    (contains? form-data :type)
+    (assoc :type (keyword (:type form-data)))
     (not (str/blank? (:source-id form-data)))
     (assoc :source-id (java.util.UUID/fromString (:source-id form-data)))
     (not (str/blank? (:value form-data)))
-    (assoc :value (json/parse-string (:value form-data) true))))
+    (assoc :value (json/parse-string (:value form-data) true))
+    (contains? form-data :description)
+    (assoc :description (:description form-data))))
 
 
 (defbase parse-ns-from-form
   [form-data]
-  (cond-> {:name (str (:name form-data))}
+  (cond-> {}
+    (contains? form-data :name)
+    (assoc :name (str (:name form-data)))
     (not (str/blank? (:parent-id form-data)))
     (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data)))
-    (not (str/blank? (:description form-data)))
+    (contains? form-data :description)
     (assoc :description (:description form-data))))
 
 

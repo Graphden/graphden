@@ -358,6 +358,53 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   transition: color 0.1s, font-weight 0.1s;
 }
 
+/* In-tooltip dismiss — the × button is the obvious affordance for
+   touch users; the document-level pointerdown handler is a fallback
+   for desktop "tap-outside". Sized 20×20 to be a comfortable touch
+   target without dominating the tooltip header. */
+.description-tooltip { position: relative; }
+.description-tooltip-close {
+  position: absolute; top: 4px; right: 4px;
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; color: var(--tooltip-fg);
+  border: 0; border-radius: 3px;
+  font-size: 18px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0.65;
+}
+.description-tooltip-close:hover { opacity: 1; background: rgba(127,127,127,0.2); }
+
+/* In-tooltip edit affordances — Edit pencil (read mode) and the
+   Save/Cancel + textarea triplet (edit mode). The tooltip itself
+   inherits `var(--tooltip-bg/--tooltip-fg)` so the buttons float on
+   the same dark/light bubble that already adapts to theme. */
+.description-tooltip-btn {
+  font-family: inherit; font-size: 11px;
+  padding: 3px 10px; border-radius: 3px; cursor: pointer;
+  background: var(--tooltip-fg); color: var(--tooltip-bg);
+  border: 1px solid var(--tooltip-fg);
+}
+.description-tooltip-btn:hover { opacity: 0.85; }
+.description-tooltip-btn:disabled { opacity: 0.5; cursor: default; }
+.description-tooltip-btn-secondary {
+  background: transparent; color: var(--tooltip-fg);
+}
+.description-tooltip-textarea {
+  width: 320px; max-width: 100%; min-height: 60px;
+  font-family: inherit; font-size: 12px; line-height: 1.4;
+  padding: 4px 6px; border-radius: 3px;
+  border: 1px solid var(--tooltip-fg);
+  background: var(--tooltip-bg); color: var(--tooltip-fg);
+  resize: vertical; box-sizing: border-box; outline: none;
+}
+.description-tooltip-textarea:focus {
+  box-shadow: 0 0 0 1px var(--tooltip-fg) inset;
+}
+.description-tooltip-error {
+  margin-top: 4px; font-size: 11px;
+  color: #ff8080;
+}
+
 /* Right-edge action icons — `i` (description) and `↗` (open in new tab).
    Highlight on hover so the click-target is obvious; the tint uses
    `currentColor` so it picks up whichever fg the row has (white on a

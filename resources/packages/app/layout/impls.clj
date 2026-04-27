@@ -305,7 +305,9 @@
 (declare target-interface-names
          compute-edge-label
          build-inverse-source-map
-         caller-bound-arg)
+         caller-bound-arg
+         terminal-arg-of
+         terminal-source-of)
 
 
 (defn- record-optional-unset!
@@ -350,6 +352,62 @@
                      :argName (or (compute-edge-label lookups arg-id source-node-id expanded-fns)
                                   (when arg-name (name arg-name)))}}))
     node-id))
+
+
+(defn- make-parent-bound-terminals
+  "Returns a memoized `(fn [fn-id])` that gives the set of terminal-
+   source-ids bound by `fn-id`'s parent-inheritance closure (including
+   itself). Bindings inside ref-id targets are NOT included — those are
+   scoped to the ref's own call context.
+
+   Memoised because the same fn-id is queried from many call sites
+   during a single layout pass."
+  [lookups]
+  (let [{:keys [fn-map arg-map args-by-fn]} lookups
+        cache (atom {})]
+    (fn [fn-id]
+      (or (get @cache fn-id)
+          (let [visited (atom #{})
+                terms (atom #{})
+                walk (fn walk
+                       [fid]
+                       (when (and fid (not (contains? @visited fid)))
+                         (swap! visited conj fid)
+                         (doseq [a (get args-by-fn fid [])]
+                           (when (or (some? (:value a)) (some? (:ref-id a)))
+                             (swap! terms conj (terminal-source-of arg-map (:id a)))))
+                         (when-let [f (get fn-map fid)]
+                           (doseq [pid (:parent-ids f)]
+                             (walk pid)))))]
+            (walk fn-id)
+            (let [result @terms]
+              (swap! cache assoc fn-id result)
+              result))))))
+
+
+(defn- arg-determined?
+  "True iff `arg-id`'s terminal source-id is bound by some fn reachable
+   via the source chain owners' parent inheritance.
+
+   Walks `arg-id`'s source chain; for each arg in the chain, takes the
+   OWNING fn's `parent-bound-terminals` set; checks if the terminal is
+   in it.
+
+   This correctly handles MI-propagated args (e.g. `text-error-router.headers`
+   → `text-not-found-response` in chain → `text-content-type` binds
+   `headers` via MI parent) WITHOUT falsely including ref-target
+   bindings (e.g. `method-map` references `assoc-handler` via 'value'
+   ref — `assoc-handler.key` binding is scoped to assoc-handler's own
+   call, not method-map.key)."
+  [arg-map parent-bound-terminals arg-id]
+  (let [terminal (terminal-source-of arg-map arg-id)]
+    (loop [cur (get arg-map arg-id)]
+      (if (nil? cur)
+        false
+        (let [fid (:fn-id cur)]
+          (if (and fid (contains? (parent-bound-terminals fid) terminal))
+            true
+            (recur (get arg-map (:source-id cur)))))))))
 
 
 (defn- arg-marks-hof?
@@ -690,52 +748,8 @@
                      :captured-edge-migrations {}})
 
         inverse-source-map (build-inverse-source-map arg-map)
+        parent-bound-terminals (make-parent-bound-terminals lookups)
 
-        ;; For each fn, the set of terminal-source-ids bound by its parent
-        ;; inheritance closure (including itself). Bindings in ref-id targets
-        ;; are NOT included — those are scoped to the ref's call context.
-        parent-bound-terminals
-        (let [cache (atom {})]
-          (fn [fn-id]
-            (or (get @cache fn-id)
-                (let [visited (atom #{})
-                      terms (atom #{})
-                      walk (fn walk
-                             [fid]
-                             (when (and fid (not (contains? @visited fid)))
-                               (swap! visited conj fid)
-                               (doseq [a (get args-by-fn fid [])]
-                                 (when (or (some? (:value a)) (some? (:ref-id a)))
-                                   (swap! terms conj (terminal-source-of arg-map (:id a)))))
-                               (when-let [f (get fn-map fid)]
-                                 (doseq [pid (:parent-ids f)]
-                                   (walk pid)))))]
-                  (walk fn-id)
-                  (let [result @terms]
-                    (swap! cache assoc fn-id result)
-                    result)))))
-
-        ;; Check if arg X is "determined" — its terminal is bound by some fn
-        ;; reachable via the source chain owners' parent inheritance.
-        ;;
-        ;; Walks source chain of X; for each arg in the chain, takes the
-        ;; OWNING fn's parent-bound-terminals set; checks if X's terminal is in it.
-        ;;
-        ;; This correctly handles MI-propagated args (e.g. text-error-router.headers
-        ;; → text-not-found-response in chain → text-content-type binds headers via
-        ;; MI parent) WITHOUT falsely including ref-target bindings (e.g. method-map
-        ;; references assoc-handler via 'value' ref — assoc-handler.key binding is
-        ;; scoped to assoc-handler's own call, not method-map.key).
-        arg-determined?
-        (fn [arg-id]
-          (let [terminal (terminal-source-of arg-map arg-id)]
-            (loop [cur (get arg-map arg-id)]
-              (if (nil? cur)
-                false
-                (let [fid (:fn-id cur)]
-                  (if (and fid (contains? (parent-bound-terminals fid) terminal))
-                    true
-                    (recur (get arg-map (:source-id cur)))))))))
 
         ;; Compute sources covered by child refs of a fn
         ;; Returns set of source-ids that child refs will handle (for binding deduplication)
@@ -1230,7 +1244,7 @@
                                         true
                                         (when-let [src-arg (get arg-map sid)]
                                           (recur (:source-id src-arg)))))))
-                                (arg-determined? arg-id)))
+                                (arg-determined? arg-map parent-bound-terminals arg-id)))
 
                           filtered-args
                           (filterv (fn [arg]
@@ -1323,7 +1337,7 @@
                         ;; (they're scoped to the ref's call context).
                         all-args (filterv (fn [arg]
                                             (if (= :unset (:type arg))
-                                              (not (arg-determined? (:arg-id arg)))
+                                              (not (arg-determined? arg-map parent-bound-terminals (:arg-id arg)))
                                               true))
                                           raw-args)
                         ;; Separate by type and origin
@@ -1564,7 +1578,7 @@
                                                       (:value migrated) (:id arg)
                                                       node-id #{fn-id}))
 
-                                (and (not has-ref) (not (arg-determined? (:id arg))))
+                                (and (not has-ref) (not (arg-determined? arg-map parent-bound-terminals (:id arg))))
                                 (when (mark-once! [terminal :unset])
                                   (add-unset-arg-node state lookups inverse-source-map
                                                       (resolve-arg-name arg arg-map)

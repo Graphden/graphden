@@ -1843,11 +1843,17 @@
 
 (defn- parse-layout-request
   "Parse request body into {:root-id UUID, :expansions parsed-map}.
-   Throws on missing root-id."
+   Throws on missing root-id. Accepts both string bodies and the raw
+   httpkit InputStream — the internal-request keeps `:body` un-slurped
+   so middleware-wrapped handlers don't see a consumed stream."
   [request]
-  (let [body-str (:body request)
-        body (when (and body-str (not (str/blank? body-str)))
-               (json/parse-string body-str true))
+  (let [raw-body (:body request)
+        body (cond
+               (instance? java.io.InputStream raw-body)
+               (json/parse-stream (java.io.InputStreamReader. raw-body "UTF-8") true)
+               (and (string? raw-body) (not (str/blank? raw-body)))
+               (json/parse-string raw-body true)
+               :else nil)
         root-id-str (:root-id body)]
     (when-not root-id-str
       (throw (ex-info "Request body must contain 'root-id'"

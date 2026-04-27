@@ -110,6 +110,11 @@
    :args {:form-data {:type :jsonb :description "`{key value}` map from `parse-form-body`."}}
    :return-type :jsonb}
 
+  {:name :parse-ns-from-form
+   :description "Extract a namespace entity's field map from a parsed form-data map. `:name` (string) is required; `:parent-id` and `:description` are optional. The form is the body of `POST /api/entities/ns` from the editor's `+` menu."
+   :args {:form-data {:type :jsonb :description "`{key value}` map from `parse-form-body`."}}
+   :return-type :jsonb}
+
   ;; =============================================================================
   ;; FN-DEFS: Constants and composed functions
   ;; =============================================================================

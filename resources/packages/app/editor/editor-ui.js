@@ -24,14 +24,38 @@ let searchFilter = '';
  * Returns: { children: Map<string, subtree>, fns: [fn, ...] }
  */
 function buildNsTree(data) {
-  const root = { children: new Map(), fns: [], description: null };
+  const root = { children: new Map(), fns: [], description: null, nsId: null };
 
-  // Build {ns-path → description} from the namespace entities so the
-  // rendered tree nodes can carry their description tooltip.
-  const descByPath = new Map();
+  // Build {ns-path → ns-entity} from the namespace entities so the
+  // rendered tree nodes can carry both their description tooltip AND
+  // their ns-id (needed by the per-namespace `+` button to set
+  // `parent-id` when creating sub-entities).
+  const nsByPath = new Map();
   (data.namespaces || []).forEach(ns => {
     const path = (lookups.nsPathMap && lookups.nsPathMap.get(ns.id)) || ns.name;
-    if (path) descByPath.set(path, ns.description);
+    if (path) nsByPath.set(path, ns);
+  });
+
+  // Pre-create tree nodes for every declared namespace, even ones that
+  // have no fns yet — newly-created empty namespaces should show up in
+  // the sidebar immediately, not only after their first fn is added.
+  nsByPath.forEach((ns, path) => {
+    const parts = path.split('.');
+    let node = root;
+    let cumulativePath = '';
+    for (const part of parts) {
+      cumulativePath = cumulativePath ? cumulativePath + '.' + part : part;
+      if (!node.children.has(part)) {
+        const entry = nsByPath.get(cumulativePath);
+        node.children.set(part, {
+          children: new Map(),
+          fns: [],
+          description: entry ? entry.description : null,
+          nsId: entry ? entry.id : null
+        });
+      }
+      node = node.children.get(part);
+    }
   });
 
   (data.fns || []).forEach(fn => {
@@ -44,10 +68,12 @@ function buildNsTree(data) {
     for (const part of parts) {
       cumulativePath = cumulativePath ? cumulativePath + '.' + part : part;
       if (!node.children.has(part)) {
+        const entry = nsByPath.get(cumulativePath);
         node.children.set(part, {
           children: new Map(),
           fns: [],
-          description: descByPath.get(cumulativePath) || null
+          description: entry ? entry.description : null,
+          nsId: entry ? entry.id : null
         });
       }
       node = node.children.get(part);
@@ -112,6 +138,13 @@ function renderNsNode(container, name, node, path) {
   if (node && node.description) {
     const desc = createDescriptionBadge(node.description, { name: nsPath });
     if (desc) header.appendChild(desc);
+  }
+  // Per-namespace `+` button — appears on hover (CSS), opens the same
+  // create menu but with parent-id pre-filled to this namespace's
+  // entity id. Skipped when we don't have an id (e.g. a synthetic
+  // tree node that doesn't correspond to a real `:ns` entity).
+  if (node && node.nsId && typeof buildNsPlusButton === 'function') {
+    buildNsPlusButton(header, node.nsId);
   }
 
   header.onclick = (e) => {

@@ -105,9 +105,9 @@
    :args {:item1 {:value :headers} :item2 :ring-headers}}
 
   {:name :ring-body-entry
-   :description "`[:body <body-string>]` entry for the internal-request map."
+   :description "`[:body <input-stream>]` entry for the internal-request map. We pass the raw httpkit InputStream straight through (NOT pre-slurped via `:ring-body`) — slurping at this layer would consume the body before it reaches a handler that lives below an `:auth-required-middleware`, leaving downstream `(:body request)` reads with an empty string. Handlers slurp on demand via the `slurp-body` helper or pass directly to `json/parse-string` (which accepts InputStream)."
    :parent :pair
-   :args {:item1 {:value :body} :item2 :ring-body}}
+   :args {:item1 {:value :body} :item2 :ring-body-input-stream}}
 
   {:name :internal-request
    :description "Internal request map — `{:request-method :uri :query-string :headers :body}` — fed to the router. All five field extractors plug into one `:pairs->map`."

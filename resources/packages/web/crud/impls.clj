@@ -6,6 +6,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
+    [clojure.tools.logging :as log]
     [graphden.executor.context :as exec-ctx]
     [graphden.executor.defbase :refer [defbase]]
     [graphden.packages.web.html.impls :as html]
@@ -36,14 +37,49 @@
 
 (defn- entity-type-from-string
   [s]
-  (case s "fn" :fn "arg" :arg nil))
+  (case s "fn" :fn "arg" :arg "ns" :ns nil))
+
+
+(defn- parse-uri-segments
+  "Pulls the `(type [id])` tail out of `:uri` for the entity routes.
+
+   We can't rely on reitit's `:path-params` here because the route
+   handler is invoked through a hof-wrap whose `:request` deep-free is
+   captured from the outer fn-graph scope rather than from reitit's
+   per-call `enrich-request` augmentation. The captured request is
+   the raw http-kit one and never sees `:path-params`. Parsing the URI
+   ourselves is dependency-free and exact for this small path family."
+  [uri]
+  (when uri
+    ;; Recognised shapes:
+    ;;   /api/entities/:type
+    ;;   /api/entities/:type/:id
+    ;;   /api/sequence/append/:fn-id
+    ;;   /api/sequence/item/:item-id
+    (let [segs (->> (str/split uri #"/") (remove str/blank?) vec)]
+      (cond
+        (and (= "api" (get segs 0)) (= "entities" (get segs 1)))
+        {:type-str (get segs 2) :id-str (get segs 3)}
+
+        (and (= "api" (get segs 0)) (= "sequence" (get segs 1)) (= "append" (get segs 2)))
+        {:fn-id-str (get segs 3)}
+
+        (and (= "api" (get segs 0)) (= "sequence" (get segs 1)) (= "item" (get segs 2)))
+        {:item-id-str (get segs 3)}
+
+        :else {}))))
 
 
 (defn- extract-entity-params
-  "Extracts type-str, id-str, entity-type from request path-params."
+  "Extracts type-str, id-str, entity-type from request. Prefers
+   reitit's `:path-params` when present; falls back to URI parsing
+   (the handler is sometimes reached with the raw http-kit request
+   that hasn't been through reitit's `enrich-request`)."
   [request]
-  (let [type-str (get-in request [:path-params :type])
-        id-str (get-in request [:path-params :id])]
+  (let [pp (:path-params request)
+        rp (when (nil? pp) (parse-uri-segments (:uri request)))
+        type-str (or (:type pp) (:type-str rp))
+        id-str (or (:id pp) (:id-str rp))]
     {:type-str type-str
      :id-str id-str
      :entity-type (entity-type-from-string type-str)}))
@@ -252,27 +288,55 @@
     (assoc :value (json/parse-string (:value form-data) true))))
 
 
+(defbase parse-ns-from-form
+  [form-data]
+  (cond-> {:name (str (:name form-data))}
+    (not (str/blank? (:parent-id form-data)))
+    (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data)))
+    (not (str/blank? (:description form-data)))
+    (assoc :description (:description form-data))))
+
+
 ;; === Action Handlers (context-aware) ===
 
 (defbase process-create-entity
   [request]
   (let [storage (require-storage ctx)
         {:keys [type-str entity-type]} (extract-entity-params request)
-        form-data (when (:body request)
+        ;; `:body` may be a slurped string (when the internal-request
+        ;; path uses `:ring-body`) OR a raw httpkit InputStream (when
+        ;; reitit hands the original request through). `parse-query-string`
+        ;; only accepts strings, so coerce explicitly.
+        raw-body (:body request)
+        body-str (cond
+                   (string? raw-body) raw-body
+                   (instance? java.io.InputStream raw-body) (clojure.core/slurp raw-body)
+                   :else nil)
+        form-data (when body-str
                     (into {} (map (fn [[k v]] [(keyword k) v])
-                                  (parse-query-string (:body request)))))]
+                                  (parse-query-string body-str))))]
     (if (and entity-type form-data)
       (let [entity-data (case type-str
-                          "fn" (parse-fn-from-form {:form-data form-data})
-                          "arg" (parse-arg-from-form {:form-data form-data})
+                          "fn" (parse-fn-from-form {:form-data form-data} ctx)
+                          "arg" (parse-arg-from-form {:form-data form-data} ctx)
+                          "ns" (parse-ns-from-form {:form-data form-data} ctx)
                           nil)
-            created (when entity-data (sp/create-entity storage entity-type entity-data))]
+            created (when entity-data
+                      (try (sp/create-entity storage entity-type entity-data)
+                           (catch Exception e
+                             (log/error e "create-entity failed for"
+                                        entity-type entity-data)
+                             nil)))]
         (if created
           (do (exec-ctx/invalidate-graph-cache! ctx)
               {:status 200 :headers {"HX-Trigger" "entityCreated"}
                :body "<p>Entity created successfully</p>"})
-          {:status 400 :body "<p class=\"error\">Failed to create entity</p>"}))
-      {:status 400 :body "<p class=\"error\">Invalid request</p>"})))
+          {:status 400 :body (str "<p class=\"error\">Failed to create "
+                                  type-str ": " (pr-str entity-data) "</p>")}))
+      {:status 400 :body (str "<p class=\"error\">Invalid request — type="
+                              (pr-str type-str) " entity-type=" (pr-str entity-type)
+                              " body=" (pr-str (:body request))
+                              " form-data=" (pr-str form-data) "</p>")})))
 
 
 (defbase process-delete-entity
@@ -461,6 +525,7 @@
    :render-entity-actions render-entity-actions
    :parse-fn-from-form parse-fn-from-form
    :parse-arg-from-form parse-arg-from-form
+   :parse-ns-from-form parse-ns-from-form
    :parse-form-body parse-form-body
    :parse-json-body parse-json-body
    :str-to-uuid str-to-uuid})

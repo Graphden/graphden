@@ -1,0 +1,36 @@
+;; The smallest fn-def shapes. Read this first.
+;;
+;; Demonstrates:
+;;   - a literal value carried by `:const`
+;;   - a keyword in arg position is a fn-REFERENCE (not a literal keyword)
+;;   - a single fn-ref filling an `:any`-typed slot
+;;   - the escape for a *literal keyword*: `{:value :kw :literal? true}`
+;;
+;; NOT shown here (deliberately): mixing literals and fn-refs inside one
+;; collection. That requires `:list`-routing — see examples.sequence-vs-jsonb
+;; for why an inline `[ref lit ref]` doesn't do what you expect when the
+;; receiving slot is `:jsonb`-typed.
+
+
+{:namespace "examples.basics"
+ :description "Smallest fn-def shapes — literal values, fn-references, and the keyword-literal escape. Start here."
+ :fns
+ [{:name :ex-greeting
+   :description "Pure literal carried by `:const`. No free args, no inheritance — the leaf form for hard-coding a value into the graph."
+   :parent :const
+   :args {:value "hello, graphden"}}
+
+  {:name :ex-greeting-len
+   :description "Length of `:ex-greeting`. The keyword `:ex-greeting` in arg position is a fn-REFERENCE — it's executed and the resulting string flows into `:str-len/:string` (which is `:type :text`, not `:jsonb`, so a single keyword resolves cleanly)."
+   :parent :str-len
+   :args {:string :ex-greeting}}
+
+  {:name :ex-greeting-upper
+   :description "`:str-upper` over the result of `:ex-greeting`. Demonstrates: chaining single-keyword fn-refs through `:type :text` slots — the cleanest composition form."
+   :parent :str-upper
+   :args {:string :ex-greeting}}
+
+  {:name :ex-status-keyword
+   :description "Carries the *keyword value* `:ok`. Without `:literal? true` the executor would resolve `:ok` as a fn-ref and fail; the escape `{:value :ok :literal? true}` forces literal interpretation."
+   :parent :const
+   :args {:value {:value :ok :literal? true}}}]}

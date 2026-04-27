@@ -578,6 +578,118 @@
     (into (vec sorted-args) sequence-slot-entries)))
 
 
+(defn- collect-expanded-args
+  "Collect rendered arg entries for an EXPANDED group of fns. `levels` is
+   a vector of BFS levels (each a coll of fn-ids), `expand-set` selects
+   which fns within `levels` participate in this expansion. Walks
+   descendant-first, dedups slots covered by closer fns, and finally
+   collapses MI shadows by (terminal-primary, ref-or-value).
+
+   Pure — no state mutation. Closures are over `lookups` plus top-level
+   helpers (`terminal-source-of`, `walk-anchor-chain`, `resolve-arg-name`,
+   `expand-sequence-anchor`)."
+  [lookups levels expand-set bindings]
+  (let [{:keys [arg-map args-by-fn]} lookups
+        active-fns (filterv expand-set (mapcat identity levels))
+        covered-sources (atom #{})
+        result (atom [])
+        chain-level (atom 0)
+        bound-slot-terminals
+        (reduce
+          (fn [acc fn-id]
+            (reduce
+              (fn [acc2 arg]
+                (if (or (some? (:value arg)) (some? (:ref-id arg)))
+                  (conj acc2 (terminal-source-of arg-map (:id arg)))
+                  acc2))
+              acc
+              (get args-by-fn fn-id [])))
+          #{}
+          active-fns)]
+    (doseq [fn-id active-fns]
+      (let [raw-args (get args-by-fn fn-id [])
+            anchor-ids (into #{}
+                             (comp (filter #(= :sequence (:type %)))
+                                   (map :id))
+                             raw-args)
+            chain-ids (into #{}
+                            (mapcat (fn [a]
+                                      (when (= :sequence (:type a))
+                                        (map :id (walk-anchor-chain a arg-map)))))
+                            raw-args)
+            args (filterv (fn [a]
+                            (not (or (contains? anchor-ids (:id a))
+                                     (contains? chain-ids (:id a)))))
+                          raw-args)
+            current-level @chain-level
+            fn-refs (atom [])
+            fn-values (atom [])
+            fn-unsets (atom [])]
+        (doseq [arg args]
+          (let [arg-id (:id arg)
+                source-id (or (:source-id arg) arg-id)
+                already-covered (contains? @covered-sources source-id)
+                has-value (some? (:value arg))
+                has-ref (some? (:ref-id arg))
+                shadow-of-bound
+                (and (not has-value) (not has-ref)
+                     (contains? bound-slot-terminals
+                                (terminal-source-of arg-map arg-id)))]
+            (when (and (not already-covered) (not shadow-of-bound))
+              (loop [sid source-id]
+                (when sid
+                  (swap! covered-sources conj sid)
+                  (recur (:source-id (get arg-map sid)))))
+              (let [arg-name (resolve-arg-name arg arg-map)
+                    from-ancestor (pos? current-level)]
+                (cond
+                  has-ref
+                  (swap! fn-refs conj {:type :ref :arg-name arg-name
+                                       :ref-id (:ref-id arg) :arg-id arg-id
+                                       :from-ancestor from-ancestor})
+
+                  has-value
+                  (swap! fn-values conj {:type :value :arg-name arg-name
+                                         :value (:value arg) :arg-id arg-id
+                                         :from-ancestor from-ancestor})
+
+                  :else
+                  (swap! fn-unsets conj {:type :unset :arg-name arg-name
+                                         :arg-type (:type arg) :arg-id arg-id
+                                         :from-ancestor from-ancestor}))))))
+        (let [raw-args-of-fn (get args-by-fn fn-id [])
+              anchors (filter #(= :sequence (:type %)) raw-args-of-fn)
+              from-ancestor (pos? current-level)]
+          (doseq [anchor anchors
+                  :let [slot-name (or (resolve-arg-name anchor arg-map) "items")]
+                  entry (expand-sequence-anchor anchor slot-name arg-map)]
+            (swap! result conj (assoc entry :from-ancestor from-ancestor))))
+        (doseq [a @fn-refs] (swap! result conj a))
+        (doseq [a @fn-values] (swap! result conj a))
+        (doseq [a @fn-unsets] (swap! result conj a))
+        (swap! chain-level inc)))
+    (let [seen (atom #{})
+          term (fn [sid]
+                 (loop [cur sid]
+                   (if-let [a (get arg-map cur)]
+                     (if (:source-id a)
+                       (recur (:source-id a))
+                       (:id a))
+                     cur)))]
+      (into []
+            (keep (fn [arg]
+                    (let [t (term (:arg-id arg))
+                          k (case (:type arg)
+                              :ref [t :ref (:ref-id arg)]
+                              :value [t :value (:value arg)]
+                              :unset [t :unset]
+                              [t (:type arg)])]
+                      (when-not (contains? @seen k)
+                        (swap! seen conj k)
+                        arg))))
+            @result))))
+
+
 (defn- child-covered-sources-for-fn
   "Source-ids that `fn-id`'s child refs already render — used for binding
    deduplication so the same upstream binding isn't drawn twice (once on
@@ -950,148 +1062,7 @@
 
 
 
-        ;; Collect args from a set of expand-fns with proper ordering:
-        ;; For each fn in expand-set (descendants first by BFS order):
-        ;;   - refs first, then values, then unset
-        ;; Args covered by earlier fns are skipped
-        ;; Returns args with :from-ancestor flag indicating if arg came from
-        ;; an fn at BFS depth > 0
-        ;;
-        ;; Key insight: when a ref-fn is shown, value args that bind TO that ref-fn's args
-        ;; should not be shown as direct children - they become part of the ref-fn's display
-        collect-expanded-args
-        (fn [levels expand-set bindings]
-          ;; Order active fns by BFS depth (descendants first)
-          (let [active-fns (filterv expand-set (mapcat identity levels))
-                ;; Full chain (all reachable ancestors) — used as set for excluding
-                ;; ref-fn-arg-ids (so shared ancestors don't get filtered)
-                full-chain-fns (set (mapcat identity levels))
-                covered-sources (atom #{})
-                result (atom [])
-                chain-level (atom 0)
-                ;; A slot (identified by its terminal primary arg-id) may have
-                ;; BOTH a binding at one expand-set level and a shadow at
-                ;; another. The binding wins — we don't want the shadow to
-                ;; render a spurious unset placeholder for a slot that's
-                ;; clearly filled. Precompute the set of slot terminals that
-                ;; are bound anywhere in expand-set.
-                bound-slot-terminals
-                (reduce
-                  (fn [acc fn-id]
-                    (reduce
-                      (fn [acc2 arg]
-                        (if (or (some? (:value arg)) (some? (:ref-id arg)))
-                          (conj acc2 (terminal-source-of arg-map (:id arg)))
-                          acc2))
-                      acc
-                      (get args-by-fn fn-id [])))
-                  #{}
-                  active-fns)]
-            ;; Second pass: collect args, skipping those that bind to ref-fn args
-            (doseq [fn-id active-fns]
-              (let [raw-args (get args-by-fn fn-id [])
-                    ;; Exclude sequence anchors and their chain items from the
-                    ;; scalar classifier. Anchors are bindings, not free slots,
-                    ;; and their items have no semantic identity outside the
-                    ;; anchor's chain.
-                    anchor-ids (into #{}
-                                     (comp (filter #(= :sequence (:type %)))
-                                           (map :id))
-                                     raw-args)
-                    chain-ids (into #{}
-                                    (mapcat (fn [a]
-                                              (when (= :sequence (:type a))
-                                                (map :id (walk-anchor-chain a arg-map)))))
-                                    raw-args)
-                    args (filterv (fn [a]
-                                    (not (or (contains? anchor-ids (:id a))
-                                             (contains? chain-ids (:id a)))))
-                                  raw-args)
-                    current-level @chain-level
-                    fn-refs (atom [])
-                    fn-values (atom [])
-                    fn-unsets (atom [])]
-                (doseq [arg args]
-                  (let [arg-id (:id arg)
-                        source-id (or (:source-id arg) arg-id)
-                        already-covered (contains? @covered-sources source-id)
-                        has-value (some? (:value arg))
-                        has-ref (some? (:ref-id arg))
-                        ;; Shadow for a slot bound elsewhere in expand-set —
-                        ;; the bound entry wins, skip this one.
-                        shadow-of-bound
-                        (and (not has-value) (not has-ref)
-                             (contains? bound-slot-terminals
-                                        (terminal-source-of arg-map arg-id)))]
-                    (when (and (not already-covered) (not shadow-of-bound))
-                      (loop [sid source-id]
-                        (when sid
-                          (swap! covered-sources conj sid)
-                          (recur (:source-id (get arg-map sid)))))
-                      (let [arg-name (resolve-arg-name arg arg-map)
-                            from-ancestor (pos? current-level)]
-                        (cond
-                          has-ref
-                          (swap! fn-refs conj {:type :ref :arg-name arg-name
-                                               :ref-id (:ref-id arg) :arg-id arg-id
-                                               :from-ancestor from-ancestor})
-
-                          has-value
-                          (swap! fn-values conj {:type :value :arg-name arg-name
-                                                 :value (:value arg) :arg-id arg-id
-                                                 :from-ancestor from-ancestor})
-
-                          :else
-                          (swap! fn-unsets conj {:type :unset :arg-name arg-name
-                                                 :arg-type (:type arg) :arg-id arg-id
-                                                 :from-ancestor from-ancestor}))))))
-                ;; Append sequence-slot entries for each anchor on this fn —
-                ;; one entry per item, labelled `<slot>[idx]`, classified by
-                ;; the item's own binding (:ref-id → :ref, :value → :value,
-                ;; nothing → :unset). Matches the root path's behaviour in
-                ;; `collect-fn-args` so `:items`-style slots render as N edges
-                ;; regardless of whether the fn is root or expanded.
-                (let [raw-args-of-fn (get args-by-fn fn-id [])
-                      anchors (filter #(= :sequence (:type %)) raw-args-of-fn)
-                      from-ancestor (pos? current-level)]
-                  (doseq [anchor anchors
-                          :let [slot-name (or (resolve-arg-name anchor arg-map) "items")]
-                          entry (expand-sequence-anchor anchor slot-name arg-map)]
-                    (swap! result conj (assoc entry :from-ancestor from-ancestor))))
-                ;; Add this fn's args in order: refs, values, unsets
-                (doseq [a @fn-refs] (swap! result conj a))
-                (doseq [a @fn-values] (swap! result conj a))
-                (doseq [a @fn-unsets] (swap! result conj a))
-                (swap! chain-level inc)))
-            ;; Dedup entries by (terminal-primary, ref-id|value-marker).
-            ;; Composition materializes many DB shadows for the SAME
-            ;; semantic slot when a free arg propagates through multiple
-            ;; ref-chains (e.g. `:request` on `router-response-body` has 5
-            ;; shadows through 5 ring-*-entry paths). A bound ref to the
-            ;; same target through different paths ALSO duplicates (observed:
-            ;; token-gated-response has 33 `ref-id=router-ring-response`
-            ;; entries via different propagation source chains). All of
-            ;; these collapse to one visible edge per slot.
-            (let [seen (atom #{})
-                  term (fn [sid]
-                         (loop [cur sid]
-                           (if-let [a (get arg-map cur)]
-                             (if (:source-id a)
-                               (recur (:source-id a))
-                               (:id a))
-                             cur)))]
-              (into []
-                    (keep (fn [arg]
-                            (let [t (term (:arg-id arg))
-                                  k (case (:type arg)
-                                      :ref [t :ref (:ref-id arg)]
-                                      :value [t :value (:value arg)]
-                                      :unset [t :unset]
-                                      [t (:type arg)])]
-                              (when-not (contains? @seen k)
-                                (swap! seen conj k)
-                                arg))))
-                    @result))))]
+        ]
 
     ;; Track bindings for EACH expanded function
     ;; Key: expanded-fn-id, Value: {:refs #{ref-ids}, :values #{arg-ids}}
@@ -1258,7 +1229,7 @@
                   ;;    (by simulating what bindings they'll resolve)
                   ;; 2. Level-0 refs pointing to those targets are hidden at root
                   ;; 3. Level-0 refs pointing to OTHER targets are shown at root
-                  (let [raw-args (collect-expanded-args levels expand-set chain-bindings)
+                  (let [raw-args (collect-expanded-args lookups levels expand-set chain-bindings)
                         ;; Filter out :unset args whose terminal is bound by some
                         ;; fn in the source-chain owners' parent inheritance
                         ;; closure. Bindings in ref-id targets are NOT considered

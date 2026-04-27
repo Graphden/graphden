@@ -407,145 +407,25 @@ Base functions and fn-defs live in `resources/packages/{pkg}/{module}/` as `fns.
 
 ## Best Practices (CRITICAL)
 
-### 1. Use Inheritance to Avoid Duplication (DRY)
+The full rationale and worked examples live in [docs/PACKAGES.md § Composition Best Practices](docs/PACKAGES.md#composition-best-practices). The bullets below are the bare minimum for AI-assisted edits — read PACKAGES.md before larger structural changes.
 
-When multiple fn-defs share the same ancestor AND one or more bound arguments, extract a common parent:
+### 1. DRY via inheritance
+Extract a common parent when ≥ 2 fn-defs share an ancestor AND ≥ 1 bound arg with the same structure. Indicators: same parent, same bound args, repeated shape, can be named meaningfully. See [§ 1](docs/PACKAGES.md#1-use-inheritance-to-eliminate-duplication-dry).
 
-**Before (duplication):**
-```edn
-{:name :health-route
- :parent :get-route
- :args {:a "/health" :v :health-handler-fn}}
+### 2. Free-args propagation
+Unbound args of a referenced fn-def surface as free args of the caller — that's how reusable templates (`:get-route`, `:json-ok-response`, …) work. Arg names propagate up; renames via `{:as :name}` swap the public name. See [§ 2](docs/PACKAGES.md#2-free-arguments-pattern-argument-propagation).
 
-{:name :metrics-route
- :parent :get-route
- :args {:a "/metrics" :v :metrics-handler-fn}}
+### 3. Named vs one-off
+Name a fn-def when it's reused, has independent meaning, or represents a domain concept. Inline (no name) when used exactly once with no semantic identity. Heuristic: if you can't name it without describing wiring, it's one-off. See [§ 3](docs/PACKAGES.md#3-named-vs-anonymous-one-off-functions).
 
-;; Both bind to :get-route with same structure
-```
+### 4. Hierarchy depth
+2–3 levels is normal, 4–5 acceptable for route/response composition, 6+ needs justification. Each level should have a name, potential reuse, and a cohesive concept. See [§ 4](docs/PACKAGES.md#4-hierarchy-depth-guidelines).
 
-This is acceptable if paths and handlers differ. But if structure repeats:
-
-**Extract common ancestor when same structure repeats:**
-```edn
-;; Common building block
-{:name :json-ok-response
- :parent :ok-response
- :args {:headers {"Content-Type" "application/json"}}}
-
-;; Reuse in multiple places
-{:name :health-response-fn
- :parent :json-ok-response
- :args {:body :health-json-body-fn}}
-
-{:name :metrics-response-fn
- :parent :json-ok-response
- :args {:body :metrics-json-body-fn}}
-```
-
-**Key indicators for extraction:**
-- Same ancestor (not necessarily immediate parent)
-- Same bound arguments
-- Repeated structural pattern
-- Meaningful name can be given to the extracted fn-def
-
-### 2. Free Arguments Pattern (Argument Propagation)
-
-When a fn-def references another fn-def with unbound arguments, those arguments become "free" (exposed) in the parent. This enables building composable hierarchies:
-
-```edn
-;; assoc-any has args: {m, k, v}
-{:name :assoc-empty
- :parent :assoc-any
- :args {:m {}}}           ; binds m={}, exposes k and v
-
-;; assoc-handler has free arg: v (k is bound)
-{:name :assoc-handler
- :parent :assoc-empty
- :args {:k "handler"}}    ; binds k="handler", exposes v
-
-;; method-map references :assoc-handler, its free arg v propagates
-{:name :method-map
- :parent :assoc-empty
- :args {:v :assoc-handler}}  ; v is fn with free arg, that arg propagates
-
-;; route exposes: a (path), k (method), v (handler)
-{:name :route
- :parent :pair
- :args {:b :method-map}}
-
-;; get-route fixes method, exposes: a (path), v (handler)
-{:name :get-route
- :parent :route
- :args {:k "get"}}
-
-;; Usage: only need to provide path and handler
-{:name :health-route
- :parent :get-route
- :args {:a "/health" :v :health-handler-fn}}
-```
-
-**Key insight:** Free arguments of referenced functions become part of the interface. This allows building reusable route/response/handler templates.
-
-### 3. Named vs Anonymous Functions
-
-**Use named fn-def when:**
-- Function is reused in multiple places
-- Function has clear semantic meaning
-- Function could be tested independently
-- Function represents a domain concept
-
-```edn
-;; Good: reusable building block
-{:name :json-ok-response
- :parent :ok-response
- :args {:headers {"Content-Type" "application/json"}}}
-```
-
-**Use inline/one-off composition when:**
-- Combination is used exactly once
-- No semantic meaning beyond "connect A to B"
-- No foreseeable reuse scenario
-
-```edn
-;; One-off: specific route with specific handler
-;; Don't create :health-route-with-specific-path-and-handler fn-def
-{:name :health-route
- :parent :get-route
- :args {:a "/health" :v :health-handler-fn}}
-```
-
-**Rule of thumb:** If you can't give it a meaningful name that describes WHAT it does (not HOW it connects things), it's probably a one-off composition.
-
-### 4. Hierarchy Depth Guidelines
-
-- **2-3 levels**: Normal for response types (`:ring-response` → `:ok-response` → `:json-ok-response`)
-- **4-5 levels**: Acceptable for complex composition (route building blocks)
-- **6+ levels**: Review if intermediate levels have independent semantic meaning
-
-Each level should:
-1. Have a meaningful name
-2. Be potentially reusable
-3. Represent a cohesive concept
-
-### 5. Base Function vs Fn-def Decision
-
-| Characteristic | Base Function | Fn-def |
-|----------------|---------------|--------|
-| Has Clojure code | Yes (impls.clj) | No |
-| Wraps library/runtime | Yes | No |
-| Contains hardcoded values | No (except defaults) | Yes |
-| Can be expressed as composition | No | Yes |
-| Lines of implementation | 1-20 | N/A |
-
-**Examples:**
-- `http-server`: Base function (wraps http-kit)
-- `web-server`: Fn-def (composes http-server with router and port)
-- `router`: Base function (wraps reitit)
+### 5. Base-fn vs fn-def
+Base-fn: has Clojure impl, wraps library, ≤ ~20 LOC body. Fn-def: pure composition, may carry hardcoded values, no impl. Base-fns MUST NOT call other base-fns — that's hidden composition. See [§ 5](docs/PACKAGES.md#5-base-function-vs-fn-def-decision-matrix) and [PHILOSOPHY § Base Functions](docs/PHILOSOPHY.md#base-functions-philosophy).
 
 ### 6. Naming (short names, context carries meaning)
-
-Names should add the **last bit of distinction** — the namespace, the parent fn-def, and the arg names already convey most of the meaning. Drop affixes the context already conveys; keep affixes that disambiguate vs a sibling that would otherwise share the name. Verb-at-end (`entity-create`) when the prefix form (`create-entity`) clashes with a base-fn or sibling. Extract a sub-NS when ≥ ~5 fn-defs share a long common prefix. Names are validated for **global** uniqueness at sync time, **including locals** (`_*`).
+Names add the **last bit of distinction** — namespace, parent, and arg names convey the rest. Drop affixes the context already says; keep affixes that disambiguate vs a sibling. Verb-at-end (`entity-create`) when prefix-form clashes with a base-fn. Extract a sub-NS when ≥ ~5 fn-defs share a long prefix. Names are validated for **global** uniqueness at sync time, **including locals** (`_*`).
 
 Before renaming, grep:
 ```bash
@@ -553,7 +433,6 @@ grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages
 ```
 
 See [docs/PACKAGES.md § Naming Guidelines](docs/PACKAGES.md#naming-guidelines) for the full rationale, decision matrix, and worked examples.
-- `editor-router`: Fn-def (composes router with specific routes)
 
 ## CI Workflow
 

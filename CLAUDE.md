@@ -132,9 +132,11 @@ three SHA-256 digests, written by `build.clj`'s
 Three consumers read those hashes:
 
 - `GET /version` → `{"frontend": "<hex>", "packages": "<hex>", "backend": "<hex>"}`
-- The editor's `BUILD_HASH` console marker — first 12 chars of the
-  `frontend` hash, substituted into the `__BUILD_HASH__` placeholder
-  in `editor-state.js` at bundle time.
+- `window.BUILD_HASH` — first 12 chars of the `frontend` hash,
+  substituted into the `__BUILD_HASH__` placeholder in
+  `editor-state.js` at bundle time. Exposed on `window` for
+  on-demand readout (type `BUILD_HASH` in DevTools, or read it
+  programmatically from a test). No auto-log to console.
 - `bb verify [<base-url>]` — recomputes the same three hashes from
   the local checkout, fetches `<base-url>/version`, and reports each
   section's match/mismatch independently.
@@ -153,15 +155,18 @@ bb verify https://prod.example.com   # any URL
 Exit codes: 0 (every section matches), 1 (at least one mismatch),
 2 (`/version` unreachable).
 
-The console marker and the `frontend` field of `/version` always
-agree because they both come from the same baked-in resource. If
-`bb verify` reports backend match + frontend stale only in the
-browser, that's a browser-cache issue (offer the in-app reload
+`window.BUILD_HASH` and the `frontend` field of `/version` always
+agree because they come from the same baked-in resource. If
+`bb verify` reports backend match but the user's browser still
+behaves like old code, compare `window.BUILD_HASH` (DevTools console)
+against `fetch('/version').then(r=>r.json())` — a divergence is a
+browser-cache issue, not a deploy issue (offer the in-app reload
 button or Ctrl+Shift+R).
 
 The placeholder is `__BUILD_HASH__` — it lives only in
 `editor-state.js`. Don't delete it; the substitution step would have
-nothing to replace and the browser would log the literal string.
+nothing to replace and `window.BUILD_HASH` would be the literal
+string `"__BUILD_HASH__"`.
 
 ### Frontend Module Structure
 

@@ -1,10 +1,13 @@
 // Editor State - Global variables, constants, and configuration
 // BUILD_HASH is substituted at bundle-time (see :script in
-// `app/editor/fns.edn`) — first 8 hex chars of the SHA-256 of the
-// concatenated raw JS bundle. Changes only when one of the editor
-// source files actually changes, so no manual bumping is needed.
+// `app/editor/fns.edn`) — first 12 hex chars of the SHA-256 of the
+// frontend source files at build time. Exposed on `window` so it can
+// be read on demand (e.g. type `BUILD_HASH` in DevTools, or compare
+// `window.BUILD_HASH` against `fetch('/version')`'s `frontend` field
+// when diagnosing browser-cache vs server-deploy drift). No auto-log
+// — the console stays clean unless you ask.
 const BUILD_HASH = '__BUILD_HASH__';
-console.log('%c[Graphden Editor] Build: ' + BUILD_HASH, 'color: #0066cc; font-weight: bold');
+window.BUILD_HASH = BUILD_HASH;
 
 // ============================================================================
 // GLOBAL STATE

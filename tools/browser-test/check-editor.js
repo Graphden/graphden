@@ -100,11 +100,13 @@ async function checkEditor() {
     console.log('\n=== Console Output ===');
     consoleLogs.forEach(log => console.log(log));
 
-    // Check for build timestamp
-    const buildLog = consoleLogs.find(l => l.includes('Build:'));
-    if (buildLog) {
+    // Build identifier — read directly from window.BUILD_HASH (the
+    // editor no longer auto-logs it; it's exposed for on-demand
+    // inspection only).
+    const buildHash = await page.evaluate(() => window.BUILD_HASH || null);
+    if (buildHash) {
       console.log('\n=== Build Info ===');
-      console.log(buildLog);
+      console.log('window.BUILD_HASH =', buildHash);
     }
 
     // Check for errors

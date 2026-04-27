@@ -89,8 +89,13 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 }
 .create-btn:hover { background: currentColor; }
 .create-btn:hover svg { color: #fff; }
+/* Match `applyActionIconBox` (description-badge `i`) so the row's
+   icons line up: same 15×15 frame, same 1px border. The action
+   buttons stay hover-only — `i` is informational and harmless to
+   show always; ✎/+ are actions and should not clutter the row when
+   the user is just scanning the tree. */
 .create-btn-inline {
-  width: 18px; height: 18px;
+  width: 15px; height: 15px;
   opacity: 0; transition: opacity 0.1s;
   color: #000;
 }

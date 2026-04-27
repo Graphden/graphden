@@ -16,10 +16,10 @@
 // the lock popover opens automatically (1) on click of any of these
 // affordances, (2) on a 401 from `authFetch`.
 
-const PLUS_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
-const PENCIL_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
-const CHECK_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
-const X_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
+const PLUS_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
+const PENCIL_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+const CHECK_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
+const X_SVG = '<svg viewBox="0 0 24 24" width="11" height="11" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
 // =============================================================================
 // API HELPERS
@@ -142,13 +142,12 @@ function buildInlineInputRow({ placeholder, indent, initialValue, onSubmit, onCa
 // PER-NAMESPACE EDIT BUTTONS
 // =============================================================================
 
-// Build the right-side hover buttons inside a namespace header:
-//   ✎ rename, + create-child (with menu).
-// `nsId` is the entity uuid; `nsPath` is the dotted path; `headerEl`
-// is the element to swap into edit mode when ✎ is clicked.
-function buildNsRowButtons(headerEl, nsId, nsPath) {
-  const group = document.createElement('span');
-  group.className = 'ns-row-actions';
+// Append the right-side hover buttons (✎ rename, + create-child) into
+// `actionsEl` — caller is responsible for placing the actions group
+// in the row. `nsId` is the entity uuid; `nsPath` is the dotted path.
+// The header element to swap into edit mode is `actionsEl.parentNode`.
+function buildNsRowButtons(actionsEl, nsId, nsPath) {
+  const headerEl = actionsEl.parentNode || actionsEl;
 
   const editBtn = document.createElement('button');
   editBtn.className = 'create-btn create-btn-inline ns-edit-btn';
@@ -170,9 +169,8 @@ function buildNsRowButtons(headerEl, nsId, nsPath) {
     openChildCreateMenu(plusBtn, nsId, nsPath);
   });
 
-  group.appendChild(editBtn);
-  group.appendChild(plusBtn);
-  headerEl.appendChild(group);
+  actionsEl.appendChild(editBtn);
+  actionsEl.appendChild(plusBtn);
 }
 
 function ensureAuth() {

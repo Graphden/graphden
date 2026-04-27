@@ -135,16 +135,20 @@ function renderNsNode(container, name, node, path) {
   label.className = 'ns-label';
   label.textContent = name;
   header.appendChild(label);
+  // All three right-edge icons live in one group: `i` (description,
+  // always visible) + ✎ (rename, hover-only) + + (create-child,
+  // hover-only). Sharing the group keeps them aligned at the row's
+  // right edge and at the same 15×15 size.
+  const actions = document.createElement('span');
+  actions.className = 'ns-row-actions';
   if (node && node.description) {
     const desc = createDescriptionBadge(node.description, { name: nsPath });
-    if (desc) header.appendChild(desc);
+    if (desc) actions.appendChild(desc);
   }
-  // Per-namespace row actions — ✎ rename + + create-child. Shown on
-  // hover via CSS. Skipped when we don't have an id (e.g. a synthetic
-  // tree node that doesn't correspond to a real `:ns` entity).
   if (node && node.nsId && typeof buildNsRowButtons === 'function') {
-    buildNsRowButtons(header, node.nsId, nsPath);
+    buildNsRowButtons(actions, node.nsId, nsPath);
   }
+  if (actions.children.length > 0) header.appendChild(actions);
 
   header.onclick = (e) => {
     e.stopPropagation();

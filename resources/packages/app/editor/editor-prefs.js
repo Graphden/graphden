@@ -20,6 +20,7 @@ const SUN_SVG  = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" st
 const MOON_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
 const COLLAPSE_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>';
 const EXPAND_SVG   = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>';
+const RELOAD_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>';
 
 // =============================================================================
 // PERSISTENCE HELPERS
@@ -134,11 +135,12 @@ function buildPrefsButtons() {
   const mount = document.getElementById('prefs-mount');
   const actions = document.querySelector('.menu-header-actions');
   if (!mount || !actions) return;
-  // Theme toggle goes in #prefs-mount (leftmost). The collapse button
-  // is appended to the actions row directly, AFTER #auth-mount, so
-  // the visual order is: theme | lock | collapse.
+  // Theme + hard-reload sit in #prefs-mount (leftmost). The collapse
+  // button is appended to the actions row directly, AFTER #auth-mount,
+  // so the visual order is: theme | reload | lock | collapse.
   mount.innerHTML =
-    '<button id="theme-toggle-btn" class="prefs-btn" title="Toggle theme"></button>';
+    '<button id="theme-toggle-btn" class="prefs-btn" title="Toggle theme"></button>'
+    + '<button id="hard-reload-btn"  class="prefs-btn" title="Reload (drop cache)">' + RELOAD_SVG + '</button>';
   const collapseBtn = document.createElement('button');
   collapseBtn.id = 'sidebar-collapse-btn';
   collapseBtn.className = 'prefs-btn';
@@ -149,7 +151,23 @@ function buildPrefsButtons() {
     applyTheme(dark);
     setDarkStored(dark);
   });
+  document.getElementById('hard-reload-btn').addEventListener('click', hardReload);
   collapseBtn.addEventListener('click', () => toggleCollapsed(true));
+}
+
+// Drop in-page caches (Cache API entries from any service worker) and
+// reload with a cache-busting query param so the browser can't serve a
+// stale disk-cached page. Mimics Ctrl+Shift+R.
+async function hardReload() {
+  if (typeof window.caches !== 'undefined') {
+    try {
+      const keys = await window.caches.keys();
+      await Promise.all(keys.map(k => window.caches.delete(k)));
+    } catch (_) { /* not fatal */ }
+  }
+  const url = new URL(window.location.href);
+  url.searchParams.set('_r', String(Date.now()));
+  window.location.replace(url.toString());
 }
 
 // Floating expand button shown only when the sidebar is collapsed. Lives

@@ -51,4 +51,5 @@
                   :sequence-remove
                   :health
                   :metrics
-                  :layout-api]}}]}
+                  :layout-api
+                  :auth-check]}}]}

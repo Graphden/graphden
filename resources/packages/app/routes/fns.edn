@@ -81,4 +81,19 @@
   {:name :layout-api
    :description "POST /api/graph/layout — accepts `{root-id, expansions}` and returns the laid-out graph (nodes + edges + grid positions)."
    :parent :post-route
-   :args {:path "/api/graph/layout" :handler :_layout-api-handler}}]}
+   :args {:path "/api/graph/layout" :handler :_layout-api-handler}}
+
+  ;; GET /api/auth/check — auth-required endpoint that simply returns 200
+  ;; "ok" if the bearer token matches AUTH_TOKEN. Used by the editor's
+  ;; lock-icon popover to validate the password BEFORE the user attempts
+  ;; a real mutation, so wrong passwords surface immediately rather than
+  ;; on the first failed POST/DELETE.
+  {:name :auth-check
+   :description "GET /api/auth/check — auth-required ping endpoint. Returns 200 `\"ok\"` when `Authorization: Bearer <AUTH_TOKEN>` matches; 401 otherwise (handled by `auth-required-middleware`). Used by the UI to validate the admin password before showing edit affordances."
+   :parent :get-auth-required
+   :args {:path "/api/auth/check" :handler :_auth-check-handler}}
+
+  {:name :_auth-check-handler
+   :description "Ring handler returning `200 \"ok\"` as plain text. Used by `:auth-check` — the auth-required-middleware short-circuits to 401 before this runs when the token is wrong, so reaching this handler confirms the token matched."
+   :parent :text-ok-response
+   :args {:body "ok"}}]}

@@ -37,8 +37,45 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 #entity-list .entity-item .name { font-weight: 400; font-size: 13px; }
 
 /* Menu header */
-.menu-header { padding: 12px 16px; border-bottom: 2px solid #000; background: #000; color: #fff; }
+.menu-header { padding: 12px 16px; border-bottom: 2px solid #000; background: #000; color: #fff;
+  display: flex; align-items: center; justify-content: space-between; position: relative; }
 .menu-header h2 { font-size: 13px; font-weight: 500; margin: 0; }
+
+/* Auth lock — sits on the right of the menu header, opens a popover. */
+#auth-mount { position: relative; line-height: 0; }
+.auth-lock-btn {
+  background: transparent; color: #fff; border: 1px solid #fff; border-radius: 3px;
+  width: 26px; height: 26px; padding: 3px; cursor: pointer; display: inline-flex;
+  align-items: center; justify-content: center;
+}
+.auth-lock-btn:hover { background: #fff; color: #000; }
+.auth-lock-btn.auth-lock-open { background: #fff; color: #000; }
+.auth-popover {
+  position: absolute; right: 0; top: calc(100% + 6px); z-index: 300;
+  background: #fff; color: #000; border: 1px solid #000; border-radius: 3px;
+  padding: 8px; min-width: 200px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.auth-popover.hidden { display: none; }
+.auth-popover input {
+  font-size: 12px; padding: 4px 6px; border: 1px solid #000; border-radius: 3px;
+  outline: none; width: 100%; box-sizing: border-box;
+}
+.auth-popover input:focus { box-shadow: 0 0 0 1px #000 inset; }
+.auth-popover-row { display: flex; gap: 6px; }
+.auth-popover-btn {
+  flex: 1; font-size: 12px; padding: 4px 8px; cursor: pointer;
+  background: #000; color: #fff; border: 1px solid #000; border-radius: 3px;
+}
+.auth-popover-btn:hover { background: #fff; color: #000; }
+.auth-popover-btn-secondary { background: #fff; color: #000; }
+.auth-popover-btn-secondary:hover { background: #000; color: #fff; }
+.auth-error {
+  font-size: 11px; color: #000; background: #f4f4f4; border: 1px solid #000;
+  padding: 4px 6px; border-radius: 3px;
+}
+.auth-error.hidden { display: none; }
 
 /* Node overlay for interactive ancestor list */
 .node-overlay { pointer-events: auto; z-index: 10; }

@@ -37,4 +37,7 @@ window.addEventListener('popstate', () => {
 // DOM READY
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', initGraph);
+document.addEventListener('DOMContentLoaded', () => {
+  initAuthLock();
+  initGraph();
+});

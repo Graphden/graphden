@@ -1,16 +1,19 @@
-;; Route groups — sidebar-visible bundles of `app.routes` leaves.
+;; Route groups — top-level entries reitit consumes via `app.server._router`.
 ;;
-;; These exist purely to give the user navigable headings ("monitoring",
-;; "ui", "entity-crud", …) that resolve to a list of routes; the names
-;; lose the `-routes` suffix because the namespace
-;; `app.routes.groups` already says "this is a routes bundle".
+;; After the nested-routes refactor, `:all` is no longer a flat list of
+;; every endpoint — it's a small list of TOP-LEVEL reitit entries:
+;; standalone leaves (`:health`, `:metrics`, `:favicon`, `:editor`) and
+;; the prefix groups (`:partials-routes`, `:api-routes`). Reitit walks
+;; the nested vectors and assembles full paths itself.
 ;;
-;; `app.routes.groups.all` is the full flat list reitit dispatches on
-;; via `app.server._router`.
+;; The other groups (`:ui`, `:entity-crud`, `:graph-api`, `:monitoring`)
+;; are still useful as sidebar bundles for the editor — they let the
+;; user navigate to logically-related endpoints regardless of where
+;; they sit in the route tree.
 
 
 {:namespace "app.routes.groups"
- :description "Route bundles — `:list`-typed fn-defs collecting subsets of `app.routes` for sidebar navigation. `all` is the canonical flat list bound into the `_router`."
+ :description "Route bundles. `:all` is the top-level nested-tree input to reitit; the other groups (`:ui`, `:entity-crud`, …) collect logically-related endpoints for the editor's sidebar."
  :fns
  [{:name :ui
    :description "User-facing UI route group — favicon and the editor page."
@@ -18,7 +21,7 @@
    :args {:items [:favicon :editor]}}
 
   {:name :entity-crud
-   :description "Entity CRUD route group — details/form pages and create/delete handlers used by the editor's right-hand panel."
+   :description "Entity CRUD bundle — partial views and the create / update / delete operations. `:entity-update` and `:entity-delete` are method-maps now (combined into `:entity-by-id`); the bundle still references them so the user can jump to the per-method definition from the sidebar."
    :parent :list
    :args {:items [:entity-details
                   :entity-form-create
@@ -28,7 +31,7 @@
                   :entity-delete]}}
 
   {:name :graph-api
-   :description "Graph-data API routes — `/api/graph/entities` (raw graph dump) and `/api/graph/layout` (layout pipeline)."
+   :description "Graph-data API routes — `/api/graph/entities` (raw dump) and `/api/graph/layout` (layout pipeline)."
    :parent :list
    :args {:items [:api-entities :layout-api]}}
 
@@ -38,20 +41,11 @@
    :args {:items [:health :metrics]}}
 
   {:name :all
-   :description "Flat list of every route reitit serves. Bound into `app.server._router` — order is irrelevant since reitit dispatches by `[path method]`."
+   :description "Top-level reitit entries — the small list of standalone leaves and prefix groups that the router walks. Adding a new path = either drop a new leaf in here (if it has no prefix-mate) or extend the appropriate sub-group inside `:partials-routes` / `:api-routes`."
    :parent :list
    :args {:items [:favicon
                   :editor
-                  :api-entities
-                  :entity-details
-                  :entity-form-create
-                  :entity-form-edit
-                  :entity-create
-                  :entity-update
-                  :entity-delete
-                  :sequence-append
-                  :sequence-remove
                   :health
                   :metrics
-                  :layout-api
-                  :auth-check]}}]}
+                  :partials-routes
+                  :api-routes]}}]}

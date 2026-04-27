@@ -1,104 +1,176 @@
-;; All concrete app routes — one fn-def per HTTP endpoint reitit serves.
-;; Names drop the redundant `-route` suffix because the namespace
-;; (`app.routes`) and the parent fn-def (`get-route`, `post-auth-required-route`,
-;; …) already say "this is a route".
+;; App routes. Each leaf carries only the SUB-path under its enclosing
+;; group; full URLs are assembled by reitit's nested vector form
+;; (`[prefix child …]`). Adding a version like `/v1` becomes a single
+;; wrap of `:api-routes` instead of a touch on every endpoint.
 ;;
-;; Handlers and request-body fn-defs live in their feature modules
-;; (`app/editor`, `app/layout`); this module only assembles
-;; `path + handler` into the route shape reitit consumes via the parent.
+;; Multi-method paths are expressed by merging per-method method-maps
+;; (`:_method-map-with-middleware`) and pairing the result with the
+;; sub-path — that gives reitit a single conflict-free entry per path.
+;;
+;; Top-level groups (`:partials-routes`, `:api-routes`) and the standalone
+;; root-level routes (`:health`, `:metrics`, `:favicon`, `:editor`) are
+;; collected into `app.routes.groups.all` for the `:_router` binding.
 
 
 {:namespace "app.routes"
- :description "Concrete HTTP routes — one fn-def per endpoint. The leaf assembled from a method-template parent (`get-route`, `post-auth-required-route`, …) plus a `:path` and a `:handler` ref into `app/editor` or `app/layout`."
+ :description "Application routes — sub-paths inside nested groups (`:partials-routes`, `:api-routes`) plus a handful of standalone root-level entries. Each entry is one reitit-shaped route, with multi-method paths combined at the graph level so reitit's natural conflict detection sees clean data."
  :fns
- [{:name :health
-   :description "GET /health — returns the current health status as JSON."
+ [;; =============================================================================
+  ;; STANDALONE ROOT-LEVEL ROUTES
+  ;; =============================================================================
+
+  {:name :health
+   :description "GET /health — current health status as JSON."
    :parent :get-route
    :args {:path "/health" :handler :_health-handler}}
 
   {:name :metrics
-   :description "GET /metrics — returns JVM info (heap, threads, uptime) as JSON."
+   :description "GET /metrics — JVM info (heap, threads, uptime) as JSON."
    :parent :get-route
    :args {:path "/metrics" :handler :_metrics-handler}}
 
   {:name :favicon
-   :description "GET /favicon.ico — returns the inlined SVG icon, cached for 24 hours."
+   :description "GET /favicon.ico — inlined SVG icon, cached for 24 hours."
    :parent :get-route
    :args {:path "/favicon.ico" :handler :_favicon-handler}}
 
   {:name :editor
-   :description "GET / — serves the graph-editor HTML page."
+   :description "GET / — the graph-editor HTML page."
    :parent :get-route
    :args {:path "/" :handler :_editor-handler}}
 
-  {:name :api-entities
-   :description "GET /api/graph/entities — full graph dump as JSON (every fn, arg, ns)."
-   :parent :get-route
-   :args {:path "/api/graph/entities" :handler :all-entities-handler}}
+  ;; =============================================================================
+  ;; /partials/* — server-rendered HTML fragments for the editor
+  ;; =============================================================================
 
-  {:name :entity-details
-   :description "GET /partials/entity-details/:type/:id — HTML partial showing one entity's fields."
-   :parent :get-route
-   :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler}}
+  ;; --- /partials/entity-form sub-group ---
 
   {:name :entity-form-create
-   :description "GET /partials/entity-form/:type — HTML partial with the create form for an entity type."
+   :description "GET /partials/entity-form/:type — HTML create form for an entity type."
    :parent :get-route
-   :args {:path "/partials/entity-form/:type" :handler :entity-form-create-handler}}
+   :args {:path "/:type" :handler :entity-form-create-handler}}
 
   {:name :entity-form-edit
-   :description "GET /partials/entity-form/:type/:id — HTML partial with the edit form for one entity."
+   :description "GET /partials/entity-form/:type/:id — HTML edit form for one entity."
    :parent :get-route
-   :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-edit-handler}}
+   :args {:path "/:type/:id" :handler :entity-form-edit-handler}}
 
-  ;; Write-facing endpoints — gated by auth-required-middleware via
-  ;; post/delete-auth-required-route templates (see app/server).
-  ;; Verb-at-end (`entity-create` over `create-entity`) avoids the
-  ;; name clash with the `web.crud` base-fns of the same root verb.
+  {:name :entity-form-routes
+   :description "/partials/entity-form/* sub-group — create + edit form partials. Sub-paths `/:type` (create) and `/:type/:id` (edit)."
+   :parent :list
+   :args {:items ["/entity-form" :entity-form-create :entity-form-edit]}}
+
+  ;; --- /partials/entity-details (single leaf, lives inside :partials-routes) ---
+
+  {:name :entity-details
+   :description "GET /partials/entity-details/:type/:id — read-only HTML view of one entity's fields."
+   :parent :get-route
+   :args {:path "/entity-details/:type/:id" :handler :entity-details-handler}}
+
+  ;; --- /partials top group ---
+
+  {:name :partials-routes
+   :description "/partials/* — wraps `:entity-form-routes` and the standalone `:entity-details` leaf under the shared `/partials` prefix."
+   :parent :list
+   :args {:items ["/partials" :entity-form-routes :entity-details]}}
+
+  ;; =============================================================================
+  ;; /api/* — application API surface. Adding `/v1` is a single wrap of
+  ;; `:api-routes` in another group with prefix "/v1".
+  ;; =============================================================================
+
+  ;; --- /api/entities — entity CRUD ---
+
   {:name :entity-create
-   :description "POST /api/entities/:type — creates an entity from the form-encoded body. Auth-required."
+   :description "POST /api/entities/:type — create entity from form-encoded body. Auth-required."
    :parent :post
-   :args {:path "/api/entities/:type" :handler :create-entity-handler}}
+   :args {:path "/:type" :handler :create-entity-handler}}
+
+  ;; PUT and DELETE both target /:type/:id — combine their method-maps
+  ;; into one reitit entry so the path is declared exactly once.
 
   {:name :entity-update
-   :description "PUT /api/entities/:type/:id — updates an entity from a form-encoded body (e.g. rename a namespace from the inline edit field in the sidebar). Auth-required."
-   :parent :put
-   :args {:path "/api/entities/:type/:id" :handler :update-entity-handler}}
+   :description "Method-data for PUT on `/api/entities/:type/:id` — updates an entity from a form-encoded body. Combined with `:entity-delete` into `:entity-by-id`. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "put"
+          :handler :update-entity-handler
+          :middleware :_middleware-list}}
 
   {:name :entity-delete
-   :description "DELETE /api/entities/:type/:id — soft-deletes an entity by id. Auth-required."
-   :parent :delete
-   :args {:path "/api/entities/:type/:id" :handler :delete-entity-handler}}
+   :description "Method-data for DELETE on `/api/entities/:type/:id` — soft-deletes the entity. Combined with `:entity-update` into `:entity-by-id`. Auth-required."
+   :parent :_method-map-with-middleware
+   :args {:method "delete"
+          :handler :delete-entity-handler
+          :middleware :_middleware-list}}
 
-  ;; Sequence-arg editing endpoints. Paths disambiguated by leading verb so
-  ;; reitit doesn't see conflicting parameter positions (`:fn-id` vs `item`).
+  {:name :_entity-by-id-methods
+   :description "Merged method-data — `{:put {…} :delete {…}}` — for `/api/entities/:type/:id`."
+   :parent :merge
+   :args {:maps [:entity-update :entity-delete]}}
+
+  {:name :entity-by-id
+   :description "Multi-method route entry `[\"/:type/:id\" {:put … :delete …}]`. Sits inside `:entity-routes`."
+   :parent :pair
+   :args {:item1 "/:type/:id" :item2 :_entity-by-id-methods}}
+
+  {:name :entity-routes
+   :description "/api/entities/* sub-group — POST `/:type` (create) and PUT/DELETE `/:type/:id` (update/delete). New methods on /:type/:id go into `:_entity-by-id-methods`; new sub-paths get listed here directly."
+   :parent :list
+   :args {:items ["/entities" :entity-create :entity-by-id]}}
+
+  ;; --- /api/sequence — sequence-arg editing ---
+
   {:name :sequence-append
    :description "POST /api/sequence/append/:fn-id — appends an item to a `:sequence`-typed arg. Auth-required."
    :parent :post
-   :args {:path "/api/sequence/append/:fn-id" :handler :sequence-append-handler}}
+   :args {:path "/append/:fn-id" :handler :sequence-append-handler}}
 
   {:name :sequence-remove
-   :description "DELETE /api/sequence/item/:item-id — removes an item from its sequence-arg by item id. Auth-required."
+   :description "DELETE /api/sequence/item/:item-id — removes an item from its sequence-arg. Auth-required."
    :parent :delete
-   :args {:path "/api/sequence/item/:item-id" :handler :sequence-remove-handler}}
+   :args {:path "/item/:item-id" :handler :sequence-remove-handler}}
 
-  ;; POST /api/graph/layout - accepts root-id and expansions
+  {:name :sequence-routes
+   :description "/api/sequence/* sub-group — append / remove endpoints (each on a distinct sub-path, so no method merging needed)."
+   :parent :list
+   :args {:items ["/sequence" :sequence-append :sequence-remove]}}
+
+  ;; --- /api/graph — graph data API ---
+
+  {:name :api-entities
+   :description "GET /api/graph/entities — full graph dump (every fn, arg, namespace) as JSON."
+   :parent :get-route
+   :args {:path "/entities" :handler :all-entities-handler}}
+
   {:name :layout-api
-   :description "POST /api/graph/layout — accepts `{root-id, expansions}` and returns the laid-out graph (nodes + edges + grid positions)."
+   :description "POST /api/graph/layout — accepts `{root-id, expansions}`, returns the laid-out graph (nodes + edges + grid positions)."
    :parent :post-route
-   :args {:path "/api/graph/layout" :handler :_layout-api-handler}}
+   :args {:path "/layout" :handler :_layout-api-handler}}
 
-  ;; GET /api/auth/check — auth-required endpoint that simply returns 200
-  ;; "ok" if the bearer token matches AUTH_TOKEN. Used by the editor's
-  ;; lock-icon popover to validate the password BEFORE the user attempts
-  ;; a real mutation, so wrong passwords surface immediately rather than
-  ;; on the first failed POST/DELETE.
+  {:name :graph-routes
+   :description "/api/graph/* sub-group — graph-data endpoints (entities dump + layout pipeline)."
+   :parent :list
+   :args {:items ["/graph" :api-entities :layout-api]}}
+
+  ;; --- /api/auth/check — admin-token validation ping ---
+
   {:name :auth-check
-   :description "GET /api/auth/check — auth-required ping endpoint. Returns 200 `\"ok\"` when `Authorization: Bearer <AUTH_TOKEN>` matches; 401 otherwise (handled by `auth-required-middleware`). Used by the UI to validate the admin password before showing edit affordances."
+   :description "GET /api/auth/check — auth-required ping endpoint. Returns 200 `\"ok\"` when the bearer token matches; the auth middleware short-circuits to 401 otherwise. Used by the editor's lock-icon popover to validate the password before showing edit affordances."
    :parent :get-auth-required
-   :args {:path "/api/auth/check" :handler :_auth-check-handler}}
+   :args {:path "/auth/check" :handler :_auth-check-handler}}
 
   {:name :_auth-check-handler
-   :description "Ring handler returning `200 \"ok\"` as plain text. Used by `:auth-check` — the auth-required-middleware short-circuits to 401 before this runs when the token is wrong, so reaching this handler confirms the token matched."
+   :description "Ring handler returning `200 \"ok\"` as plain text."
    :parent :text-ok-response
-   :args {:body "ok"}}]}
+   :args {:body "ok"}}
+
+  ;; --- /api top group (combines all /api/* sub-groups + the auth-check leaf) ---
+
+  {:name :api-routes
+   :description "/api/* — full API surface. To add API versioning (e.g. `/v1`), wrap this in a list with the version prefix as first item — one change instead of one-per-endpoint."
+   :parent :list
+   :args {:items ["/api"
+                  :entity-routes
+                  :sequence-routes
+                  :graph-routes
+                  :auth-check]}}]}

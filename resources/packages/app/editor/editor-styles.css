@@ -31,7 +31,8 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 .ns-arrow { width: 16px; font-size: 10px; color: #555; flex-shrink: 0; text-align: center; }
 .ns-label { font-size: 13px; font-weight: 600; color: #222; }
 .ns-children { padding-left: 16px; }
-#entity-list .entity-item { padding: 2px 8px 2px 24px; cursor: pointer; }
+#entity-list .entity-item { padding: 2px 8px 2px 24px; cursor: pointer;
+  display: flex; align-items: center; }
 #entity-list .entity-item:hover { background: #eee; }
 #entity-list .entity-item.selected { background: #ddd; }
 #entity-list .entity-item .name { font-weight: 400; font-size: 13px; }
@@ -99,7 +100,8 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
   opacity: 0; transition: opacity 0.1s;
   color: #000;
 }
-.ns-header:hover .ns-row-actions .create-btn-inline { opacity: 1; }
+.ns-header:hover .ns-row-actions .create-btn-inline,
+.entity-item:hover .ns-row-actions .create-btn-inline { opacity: 1; }
 .create-btn-inline:hover { background: #000; color: #fff; }
 
 /* Create-child popover menu (ns / fn). Floated above the sidebar. */

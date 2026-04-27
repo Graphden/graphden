@@ -179,6 +179,23 @@ function ensureAuth() {
   return false;
 }
 
+// Append the rename button (✎) into `actionsEl` for a fn row. fns
+// have no children to add inline, so there's no `+` here.
+function buildFnRowButtons(actionsEl, fnId, fnName) {
+  const itemEl = actionsEl.parentNode || actionsEl;
+  const editBtn = document.createElement('button');
+  editBtn.className = 'create-btn create-btn-inline ns-edit-btn';
+  editBtn.title = 'Rename graph';
+  editBtn.innerHTML = PENCIL_SVG;
+  editBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!ensureAuth()) return;
+    startFnRename(itemEl, fnId, fnName);
+  });
+  actionsEl.appendChild(editBtn);
+}
+
+
 // =============================================================================
 // CREATE-CHILD MENU (ns / fn)
 // =============================================================================
@@ -342,6 +359,39 @@ function startNsRename(headerEl, nsId, nsPath) {
   headerEl.appendChild(row);
 }
 
+function startFnRename(itemEl, fnId, currentName) {
+  // Hide name + actions; insert input row in their place.
+  itemEl.querySelectorAll('.name, .ns-row-actions')
+    .forEach((el) => { el.style.display = 'none'; });
+
+  const row = buildInlineInputRow({
+    placeholder: 'Graph name',
+    indent: 0,
+    initialValue: currentName,
+    onSubmit: async (newName) => {
+      if (newName === currentName) {
+        await initGraph();
+        return;
+      }
+      const response = await putEntity('fn', fnId, { name: newName });
+      if (response.status >= 200 && response.status < 300) {
+        await initGraph();
+      } else {
+        const text = await response.text().catch(() => '');
+        throw new Error('Status ' + response.status
+                        + (text ? ': ' + text.slice(0, 80) : ''));
+      }
+    },
+    onCancel: () => {
+      if (typeof updateEntityList === 'function' && graphData) {
+        updateEntityList(graphData);
+      }
+    }
+  });
+  itemEl.appendChild(row);
+}
+
+
 // =============================================================================
 // ROOT-LEVEL "+ New namespace" BUTTON
 // =============================================================================
@@ -364,6 +414,7 @@ function buildRootCreateButton() {
 // =============================================================================
 
 window.buildNsRowButtons = buildNsRowButtons;
+window.buildFnRowButtons = buildFnRowButtons;
 window.buildActiveCreateRow = buildActiveCreateRow;
 window.buildRootCreateRow = buildRootCreateRow;
 window.buildRootCreateButton = buildRootCreateButton;

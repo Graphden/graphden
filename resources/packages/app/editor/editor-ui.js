@@ -117,6 +117,40 @@ function filterNsNode(node, filter, nsName) {
 /**
  * Render a namespace tree node recursively into the container.
  */
+function buildFnItem(fn) {
+  const item = document.createElement('div');
+  item.className = 'entity-item';
+  if (fn.id === selectedFnId) item.className += ' selected';
+  item.dataset.fnId = fn.id;
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'name';
+  nameSpan.textContent = fn.displayName;
+  item.appendChild(nameSpan);
+
+  // Right-edge action group — same shape as `.ns-row-actions`. Order:
+  // hover-only ✎ first, then always-visible `i`. fns don't have a `+`
+  // button (you don't add children to a fn the same way you do to a
+  // ns), only rename.
+  const actions = document.createElement('span');
+  actions.className = 'ns-row-actions';
+  if (typeof buildFnRowButtons === 'function') {
+    buildFnRowButtons(actions, fn.id, fn.displayName);
+  }
+  if (fn.description) {
+    const desc = createDescriptionBadge(fn.description, {
+      name: fn.displayName,
+      namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id))
+    });
+    if (desc) actions.appendChild(desc);
+  }
+  if (actions.children.length > 0) item.appendChild(actions);
+
+  item.onclick = () => selectFn(fn.id);
+  return item;
+}
+
+
 function renderNsNode(container, name, node, path) {
   const nsPath = path ? path + '.' + name : name;
   const isCollapsed = !expandedNamespaces.has(nsPath);
@@ -135,18 +169,20 @@ function renderNsNode(container, name, node, path) {
   label.className = 'ns-label';
   label.textContent = name;
   header.appendChild(label);
-  // All three right-edge icons live in one group: `i` (description,
-  // always visible) + ✎ (rename, hover-only) + + (create-child,
-  // hover-only). Sharing the group keeps them aligned at the row's
-  // right edge and at the same 15×15 size.
+  // All three right-edge icons live in one group. Order:
+  //   ✎ (rename, hover-only)  +  + (create-child, hover-only)  +  i (description, always)
+  // The always-visible `i` sits LAST so the empty slots left by the
+  // hover-only buttons (when not hovered) collapse to nothing visible
+  // — otherwise the row would look like there's a useless gap to the
+  // left of the `i`.
   const actions = document.createElement('span');
   actions.className = 'ns-row-actions';
+  if (node && node.nsId && typeof buildNsRowButtons === 'function') {
+    buildNsRowButtons(actions, node.nsId, nsPath);
+  }
   if (node && node.description) {
     const desc = createDescriptionBadge(node.description, { name: nsPath });
     if (desc) actions.appendChild(desc);
-  }
-  if (node && node.nsId && typeof buildNsRowButtons === 'function') {
-    buildNsRowButtons(actions, node.nsId, nsPath);
   }
   if (actions.children.length > 0) header.appendChild(actions);
 
@@ -176,23 +212,7 @@ function renderNsNode(container, name, node, path) {
   // Fn items (sorted)
   const sortedFns = [...node.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
   for (const fn of sortedFns) {
-    const item = document.createElement('div');
-    item.className = 'entity-item';
-    if (fn.id === selectedFnId) item.className += ' selected';
-    item.dataset.fnId = fn.id;
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'name';
-    nameSpan.textContent = fn.displayName;
-    item.appendChild(nameSpan);
-    if (fn.description) {
-      const desc = createDescriptionBadge(fn.description, {
-        name: fn.displayName,
-        namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id))
-      });
-      if (desc) item.appendChild(desc);
-    }
-    item.onclick = () => selectFn(fn.id);
-    childGroup.appendChild(item);
+    childGroup.appendChild(buildFnItem(fn));
   }
 
   // If the user has an active inline-create rooted at THIS namespace,
@@ -244,23 +264,7 @@ function updateEntityList(data) {
   // Top-level fns without namespace
   const sortedFns = [...tree.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
   for (const fn of sortedFns) {
-    const item = document.createElement('div');
-    item.className = 'entity-item';
-    if (fn.id === selectedFnId) item.className += ' selected';
-    item.dataset.fnId = fn.id;
-    const nameSpan = document.createElement('span');
-    nameSpan.className = 'name';
-    nameSpan.textContent = fn.displayName;
-    item.appendChild(nameSpan);
-    if (fn.description) {
-      const desc = createDescriptionBadge(fn.description, {
-        name: fn.displayName,
-        namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id))
-      });
-      if (desc) item.appendChild(desc);
-    }
-    item.onclick = () => selectFn(fn.id);
-    list.appendChild(item);
+    list.appendChild(buildFnItem(fn));
   }
 
   if (list.children.length === 0) {

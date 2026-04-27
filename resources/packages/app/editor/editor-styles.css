@@ -17,10 +17,14 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 }
 #search-input:focus { border-color: #888; }
 #search-clear {
-  width: 24px; height: 24px; border: 1px solid #ccc; border-radius: 3px;
+  /* Match the input's height: drop the explicit `height: 24px` and
+     let flex `align-items: stretch` (the default on `#search-bar`)
+     pull the button up to whatever the input renders at. Result is
+     pixel-aligned regardless of font/line-height changes. */
+  width: 24px; align-self: stretch; border: 1px solid #ccc; border-radius: 3px;
   background: #fff; font-size: 16px; cursor: pointer; color: #666;
   display: flex; align-items: center; justify-content: center; padding: 0;
-  flex-shrink: 0;
+  flex-shrink: 0; box-sizing: border-box;
 }
 #search-clear:hover { background: #eee; color: #000; }
 

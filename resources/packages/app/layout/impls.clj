@@ -303,29 +303,44 @@
    Returns {:nodes [...] :edges [...]}"
   [root-fn-id expansions lookups]
   (let [{:keys [fn-map arg-map args-by-fn]} lookups
-        nodes (atom [])
-        edges (atom [])
-        added-node-ids (atom #{})
-        processed-arg-targets (atom #{})
-        ;; Track fully processed fn nodes (with all children processed)
-        ;; Different from added-node-ids which only tracks node creation
-        ;; This prevents infinite recursion when same fn is reached via different paths
-        processed-fn-nodes (atom #{})
-        ;; Track expansions currently being processed (cycle protection for
-        ;; process-expanded-fn). Cyclic refs (e.g. method-map.value → assoc-handler
-        ;; whose binding chain leads back to method-map) would otherwise loop.
-        in-progress-expansions (atom #{})
+        ;; Mutable state collected during traversal lives in ONE atom keyed
+        ;; by purpose. Helpers receive `state` via lexical closure and use
+        ;; `(swap! state update :nodes conj …)` / `(:nodes @state)` to read.
+        ;;
+        ;; Keys:
+        ;;   :nodes / :edges                  — accumulated cytoscape elements
+        ;;   :added-node-ids                  — set of emitted node-ids (dedup)
+        ;;   :processed-arg-targets           — arg-target keys already wired
+        ;;   :processed-fn-nodes              — fn-process keys already done
+        ;;                                       (cycle guard for shared-fn graphs)
+        ;;   :in-progress-expansions          — expansion keys currently active
+        ;;                                       (cycle guard for self-referential refs)
+        ;;   :optional-unsets-by-node         — node-id → [arg-name …] for the
+        ;;                                       compact `+default, +else` badge
+        ;;   :hof-captured-by-node            — node-id → [arg-name …] for the
+        ;;                                       λname HOF capture badge
+        ;;   :captured-edge-migrations        — caller arg-id → inside consumer
+        ;;                                       node-id, post-process rewrite of
+        ;;                                       cross-HOF edges
+        state (atom {:nodes []
+                     :edges []
+                     :added-node-ids #{}
+                     :processed-arg-targets #{}
+                     :processed-fn-nodes #{}
+                     :in-progress-expansions #{}
+                     :optional-unsets-by-node {}
+                     :hof-captured-by-node {}
+                     :captured-edge-migrations {}})
         max-visible-ancestors 4
 
         ;; Optional unbound args don't deserve their own placeholder node — the
-        ;; caller's fn has a sensible fallback baked in. We collect the NAMES
-        ;; per displayed node-id here and surface them on the node's `:data`
+        ;; caller's fn has a sensible fallback baked in. The names are
+        ;; collected per displayed node-id and surfaced on the node's `:data`
         ;; so the client can render a compact badge like "+default, +else".
-        optional-unsets-by-node (atom {})
         record-optional-unset!
         (fn [node-id arg-name]
           (when (and node-id arg-name)
-            (swap! optional-unsets-by-node update node-id
+            (swap! state update-in [:optional-unsets-by-node node-id]
                    (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
 
         ;; Lambda-param free args on HOF-reachable nodes — supplied by the
@@ -334,11 +349,10 @@
         ;; source-id chain reaches this arg's origin) are NOT recorded
         ;; here — their binding is rendered as an ordinary edge on the
         ;; capturing caller node.
-        hof-captured-by-node (atom {})
         record-hof-captured!
         (fn [node-id arg-name]
           (when (and node-id arg-name)
-            (swap! hof-captured-by-node update node-id
+            (swap! state update-in [:hof-captured-by-node node-id]
                    (fn [xs] (if xs (conj xs arg-name) [arg-name])))))
 
         ;; Reverse source-id index: arg-id → vector of args whose
@@ -378,15 +392,6 @@
                       bound
                       (recur (into rest-q (map :id) children)
                              (conj visited cur)))))))))
-
-        ;; Edge-migration map: caller-side arg-id → inside-consumer
-        ;; node-id. Populated when an unset arg inside an expanded HOF
-        ;; subgraph is structurally captured. Post-processing rewrites
-        ;; edges whose `:source-arg-id` matches a key here so the
-        ;; rendered edge originates from the inside consumer (the leaf
-        ;; that actually reads the value) instead of the outer caller
-        ;; node.
-        captured-edge-migrations (atom {})
 
         ;; Does `arg-entity` propagate an `is-fn=true` marker anywhere in its
         ;; source-id chain? Used to decide whether a ref-binding to another
@@ -436,8 +441,8 @@
                                              (subs source-node-id 3)
                                              (str source-node-id))]
                             (str "fn-" caller-tag "-" source-arg-id)))]
-            (when-not (contains? @added-node-ids node-id)
-              (swap! added-node-ids conj node-id)
+            (when-not (contains? (:added-node-ids @state) node-id)
+              (swap! state update :added-node-ids conj node-id)
               (let [levels (get-inheritance-levels original-fn-id fn-map)
                     ;; Name of a fn for label rendering. For level 0 (`top-level?`)
                     ;; we do NOT substitute the nearest named ancestor: if the fn
@@ -468,7 +473,7 @@
                                   (conj raw-lines "...")
                                   raw-lines)
                     label (str/join "\n" label-lines)]
-                (swap! nodes conj
+                (swap! state update :nodes conj
                        {:data {:id node-id
                                :label label
                                :type "fn"
@@ -592,13 +597,13 @@
                   arg-target-key (when source-arg-id
                                    (str source-node-id "-" source-arg-id "->" node-id))
                   is-duplicate (and arg-target-key
-                                    (contains? @processed-arg-targets arg-target-key))]
-              (when (and (not (contains? @added-node-ids edge-id))
+                                    (contains? (:processed-arg-targets @state) arg-target-key))]
+              (when (and (not (contains? (:added-node-ids @state) edge-id))
                          (not is-duplicate))
-                (swap! added-node-ids conj edge-id)
+                (swap! state update :added-node-ids conj edge-id)
                 (when arg-target-key
-                  (swap! processed-arg-targets conj arg-target-key))
-                (swap! edges conj
+                  (swap! state update :processed-arg-targets conj arg-target-key))
+                (swap! state update :edges conj
                        {:data {:id edge-id
                                :source source-node-id
                                :target node-id
@@ -612,14 +617,14 @@
           ;; Different fns expanding to same ancestor should get separate arg nodes
           (let [node-id (str "arg-" source-node-id "-" arg-id)
                 edge-id (str "e-val-" source-node-id "-" arg-id)]
-            (when-not (contains? @added-node-ids node-id)
-              (swap! added-node-ids conj node-id)
+            (when-not (contains? (:added-node-ids @state) node-id)
+              (swap! state update :added-node-ids conj node-id)
               (let [display-value (truncate-label (json/generate-string value) 20)]
-                (swap! nodes conj
+                (swap! state update :nodes conj
                        {:data {:id node-id
                                :label display-value
                                :type "arg"}}))
-              (swap! edges conj
+              (swap! state update :edges conj
                      {:data {:id edge-id
                              :source source-node-id
                              :target node-id
@@ -665,21 +670,21 @@
                  ;; so post-processing rewrites the caller's edge to
                  ;; originate from THIS inside-consumer node (the leaf
                  ;; that actually reads the captured value).
-                 (swap! captured-edge-migrations assoc (:id bound) source-node-id)
+                 (swap! state update :captured-edge-migrations assoc (:id bound) source-node-id)
                  ;; True lambda-param: HOF impl supplies it per call.
                  (record-hof-captured! source-node-id displayed-name))
 
                :else
                (let [node-id (str "unset-" source-node-id "-" arg-id)
                      edge-id (str "e-unset-" source-node-id "-" arg-id)]
-                 (when-not (contains? @added-node-ids node-id)
-                   (swap! added-node-ids conj node-id)
-                   (swap! nodes conj
+                 (when-not (contains? (:added-node-ids @state) node-id)
+                   (swap! state update :added-node-ids conj node-id)
+                   (swap! state update :nodes conj
                           {:data {:id node-id
                                   :label (if arg-type (name arg-type) "any")
                                   :type "fn"
                                   :isPlaceholder true}})
-                   (swap! edges conj
+                   (swap! state update :edges conj
                           {:data {:id edge-id
                                   :source source-node-id
                                   :target node-id
@@ -1163,8 +1168,8 @@
 
                   ;; Only process children if this node wasn't already fully processed
                   ;; This prevents infinite recursion when same fn is reached via different paths
-                  (when-not (contains? @processed-fn-nodes process-key)
-                    (swap! processed-fn-nodes conj process-key)
+                  (when-not (contains? (:processed-fn-nodes @state) process-key)
+                    (swap! state update :processed-fn-nodes conj process-key)
                     ;; Process children
                     ;; When inside an expansion context (expansion-root is set),
                     ;; we WANT to show bindings - they should appear here, not at the root
@@ -1257,16 +1262,16 @@
                 ;; This handles cyclic refs like method-map.value → assoc-handler
                 ;; whose binding chain leads back to method-map.
                 (let [in-progress-key [original-fn-id parent-expansion-root]]
-                  (if (contains? @in-progress-expansions in-progress-key)
+                  (if (contains? (:in-progress-expansions @state) in-progress-key)
                     (let [node-id (add-fn-node original-fn-id is-root source-node-id source-arg-id)]
                       (add-ref-edge! source-node-id node-id source-arg-id edge-arg-name source-expanded-fns)
                       node-id)
                     (do
-                      (swap! in-progress-expansions conj in-progress-key)
+                      (swap! state update :in-progress-expansions conj in-progress-key)
                       (try
                         (process-expanded-fn-impl original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns is-hof)
                         (finally
-                          (swap! in-progress-expansions disj in-progress-key)))))))
+                          (swap! state update :in-progress-expansions disj in-progress-key)))))))
 
               (process-expanded-fn-impl
                 [original-fn-id spec source-node-id edge-arg-name is-root source-arg-id parent-bindings parent-expansion-root source-expanded-fns is-hof]
@@ -1580,15 +1585,15 @@
     ;; instead of cluttering the graph with placeholder nodes.
     (let [final-nodes (mapv (fn [n]
                               (let [node-id (get-in n [:data :id])
-                                    optionals (get @optional-unsets-by-node node-id)
-                                    hof-captured (get @hof-captured-by-node node-id)]
+                                    optionals (get (:optional-unsets-by-node @state) node-id)
+                                    hof-captured (get (:hof-captured-by-node @state) node-id)]
                                 (cond-> n
                                   (seq optionals)
                                   (assoc-in [:data :optionalArgs] (vec (distinct optionals)))
 
                                   (seq hof-captured)
                                   (assoc-in [:data :hofCapturedArgs] (vec (distinct hof-captured))))))
-                            @nodes)
+                            (:nodes @state))
           ;; Edge migration: when an unset arg inside an expanded HOF
           ;; was structurally captured, rewrite the caller's edge so it
           ;; originates from the inside-consumer node. The captured
@@ -1596,7 +1601,7 @@
           ;; Edges keep their target/argName; only `:source` and `:id`
           ;; are rewritten so the edge visually starts at the leaf
           ;; that actually reads the value.
-          migrations @captured-edge-migrations
+          migrations (:captured-edge-migrations @state)
           final-edges (mapv (fn [e]
                               (let [data (:data e)
                                     sai (:sourceArgId data)
@@ -1607,7 +1612,7 @@
                                                 :source new-src
                                                 :id (str "e-cap-" new-src "-" (:target data))))
                                   e)))
-                            @edges)]
+                            (:edges @state))]
       {:nodes final-nodes
        :edges final-edges})))
 

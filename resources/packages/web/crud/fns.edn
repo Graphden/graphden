@@ -49,6 +49,11 @@
    :args {:request {:type :jsonb :description "Internal Ring request map."}}
    :return-type :jsonb}
 
+  {:name :process-update-entity
+   :description "Parse a Ring request, update the entity it identifies (PUT /api/entities/:type/:id), return a partial Ring response."
+   :args {:request {:type :jsonb :description "Internal Ring request map."}}
+   :return-type :jsonb}
+
   {:name :process-delete-entity
    :description "Parse a Ring request, delete the entity it identifies, return a partial Ring response."
    :args {:request {:type :jsonb :description "Internal Ring request map."}}
@@ -239,6 +244,11 @@
    :description "Ring handler for `POST /api/entities/:type` — runs `process-create-entity` and wraps the result via `html-action-response`."
    :parent :html-action-response
    :args {:result :process-create-entity}}
+
+  {:name :update-entity-handler
+   :description "Ring handler for `PUT /api/entities/:type/:id` — runs `process-update-entity` and wraps the result via `html-action-response`."
+   :parent :html-action-response
+   :args {:result :process-update-entity}}
 
   {:name :delete-entity-handler
    :description "Ring handler for `DELETE /api/entities/:type/:id` — runs `process-delete-entity` and wraps the result via `html-action-response`."

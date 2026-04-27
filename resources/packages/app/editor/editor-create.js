@@ -1,206 +1,371 @@
-// Editor Create — `+` buttons for adding namespaces and fns to the graph.
+// Editor Create / Edit — inline UI for namespace + fn creation and
+// namespace renaming, all driven from the sidebar tree itself.
 //
-// Two surfaces:
-//   1. Top-level `+` in the sidebar header (next to the auth lock).
-//      Click → menu with "New namespace…" / "New graph…" — both create
-//      at the root (no parent).
-//   2. Per-namespace `+` icon, shown on hover next to each namespace
-//      row in the sidebar tree. Click → same menu but creates INSIDE
-//      that namespace (parent-id = the row's ns-id).
+// Surfaces:
+//   1. Per-namespace row buttons (shown on hover):
+//        ✎  rename namespace inline (input replaces the label)
+//        +  open a small menu — "New namespace…" / "New graph…"
+//      Choosing either spawns an inline input row indented under the
+//      namespace; submitting it POSTs the create and refreshes.
+//   2. A full-width "+ New namespace" button at the bottom of the
+//      sidebar that creates a ROOT namespace inline.
+//      No "New graph…" option there — fns must live inside a namespace,
+//      and a root-level graph would have no namespace-id to attach to.
 //
-// Both surfaces open the same modal form, prefilled with the parent
-// context. On submit, we POST to `/api/entities/<type>` via authFetch
-// (admin-only), then reload graph entities so the sidebar reflects the
-// new node.
+// All mutating fetches go through `authFetch`; without a stored token
+// the lock popover opens automatically (1) on click of any of these
+// affordances, (2) on a 401 from `authFetch`.
 
 const PLUS_SVG = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"/></svg>';
+const PENCIL_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
+const CHECK_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5L20 7"/></svg>';
+const X_SVG = '<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 6l12 12M18 6L6 18"/></svg>';
 
-function initCreateMount() {
-  const mount = document.getElementById('create-mount');
-  if (!mount) return;
-  mount.innerHTML =
-    '<button id="create-root-btn" class="create-btn create-btn-header" title="Create…"></button>' +
-    '<div id="create-menu" class="create-menu hidden">' +
-      '<button class="create-menu-item" data-type="ns">New namespace…</button>' +
-      '<button class="create-menu-item" data-type="fn">New graph…</button>' +
-    '</div>';
-  document.getElementById('create-root-btn').innerHTML = PLUS_SVG;
-  document.getElementById('create-root-btn').addEventListener('click', (e) => {
-    e.stopPropagation();
-    toggleCreateMenu(null);
+// =============================================================================
+// API HELPERS
+// =============================================================================
+
+async function postEntity(type, fields) {
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(fields)) {
+    if (v !== undefined && v !== null && v !== '') body.set(k, v);
+  }
+  const response = await authFetch('/api/entities/' + type, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
   });
-  document.querySelectorAll('#create-menu .create-menu-item').forEach((btn) => {
+  return response;
+}
+
+async function putEntity(type, id, fields) {
+  const body = new URLSearchParams();
+  for (const [k, v] of Object.entries(fields)) {
+    if (v !== undefined && v !== null && v !== '') body.set(k, v);
+  }
+  const response = await authFetch('/api/entities/' + type + '/' + id, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: body.toString()
+  });
+  return response;
+}
+
+// =============================================================================
+// INLINE-INPUT ROW BUILDER
+// =============================================================================
+
+// Build a row `[<input> <save> <cancel>]` indented by `indent` and
+// styled to match the sidebar. `placeholder` shows in the empty input.
+// `onSubmit(value)` is called when user hits Enter or save; it should
+// return a Promise — while pending the row is disabled. `onCancel()`
+// is called when user hits Escape, clicks cancel, or blurs (without
+// committing). `initialValue` pre-fills the input.
+function buildInlineInputRow({ placeholder, indent, initialValue, onSubmit, onCancel }) {
+  const row = document.createElement('div');
+  row.className = 'inline-input-row';
+  row.style.paddingLeft = (indent || 0) + 'px';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'inline-input';
+  input.placeholder = placeholder || '';
+  input.value = initialValue || '';
+  input.autocomplete = 'off';
+
+  const saveBtn = document.createElement('button');
+  saveBtn.className = 'inline-btn inline-btn-save';
+  saveBtn.title = 'Save';
+  saveBtn.innerHTML = CHECK_SVG;
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'inline-btn inline-btn-cancel';
+  cancelBtn.title = 'Cancel';
+  cancelBtn.innerHTML = X_SVG;
+
+  const errorEl = document.createElement('span');
+  errorEl.className = 'inline-error';
+
+  row.appendChild(input);
+  row.appendChild(saveBtn);
+  row.appendChild(cancelBtn);
+  row.appendChild(errorEl);
+
+  let pending = false;
+
+  const setPending = (p) => {
+    pending = p;
+    input.disabled = p;
+    saveBtn.disabled = p;
+    cancelBtn.disabled = p;
+  };
+
+  const showError = (msg) => {
+    errorEl.textContent = msg || '';
+    errorEl.style.display = msg ? 'inline' : 'none';
+  };
+
+  const tryCommit = async () => {
+    if (pending) return;
+    const value = input.value.trim();
+    if (!value) {
+      showError('Name required');
+      input.focus();
+      return;
+    }
+    setPending(true);
+    showError('');
+    try {
+      await onSubmit(value);
+    } catch (e) {
+      showError(e.message || 'Failed');
+      setPending(false);
+      input.focus();
+    }
+  };
+
+  saveBtn.addEventListener('click', (e) => { e.stopPropagation(); tryCommit(); });
+  cancelBtn.addEventListener('click', (e) => { e.stopPropagation(); if (!pending) onCancel(); });
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); tryCommit(); }
+    else if (e.key === 'Escape') { e.preventDefault(); if (!pending) onCancel(); }
+  });
+  input.addEventListener('click', (e) => e.stopPropagation());
+
+  // Focus on next tick so the row is in the DOM first.
+  setTimeout(() => input.focus(), 0);
+
+  return row;
+}
+
+// =============================================================================
+// PER-NAMESPACE EDIT BUTTONS
+// =============================================================================
+
+// Build the right-side hover buttons inside a namespace header:
+//   ✎ rename, + create-child (with menu).
+// `nsId` is the entity uuid; `nsPath` is the dotted path; `headerEl`
+// is the element to swap into edit mode when ✎ is clicked.
+function buildNsRowButtons(headerEl, nsId, nsPath) {
+  const group = document.createElement('span');
+  group.className = 'ns-row-actions';
+
+  const editBtn = document.createElement('button');
+  editBtn.className = 'create-btn create-btn-inline ns-edit-btn';
+  editBtn.title = 'Rename namespace';
+  editBtn.innerHTML = PENCIL_SVG;
+  editBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!ensureAuth()) return;
+    startNsRename(headerEl, nsId, nsPath);
+  });
+
+  const plusBtn = document.createElement('button');
+  plusBtn.className = 'create-btn create-btn-inline ns-plus-btn';
+  plusBtn.title = 'Add inside this namespace';
+  plusBtn.innerHTML = PLUS_SVG;
+  plusBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (!ensureAuth()) return;
+    openChildCreateMenu(plusBtn, nsId, nsPath);
+  });
+
+  group.appendChild(editBtn);
+  group.appendChild(plusBtn);
+  headerEl.appendChild(group);
+}
+
+function ensureAuth() {
+  if (isAuthenticated()) return true;
+  openAuthPopover('Sign in to edit the graph.');
+  return false;
+}
+
+// =============================================================================
+// CREATE-CHILD MENU (ns / fn)
+// =============================================================================
+
+let activeChildMenu = null;
+
+function openChildCreateMenu(anchorEl, parentNsId, parentNsPath) {
+  closeChildCreateMenu();
+  const menu = document.createElement('div');
+  menu.className = 'create-menu';
+  menu.innerHTML =
+    '<button class="create-menu-item" data-type="ns">New namespace…</button>' +
+    '<button class="create-menu-item" data-type="fn">New graph…</button>';
+  // Position fixed under the anchor.
+  const rect = anchorEl.getBoundingClientRect();
+  menu.style.position = 'fixed';
+  menu.style.top = (rect.bottom + 4) + 'px';
+  menu.style.left = rect.left + 'px';
+  menu.style.right = 'auto';
+  menu.style.zIndex = '300';
+  document.body.appendChild(menu);
+  activeChildMenu = menu;
+
+  menu.querySelectorAll('.create-menu-item').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.stopPropagation();
-      closeCreateMenu();
-      openCreateForm(btn.dataset.type, getCreateMenuParentId());
+      const type = btn.dataset.type;
+      closeChildCreateMenu();
+      startInlineCreate(type, parentNsId, parentNsPath);
     });
   });
-  document.addEventListener('click', (e) => {
-    const menu = document.getElementById('create-menu');
-    if (!menu || menu.classList.contains('hidden')) return;
-    if (menu.contains(e.target)) return;
-    closeCreateMenu();
-  });
-  buildCreateModal();
+
+  // Outside-click closes the menu.
+  setTimeout(() => {
+    document.addEventListener('click', closeChildCreateMenu, { once: true });
+  }, 0);
 }
 
-// The currently-selected parent-namespace-id for the next create
-// action. Set by the openers (`null` = root, `<uuid>` = inside that ns).
-let pendingCreateParentId = null;
-
-function getCreateMenuParentId() {
-  return pendingCreateParentId;
-}
-
-function toggleCreateMenu(parentNsId) {
-  pendingCreateParentId = parentNsId;
-  const menu = document.getElementById('create-menu');
-  if (!menu) return;
-  if (menu.classList.contains('hidden')) {
-    menu.classList.remove('hidden');
-  } else {
-    closeCreateMenu();
+function closeChildCreateMenu() {
+  if (activeChildMenu) {
+    activeChildMenu.remove();
+    activeChildMenu = null;
   }
-}
-
-function closeCreateMenu() {
-  const menu = document.getElementById('create-menu');
-  if (menu) menu.classList.add('hidden');
-}
-
-// Build the inline-`+` button used inside renderNsNode for per-namespace
-// creation. Appends to `containerEl`. `nsId` is the ns-entity uuid.
-function buildNsPlusButton(containerEl, nsId) {
-  const btn = document.createElement('button');
-  btn.className = 'create-btn create-btn-inline';
-  btn.title = 'Create inside this namespace';
-  btn.innerHTML = PLUS_SVG;
-  btn.addEventListener('click', (e) => {
-    e.stopPropagation();
-    // Open the same menu but parented to this ns. Reposition it under
-    // the inline button so the menu lands where the click was.
-    const menu = document.getElementById('create-menu');
-    if (!menu) return;
-    const rect = btn.getBoundingClientRect();
-    menu.style.position = 'fixed';
-    menu.style.top = (rect.bottom + 4) + 'px';
-    menu.style.left = rect.left + 'px';
-    menu.style.right = 'auto';
-    toggleCreateMenu(nsId);
-  });
-  containerEl.appendChild(btn);
 }
 
 // =============================================================================
-// MODAL FORM — single shared input for namespace or fn name.
+// INLINE CREATE
 // =============================================================================
 
-function buildCreateModal() {
-  let modal = document.getElementById('create-modal');
-  if (modal) return;
-  modal = document.createElement('div');
-  modal.id = 'create-modal';
-  modal.className = 'create-modal hidden';
-  modal.innerHTML =
-    '<div class="create-modal-backdrop"></div>' +
-    '<div class="create-modal-panel">' +
-      '<div class="create-modal-header" id="create-modal-title">New entity</div>' +
-      '<div class="create-modal-body">' +
-        '<label for="create-name">Name</label>' +
-        '<input id="create-name" type="text" autocomplete="off">' +
-        '<div id="create-modal-error" class="create-modal-error hidden"></div>' +
-      '</div>' +
-      '<div class="create-modal-footer">' +
-        '<button id="create-modal-cancel" class="create-modal-btn create-modal-btn-secondary">Cancel</button>' +
-        '<button id="create-modal-submit" class="create-modal-btn">Create</button>' +
-      '</div>' +
-    '</div>';
-  document.body.appendChild(modal);
+// State: which slot is currently in inline-create mode. Cleared on
+// cancel/commit. We don't persist across refreshes — initGraph()
+// rebuilds the sidebar fresh each time.
+let activeCreate = null;  // { type, parentNsId, parentNsPath } | null
 
-  document.getElementById('create-modal-cancel').addEventListener('click', closeCreateForm);
-  modal.querySelector('.create-modal-backdrop').addEventListener('click', closeCreateForm);
-  document.getElementById('create-modal-submit').addEventListener('click', submitCreateForm);
-  document.getElementById('create-name').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') submitCreateForm();
-    if (e.key === 'Escape') closeCreateForm();
+function startInlineCreate(type, parentNsId, parentNsPath) {
+  activeCreate = { type, parentNsId, parentNsPath };
+  // Re-render so renderNsNode picks up the active-create marker and
+  // injects the inline input row at the right spot.
+  if (typeof updateEntityList === 'function' && graphData) {
+    updateEntityList(graphData);
+  }
+}
+
+function startRootCreate() {
+  if (!ensureAuth()) return;
+  activeCreate = { type: 'ns', parentNsId: null, parentNsPath: null };
+  if (typeof updateEntityList === 'function' && graphData) {
+    updateEntityList(graphData);
+  }
+}
+
+function clearActiveCreate() {
+  activeCreate = null;
+  if (typeof updateEntityList === 'function' && graphData) {
+    updateEntityList(graphData);
+  }
+}
+
+// Called from renderNsNode when its `nsId` matches the active create
+// context — caller appends the returned row inside the children
+// container of that namespace.
+function buildActiveCreateRow(nsId, indent) {
+  if (!activeCreate) return null;
+  if (activeCreate.parentNsId !== nsId) return null;
+  return buildCreateRow(indent);
+}
+
+function buildRootCreateRow() {
+  if (!activeCreate) return null;
+  if (activeCreate.parentNsId !== null) return null;
+  return buildCreateRow(0);
+}
+
+function buildCreateRow(indent) {
+  const placeholder = activeCreate.type === 'ns' ? 'New namespace name'
+                                                 : 'New graph name';
+  return buildInlineInputRow({
+    placeholder,
+    indent,
+    onSubmit: async (name) => {
+      const fields = activeCreate.type === 'ns'
+        ? { name, 'parent-id': activeCreate.parentNsId || '' }
+        : { name, 'namespace-id': activeCreate.parentNsId || '' };
+      const response = await postEntity(activeCreate.type, fields);
+      if (response.status >= 200 && response.status < 300) {
+        activeCreate = null;
+        await initGraph();
+      } else {
+        const text = await response.text().catch(() => '');
+        throw new Error('Status ' + response.status
+                        + (text ? ': ' + text.slice(0, 80) : ''));
+      }
+    },
+    onCancel: clearActiveCreate
   });
 }
 
-let activeCreateType = null;
-let activeCreateParentId = null;
+// =============================================================================
+// INLINE RENAME
+// =============================================================================
 
-function openCreateForm(type, parentNsId) {
-  if (!isAuthenticated()) {
-    // Not signed in — bounce the user to the auth popover instead of
-    // letting them type a name only to get a 401 on submit.
-    openAuthPopover('Sign in to create entities.');
-    return;
-  }
-  activeCreateType = type;
-  activeCreateParentId = parentNsId || null;
-  const titleEl = document.getElementById('create-modal-title');
-  const nameInput = document.getElementById('create-name');
-  const err = document.getElementById('create-modal-error');
-  if (titleEl) {
-    const what = type === 'ns' ? 'namespace' : 'graph';
-    const where = parentNsId ? ' (inside selected namespace)' : '';
-    titleEl.textContent = 'New ' + what + where;
-  }
-  if (nameInput) {
-    nameInput.value = '';
-    nameInput.focus();
-  }
-  if (err) { err.textContent = ''; err.classList.add('hidden'); }
-  document.getElementById('create-modal').classList.remove('hidden');
-}
+let activeRename = null;  // { nsId, nsPath } | null
 
-function closeCreateForm() {
-  const modal = document.getElementById('create-modal');
-  if (modal) modal.classList.add('hidden');
-  activeCreateType = null;
-  activeCreateParentId = null;
-}
+function startNsRename(headerEl, nsId, nsPath) {
+  // Replace label + actions with input row inline.
+  const segments = nsPath.split('.');
+  const currentName = segments[segments.length - 1];
+  const arrow = headerEl.querySelector('.ns-arrow');
+  // Hide the original label/actions; we insert the input row after the arrow.
+  headerEl.querySelectorAll('.ns-label, .description-badge, .ns-row-actions')
+    .forEach((el) => { el.style.display = 'none'; });
 
-async function submitCreateForm() {
-  const nameInput = document.getElementById('create-name');
-  const err = document.getElementById('create-modal-error');
-  const name = (nameInput && nameInput.value || '').trim();
-  if (!name) {
-    if (err) { err.textContent = 'Name required.'; err.classList.remove('hidden'); }
-    return;
-  }
-  const body = new URLSearchParams();
-  body.set('name', name);
-  if (activeCreateParentId) body.set('parent-id', activeCreateParentId);
-
-  try {
-    const response = await authFetch('/api/entities/' + activeCreateType, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: body.toString()
-    });
-    if (response.status >= 200 && response.status < 300) {
-      closeCreateForm();
-      // Reload the sidebar — initGraph fetches /api/graph/entities and
-      // calls updateEntityList. Defined in editor-main.js, hoisted to
-      // bundle scope.
-      await initGraph();
-    } else {
-      const text = await response.text().catch(() => '');
-      if (err) {
-        err.textContent = 'Create failed (status ' + response.status + ')'
-                        + (text ? ': ' + text.slice(0, 120) : '.');
-        err.classList.remove('hidden');
+  const row = buildInlineInputRow({
+    placeholder: 'Namespace name',
+    indent: 0,
+    initialValue: currentName,
+    onSubmit: async (newName) => {
+      if (newName === currentName) {
+        // No-op — just close.
+        await initGraph();
+        return;
+      }
+      const response = await putEntity('ns', nsId, { name: newName });
+      if (response.status >= 200 && response.status < 300) {
+        await initGraph();
+      } else {
+        const text = await response.text().catch(() => '');
+        throw new Error('Status ' + response.status
+                        + (text ? ': ' + text.slice(0, 80) : ''));
+      }
+    },
+    onCancel: () => {
+      // Restore visibility — but updateEntityList rebuilds anyway when
+      // graphData hasn't changed. Quickest: just trigger re-render.
+      if (typeof updateEntityList === 'function' && graphData) {
+        updateEntityList(graphData);
       }
     }
-  } catch (e) {
-    if (err) {
-      err.textContent = 'Network error: ' + e.message;
-      err.classList.remove('hidden');
-    }
-  }
+  });
+  // Drop into the header replacing where label was.
+  headerEl.appendChild(row);
 }
 
-window.initCreateMount = initCreateMount;
-window.buildNsPlusButton = buildNsPlusButton;
+// =============================================================================
+// ROOT-LEVEL "+ New namespace" BUTTON
+// =============================================================================
+
+function buildRootCreateButton() {
+  const btn = document.createElement('button');
+  btn.id = 'create-root-ns-btn';
+  btn.className = 'create-root-ns-btn';
+  btn.innerHTML = '<span class="create-root-ns-plus">' + PLUS_SVG + '</span>'
+                + '<span class="create-root-ns-text">New namespace</span>';
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    startRootCreate();
+  });
+  return btn;
+}
+
+// =============================================================================
+// EXPORTS
+// =============================================================================
+
+window.buildNsRowButtons = buildNsRowButtons;
+window.buildActiveCreateRow = buildActiveCreateRow;
+window.buildRootCreateRow = buildRootCreateRow;
+window.buildRootCreateButton = buildRootCreateButton;

@@ -139,12 +139,11 @@ function renderNsNode(container, name, node, path) {
     const desc = createDescriptionBadge(node.description, { name: nsPath });
     if (desc) header.appendChild(desc);
   }
-  // Per-namespace `+` button — appears on hover (CSS), opens the same
-  // create menu but with parent-id pre-filled to this namespace's
-  // entity id. Skipped when we don't have an id (e.g. a synthetic
+  // Per-namespace row actions — ✎ rename + + create-child. Shown on
+  // hover via CSS. Skipped when we don't have an id (e.g. a synthetic
   // tree node that doesn't correspond to a real `:ns` entity).
-  if (node && node.nsId && typeof buildNsPlusButton === 'function') {
-    buildNsPlusButton(header, node.nsId);
+  if (node && node.nsId && typeof buildNsRowButtons === 'function') {
+    buildNsRowButtons(header, node.nsId, nsPath);
   }
 
   header.onclick = (e) => {
@@ -190,6 +189,14 @@ function renderNsNode(container, name, node, path) {
     }
     item.onclick = () => selectFn(fn.id);
     childGroup.appendChild(item);
+  }
+
+  // If the user has an active inline-create rooted at THIS namespace,
+  // append the input row inside `childGroup` so it sits where the new
+  // entity will appear once submitted.
+  if (node && node.nsId && typeof buildActiveCreateRow === 'function') {
+    const createRow = buildActiveCreateRow(node.nsId, 0);
+    if (createRow) childGroup.appendChild(createRow);
   }
 
   container.appendChild(childGroup);
@@ -254,6 +261,20 @@ function updateEntityList(data) {
 
   if (list.children.length === 0) {
     list.innerHTML = '<div class="loading">No matches</div>';
+  }
+
+  // Root-level inline-create input row, when the user clicked the
+  // bottom "+ New namespace" button. Appears between the tree and the
+  // bottom button so the new entry shows up in place.
+  const rootCreateRow = (typeof buildRootCreateRow === 'function')
+                        ? buildRootCreateRow() : null;
+  if (rootCreateRow) {
+    list.appendChild(rootCreateRow);
+  } else if (typeof buildRootCreateButton === 'function') {
+    // Always-visible "+ New namespace" full-width button at the bottom
+    // of the sidebar. Skipped while a root-create row is already
+    // active (no point in offering both at once).
+    list.appendChild(buildRootCreateButton());
   }
 }
 

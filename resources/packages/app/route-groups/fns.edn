@@ -24,6 +24,7 @@
                   :entity-form-create
                   :entity-form-edit
                   :entity-create
+                  :entity-update
                   :entity-delete]}}
 
   {:name :graph-api
@@ -46,6 +47,7 @@
                   :entity-form-create
                   :entity-form-edit
                   :entity-create
+                  :entity-update
                   :entity-delete
                   :sequence-append
                   :sequence-remove

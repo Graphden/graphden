@@ -60,6 +60,11 @@
    :parent :post
    :args {:path "/api/entities/:type" :handler :create-entity-handler}}
 
+  {:name :entity-update
+   :description "PUT /api/entities/:type/:id — updates an entity from a form-encoded body (e.g. rename a namespace from the inline edit field in the sidebar). Auth-required."
+   :parent :put
+   :args {:path "/api/entities/:type/:id" :handler :update-entity-handler}}
+
   {:name :entity-delete
    :description "DELETE /api/entities/:type/:id — soft-deletes an entity by id. Auth-required."
    :parent :delete

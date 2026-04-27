@@ -54,13 +54,12 @@
             [:div {:id "side-menu"}
              [:div {:class "menu-header"}
               [:h2 "Graphden"]
-              ;; Right-side buttons: top-level `+` for creating
-              ;; namespaces / graphs, and the auth lock. Both mounted
-              ;; from JS on DOMContentLoaded so the icons / popovers /
-              ;; modal stay collocated with their behaviour.
-              [:div {:class "menu-header-actions"}
-               [:div {:id "create-mount"}]
-               [:div {:id "auth-mount"}]]]
+              ;; Auth lock — mounted from `editor-auth.js` on
+              ;; DOMContentLoaded. The "+ New namespace" affordance
+              ;; lives at the bottom of `#entity-list` (full-width)
+              ;; and per-row create/edit buttons render inside each
+              ;; namespace row from `renderNsNode`.
+              [:div {:id "auth-mount"}]]
              [:div {:id "search-bar"}
               [:input {:id "search-input" :type "text" :placeholder "Filter..."
                        :oninput "onSearchInput(this.value)"}]

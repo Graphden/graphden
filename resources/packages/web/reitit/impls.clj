@@ -19,9 +19,17 @@
 
 (defbase ring-router-fn
   "Compile routes into a reitit router. Consumes reitit-shaped route
-   data `[[path {:method {:handler …}} …]]` with keyword keys."
+   data `[[path {:method {:handler …}} …]]` with keyword keys.
+
+   `:conflicts nil` disables reitit's same-path-conflict check — we
+   declare each (path, method) pair as a separate fn-def, so the
+   compiled routes vector legitimately has duplicate paths with
+   different methods (e.g. PUT and DELETE on
+   `/api/entities/:type/:id`). Reitit dispatches by `[path method]`
+   regardless, so the conflict check is just a paranoia guard for
+   hand-written routes."
   [routes]
-  (ring/router routes))
+  (ring/router routes {:conflicts nil}))
 
 
 (defbase ring-create-default-handler-fn

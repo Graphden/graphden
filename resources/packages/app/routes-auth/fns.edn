@@ -25,4 +25,9 @@
   {:name :get-auth-required
    :description "GET route template wired with `auth-required-middleware`. Used for endpoints that read state but should be admin-only — e.g. `/api/auth/check` for password validation in the editor's lock-icon popover. (The `-auth-required` suffix is necessary because `:get` is already a `core.collections` base-fn — bare `:get` would silently shadow it.)"
    :parent :get-route-with-middleware
+   :args {:middleware :_middleware-list}}
+
+  {:name :put
+   :description "PUT route template wired with `auth-required-middleware`. Caller provides `:path` and `:handler`. Used for entity updates (rename, etc.)."
+   :parent :put-route-with-middleware
    :args {:middleware :_middleware-list}}]}

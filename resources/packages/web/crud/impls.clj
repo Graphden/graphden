@@ -272,9 +272,11 @@
 
 (defbase parse-fn-from-form
   [form-data]
-  (cond-> {:name (keyword (:name form-data))}
+  (cond-> {:name (str (:name form-data))}
     (not (str/blank? (:parent-id form-data)))
-    (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data)))))
+    (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data)))
+    (not (str/blank? (:namespace-id form-data)))
+    (assoc :namespace-id (java.util.UUID/fromString (:namespace-id form-data)))))
 
 
 (defbase parse-arg-from-form
@@ -337,6 +339,43 @@
                               (pr-str type-str) " entity-type=" (pr-str entity-type)
                               " body=" (pr-str (:body request))
                               " form-data=" (pr-str form-data) "</p>")})))
+
+
+(defbase process-update-entity
+  "PUT /api/entities/:type/:id — updates an entity from a form-encoded
+   body. Mirror of `process-create-entity` but goes through
+   `update-entity` and requires both `:type` and `:id` URI segments."
+  [request]
+  (let [storage (require-storage ctx)
+        {:keys [type-str id-str entity-type]} (extract-entity-params request)
+        raw-body (:body request)
+        body-str (cond
+                   (string? raw-body) raw-body
+                   (instance? java.io.InputStream raw-body) (clojure.core/slurp raw-body)
+                   :else nil)
+        form-data (when body-str
+                    (into {} (map (fn [[k v]] [(keyword k) v])
+                                  (parse-query-string body-str))))]
+    (if (and entity-type id-str form-data)
+      (let [entity-data (case type-str
+                          "fn" (parse-fn-from-form {:form-data form-data} ctx)
+                          "arg" (parse-arg-from-form {:form-data form-data} ctx)
+                          "ns" (parse-ns-from-form {:form-data form-data} ctx)
+                          nil)
+            updated (when entity-data
+                      (try (sp/update-entity storage entity-type
+                                             (java.util.UUID/fromString id-str)
+                                             entity-data)
+                           (catch Exception e
+                             (log/error e "update-entity failed for"
+                                        entity-type id-str entity-data)
+                             nil)))]
+        (if updated
+          (do (exec-ctx/invalidate-graph-cache! ctx)
+              {:status 200 :headers {"HX-Trigger" "entityUpdated"}
+               :body "<p>Entity updated successfully</p>"})
+          {:status 400 :body "<p class=\"error\">Failed to update entity</p>"}))
+      {:status 400 :body "<p class=\"error\">Invalid update request</p>"})))
 
 
 (defbase process-delete-entity
@@ -519,6 +558,7 @@
    :render-entity-details-view render-entity-details-view
    :render-entity-form-view render-entity-form-view
    :process-create-entity process-create-entity
+   :process-update-entity process-update-entity
    :process-delete-entity process-delete-entity
    :process-sequence-append process-sequence-append
    :process-sequence-remove process-sequence-remove

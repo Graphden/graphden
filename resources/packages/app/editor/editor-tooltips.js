@@ -704,6 +704,103 @@ function enterFnReturnTypeEditMode(fn, anchorEl) {
   });
 }
 
+// --- arg type flip (Phase 2) ---
+//
+// Type-chip click → small select of `value_kind` enum. On save we
+// orchestrate two PUTs to /api/entities/arg/:id:
+//
+//   1. type=<new>&value=&ref-id=  — backend doesn't cascade type
+//      changes, so we have to wipe both bindings explicitly. The
+//      permissive parse honours empty form values now (Phase 2
+//      backend change).
+//   2. (only when new type is `:fn`) ref-id=<picked-fn-id> — opens
+//      the fn-picker and writes the chosen ref-id, then refetches.
+//
+// Refetch is `initGraph()` because flipping type→fn restructures
+// the canvas (arg-value node disappears, ref-edge appears).
+
+function enterArgTypeEditMode(arg, anchorEl) {
+  if (!arg) return;
+  openInlineEditPopover({
+    anchorEl,
+    makeControl(root) {
+      const select = document.createElement('select');
+      select.className = 'arg-value-edit-input';
+      const kinds = (typeof VALUE_KINDS !== 'undefined') ? VALUE_KINDS
+                  : ['null','uuid','text','int','bool','numeric','timestamptz','jsonb','bytes','any','fn','sequence'];
+      const cur = arg.type ? String(arg.type).replace(/^:/, '') : '';
+      kinds.forEach(k => {
+        const o = document.createElement('option');
+        o.value = k;
+        o.textContent = k;
+        if (cur === k) o.selected = true;
+        select.appendChild(o);
+      });
+      root.insertBefore(select, root.firstChild);
+      return select;
+    },
+    async doSave(select) {
+      const newType = select.value;
+      const curType = arg.type ? String(arg.type).replace(/^:/, '') : null;
+      if (newType === curType) return true;  // no-op
+      // Step 1: change type, wipe value + ref-id.
+      try {
+        const r = await authFetch('/api/entities/arg/' + encodeURIComponent(arg.id), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'type=' + encodeURIComponent(newType)
+              + '&value=&ref-id='
+        });
+        if (!r || !r.ok) return false;
+      } catch (_) { return false; }
+      // Step 2: if flipped to :fn, prompt for the ref via fn-picker.
+      // Picker is fired AFTER the popover closes (onSaved); we just
+      // patch local state for now and let onSaved drive the rest.
+      patchArgFieldInState(arg.id, 'type', newType);
+      patchArgFieldInState(arg.id, 'value', null);
+      patchArgFieldInState(arg.id, 'ref-id', null);
+      return true;
+    },
+    onSaved() {
+      const newType = arg.type ? String(arg.type).replace(/^:/, '') : null;
+      // Re-read local state after patch — `arg` is the SAME object as
+      // the one we just patched so its `type` is current.
+      if (newType === 'fn' && typeof openFnPicker === 'function') {
+        // Allow self-reference but exclude only the fn the arg is
+        // attached to to keep things sane. Re-parent (Phase 3) will
+        // need the descendants exclusion.
+        const fnId = arg['fn-id'];
+        openFnPicker({
+          anchorEl: document.getElementById('cy') || document.body,
+          excludeIds: fnId ? [fnId] : [],
+          onPick: async (fn) => { await saveArgRef(arg.id, fn.id); },
+          onCancel: () => {
+            if (typeof initGraph === 'function') initGraph();
+          }
+        });
+      } else if (typeof initGraph === 'function') {
+        initGraph();
+      }
+    }
+  });
+}
+
+async function saveArgRef(argId, refFnId) {
+  try {
+    const r = await authFetch('/api/entities/arg/' + encodeURIComponent(argId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'ref-id=' + encodeURIComponent(refFnId)
+    });
+    if (r && r.ok) {
+      patchArgFieldInState(argId, 'ref-id', refFnId);
+      if (typeof initGraph === 'function') initGraph();
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
 function patchArgFieldInState(argId, field, value) {
   if (!graphData || !Array.isArray(graphData.args)) return;
   for (const a of graphData.args) {

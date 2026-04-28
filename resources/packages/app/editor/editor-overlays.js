@@ -730,8 +730,14 @@ function createFnOverlay(node, container) {
 function createArgOverlay(node, container) {
   const overlay = createOverlay(node.id(), { borderRadius: '4px', fontSize: '10px' });
 
+  // Flex row so the type-chip docks to the right without overlapping
+  // the value text.
+  overlay.style.display = 'flex';
+  overlay.style.alignItems = 'center';
+
   const content = document.createElement('div');
   content.style.padding = '4px 8px';
+  content.style.flex = '1';
   content.textContent = truncateLabel(node.data('label') || '', 30);
   overlay.appendChild(content);
 
@@ -755,10 +761,46 @@ function createArgOverlay(node, container) {
       e.stopPropagation();
       enterArgValueEditMode(arg, content);
     });
+    // Type-chip — flips literal kind (int/text/bool/…) and toggles
+    // the arg between literal-value mode and fn-ref mode. Uses the
+    // resolved type via source-id chain, since the bound arg may
+    // inherit its type from the parent.
+    if (arg.type || (arg['source-id'] && lookups.argMap.get(arg['source-id']))) {
+      const chip = createTypeChip(arg);
+      if (chip) overlay.appendChild(chip);
+    }
   }
 
   createDragHandle(overlay, node);
   container.appendChild(overlay);
+}
+
+// Resolves the effective type for an arg by walking source-id when the
+// arg itself has none (inherited).
+function resolveArgType(arg) {
+  let cur = arg;
+  for (let i = 0; i < 100 && cur; i++) {
+    if (cur.type) return String(cur.type).replace(/^:/, '');
+    if (!cur['source-id'] || !lookups || !lookups.argMap) return null;
+    cur = lookups.argMap.get(cur['source-id']);
+  }
+  return null;
+}
+
+// Compact button styled like the description-i and ↗ glyphs but
+// wider (text label fits "timestamptz" at ~9px). Click → enterArgTypeEditMode.
+function createTypeChip(arg) {
+  if (typeof enterArgTypeEditMode !== 'function') return null;
+  const type = resolveArgType(arg) || 'any';
+  const chip = document.createElement('span');
+  chip.className = 'arg-type-chip';
+  chip.textContent = type;
+  chip.title = 'Click to change type (' + type + ')';
+  chip.addEventListener('click', (e) => {
+    e.stopPropagation();
+    enterArgTypeEditMode(arg, chip);
+  });
+  return chip;
 }
 
 /**
@@ -840,6 +882,11 @@ function createEdgeLabelOverlay(edge, container) {
       e.stopPropagation();
       enterArgRenameEditMode(editArg, labelSpan, label);
     });
+    // Type-chip mirroring the one on arg-overlays — ref-args don't
+    // get a separate value-node, so this is the only place to flip
+    // their type back to a literal.
+    const chip = createTypeChip(editArg);
+    if (chip) overlay.appendChild(chip);
   }
 
   if (descriptionArgId) {

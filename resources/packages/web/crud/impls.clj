@@ -308,8 +308,20 @@
     (assoc :type (keyword (:type form-data)))
     (not (str/blank? (:source-id form-data)))
     (assoc :source-id (java.util.UUID/fromString (:source-id form-data)))
-    (not (str/blank? (:value form-data)))
-    (assoc :value (json/parse-string (:value form-data) true))
+    ;; `value`/`ref-id` honour the empty-as-clear convention so type
+    ;; flips can wipe the previous binding without separate calls.
+    ;; Backend doesn't cascade those — frontend orchestrates.
+    (contains? form-data :value)
+    (assoc :value (when-not (str/blank? (:value form-data))
+                    (json/parse-string (:value form-data) true)))
+    (contains? form-data :ref-id)
+    (assoc :ref-id (when-not (str/blank? (:ref-id form-data))
+                     (java.util.UUID/fromString (:ref-id form-data))))
+    (contains? form-data :is-fn)
+    (assoc :is-fn (case (str/lower-case (or (:is-fn form-data) ""))
+                    ("true"  "1" "yes") true
+                    ("false" "0" "no")  false
+                    nil))
     (contains? form-data :description)
     (assoc :description (:description form-data))))
 

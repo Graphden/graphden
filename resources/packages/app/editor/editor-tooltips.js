@@ -801,6 +801,273 @@ async function saveArgRef(argId, refFnId) {
   return false;
 }
 
+// --- re-parent (Phase 3) ---
+//
+// "Edit parents" on the root card opens a popover listing the current
+// parents (chips with × removal) and an "+ Add parent" button that
+// drives the fn-picker (with cycle-causing fns excluded). Save runs
+// the cascade:
+//
+//   1. Compute orphan args — args whose source-id chain ends at a
+//      parent that's no longer in the new set. DELETE each.
+//   2. PUT parent-ids=<new-list>.
+//   3. For each new parent, identify its TERMINAL primary args
+//      (source-id=nil) that we don't already have a binding for, and
+//      POST a fresh inheriting arg per terminal.
+//   4. initGraph() — full refetch (the canvas re-shapes around the
+//      new ancestor chain).
+//
+// Pre-flight: every candidate parent runs through `validateParentSet`
+// to surface cycle / MI-collision issues before the cascade fires.
+
+let parentSetEditorEl = null;
+
+function closeParentSetEditor() {
+  if (parentSetEditorEl) {
+    parentSetEditorEl.remove();
+    parentSetEditorEl = null;
+  }
+}
+
+function enterReparentEditMode(fn, anchorEl) {
+  if (!fn) return;
+  closeParentSetEditor();
+
+  const el = document.createElement('div');
+  el.className = 'parent-set-editor';
+  const rect = anchorEl.getBoundingClientRect();
+  el.style.top  = (rect.bottom + 6) + 'px';
+  el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 360)) + 'px';
+
+  const title = document.createElement('div');
+  title.className = 'parent-set-editor-title';
+  title.textContent = 'Parents of ' + (fn.name || '(anonymous)');
+  el.appendChild(title);
+
+  const chipList = document.createElement('div');
+  chipList.className = 'parent-set-editor-chips';
+  el.appendChild(chipList);
+
+  const addBtn = document.createElement('button');
+  addBtn.type = 'button';
+  addBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+  addBtn.textContent = '+ add parent';
+  el.appendChild(addBtn);
+
+  const errorEl = document.createElement('div');
+  errorEl.className = 'arg-value-edit-error';
+  errorEl.style.display = 'none';
+  el.appendChild(errorEl);
+
+  const buttons = document.createElement('div');
+  buttons.className = 'arg-value-edit-buttons';
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', closeParentSetEditor);
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'arg-value-edit-btn';
+  save.textContent = 'Save';
+  buttons.appendChild(cancel);
+  buttons.appendChild(save);
+  el.appendChild(buttons);
+
+  document.body.appendChild(el);
+  parentSetEditorEl = el;
+
+  // Working copy of the parent set — chip list reflects this list.
+  let workingParents = [...(fn['parent-ids'] || [])];
+
+  function showError(msg) {
+    errorEl.textContent = msg;
+    errorEl.style.display = msg ? 'block' : 'none';
+  }
+  function renderChips() {
+    chipList.innerHTML = '';
+    if (workingParents.length === 0) {
+      const empty = document.createElement('div');
+      empty.className = 'parent-set-editor-empty';
+      empty.textContent = '(base-fn — no parents)';
+      chipList.appendChild(empty);
+      return;
+    }
+    workingParents.forEach((pid, idx) => {
+      const pf = lookups.fnMap.get(pid);
+      const chip = document.createElement('span');
+      chip.className = 'parent-set-editor-chip';
+      const lbl = document.createElement('span');
+      lbl.textContent = pf
+        ? (typeof getQualifiedFnName === 'function' ? getQualifiedFnName(pf) : (pf.name || '(anonymous)'))
+        : '(unknown ' + pid.slice(0, 8) + ')';
+      chip.appendChild(lbl);
+      const rm = document.createElement('button');
+      rm.type = 'button';
+      rm.className = 'parent-set-editor-chip-remove';
+      rm.textContent = '×';
+      rm.title = 'Remove this parent';
+      rm.addEventListener('click', () => {
+        workingParents.splice(idx, 1);
+        showError('');
+        renderChips();
+      });
+      chip.appendChild(rm);
+      chipList.appendChild(chip);
+    });
+  }
+  renderChips();
+
+  addBtn.addEventListener('click', () => {
+    if (typeof openFnPicker !== 'function') return;
+    // Exclude self + descendants (would create a cycle) + already-selected.
+    const exclude = new Set([fn.id, ...workingParents]);
+    if (lookups && lookups.fnMap) {
+      // Walk descendants of fn (anything that already has fn in its
+      // parent closure) and exclude those too.
+      lookups.fnMap.forEach((f, id) => {
+        const seen = new Set();
+        const stk = [id];
+        while (stk.length) {
+          const cur = stk.pop();
+          if (seen.has(cur)) continue;
+          seen.add(cur);
+          if (cur === fn.id && id !== fn.id) {
+            exclude.add(id);
+            break;
+          }
+          const ff = lookups.fnMap.get(cur);
+          for (const p of ((ff && ff['parent-ids']) || [])) stk.push(p);
+        }
+      });
+    }
+    openFnPicker({
+      anchorEl: addBtn,
+      excludeIds: Array.from(exclude),
+      fnNamespaceId: fn['namespace-id'],
+      onPick: (picked) => {
+        if (!picked || !picked.id) return;
+        workingParents.push(picked.id);
+        // Validate immediately so the user knows before hitting Save.
+        const v = (typeof validateParentSet === 'function')
+                  ? validateParentSet(fn.id, workingParents) : { ok: true };
+        if (!v.ok) {
+          workingParents.pop();
+          showError(v.reason);
+        } else {
+          showError('');
+        }
+        renderChips();
+      }
+    });
+  });
+
+  save.addEventListener('click', async () => {
+    showError('');
+    save.disabled = true;
+    cancel.disabled = true;
+    const v = (typeof validateParentSet === 'function')
+              ? validateParentSet(fn.id, workingParents) : { ok: true };
+    if (!v.ok) {
+      showError(v.reason);
+      save.disabled = false;
+      cancel.disabled = false;
+      return;
+    }
+    const ok = await performReparentCascade(fn.id, workingParents);
+    if (ok) {
+      closeParentSetEditor();
+      if (typeof initGraph === 'function') initGraph();
+    } else {
+      showError('Re-parent failed — check the network log; some changes may be partial. Re-saving will retry idempotently.');
+      save.disabled = false;
+      cancel.disabled = false;
+    }
+  });
+}
+
+async function performReparentCascade(fnId, newParentIds) {
+  if (!lookups || !lookups.argsByFn) return false;
+  const newSet = new Set(newParentIds);
+
+  // 1. Walk current args, identify orphans by chasing source-id to its
+  //    terminal owner and checking whether that owner is still a parent.
+  const currentArgs = lookups.argsByFn.get(fnId) || [];
+  const orphans = [];
+  const keptByTerminal = new Map();  // terminalArgId → arg (already bound)
+  for (const arg of currentArgs) {
+    if (!arg['source-id']) continue;  // primary args (rare on composed fns)
+    let cur = lookups.argMap.get(arg['source-id']);
+    while (cur && cur['source-id']) cur = lookups.argMap.get(cur['source-id']);
+    if (!cur) continue;
+    if (newSet.has(cur['fn-id'])) {
+      keptByTerminal.set(cur.id, arg);
+    } else {
+      orphans.push(arg);
+    }
+  }
+
+  // 2. DELETE orphans.
+  for (const o of orphans) {
+    try {
+      const r = await authFetch('/api/entities/arg/' + encodeURIComponent(o.id),
+                                { method: 'DELETE' });
+      if (!r || !r.ok) return false;
+    } catch (_) { return false; }
+  }
+
+  // 3. PUT new parent-ids.
+  try {
+    const r = await authFetch('/api/entities/fn/' + encodeURIComponent(fnId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'parent-ids=' + encodeURIComponent(newParentIds.join(','))
+    });
+    if (!r || !r.ok) return false;
+  } catch (_) { return false; }
+
+  // 4. POST inheriting args for each new-parent's terminal primary args
+  //    that we don't already have a binding for.
+  //    "Terminals" = args with source-id=nil reachable through the parent's
+  //    full ancestor closure.
+  const terminals = [];
+  const visited = new Set();
+  const collectTerminals = (fid) => {
+    if (visited.has(fid)) return;
+    visited.add(fid);
+    const f = lookups.fnMap.get(fid);
+    if (!f) return;
+    const args = lookups.argsByFn.get(fid) || [];
+    for (const a of args) {
+      if (!a['source-id']) terminals.push(a);
+    }
+    for (const p of (f['parent-ids'] || [])) collectTerminals(p);
+  };
+  for (const p of newParentIds) collectTerminals(p);
+
+  for (const t of terminals) {
+    if (keptByTerminal.has(t.id)) continue;  // already bound through this slot
+    const body = [
+      'fn-id=' + encodeURIComponent(fnId),
+      'source-id=' + encodeURIComponent(t.id),
+      // type and is-fn copy from the terminal so the new arg shares the
+      // contract; the user can still flip them later via the type-chip.
+      t.type ? 'type=' + encodeURIComponent(String(t.type).replace(/^:/, '')) : '',
+      (t['is-fn'] !== null && t['is-fn'] !== undefined)
+        ? 'is-fn=' + (t['is-fn'] ? 'true' : 'false') : ''
+    ].filter(Boolean).join('&');
+    try {
+      const r = await authFetch('/api/entities/arg', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body
+      });
+      if (!r || !r.ok) return false;
+    } catch (_) { return false; }
+  }
+  return true;
+}
+
 function patchArgFieldInState(argId, field, value) {
   if (!graphData || !Array.isArray(graphData.args)) return;
   for (const a of graphData.args) {

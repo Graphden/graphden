@@ -486,6 +486,58 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   display: flex; justify-content: flex-end;
 }
 
+/* Edit-parents strip — same layout as return-type strip but distinct
+   text colour so the two affordances on the root card don't blur. */
+.reparent-strip {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--muted-fg);
+  border-top: 1px solid var(--card-border);
+  cursor: pointer;
+  background: var(--card-bg);
+}
+.reparent-strip:hover {
+  background: color-mix(in srgb, var(--fg) 6%, var(--card-bg));
+}
+
+/* Parent-set editor — popover with chip list + add/save controls. */
+.parent-set-editor {
+  position: fixed; z-index: 10001;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border); border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  padding: 8px; min-width: 280px; max-width: 380px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+}
+.parent-set-editor-title {
+  font-size: 11px; font-weight: 600;
+  color: var(--muted-fg);
+  border-bottom: 1px solid var(--card-border);
+  padding-bottom: 4px;
+}
+.parent-set-editor-chips {
+  display: flex; flex-direction: column; gap: 4px;
+  min-height: 24px;
+}
+.parent-set-editor-empty {
+  font-size: 11px; opacity: 0.6; font-style: italic;
+}
+.parent-set-editor-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 3px;
+  border: 1px solid var(--card-border);
+  background: var(--bg);
+  font-size: 11px;
+}
+.parent-set-editor-chip-remove {
+  background: transparent; border: 0;
+  color: var(--fg);
+  cursor: pointer; opacity: 0.6; font-size: 14px; padding: 0 2px;
+  line-height: 1;
+}
+.parent-set-editor-chip-remove:hover { opacity: 1; }
+
 /* In-tooltip dismiss — the × button is the obvious affordance for
    touch users; the document-level pointerdown handler is a fallback
    for desktop "tap-outside". Sized 20×20 to be a comfortable touch

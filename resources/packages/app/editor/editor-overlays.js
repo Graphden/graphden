@@ -667,6 +667,24 @@ function createFnOverlay(node, container) {
       }
       overlay.appendChild(strip);
     }
+
+    // Edit-parents strip — shown only on editable root cards. Lists
+    // current parent count so the user can see at a glance whether
+    // this is base-fn / single-parent / MI before clicking in.
+    if (rtEditable && typeof enterReparentEditMode === 'function') {
+      const pids = cardFnEntity['parent-ids'] || [];
+      const strip = document.createElement('div');
+      strip.className = 'reparent-strip';
+      strip.textContent = pids.length === 0
+        ? 'parents: (none)'
+        : 'parents: ' + pids.length;
+      strip.title = 'Click to edit parents';
+      strip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        enterReparentEditMode(cardFnEntity, strip);
+      });
+      overlay.appendChild(strip);
+    }
   }
 
   // HOF-captured args (e.g. `:request` on a Ring-handler subtree) are free

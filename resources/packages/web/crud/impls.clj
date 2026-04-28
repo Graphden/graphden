@@ -294,7 +294,17 @@
     ;; from the value-kind enum.
     (contains? form-data :return-type)
     (assoc :return-type (when-not (str/blank? (:return-type form-data))
-                          (keyword (:return-type form-data))))))
+                          (keyword (:return-type form-data))))
+    ;; `parent-ids` is the multi-valued ref-many field. Form encoding
+    ;; reserves form-keys to single values, so the list comes in as a
+    ;; comma-separated UUID string. Empty clears (base-fn).
+    (contains? form-data :parent-ids)
+    (assoc :parent-ids
+           (let [v (:parent-ids form-data)]
+             (if (str/blank? v)
+               []
+               (mapv #(java.util.UUID/fromString (str/trim %))
+                     (str/split v #",")))))))
 
 
 (defbase parse-arg-from-form

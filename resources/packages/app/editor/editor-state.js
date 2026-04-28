@@ -1,7 +1,13 @@
 // Editor State - Global variables, constants, and configuration
-// Build timestamp (UTC+3) - update on each frontend change
-const BUILD_TIMESTAMP = '2026-04-17 00:50';
-console.log('%c[Graphden Editor] Build: ' + BUILD_TIMESTAMP, 'color: #0066cc; font-weight: bold');
+// BUILD_HASH is substituted at bundle-time (see :script in
+// `app/editor/fns.edn`) — first 12 hex chars of the SHA-256 of the
+// frontend source files at build time. Exposed on `window` so it can
+// be read on demand (e.g. type `BUILD_HASH` in DevTools, or compare
+// `window.BUILD_HASH` against `fetch('/version')`'s `frontend` field
+// when diagnosing browser-cache vs server-deploy drift). No auto-log
+// — the console stays clean unless you ask.
+const BUILD_HASH = '__BUILD_HASH__';
+window.BUILD_HASH = BUILD_HASH;
 
 // ============================================================================
 // GLOBAL STATE
@@ -11,6 +17,36 @@ let cy = null;                    // Cytoscape instance
 let selectedFnId = null;          // Currently selected function ID
 let graphData = null;             // Raw graph data from API
 let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
+
+// Set of fn-ids reachable from `selectedFnId` via ref-id only — i.e.
+// fns that show up in the layout WITHOUT requiring an expansion. The
+// editor uses this to scope arg-level edits: anything in the
+// "immediate implementation" should be editable, ancestor chains
+// revealed by expansion stay read-only.
+//
+// Rebuilt by `rebuildImplementationFnIds()` on every graphData refresh
+// (initGraph) and whenever lookups change.
+let implementationFnIds = new Set();
+function rebuildImplementationFnIds() {
+  if (!selectedFnId || !lookups || !lookups.argsByFn) {
+    implementationFnIds = new Set();
+    return;
+  }
+  const seen = new Set([selectedFnId]);
+  const stack = [selectedFnId];
+  while (stack.length) {
+    const cur = stack.pop();
+    const args = lookups.argsByFn.get(cur) || [];
+    for (const a of args) {
+      const ref = a['ref-id'];
+      if (ref && !seen.has(ref)) {
+        seen.add(ref);
+        stack.push(ref);
+      }
+    }
+  }
+  implementationFnIds = seen;
+}
 
 // Expansion state — per node, holds an expansion spec.
 // spec: {fullDepth: number, partialFns: Set<fnId>}
@@ -25,7 +61,7 @@ let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
 //   L > fullDepth + 1       → cascade: fullDepth = L - 1, partial = {fn}
 let expansionState = new Map();  // nodeId -> {fullDepth, partialFns}
 let previewState = new Map();    // nodeId -> {fullDepth, partialFns}
-let anchorFnId = null;            // fnId that should stay stationary during layout
+let anchorNodeId = null;          // cytoscape node id (full, incl. expansion prefix) that should stay stationary during layout
 
 // UI state flags
 let rebuildingOverlays = false;   // Prevents mouseleave during overlay rebuild

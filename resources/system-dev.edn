@@ -18,7 +18,7 @@
 
  ;; Load packages from resources/packages/
  :app/packages
- {:package-names ["core" "web" "app"]}
+ {:package-names ["core" "web" "app" "examples"]}
 
  :exec/base-fns
  {:storage #ig/ref :db/versioned
@@ -30,11 +30,17 @@
   :base-fns #ig/ref :exec/base-fns}
 
  :exec/context
- {:storage #ig/ref :db/versioned
-  :max-depth 1000
-  :timeout-ms 120000}
+ {:storage #ig/ref :db/versioned}
+
+ ;; Compile fn graphs into Clojure closures at startup. Depends on
+ ;; fn-entities so every composed fn is already in storage before we
+ ;; traverse them.
+ :exec/compiled-registry
+ {:context #ig/ref :exec/context
+  :_fn-entities #ig/ref :exec/fn-entities}
 
  :http/server
  {:context #ig/ref :exec/context
   :packages #ig/ref :app/packages
-  :port 8080}}
+  :port 8080
+  :_compiled-registry #ig/ref :exec/compiled-registry}}

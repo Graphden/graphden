@@ -368,7 +368,7 @@
     ;; This modifies global state, so we test indirectly
     (let [defs {:test-reg-fn {:args {:x :int}
                               :return-type :int
-                              :impl (fn [{:keys [x]} _] @x)}}]
+                              :impl (setup/fn-impl [x] x)}}]
       ;; Should not throw
       (is (nil? (core/register-base-fns! defs))))))
 

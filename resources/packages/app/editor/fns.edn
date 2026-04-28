@@ -1,170 +1,179 @@
 ;; Graph Editor fn-defs
-;; Base functions load CSS/JS from files
-;; Everything else is fn-def composition
+;; CSS / JS loaded via the core :read-resource / :concat-resources
+;; chain. No base-fns in this package.
 
 
 {:namespace "app.editor"
+ :description "Graph-editor application — HTML/CSS/JS assembly via fn-defs (no base-fns), plus the routes for editor UI + API endpoints."
  :fns
-[;; =============================================================================
- ;; BASE FUNCTIONS (implementations in impls.clj load from resource files)
- ;; =============================================================================
+ [;; =============================================================================
+  ;; CSS + JS asset loading (fn-def compositions)
+  ;; =============================================================================
 
- {:name :editor-styles
-  :args {}
-  :return-type :text}
+  {:name :styles
+   :description "Editor stylesheet — read from `packages/app/editor/editor-styles.css`. Wrapped into `<style>` by `:style-element`."
+   :parent :read-resource
+   :args {:path "packages/app/editor/editor-styles.css"}}
 
- ;; Editor JS modules — loaded from resources and concatenated in order
- {:name :_editor-script-paths
-  :parent :const
-  :args {:value ["packages/app/editor/editor-state.js"
-                 "packages/app/editor/editor-data.js"
-                 "packages/app/editor/editor-layout.js"
-                 "packages/app/editor/editor-overlays.js"
-                 "packages/app/editor/editor-ui.js"
-                 "packages/app/editor/editor-cytoscape.js"
-                 "packages/app/editor/editor-main.js"]}}
+  ;; Editor JS modules — loaded from resources and concatenated in order.
+  ;; Order matters: tooltips/icons/drag must come BEFORE overlays (which
+  ;; calls into them); ui/cytoscape come after overlays (they call
+  ;; into the overlay management API).
+  {:name :_editor-script-paths
+   :parent :const
+   :args {:value ["packages/app/editor/editor-state.js"
+                  "packages/app/editor/editor-prefs.js"
+                  "packages/app/editor/editor-auth.js"
+                  "packages/app/editor/editor-create.js"
+                  "packages/app/editor/editor-data.js"
+                  "packages/app/editor/editor-layout.js"
+                  "packages/app/editor/editor-tooltips.js"
+                  "packages/app/editor/editor-icons.js"
+                  "packages/app/editor/editor-drag.js"
+                  "packages/app/editor/editor-fn-picker.js"
+                  "packages/app/editor/editor-namespace-picker.js"
+                  "packages/app/editor/editor-edit-validation.js"
+                  "packages/app/editor/editor-overlays.js"
+                  "packages/app/editor/editor-ui.js"
+                  "packages/app/editor/editor-cytoscape.js"
+                  "packages/app/editor/editor-main.js"]}}
 
- {:name :editor-script
-  :parent :concat-resources
-  :args {:paths :_editor-script-paths}}
+  ;; Raw concatenation of every editor module — still contains the
+  ;; literal `__BUILD_HASH__` placeholder from `editor-state.js`.
+  {:name :_script-raw
+   :description "Concatenated editor JS bundle, BEFORE the build-hash substitution."
+   :parent :concat-resources
+   :args {:paths :_editor-script-paths}}
 
- ;; =============================================================================
- ;; FN-DEFS: Editor UI structure
- ;; =============================================================================
+  ;; The placeholder is replaced with the FRONTEND-section build hash
+  ;; (see `:build-hash-frontend-short` in core.system). The console
+  ;; marker thus reflects exactly which JS/CSS the browser is running
+  ;; — and matches the `frontend` key returned by `GET /version`.
+  {:name :script
+   :description "Bundled editor JS with `__BUILD_HASH__` substituted by `:build-hash-frontend-short`. The in-page console marker mirrors the `frontend` value returned by `GET /version`, so the browser bundle's identity is never out of step with what the server reports."
+   :parent :str-replace
+   :args {:s :_script-raw
+          :match "__BUILD_HASH__"
+          :replacement :build-hash-frontend-short}}
 
- ;; Editor body — HTML structure as hiccup constant
- {:name :editor-body
-  :parent :const
-  :args {:value
-   [:div {:id "app"}
-    [:div {:id "main-container"}
-     ;; Side menu
-     [:div {:id "side-menu"}
-      [:div {:class "menu-header"}
-       [:h2 "Graphden"]]
-      [:div {:id "search-bar"}
-       [:input {:id "search-input" :type "text" :placeholder "Filter..."
-                :oninput "onSearchInput(this.value)"}]
-       [:button {:id "search-clear" :onclick "clearSearch()"} "\u00D7"]]
-      [:div {:id "entity-list"}]]
-     ;; Graph container
-     [:div {:id "graph-container"}
-      [:div {:id "cy"}]
-      ;; Navigation controls
-      [:div {:id "nav-controls"}
-       [:div {:class "nav-zoom-col"}
-        [:button {:class "nav-btn" :onclick "navZoom(1)" :title "Zoom in"} "+"]
-        [:input {:id "zoom-slider" :type "range" :min "10" :max "300" :value "100"
-                 :orient "vertical"
-                 :oninput "navZoomTo(this.value/100)" :title "Zoom"}]
-        [:button {:class "nav-btn" :onclick "navZoom(-1)" :title "Zoom out"} "\u2212"]]
-       [:div {:class "nav-bottom-row"}
-        [:button {:class "nav-btn" :onclick "navGoToRoot()" :title "Go to root node"} "\u2302"]
-        [:button {:class "nav-btn" :onclick "navResetPositions()" :title "Reset all node positions"} "\u27F2"]
-        [:button {:class "nav-btn" :onclick "navResetZoom()" :title "Reset zoom"} "\u2299"]]]]]]}}
+  ;; =============================================================================
+  ;; FN-DEFS: Editor UI structure
+  ;; =============================================================================
 
- ;; Wrapped elements — fn-defs using wrap-style/wrap-script
- {:name :editor-style-element
-  :parent :wrap-style
-  :args {:content :editor-styles}}
+  ;; Editor body — HTML structure as hiccup constant
+  {:name :body
+   :description "Hiccup constant for the editor's `<body>` content — sidebar (filter input + entity list), graph container, and zoom/home/reset nav controls."
+   :parent :const
+   :args {:value
+          [:div {:id "app"}
+           [:div {:id "main-container"}
+            ;; Side menu
+            [:div {:id "side-menu"}
+             [:div {:class "menu-header"}
+              [:h2 "Graphden"]
+              ;; Right-side header buttons. `editor-prefs.js` mounts
+              ;; theme + collapse buttons here on DOMContentLoaded;
+              ;; `editor-auth.js` mounts the lock + popover next to
+              ;; them. The "+ New namespace" affordance lives at the
+              ;; bottom of `#entity-list`.
+              [:div {:class "menu-header-actions"}
+               [:div {:id "prefs-mount"}]
+               [:div {:id "auth-mount"}]]]
+             [:div {:id "search-bar"}
+              [:input {:id "search-input" :type "text" :placeholder "Filter..."
+                       :oninput "onSearchInput(this.value)"}]
+              [:button {:id "search-clear" :onclick "clearSearch()"} "\u00D7"]]
+             [:div {:id "entity-list"}]]
+            ;; Graph container
+            [:div {:id "graph-container"}
+             [:div {:id "cy"}]
+             ;; Navigation controls
+             [:div {:id "nav-controls"}
+              [:div {:class "nav-zoom-col"}
+               [:button {:class "nav-btn" :onclick "navZoom(1)" :title "Zoom in"} "+"]
+               [:input {:id "zoom-slider" :type "range" :min "10" :max "300" :value "100"
+                        :orient "vertical"
+                        :oninput "navZoomTo(this.value/100)" :title "Zoom"}]
+               [:button {:class "nav-btn" :onclick "navZoom(-1)" :title "Zoom out"} "\u2212"]]
+              [:div {:class "nav-bottom-row"}
+               [:button {:class "nav-btn" :onclick "navGoToRoot()" :title "Go to root node"} "\u2302"]
+               [:button {:class "nav-btn" :onclick "navResetPositions()" :title "Reset all node positions"} "\u27F2"]
+               [:button {:class "nav-btn" :onclick "navResetZoom()" :title "Reset zoom"} "\u2299"]]]]]]}}
 
- {:name :editor-script-element
-  :parent :wrap-script
-  :args {:content :editor-script}}
+  ;; Wrapped elements — fn-defs using wrap-style/wrap-script
+  {:name :style-element
+   :description "`<style>…</style>` element wrapping `:styles` (the editor CSS bundle)."
+   :parent :wrap-style
+   :args {:content :styles}}
 
- ;; =============================================================================
- ;; PAGE COMPOSITION (fn-defs)
- ;; =============================================================================
+  {:name :script-element
+   :description "`<script>…</script>` element wrapping `:script` (the editor JS bundle)."
+   :parent :wrap-script
+   :args {:content :script}}
 
- ;; Build head elements list for cytoscape
- {:name :editor-head-elements-0
-  :parent :conj
-  :args {:coll [] :item :editor-style-element}}
+  ;; =============================================================================
+  ;; PAGE COMPOSITION (fn-defs)
+  ;; =============================================================================
 
- ;; Head elements for Cytoscape (adds cytoscape scripts)
- {:name :editor-cytoscape-head
-  :parent :with-cdn-script
-  :args {:head :editor-head-elements-0
-         :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
+  ;; Build head elements list for cytoscape
+  {:name :head-elements-0
+   :description "Initial head-elements vector — single entry: `:style-element`. Subsequent fn-defs append CDN scripts."
+   :parent :conj
+   :args {:coll [] :item :style-element}}
 
- ;; Head elements with HTMX (adds htmx script)
- {:name :editor-head
-  :parent :with-cdn-script
-  :args {:head :editor-cytoscape-head
-         :url "https://unpkg.com/htmx.org@2.0.4"}}
+  ;; Head elements for Cytoscape (adds cytoscape scripts)
+  {:name :cytoscape-head
+   :description "`:head-elements-0` plus the Cytoscape.js CDN `<script>` — Cytoscape becomes available as `window.cytoscape`."
+   :parent :with-cdn-script
+   :args {:head :head-elements-0
+          :url "https://unpkg.com/cytoscape@3.30.4/dist/cytoscape.min.js"}}
 
- ;; Complete HTML page
- ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)
- {:name :_editor-scripts
-  :parent :conj-empty
-  :args {:item :editor-script-element}}
+  ;; Head elements with HTMX (adds htmx script)
+  {:name :head
+   :description "Final editor `<head>` element vector — style + Cytoscape + HTMX CDN scripts."
+   :parent :with-cdn-script
+   :args {:head :cytoscape-head
+          :url "https://unpkg.com/htmx.org@2.0.4"}}
 
- {:name :editor-page
-  :parent :html-page
-  :args {:title "Graphden - Graph Editor"
-         :head :editor-head
-         :body :editor-body
-         :scripts :_editor-scripts}}
+  ;; Complete HTML page
+  ;; Scripts: single editor JS (layout is computed server-side, no dagre needed)
+  {:name :_editor-scripts
+   :parent :conj-empty
+   :args {:item :script-element}}
 
- ;; Handler returns Ring response with HTML
- {:name :_editor-response
-  :parent :html-response
-  :args {:body :editor-page}}
+  {:name :page
+   :description "Full editor HTML page — title, head (styles + CDN scripts), body (sidebar + graph), and the editor JS bundle as a `<script>` at end of body. Rendered by `:_editor-handler` on `GET /`."
+   :parent :html-page
+   :args {:title "Graphden - Graph Editor"
+          :head :head
+          :body :body
+          :scripts :_editor-scripts}}
 
- {:name :_editor-handler
-  :parent :make-handler
-  :args {:response :_editor-response}}
+  ;; Handler — :html-ok-response sets status 200 + html content-type;
+  ;; :render-hiccup converts the hiccup page to an HTML string. With
+  ;; :assoc-fn at the route binding the whole graph is hof-wrap'd into
+  ;; a constant Ring callable.
+  {:name :_editor-rendered-page
+   :parent :render-hiccup
+   :args {:hiccup :page}}
 
- ;; =============================================================================
- ;; FAVICON (SVG icon with caching)
- ;; =============================================================================
+  {:name :_editor-handler
+   :parent :html-ok-response
+   :args {:body :_editor-rendered-page}}
 
- {:name :_favicon-svg-body
-  :parent :const
-  :args {:value "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#fff\" rx=\"4\"/><rect x=\"1\" y=\"1\" width=\"30\" height=\"30\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" rx=\"4\"/><rect x=\"3\" y=\"12\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"4\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"20\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"14\" x2=\"19\" y2=\"8\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"18\" x2=\"19\" y2=\"24\" stroke=\"#000\" stroke-width=\"1.5\"/></svg>"}}
+  ;; =============================================================================
+  ;; FAVICON (SVG icon with caching)
+  ;; =============================================================================
 
- {:name :_favicon-response
-  :parent :cached-svg-ok-response
-  :args {:body :_favicon-svg-body}}
+  {:name :_favicon-svg-body
+   :parent :const
+   :args {:value "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 32 32\"><rect width=\"32\" height=\"32\" fill=\"#fff\" rx=\"4\"/><rect x=\"1\" y=\"1\" width=\"30\" height=\"30\" fill=\"none\" stroke=\"#000\" stroke-width=\"2\" rx=\"4\"/><rect x=\"3\" y=\"12\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"4\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><rect x=\"19\" y=\"20\" width=\"10\" height=\"8\" rx=\"2\" fill=\"#fff\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"14\" x2=\"19\" y2=\"8\" stroke=\"#000\" stroke-width=\"1.5\"/><line x1=\"13\" y1=\"18\" x2=\"19\" y2=\"24\" stroke=\"#000\" stroke-width=\"1.5\"/></svg>"}}
 
- {:name :_favicon-handler
-  :parent :make-handler
-  :args {:response :_favicon-response}}
+  {:name :_favicon-handler
+   :parent :cached-svg-ok-response
+   :args {:body :_favicon-svg-body}}
 
- ;; =============================================================================
- ;; ROUTES
- ;; =============================================================================
-
- {:name :favicon-route
-  :parent :get-route
-  :args {:path "/favicon.ico" :handler :_favicon-handler}}
-
- {:name :editor-route
-  :parent :get-route
-  :args {:path "/" :handler :_editor-handler}}
-
- {:name :api-entities-route
-  :parent :get-route
-  :args {:path "/api/graph/entities" :handler :all-entities-json-handler}}
-
- {:name :entity-details-route
-  :parent :get-route
-  :args {:path "/partials/entity-details/:type/:id" :handler :entity-details-handler}}
-
- {:name :entity-form-create-route
-  :parent :get-route
-  :args {:path "/partials/entity-form/:type" :handler :entity-form-create-handler}}
-
- {:name :entity-form-edit-route
-  :parent :get-route
-  :args {:path "/partials/entity-form/:type/:id" :handler :entity-form-edit-handler}}
-
- {:name :create-entity-route
-  :parent :post-route
-  :args {:path "/api/entities/:type" :handler :create-entity-api-handler}}
-
- {:name :delete-entity-route
-  :parent :delete-route
-  :args {:path "/api/entities/:type/:id" :handler :delete-entity-api-handler}}
-
-]}
+  ;; Concrete editor routes (`/`, `/favicon.ico`, `/partials/...`,
+  ;; `/api/entities/...`, `/api/sequence/...`) live in `app.routes`;
+  ;; they reference the handler fn-defs above by name.
+  ]}

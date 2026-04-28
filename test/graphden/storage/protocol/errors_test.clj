@@ -2,14 +2,15 @@
   "Tests for error classification, registry, and sensitive data redaction."
   (:require
     [clojure.test :refer [deftest is testing use-fixtures]]
-    [graphden.storage.protocol.errors :as errors]))
+    [graphden.storage.protocol.errors :as errors]
+    [graphden.storage.protocol.redaction :as redaction]))
 
 
 ;; === Fixture to isolate sensitive field registry ===
 
 (defn reset-registry-fixture
   [f]
-  (errors/with-sensitive-field-registry
+  (redaction/with-sensitive-field-registry
     (f)))
 
 
@@ -162,86 +163,86 @@
 
 (deftest register-sensitive-field-name-test
   (testing "registers custom sensitive field name"
-    (errors/register-sensitive-field-name! :employee-ssn)
-    (is (contains? (errors/sensitive-field-names) :employee-ssn))
-    (is (errors/sensitive-field? :employee-ssn)))
+    (redaction/register-sensitive-field-name! :employee-ssn)
+    (is (contains? (redaction/sensitive-field-names) :employee-ssn))
+    (is (redaction/sensitive-field? :employee-ssn)))
 
   (testing "rejects non-keyword"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"field-name must be a keyword"
-          (errors/register-sensitive-field-name! "string-name")))))
+          (redaction/register-sensitive-field-name! "string-name")))))
 
 
 (deftest register-sensitive-field-pattern-test
   (testing "registers custom pattern"
-    (errors/register-sensitive-field-pattern! #"(?i)patient[_-]?id")
-    (is (errors/sensitive-field? :patient-id))
-    (is (errors/sensitive-field? :patient_id))
-    (is (errors/sensitive-field? :patientid)))
+    (redaction/register-sensitive-field-pattern! #"(?i)patient[_-]?id")
+    (is (redaction/sensitive-field? :patient-id))
+    (is (redaction/sensitive-field? :patient_id))
+    (is (redaction/sensitive-field? :patientid)))
 
   (testing "rejects non-pattern"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"pattern must be a compiled regex"
-          (errors/register-sensitive-field-pattern! "not-a-pattern")))))
+          (redaction/register-sensitive-field-pattern! "not-a-pattern")))))
 
 
 (deftest register-sensitive-field-predicate-test
   (testing "registers custom predicate"
-    (errors/register-sensitive-field-predicate!
+    (redaction/register-sensitive-field-predicate!
       (fn [k] (= "pii" (namespace k))))
-    (is (errors/sensitive-field? :pii/name))
-    (is (errors/sensitive-field? :pii/address))
-    (is (not (errors/sensitive-field? :public/name))))
+    (is (redaction/sensitive-field? :pii/name))
+    (is (redaction/sensitive-field? :pii/address))
+    (is (not (redaction/sensitive-field? :public/name))))
 
   (testing "rejects non-function"
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"pred-fn must be a function"
-          (errors/register-sensitive-field-predicate! :not-a-function)))))
+          (redaction/register-sensitive-field-predicate! :not-a-function)))))
 
 
 (deftest reset-sensitive-field-registry-test
   (testing "resets to defaults"
     ;; Add custom registration
-    (errors/register-sensitive-field-name! :custom-sensitive)
-    (is (errors/sensitive-field? :custom-sensitive))
+    (redaction/register-sensitive-field-name! :custom-sensitive)
+    (is (redaction/sensitive-field? :custom-sensitive))
 
     ;; Reset
-    (errors/reset-sensitive-field-registry!)
+    (redaction/reset-sensitive-field-registry!)
 
     ;; Custom should be gone, defaults should remain
-    (is (not (contains? (errors/sensitive-field-names) :custom-sensitive)))
-    (is (errors/sensitive-field? :password))))
+    (is (not (contains? (redaction/sensitive-field-names) :custom-sensitive)))
+    (is (redaction/sensitive-field? :password))))
 
 
 (deftest get-and-set-sensitive-field-registry-test
   (testing "get returns current state"
-    (let [state (errors/get-sensitive-field-registry)]
+    (let [state (redaction/get-sensitive-field-registry)]
       (is (set? (:names state)))
       (is (vector? (:patterns state)))
       (is (vector? (:predicates state)))))
 
   (testing "set restores previous state"
-    (let [original (errors/get-sensitive-field-registry)]
-      (errors/register-sensitive-field-name! :temp-field)
-      (is (errors/sensitive-field? :temp-field))
-      (errors/set-sensitive-field-registry! original)
-      (is (not (contains? (errors/sensitive-field-names) :temp-field))))))
+    (let [original (redaction/get-sensitive-field-registry)]
+      (redaction/register-sensitive-field-name! :temp-field)
+      (is (redaction/sensitive-field? :temp-field))
+      (redaction/set-sensitive-field-registry! original)
+      (is (not (contains? (redaction/sensitive-field-names) :temp-field))))))
 
 
 (deftest with-sensitive-field-registry-test
   (testing "isolates registry modifications"
-    (let [before-count (count (errors/sensitive-field-names))]
-      (errors/with-sensitive-field-registry
-        (errors/register-sensitive-field-name! :isolated-field)
-        (is (errors/sensitive-field? :isolated-field)))
+    (let [before-count (count (redaction/sensitive-field-names))]
+      (redaction/with-sensitive-field-registry
+        (redaction/register-sensitive-field-name! :isolated-field)
+        (is (redaction/sensitive-field? :isolated-field)))
       ;; After macro, registration should be rolled back
-      (is (= before-count (count (errors/sensitive-field-names))))
-      (is (not (contains? (errors/sensitive-field-names) :isolated-field))))))
+      (is (= before-count (count (redaction/sensitive-field-names))))
+      (is (not (contains? (redaction/sensitive-field-names) :isolated-field))))))
 
 
 (deftest sensitive-field-names-test
   (testing "returns set of names"
-    (let [names (errors/sensitive-field-names)]
+    (let [names (redaction/sensitive-field-names)]
       (is (set? names))
       (is (contains? names :password))
       (is (contains? names :api-key)))))
@@ -249,73 +250,73 @@
 
 (deftest sensitive-field-patterns-test
   (testing "returns vector of patterns"
-    (let [patterns (errors/sensitive-field-patterns)]
+    (let [patterns (redaction/sensitive-field-patterns)]
       (is (vector? patterns))
       (is (every? #(instance? java.util.regex.Pattern %) patterns)))))
 
 
 (deftest sensitive-field-test
   (testing "detects explicit field names"
-    (is (errors/sensitive-field? :password))
-    (is (errors/sensitive-field? :secret))
-    (is (errors/sensitive-field? :token))
-    (is (errors/sensitive-field? :api-key))
-    (is (errors/sensitive-field? :credentials)))
+    (is (redaction/sensitive-field? :password))
+    (is (redaction/sensitive-field? :secret))
+    (is (redaction/sensitive-field? :token))
+    (is (redaction/sensitive-field? :api-key))
+    (is (redaction/sensitive-field? :credentials)))
 
   (testing "detects via patterns"
-    (is (errors/sensitive-field? :user-password))
-    (is (errors/sensitive-field? :access-token))
-    (is (errors/sensitive-field? :api_key))
-    (is (errors/sensitive-field? :auth-header)))
+    (is (redaction/sensitive-field? :user-password))
+    (is (redaction/sensitive-field? :access-token))
+    (is (redaction/sensitive-field? :api_key))
+    (is (redaction/sensitive-field? :auth-header)))
 
   (testing "handles strings"
-    (is (errors/sensitive-field? "password"))
-    (is (errors/sensitive-field? "api-key")))
+    (is (redaction/sensitive-field? "password"))
+    (is (redaction/sensitive-field? "api-key")))
 
   (testing "handles nil gracefully"
-    (is (nil? (errors/sensitive-field? nil))))
+    (is (nil? (redaction/sensitive-field? nil))))
 
   (testing "returns falsy for non-sensitive fields"
-    (is (not (errors/sensitive-field? :username)))
-    (is (not (errors/sensitive-field? :email)))
-    (is (not (errors/sensitive-field? :id)))))
+    (is (not (redaction/sensitive-field? :username)))
+    (is (not (redaction/sensitive-field? :email)))
+    (is (not (redaction/sensitive-field? :id)))))
 
 
 (deftest critical-sensitive-patterns-test
   (testing "all critical patterns are matched"
-    (doseq [pattern errors/critical-sensitive-patterns]
-      (is (errors/sensitive-field? pattern)
+    (doseq [pattern redaction/critical-sensitive-patterns]
+      (is (redaction/sensitive-field? pattern)
           (str "Critical pattern not matched: " pattern)))))
 
 
 (deftest validate-sensitive-field-coverage-test
   (testing "passes with default registry"
-    (is (nil? (errors/validate-sensitive-field-coverage!))))
+    (is (nil? (redaction/validate-sensitive-field-coverage!))))
 
   (testing "fails when critical patterns not covered"
     ;; Reset to empty registry
-    (errors/set-sensitive-field-registry! {:names #{} :patterns [] :predicates []})
+    (redaction/set-sensitive-field-registry! {:names #{} :patterns [] :predicates []})
     (is (thrown-with-msg? clojure.lang.ExceptionInfo
                           #"Critical sensitive patterns not covered"
-          (errors/validate-sensitive-field-coverage!)))))
+          (redaction/validate-sensitive-field-coverage!)))))
 
 
 ;; === Redaction Tests ===
 
 (deftest redact-sensitive-map-test
   (testing "redacts sensitive keys in map"
-    (let [result (errors/redact-sensitive-map {:password "secret" :username "john"})]
+    (let [result (redaction/redact-sensitive-map {:password "secret" :username "john"})]
       (is (= "[REDACTED]" (:password result)))
       (is (= "john" (:username result)))))
 
   (testing "handles empty map"
-    (is (= {} (errors/redact-sensitive-map {}))))
+    (is (= {} (redaction/redact-sensitive-map {}))))
 
   (testing "handles nil"
-    (is (nil? (errors/redact-sensitive-map nil))))
+    (is (nil? (redaction/redact-sensitive-map nil))))
 
   (testing "redacts multiple sensitive fields"
-    (let [result (errors/redact-sensitive-map {:password "x" :api-key "y" :token "z" :name "john"})]
+    (let [result (redaction/redact-sensitive-map {:password "x" :api-key "y" :token "z" :name "john"})]
       (is (= "[REDACTED]" (:password result)))
       (is (= "[REDACTED]" (:api-key result)))
       (is (= "[REDACTED]" (:token result)))
@@ -326,31 +327,31 @@
   (testing "redacts nested sensitive values"
     (let [data {:config {:database {:password "secret"
                                     :host "localhost"}}}
-          result (errors/redact-sensitive-deep data)]
+          result (redaction/redact-sensitive-deep data)]
       (is (= "[REDACTED]" (get-in result [:config :database :password])))
       (is (= "localhost" (get-in result [:config :database :host])))))
 
   (testing "handles vectors with maps"
     (let [data {:users [{:name "john" :api-key "key1"}
                         {:name "jane" :api-key "key2"}]}
-          result (errors/redact-sensitive-deep data)]
+          result (redaction/redact-sensitive-deep data)]
       (is (= "john" (get-in result [:users 0 :name])))
       (is (= "[REDACTED]" (get-in result [:users 0 :api-key])))
       (is (= "[REDACTED]" (get-in result [:users 1 :api-key])))))
 
   (testing "handles primitives"
-    (is (= "hello" (errors/redact-sensitive-deep "hello")))
-    (is (= 123 (errors/redact-sensitive-deep 123)))
-    (is (nil? (errors/redact-sensitive-deep nil))))
+    (is (= "hello" (redaction/redact-sensitive-deep "hello")))
+    (is (= 123 (redaction/redact-sensitive-deep 123)))
+    (is (nil? (redaction/redact-sensitive-deep nil))))
 
   (testing "handles sets"
-    (let [result (errors/redact-sensitive-deep #{1 2 3})]
+    (let [result (redaction/redact-sensitive-deep #{1 2 3})]
       (is (set? result))
       (is (= #{1 2 3} result))))
 
   (testing "handles mixed collections"
     (let [data {:items [1 "two" {:secret "hidden"}]}
-          result (errors/redact-sensitive-deep data)]
+          result (redaction/redact-sensitive-deep data)]
       (is (= 1 (get-in result [:items 0])))
       (is (= "two" (get-in result [:items 1])))
       (is (= "[REDACTED]" (get-in result [:items 2 :secret]))))))
@@ -460,22 +461,22 @@
 
 (deftest warn-on-suspicious-field-test
   (testing "returns nil for nil input"
-    (is (nil? (errors/warn-on-suspicious-field nil))))
+    (is (nil? (redaction/warn-on-suspicious-field nil))))
 
   (testing "returns nil for non-suspicious registered field"
-    (is (nil? (errors/warn-on-suspicious-field :password))))  ; registered, not suspicious
+    (is (nil? (redaction/warn-on-suspicious-field :password))))  ; registered, not suspicious
 
   (testing "returns nil for clearly non-sensitive field"
-    (is (nil? (errors/warn-on-suspicious-field :username))))
+    (is (nil? (redaction/warn-on-suspicious-field :username))))
 
   (testing "returns true for suspicious unregistered field"
     ;; This field looks suspicious (has 'key' in name) but isn't registered
     ;; Note: may actually be caught by patterns - test different field
-    (errors/with-sensitive-field-registry
-      (errors/reset-sensitive-field-registry!)
+    (redaction/with-sensitive-field-registry
+      (redaction/reset-sensitive-field-registry!)
       ;; With empty registry, 'api-key-backup' should be suspicious
-      (errors/set-sensitive-field-registry! {:names #{} :patterns [] :predicates []})
-      (is (true? (errors/warn-on-suspicious-field :api-key-backup))))))
+      (redaction/set-sensitive-field-registry! {:names #{} :patterns [] :predicates []})
+      (is (true? (redaction/warn-on-suspicious-field :api-key-backup))))))
 
 
 ;; === Redact deep with sequences ===
@@ -483,7 +484,7 @@
 (deftest redact-sensitive-deep-sequences-test
   (testing "handles lists (sequences)"
     (let [data {:items (list {:password "secret"} {:name "john"})}
-          result (errors/redact-sensitive-deep data)]
+          result (redaction/redact-sensitive-deep data)]
       ;; Result should have redacted password
       (is (= "[REDACTED]" (:password (first (:items result))))))))
 
@@ -493,4 +494,4 @@
 (deftest sensitive-field-empty-name-test
   (testing "handles keyword with empty name"
     ;; This is an edge case - empty keyword name
-    (is (not (errors/sensitive-field? (keyword ""))))))
+    (is (not (redaction/sensitive-field? (keyword ""))))))

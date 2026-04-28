@@ -6,24 +6,27 @@
 
 
 {:namespace "app.layout"
+ :description "Graph-layout pass — turns raw fn/arg entities + per-call expansion specs into the {:nodes :edges :grid-pos :validation} cytoscape response."
  :fns
-[;; Layout data function - fetches from DB, builds graph, computes layout
- ;; Context-aware: receives storage from ctx
- {:name :get-layout-data
-  :args {:request :jsonb}
-  :return-type :jsonb
-  :ctx true}
+ [;; Layout data function - fetches from DB, builds graph, computes layout
+  ;; Context-aware: receives storage from ctx
+  {:name :get-layout-data
+   :description "Fetch every fn/arg entity from storage, expand the requested subgraph based on the request's `:root-id` + `:expansions` map, run the layout pipeline, and return `{:nodes :edges :grid-pos :validation}`. Context-aware (reads storage from `ctx`)."
+   :args {:request {:type :jsonb :description "Internal Ring request — body parsed into `{:root-id :expansions}`."}}
+   :return-type :jsonb}
 
- ;; =============================================================================
- ;; FN-DEFS: Layout API handler
- ;; =============================================================================
+  ;; =============================================================================
+  ;; FN-DEFS: Layout API handler
+  ;; =============================================================================
 
- ;; Layout handler using make-json-response-handler pattern
- {:name :_layout-api-handler
-  :parent :make-json-response-handler
-  :args {:data-fn :get-layout-data}}
+  ;; Layout handler — fn-graph composition, no factory.
+  {:name :_layout-api-handler
+   :parent :json-ok-response
+   :args {:body :_layout-api-body}}
 
- ;; POST /api/graph/layout - accepts root-id and expansions
- {:name :layout-api-route
-  :parent :post-route
-  :args {:path "/api/graph/layout" :handler :_layout-api-handler}}]}
+  {:name :_layout-api-body
+   :parent :to-json-string
+   :args {:data :get-layout-data}}
+
+  ;; The concrete `/api/graph/layout` route lives in `app.routes`.
+  ]}

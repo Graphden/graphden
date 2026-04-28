@@ -4,79 +4,128 @@
 
 
 {:namespace "core.strings"
+ :description "String primitives — concat/subs/length/case/trim/split/join, plus keyword↔string conversions."
  :fns
-[{:name :str
-  :args {:parts :jsonb}
-  :return-type :text}
+ [{:name :str
+   :description "Concatenate a sequence of values into a single string (Clojure's `(apply str parts)`). Each part is stringified."
+   :args {:parts {:type :sequence :of :any :description "Items to stringify and concatenate. Each item may be a literal or a fn-ref."}}
+   :return-type :text}
 
- {:name :subs
-  :args {:string :text
-         :start :int
-         :end {:type :int :required false}}
-  :return-type :text}
+  {:name :subs
+   :description "Substring of a string (Clojure's `subs`). End is exclusive; omit it to take to end."
+   :args {:string {:type :text :description "Source string."}
+          :start {:type :int :description "Inclusive start index."}
+          :end {:type :int :required false :description "Exclusive end index. Defaults to string length."}}
+   :return-type :text}
 
- {:name :str-len
-  :args {:string :text}
-  :return-type :int}
+  {:name :str-len
+   :description "Length of a string in characters (Clojure's `count` on a string)."
+   :args {:string {:type :text :description "String to measure."}}
+   :return-type :int}
 
- {:name :str-upper
-  :args {:string :text}
-  :return-type :text}
+  {:name :str-upper
+   :description "Upper-case a string (Java `String.toUpperCase`)."
+   :args {:string {:type :text :description "String to upper-case."}}
+   :return-type :text}
 
- {:name :str-lower
-  :args {:string :text}
-  :return-type :text}
+  {:name :str-lower
+   :description "Lower-case a string (Java `String.toLowerCase`)."
+   :args {:string {:type :text :description "String to lower-case."}}
+   :return-type :text}
 
- {:name :str-trim
-  :args {:string :text}
-  :return-type :text}
+  {:name :str-trim
+   :description "Trim leading and trailing whitespace (Clojure's `clojure.string/trim`)."
+   :args {:string {:type :text :description "String to trim."}}
+   :return-type :text}
 
- {:name :str-split
-  :args {:string :text, :separator :text}
-  :return-type :jsonb}
+  {:name :str-split
+   :description "Split a string by separator (Clojure's `(str/split s (re-pattern separator))`). Separator is a regex."
+   :args {:string {:type :text :description "String to split."}
+          :separator {:type :text :description "Regex pattern that delimits parts."}}
+   :return-type :jsonb}
 
- {:name :str-join
-  :args {:coll :jsonb
-         :separator {:type :text :value ""}}
-  :return-type :text}
+  {:name :str-join
+   :description "Join a collection of strings into one (Clojure's `clojure.string/join`)."
+   :args {:coll {:type :jsonb :description "Collection of strings (or stringifiable values)."}
+          :separator {:type :text :value "" :description "Inserted between every pair. Defaults to empty."}}
+   :return-type :text}
 
- {:name :str-to-keyword
-  :args {:string :text}
-  :return-type :any}
+  {:name :str-to-keyword
+   :description "Coerce a string into a keyword (Clojure's `keyword`)."
+   :args {:string {:type :text :description "String to convert."}}
+   :return-type :any}
 
- {:name :keyword-to-str
-  :args {:keyword :any}
-  :return-type :text}
+  {:name :keyword-to-str
+   :description "Coerce a keyword into a string without the leading colon (Clojure's `name`)."
+   :args {:keyword {:type :any :description "Keyword to convert."}}
+   :return-type :text}
 
- {:name :pr-str
-  :args {:value :any}
-  :return-type :text}
+  {:name :pr-str
+   :description "Print-readable string form of a value (Clojure's `pr-str`). Strings are quoted, keywords prefixed."
+   :args {:value {:type :any :description "Value to print."}}
+   :return-type :text}
 
- {:name :to-str
-  :args {:value :any}
-  :return-type :text}
+  {:name :to-str
+   :description "Plain string form of a value (Clojure's `str`). No quoting; nil renders as empty string."
+   :args {:value {:type :any :description "Value to stringify."}}
+   :return-type :text}
 
- {:name :parse-query-string
-  :args {:string :text}
-  :return-type :jsonb}
+  {:name :parse-query-string
+   :description "Parse an HTTP query string into a `{key value}` map. Repeated keys collapse to last."
+   :args {:string {:type :text :description "Raw query string (without leading `?`)."}}
+   :return-type :jsonb}
 
- {:name :truncate
-  :args {:string :text
-         :max-length :int}
-  :return-type :text}
+  ;; (if (> (count s) n) (str (subs s 0 n) "...") s) — pure composition.
+  {:name :truncate
+   :description "Truncate a string to at most `:max-length` characters, appending `…` when shortened. Pure fn-graph composition over `:if`/`:gt`/`:subs`/`:str`."
+   :parent :if
+   :args {:test :_truncate-too-long?
+          :then :_truncate-suffixed
+          :else {:as :string}}}
 
- {:name :blank?
-  :args {:string {:type :text :required false}}
-  :return-type :bool}
+  {:name :_truncate-len
+   :parent :str-len
+   :args {:string {:as :string}}}
 
- {:name :url-decode
-  :args {:string :text}
-  :return-type :text}
+  {:name :_truncate-too-long?
+   :parent :gt
+   :args {:nums [:_truncate-len {:as :max-length}]}}
 
- {:name :str-contains?
-  :args {:string :text, :substring :text}
-  :return-type :bool}
+  {:name :_truncate-prefix
+   :parent :subs
+   :args {:string {:as :string}
+          :start 0
+          :end {:as :max-length}}}
 
- {:name :str-starts-with?
-  :args {:string :text, :prefix :text}
-  :return-type :bool}]}
+  {:name :_truncate-suffixed
+   :parent :str
+   :args {:parts [:_truncate-prefix {:value "..."}]}}
+
+  {:name :blank?
+   :description "True iff the string is nil, empty, or contains only whitespace (Clojure's `clojure.string/blank?`)."
+   :args {:string {:type :text :required false :description "String to test (nil-safe)."}}
+   :return-type :bool}
+
+  {:name :url-decode
+   :description "Decode a URL-encoded string (`%20` → space, etc.). UTF-8."
+   :args {:string {:type :text :description "Encoded string."}}
+   :return-type :text}
+
+  {:name :str-contains?
+   :description "True iff `string` contains `substring` (Clojure's `clojure.string/includes?`)."
+   :args {:string {:type :text :description "String to search."}
+          :substring {:type :text :description "Substring to find."}}
+   :return-type :bool}
+
+  {:name :str-starts-with?
+   :description "True iff `string` starts with `prefix` (Java `String.startsWith`). Nil-safe — returns false for nil input."
+   :args {:string {:type :text :description "String to test."}
+          :prefix {:type :text :description "Required leading substring."}}
+   :return-type :bool}
+
+  {:name :str-replace
+   :description "Replace every occurrence of `:match` with `:replacement` in `:s` (Clojure's `clojure.string/replace`). All three args are plain strings — no regex."
+   :args {:s {:type :text :description "Source string."}
+          :match {:type :text :description "Literal substring to find."}
+          :replacement {:type :text :description "Replacement string."}}
+   :return-type :text}]}

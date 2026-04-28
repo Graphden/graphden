@@ -1,0 +1,33 @@
+;; Auth-required route templates — bind `:auth-required-middleware`
+;; into the per-method route shape so concrete routes only need to
+;; supply their `:path` and `:handler`. Names are just the HTTP
+;; method because the namespace `app.routes.auth` already says
+;; "this is an auth-required route template".
+
+
+{:namespace "app.routes.auth"
+ :description "Auth-required route templates — `auth-required-middleware` baked into the per-method route shape. Concrete `app.routes` leaves use these as their parent."
+ :fns
+ [{:name :_middleware-list
+   :parent :list
+   :args {:items [:auth-required-middleware]}}
+
+  {:name :post
+   :description "POST route template wired with `auth-required-middleware`. Caller provides `:path` and `:handler`."
+   :parent :post-route-with-middleware
+   :args {:middleware :_middleware-list}}
+
+  {:name :delete
+   :description "DELETE route template wired with `auth-required-middleware`. Caller provides `:path` and `:handler`."
+   :parent :delete-route-with-middleware
+   :args {:middleware :_middleware-list}}
+
+  {:name :get-auth-required
+   :description "GET route template wired with `auth-required-middleware`. Used for endpoints that read state but should be admin-only — e.g. `/api/auth/check` for password validation in the editor's lock-icon popover. (The `-auth-required` suffix is necessary because `:get` is already a `core.collections` base-fn — bare `:get` would silently shadow it.)"
+   :parent :get-route-with-middleware
+   :args {:middleware :_middleware-list}}
+
+  {:name :put
+   :description "PUT route template wired with `auth-required-middleware`. Caller provides `:path` and `:handler`. Used for entity updates (rename, etc.)."
+   :parent :put-route-with-middleware
+   :args {:middleware :_middleware-list}}]}

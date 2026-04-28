@@ -46,3 +46,26 @@ node check-editor.js
 - Node.js
 - Playwright with Chromium
 - Graphden server running on `http://localhost:9002`
+
+## Editor-edit e2e suite
+
+The `edit-*.test.js` files exercise the inline graph-editing affordances
+(re-parent cascade, sequence add/remove, namespace-move). Each script
+exits 0 on PASS, non-zero on FAIL — assertions are inline via the
+helpers in `edit-test-helpers.js`.
+
+Requires `AUTH_TOKEN=<token> bb rebuild` so the dev container's
+admin password matches what the tests put into `localStorage`. With
+the default `test123` token:
+
+```bash
+AUTH_TOKEN=test123 bb rebuild        # one-time, sets the container token
+cd tools/browser-test
+./run-edit-tests.sh                  # runs the whole suite, exits non-zero on fail
+node edit-phase3-reparent.test.js    # or run one
+```
+
+Override `AUTH_TOKEN` / `GRAPHDEN_URL` via env vars to point at a
+different deployment. Test fns are named `test-edit-phase*` and are
+created/cleaned per-run, so it is safe to run against a non-pristine
+graph.

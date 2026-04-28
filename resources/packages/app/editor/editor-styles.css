@@ -1,48 +1,638 @@
-/* Graph editor CSS styles - monochrome design */
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #fff; color: #000; }
+/* Graph editor CSS styles - monochrome design.
+ * Theme variables live on `:root`; `body.theme-dark` overrides. The
+ * full sidebar respects `--sidebar-width` so the resize handle and
+ * the collapse button can change one number to retheme + relayout. */
+:root {
+  --bg: #fff;
+  --fg: #000;
+  --muted-fg: #555;
+  --light-fg: #888;
+  --border: #000;
+  --light-border: #ddd;
+  --input-border: #ccc;
+  --hover-bg: #eee;
+  --selected-bg: #ddd;
+  --sidebar-bg: #fafafa;
+  --header-bg: #000;
+  --header-fg: #fff;
+  --accent: #0066cc;
+  /* Graph node ("card") palette — keeps the same visual hierarchy in both
+     themes (slightly-raised body + distinct header band + visible outline)
+     instead of inverting to bright gray. */
+  --card-bg: #fff;
+  --card-fg: #000;
+  --card-border: #000;
+  --card-header-bg: #000;
+  --card-header-fg: #fff;
+  --card-row-highlight: #f0f0f0;
+  /* HOF-captured arg strip — subtle blue tint that survives both themes. */
+  --hof-fg: #557;
+  --hof-bg: #f4f6fc;
+  --hof-border: #b8c0e0;
+  /* Description tooltip — high-contrast bubble that sits over both
+     overlay rows and the cy canvas, so it must read against any bg. */
+  --tooltip-bg: rgba(0,0,0,0.88);
+  --tooltip-fg: #fff;
+  --sidebar-width: 280px;
+}
+body.theme-dark {
+  --bg: #1a1a1a;
+  --fg: #e8e8e8;
+  --muted-fg: #aaa;
+  --light-fg: #888;
+  --border: #888;
+  --light-border: #444;
+  --input-border: #555;
+  --hover-bg: #2a2a2a;
+  --selected-bg: #3a3a3a;
+  --sidebar-bg: #1f1f1f;
+  --header-bg: #2c2c2c;
+  --header-fg: #e8e8e8;
+  --accent: #4d9fff;
+  /* Card body slightly raised vs body bg, header still distinct but not
+     bright; outline subtle so the node frame isn't a glaring white box. */
+  --card-bg: #242424;
+  --card-fg: #e8e8e8;
+  --card-border: #555;
+  --card-header-bg: #3a3a3a;
+  --card-header-fg: #e8e8e8;
+  --card-row-highlight: #2e2e2e;
+  --hof-fg: #aab8e8;
+  --hof-bg: #1e2030;
+  --hof-border: #3a4070;
+  --tooltip-bg: rgba(232,232,232,0.92);
+  --tooltip-fg: #1a1a1a;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+  background: var(--bg); color: var(--fg); }
 
-/* ID-based layout (matches editor-body hiccup structure) */
+/* ID-based layout (matches editor-body hiccup structure).
+ *
+ * The sidebar is absolute-positioned ON TOP of a full-viewport
+ * graph-container. Collapse / expand is a `transform: translateX(...)`
+ * slide — graph-container never reflows, cytoscape never resizes,
+ * edges never get recomputed. That keeps the animation perfectly
+ * smooth (the only thing moving is the sidebar layer, GPU-composited
+ * via transform) and frees us from juggling a pan compensation in
+ * lockstep with the CSS transition.
+ *
+ * Trade-off: when the sidebar is open it covers the leftmost slice of
+ * the graph. We compensate at fit time (editor-cytoscape.js) by
+ * panning the freshly-fitted graph half the sidebar width to the
+ * right so the visible portion stays centered. */
 #app { height: 100vh; }
-#main-container { display: flex; height: 100%; }
-#side-menu { width: 280px; background: #fafafa; border-right: 2px solid #000; overflow-y: auto; position: relative; z-index: 200; }
-#graph-container { flex: 1; display: flex; flex-direction: column; position: relative; overflow: hidden; }
+#main-container { position: relative; height: 100%; }
+#side-menu {
+  position: absolute; top: 0; left: 0; height: 100%;
+  width: var(--sidebar-width); background: var(--sidebar-bg);
+  border-right: 2px solid var(--border); overflow-y: auto;
+  z-index: 200;
+  transform: translateX(0);
+  transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+  will-change: transform;
+}
+body.resizing-sidebar #side-menu { transition: none; user-select: none; }
+body.resizing-sidebar { user-select: none; cursor: col-resize; }
+/* Collapsed: slide the sidebar one full width to the left so it sits
+   off-screen. Width stays the same in the underlying layout, but
+   nothing reflows since the sidebar is absolute-positioned anyway.
+   The expand affordance is a separate floating button — see
+   `.sidebar-expand-floating`. */
+body.sidebar-collapsed #side-menu {
+  transform: translateX(calc(-1 * var(--sidebar-width) - 2px));
+}
+body.sidebar-collapsed #sidebar-resizer { display: none; }
+#graph-container {
+  position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+  display: flex; flex-direction: column; overflow: hidden;
+}
 #cy { width: 100%; height: 100%; }
 
+/* Floating expand button — visible only when sidebar is collapsed. Sits
+   in viewport top-left, fades in once the shrink animation has cleared
+   space for it so the icon doesn't appear over a still-shrinking
+   sidebar. */
+.sidebar-expand-floating {
+  position: fixed; top: 8px; left: 8px; z-index: 250;
+  width: 26px; height: 26px; padding: 3px;
+  background: var(--bg); color: var(--fg);
+  border: 1px solid var(--fg); border-radius: 3px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0; pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+body.sidebar-collapsed .sidebar-expand-floating {
+  opacity: 1; pointer-events: auto;
+  transition: opacity 0.18s ease 0.2s; /* wait for the shrink to clear */
+}
+.sidebar-expand-floating:hover { background: var(--fg); color: var(--bg); }
+
+/* Right-edge resize handle. 4 px wide, centred on the sidebar's
+   trailing border so the cursor lands on it before the user has to
+   nail the 2 px border itself. */
+#sidebar-resizer {
+  position: absolute; top: 0; right: -2px; width: 6px; height: 100%;
+  cursor: col-resize; z-index: 250; user-select: none;
+}
+#sidebar-resizer:hover { background: rgba(0, 0, 0, 0.08); }
+body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); }
+
 /* Search bar */
-#search-bar { display: flex; padding: 6px 8px; border-bottom: 1px solid #ddd; gap: 4px; }
+#search-bar { display: flex; padding: 6px 8px;
+  border-bottom: 1px solid var(--light-border); gap: 4px; }
 #search-input {
-  flex: 1; min-width: 0; padding: 4px 8px; border: 1px solid #ccc; border-radius: 3px;
-  font-family: inherit; font-size: 13px; outline: none; background: #fff;
+  flex: 1; min-width: 0; padding: 4px 8px;
+  border: 1px solid var(--input-border); border-radius: 3px;
+  font-family: inherit; font-size: 13px; outline: none;
+  background: var(--bg); color: var(--fg);
 }
-#search-input:focus { border-color: #888; }
+#search-input:focus { border-color: var(--light-fg); }
 #search-clear {
-  width: 24px; height: 24px; border: 1px solid #ccc; border-radius: 3px;
-  background: #fff; font-size: 16px; cursor: pointer; color: #666;
+  width: 24px; align-self: stretch;
+  border: 1px solid var(--input-border); border-radius: 3px;
+  background: var(--bg); color: var(--muted-fg);
+  font-size: 16px; cursor: pointer;
   display: flex; align-items: center; justify-content: center; padding: 0;
-  flex-shrink: 0;
+  flex-shrink: 0; box-sizing: border-box;
 }
-#search-clear:hover { background: #eee; color: #000; }
+#search-clear:hover { background: var(--hover-bg); color: var(--fg); }
 
 /* Namespace tree in sidebar */
 #entity-list { padding: 4px 0; margin: 0; }
 .ns-header { display: flex; align-items: center; padding: 3px 8px; cursor: pointer; user-select: none; }
-.ns-header:hover { background: #eee; }
-.ns-arrow { width: 16px; font-size: 10px; color: #555; flex-shrink: 0; text-align: center; }
-.ns-label { font-size: 13px; font-weight: 600; color: #222; }
+.ns-header:hover { background: var(--hover-bg); }
+.ns-arrow { width: 16px; font-size: 10px; color: var(--muted-fg); flex-shrink: 0; text-align: center; }
+.ns-label { font-size: 13px; font-weight: 600; color: var(--fg); }
 .ns-children { padding-left: 16px; }
-#entity-list .entity-item { padding: 2px 8px 2px 24px; cursor: pointer; }
-#entity-list .entity-item:hover { background: #eee; }
-#entity-list .entity-item.selected { background: #ddd; }
+#entity-list .entity-item { padding: 2px 8px 2px 24px; cursor: pointer;
+  display: flex; align-items: center; }
+#entity-list .entity-item:hover { background: var(--hover-bg); }
+#entity-list .entity-item.selected { background: var(--selected-bg); }
 #entity-list .entity-item .name { font-weight: 400; font-size: 13px; }
 
-/* Menu header */
-.menu-header { padding: 12px 16px; border-bottom: 2px solid #000; background: #000; color: #fff; }
+/* Menu header — asymmetric padding pulls the action buttons closer to
+   the right edge while keeping the title comfortably indented on the
+   left. */
+.menu-header { padding: 12px 8px 12px 16px; border-bottom: 2px solid var(--border);
+  background: var(--header-bg); color: var(--header-fg);
+  display: flex; align-items: center; justify-content: space-between; position: relative; }
 .menu-header h2 { font-size: 13px; font-weight: 500; margin: 0; }
+.menu-header-actions { display: inline-flex; align-items: center; gap: 6px; line-height: 0; }
+
+/* Prefs (theme + collapse) buttons — same shape/size as auth lock. */
+#prefs-mount { display: inline-flex; gap: 6px; }
+.prefs-btn {
+  background: transparent; color: var(--header-fg);
+  border: 1px solid var(--header-fg); border-radius: 3px;
+  width: 26px; height: 26px; padding: 3px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.prefs-btn:hover { background: var(--header-fg); color: var(--header-bg); }
+
+/* Auth lock — sits on the right of the menu header, opens a popover. */
+#auth-mount { position: relative; line-height: 0; }
+.auth-lock-btn {
+  background: transparent; color: var(--header-fg); border: 1px solid var(--header-fg); border-radius: 3px;
+  width: 26px; height: 26px; padding: 3px; cursor: pointer; display: inline-flex;
+  align-items: center; justify-content: center;
+}
+.auth-lock-btn:hover { background: var(--header-fg); color: var(--header-bg); }
+.auth-lock-btn.auth-lock-open { background: var(--header-fg); color: var(--header-bg); }
+/* Popover positioned with `position: fixed` (relative to viewport,
+   set via JS in `positionAuthPopover`) so it can escape #side-menu's
+   scroll context — focusing the input would otherwise cause the
+   browser to horizontally scroll the sidebar to reveal it. */
+.auth-popover {
+  position: fixed; z-index: 300;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--fg); border-radius: 3px;
+  padding: 8px; min-width: 200px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+  display: flex; flex-direction: column; gap: 6px;
+}
+.auth-popover.hidden { display: none; }
+.auth-popover input {
+  font-size: 12px; padding: 4px 6px; border: 1px solid var(--fg); border-radius: 3px;
+  outline: none; width: 100%; box-sizing: border-box;
+  background: var(--bg); color: var(--fg);
+}
+.auth-popover input:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
+/* Wrapper that lets the eye-toggle button float over the right edge
+   of the password input. The input gets extra right-padding so the
+   typed text doesn't run under the icon. */
+.auth-input-wrap { position: relative; }
+.auth-input-wrap input { padding-right: 28px; }
+.auth-toggle-visibility {
+  position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; border: 0; border-radius: 2px;
+  cursor: pointer; color: var(--muted-fg);
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.auth-toggle-visibility:hover { color: var(--fg); }
+.auth-popover-row { display: flex; gap: 6px; }
+.auth-popover-btn {
+  flex: 1; font-size: 12px; padding: 4px 8px; cursor: pointer;
+  background: var(--fg); color: var(--bg); border: 1px solid var(--fg); border-radius: 3px;
+}
+.auth-popover-btn:hover { background: var(--bg); color: var(--fg); }
+.auth-popover-btn-secondary { background: var(--bg); color: var(--fg); }
+.auth-popover-btn-secondary:hover { background: var(--fg); color: var(--bg); }
+.auth-error {
+  font-size: 11px; color: var(--fg); background: var(--hover-bg); border: 1px solid var(--fg);
+  padding: 4px 6px; border-radius: 3px;
+}
+.auth-error.hidden { display: none; }
+
+/* Per-namespace row buttons — ✎ rename + + create-child. Hidden until
+   the row is hovered. Both monochrome to match the sidebar palette. */
+.ns-row-actions {
+  margin-left: auto; display: inline-flex; gap: 4px; align-items: center;
+}
+.create-btn {
+  background: transparent; color: inherit; border: 1px solid currentColor;
+  border-radius: 3px; cursor: pointer; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.create-btn:hover { background: currentColor; }
+.create-btn:hover svg { color: var(--bg); }
+/* Match `applyActionIconBox` (description-badge `i`) so the row's
+   icons line up: same 15×15 frame, same 1px border. The action
+   buttons stay hover-only — `i` is informational and harmless to
+   show always; ✎/+ are actions and should not clutter the row when
+   the user is just scanning the tree. */
+.create-btn-inline {
+  width: 15px; height: 15px;
+  opacity: 0; transition: opacity 0.1s;
+  color: var(--fg);
+}
+.ns-header:hover .ns-row-actions .create-btn-inline,
+.entity-item:hover .ns-row-actions .create-btn-inline { opacity: 1; }
+.create-btn-inline:hover { background: var(--fg); color: var(--bg); }
+
+/* Disabled (greyed-out) state for the delete button when the entity
+   can't be removed safely. The button stays in the row layout so its
+   absence doesn't shift the icon group; tooltip carries the reason.
+   Hover doesn't change anything — no background flip, no color change,
+   no SVG colour swap — the row's hover rule still raises opacity to
+   make the button visible, but everything else stays at the disabled
+   palette so it reads as "not clickable". */
+.create-btn-inline.create-btn-disabled,
+.create-btn-inline.create-btn-disabled:hover,
+.create-btn-inline:disabled,
+.create-btn-inline:disabled:hover {
+  color: var(--light-fg);
+  background: transparent;
+  cursor: not-allowed;
+}
+.create-btn-inline.create-btn-disabled:hover svg,
+.create-btn-inline:disabled:hover svg {
+  color: var(--light-fg);
+}
+
+/* Create-child popover menu (ns / fn). Floated above the sidebar. */
+.create-menu {
+  background: var(--bg); color: var(--fg); border: 1px solid var(--fg); border-radius: 3px;
+  min-width: 180px; padding: 4px; display: flex; flex-direction: column; gap: 2px;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25);
+}
+.create-menu-item {
+  background: transparent; border: 0; border-radius: 2px;
+  padding: 6px 10px; text-align: left; font-size: 12px; cursor: pointer;
+  color: inherit;
+}
+.create-menu-item:hover { background: var(--fg); color: var(--bg); }
+
+/* Inline input row — used both for create (indented under a parent ns)
+   and for rename (replaces the ns-header label in place). */
+.inline-input-row {
+  display: flex; align-items: center; gap: 4px;
+  padding: 4px 6px;
+}
+.inline-input {
+  flex: 1; font-size: 12px; padding: 3px 6px;
+  border: 1px solid var(--fg); border-radius: 3px; outline: none;
+  background: var(--bg); color: var(--fg);
+}
+.inline-input:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
+.inline-input:disabled { opacity: 0.6; }
+.inline-btn {
+  width: 22px; height: 22px; padding: 0;
+  background: var(--bg); color: var(--fg); border: 1px solid var(--fg);
+  border-radius: 3px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+}
+.inline-btn:hover { background: var(--fg); color: var(--bg); }
+.inline-btn-save:hover { background: var(--fg); color: var(--bg); }
+.inline-btn:disabled { opacity: 0.4; cursor: default; }
+.inline-error {
+  font-size: 10px; color: var(--fg);
+  background: var(--hover-bg); border: 1px solid var(--fg); border-radius: 3px;
+  padding: 1px 5px; display: none;
+}
+
+/* "+ New namespace" button at the bottom of the sidebar. Side margins
+   keep the dashed border off the sidebar edges. */
+.create-root-ns-btn {
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  width: calc(100% - 24px); box-sizing: border-box;
+  padding: 10px 12px; margin: 8px 12px 12px;
+  background: var(--bg); color: var(--fg);
+  border: 1px dashed var(--fg); border-radius: 3px;
+  font-size: 12px; cursor: pointer;
+}
+.create-root-ns-btn:hover { background: var(--fg); color: var(--bg); }
+.create-root-ns-plus { display: inline-flex; align-items: center; }
+.create-root-ns-text { font-weight: 500; }
 
 /* Node overlay for interactive ancestor list */
 .node-overlay { pointer-events: auto; z-index: 10; }
-.node-overlay .ancestor-line { transition: color 0.1s, font-weight 0.1s; }
+.node-overlay .ancestor-line {
+  /* Each row must occupy one full text-line slot even when the content is
+     empty — e.g. the top row of an anonymous fn keeps its black "no own name"
+     band instead of collapsing. With global box-sizing: border-box the
+     min-height must include vertical padding (4+4) + line-height (13) = 21. */
+  min-height: 21px;
+  line-height: 13px;
+  transition: color 0.1s, font-weight 0.1s;
+}
+
+/* Return-type strip on root fn cards — sits at the bottom of the
+   card, right above the optional/HOF strips and drag handle. Visual
+   reuses the same compact treatment (1-px dashed top border + small
+   italic font) so it feels like a peer of those informational strips
+   rather than a primary control. Editable on the root card only;
+   adds a hover-bg + cursor when so. */
+.return-type-strip {
+  padding: 2px 8px;
+  color: var(--muted-fg);
+  font-size: 10px;
+  font-style: italic;
+  border-top: 1px dashed var(--input-border);
+  background: var(--card-bg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.return-type-strip-editable {
+  cursor: pointer;
+}
+.return-type-strip-editable:hover {
+  background: var(--hover-bg);
+  color: var(--fg);
+}
+
+/* Edit pencil ✎ — right-pinned action icon, opacity transitions like
+   the open-in-new-tab and description-badge so it stays unobtrusive
+   when the user is just scanning. */
+.edit-pencil {
+  opacity: 0.85;
+  transition: opacity 0.1s, background-color 0.1s;
+}
+.edit-pencil:hover {
+  opacity: 1;
+  background-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+
+/* Arg-value edit popover — small floating panel anchored below the
+   clicked value box. Theme-aware via the same vars as the rest of
+   the editor; uses `--card-*` so the popover visually matches a
+   graph node rather than a tooltip. */
+.arg-value-edit-popover {
+  position: fixed; z-index: 10001;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border); border-radius: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+  padding: 8px; min-width: 220px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+}
+.arg-value-edit-input {
+  font-family: inherit; font-size: 12px;
+  padding: 4px 6px; border-radius: 3px;
+  border: 1px solid var(--card-border);
+  background: var(--bg); color: var(--fg);
+  outline: none; box-sizing: border-box; width: 100%;
+}
+.arg-value-edit-input:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
+.arg-value-edit-buttons { display: flex; gap: 6px; justify-content: flex-end; }
+.arg-value-edit-btn {
+  font-family: inherit; font-size: 11px;
+  padding: 3px 10px; border-radius: 3px; cursor: pointer;
+  background: var(--fg); color: var(--bg);
+  border: 1px solid var(--fg);
+}
+.arg-value-edit-btn:hover { opacity: 0.85; }
+.arg-value-edit-btn:disabled { opacity: 0.5; cursor: default; }
+.arg-value-edit-btn-secondary {
+  background: transparent; color: var(--fg);
+}
+.arg-value-edit-error {
+  font-size: 11px; color: #ff6b6b;
+}
+
+/* Arg type-chip — small text label "[int]" / "[fn]" docked to the
+   right edge of an arg-overlay or trailing an edge-label. Click flips
+   the arg's type, optionally chaining into the fn-picker. */
+.arg-type-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 4px; margin-left: 4px;
+  font-family: inherit; font-size: 9px; line-height: 14px;
+  border: 1px solid currentColor; border-radius: 3px;
+  cursor: pointer; opacity: 0.7;
+  pointer-events: auto;
+}
+.arg-type-chip:hover { opacity: 1; }
+
+/* is-fn toggle chip — shown beside the type-chip for fn-typed args.
+   Same shape language as the type-chip; distinct content so the
+   user can spot the toggle without parsing the label. */
+.arg-isfn-chip {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0 4px; margin-left: 4px;
+  font-family: inherit; font-size: 9px; line-height: 14px;
+  border: 1px solid currentColor; border-radius: 3px;
+  cursor: pointer; opacity: 0.7;
+  pointer-events: auto;
+}
+.arg-isfn-chip:hover { opacity: 1; }
+
+/* Free-arg binding chooser — two-button row inside the inline-edit
+   popover; user picks "Bind literal" or "Bind fn-ref". */
+.free-arg-bind-chooser {
+  display: flex; gap: 6px; flex-wrap: wrap;
+}
+
+/* Sequence add/remove buttons on edge-labels (Phase 5). Shape matches
+   the type-chip / is-fn chip family — same border-radius, same line-
+   height — so a row of edge-label affordances reads as one strip. */
+.arg-seq-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; margin-left: 4px;
+  width: 14px; height: 14px;
+  font-family: inherit; font-size: 11px; line-height: 1;
+  border: 1px solid currentColor; border-radius: 3px;
+  background: transparent; color: currentColor;
+  cursor: pointer; opacity: 0.7;
+  pointer-events: auto;
+}
+.arg-seq-btn:hover { opacity: 1; }
+.arg-seq-btn-remove { color: var(--muted-fg); }
+.arg-seq-btn-add { font-weight: bold; }
+
+/* Fn-picker popover — search input + scrollable list of candidate
+   fns, used by Phase 2 (arg-type → fn) and reused in later phases. */
+.fn-picker-popover {
+  position: fixed; z-index: 10002;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border); border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  padding: 6px; min-width: 280px; max-width: 360px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+}
+.fn-picker-search {
+  font-family: inherit; font-size: 12px;
+  padding: 5px 7px; border-radius: 3px;
+  border: 1px solid var(--card-border);
+  background: var(--bg); color: var(--fg);
+  outline: none; box-sizing: border-box; width: 100%;
+}
+.fn-picker-search:focus { box-shadow: 0 0 0 1px var(--fg) inset; }
+.fn-picker-list {
+  max-height: 260px; overflow-y: auto;
+  border: 1px solid var(--card-border); border-radius: 3px;
+  background: var(--bg);
+}
+.fn-picker-row {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 4px 8px; cursor: pointer;
+  font-size: 11px;
+}
+.fn-picker-row-active {
+  background: color-mix(in srgb, var(--fg) 12%, transparent);
+}
+.fn-picker-row-name { flex: 1; }
+.fn-picker-row-rt {
+  font-style: italic; opacity: 0.6; margin-left: 8px;
+}
+.fn-picker-empty {
+  padding: 8px; font-size: 11px; opacity: 0.6; text-align: center;
+}
+.fn-picker-cancel-row {
+  display: flex; justify-content: flex-end;
+}
+
+/* Edit-parents strip — same layout as return-type strip but distinct
+   text colour so the two affordances on the root card don't blur. */
+.reparent-strip {
+  padding: 2px 8px;
+  font-size: 10px;
+  color: var(--muted-fg);
+  border-top: 1px solid var(--card-border);
+  cursor: pointer;
+  background: var(--card-bg);
+}
+.reparent-strip:hover {
+  background: color-mix(in srgb, var(--fg) 6%, var(--card-bg));
+}
+
+/* Parent-set editor — popover with chip list + add/save controls. */
+.parent-set-editor {
+  position: fixed; z-index: 10001;
+  background: var(--card-bg); color: var(--card-fg);
+  border: 1px solid var(--card-border); border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.3);
+  padding: 8px; min-width: 280px; max-width: 380px;
+  display: flex; flex-direction: column; gap: 6px;
+  font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace;
+}
+.parent-set-editor-title {
+  font-size: 11px; font-weight: 600;
+  color: var(--muted-fg);
+  border-bottom: 1px solid var(--card-border);
+  padding-bottom: 4px;
+}
+.parent-set-editor-chips {
+  display: flex; flex-direction: column; gap: 4px;
+  min-height: 24px;
+}
+.parent-set-editor-empty {
+  font-size: 11px; opacity: 0.6; font-style: italic;
+}
+.parent-set-editor-chip {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 2px 8px; border-radius: 3px;
+  border: 1px solid var(--card-border);
+  background: var(--bg);
+  font-size: 11px;
+}
+.parent-set-editor-chip-remove {
+  background: transparent; border: 0;
+  color: var(--fg);
+  cursor: pointer; opacity: 0.6; font-size: 14px; padding: 0 2px;
+  line-height: 1;
+}
+.parent-set-editor-chip-remove:hover { opacity: 1; }
+
+/* In-tooltip dismiss — the × button is the obvious affordance for
+   touch users; the document-level pointerdown handler is a fallback
+   for desktop "tap-outside". Sized 20×20 to be a comfortable touch
+   target without dominating the tooltip header. */
+.description-tooltip { position: relative; }
+.description-tooltip-close {
+  position: absolute; top: 4px; right: 4px;
+  width: 20px; height: 20px; padding: 0;
+  background: transparent; color: var(--tooltip-fg);
+  border: 0; border-radius: 3px;
+  font-size: 18px; line-height: 1; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  opacity: 0.65;
+}
+.description-tooltip-close:hover { opacity: 1; background: rgba(127,127,127,0.2); }
+
+/* In-tooltip edit affordances — Edit pencil (read mode) and the
+   Save/Cancel + textarea triplet (edit mode). The tooltip itself
+   inherits `var(--tooltip-bg/--tooltip-fg)` so the buttons float on
+   the same dark/light bubble that already adapts to theme. */
+.description-tooltip-btn {
+  font-family: inherit; font-size: 11px;
+  padding: 3px 10px; border-radius: 3px; cursor: pointer;
+  background: var(--tooltip-fg); color: var(--tooltip-bg);
+  border: 1px solid var(--tooltip-fg);
+}
+.description-tooltip-btn:hover { opacity: 0.85; }
+.description-tooltip-btn:disabled { opacity: 0.5; cursor: default; }
+.description-tooltip-btn-secondary {
+  background: transparent; color: var(--tooltip-fg);
+}
+.description-tooltip-textarea {
+  width: 320px; max-width: 100%; min-height: 60px;
+  font-family: inherit; font-size: 12px; line-height: 1.4;
+  padding: 4px 6px; border-radius: 3px;
+  border: 1px solid var(--tooltip-fg);
+  background: var(--tooltip-bg); color: var(--tooltip-fg);
+  resize: vertical; box-sizing: border-box; outline: none;
+}
+.description-tooltip-textarea:focus {
+  box-shadow: 0 0 0 1px var(--tooltip-fg) inset;
+}
+.description-tooltip-error {
+  margin-top: 4px; font-size: 11px;
+  color: #ff8080;
+}
+
+/* Right-edge action icons — `i` (description) and `↗` (open in new tab).
+   Highlight on hover so the click-target is obvious; the tint uses
+   `currentColor` so it picks up whichever fg the row has (white on a
+   header row, dark on a body row) without needing to know the theme. */
+.description-badge, .open-in-new-tab {
+  opacity: 0.85;
+  transition: opacity 0.1s, background-color 0.1s;
+}
+.description-badge:hover, .open-in-new-tab:hover {
+  opacity: 1;
+  background-color: color-mix(in srgb, currentColor 28%, transparent);
+}
 
 /* Navigation controls — zoom slider hugs right edge, buttons left of reset */
 #nav-controls {
@@ -52,14 +642,14 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
 }
 .nav-btn {
   width: 28px; height: 28px;
-  border: 1px solid #ccc; border-radius: 4px;
-  background: #fff; color: #000;
+  border: 1px solid var(--input-border); border-radius: 4px;
+  background: var(--bg); color: var(--fg);
   font-size: 24px; cursor: pointer;
   display: flex; align-items: center; justify-content: center;
   padding: 0; user-select: none; flex-shrink: 0;
 }
-.nav-btn:hover { background: #f0f0f0; }
-.nav-btn:active { background: #ddd; }
+.nav-btn:hover { background: var(--hover-bg); }
+.nav-btn:active { background: var(--selected-bg); }
 
 /* Vertical zoom: + slider − stacked, right-aligned */
 .nav-zoom-col {
@@ -69,7 +659,7 @@ body { font-family: 'SF Mono', 'Monaco', 'Inconsolata', monospace; background: #
   writing-mode: vertical-lr;
   direction: rtl;
   height: 120px; width: 20px;
-  cursor: pointer; accent-color: #000;
+  cursor: pointer; accent-color: var(--fg);
   margin: 0;
 }
 

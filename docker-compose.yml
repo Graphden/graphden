@@ -10,8 +10,8 @@ services:
       POSTGRES_PASSWORD: graphden
     volumes:
       - postgres_data:/var/lib/postgresql/data
-    # ports:
-    #   - "5432:5432"  # Uncomment for external access
+    ports:
+      - "5435:5432"  # Exposed for the postgres MCP server / host-side dev tooling
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U graphden -d graphden"]
       interval: 5s
@@ -32,6 +32,7 @@ services:
       DB_USERNAME: graphden
       DB_PASSWORD: graphden
       DB_POOL_SIZE: 10
+      AUTH_TOKEN: ${AUTH_TOKEN:-}
     ports:
       - "9002:8080"
     restart: unless-stopped

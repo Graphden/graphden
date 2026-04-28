@@ -1,75 +1,66 @@
 (ns graphden.packages.core.hof.impls
   "Implementations for core/hof base functions.
 
-   Functions with :fn type args are handled specially by the loader.
-   The loader wraps fn arguments as callables before passing them here.")
+   `:fn`-type args arrive as already-wrapped single-arg callables (via
+   compile.clj/hof-wrap under the new executor, or via make-single-arg-
+   callable under the legacy queue — both normalised by the loader)."
+  (:require
+    [graphden.executor.defbase :refer [defbase]]))
 
 
-(defn map-fn
-  [{:keys [func coll]}]
+(defbase map-fn [func coll]
   (if coll
     (map func coll)
     (map func)))
 
 
-(defn filter-fn
-  [{:keys [pred coll]}]
+(defbase filter-fn [pred coll]
   (if coll
     (filter pred coll)
     (filter pred)))
 
 
-(defn reduce-fn
-  [{:keys [func init coll]}]
+(defbase reduce-fn [func init coll]
   ;; reduce passes [acc item] as single vector to the function
   (reduce (fn [acc item] (func [acc item])) init coll))
 
 
-(defn some-fn
-  [{:keys [pred coll]}]
+(defbase some-fn [pred coll]
   (some (fn [item]
           (when-let [result (pred item)]
             result))
         coll))
 
 
-(defn every?-fn
-  [{:keys [pred coll]}]
+(defbase every?-fn [pred coll]
   (every? pred coll))
 
 
-(defn find-first
-  [{:keys [pred coll]}]
+(defbase find-first [pred coll]
   (some #(when (pred %) %) coll))
 
 
-(defn group-by-fn
-  [{:keys [key-fn coll]}]
+(defbase group-by-fn [key-fn coll]
   (group-by key-fn coll))
 
 
-(defn sort-by-fn
-  [{:keys [key-fn coll]}]
+(defbase sort-by-fn [key-fn coll]
   (vec (sort-by key-fn coll)))
 
 
-(defn apply-fn
-  [{:keys [func args]}]
+(defbase apply-fn [func args]
   (func args))
 
 
-(defn constantly-fn
-  [{:keys [value]}]
+(defbase constantly-fn [value _item]
   value)
 
 
-(defn comp-fn
-  [{:keys [functions]}]
+(defbase comp-fn [functions]
   (apply comp functions))
 
 
-(defn transduce-fn
-  [{:keys [transducer reducer init coll]}]
+(defbase transduce-fn [transducer reducer init coll]
   (transduce transducer
              (fn
                ([acc] acc)

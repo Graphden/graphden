@@ -1,0 +1,15 @@
+{:name "examples"
+ :version "1.0.0"
+ :description "Pedagogical fn-def examples — one feature per submodule. No new base-fns; pure composition over `core`. Load only in dev/test, never in prod."
+ :dependencies ["core"]
+ :modules ["basics"
+           "inheritance"
+           "free-args"
+           "collections"
+           "hof"
+           "shared-vs-isolated"
+           "invoke-vs-call"
+           "literal-keyword-in-sequence"
+           "cond-pattern"
+           "reduce-pattern"
+           "error-handling"]}

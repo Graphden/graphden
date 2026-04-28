@@ -1,11 +1,9 @@
 (ns graphden.packages.core.collections.impls
-  "Implementations for core/collections base functions.
-
-   All functions receive already-dereferenced arguments.
-   The loader handles deref before calling these implementations."
+  "Implementations for core/collections base functions."
   (:require
     [clojure.math :as math]
     [clojure.walk]
+    [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -39,83 +37,75 @@
 
 ;; === Implementations ===
 
-(defn first-fn
-  [{:keys [coll]}]
+(defbase first-fn [coll]
   (first coll))
 
 
-(defn rest-fn
-  [{:keys [coll]}]
+(defbase rest-fn [coll]
   (rest coll))
 
 
-(defn cons-fn
-  [{:keys [item coll]}]
+(defbase cons-fn [item coll]
   (cons item coll))
 
 
-(defn conj-any-fn
-  [{:keys [coll item]}]
+(defbase conj-any-fn [coll item]
   (conj coll item))
 
 
-(defn get-fn
-  [{:keys [coll key default]}]
+(defbase get-fn [coll key default]
   (get coll key default))
 
 
-(defn get-in-fn
-  [{:keys [map path default]}]
+(defbase get-in-fn [map path default]
   (get-in map path default))
 
 
-(defn assoc-any-fn
-  [{:keys [map key value]}]
+(defbase assoc-any-fn [map key value]
   (assoc (or map {}) key value))
 
 
-(defn dissoc-fn
-  [{:keys [map key]}]
+(defbase dissoc-fn [map key]
   (dissoc map key))
 
 
-(defn count-fn
-  [{:keys [coll]}]
+(defbase count-fn [coll]
   (count coll))
 
 
-(defn empty?-fn
-  [{:keys [coll]}]
+(defbase empty?-fn [coll]
   (empty? coll))
 
 
-(defn contains?-fn
-  [{:keys [coll key]}]
+(defbase contains?-fn [coll key]
   (contains? coll key))
 
 
-(defn keys-fn
-  [{:keys [map]}]
+(defbase keys-fn [map]
   (keys map))
 
 
-(defn vals-fn
-  [{:keys [map]}]
+(defbase vals-fn [map]
   (vals map))
 
 
-(defn merge-fn
-  [{:keys [maps]}]
+(defbase merge-fn [maps]
   (apply merge maps))
 
 
-(defn into-fn
-  [{:keys [to from]}]
+(defbase into-fn [to from]
   (into to from))
 
 
-(defn range-fn
-  [{:keys [start end step]}]
+(defbase assoc-in-fn [m path v]
+  (assoc-in m path v))
+
+
+(defbase update-in-fn [m path f]
+  (update-in m path f))
+
+
+(defbase range-fn [start end step]
   (let [max-size sp/*max-range-size*]
     (validate-non-zero! step :step "step cannot be zero (would cause infinite loop)")
     (let [range-size (if (or (and (pos? step) (< start end))
@@ -130,8 +120,7 @@
       (vec (range start end step)))))
 
 
-(defn repeat-fn
-  [{:keys [count item]}]
+(defbase repeat-fn [count item]
   (let [max-size sp/*max-repeat-size*]
     (validate-non-negative-count! count :count "repeat count cannot be negative")
     (validate-collection-size! count max-size :execution-error/repeat-too-large {:count count}
@@ -139,44 +128,37 @@
     (vec (repeat count item))))
 
 
-(defn take-fn
-  [{:keys [count coll]}]
+(defbase take-fn [count coll]
   (vec (take count coll)))
 
 
-(defn drop-fn
-  [{:keys [count coll]}]
+(defbase drop-fn [count coll]
   (vec (drop count coll)))
 
 
-(defn reverse-fn
-  [{:keys [coll]}]
+(defbase reverse-fn [coll]
   (vec (reverse coll)))
 
 
-(defn sort-fn
-  [{:keys [coll]}]
+(defbase sort-fn [coll]
   (vec (sort coll)))
 
 
-(defn concat-fn
-  [{:keys [colls]}]
+(defbase concat-fn [colls]
   (into [] cat colls))
 
 
-(defn flatten-fn
-  [{:keys [coll]}]
+(defbase flatten-fn [coll]
   (vec (flatten coll)))
 
 
-(defn distinct-fn
-  [{:keys [coll]}]
+(defbase distinct-fn [coll]
   (vec (distinct coll)))
 
 
-(defn stringify-map-keys-fn
+(defbase stringify-map-keys-fn
   "Converts all map keys to strings (keyword keys become their name)."
-  [{:keys [m]}]
+  [m]
   (when m
     (into {}
           (map (fn [[k v]]
@@ -184,9 +166,9 @@
                m))))
 
 
-(defn keywordize-map-keys-fn
+(defbase keywordize-map-keys-fn
   "Recursively converts all string map keys to keywords."
-  [{:keys [m]}]
+  [m]
   (clojure.walk/postwalk
     (fn [x]
       (if (map? x)
@@ -196,6 +178,30 @@
                    x))
         x))
     m))
+
+
+(defbase select-keys-fn [m ks]
+  (select-keys m ks))
+
+
+(defbase zipmap-fn [keys vals]
+  (zipmap keys vals))
+
+
+(defbase update-vals-fn [m f]
+  (update-vals m f))
+
+
+;; === Sequence primitives ===
+;; Executor resolves the linked-list chain into a Clojure vector before
+;; calling these impls.
+
+(defbase list-fn [items]
+  (vec items))
+
+
+(defbase pairs->map-fn [entries]
+  (into {} entries))
 
 
 ;; === Registry ===
@@ -216,6 +222,7 @@
    :vals vals-fn
    :merge merge-fn
    :into into-fn
+   :assoc-in assoc-in-fn
    :range range-fn
    :repeat repeat-fn
    :take take-fn
@@ -227,6 +234,9 @@
    :distinct distinct-fn
    :stringify-map-keys stringify-map-keys-fn
    :keywordize-map-keys keywordize-map-keys-fn
-   :select-keys (fn [{:keys [m ks]}] (select-keys m ks))
-   :zipmap (fn [{ks :keys vs :vals}] (zipmap ks vs))
-   :update-vals (fn [{:keys [m f]}] (update-vals m f))})
+   :select-keys select-keys-fn
+   :zipmap zipmap-fn
+   :update-vals update-vals-fn
+   :update-in update-in-fn
+   :list list-fn
+   :pairs->map pairs->map-fn})

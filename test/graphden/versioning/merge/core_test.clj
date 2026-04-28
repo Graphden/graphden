@@ -31,9 +31,8 @@
 
 (defn- create-test-storage
   "Creates a versioned storage with graph, versioned, and traits schemas.
-   Cleans the database before creating storage to ensure test isolation."
+   Relies on the :each fixture to have cleaned the schema already."
   []
-  (th/clean-database-fast! *container*)
   (let [schema (-> (mds/create-builder)
                    (gds/extend-builder)
                    (vds/extend-builder)

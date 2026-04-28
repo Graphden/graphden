@@ -2,5 +2,5 @@
  :version "1.0.0"
  :description "Application server: common building blocks, editor UI, and server fn-defs"
  :dependencies ["core" "web"]
- :modules ["common" "editor" "layout" "server"]
+ :modules ["common" "routes-method" "editor" "layout" "routes" "routes-auth" "route-groups" "server"]
  :startup-fn :web-server}

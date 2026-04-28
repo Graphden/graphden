@@ -11,6 +11,7 @@
     [graphden.schema.fields.types :as ft]
     [graphden.schema.malli.core :as mds]
     [graphden.schema.malli.test-helpers :refer [example-schema]]
+    [graphden.schema.malli.types :as mtypes]
     [graphden.schema.protocol.protocol :as ds]))
 
 
@@ -83,4 +84,4 @@
 
 (deftest type-mapping-completeness-test
   (testing "malli-type-mapping covers all supported field types"
-    (is (= ft/supported-types (set (keys mds/malli-type-mapping))))))
+    (is (= ft/supported-types (set (keys mtypes/malli-type-mapping))))))

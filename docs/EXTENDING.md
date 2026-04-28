@@ -1,231 +1,106 @@
 # Extending Graphden
 
-This guide covers common extension points in the Graphden system.
+Low-level extension points. For **adding new base-fns / fn-defs to an
+existing package**, see [PACKAGES.md](PACKAGES.md) — that's the common
+case and the package system (`resources/packages/`) already handles
+registration, sync, and ordering.
 
-## Adding Base Functions
+This document covers:
 
-Base functions are the primitives that execute actual computations. They are registered at runtime and referenced by `fn.name` where `fn.parent-id` is nil (base-fn).
+- [Higher-Order Functions (HOFs)](#higher-order-functions-hofs)
+- [Implementing Custom Storage](#implementing-custom-storage)
+- [Graph Data Schema](#graph-data-schema)
+- [Base-fn Version Tracking (impl-hash)](#base-fn-version-tracking-impl-hash)
 
-### Step 1: Register the Base Function
+---
 
-```clojure
-(require '[graphden.executor.interface :as exec])
+## Higher-Order Functions (HOFs)
 
-;; Simple function that adds two numbers
-(exec/register-base-fn!
-  :add
-  (fn [{:keys [a b]} _ctx]
-    (+ @a @b)))  ; @ dereferences the delay to get actual value
+A `:fn`-typed arg in an `fns.edn` declaration tells the compiler
+"this slot receives a callable". At sync-time, `is-fn=true` is set on
+the parent-arg; at compile-time, refs bound to such slots go through
+`hof-wrap` instead of the normal thunk path.
+
+### Wrap shape by free-arg count
+
+`hof-wrap` inspects the wrapped fn-graph's leftover free args (names
+the author chose for unbound slots). The compiler never inspects
+specific names.
+
+| Free args of wrapped fn | Callable shape | Impl invokes as |
+|-------------------------|----------------|----------------|
+| 0 | variadic, ignores input | `(f)` or `(f anything)` |
+| 1 | single-arg | `(f value)` — value is bound to that one name |
+| ≥ 2 | map-callable | `(f {:name1 v1 :name2 v2 …})` — keys chosen by impl, author's `{:as :…}` renames must match |
+
+### Example: `map` (1 leftover — single-arg)
+
+```edn
+;; In fns.edn
+{:name :map
+ :args {:func :fn
+        :coll {:type :jsonb :required false}}
+ :return-type :any}
 ```
 
-### Step 2: Create Base-fn in Storage
-
 ```clojure
-(require '[graphden.storage.protocol.core :as sp])
-
-;; Create base-fn (parent-id=nil means it's a base function)
-(let [base-fn (sp/create-entity storage :fn
-                                {:name "add"           ; Must match registered name
-                                 :parent-id nil        ; Base function
-                                 :return-type :int})]
-  ;; Create args for the function
-  (sp/create-entity storage :arg
-                    {:fn-id (:id base-fn)
-                     :name "a"
-                     :type :int
-                     :required true})
-  (sp/create-entity storage :arg
-                    {:fn-id (:id base-fn)
-                     :name "b"
-                     :type :int
-                     :required true}))
+;; In impls.clj
+(defbase map-fn [func coll]
+  (mapv func coll))   ; func is called (func item) per element
 ```
 
-### Step 3: Create Composed Function and Execute
+A user binds their unary fn-graph as `:func`; its one leftover free
+arg (whatever name) receives each item.
+
+### Example: `reduce` (1 leftover via vec packing)
 
 ```clojure
-;; Create a composed function that inherits from base-fn
-(let [my-fn (sp/create-entity storage :fn
-                              {:name "my-add"
-                               :parent-id (:id base-fn)})  ; Inherit from add
-      ;; Create args with values (source-id references parent's args)
-      _ (sp/create-entity storage :arg
-                          {:fn-id (:id my-fn)
-                           :source-id (:id arg-a)    ; Inherits from parent's "a"
-                           :value 5})
-      _ (sp/create-entity storage :arg
-                          {:fn-id (:id my-fn)
-                           :source-id (:id arg-b)    ; Inherits from parent's "b"
-                           :value 3})
-      ;; Execute
-      ctx (exec/create-context {:storage storage})
-      result (exec/execute ctx (:id my-fn) {})]
-  (println result)) ; => 8
+(defbase reduce-fn [func init coll]
+  (reduce (fn [acc item] (func [acc item])) init coll))
 ```
 
-### Argument Types
+Impl packs `[acc item]` as a single value. The user's fn-graph is
+unary (leftover = `:pair` or similar) and destructures via
+`:get :key 0` / `:key 1` inside.
 
-| Type | Clojure Type | Description |
-|------|--------------|-------------|
-| `:int` | Long | Integer value |
-| `:text` | String | Text value |
-| `:bool` | Boolean | Boolean value |
-| `:numeric` | Number | Any numeric type |
-| `:jsonb` | Map/Vector | JSON-compatible data |
-| `:uuid` | UUID | UUID reference |
-| `:fn` | UUID | Function reference (used with is-fn flag) |
-
-### Working with Lazy Arguments (Delays)
-
-Arguments are passed as Clojure delays (lazy values). Use `@` to dereference and get the actual value:
+### Example: `middleware` (2 leftovers — map-callable)
 
 ```clojure
-(exec/register-base-fn!
-  :conditional-add
-  (fn [{:keys [condition a b]} ctx]
-    ;; @ (deref) evaluates the delay
-    (if @condition
-      (+ @a @b)
-      0)))
+(defbase middleware [name body]
+  {:name name
+   :wrap (fn [handler]
+           (fn [request]
+             ;; body is map-callable: two free args :request + :next-handler
+             (body {:request request :next-handler handler})))})
 ```
 
-### Higher-Order Functions (HOF)
+The body fn-graph declares `{:as :request}` and `{:as :next-handler}`
+renames somewhere; those become its two leftover free-args; compiler
+produces a map-callable that impl populates.
 
-For HOF arguments, use `is-fn: true` on the arg. When `is-fn` is true, the ref-id is passed directly without execution.
+### `make-single-arg-callable` — raw fn-id entry point
 
-**Single-Argument Model**: Functions passed to HOF must have exactly **one required argument** (any name). This eliminates naming convention problems — users don't need to know that `map` expects `:item` or `reduce` expects `:acc`.
+When a `:fn`-typed arg arrives as a raw fn-id UUID (e.g. in test code
+that doesn't go through `hof-wrap`), use
+`exec/make-single-arg-callable` to get the same behaviour as the
+compile-time wrap.
 
-Use `make-single-arg-callable` to create a callable that automatically finds the single required argument:
-
-```clojure
-(exec/register-base-fn!
-  :my-map
-  (fn [{:keys [f coll]} ctx]
-    ;; f has is-fn=true - @ returns fn-id (UUID) without executing
-    (let [fn-id @f
-          items @coll
-          ;; Create callable that passes value to the single required arg
-          callable (exec/make-single-arg-callable ctx fn-id)]
-      (mapv callable items))))
-```
-
-For `reduce`-like operations, the function receives a vector `[acc item]` as its single argument:
-
-```clojure
-(exec/register-base-fn!
-  :my-reduce
-  (fn [{:keys [f init coll]} ctx]
-    (let [fn-id @f
-          initial @init
-          items @coll
-          callable (exec/make-single-arg-callable ctx fn-id)]
-      ;; Pass [acc item] as single value
-      (reduce (fn [acc item] (callable [acc item])) initial items))))
-```
-
-**Example: apply-twice**
-
-```clojure
-(exec/register-base-fn!
-  :apply-twice
-  (fn [{:keys [f x]} ctx]
-    (let [fn-id @f
-          x-val @x
-          callable (exec/make-single-arg-callable ctx fn-id)
-          result1 (callable x-val)
-          result2 (callable result1)]
-      result2)))
-```
-
-### HOF Arg in Storage
-
-```clojure
-;; Create HOF base-fn
-(let [map-fn (sp/create-entity storage :fn
-                               {:name "map"
-                                :parent-id nil
-                                :return-type :jsonb})]
-  ;; The 'f' argument is a HOF arg (is-fn=true)
-  (sp/create-entity storage :arg
-                    {:fn-id (:id map-fn)
-                     :name "f"
-                     :type :fn
-                     :is-fn true        ; <- This makes it a HOF arg
-                     :required true})
-  (sp/create-entity storage :arg
-                    {:fn-id (:id map-fn)
-                     :name "coll"
-                     :type :jsonb
-                     :required true}))
-```
-
-## Execution Configuration
-
-### Depth and Timeout Limits
-
-```clojure
-(exec/create-context
-  {:storage storage
-   :max-depth 1000      ; Maximum recursion depth (default: 1000)
-   :timeout-ms 30000})  ; Execution timeout in ms (default: 30000)
-```
-
-### Result Caching
-
-Results are cached by `ref-id` within a single execution context. When multiple args reference the same function via ref-id, the function executes once and the result is reused.
-
-```clojure
-;; Both args reference the same expensive-fn - it runs once
-(sp/create-entity storage :arg
-                  {:fn-id (:id fn-a)
-                   :source-id (:id some-arg)
-                   :ref-id (:id expensive-fn)})  ; First reference
-(sp/create-entity storage :arg
-                  {:fn-id (:id fn-b)
-                   :source-id (:id some-arg)
-                   :ref-id (:id expensive-fn)})  ; Same ref-id = cached result
-```
-
-### Error Handling
-
-Common execution errors:
-
-| Error Type | Cause |
-|------------|-------|
-| `:execution-error/fn-not-found` | Function ID not in graph |
-| `:execution-error/missing-required-arg` | Required argument not provided |
-| `:execution-error/type-mismatch` | Provided arg doesn't match type |
-| `:execution-error/max-depth-exceeded` | Recursion limit reached |
-| `:execution-error/timeout` | Execution took too long |
+---
 
 ## Implementing Custom Storage
 
-To implement a custom storage backend, implement these protocols from `graphden.storage.protocol.core`:
+Implement these protocols from `graphden.storage.protocol.core` to
+create a new backend:
 
-### Required Protocols
+| Protocol | Purpose |
+|----------|---------|
+| `Storage` | `initialize`, `close` — lifecycle |
+| `StorageIntrospection` | `current-entities`, `current-enums` |
+| `StorageCRUD` | `create-entity`, `read-entity`, `update-entity`, `delete-entity`, `query-entities` |
+| `GraphConstraints` | `validate-no-dependency-cycle!` |
+| `ExecutionGraph` | `resolve-execution-graph` |
 
-1. **Storage** - Lifecycle management
-   - `initialize` - Set up schema
-   - `close` - Clean up resources
-
-2. **StorageIntrospection** - Schema inspection
-   - `current-entities` - List entity types
-   - `current-enums` - List enum types
-
-3. **StorageCRUD** - Data operations
-   - `create-entity` - Create record
-   - `read-entity` - Read by ID
-   - `update-entity` - Update record
-   - `delete-entity` - Delete record
-   - `query-entities` - Query with conditions
-
-4. **GraphConstraints** - Graph integrity
-   - `validate-no-dependency-cycle!` - Check for circular dependencies via ref-id
-
-5. **ExecutionGraph** - Graph resolution
-   - `resolve-execution-graph` - Build execution graph
-
-### Example Implementation Skeleton
+### Skeleton
 
 ```clojure
 (ns my.custom-storage
@@ -233,103 +108,60 @@ To implement a custom storage backend, implement these protocols from `graphden.
 
 (defrecord CustomStorage [connection metadata]
   sp/Storage
-  (initialize [this schema]
-    ;; Create tables/collections for fn and arg entities
-    ;; Store metadata
-    this)
-
-  (close [this]
-    ;; Close connections
-    nil)
+  (initialize [this schema] this)
+  (close [this] nil)
 
   sp/StorageCRUD
-  (create-entity [this entity-name data]
-    ;; Insert record, return with generated :id
-    )
+  (create-entity [this entity-name data] …)
+  (read-entity [this entity-name id] …)
+  ;; …
 
-  (read-entity [this entity-name id]
-    ;; Fetch by id, return nil if not found
-    )
-
-  ;; ... implement remaining protocols
-  )
+  sp/ExecutionGraph
+  (resolve-execution-graph [this fn-id] …))
 
 (defn create-storage [opts]
   (->CustomStorage (:connection opts) (atom {})))
 ```
 
-### Contract Tests
-
-Use the contract tests from `storage-protocol` to verify your implementation:
+### Contract tests
 
 ```clojure
-(ns my.custom-storage-test
-  (:require [graphden.storage.protocol.contract-test :as contract]))
-
-;; Run contract tests with your storage factory
+(require '[graphden.storage.protocol.contract-test :as contract])
 (contract/run-storage-tests create-my-storage)
 ```
 
+---
+
 ## Graph Data Schema
 
-The 2-entity graph schema includes:
+Two entity types only — by design (see PHILOSOPHY.md "Minimal
+entities").
 
-| Entity | Fields | Description |
-|--------|--------|-------------|
-| `fn` | id, name, parent-id, return-type, impl-hash | Function entity |
-| `arg` | id, fn-id, source-id, name, type, required, value, ref-id, is-fn | Argument entity |
+| Entity | Fields | Notes |
+|--------|--------|-------|
+| `fn` | `id, name, parent-id, namespace-id, return-type, impl-hash` | `parent-id=nil` → base-fn; `name=nil` → local fn |
+| `arg` | `id, fn-id, source-id, via-fn-id, name, type, required, value, ref-id, is-fn, next-arg-id, prev-arg-id` | `source-id=nil` → primary arg; `next-arg-id`/`prev-arg-id` → sequence chain |
 
-### Entity Details
+### Inheritance via source-id
 
-**fn entity:**
-- `id` - UUID primary key
-- `name` - Unique function name (nullable for local functions)
-- `parent-id` - Reference to parent fn (nil for base-fns)
-- `return-type` - Return type keyword
-- `impl-hash` - SHA-256 hash for base-fn version tracking
-
-**arg entity:**
-- `id` - UUID primary key
-- `fn-id` - Owner function
-- `source-id` - Reference to parent's arg (for inheritance)
-- `name` - Argument name
-- `type` - Argument type keyword
-- `required` - Whether argument is required
-- `value` - Literal value (JSONB)
-- `ref-id` - Reference to another function
-- `is-fn` - HOF flag (when true, ref-id is passed without execution)
-
-### Inheritance Model
-
-Functions inherit args from their parent via `source-id`:
+A composed fn's arg points at a parent's arg via `source-id`, then
+overrides with `value` or `ref-id`:
 
 ```clojure
-;; Base function with args
-(let [base-fn (sp/create-entity storage :fn
-                                {:name "add" :parent-id nil :return-type :int})
-      arg-a (sp/create-entity storage :arg
-                              {:fn-id (:id base-fn) :name "a" :type :int :required true})
-      arg-b (sp/create-entity storage :arg
-                              {:fn-id (:id base-fn) :name "b" :type :int :required true})]
+;; Base
+(sp/create-entity storage :fn
+                  {:name "add" :parent-id nil :return-type :int})
+(sp/create-entity storage :arg
+                  {:fn-id base-fn-id :name "a" :type :int :required true})
 
-  ;; Composed function inherits and provides values
-  (let [composed (sp/create-entity storage :fn
-                                   {:name "add-5-and-3" :parent-id (:id base-fn)})]
-    ;; Inherit arg-a with value 5
-    (sp/create-entity storage :arg
-                      {:fn-id (:id composed)
-                       :source-id (:id arg-a)  ; Inherits from parent's arg
-                       :value 5})
-    ;; Inherit arg-b with value 3
-    (sp/create-entity storage :arg
-                      {:fn-id (:id composed)
-                       :source-id (:id arg-b)
-                       :value 3})))
+;; Composed fn that binds a=5
+(sp/create-entity storage :fn
+                  {:name "add-5" :parent-id base-fn-id})
+(sp/create-entity storage :arg
+                  {:fn-id composed-id :source-id arg-a-id :value 5})
 ```
 
-### Customizing the Schema
-
-You can extend the schema by modifying `graph-data-schema`:
+### Extending the schema
 
 ```clojure
 (ns my.extended-schema
@@ -337,68 +169,38 @@ You can extend the schema by modifying `graph-data-schema`:
             [graphden.schema.protocol.protocol :as ds]))
 
 (defn build-extended-schema [builder]
-  ;; Start with base graph schema
-  (let [schema (graph/extend-builder builder)]
-    ;; Add custom entities
-    (-> schema
-        (ds/add-entity :my-entity
-                       {:id {:type :uuid :primary-key true}
-                        :name {:type :text :nullable false}
-                        :data {:type :jsonb :nullable true}}))))
+  (-> (graph/extend-builder builder)
+      (ds/add-entity :my-entity
+                     {:id {:type :uuid :primary-key true}
+                      :name {:type :text :nullable false}
+                      :data {:type :jsonb :nullable true}})))
 ```
 
-## Base Function Version Tracking
+---
 
-When a base function is synced to storage, an `impl-hash` is computed and stored in the `fn` entity. This hash enables detecting when implementations change.
+## Base-fn Version Tracking (impl-hash)
 
-### How impl-hash Works
+Each base-fn gets a SHA-256 `impl-hash` stored on its `fn` entity.
+Registry sync uses it to detect impl changes between runs.
 
-The hash is computed from:
-- `:args` - argument specifications (types, required flags)
-- `:return-type` - the function's return type
-- `:impl-source` - the original body forms (captured by defbase macro)
+### What goes into the hash
 
-```clojure
-;; defbase automatically captures impl-source
-(defbase my-fn
-  {:args {:x :int :y :int}
-   :return-type :int}
-  (+ x y))  ; This body is stored in :impl-source
+- `:args` (names, types, required flags)
+- `:return-type`
+- `:impl-source` — the body forms captured by the `defbase` macro
 
-;; The generated definition includes:
-;; {:args {:x :int :y :int}
-;;  :return-type :int
-;;  :impl <fn>
-;;  :impl-source [(+ x y)]}  ; Original body for hashing
-```
+### What changes the hash
 
-### What Changes the Hash
-
-| Change | Hash Changes? |
+| Change | Hash changes? |
 |--------|---------------|
-| Function body changes | Yes |
-| Argument type changes | Yes |
-| Arguments added/removed | Yes |
-| Return type changes | Yes |
-| Whitespace/formatting | No |
-| Comments | No |
-| Map key ordering | No |
+| Function body edits | ✓ |
+| Arg type / arity change | ✓ |
+| Return type change | ✓ |
+| Whitespace, comments, map-key order | ✗ |
 
-### Checking impl-hash
+### Reading a fn's impl-hash
 
 ```clojure
-(require '[graphden.storage.protocol.core :as sp])
-
-;; Read fn to see impl-hash
 (let [base-fn (sp/read-entity storage :fn fn-id)]
-  (println "impl-hash:" (:impl-hash base-fn)))
+  (:impl-hash base-fn))
 ```
-
-## Best Practices
-
-1. **Register base functions at startup** - Before any execution
-2. **Use is-fn flag for HOF** - Set `is-fn: true` on args that receive functions
-3. **Set reasonable limits** - Adjust max-depth and timeout for your use case
-4. **Handle errors gracefully** - Catch and log execution errors
-5. **Test with contract tests** - Ensure storage implementations are correct
-6. **Monitor impl-hash changes** - Track when base function implementations change

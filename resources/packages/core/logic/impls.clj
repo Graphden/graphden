@@ -1,48 +1,51 @@
 (ns graphden.packages.core.logic.impls
   "Implementations for core/logic base functions.
 
-   All functions receive already-dereferenced arguments.
-   The loader handles deref before calling these implementations.")
+   Migrated to `defbase` — arg symbols resolve at use site via the runtime
+   helper. Clojure's native short-circuit evaluation (`if`, `and`, `or`,
+   `cond`) handles laziness for conditional args without any `:lazy` flag
+   inspection: references in unchosen branches simply never run."
+  (:require
+    [graphden.executor.defbase :refer [defbase]]))
 
 
 ;; === Logic ===
 
-(defn and-fn
-  [{:keys [values]}]
+(defbase and-fn [values]
   (every? identity values))
 
 
-(defn or-fn
-  [{:keys [values]}]
+(defbase or-fn [values]
   (boolean (some identity values)))
 
 
-(defn not-fn
-  [{:keys [value]}]
+(defbase not-fn [value]
   (not value))
 
 
-(defn some?-fn
-  [{:keys [value]}]
+(defbase some?-fn [value]
   (some? value))
 
 
-(defn nil?-fn
-  [{:keys [value]}]
+(defbase nil?-fn [value]
   (nil? value))
 
 
 ;; === Conditionals ===
 
-(defn if-fn
-  [{:keys [test then else]}]
+(defbase if-fn
+  "Lazy if: only the chosen branch's ref-thunk is invoked. Clojure's
+   native `if` guarantees only one branch's arg reference is evaluated,
+   and `rt/resolve-arg` (injected by the macro) handles both new-style
+   thunks and legacy IDeref delays."
+  [test then else]
   (if test then else))
 
 
-(defn cond-fn
+(defbase cond-fn
   "Evaluates clauses as [[test1 result1] [test2 result2] ...].
    Returns first result where test is truthy, or nil if none match."
-  [{:keys [clauses]}]
+  [clauses]
   (loop [remaining clauses]
     (when (seq remaining)
       (let [[test result] (first remaining)]
@@ -51,25 +54,27 @@
           (recur (rest remaining)))))))
 
 
-(defn case-fn
+(defbase case-fn
   "Dispatches on value. Clauses is a map {match-value result ...}.
    Returns result for matching value, or default if no match."
-  [{:keys [value clauses default]}]
+  [value clauses default]
   (get clauses value default))
 
 
 ;; === Defaults ===
 
-(defn coalesce
-  [{:keys [value default]}]
+(defbase coalesce [value default]
   (or value default))
 
 
 ;; === Constants ===
 
-(defn const
-  [{:keys [value]}]
+(defbase const [value]
   value)
+
+
+(defbase equal?-fn [a b]
+  (= a b))
 
 
 ;; === Registry ===
@@ -85,4 +90,5 @@
    :cond cond-fn
    :case case-fn
    :coalesce coalesce
-   :const const})
+   :const const
+   :equal? equal?-fn})

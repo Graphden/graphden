@@ -155,10 +155,23 @@
               ;; Only compare version-controlled fields, not :id
               {:keys [version-data-fields]} (get res/entity-config entity-name)
               current-data (select-keys current version-data-fields)
-              merged-data (select-keys merged version-data-fields)]
+              merged-data (select-keys merged version-data-fields)
+              ;; Non-versioned fields (e.g. :ref-many junction fields like
+              ;; :parent-ids) live on the identity row / junction tables,
+              ;; not in the version table. Updates to those have to be
+              ;; flowed through to base storage explicitly — without this,
+              ;; PUTs that change ONLY non-versioned fields are silent
+              ;; no-ops because version-data-fields-only diffing returns
+              ;; equal and create-version-record! is skipped.
+              non-versioned-data (apply dissoc data version-data-fields)]
           ;; Skip creating new version if data unchanged
           (when (not= current-data merged-data)
             (create-version-record! base-storage entity-name id branch-id merged))
+          ;; Apply non-versioned fields directly. base-storage's
+          ;; update-entity handles columnar identity columns AND
+          ;; ref-many junction replacement.
+          (when (seq non-versioned-data)
+            (sp/update-entity base-storage entity-name id non-versioned-data))
           merged))))
 
 

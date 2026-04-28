@@ -1,109 +1,78 @@
-;; Web server fn-defs - combines UI, API, and monitoring routes
+;; App-specific web-server composition.
 ;;
-;; Route groups:
-;;   UI:         GET / (Editor), GET /favicon.ico
-;;   Entity API: GET/POST/DELETE /api/entities/*, GET /partials/*
-;;   Graph API:  GET /api/graph/entities, POST /api/graph/layout
-;;   Monitoring: GET /health, GET /metrics
+;; The reusable ring-adapter + handler pipeline lives in `web/ring-adapter`.
+;; This module only carries THIS app's routes + router binding + the
+;; web-server root node.
 
 
 {:namespace "app.server"
+ :description "Application web-server entry point — this app's routes, router binding, and the `:web-server` root fn-def started by the runtime."
  :fns
-[;; =============================================================================
- ;; MONITORING: Health & Metrics
- ;; =============================================================================
+ [;; =============================================================================
+  ;; MONITORING: Health & Metrics (app-specific)
+  ;; =============================================================================
 
- {:name :_health-json-body
-  :parent :to-json-string
-  :args {:data :health-status}}
+  {:name :_health-json-body
+   :parent :to-json-string
+   :args {:data :health-status}}
 
- {:name :_health-response
-  :parent :json-ok-response
-  :args {:body :_health-json-body}}
+  {:name :_health-handler
+   :parent :json-ok-response
+   :args {:body :_health-json-body}}
 
- {:name :_health-handler
-  :parent :make-handler
-  :args {:response :_health-response}}
+  {:name :_metrics-json-body
+   :parent :to-json-string
+   :args {:data :jvm-info}}
 
- {:name :health-route
-  :parent :get-route
-  :args {:path "/health" :handler :_health-handler}}
+  {:name :_metrics-handler
+   :parent :json-ok-response
+   :args {:body :_metrics-json-body}}
 
- {:name :_metrics-json-body
-  :parent :to-json-string
-  :args {:data :jvm-info}}
+  ;; ============================================================================
+  ;; VERSION (deploy verification)
+  ;; ============================================================================
+  ;; `/version` returns the full three-section build-hash map:
+  ;;     {"frontend": "<hex>", "backend": "<hex>", "packages": "<hex>"}
+  ;; Each is the SHA-256 of one slice of the deploy at build time
+  ;; (see build.clj). `bb verify` recomputes the same three hashes
+  ;; from the local checkout and reports per-section match/mismatch,
+  ;; so a failing deploy can be diagnosed by section rather than as
+  ;; one opaque "something didn't match".
+  ;;
+  ;; The handler just JSON-encodes the already-parsed `:build-hashes`
+  ;; map.
 
- {:name :_metrics-response
-  :parent :json-ok-response
-  :args {:body :_metrics-json-body}}
+  {:name :_version-json-body
+   :parent :to-json-string
+   :args {:data :build-hashes}}
 
- {:name :_metrics-handler
-  :parent :make-handler
-  :args {:response :_metrics-response}}
+  {:name :_version-handler
+   :parent :json-ok-response
+   :args {:body :_version-json-body}}
 
- {:name :metrics-route
-  :parent :get-route
-  :args {:path "/metrics" :handler :_metrics-handler}}
+  ;; Concrete leaf routes live in `app.routes`; route groups
+  ;; (`monitoring`, `entity-crud`, `graph-api`, `ui`, `all`) live in
+  ;; `app.routes.groups`. This module only owns the auth presets +
+  ;; the web-server root chain.
 
- ;; =============================================================================
- ;; ROUTES — organized by responsibility
- ;; =============================================================================
+  ;; Auth-required route templates live in `app.routes.auth`.
 
- ;; UI routes: pages served to browser
- {:name :ui-routes
-  :parent :pair
-  :args {:item1 :favicon-route
-         :item2 :editor-route}}
+  ;; =============================================================================
+  ;; WEB SERVER
+  ;; =============================================================================
 
- ;; Entity CRUD routes: partials + create/delete API
- {:name :entity-crud-routes
-  :parent :list-10-5
-  :args {:item1 :entity-details-route
-         :item2 :entity-form-create-route
-         :item3 :entity-form-edit-route
-         :item4 :create-entity-route
-         :item5 :delete-entity-route}}
+  ;; This app's router instance — bound to all-routes.
+  {:name :_router
+   :description "This app's compiled reitit router — text-error-router bound to all of this app's routes."
+   :parent :text-error-router
+   :args {:routes :all}}
 
- ;; Graph API routes: entity listing + layout computation
- {:name :graph-api-routes
-  :parent :pair
-  :args {:item1 :api-entities-route
-         :item2 :layout-api-route}}
+  {:name :_app-ring-response
+   :description "Final Ring handler — invokes the router on the parsed request and merges default security headers. Bound to `:http-server.handler`."
+   :parent :router-ring-response
+   :args {:func :_router}}
 
- ;; Monitoring routes: health + metrics
- {:name :monitoring-routes
-  :parent :pair
-  :args {:item1 :health-route
-         :item2 :metrics-route}}
-
- ;; All routes — combines all groups
- {:name :all-routes
-  :parent :list-11
-  :args {:item1 :favicon-route
-         :item2 :editor-route
-         :item3 :api-entities-route
-         :item4 :entity-details-route
-         :item5 :entity-form-create-route
-         :item6 :entity-form-edit-route
-         :item7 :create-entity-route
-         :item8 :delete-entity-route
-         :item9 :health-route
-         :item10 :metrics-route
-         :item11 :layout-api-route}}
-
- ;; =============================================================================
- ;; SERVER
- ;; =============================================================================
-
- {:name :_router
-  :parent :text-error-router
-  :args {:routes :all-routes}}
-
- {:name :web-server
-  :parent :http-server
-  :args {:handler :_router
-         :port 8080
-         :default-headers {"X-Content-Type-Options" "nosniff"
-                           "X-Frame-Options" "DENY"
-                           "X-XSS-Protection" "1; mode=block"
-                           "Referrer-Policy" "strict-origin-when-cross-origin"}}}]}
+  {:name :web-server
+   :description "Application root — starts the http-kit server on port 8080 with this app's full Ring handler chain."
+   :parent :http-server
+   :args {:handler :_app-ring-response :port 8080}}]}

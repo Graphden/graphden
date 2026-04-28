@@ -226,17 +226,16 @@
           ;; A map-like function that receives fn-id and uses make-single-arg-callable
           _ (exec/register-base-fn!
               :my-map
-              (fn [{:keys [f coll]} ctx]
-                (let [callable (exec/make-single-arg-callable ctx @f)]
-                  (mapv callable @coll))))
+              (setup/fn-impl [f coll]
+                             (let [callable (exec/make-single-arg-callable ctx f)]
+                               (mapv callable coll))))
           ;; An identity function that records what it receives
           ;; Takes exactly 1 required arg (item) for HOF compatibility
           _ (exec/register-base-fn!
               :recorder
-              (fn [{:keys [item]} _ctx]
-                (let [v @item]
-                  (swap! call-args conj v)
-                  v)))
+              (setup/fn-impl [item]
+                             (swap! call-args conj item)
+                             item))
           ;; Create my-map base fn
           map-base (setup/create-base-fn! storage "my-map" :jsonb)
           map-arg-f (setup/create-arg! storage (:id map-base)

@@ -30,8 +30,9 @@
 
 
 (defn- create-test-storage
-  "Creates storage with graph + traits schema.
-   Cleans the database before creating storage to ensure test isolation."
+  "Creates storage with graph + traits schema. Cleans the database —
+   some tests call this multiple times inside one deftest to exercise
+   fresh state between `testing` blocks."
   []
   (th/clean-database-fast! *container*)
   (let [schema (-> (mds/create-builder)

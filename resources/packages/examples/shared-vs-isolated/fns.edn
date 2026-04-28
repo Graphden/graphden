@@ -1,0 +1,58 @@
+;; Sharing a sub-graph vs creating an independent instance.
+;;
+;; The rule (from the project's auto-memory):
+;;   "Only share a fn-def ref when the computed value is genuinely
+;;    reused in one code path. Mutually-exclusive branches → separate
+;;    instances."
+;;
+;; Why it matters: in graphden, ONE fn-ref means ONE node, and that
+;; node's free args are SHARED across every consumer of that ref. If
+;; two consumers want different values for the same logical slot, you
+;; need two separate fn-defs (= two separate nodes), even when their
+;; bodies are identical.
+
+
+{:namespace "examples.shared-vs-isolated"
+ :description "When ONE shared sub-graph is enough, when you need TWO independent copies."
+ :fns
+ [;; SHARED: one helper, referenced twice. Both call-sites collapse to the
+  ;; same node — single free arg, same value in both positions.
+  {:name :ex-shared-pair
+   :description "References `:_ex-shared-upper` TWICE in `:parts`. Both refs are the same node, so the single free `:value` flows to both positions. Result is `\"<VALUE> & <VALUE>\"`."
+   :parent :str
+   :args {:parts [:_ex-shared-upper
+                  {:value " & "}
+                  :_ex-shared-upper]}}
+
+  {:name :_ex-shared-upper
+   :description "Single helper — upper-case the renamed `:value` arg. Referenced from two slots in `:ex-shared-pair` but is one node, one free arg."
+   :parent :str-upper
+   :args {:string {:as :value}}}
+
+  ;; ISOLATED: two separate helpers, each with its own free arg.
+  ;; Caller passes two different values; the result combines them.
+  {:name :ex-isolated-pair
+   :description "Uses TWO separate helpers (`:_ex-iso-left`, `:_ex-iso-right`), each with its own free arg (`:left` and `:right`). The two values flow independently. Use when the positions are conceptually different (different roles, different data)."
+   :parent :str
+   :args {:parts [:_ex-iso-left
+                  {:value " & "}
+                  :_ex-iso-right]}}
+
+  {:name :_ex-iso-left
+   :parent :str-upper
+   :args {:string {:as :left}}}
+
+  {:name :_ex-iso-right
+   :parent :str-upper
+   :args {:string {:as :right}}}
+
+  ;; Mutually-exclusive `:if` branches: the two slots must be SEPARATE
+  ;; instances even though both are `:str-upper` over a string. Sharing
+  ;; one helper here would force `:left = :right`, which is exactly
+  ;; what the auto-memory rule warns against.
+  {:name :ex-pick-by-flag
+   :description "Demonstrates correct ISOLATION across mutually-exclusive `:if` branches: each branch carries its own helper instance. If `:flag?` is truthy → upper-cased `:left`; else upper-cased `:right`. Sharing a helper here would force `:left = :right`, so we don't."
+   :parent :if
+   :args {:test {:as :flag?}
+          :then :_ex-iso-left
+          :else :_ex-iso-right}}]}

@@ -12,6 +12,7 @@
    :http/server      → [:exec/context, :exec/fn-entities, :app/packages]"
   (:require
     [clojure.tools.logging :as log]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
@@ -109,7 +110,8 @@
   (log/info "Registering base functions...")
   (let [base-fn-defs (:base-fn-defs packages)
         ;; Sync namespace entities first (creates ns hierarchy in DB)
-        ns-id-map (pkg/sync-namespaces! storage (:namespaces packages))]
+        ns-id-map (pkg/sync-namespaces! storage (:namespaces packages)
+                                        (:ns-descriptions packages))]
     (registry/register-base-fns! base-fn-defs)
     (registry/sync-defs-to-storage! storage base-fn-defs ns-id-map)
     (log/info "Base functions registered:" (count base-fn-defs))
@@ -136,21 +138,34 @@
 ;; Executor Context
 ;; =============================================================================
 
-(defmethod ig/init-key :exec/context [_ {:keys [storage max-depth timeout-ms]}]
+(defmethod ig/init-key :exec/context [_ {:keys [storage]}]
   (log/info "Creating executor context...")
-  (exec/create-context {:storage storage
-                        :max-depth (or max-depth 1000)
-                        :timeout-ms (or timeout-ms 30000)}))
+  (exec/create-context {:storage storage}))
 
 
 ;; =============================================================================
-;; HTTP Server (executed via graph)
+;; Compiled Registry (compile-at-startup executor)
+;; =============================================================================
+;;
+;; Walks every fn/arg entity in storage and compiles each into a Clojure
+;; closure of shape `(fn [all-fns free-args] result)`. Stored in the
+;; context's `:compiled-registry` atom for the hot path (HTTP handlers).
+
+(defmethod ig/init-key :exec/compiled-registry [_ {:keys [context]}]
+  (log/info "Building compiled registry...")
+  (let [registry (cr/rebuild! context)]
+    (log/info "Compiled registry built:" (count registry) "fns")
+    registry))
+
+
+;; =============================================================================
+;; HTTP Server (executed via compile-at-startup registry)
 ;; =============================================================================
 
 (defmethod ig/init-key :http/server [_ {:keys [context packages port]}]
   (let [startup-fn-name (:startup-fn packages)]
     (log/info "Starting HTTP server via" startup-fn-name "on port" port "...")
-    (let [server (exec/execute-by-name context (name startup-fn-name) nil)]
+    (let [server (cr/execute-by-name context (name startup-fn-name) nil)]
       (log/info "HTTP server started on port" port)
       server)))
 

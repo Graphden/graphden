@@ -1,0 +1,45 @@
+;; Inheritance hierarchies — how `:parent` actually composes.
+;;
+;; The pattern: each level binds ONE more arg of its parent. Anything not
+;; bound stays free (visible to callers). Arg names propagate up by default;
+;; rename them with `{:as :new-name}` (see examples.free-args).
+;;
+;; Three-level chain over `:assoc`:
+;;
+;;   :assoc                    → free: :map :key :value
+;;   :ex-set-status            → free: :map :value         (binds :key)
+;;   :ex-set-status-ok         → free: :map                (binds :value too)
+;;   :ex-set-status-ok-on-{}   → no free args              (binds :map too)
+;;
+;; Calling each fn-def with progressively fewer args yields the same
+;; underlying `:assoc` invocation: `(assoc {} \"status\" \"ok\")`.
+
+
+{:namespace "examples.inheritance"
+ :description "Three levels of inheritance over `:assoc`. Each level binds one more arg of the parent."
+ :fns
+ [;; LEVEL 1 — fix the key.
+  {:name :ex-set-status
+   :description "Inherits `:assoc`, binds `:key` to \"status\". Caller still supplies `:map` and `:value`. Most common pattern: a parent-with-one-slot-fixed."
+   :parent :assoc
+   :args {:key "status"}}
+
+  ;; LEVEL 2 — also fix the value.
+  {:name :ex-set-status-ok
+   :description "Inherits `:ex-set-status` (so `:key` stays bound to \"status\") and binds `:value` to \"ok\". Caller now only supplies `:map`. Demonstrates: bindings stack — a child sees parent's bindings as already-resolved."
+   :parent :ex-set-status
+   :args {:value "ok"}}
+
+  ;; LEVEL 3 — also fix the map. No free args left.
+  {:name :ex-set-status-ok-on-empty
+   :description "Inherits `:ex-set-status-ok` and binds `:map` to `{}`. No free args remain — calling this is `(assoc {} \"status\" \"ok\")`. Shows: a fn-def with all args bound is effectively a constant graph."
+   :parent :ex-set-status-ok
+   :args {:map {}}}
+
+  ;; A second hierarchy showing inheritance from a fn-def (not a base-fn):
+  ;; Demonstrates that `:parent` accepts ANY fn — base or composed —
+  ;; uniformly. There's no distinction at the parent slot.
+  {:name :ex-set-status-error
+   :description "Sibling of `:ex-set-status-ok` — inherits the same `:ex-set-status` parent (so `:key` is \"status\") but binds `:value` differently. Shows: the same parent can spawn many children with different bindings."
+   :parent :ex-set-status
+   :args {:value "error"}}]}

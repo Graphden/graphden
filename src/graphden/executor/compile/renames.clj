@@ -1,0 +1,185 @@
+(ns graphden.executor.compile.renames
+  "Compile-time helpers that translate free-arg names between a caller
+   fn F and the ref-target fn R it invokes.
+
+   ## Why
+
+   The `:route → :pair → :conj` pattern (see `resources/packages/app/common/
+   fns.edn`) is the canonical case. `:route` inherits `:pair`, binds
+   `:item2` to a ref, and renames `:item1 → :path`. But `:pair` was
+   composed by referencing `:pair-1`, so `:conj` is invoked twice along
+   the chain — once via `:pair-1` (for the inner `[item1]` vector) and
+   once at `:pair` itself (for the outer append).
+
+   When `:route` fires its `:coll` thunk to call `:pair-1`, it hands over
+   free-args keyed by its own external names (`:path`). But `:pair-1`
+   expects them keyed by `:item1`. We compute `{R-ext-name → F-ext-name}`
+   at compile time here; `apply-renames` does the key rewrite at call
+   time.
+
+   `deep-free-ext-names` also lives here because the rename table is
+   built against the full list of free-arg names reachable from R's
+   bindings."
+  (:require
+    [graphden.executor.compile.bindings :as b]
+    [graphden.executor.compile.lookups :as l]))
+
+
+(defn- find-in-chain
+  "BFS F's inheritance chain (closest first); return the first
+   `(pred arg)` that's truthy. `pred` is called with each arg entity."
+  [fn-id pred {:keys [fn-map args-by-fn]}]
+  (some (fn [fid]
+          (some pred (get args-by-fn fid [])))
+        (l/inheritance-chain fn-id fn-map)))
+
+
+(defn- chain-arg-id-for-ext-name
+  "Arg-id of the first chain-arg on `fn-id` whose own ext-name (walked
+   via source-id) matches `ext-name` — i.e. the structural origin of
+   the rename (`{:as :ext-name}`) or the primary that bears the name.
+   Callers source-id chains to this id to bind the free slot."
+  [fn-id ext-name {:keys [arg-map] :as lookups}]
+  (find-in-chain fn-id
+                 (fn [arg]
+                   (when (= ext-name (l/arg-ext-name (:id arg) arg-map))
+                     (:id arg)))
+                 lookups))
+
+
+(defn deep-free-ext-args
+  "Like `deep-free-ext-names` but returns a vector of `[ext-name origin-arg-id]`
+   pairs. `origin-arg-id` is the id of the chain-arg that introduces the
+   ext-name (via `:as` rename or as a primary), so callers can match
+   their own source-id chains against it for structural classification
+   (capture vs lambda-param).
+
+   Walks the same shape as `deep-free-ext-names`: through non-HOF refs
+   and `:seq` ref-items, with `:is-fn` refs treated as a BOUNDARY (the
+   inner hof-wrap consumes its own leftovers, so they don't widen the
+   outer interface)."
+  [fn-id lookups]
+  (let [result (atom [])
+        seen (atom #{})
+        already-collected? (fn [n] (some #(= n (first %)) @result))
+        emit! (fn [n oid] (swap! result conj [n oid]))]
+    (letfn [(walk
+              [fid covered]
+              (when-not (contains? @seen fid)
+                (swap! seen conj fid)
+                (let [bindings (b/collect-bindings fid lookups)
+                      own-env (set (map :env-name
+                                        (b/collect-env-bindings fid lookups)))
+                      own-primaries (into #{}
+                                          (comp (remove #(= :free (:kind %)))
+                                                (map :ext-name))
+                                          bindings)
+                      next-covered (into (into covered own-env) own-primaries)]
+                  (doseq [bnd bindings]
+                    (case (:kind bnd)
+                      :free (let [n (:ext-name bnd)]
+                              (when-not (or (next-covered n)
+                                            (not (:required bnd))
+                                            (already-collected? n))
+                                (when-let [oid (chain-arg-id-for-ext-name fid n lookups)]
+                                  (emit! n oid))))
+                      :ref (when-not (:is-fn bnd)
+                             (walk (:ref-id bnd) next-covered))
+                      :seq (doseq [item (:items bnd)]
+                             (cond
+                               (:ref-id item)
+                               (walk (:ref-id item) next-covered)
+                               ;; Named free slot inside the sequence
+                               ;; (`{:as :name}` syntax) — the item
+                               ;; itself is the structural origin
+                               ;; callers source-id against.
+                               (and (:name item) (nil? (:value item)))
+                               (let [n (keyword (:name item))]
+                                 (when-not (or (next-covered n) (already-collected? n))
+                                   (emit! n (:id item))))))
+                      :value nil)))))]
+      (walk fn-id #{}))
+    @result))
+
+
+(defn deep-free-ext-names
+  "Collect TRULY-unbound free-arg external names reachable from `fn-id`,
+   walking across non-HOF ref bindings and descending into :seq items
+   via their refs. `:is-fn` refs are a BOUNDARY — see
+   `deep-free-ext-args` for the underlying walk and the rationale.
+
+   Convenience wrapper: drops the origin-arg-ids that
+   `deep-free-ext-args` carries."
+  [fn-id lookups]
+  (mapv first (deep-free-ext-args fn-id lookups)))
+
+
+(defn hof-lambda-params
+  "Lambda-param names of HOF target `r-fn-id` when invoked from
+   `f-fn-id`. A deep-free name of R is a LAMBDA PARAM iff F's
+   inheritance chain has no bound arg whose source-id chain reaches
+   the name's origin (no structural anchor → must be filled per
+   call). Captures (the rest) flow in via `outer-free-args` and are
+   not the HOF impl's responsibility.
+
+   `hof-wrap` picks its call shape from `(count lambda-params)` —
+   0/1/N → variadic / single-arg / map-callable."
+  [r-fn-id f-fn-id lookups]
+  (let [{:keys [fn-map arg-map args-by-fn]} lookups
+        bound-source-targets
+        (reduce (fn [acc fid]
+                  (reduce (fn [a arg]
+                            (if (or (some? (:value arg)) (some? (:ref-id arg)))
+                              (into a (l/walk-source-chain (:id arg) arg-map))
+                              a))
+                          acc
+                          (get args-by-fn fid [])))
+                #{}
+                (l/inheritance-chain f-fn-id fn-map))]
+    (into []
+          (comp (remove (fn [[_ oid]] (contains? bound-source-targets oid)))
+                (map first))
+          (deep-free-ext-args r-fn-id lookups))))
+
+
+(defn- f-arg-for-r-origin
+  "Arg on F (or an F-ancestor) whose source-id chain includes
+   `r-origin-id` — the arg that propagates R's free slot up to F's
+   external interface."
+  [r-origin-id f-fn-id {:keys [arg-map] :as lookups}]
+  (find-in-chain f-fn-id
+                 (fn [arg]
+                   (when (contains? (l/source-chain-set (:id arg) arg-map) r-origin-id)
+                     arg))
+                 lookups))
+
+
+(defn build-ref-renames
+  "For ref R called from F, compute `{R-ext-name → F-ext-name}`. Only
+   includes entries where the name actually differs (identity entries are
+   elided so callers can skip the rename work when the map is empty)."
+  [r-fn-id f-fn-id lookups]
+  (let [arg-map (:arg-map lookups)]
+    (into {}
+          (keep (fn [[r-ext origin]]
+                  (when-let [f-arg (f-arg-for-r-origin origin f-fn-id lookups)]
+                    (let [f-ext (l/arg-ext-name (:id f-arg) arg-map)]
+                      (when (and f-ext (not= f-ext r-ext))
+                        [r-ext f-ext])))))
+          (deep-free-ext-args r-fn-id lookups))))
+
+
+(defn apply-renames
+  "Apply {R-ext-name → F-ext-name} to `free-args`: for each entry, if F
+   has a value under `f-ext`, expose it under `r-ext` (and drop the
+   `f-ext` key so R's own naming wins). Extra keys in `free-args` pass
+   through untouched; R ignores ones it doesn't consume."
+  [free-args renames]
+  (reduce-kv (fn [acc r-ext f-ext]
+               (if (contains? acc f-ext)
+                 (-> acc
+                     (assoc r-ext (get acc f-ext))
+                     (dissoc f-ext))
+                 acc))
+             free-args
+             renames))

@@ -26,7 +26,8 @@
    :numeric     [:or :int :double]
    :timestamptz inst?
    :jsonb       jsonb-schema
-   :bytes       bytes?})
+   :bytes       bytes?
+   :sequence    sequential?})
 
 
 (def known-field-types

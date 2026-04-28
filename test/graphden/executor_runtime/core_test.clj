@@ -283,7 +283,7 @@
 
 
 (deftest exec-context-init-test
-  (testing ":exec/context creates context map with correct keys"
+  (testing ":exec/context creates context with the slim field set"
     (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
           config (-> (sys/read-config :test)
                      (assoc-in [:db/postgres :jdbc-url] jdbc-url))
@@ -292,26 +292,9 @@
         (let [ctx (:exec/context system)]
           (is (map? ctx))
           (is (contains? ctx :storage))
-          (is (contains? ctx :max-depth))
-          (is (contains? ctx :timeout-ms))
-          (is (= 100 (:max-depth ctx)))
-          (is (= 5000 (:timeout-ms ctx))))
-        (finally
-          (ig/halt! system))))))
-
-
-(deftest exec-context-defaults-test
-  (testing ":exec/context uses defaults when max-depth and timeout-ms are nil"
-    (let [jdbc-url (:jdbc-url (pth/get-container-config *container*))
-          config (-> (sys/read-config :test)
-                     (assoc-in [:db/postgres :jdbc-url] jdbc-url)
-                     (assoc-in [:exec/context :max-depth] nil)
-                     (assoc-in [:exec/context :timeout-ms] nil))
-          system (ig/init config [:db/schema :db/postgres :db/versioned :exec/context])]
-      (try
-        (let [ctx (:exec/context system)]
-          (is (= 1000 (:max-depth ctx)))
-          (is (= 30000 (:timeout-ms ctx))))
+          (is (contains? ctx :base-fns))
+          (is (contains? ctx :clock))
+          (is (contains? ctx :compiled-registry)))
         (finally
           (ig/halt! system))))))
 

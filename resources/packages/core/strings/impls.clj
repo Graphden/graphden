@@ -1,10 +1,10 @@
 (ns graphden.packages.core.strings.impls
   "Implementations for core/strings base functions.
 
-   All functions receive already-dereferenced arguments.
-   The loader handles deref before calling these implementations."
+   Migrated to `defbase` — arg symbols resolve at use site."
   (:require
     [clojure.string :as str]
+    [graphden.executor.defbase :refer [defbase]]
     [graphden.storage.protocol.core :as sp]))
 
 
@@ -77,13 +77,11 @@
 
 ;; === Implementations ===
 
-(defn str-fn
-  [{:keys [parts]}]
+(defbase str-fn [parts]
   (str/join parts))
 
 
-(defn subs-fn
-  [{:keys [string start end]}]
+(defbase subs-fn [string start end]
   (let [len (count string)]
     (validate-string-index! start len :start)
     (if end
@@ -94,28 +92,23 @@
       (subs string start))))
 
 
-(defn str-len-fn
-  [{:keys [string]}]
+(defbase str-len-fn [string]
   (count string))
 
 
-(defn str-upper-fn
-  [{:keys [string]}]
+(defbase str-upper-fn [string]
   (str/upper-case string))
 
 
-(defn str-lower-fn
-  [{:keys [string]}]
+(defbase str-lower-fn [string]
   (str/lower-case string))
 
 
-(defn str-trim-fn
-  [{:keys [string]}]
+(defbase str-trim-fn [string]
   (str/trim string))
 
 
-(defn str-split-fn
-  [{:keys [string separator]}]
+(defbase str-split-fn [string separator]
   (when (empty? separator)
     (throw (ex-info "separator cannot be empty"
                     {:type :execution-error/invalid-separator
@@ -131,39 +124,36 @@
       (vec (str/split string pattern)))))
 
 
-(defn str-join-fn
-  [{:keys [coll separator]}]
+(defbase str-join-fn [coll separator]
   (str/join separator coll))
 
 
-(defn str-to-keyword-fn
-  [{:keys [string]}]
+(defbase str-to-keyword-fn [string]
   (keyword string))
 
 
-(defn keyword-to-str-fn
-  [{:keys [keyword]}]
+(defbase keyword-to-str-fn [keyword]
   (if (keyword? keyword)
     (name keyword)
     (str keyword)))
 
 
-(defn pr-str-fn
+(defbase pr-str-fn
   "Returns a string representation of value for debugging/display."
-  [{:keys [value]}]
+  [value]
   (pr-str value))
 
 
-(defn to-str-fn
+(defbase to-str-fn
   "Converts any value to string using str."
-  [{:keys [value]}]
+  [value]
   (str value))
 
 
-(defn parse-query-string-fn
+(defbase parse-query-string-fn
   "Parses a URL query string or form-urlencoded body into a map.
    Splits by & then = and URL-decodes values."
-  [{:keys [string]}]
+  [string]
   (when (and string (not (str/blank? string)))
     (into {}
           (for [pair (str/split string #"&")
@@ -172,21 +162,24 @@
             [k (java.net.URLDecoder/decode (or v "") "UTF-8")]))))
 
 
-(defn truncate-fn
-  [{:keys [string max-length]}]
-  (if (> (count string) max-length)
-    (str (subs string 0 max-length) "...")
-    string))
-
-
-(defn blank?-fn
-  [{:keys [string]}]
+(defbase blank?-fn [string]
   (str/blank? string))
 
 
-(defn url-decode-fn
-  [{:keys [string]}]
+(defbase url-decode-fn [string]
   (java.net.URLDecoder/decode string "UTF-8"))
+
+
+(defbase str-contains?-fn [string substring]
+  (boolean (and string (str/includes? string substring))))
+
+
+(defbase str-starts-with?-fn [string prefix]
+  (boolean (and string (str/starts-with? string prefix))))
+
+
+(defbase str-replace-fn [s match replacement]
+  (when s (str/replace s match replacement)))
 
 
 ;; === Registry ===
@@ -205,8 +198,8 @@
    :pr-str pr-str-fn
    :to-str to-str-fn
    :parse-query-string parse-query-string-fn
-   :truncate truncate-fn
    :blank? blank?-fn
    :url-decode url-decode-fn
-   :str-contains? (fn [{:keys [string substring]}] (str/includes? string substring))
-   :str-starts-with? (fn [{:keys [string prefix]}] (str/starts-with? string prefix))})
+   :str-contains? str-contains?-fn
+   :str-starts-with? str-starts-with?-fn
+   :str-replace str-replace-fn})

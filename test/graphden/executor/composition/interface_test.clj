@@ -10,10 +10,12 @@
     [clojure.string :as str]
     [clojure.test :refer [deftest is testing use-fixtures]]
     [clojure.tools.logging]
-    [graphden.executor.composition.core :as core]
+    [graphden.executor.composition.deps :as deps]
     [graphden.executor.composition.interface :as fn-composition]
+    [graphden.executor.composition.parsing :as parsing]
     [graphden.executor.interface :as exec]
     [graphden.executor.registry.interface :as registry]
+    [graphden.executor.test-setup :as setup]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.postgres.core :as pg]
@@ -56,6 +58,24 @@
             source-arg (first source-args)]
         (when source-arg
           (recur storage source-arg))))))
+
+
+(deftest sync-fns-to-storage-3-arity-accepts-ns-id-map
+  (testing "3-arity variant threads ns-id-map through to core — exercised by system init-key"
+    (let [storage (create-test-storage)]
+      (try
+        (exec/register-base-fn! :const-1 (fn [_ _] 1))
+        (registry/sync-defs-to-storage! storage {:const-1 {:args {}
+                                                           :return-type :int
+                                                           :impl (fn [_ _] 1)}})
+        (let [result (fn-composition/sync-fns-to-storage!
+                       storage
+                       [{:name :my-const :parent :const-1}]
+                       {})]
+          (is (map? result))
+          (is (contains? result :my-const)))
+        (finally
+          (sp/close storage))))))
 
 
 (deftest sync-fns-to-storage!-test
@@ -161,19 +181,19 @@
 
 (deftest parse-fn-ref-test
   (testing "parses :fn-name as fn reference"
-    (is (= :my-fn (#'core/parse-fn-ref :my-fn))))
+    (is (= :my-fn (parsing/parse-fn-ref :my-fn))))
 
   (testing "parses valid identifier keywords"
-    (is (= :handler (#'core/parse-fn-ref :handler)))
-    (is (= :my-fn-123 (#'core/parse-fn-ref :my-fn-123))))
+    (is (= :handler (parsing/parse-fn-ref :handler)))
+    (is (= :my-fn-123 (parsing/parse-fn-ref :my-fn-123))))
 
   (testing "returns nil for non-fn refs"
-    (is (nil? (#'core/parse-fn-ref "not-a-keyword")))
-    (is (nil? (#'core/parse-fn-ref 123))))
+    (is (nil? (parsing/parse-fn-ref "not-a-keyword")))
+    (is (nil? (parsing/parse-fn-ref 123))))
 
   (testing "returns nil for invalid identifiers"
-    (is (nil? (#'core/parse-fn-ref :>)))
-    (is (nil? (#'core/parse-fn-ref :123-starts-with-digit)))))
+    (is (nil? (parsing/parse-fn-ref :>)))
+    (is (nil? (parsing/parse-fn-ref :123-starts-with-digit)))))
 
 
 ;; === extract-dependencies edge case tests ===
@@ -186,7 +206,7 @@
                          :b :third-fn   ; fn ref
                          :c 42}}        ; literal (ignored)
           fn-names #{:other-fn :third-fn}
-          deps (#'core/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names)]
       (is (= #{:other-fn :third-fn} deps))))
 
   (testing "ignores refs to fns not in the set"
@@ -194,12 +214,12 @@
                   :parent :base
                   :args {:a :external-fn}}  ; not in fn-names set
           fn-names #{:other-fn}
-          deps (#'core/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names)]
       (is (empty? deps))))
 
   (testing "handles empty args"
     (let [fn-def {:name :my-fn :parent :base}
-          deps (#'core/extract-dependencies fn-def #{})]
+          deps (#'deps/extract-dependencies fn-def #{})]
       (is (empty? deps)))))
 
 
@@ -210,7 +230,7 @@
     (let [fn-defs [{:name :a :parent :base :args {:x :b}}
                    {:name :b :parent :base :args {:x :c}}
                    {:name :c :parent :base}]
-          graph (#'core/build-dependency-graph fn-defs)]
+          graph (#'deps/build-dependency-graph fn-defs)]
       (is (= {:a #{:b} :b #{:c} :c #{}} graph)))))
 
 
@@ -219,28 +239,28 @@
 (deftest topological-sort-edge-cases-test
   (testing "handles single element"
     (let [fn-defs [{:name :single :parent :base}]
-          sorted (#'core/topological-sort fn-defs)]
+          sorted (deps/topological-sort fn-defs)]
       (is (= [:single] (mapv :name sorted)))))
 
   (testing "handles independent elements (no dependencies)"
     (let [fn-defs [{:name :a :parent :base}
                    {:name :b :parent :base}
                    {:name :c :parent :base}]
-          sorted (#'core/topological-sort fn-defs)]
+          sorted (deps/topological-sort fn-defs)]
       ;; Order doesn't matter for independent elements
       (is (= #{:a :b :c} (set (mapv :name sorted))))))
 
   (testing "throws on self-reference cycle"
     (let [fn-defs [{:name :self-ref :parent :base :args {:x :self-ref}}]]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
-            (#'core/topological-sort fn-defs)))))
+            (deps/topological-sort fn-defs)))))
 
   (testing "throws on three-way cycle"
     (let [fn-defs [{:name :a :parent :base :args {:x :b}}
                    {:name :b :parent :base :args {:x :c}}
                    {:name :c :parent :base :args {:x :a}}]]
       (is (thrown-with-msg? clojure.lang.ExceptionInfo #"Circular"
-            (#'core/topological-sort fn-defs))))))
+            (deps/topological-sort fn-defs))))))
 
 
 (deftest validation-edge-cases-test
@@ -397,20 +417,20 @@
 
 (deftest valid-identifier-edge-cases-test
   (testing "returns falsy for empty string"
-    (is (not (#'core/valid-identifier? ""))))
+    (is (not (parsing/valid-identifier? ""))))
 
   (testing "returns falsy for string with whitespace"
-    (is (not (#'core/valid-identifier? "hello world"))))
+    (is (not (parsing/valid-identifier? "hello world"))))
 
   (testing "returns falsy for non-string input"
-    (is (not (#'core/valid-identifier? nil)))
-    (is (not (#'core/valid-identifier? 123))))
+    (is (not (parsing/valid-identifier? nil)))
+    (is (not (parsing/valid-identifier? 123))))
 
   (testing "returns truthy for valid identifiers"
-    (is (#'core/valid-identifier? "hello"))
-    (is (#'core/valid-identifier? "my-fn"))
-    (is (#'core/valid-identifier? "_private"))
-    (is (#'core/valid-identifier? "fn123"))))
+    (is (parsing/valid-identifier? "hello"))
+    (is (parsing/valid-identifier? "my-fn"))
+    (is (parsing/valid-identifier? "_private"))
+    (is (parsing/valid-identifier? "fn123"))))
 
 
 (deftest extract-dependencies-with-parent-dep-test
@@ -419,7 +439,7 @@
                   :parent :parent-fn  ; parent is another fn-def
                   :args {:a 1}}
           fn-names #{:parent-fn :child-fn}
-          deps (#'core/extract-dependencies fn-def fn-names)]
+          deps (#'deps/extract-dependencies fn-def fn-names)]
       (is (contains? deps :parent-fn)))))
 
 
@@ -465,7 +485,7 @@
           _ (registry/initialize-all! storage
                                       [{:two-arg-fn {:args {:a :int :b :int}
                                                      :return-type :int
-                                                     :impl (fn [{:keys [a b]} _ctx] (+ @a @b))}}])
+                                                     :impl (setup/fn-impl [a b] (+ a b))}}])
           ;; Sync partial-fn that only binds :a, leaving :b free
           result (fn-composition/sync-fns-to-storage! storage
                                                       [{:name :partial-fn :parent :two-arg-fn :args {:a 10}}])
@@ -508,11 +528,14 @@
           _ (registry/initialize-all! storage
                                       [{:adder {:args {:a :int :b :int}
                                                 :return-type :int
-                                                :impl (fn [{:keys [a b]} _] (+ @a @b))}}
+                                                :impl (setup/fn-impl [a b] (+ a b))}}
                                        {:caller {:args {:f :fn :x :int}
                                                  :return-type :int
-                                                 :impl (fn [{:keys [f x]} ctx]
-                                                         (@f {:value @x} ctx))}}])
+                                                 :impl (setup/fn-impl [f x]
+                                                                      ;; `f` arrives pre-wrapped as a single-arg
+                                                                      ;; callable; feeding `x` routes it to the
+                                                                      ;; target's single free slot.
+                                                                      (f x))}}])
           ;; Composed fns:
           ;; - add-10: partial application of adder with a=10, b is free
           ;; - call-add-10: calls add-10 passing :x as :b
@@ -548,7 +571,7 @@
           _ (registry/initialize-all! storage
                                       [{:three-arg {:args {:a :int :b :int :c :int}
                                                     :return-type :int
-                                                    :impl (fn [{:keys [a b c]} _] (+ @a @b @c))}}
+                                                    :impl (setup/fn-impl [a b c] (+ a b c))}}
                                        {:ref-holder {:args {:fn-ref :fn}
                                                      :return-type :any
                                                      :impl (fn [{:keys [fn-ref]} _] fn-ref)}}])
@@ -608,7 +631,7 @@
           _ (registry/initialize-all! storage
                                       [{:two-arg-fn {:args {:a :int :b :int}
                                                      :return-type :int
-                                                     :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+                                                     :impl (setup/fn-impl [a b] (+ a b))}}])
           ;; Rename :a to :first and :b to :second without binding values
           result (fn-composition/sync-fns-to-storage! storage
                                                       [{:name :renamed-fn
@@ -634,7 +657,7 @@
           _ (registry/initialize-all! storage
                                       [{:two-arg-fn {:args {:a :int :b :int}
                                                      :return-type :int
-                                                     :impl (fn [{:keys [a b]} _] (+ @a @b))}}])
+                                                     :impl (setup/fn-impl [a b] (+ a b))}}])
           ;; Rename :a to :first and bind value 42
           result (fn-composition/sync-fns-to-storage! storage
                                                       [{:name :renamed-with-value

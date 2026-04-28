@@ -61,7 +61,9 @@
 
 
 (defn register-base-fns!
-  "Registers base functions from a definitions map."
+  "Registers base functions from a definitions map. Impls are called
+   with the raw args map — use `rt/resolve-arg` inside the body
+   (or use `defbase`, which generates impls in that shape)."
   [defs]
   (doseq [[fn-name fn-def] defs]
     (exec/register-base-fn! fn-name (:impl fn-def))))
@@ -125,7 +127,9 @@
 
 
 (def ^:private identifier-pattern
-  #"^[a-zA-Z_][a-zA-Z0-9_-]*\??$")
+  ;; Allows the Clojure naming conventions: trailing `?` (predicate),
+  ;; trailing `!` (mutator), and `->` anywhere (conversion, e.g. pairs->map).
+  #"^[a-zA-Z_][a-zA-Z0-9_\->]*[?!]?$")
 
 
 (defn- validate-identifier!
@@ -155,6 +159,17 @@
   [fn-name]
   (validate-identifier! "fn-name" fn-name)
   (memoized-uuid-v5 (str "fn:" (name fn-name))))
+
+
+(defn local-fn-uuid
+  "Generates a deterministic UUID for a local (anonymous-in-DB) fn-def
+   keyed by namespace + local name, so re-syncs without DB truncation
+   reuse the same row instead of dropping a fresh anonymous shadow on
+   every call. Doesn't go through `validate-identifier!` because the
+   composed key (ns + `_`-prefixed name) intentionally violates the
+   single-identifier pattern."
+  [ns-path local-name]
+  (memoized-uuid-v5 (str "local:" (or ns-path "") "/" (name local-name))))
 
 
 (defn arg-uuid
@@ -200,7 +215,8 @@
                            :arg-spec arg-spec
                            :required-value required-val})))
         (validate-arg-type! arg-name arg-type)
-        {:arg-type arg-type :required required-val})
+        (cond-> {:arg-type arg-type :required required-val}
+          (:description arg-spec) (assoc :description (:description arg-spec))))
       (throw (ex-info "arg-spec map must contain :type key"
                       {:type :invalid-arg-spec
                        :arg-name arg-name
@@ -240,7 +256,7 @@
    Base fn = fn entity with parent-ids=nil.
    ns-id-map: {ns-path-string → ns-entity-uuid} for resolving namespace-id."
   [fn-name fn-def ns-id-map]
-  (let [{:keys [return-type]} fn-def
+  (let [{:keys [return-type description]} fn-def
         id (fn-uuid fn-name)
         impl-hash (compute-impl-hash fn-def)
         ns-id (when-let [ns-path (:namespace fn-def)]
@@ -250,7 +266,8 @@
              :parent-ids nil
              :return-type return-type
              :impl-hash impl-hash}
-      ns-id (assoc :namespace-id ns-id))))
+      ns-id (assoc :namespace-id ns-id)
+      description (assoc :description description))))
 
 
 (defn- prepare-arg-records
@@ -259,15 +276,16 @@
    Sets is-fn=true for :fn type args (HOF)."
   [fn-name fn-id args]
   (mapv (fn [[arg-name arg-spec]]
-          (let [{:keys [arg-type required]} (parse-arg-spec arg-name arg-spec)
+          (let [{:keys [arg-type required description]} (parse-arg-spec arg-name arg-spec)
                 is-fn? (= :fn arg-type)
                 id (arg-uuid fn-name arg-name)]
-            {:id id
-             :fn-id fn-id
-             :name (name arg-name)
-             :type arg-type
-             :required required
-             :is-fn is-fn?}))
+            (cond-> {:id id
+                     :fn-id fn-id
+                     :name (name arg-name)
+                     :type arg-type
+                     :required required
+                     :is-fn is-fn?}
+              description (assoc :description description))))
         args))
 
 

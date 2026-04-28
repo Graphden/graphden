@@ -24,7 +24,39 @@ let searchFilter = '';
  * Returns: { children: Map<string, subtree>, fns: [fn, ...] }
  */
 function buildNsTree(data) {
-  const root = { children: new Map(), fns: [] };
+  const root = { children: new Map(), fns: [], description: null, nsId: null };
+
+  // Build {ns-path → ns-entity} from the namespace entities so the
+  // rendered tree nodes can carry both their description tooltip AND
+  // their ns-id (needed by the per-namespace `+` button to set
+  // `parent-id` when creating sub-entities).
+  const nsByPath = new Map();
+  (data.namespaces || []).forEach(ns => {
+    const path = (lookups.nsPathMap && lookups.nsPathMap.get(ns.id)) || ns.name;
+    if (path) nsByPath.set(path, ns);
+  });
+
+  // Pre-create tree nodes for every declared namespace, even ones that
+  // have no fns yet — newly-created empty namespaces should show up in
+  // the sidebar immediately, not only after their first fn is added.
+  nsByPath.forEach((ns, path) => {
+    const parts = path.split('.');
+    let node = root;
+    let cumulativePath = '';
+    for (const part of parts) {
+      cumulativePath = cumulativePath ? cumulativePath + '.' + part : part;
+      if (!node.children.has(part)) {
+        const entry = nsByPath.get(cumulativePath);
+        node.children.set(part, {
+          children: new Map(),
+          fns: [],
+          description: entry ? entry.description : null,
+          nsId: entry ? entry.id : null
+        });
+      }
+      node = node.children.get(part);
+    }
+  });
 
   (data.fns || []).forEach(fn => {
     if (!fn.name) return; // skip anonymous/local fns
@@ -32,9 +64,17 @@ function buildNsTree(data) {
     const parts = qname.split('.');
     const fnName = parts.pop();
     let node = root;
+    let cumulativePath = '';
     for (const part of parts) {
+      cumulativePath = cumulativePath ? cumulativePath + '.' + part : part;
       if (!node.children.has(part)) {
-        node.children.set(part, { children: new Map(), fns: [] });
+        const entry = nsByPath.get(cumulativePath);
+        node.children.set(part, {
+          children: new Map(),
+          fns: [],
+          description: entry ? entry.description : null,
+          nsId: entry ? entry.id : null
+        });
       }
       node = node.children.get(part);
     }
@@ -77,6 +117,42 @@ function filterNsNode(node, filter, nsName) {
 /**
  * Render a namespace tree node recursively into the container.
  */
+function buildFnItem(fn) {
+  const item = document.createElement('div');
+  item.className = 'entity-item';
+  if (fn.id === selectedFnId) item.className += ' selected';
+  item.dataset.fnId = fn.id;
+
+  const nameSpan = document.createElement('span');
+  nameSpan.className = 'name';
+  nameSpan.textContent = fn.displayName;
+  item.appendChild(nameSpan);
+
+  // Right-edge action group — same shape as `.ns-row-actions`. Order:
+  // hover-only ✎ first, then always-visible `i`. fns don't have a `+`
+  // button (you don't add children to a fn the same way you do to a
+  // ns), only rename.
+  const actions = document.createElement('span');
+  actions.className = 'ns-row-actions';
+  if (typeof buildFnRowButtons === 'function') {
+    buildFnRowButtons(actions, fn.id, fn.displayName);
+  }
+  // Always render the badge so the user has an entry point to ADD a
+  // description to entities that don't have one yet.
+  const desc = createDescriptionBadge(fn.description, {
+    name: fn.displayName,
+    namespace: getFnNamespace(lookups && lookups.fnMap && lookups.fnMap.get(fn.id)),
+    entityType: 'fn',
+    entityId: fn.id
+  });
+  if (desc) actions.appendChild(desc);
+  if (actions.children.length > 0) item.appendChild(actions);
+
+  item.onclick = () => selectFn(fn.id);
+  return item;
+}
+
+
 function renderNsNode(container, name, node, path) {
   const nsPath = path ? path + '.' + name : name;
   const isCollapsed = !expandedNamespaces.has(nsPath);
@@ -95,6 +171,26 @@ function renderNsNode(container, name, node, path) {
   label.className = 'ns-label';
   label.textContent = name;
   header.appendChild(label);
+  // All three right-edge icons live in one group. Order:
+  //   ✎ (rename, hover-only)  +  + (create-child, hover-only)  +  i (description, always)
+  // The always-visible `i` sits LAST so the empty slots left by the
+  // hover-only buttons (when not hovered) collapse to nothing visible
+  // — otherwise the row would look like there's a useless gap to the
+  // left of the `i`.
+  const actions = document.createElement('span');
+  actions.className = 'ns-row-actions';
+  if (node && node.nsId && typeof buildNsRowButtons === 'function') {
+    buildNsRowButtons(actions, node.nsId, nsPath);
+  }
+  if (node && node.nsId) {
+    const desc = createDescriptionBadge(node.description, {
+      name: nsPath,
+      entityType: 'ns',
+      entityId: node.nsId
+    });
+    if (desc) actions.appendChild(desc);
+  }
+  if (actions.children.length > 0) header.appendChild(actions);
 
   header.onclick = (e) => {
     e.stopPropagation();
@@ -122,13 +218,15 @@ function renderNsNode(container, name, node, path) {
   // Fn items (sorted)
   const sortedFns = [...node.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
   for (const fn of sortedFns) {
-    const item = document.createElement('div');
-    item.className = 'entity-item';
-    if (fn.id === selectedFnId) item.className += ' selected';
-    item.dataset.fnId = fn.id;
-    item.innerHTML = '<span class="name">' + fn.displayName + '</span>';
-    item.onclick = () => selectFn(fn.id);
-    childGroup.appendChild(item);
+    childGroup.appendChild(buildFnItem(fn));
+  }
+
+  // If the user has an active inline-create rooted at THIS namespace,
+  // append the input row inside `childGroup` so it sits where the new
+  // entity will appear once submitted.
+  if (node && node.nsId && typeof buildActiveCreateRow === 'function') {
+    const createRow = buildActiveCreateRow(node.nsId, 0);
+    if (createRow) childGroup.appendChild(createRow);
   }
 
   container.appendChild(childGroup);
@@ -172,17 +270,25 @@ function updateEntityList(data) {
   // Top-level fns without namespace
   const sortedFns = [...tree.fns].sort((a, b) => a.displayName.localeCompare(b.displayName));
   for (const fn of sortedFns) {
-    const item = document.createElement('div');
-    item.className = 'entity-item';
-    if (fn.id === selectedFnId) item.className += ' selected';
-    item.dataset.fnId = fn.id;
-    item.innerHTML = '<span class="name">' + fn.displayName + '</span>';
-    item.onclick = () => selectFn(fn.id);
-    list.appendChild(item);
+    list.appendChild(buildFnItem(fn));
   }
 
   if (list.children.length === 0) {
     list.innerHTML = '<div class="loading">No matches</div>';
+  }
+
+  // Root-level inline-create input row, when the user clicked the
+  // bottom "+ New namespace" button. Appears between the tree and the
+  // bottom button so the new entry shows up in place.
+  const rootCreateRow = (typeof buildRootCreateRow === 'function')
+                        ? buildRootCreateRow() : null;
+  if (rootCreateRow) {
+    list.appendChild(rootCreateRow);
+  } else if (typeof buildRootCreateButton === 'function') {
+    // Always-visible "+ New namespace" full-width button at the bottom
+    // of the sidebar. Skipped while a root-create row is already
+    // active (no point in offering both at once).
+    list.appendChild(buildRootCreateButton());
   }
 }
 
@@ -198,6 +304,9 @@ function selectFn(fnId, updateHistory = true) {
   expansionState.clear();
   previewState.clear();
   userMovedNodes.clear();
+  // Recompute the editable scope so arg-overlays + edge-labels gate
+  // on the new root's transitive ref closure.
+  if (typeof rebuildImplementationFnIds === 'function') rebuildImplementationFnIds();
 
   // Ensure the fn's namespace is expanded in the sidebar tree
   const fn = lookups.fnMap.get(fnId);
@@ -253,7 +362,13 @@ function getSpec(nodeId) {
  * Apply a click/hover on an ancestor row.
  *
  * SINGLE-FN at depth L → spec = {fullDepth: L, partial: empty}
- *   "expand exactly to L" (always set, no toggle)
+ *   "expand exactly to L" — pure SET, no toggle. Clicking a row already
+ *   inside the expansion is a no-op; to collapse a level the user clicks
+ *   a SHALLOWER row (which sets fullDepth to that shallower level, hiding
+ *   anything deeper). The visual model treats a grouped block (e.g.
+ *   merge-in + assoc-in joined into one cell) as a single unit — hovering
+ *   inside an already-expanded block must NOT preview an asymmetric
+ *   half-collapse like "merge-in stays, assoc-in disappears".
  *
  * MULTI-FN parent (MI) → toggle membership in partial:
  *   - Currently NOT in expansion: ADD this fn (cascade through shallower
@@ -275,13 +390,9 @@ function computeSpecAfterClick(currentSpec, depth, fnId, allFnsAtDepth) {
   const fullDepth = currentSpec.fullDepth || 0;
 
   if (!isMI) {
-    // Toggle: if already expanded to this depth or deeper → collapse.
-    // Otherwise → expand to this depth.
-    if (depth <= fullDepth) {
-      const newFull = depth - 1;
-      if (newFull <= 0) return null;
-      return { fullDepth: newFull, partialFns: new Set() };
-    }
+    // Pure SET: expand to exactly this depth. If already there or deeper,
+    // the spec is unchanged (no asymmetric collapse). To shrink, the user
+    // clicks a shallower row.
     return { fullDepth: depth, partialFns: new Set() };
   }
 
@@ -323,6 +434,22 @@ function computeSpecAfterClick(currentSpec, depth, fnId, allFnsAtDepth) {
 }
 
 /**
+ * True when two specs (or absence-of-spec) describe the same expansion.
+ * `null` and a missing entry both behave like {fullDepth: 0, partialFns: ∅}.
+ */
+function specsEqual(a, b) {
+  const aFull = a ? a.fullDepth : 0;
+  const bFull = b ? b.fullDepth : 0;
+  if (aFull !== bFull) return false;
+  const aPartial = (a && a.partialFns) || new Set();
+  const bPartial = (b && b.partialFns) || new Set();
+  if (aPartial.size !== bPartial.size) return false;
+  for (const f of aPartial) if (!bPartial.has(f)) return false;
+  return true;
+}
+
+
+/**
  * Apply spec change for click on a fn at a depth.
  */
 function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
@@ -330,10 +457,19 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = null;
   }
-  const parts = nodeId.replace('fn-', '').split('_');
-  anchorFnId = parts[parts.length - 1];
+  anchorNodeId = nodeId;
 
+  const currentSpec = expansionState.get(nodeId);
   const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
+  // No-op if the click would leave the expansion unchanged. Important now
+  // that non-MI clicks are pure SET — re-clicking an already-expanded row
+  // would otherwise clear savedUserPositions and trigger a needless re-render.
+  if (specsEqual(currentSpec, newSpec)) {
+    suppressPreviewOnClick();
+    previewState.delete(nodeId);
+    anchorNodeId = null;
+    return;
+  }
   if (newSpec === null) {
     expansionState.delete(nodeId);
   } else {
@@ -347,7 +483,7 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
   // committed state lose their manual position.
   savedUserPositions.clear();
   renderGraph(false);
-  anchorFnId = null;
+  anchorNodeId = null;
 }
 
 /**
@@ -358,27 +494,36 @@ function applyClickSpec(nodeId, depth, fnId, allFnsAtDepth) {
  * This keeps clicks reliable even with hover preview active.
  */
 function applyHoverSpec(nodeId, depth, fnId, allFnsAtDepth) {
-  const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
-  const oldPreview = previewState.get(nodeId);
   if (previewDebounceTimer) {
     clearTimeout(previewDebounceTimer);
     previewDebounceTimer = null;
   }
-  // Skip if preview unchanged
-  if (oldPreview && newSpec
-      && oldPreview.fullDepth === newSpec.fullDepth
-      && oldPreview.partialFns.size === newSpec.partialFns.size
-      && [...oldPreview.partialFns].every(f => newSpec.partialFns.has(f))) {
-    return;
-  }
+  const newSpec = computeSpecAfterClick(getSpec(nodeId), depth, fnId, allFnsAtDepth);
+  const committed = expansionState.get(nodeId);
+  const oldPreview = previewState.get(nodeId);
+
+  // What the layout actually needs to render under this hover. If hover
+  // reproduces the committed state, no preview is needed — clear it (or
+  // do nothing if there was none). This avoids hammering the backend
+  // with no-op layouts for hovers that wouldn't change anything.
+  const matchesCommitted = specsEqual(committed, newSpec);
+  const effectiveSpec = matchesCommitted
+    ? null
+    : (newSpec || { fullDepth: 0, partialFns: new Set() });
+
+  // Already in the desired preview state? Skip.
+  if (effectiveSpec === null && !previewState.has(nodeId)) return;
+  if (effectiveSpec && oldPreview && specsEqual(oldPreview, effectiveSpec)) return;
+
   previewDebounceTimer = setTimeout(() => {
-    const parts = nodeId.replace('fn-', '').split('_');
-    anchorFnId = parts[parts.length - 1];
-    // null spec means "collapse everything" — use {fullDepth:0} so the
-    // preview render shows the collapsed graph (not the committed state).
-    previewState.set(nodeId, newSpec || { fullDepth: 0, partialFns: new Set() });
+    anchorNodeId = nodeId;
+    if (effectiveSpec === null) {
+      previewState.delete(nodeId);
+    } else {
+      previewState.set(nodeId, effectiveSpec);
+    }
     renderGraph(false);
-    anchorFnId = null;
+    anchorNodeId = null;
   }, PREVIEW_DEBOUNCE_MS);
 }
 
@@ -389,11 +534,10 @@ function clearPreview(nodeId) {
   }
   if (!previewState.has(nodeId)) return;
   previewDebounceTimer = setTimeout(() => {
-    const parts = nodeId.replace('fn-', '').split('_');
-    anchorFnId = parts[parts.length - 1];
+    anchorNodeId = nodeId;
     previewState.delete(nodeId);
     renderGraph(false);
-    anchorFnId = null;
+    anchorNodeId = null;
   }, PREVIEW_DEBOUNCE_MS);
 }
 
@@ -440,7 +584,7 @@ function updateZoomSlider() {
 /** Reset zoom to fit all nodes in viewport. */
 function navResetZoom() {
   if (!cy || cy.nodes().length === 0) return;
-  cy.fit(50);
+  fitInVisibleArea(50);
   updateOverlayPositions();
   updateZoomSlider();
 }

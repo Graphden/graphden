@@ -1,6 +1,7 @@
 (ns graphden.packages.web.html.impls
   "Implementations for web/html base functions using Hiccup."
   (:require
+    [graphden.executor.defbase :refer [defbase]]
     [hiccup2.core :as h]))
 
 
@@ -78,40 +79,37 @@
     [(normalize-hiccup-element head)]
     (and (or (vector? head) (seq? head) (list? head))
          (seq head))
-    (into [] (mapcat (fn [item]
-                       (cond
-                         (hiccup-element? item) [(normalize-hiccup-element item)]
-                         (and (or (vector? item) (seq? item) (list? item))
-                              (seq item))
-                         (flatten-head item)
-                         :else []))
-                     head))
+    (vec (mapcat (fn [item]
+                   (cond
+                     (hiccup-element? item) [(normalize-hiccup-element item)]
+                     (and (or (vector? item) (seq? item) (list? item))
+                          (seq item))
+                     (flatten-head item)
+                     :else []))
+                 head))
     :else []))
 
 
-(defn normalize-head
-  [head]
-  (flatten-head head))
+(defn- apply-transform-impl
+  [value transform]
+  (case (when transform (keyword transform))
+    :keyword-to-str (when value (if (keyword? value) (name value) (str value)))
+    :pr-str (when value (pr-str value))
+    :bool-to-yesno (if value "Yes" "No")
+    value))
 
 
 ;; === Implementations ===
 
-(defn render-hiccup
-  [{:keys [hiccup]}]
+(defbase render-hiccup
+  [hiccup]
   (str (h/html hiccup)))
 
 
-(defn html-response
-  [{:keys [body status]}]
-  {:status (or status 200)
-   :headers {"Content-Type" "text/html; charset=utf-8"}
-   :body (if (string? body) body (str (h/html body)))})
-
-
-(defn html-page
-  [{:keys [title head body scripts]}]
-  (let [head-elements (normalize-head head)
-        scripts-elements (normalize-head scripts)
+(defbase html-page
+  [title head body scripts]
+  (let [head-elements (flatten-head head)
+        scripts-elements (flatten-head scripts)
         normalized-body (normalize-hiccup body)]
     (into [:html {:lang "en"}
            (into [:head
@@ -122,20 +120,20 @@
           [(into [:body normalized-body] scripts-elements)])))
 
 
-(defn with-cdn-script
-  [{:keys [head url]}]
+(defbase with-cdn-script
+  [head url]
   (let [script-el [:script {:src url}]
-        head-elements (normalize-head head)]
+        head-elements (flatten-head head)]
     (conj head-elements script-el)))
 
 
-(defn cytoscape-container
-  [{:keys [id style]}]
+(defbase cytoscape-container
+  [id style]
   [:div {:id id :style style}])
 
 
-(defn form-input
-  [{:keys [field-name label-text input-type field-value extra-attrs]}]
+(defbase form-input
+  [field-name label-text input-type field-value extra-attrs]
   [:div {:class "form-group"}
    [:label {:for field-name} label-text]
    [:input (merge {:type input-type :name field-name :id field-name}
@@ -143,8 +141,8 @@
                   extra-attrs)]])
 
 
-(defn form-select
-  [{:keys [field-name label-text options selected-value extra-attrs]}]
+(defbase form-select
+  [field-name label-text options selected-value extra-attrs]
   [:div {:class "form-group"}
    [:label {:for field-name} label-text]
    (into [:select (merge {:name field-name :id field-name} extra-attrs)]
@@ -153,13 +151,15 @@
            [:option (cond-> {:value v} (= v selected-value) (assoc :selected true)) l]))])
 
 
+;; Plain Clojure helpers — used by crud's render code. No longer base-fns
+;; (see web/html/fns.edn for the graph-level fn-def equivalents). Single
+;; map-arg signature so callers like `(html/button {:btn-text "..."})` work.
 (defn button
   [{:keys [btn-text btn-type extra-attrs]}]
   [:button (merge {:type (or btn-type "button")} extra-attrs) btn-text])
 
 
 (defn field-row
-  "Renders a label-value field row."
   [{:keys [label value]}]
   [:div {:class "field-row"}
    [:span {:class "field-label"} label]
@@ -171,22 +171,10 @@
   [:span {:class (if badge-type (str "badge badge-" badge-type) "badge")} badge-text])
 
 
-(defn apply-transform-fn
-  [{:keys [value transform]}]
-  (case (when transform (keyword transform))
-    :keyword-to-str (when value (if (keyword? value) (name value) (str value)))
-    :pr-str (when value (pr-str value))
-    :bool-to-yesno (if value "Yes" "No")
-    value))
-
-
-(defn entity-field-rows
+(defbase entity-field-rows
   "Renders multiple field rows from entity using field-specs.
-   field-specs: [[label key] ...] or [[label key transform] ...]
-   - key is a keyword or vector path to get from entity
-   - transform is optional: :keyword-to-str, :pr-str, :bool-to-yesno
-   Returns a div containing all field-rows."
-  [{:keys [entity field-specs]}]
+   field-specs: [[label key] ...] or [[label key transform] ...]"
+  [entity field-specs]
   (into [:div]
         (for [spec field-specs]
           (let [[label key-path transform] (if (= 3 (count spec))
@@ -195,45 +183,37 @@
                 raw-value (if (vector? key-path)
                             (get-in entity key-path)
                             (get entity key-path))
-                value (apply-transform-fn {:value raw-value :transform transform})]
+                value (apply-transform-impl raw-value transform)]
             [:div {:class "field-row"}
              [:span {:class "field-label"} label]
              [:span {:class "field-value"} (if (nil? value) "-" (str value))]]))))
 
 
-(defn wrap-element
-  "Wraps text content in an HTML element."
-  [{:keys [tag content]}]
-  [(keyword tag) content])
-
-
-(defn hiccup-element
-  [{:keys [tag attrs children]}]
+(defbase hiccup-element
+  [tag attrs children]
   (let [tag-kw (if (keyword? tag) tag (keyword tag))]
     (into (if attrs [tag-kw attrs] [tag-kw]) children)))
 
 
 (defn button-row
-  "Creates a horizontal flex container for buttons."
   [{:keys [buttons style]}]
   (into [:div {:style style}] buttons))
+
+
+(defbase apply-transform-fn
+  [value transform]
+  (apply-transform-impl value transform))
 
 
 ;; === Registry ===
 
 (def impls
   {:render-hiccup render-hiccup
-   :html-response html-response
    :html-page html-page
    :with-cdn-script with-cdn-script
    :cytoscape-container cytoscape-container
    :form-input form-input
    :form-select form-select
-   :button button
-   :field-row field-row
-   :badge badge
    :entity-field-rows entity-field-rows
-   :wrap-element wrap-element
    :hiccup hiccup-element
-   :button-row button-row
    :apply-transform apply-transform-fn})

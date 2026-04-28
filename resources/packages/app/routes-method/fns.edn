@@ -1,0 +1,66 @@
+;; HTTP-method route templates — method-specific shortcuts over `:route`
+;; (and `:route-with-middleware` for the auth-aware variants).
+;;
+;; Names keep the `-route` suffix because the bare HTTP-method names
+;; (`get`, `post`, …) clash with `core.collections.get` and
+;; `app.routes.auth.{post,delete}`. The `-route` suffix also marks
+;; these as TEMPLATES — concrete leaves in `app.routes` drop the suffix.
+
+
+{:namespace "app.routes.method"
+ :description "HTTP-method route templates — `get-route`/`post-route`/… and their `*-with-middleware` doubles. Each fixes the method on top of the generic `:route` / `:route-with-middleware` template; concrete routes in `app.routes` use these as parents."
+ :fns
+ [;; --- Plain method routes (free: path, handler) ---
+
+  {:name :get-route
+   :description "Method template for `GET` routes. Caller supplies `:path` and `:handler`."
+   :parent :route
+   :args {:method "get"}}
+
+  {:name :post-route
+   :description "Method template for `POST` routes. Caller supplies `:path` and `:handler`."
+   :parent :route
+   :args {:method "post"}}
+
+  {:name :put-route
+   :description "Method template for `PUT` routes. Caller supplies `:path` and `:handler`."
+   :parent :route
+   :args {:method "put"}}
+
+  {:name :delete-route
+   :description "Method template for `DELETE` routes. Caller supplies `:path` and `:handler`."
+   :parent :route
+   :args {:method "delete"}}
+
+  {:name :patch-route
+   :description "Method template for `PATCH` routes. Caller supplies `:path` and `:handler`."
+   :parent :route
+   :args {:method "patch"}}
+
+  ;; --- Method routes that carry their own middleware list ---
+  ;; Free args: path, handler, middleware.
+
+  {:name :get-route-with-middleware
+   :description "Method template for `GET` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
+   :parent :route-with-middleware
+   :args {:method "get"}}
+
+  {:name :post-route-with-middleware
+   :description "Method template for `POST` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
+   :parent :route-with-middleware
+   :args {:method "post"}}
+
+  {:name :put-route-with-middleware
+   :description "Method template for `PUT` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
+   :parent :route-with-middleware
+   :args {:method "put"}}
+
+  {:name :delete-route-with-middleware
+   :description "Method template for `DELETE` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
+   :parent :route-with-middleware
+   :args {:method "delete"}}
+
+  {:name :patch-route-with-middleware
+   :description "Method template for `PATCH` routes that carry their own middleware list. Free args: `:path`, `:handler`, `:middleware`."
+   :parent :route-with-middleware
+   :args {:method "patch"}}]}

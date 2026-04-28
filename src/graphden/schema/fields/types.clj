@@ -49,7 +49,9 @@
    :jsonb       {:description "JSON data (any JSON-serializable value)"
                  :clojure-type 'Object}
    :bytes       {:description "Binary data"
-                 :clojure-type 'bytes}})
+                 :clojure-type 'bytes}
+   :sequence    {:description "Ordered linked-list of args (stored via next-arg-id chain)"
+                 :clojure-type 'clojure.lang.Sequential}})
 
 
 (def supported-types
@@ -74,6 +76,10 @@
    :timestamptz {:postgres "TIMESTAMPTZ" :datomic :db.type/instant :memory :any}
    :jsonb       {:postgres "JSONB"       :datomic :db.type/string  :memory :any}
    :bytes       {:postgres "BYTEA"       :datomic :db.type/bytes   :memory :any}
+   ;; :sequence is a marker type — the actual items live in separate arg rows
+   ;; linked via arg.next_arg_id. Backends don't need a column for the sequence
+   ;; itself; we map to JSONB for forward compat with dumps.
+   :sequence    {:postgres "JSONB"       :datomic :db.type/string  :memory :any}
    ;; Special types for references
    :ref         {:postgres "UUID"        :datomic :db.type/ref     :memory :any}
    ;; :ref-many = many-to-many relationship.
@@ -139,6 +145,7 @@
    :enum        keyword?
    :union       (constantly true)   ; Union accepts any value
    :any         (constantly true)   ; Any accepts any value (polymorphic type)
+   :sequence    sequential?         ; Sequence of items (Clojure vector / seq)
    :null        (constantly true)}) ; Null/void type
 
 

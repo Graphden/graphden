@@ -3,28 +3,31 @@
 
 
 {:namespace "web.graph"
+ :description "Graph-shape adapters between graphden entities and Cytoscape.js's nodes/edges format."
  :fns
-[{:name :entities-to-cytoscape
-  :args {:entities :jsonb}
-  :return-type :jsonb}
+ [{:name :entities-to-cytoscape
+   :description "Convert a flat list of graphden entities (fn/arg/ns rows) into Cytoscape.js's `{:nodes [] :edges []}` element shape."
+   :args {:entities {:type :jsonb :description "Vector of entity maps (mixed fn/arg/ns)."}}
+   :return-type :jsonb}
 
- {:name :cytoscape-init-script
-  :args {:container-id :text
-         :elements :jsonb
-         :style :jsonb
-         :layout :jsonb
-         :on-click {:type :text :required false}}
-  :return-type :text}
+  {:name :cytoscape-init-script
+   :description "Generate a JS init script that mounts a Cytoscape.js instance on a container, with elements/style/layout and an optional on-click expression."
+   :args {:container-id {:type :text :description "DOM id of the mount container."}
+          :elements {:type :jsonb :description "`{:nodes [] :edges []}` element shape."}
+          :style {:type :jsonb :description "Cytoscape selectors → style map."}
+          :layout {:type :jsonb :description "Cytoscape layout options map."}
+          :on-click {:type :text :required false :description "JS expression evaluated when a node is clicked. The clicked node is bound as `node`."}}
+   :return-type :text}
 
- {:name :cytoscape-update-script
-  :args {:elements :jsonb
-         :layout {:type :bool :value true}}
-  :return-type :text}
+  {:name :cytoscape-update-script
+   :description "Generate a JS snippet that swaps the elements of an existing Cytoscape.js instance and (optionally) re-runs its layout."
+   :args {:elements {:type :jsonb :description "New `{:nodes [] :edges []}` shape."}
+          :layout {:type :bool :value true :description "Whether to re-run layout after swapping. Default true."}}
+   :return-type :text}
 
- {:name :format-display-value
-  :args {:value {:type :any :required false}
-         :ref-id {:type :text :required false}
-         :max-length {:type :int :required false}}
-  :return-type :text}
-
-]}
+  {:name :format-display-value
+   :description "Format an arg value or ref-id for display in the right-hand panel — truncates long literals, dereferences refs, hides nil."
+   :args {:value {:type :any :required false :description "Literal value (when present)."}
+          :ref-id {:type :text :required false :description "Fn ref id (when value is nil and the arg points to another fn)."}
+          :max-length {:type :int :required false :description "Maximum visible length before truncation."}}
+   :return-type :text}]}

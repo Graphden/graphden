@@ -1,0 +1,52 @@
+;; `:reduce` with a 1-arg reducer callable that receives `[acc item]`.
+;;
+;; The `:reduce` impl wraps Clojure's reduce so the user fn is called
+;; with the per-step args packed into a single vector:
+;;
+;;     (reduce (fn [acc item] (func [acc item])) init coll)
+;;
+;; That means a reducer fn-graph has ONE free arg (typically `:pair`),
+;; not two. `:hof-lambda-params` sees a single deep-free name, so
+;; `hof-wrap` produces a single-arg callable, and the `[acc item]`
+;; vector flows through verbatim under the rename.
+;;
+;; From there, you point that single arg at any sequence-typed slot —
+;; `:add/:nums`, `:mul/:nums`, etc. — and the vector becomes the impl's
+;; argument. For `+` and `*` this collapses to one node:
+;; `:_ex-sum-step :parent :add :args {:nums {:as :pair}}`.
+
+
+{:namespace "examples.reduce-pattern"
+ :description "Folding with `:reduce` — reducer's `:pair` free arg receives the `[acc item]` vector."
+ :fns
+ [;; Sum a literal collection.
+  {:name :ex-sum-vec
+   :description "Sum of `[1 2 3 4 5]` via `:reduce`. Reducer is `:add` with `:nums {:as :pair}` — the `[acc item]` vector flows directly into `:nums`. Result: 15."
+   :parent :reduce
+   :args {:func :_ex-sum-step
+          :init 0
+          :coll {:value [1 2 3 4 5]}}}
+
+  {:name :_ex-sum-step
+   :description "Reducer step `(+ acc item)`. Whole-arg rename `{:as :pair}` makes `:add/:nums` receive the `[acc item]` vector verbatim from `:reduce`'s call site."
+   :parent :add
+   :args {:nums {:as :pair}}}
+
+  ;; Same shape for product.
+  {:name :ex-product-vec
+   :description "Product of `[1 2 3 4 5]` via `:reduce`. Result: 120."
+   :parent :reduce
+   :args {:func :_ex-mul-step
+          :init 1
+          :coll {:value [1 2 3 4 5]}}}
+
+  {:name :_ex-mul-step
+   :parent :mul
+   :args {:nums {:as :pair}}}
+
+  ;; Reduce over a free-arg collection — caller passes `:coll`.
+  {:name :ex-sum-of
+   :description "Sum a caller-supplied collection. Free arg `:coll` propagates from `:reduce/:coll` straight up."
+   :parent :reduce
+   :args {:func :_ex-sum-step
+          :init 0}}]}

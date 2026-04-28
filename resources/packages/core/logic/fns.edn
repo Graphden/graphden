@@ -3,56 +3,75 @@
 
 
 {:namespace "core.logic"
+ :description "Boolean logic, branching, defaults, and constant primitives."
  :fns
-[;; === Logic ===
- {:name :and
-  :args {:values :jsonb}
-  :return-type :bool}
+ [;; === Logic ===
+  {:name :and
+   :description "Logical AND over a vector — true iff every value is truthy."
+   :args {:values {:type :sequence :of :any :description "Vector of values to AND."}}
+   :return-type :bool}
 
- {:name :or
-  :args {:values :jsonb}
-  :return-type :bool}
+  {:name :or
+   :description "Logical OR over a vector — true iff at least one value is truthy."
+   :args {:values {:type :sequence :of :any :description "Vector of values to OR."}}
+   :return-type :bool}
 
- {:name :not
-  :args {:value :any}
-  :return-type :bool}
+  {:name :not
+   :description "Boolean negation."
+   :args {:value {:type :any :description "Any value; truthy → false, falsy → true."}}
+   :return-type :bool}
 
- {:name :some?
-  :args {:value :any}
-  :return-type :bool}
+  {:name :some?
+   :description "True iff value is non-nil."
+   :args {:value {:type :any :description "Value to test for nilness."}}
+   :return-type :bool}
 
- {:name :nil?
-  :args {:value :any}
-  :return-type :bool}
+  {:name :nil?
+   :description "True iff value is nil."
+   :args {:value {:type :any :description "Value to test for nilness."}}
+   :return-type :bool}
 
- ;; === Conditionals ===
- {:name :if
-  :args {:test :any
-         :then :any
-         :else {:type :any :required false}}
-  :return-type :any}
+  ;; === Conditionals ===
+  {:name :if
+   :description "Two-branch conditional. Returns `then` when `test` is truthy, else `else` (nil if omitted)."
+   :args {:test {:type :any :description "Truthy/falsy expression."}
+          :then {:type :any :description "Returned when test is truthy."}
+          :else {:type :any :required false
+                 :description "Returned when test is falsy. Defaults to nil."}}
+   :return-type :any}
 
- {:name :cond
-  :args {:clauses :jsonb}
-  :return-type :any}
+  {:name :cond
+   :description "Multi-branch — evaluates pairs `[test result …]`, returns the first result whose test is truthy."
+   :args {:clauses {:type :sequence :of :any :description "Vector of alternating tests and result expressions."}}
+   :return-type :any}
 
- {:name :case
-  :args {:value :any
-         :clauses :jsonb
-         :default {:type :any :required false}}
-  :return-type :any}
+  {:name :case
+   :description "Constant-time dispatch on `value` via a `{match-value result}` map (Clojure's `(get clauses value default)`). Falls back to `:default` when the value isn't a key. Note: keys in a literal `:clauses` map come back keywordized after JSONB roundtrip — use string keys when matching against caller-supplied strings."
+   :args {:value {:type :any :description "Value to look up in the clauses map."}
+          :clauses {:type :jsonb :description "Map of `{match-value result}` — the dispatch table. Pass either a literal map or a fn-ref that returns one."}
+          :default {:type :any :required false
+                    :description "Fallback when `value` isn't a key in `:clauses`. Defaults to nil."}}
+   :return-type :any}
 
- ;; === Defaults ===
- {:name :coalesce
-  :args {:value :any
-         :default :any}
-  :return-type :any}
+  ;; === Defaults ===
+  {:name :coalesce
+   :description "Returns `value` if non-nil, else `default`."
+   :args {:value {:type :any :description "Primary value; used when non-nil."}
+          :default {:type :any :description "Fallback used when value is nil."}}
+   :return-type :any}
 
- ;; === Constants ===
- {:name :const
-  :args {:value :any}
-  :return-type :any}
+  ;; === Constants ===
+  {:name :const
+   :description "Identity-style passthrough — returns `:value` unchanged. Building block for capture renames `{:as :name}`."
+   :args {:value {:type :any :description "Value to return as-is."}}
+   :return-type :any}
 
- ;; identity is just const with a different name
- {:name :identity
-  :parent :const}]}
+  {:name :identity
+   :description "Alias of `:const`."
+   :parent :const}
+
+  {:name :equal?
+   :description "Two-arg equality (Clojure's `=`). Composition-friendly variant of `:eq`."
+   :args {:a {:type :any :description "Left operand."}
+          :b {:type :any :description "Right operand."}}
+   :return-type :bool}]}

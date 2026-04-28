@@ -1,0 +1,62 @@
+;; `:invoke` vs `:call` — two ways to apply something to one argument.
+;;
+;; The difference is in what the `:func` slot CONTAINS, not what it does:
+;;
+;;   :invoke  → :func is :any-typed.
+;;              The fn-graph at :func is EXECUTED first; its result must
+;;              already be a Clojure callable (an actual fn object), and
+;;              that callable is invoked with `:arg`. No hof-wrapping.
+;;
+;;   :call    → :func is :fn-typed.
+;;              The fn-graph at :func is HOF-WRAPPED into a Clojure
+;;              callable, then invoked with `:arg`. The fn-graph itself
+;;              is the callable — no need to "produce" one.
+;;
+;; Rule of thumb:
+;;   - Use `:call` when `:func` is a fn-graph with one free arg —
+;;     the most common case (`:str-upper`, `:_ex-greet-name-up`, …).
+;;   - Use `:invoke` when `:func` is a fn-graph that COMPUTES a
+;;     callable (`:make-handler`, `:_router`, anything returning an
+;;     `(fn [x] …)` from inside the graph).
+;;
+;; Mismatch is a frequent bug — the project memory `feedback_fn_vs_any_for_callables`
+;; documents getting this wrong: passing a fn-graph through a `:fn` slot
+;; when the slot already received a built callable wraps it twice and
+;; doesn't behave as expected.
+
+
+{:namespace "examples.invoke-vs-call"
+ :description ":invoke (already-built Clojure callable) vs :call (fn-graph, will be hof-wrapped)."
+ :fns
+ [;; CALL: fn-graph as the callable. `:str-upper` has one free `:string`,
+  ;; the hof-wrap turns it into `(fn [s] (str-upper-fn s))`, then `:arg`
+  ;; flows in as `s`.
+  {:name :ex-call-upper
+   :description "`:call` with a fn-graph as the callable. `:str-upper` is hof-wrapped (its single free `:string` becomes the call-site arg) and invoked with `:arg`. Idiomatic shape for any one-arg fn-graph."
+   :parent :call
+   :args {:func :str-upper
+          :arg "hello"}}
+
+  ;; INVOKE: a fn-graph that PRODUCES a Clojure callable. `:make-handler`
+  ;; is a base-fn that returns `(fn [_request] response)` — i.e. its
+  ;; output IS the callable. We pass that output to `:invoke`, not the
+  ;; fn-graph itself.
+  {:name :ex-invoke-handler
+   :description "`:invoke` with a fn-graph that COMPUTES a callable. `:make-handler` returns `(fn [_req] {:status 200 :headers {} :body \"hi\"})`; `:invoke` calls that fn with `:arg` (a fake request map). Use this shape when `:func` is something whose RESULT is the callable, not something that IS one."
+   :parent :invoke
+   :args {:func :_ex-static-handler
+          :arg {}}}
+
+  {:name :_ex-static-handler
+   :description "Builds a constant Ring handler `(fn [_req] {:status 200 …})` via `:make-handler`."
+   :parent :make-handler
+   :args {:response {:value {:status 200 :headers {} :body "hi"}}}}
+
+  ;; Side-by-side: same logical operation, two different shapes.
+  ;; `:_ex-shout-fn` produces a callable that upper-cases its input,
+  ;; via `:make-handler` over `:str-upper`-wrapped-as-callable.
+  ;;
+  ;; (Skipped here — `:make-handler` returns a one-arg-ignoring fn,
+  ;; so this exercise can't trivially layer on top of it. Stays at
+  ;; the two clear cases above.)
+  ]}

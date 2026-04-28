@@ -20,6 +20,4 @@
  {:storage #ig/ref :db/versioned}
 
  :exec/context
- {:storage #ig/ref :db/versioned
-  :max-depth 100
-  :timeout-ms 5000}}
+ {:storage #ig/ref :db/versioned}}

@@ -1,43 +1,22 @@
 (ns graphden.packages.web.http.impls
-  "Implementations for web/http base functions using http-kit."
+  "Implementations for web/http base functions.
+
+   Thin wrappers around http-kit. Request adaptation, header merging,
+   and auth are composed from fn-defs elsewhere."
   (:require
+    [graphden.executor.defbase :refer [defbase]]
     [org.httpkit.server :as http-kit]))
 
 
-(defn- stringify-keys
-  "Adapts map keys to Ring string format (keyword keys → their name)."
-  [m]
-  (when m
-    (into {} (map (fn [[k v]] [(if (keyword? k) (name k) (str k)) v]) m))))
+(defbase http-server
+  [handler port]
+  (http-kit/run-server handler {:port port}))
 
 
-(defn http-server
-  [{:keys [handler port default-headers]}]
-  (let [
-        base-headers (stringify-keys (or default-headers {}))
-        ring-handler (fn [request]
-                       (let [req-map {:method (name (:request-method request))
-                                      :uri (:uri request)
-                                      :query-string (:query-string request)
-                                      :headers (:headers request)
-                                      :body (when-let [b (:body request)]
-                                              (slurp b))}
-                             response (handler req-map)]
-                         {:status (or (:status response) 200)
-                          :headers (merge base-headers
-                                          (stringify-keys (or (:headers response) {})))
-                          :body (or (:body response) "")}))]
-    (http-kit/run-server ring-handler {:port port})))
+(defbase http-stop
+  [server]
+  (when server (server) nil))
 
-
-(defn http-stop
-  [{:keys [server]}]
-  (when server
-    (server)
-    nil))
-
-
-;; === Registry ===
 
 (def impls
   {:http-server http-server

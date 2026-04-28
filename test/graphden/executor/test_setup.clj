@@ -16,11 +16,43 @@
    instead of enums. Cannot unify without schema alignment."
   (:require
     [graphden.executor.interface :as exec]
+    [graphden.executor.runtime :as rt]
     [graphden.schema.graph.schema :as gds]
     [graphden.schema.malli.core :as mds]
     [graphden.storage.postgres.core :as pg]
     [graphden.storage.protocol.core :as sp]
     [graphden.storage.protocol.postgres-test-helpers :as pth]))
+
+
+;; ============================================================================
+;; Impl helper — inline `defbase`-style for test registration
+;; ============================================================================
+
+(defmacro fn-impl
+  "Build an anonymous base-fn impl whose body references args by name,
+   mirroring `defbase` but inline. Equivalent to:
+
+     (fn [args ctx]
+       (let [a (rt/resolve-arg args :a)
+             b (rt/resolve-arg args :b)]
+         body))
+
+   The symbols `args` and `ctx` are bound by the generated fn and
+   accessible from the body — useful for HOF impls that need ctx
+   (`(exec/make-single-arg-callable ctx some-fn)`) or lazy impls that
+   want to skip the eager resolve for specific keys
+   (`(rt/resolve-arg args :then-branch)` inside an `if`).
+
+   Use in tests instead of `(fn [{:keys [a b]} _] (+ @a @b))` — the
+   latter relies on the legacy-deref adapter which production no longer
+   pays for on the hot path."
+  [arg-syms & body]
+  (let [let-bindings (mapcat (fn [s] [s `(rt/resolve-arg ~'args ~(keyword s))]) arg-syms)]
+    `(fn [~'args ~'ctx]
+       (let [~'ctx ~'ctx               ; keep kondo quiet for bodies that ignore ctx
+             ~'args ~'args             ; and same for args if the body only names resolved syms
+             ~@let-bindings]
+         ~@body))))
 
 
 ;; ============================================================================
@@ -117,11 +149,13 @@
    - Creates args owned by base fn
    - Creates composed fn with parent-id=base-fn-id"
   [storage]
-  ;; Register the base function (args are delays, use @ to deref)
+  ;; Register the base function. Args arrive via compile's build-args-map —
+  ;; plain values for literal bindings, `rt/thunk` for refs, or raw values
+  ;; in free-args. `rt/resolve-arg` handles all three.
   (exec/register-base-fn!
     :add
-    (fn [{:keys [a b]} _ctx]
-      (+ @a @b)))
+    (fn [args _ctx]
+      (+ (rt/resolve-arg args :a) (rt/resolve-arg args :b))))
 
   ;; Create base fn - keep name "add" to match registry keyword
   ;; Composed fn gets unique name to avoid conflicts

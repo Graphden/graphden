@@ -3,123 +3,262 @@
 
 
 {:namespace "core.system"
+ :description "System primitives — Ring response shape, JSON, JVM info, timing, env, resources."
  :fns
-[{:name :ring-response
-  :args {:status :int
-         :headers :jsonb
-         :body :text}
-  :return-type :jsonb}
+ [{:name :ring-response
+   :description "Build a Ring response map: {:status :headers :body}. Consumed directly by http-kit."
+   :args {:status {:type :int :description "HTTP status code (e.g. 200, 404)."}
+          :headers {:type :jsonb :description "Header map; keys must be strings (http-kit convention)."}
+          :body {:type :text :description "Response body — a string the client receives verbatim."}}
+   :return-type :jsonb}
 
- {:name :make-handler
-  :args {:response :jsonb}
-  :return-type :fn}
+  {:name :make-handler
+   :description "Wrap a constant value as a Ring callable `(fn [_request] response)`. Used for reitit's default-handler trio (:not-found etc.) where the slot is :any-typed and needs a real Clojure callable; per-route handlers use :assoc-fn instead."
+   :args {:response {:type :jsonb :description "The fixed Ring response to return for every call."}}
+   :return-type :fn}
 
- ;; Dynamic handler that calls response-fn for each request
- ;; response-fn is a fn-id of function with one required arg (receives request)
- {:name :make-request-handler
-  :args {:response-fn :fn}
-  :return-type :fn
-  :ctx true}
+  {:name :to-json-string
+   :description "Serialize a Clojure value to a JSON string."
+   :args {:data {:type :any :description "Any JSON-encodable value."}}
+   :return-type :text}
 
- ;; =============================================================================
- ;; HANDLER FACTORIES (base-fns)
- ;; =============================================================================
+  {:name :parse-json
+   :description "Parse a JSON string into a Clojure value."
+   :args {:string {:type :text :description "JSON text to parse."}
+          :keywordize {:type :bool :value true
+                       :description "When true, convert string keys to keywords."}}
+   :return-type :jsonb}
 
- ;; Data handler: data-fn(request) -> data, body-fn(data) -> body string
- {:name :make-data-handler
-  :args {:data-fn :fn
-         :body-fn :fn
-         :status :int
-         :headers :jsonb}
-  :return-type :fn
-  :ctx true}
+  {:name :jvm-version
+   :description "Java runtime version string (`java.version` system property)."
+   :args {}
+   :return-type :jsonb}
 
- ;; Action handler: action-fn(request) -> {:status :headers :body}
- {:name :make-action-handler
-  :args {:action-fn :fn
-         :base-headers :jsonb}
-  :return-type :fn
-  :ctx true}
+  {:name :heap-memory
+   :description "JVM heap usage snapshot — `{:used :committed :max}` in bytes."
+   :args {}
+   :return-type :jsonb}
 
- ;; =============================================================================
- ;; FN-DEFS: Specialized handlers via inheritance
- ;; =============================================================================
+  {:name :thread-count
+   :description "Live thread count from the JVM ThreadMXBean."
+   :args {}
+   :return-type :int}
 
- ;; JSON data handler - data-fn returns data, serialized to JSON
- {:name :make-json-response-handler
-  :parent :make-data-handler
-  :args {:body-fn :to-json-string
-         :status 200
-         :headers {"Content-Type" "application/json"}
-         :data-fn {:as :data-fn}}}
+  {:name :os-info
+   :description "Host operating-system info — name, arch, version."
+   :args {}
+   :return-type :jsonb}
 
- ;; HTML data handler - data-fn returns hiccup, rendered to HTML
- {:name :make-html-response-handler
-  :parent :make-data-handler
-  :args {:body-fn :render-hiccup
-         :status 200
-         :headers {"Content-Type" "text/html; charset=utf-8"}
-         :data-fn {:as :render-fn}}}
+  ;; jvm-info composed from atomic base-fns via assoc chain
+  {:name :jvm-info
+   :description "Aggregate JVM/system snapshot — version, heap, threads, OS."
+   :parent :assoc
+   :args {:map :_threads-section :key "os" :value :os-info}}
 
- ;; HTML action handler - action-fn returns full response map
- {:name :make-html-action-handler
-  :parent :make-action-handler
-  :args {:base-headers {"Content-Type" "text/html; charset=utf-8"}
-         :action-fn {:as :action-fn}}}
+  {:name :_jvm-section
+   :parent :assoc-empty
+   :args {:key "jvm" :value :jvm-version}}
 
- {:name :to-json-string
-  :args {:data :any}
-  :return-type :text}
+  {:name :_memory-section
+   :parent :assoc
+   :args {:map :_jvm-section :key "memory" :value :heap-memory}}
 
- {:name :parse-json
-  :args {:string :text
-         :keywordize {:type :bool :value true}}
-  :return-type :jsonb}
+  {:name :_threads-section
+   :parent :assoc
+   :args {:map :_memory-section :key "threads" :value :thread-count}}
 
- {:name :jvm-version
-  :args {}
-  :return-type :jsonb}
+  {:name :current-time-ms
+   :description "Wall-clock milliseconds since Unix epoch."
+   :args {}
+   :return-type :int}
 
- {:name :heap-memory
-  :args {}
-  :return-type :jsonb}
+  {:name :env
+   :description "Read an OS environment variable. Returns nil if unset."
+   :args {:name {:type :text :description "Environment variable name."}}
+   :return-type :text}
 
- {:name :thread-count
-  :args {}
-  :return-type :int}
+  ;; Construct an ExceptionInfo. Paired with :throw to raise from
+  ;; graph code; also usable as a plain value if something wants a
+  ;; ready-made exception without raising.
+  {:name :ex-info
+   :description "Construct a Clojure `clojure.lang.ExceptionInfo` from a message + data map. Pair with `:throw` to raise; the value can also flow through the graph as a plain exception object."
+   :args {:message {:type :text :description "Human-readable error message."}
+          :data {:type :jsonb :description "Structured `:data` payload attached to the exception."}}
+   :return-type :any}
 
- {:name :os-info
-  :args {}
-  :return-type :jsonb}
+  ;; Raise the given exception. :return-type is :any because control
+  ;; flow never returns, but the graph-level caller needs a placeholder.
+  {:name :throw
+   :description "Raise an exception from graph code. Control flow never returns; `:return-type :any` is a placeholder so callers can wire it where any value would do."
+   :args {:exception {:type :any :description "Exception to raise (typically built via `:ex-info`)."}}
+   :return-type :any}
 
- ;; jvm-info composed from atomic base-fns via assoc chain
- {:name :_jvm-section
-  :parent :assoc-empty
-  :args {:key "jvm" :value :jvm-version}}
+  ;; `:env-required` is now a fn-def (see below) composing :env with
+  ;; :if + :throw + :ex-info — kept here as a forward declaration so
+  ;; consumers reading fns.edn see the spec in one place.
+  {:name :env-required
+   :description "Read an OS environment variable, throwing `execution-error/missing-env-var` if it's unset or blank. Pure composition over `:if`/`:env`/`:blank?`/`:throw`/`:ex-info`."
+   :parent :if
+   :args {:test :_env-blank?
+          :then :_env-missing-throw
+          :else :_env-value}}
 
- {:name :_memory-section
-  :parent :assoc
-  :args {:map :_jvm-section :key "memory" :value :heap-memory}}
+  {:name :_env-value
+   :parent :env
+   :args {:name {:as :name}}}
 
- {:name :_threads-section
-  :parent :assoc
-  :args {:map :_memory-section :key "threads" :value :thread-count}}
+  {:name :_env-blank?
+   :parent :blank?
+   :args {:string :_env-value}}
 
- {:name :jvm-info
-  :parent :assoc
-  :args {:map :_threads-section :key "os" :value :os-info}}
+  {:name :_env-missing-message
+   :parent :str
+   :args {:parts [{:value "Required env var "}
+                  {:as :name}
+                  {:value " is not set"}]}}
 
- {:name :current-time-ms
-  :args {}
-  :return-type :int}
+  {:name :_env-missing-error
+   :parent :ex-info
+   :args {:message :_env-missing-message
+          :data {"type" "execution-error/missing-env-var"}}}
 
- ;; Read file from classpath resources
- {:name :read-resource
-  :args {:path :text}
-  :return-type :text}
+  {:name :_env-missing-throw
+   :parent :throw
+   :args {:exception :_env-missing-error}}
 
- ;; Load multiple resource files and concatenate with separator
- {:name :concat-resources
-  :args {:paths :jsonb
-         :separator {:type :text :value "\n\n"}}
-  :return-type :text}]}
+  ;; Look up a classpath resource and slurp it. Returns nil if missing.
+  {:name :read-resource-or-nil
+   :description "Read a classpath resource as a string, or return nil if the path doesn't resolve. Building block for `:read-resource` (which throws on miss)."
+   :args {:path {:type :text :description "Resource path relative to the classpath root."}}
+   :return-type :text}
+
+  ;; Read file from classpath resources, or throw with a clear message
+  ;; if the path doesn't resolve. fn-def composition on top of
+  ;; `:read-resource-or-nil` + `:if` + `:throw` + `:ex-info`.
+  {:name :read-resource
+   :description "Read a classpath resource as a string, throwing `execution-error/resource-not-found` when the path doesn't resolve. Pure composition over `:read-resource-or-nil`/`:if`/`:throw`/`:ex-info`."
+   :parent :if
+   :args {:test :_resource-nil?
+          :then :_resource-not-found-throw
+          :else :_resource-or-nil}}
+
+  {:name :_resource-or-nil
+   :parent :read-resource-or-nil
+   :args {:path {:as :path}}}
+
+  {:name :_resource-nil?
+   :parent :nil?
+   :args {:value :_resource-or-nil}}
+
+  {:name :_resource-not-found-message
+   :parent :str
+   :args {:parts [{:value "Resource not found: "}
+                  {:as :path}]}}
+
+  {:name :_resource-not-found-error
+   :parent :ex-info
+   :args {:message :_resource-not-found-message
+          :data {"type" "execution-error/resource-not-found"}}}
+
+  {:name :_resource-not-found-throw
+   :parent :throw
+   :args {:exception :_resource-not-found-error}}
+
+  ;; Load multiple resource files and concatenate with separator.
+  ;; Pure composition over `:map :read-resource` + `:str-join`.
+  {:name :concat-resources
+   :description "Read each path in `:paths` via `:read-resource` and join the contents with a separator (default `\\n\\n`). Used to bundle CSS/JS asset modules."
+   :parent :str-join
+   :args {:coll :_concat-resources-list
+          :separator {:type :text :value "\n\n"}}}
+
+  {:name :_concat-resources-list
+   :parent :map
+   :args {:func :read-resource
+          :coll {:as :paths}}}
+
+  ;; SHA-256 of a UTF-8 string, returned as 64 hex chars. Used as a
+  ;; lower-level primitive when a one-off content hash is needed
+  ;; somewhere; deploy verification uses the build-time hash below
+  ;; instead (single source of truth across front- and back-end).
+  {:name :sha256-hex
+   :description "Lower-case 64-char hex SHA-256 digest of a UTF-8 string. Use `:subs` to take a shorter prefix when a concise build identifier is needed."
+   :args {:s {:type :text :description "Input string. Returns nil for nil input."}}
+   :return-type :text}
+
+  ;; ============================================================================
+  ;; Build identifiers (3-section)
+  ;;
+  ;; The uberjar carries `graphden-build-hashes.json`, written at build
+  ;; time by `build.clj`'s `compute-section-hashes` step. It splits the
+  ;; deploy into three independently-hashed sections so a `/version`
+  ;; check tells you WHAT moved, not just whether anything did:
+  ;;
+  ;;   :frontend  — every `.js` / `.css` / `.html` / `.svg` under
+  ;;                `resources/packages/` (the editor browser bundle)
+  ;;   :packages  — every `.edn` / `.clj` under `resources/packages/`
+  ;;                (graph fn-defs + their base-fn impls)
+  ;;   :backend   — `src/**/*.clj` plus non-package resources
+  ;;                (`system-*.edn`, `logback.xml`, …)
+  ;;
+  ;; All three flow into `GET /version`; the editor's console marker
+  ;; uses the frontend hash specifically (it's the bit the user can
+  ;; visually verify against what they have open in the editor).
+  ;; ============================================================================
+
+  {:name :_build-hashes-raw
+   :parent :read-resource
+   :args {:path "graphden-build-hashes.json"}}
+
+  {:name :build-hashes
+   :description "Map `{\"frontend\" … \"backend\" … \"packages\" …}` — each value is the lower-case 64-char hex SHA-256 of that section of the deploy at build time. Keys stay strings (`:keywordize false`) so the `:get` lookups below match the JSON shape verbatim."
+   :parent :parse-json
+   :args {:string :_build-hashes-raw
+          :keywordize false}}
+
+  {:name :build-hash-frontend
+   :description "Frontend-section SHA-256 — every `.js` / `.css` under `resources/packages/`. Changes only when a browser-side asset changes."
+   :parent :get
+   :args {:coll :build-hashes :key "frontend"}}
+
+  {:name :build-hash-backend
+   :description "Backend-section SHA-256 — `src/**/*.clj` plus non-package resources. Changes only when Clojure server code or system config changes."
+   :parent :get
+   :args {:coll :build-hashes :key "backend"}}
+
+  {:name :build-hash-packages
+   :description "Packages-section SHA-256 — every `.edn` and `.clj` under `resources/packages/`. Changes only when graph fn-defs or base-fn impls change."
+   :parent :get
+   :args {:coll :build-hashes :key "packages"}}
+
+  {:name :build-hash-frontend-short
+   :description "First 12 chars of `:build-hash-frontend` — used by the editor's `BUILD_HASH` console marker so the in-page identifier reflects exactly which JS/CSS the user is running."
+   :parent :subs
+   :args {:string :build-hash-frontend :start 0 :end 12}}
+
+  ;; Invoke a value (that happens to be a Clojure fn) with one arg.
+  ;; `:func :any` — the value is deref'd and used as-is. Use this when
+  ;; :func is a fn-graph that PRODUCES a callable (e.g. :_router
+  ;; returns a reitit ring-handler).
+  {:name :invoke
+   :description "Invoke a value that's already a Clojure callable with one argument. The `:func` slot is `:any` so the value flows through as-is — use this when `:func` is a fn-graph that PRODUCES a callable. For fn-graphs that ARE callables, use `:call`."
+   :args {:func {:type :any :description "Already-built Clojure callable (e.g. produced by another fn-graph). Used as-is — no hof-wrap."}
+          :arg {:type :any :description "Single argument passed to the callable."}}
+   :return-type :any}
+
+  ;; Call a fn-graph-as-callable with one arg. `:func :fn` — the ref is
+  ;; hof-wrap'd into a callable (the fn-graph's leftover free-arg
+  ;; receives :arg). Use this when :func is a fn-graph that IS a
+  ;; callable (Ring-handler-shaped: has `:request` or similar free arg,
+  ;; returns a response).
+  {:name :call
+   :description "Invoke a fn-graph (hof-wrap'd into a Clojure callable) with one argument. Use when `:func` IS a callable; for already-built Clojure fns use `:invoke`."
+   :args {:func {:type :fn :description "Fn-graph to wrap into a callable."}
+          :arg {:type :any :description "Single argument passed to the callable."}}
+   :return-type :any}
+
+  ;; Read an InputStream/Reader to string
+  {:name :slurp
+   :description "Read an InputStream/Reader to a string (Clojure's `slurp`). Used to materialise Ring request bodies."
+   :args {:input {:type :any :description "InputStream, Reader, or any source `clojure.core/slurp` accepts."}}
+   :return-type :text}]}

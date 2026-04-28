@@ -91,6 +91,10 @@
   #uuid "28293031-3233-4678-5d6e-7f8a9b0c1d2e")
 
 
+(def ^:private fn-version-description-field-uuid
+  #uuid "3c4d5e6f-7a8b-4c9d-0e1f-2a3b4c5d6e7f")
+
+
 ;; Field UUIDs for :arg-version
 (def ^:private arg-version-arg-id-field-uuid
   #uuid "31323334-3536-4789-8c9d-0e1f2a3b4c5d")
@@ -136,12 +140,24 @@
   #uuid "41424344-4546-4789-8a9b-0c1d2e3f4a5b")
 
 
+(def ^:private arg-version-next-arg-id-field-uuid
+  #uuid "44454647-4849-4a0b-1c2d-3e4f5a6b7c8d")
+
+
+(def ^:private arg-version-prev-arg-id-field-uuid
+  #uuid "45464748-494a-4b1c-2d3e-4f5a6b7c8d9e")
+
+
 (def ^:private arg-version-created-at-field-uuid
   #uuid "42434445-4647-4890-9b0c-1d2e3f4a5b6c")
 
 
 (def ^:private arg-version-deleted-at-field-uuid
   #uuid "43444546-4748-4901-0c1d-2e3f4a5b6c7d")
+
+
+(def ^:private arg-version-description-field-uuid
+  #uuid "4d5e6f7a-8b9c-4d0e-1f2a-3b4c5d6e7f8a")
 
 
 (def versioned-entities
@@ -201,6 +217,9 @@
                       :impl-hash {:uuid fn-version-impl-hash-field-uuid
                                   :type :text
                                   :nullable? true}
+                      :description {:uuid fn-version-description-field-uuid
+                                    :type :text
+                                    :nullable? true}
                       :created-at {:uuid fn-version-created-at-field-uuid
                                    :type :timestamptz}
                       :deleted-at {:uuid fn-version-deleted-at-field-uuid
@@ -240,6 +259,15 @@
                       :is-fn {:uuid arg-version-is-fn-field-uuid
                               :type :bool
                               :nullable? true}
+                      :next-arg-id {:uuid arg-version-next-arg-id-field-uuid
+                                    :type :uuid
+                                    :nullable? true}
+                      :prev-arg-id {:uuid arg-version-prev-arg-id-field-uuid
+                                    :type :uuid
+                                    :nullable? true}
+                      :description {:uuid arg-version-description-field-uuid
+                                    :type :text
+                                    :nullable? true}
                       :created-at {:uuid arg-version-created-at-field-uuid
                                    :type :timestamptz}
                       :deleted-at {:uuid arg-version-deleted-at-field-uuid

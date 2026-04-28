@@ -1,0 +1,65 @@
+;; Building collections from mixed literals and fn-refs.
+;;
+;; All sequence-typed slots (`:list/:items`, `:concat/:colls`, `:str/:parts`,
+;; `:add/:nums`, `:cond/:clauses`, `:apply/:args`, `:get-in/:path`,
+;; `:assoc-in/:path`, `:select-keys/:ks`, …) accept inline `[lit ref lit]`
+;; vectors — each item is its own arg-entity, fn-refs are resolved per item.
+;;
+;; The few remaining `:jsonb`-typed collection slots are accept-collection
+;; slots — `:filter/:coll`, `:map/:coll`, `:str-join/:coll`, `:sort/:coll`,
+;; etc. — where the slot expects ONE already-built collection (typically a
+;; computed fn-ref). For literal keywords inside a `:sequence` slot, see
+;; examples.literal-keyword-in-sequence.
+
+
+{:namespace "examples.collections"
+ :description "`:list` with mixed items, `:concat` with inline collections, stacked `:assoc` for map-building."
+ :fns
+ [{:name :ex-mixed-list
+   :description "A vector with two literals and one fn-ref interleaved. Each `:items` entry is its own arg-entity, so fn-refs resolve per item."
+   :parent :list
+   :args {:items [{:value 1}
+                  :_ex-three
+                  {:value 5}]}}
+
+  {:name :_ex-three
+   :description "Local helper providing the value 3."
+   :parent :const
+   :args {:value 3}}
+
+  ;; :concat — `:colls` is sequence-typed. Inline mix works: each entry is
+  ;; either a literal collection or a fn-ref to a computed one.
+  {:name :ex-prepended
+   :description "Prepend `[0]` in front of `:ex-mixed-list`. Inline `[{:value [0]} :ex-mixed-list]` — the literal vector and the fn-ref to a computed list both resolve as separate items."
+   :parent :concat
+   :args {:colls [{:value [0]}
+                  :ex-mixed-list]}}
+
+  ;; Stacked :assoc — `:map`/`:value` are `:any`-typed, fn-refs resolve directly.
+  {:name :ex-status-map
+   :description "Builds `{\"version\" \"1.0\" \"status\" \"ok\"}` by stacking two `:assoc` calls. `:assoc/:map` is `:any`-typed, so `:_ex-status-stage-1` resolves cleanly."
+   :parent :assoc
+   :args {:map :_ex-status-stage-1
+          :key "status"
+          :value "ok"}}
+
+  {:name :_ex-status-stage-1
+   :description "First stage — empty map plus `\"version\" => \"1.0\"`."
+   :parent :assoc
+   :args {:map {}
+          :key "version"
+          :value "1.0"}}
+
+  ;; :count over a computed collection
+  {:name :ex-count-prepended
+   :description "Number of items in `:ex-prepended`. Confirms the prepended collection has 4 items: 0, 1, 3, 5."
+   :parent :count
+   :args {:coll :ex-prepended}}
+
+  ;; Numeric :nums slot — also sequence-typed. Same inline rule.
+  {:name :ex-sum-mixed
+   :description "Sum `[10, ex-three=3, 100]`. `:add/:nums` is sequence-typed, so a fn-ref sitting next to literals resolves correctly."
+   :parent :add
+   :args {:nums [{:value 10}
+                 :_ex-three
+                 {:value 100}]}}]}

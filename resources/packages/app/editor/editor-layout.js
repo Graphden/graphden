@@ -20,27 +20,20 @@
 // (comma-separated names) split into N flex cells of width/N each; each cell
 // wraps its name to multiple lines if the name is wider than the cell content
 // area. The overlay height = sum of row heights + drag handle.
-function computeFnOverlayHeight(label, width) {
+function computeFnOverlayHeight(label, _width) {
+  // All ancestor rows render single-line (white-space:nowrap +
+  // text-overflow:ellipsis); the full name is revealed on hover via
+  // the floating full-name popover. Height is therefore
+  // line-count × per-line-height, no per-cell wrap math.
   const LINE_H = 13;     // 11px font @ ~1.2 line-height
   const ROW_PAD = 8;     // 4px top + 4px bottom inside each ancestor-line
-  const CHAR_W = 7;
-  const CELL_PAD = 16;   // 8px left + 8px right inside each MI cell
   const lines = label.split('\n');
-  let h = 0;
-  for (const line of lines) {
-    if (line.includes(', ')) {
-      const cells = line.split(', ');
-      const cellW = width / cells.length;
-      const cellContentW = Math.max(1, cellW - CELL_PAD);
-      const wrapPerCell = cells.map(c =>
-        Math.max(1, Math.ceil(c.length * CHAR_W / cellContentW)));
-      h += Math.max(...wrapPerCell) * LINE_H + ROW_PAD;
-    } else {
-      h += LINE_H + ROW_PAD;
-    }
-  }
-  return h + DRAG_HANDLE_HEIGHT;
+  return lines.length * (LINE_H + ROW_PAD) + DRAG_HANDLE_HEIGHT;
 }
+
+// Optional-args strip rendered by editor-overlays.js right above the drag
+// handle: 1px top border + italic text at 10px with 2px vertical padding.
+const OPTIONAL_STRIP_HEIGHT = 17;
 
 function calculateNodeSize(nodeData) {
   const label = nodeData.label || '';
@@ -56,15 +49,35 @@ function calculateNodeSize(nodeData) {
     };
   } else {
     // Both fn and placeholder use fn-overlay rendering with potential MI rows.
+    // Cap visible row width — names beyond this are truncated with an
+    // ellipsis at render time and revealed in full via the hover popover.
     const lines = label.split('\n');
-    const maxLineLen = 30;
+    const maxLineLen = 36;
     const maxLen = Math.max(...lines.map(l => {
       const cleanLen = l.replace(/[^\x20-\x7E]/g, '').length;
       return Math.min(cleanLen, maxLineLen);
     }));
-    const width = Math.max(80, maxLen * 7 + 24);
+    const optionalArgs = nodeData.optionalArgs;
+    const optionalText = Array.isArray(optionalArgs) && optionalArgs.length
+      ? optionalArgs.map(n => '?' + n).join(' ')
+      : '';
+    const widthFromOptional = optionalText ? optionalText.length * 6 + 24 : 0;
+    // Per-MI-cell floor so each cell still fits at least one icon-pair
+    // worth of slack even when the names are very short. Without this,
+    // a 3-cell MI row of `r404, r405, r500` collapses each cell to ~50px
+    // and even the 4-character name truncates to "r…".
+    const MIN_MI_CELL = 90;
+    const widthFromMI = Math.max(...lines.map(l => {
+      if (!l.includes(', ')) return 0;
+      return l.split(', ').length * MIN_MI_CELL;
+    }));
+    // Slack budget = inner padding + room for the right-pinned action
+    // icons (i + ↗ ≈ 42px) so the longest full name actually fits and
+    // doesn't get prematurely ellipsised.
+    const width = Math.max(80, maxLen * 7 + 60, widthFromOptional, widthFromMI);
+    const extra = optionalText ? OPTIONAL_STRIP_HEIGHT : 0;
     const height = Math.max(30 + DRAG_HANDLE_HEIGHT,
-                            computeFnOverlayHeight(label, width));
+                            computeFnOverlayHeight(label, width) + extra);
     return { width, height };
   }
 }
@@ -165,50 +178,99 @@ async function fetchBackendLayout() {
     });
 
     // Calculate per-column gap based on:
-    // 1. Longest edge label crossing each column boundary
-    // 2. Width spread in the column (max - min): wide nodes extend past narrow ones,
-    //    so edges from narrow nodes start further left, needing more gap for labels
+    // 1. Longest edge label crossing each column boundary, INCLUDING the
+    //    type-chip / is-fn-chip / sequence buttons / description badge
+    //    that the frontend overlays render alongside the label text.
+    //    Without this the column gap is sized for the bare argName and
+    //    the chips spill into the next column (`handler` + `fn` chip +
+    //    `λ` chip + `i` badge does not fit in 7 chars × 9px + 30px).
+    // 2. Width spread in the column (max - min): wide nodes extend past
+    //    narrow ones, so edges from narrow nodes start further left,
+    //    needing more gap for labels.
     const colGaps = new Map();
     const CHAR_WIDTH = 9;
     const LABEL_PADDING = 30;
+    // Chip widths must stay in lock-step with editor-styles.css values:
+    //   .arg-type-chip / .arg-isfn-chip — 4px padding each side, 1px
+    //   border each side, ~9px font; longest chip text is "timestamptz"
+    //   (~11 chars × 6px ≈ 66px) but in practice the type rendered on
+    //   edges is the EFFECTIVE type which tends to be short. The
+    //   description-badge is a fixed 15px square. Each chip carries
+    //   4px margin-left.
+    const TYPE_CHIP_WIDTH      = 38;  // covers "sequence" comfortably
+    const ISFN_CHIP_WIDTH      = 22;  // λ / ()
+    const SEQ_BTN_WIDTH        = 18;  // × or +
+    const DESC_BADGE_WIDTH     = 19;  // 15 + 4 margin
     edges.forEach(e => {
       const srcPos = gridPos[e.data.source];
       const tgtPos = gridPos[e.data.target];
       if (srcPos && tgtPos && e.data.argName) {
         const labelCol = Math.min(srcPos.col, tgtPos.col);
-        // Use widest line for multi-line labels (\n-separated)
         const widestLine = e.data.argName.split('\n').reduce(
           (max, line) => Math.max(max, line.length), 0);
-        const labelWidth = widestLine * CHAR_WIDTH + LABEL_PADDING;
+        let chipOverhead = DESC_BADGE_WIDTH;  // always rendered
+        // Mirror the chip-emit predicates from createEdgeLabelOverlay
+        // so the layout reserves space for the same elements that get
+        // rendered. Look up the source arg directly from `lookups`.
+        const sourceArgId = e.data.sourceArgId;
+        const editArg = sourceArgId && lookups && lookups.argMap
+                        ? lookups.argMap.get(sourceArgId) : null;
+        const editable = editArg
+                      && typeof implementationFnIds !== 'undefined'
+                      && implementationFnIds.has(editArg['fn-id'])
+                      && (typeof isAuthenticated === 'function'
+                          ? isAuthenticated() : true);
+        if (editable) {
+          chipOverhead += TYPE_CHIP_WIDTH;
+          // Walk source-id chain to determine effective type (mirrors
+          // resolveArgType in editor-overlays.js).
+          let cur = editArg;
+          let effType = null;
+          for (let i = 0; i < 100 && cur; i++) {
+            if (cur.type) { effType = String(cur.type).replace(/^:/, ''); break; }
+            if (!cur['source-id']) break;
+            cur = lookups.argMap.get(cur['source-id']);
+          }
+          if (effType === 'fn') chipOverhead += ISFN_CHIP_WIDTH;
+          if (editArg['prev-arg-id']) {
+            chipOverhead += SEQ_BTN_WIDTH;                              // ×
+            if (!editArg['next-arg-id']) chipOverhead += SEQ_BTN_WIDTH; // tail +
+          }
+        }
+        const labelWidth = widestLine * CHAR_WIDTH + LABEL_PADDING + chipOverhead;
         const currentGap = colGaps.get(labelCol) || GRID_GAP_X;
         colGaps.set(labelCol, Math.max(currentGap, labelWidth));
       }
     });
 
-    // Calculate X positions with per-column gaps + width spread compensation
+    // Calculate X positions with per-column gaps + width spread compensation.
+    // Skip empty columns entirely — the backend reserves some cells for edge
+    // routing but those produce no nodes, so padding them with a default width
+    // wastes horizontal space.
     const colLeftX = new Map();
-    const maxColKey = Math.max(...Array.from(colWidths.keys()), 0);
+    const usedCols = Array.from(colWidths.keys()).sort((a, b) => a - b);
     let currentX = 0;
-    for (let c = 0; c <= maxColKey; c++) {
+    usedCols.forEach(c => {
       colLeftX.set(c, currentX);
-      const maxWidth = colWidths.get(c) || 80;
+      const maxWidth = colWidths.get(c);
       const minWidth = colMinWidths.get(c) || maxWidth;
-      // Half the spread: wide node center is offset from narrow node center,
-      // so edge label from a narrow node needs extra space to clear the wide node
       const widthSpread = Math.max(0, (maxWidth - minWidth) / 2);
       const gap = colGaps.get(c) || GRID_GAP_X;
       currentX += maxWidth + Math.max(gap, gap + widthSpread);
-    }
+    });
 
-    // Calculate Y positions
+    // Calculate Y positions. Skip empty rows — they happen when the matrix
+    // solver leaves gaps between subtrees, and rendering them at the default
+    // 30px + gap wastes vertical space (seen as a big void between top row
+    // and the rest of the graph).
     const rowCenterY = new Map();
     let currentY = 0;
-    const maxRowKey = Math.max(...Array.from(rowHeights.keys()), 0);
-    for (let r = 0; r <= maxRowKey; r++) {
-      const height = rowHeights.get(r) || 30;
+    const usedRows = Array.from(rowHeights.keys()).sort((a, b) => a - b);
+    usedRows.forEach(r => {
+      const height = rowHeights.get(r);
       rowCenterY.set(r, currentY + height / 2);
       currentY += height + GRID_GAP_Y;
-    }
+    });
 
     // Build final layout
     // Left-align all nodes: x = leftX + nodeWidth/2

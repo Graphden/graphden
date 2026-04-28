@@ -26,8 +26,9 @@
 
 
 (defn- create-test-storage
-  "Creates a versioned storage initialized with versioned schema on main branch.
-   Cleans the database before creating storage to ensure test isolation."
+  "Creates a versioned storage on main branch. Cleans the database
+   before creating — some tests call this multiple times inside one
+   deftest to exercise fresh state between `testing` blocks."
   []
   (th/clean-database-fast! *container*)
   (let [schema (vds/build-schema (mds/create-builder))

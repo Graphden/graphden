@@ -72,7 +72,7 @@ fn: add-10
 **Using the composed function:**
 ```clojure
 ;; Execute add-10 with b=5 → returns 15
-(execute ctx add-10-id {:b-arg-id 5})
+(execute ctx add-10-id {:b 5})
 ```
 
 **Key insight:** All argument binding happens in the database via arg entities. No separate fn-arg/arg-value entities needed. The arg entity combines schema, value, and inheritance in one place.
@@ -84,9 +84,11 @@ fn: add-10
 | [docs/PHILOSOPHY.md](docs/PHILOSOPHY.md) | Design principles, rationale, module mapping | Before making architectural decisions |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Technical details, execution model, examples | When implementing features |
 | [docs/PACKAGES.md](docs/PACKAGES.md) | Package system, module structure, loading | When adding base-fns or fn-defs |
+| [docs/TYPES.md](docs/TYPES.md) | Type system design & semantics | When working with arg types |
+| [docs/LAYOUT.md](docs/LAYOUT.md) | Graph-editor layout pipeline (Stages 1–7) | When touching layout impl or editor frontend |
 | [docs/CONSTRAINTS.md](docs/CONSTRAINTS.md) | Graph constraint specifications | When working with GraphConstraints |
 | [docs/ERROR_CODES.md](docs/ERROR_CODES.md) | Error types reference | When handling errors |
-| [docs/EXTENDING.md](docs/EXTENDING.md) | Adding new storage backends | When implementing new backend |
+| [docs/EXTENDING.md](docs/EXTENDING.md) | HOF semantics, custom storage, schema extensions, impl-hash | When extending below the package layer |
 | [docs/ROADMAP.md](docs/ROADMAP.md) | Implementation status, future plans | For project planning |
 | [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | Integrant config, Aero tags | When configuring the system |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | Docker, uberjar, environment | When deploying to production |
@@ -115,25 +117,56 @@ clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test
 clojure -M:dev:test -m kaocha.runner --focus graphden.executor.core-test/execute-test
 ```
 
-### Frontend Build Verification
+### Deploy verification — `bb verify`
 
-The editor frontend has a build timestamp to verify deployments:
+Every uberjar carries a `graphden-build-hashes.json` resource with
+three SHA-256 digests, written by `build.clj`'s
+`compute-section-hashes` step:
 
-1. **After ANY frontend change** (any `editor-*.js` or `editor-styles.css`):
-   - Update `BUILD_TIMESTAMP` in `resources/packages/app/editor/editor-state.js`
-   - Use format: `'YYYY-MM-DD HH:MM'` (UTC+3 timezone)
-   - Rebuild: `clojure -T:build uber && docker compose build --no-cache executor && docker compose up -d executor`
-   - Tell user the new timestamp
+| Section | Files |
+|---------|-------|
+| `frontend` | `.js` / `.css` / `.html` / `.svg` under `resources/packages/` |
+| `packages` | `.edn` / `.clj` under `resources/packages/` |
+| `backend`  | `src/**/*.clj` plus non-package resources |
 
-2. **Verification flow**:
-   - User opens browser console and sees: `[Graphden Editor] Build: YYYY-MM-DD HH:MM`
-   - If user reports a different timestamp → changes did NOT deploy
-   - Fix deployment before making more code changes
+Three consumers read those hashes:
 
-3. **If deployment fails**:
-   - Check JAR contains changes: `unzip -p target/executor-server.jar packages/app/editor/editor-state.js | grep BUILD_TIMESTAMP`
-   - Check Docker image timestamp: `docker inspect graphden-executor --format '{{.Created}}'`
-   - Ensure JAR was built BEFORE Docker image
+- `GET /version` → `{"frontend": "<hex>", "packages": "<hex>", "backend": "<hex>"}`
+- `window.BUILD_HASH` — first 12 chars of the `frontend` hash,
+  substituted into the `__BUILD_HASH__` placeholder in
+  `editor-state.js` at bundle time. Exposed on `window` for
+  on-demand readout (type `BUILD_HASH` in DevTools, or read it
+  programmatically from a test). No auto-log to console.
+- `bb verify [<base-url>]` — recomputes the same three hashes from
+  the local checkout, fetches `<base-url>/version`, and reports each
+  section's match/mismatch independently.
+
+Workflow:
+
+```bash
+bb rebuild           # rebuild JAR + docker image
+bb verify            # per-section ✓/✗ — tells you WHICH part of the
+                     # deploy didn't ship: e.g. frontend matches but
+                     # backend differs → docker image rebuilt with a
+                     # stale jar
+bb verify https://prod.example.com   # any URL
+```
+
+Exit codes: 0 (every section matches), 1 (at least one mismatch),
+2 (`/version` unreachable).
+
+`window.BUILD_HASH` and the `frontend` field of `/version` always
+agree because they come from the same baked-in resource. If
+`bb verify` reports backend match but the user's browser still
+behaves like old code, compare `window.BUILD_HASH` (DevTools console)
+against `fetch('/version').then(r=>r.json())` — a divergence is a
+browser-cache issue, not a deploy issue (offer the in-app reload
+button or Ctrl+Shift+R).
+
+The placeholder is `__BUILD_HASH__` — it lives only in
+`editor-state.js`. Don't delete it; the substitution step would have
+nothing to replace and `window.BUILD_HASH` would be the literal
+string `"__BUILD_HASH__"`.
 
 ### Frontend Module Structure
 
@@ -144,13 +177,15 @@ The editor frontend is split into modules for better maintainability:
 | `editor-state.js` | Global variables, constants, timestamp | - |
 | `editor-data.js` | Data utilities, lookups, inheritance | state |
 | `editor-layout.js` | Grid layout algorithm, positioning | state |
-| `editor-graph.js` | Building graph elements (nodes, edges) | state, data |
-| `editor-overlays.js` | HTML overlays, drag handles | state, data |
-| `editor-ui.js` | Sidebar, selection, expansion controls | state, data, cytoscape |
-| `editor-cytoscape.js` | Cytoscape initialization, rendering | state, layout, overlays, graph |
+| `editor-tooltips.js` | Description-tooltip + full-name popover singletons | state |
+| `editor-icons.js` | Right-edge action icons (`i`, `↗`) | state, data, tooltips |
+| `editor-drag.js` | Drag handle for any overlay | state |
+| `editor-overlays.js` | HTML overlays for cy nodes (rows, edges, placeholders, args) | state, data, tooltips, icons, drag |
+| `editor-ui.js` | Sidebar, selection, expansion controls | state, data, icons, cytoscape |
+| `editor-cytoscape.js` | Cytoscape initialization, rendering | state, layout, overlays |
 | `editor-main.js` | Entry point, init | all |
 
-**Load order** (in `impls.clj`): state → data → layout → graph → overlays → ui → cytoscape → main
+**Load order** (in `app/editor/fns.edn` `_editor-script-paths`): state → data → layout → tooltips → icons → drag → overlays → ui → cytoscape → main
 
 ### Browser Test Tool
 
@@ -401,191 +436,36 @@ resources/packages/     # Package definitions (EDN + Clojure impls)
 
 ## Packages System
 
-Base functions and fn-defs are organized in packages under `resources/packages/`. Each package contains modules with `fns.edn` (definitions) and `impls.clj` (Clojure implementations).
-
-### Package Structure
-
-```
-resources/packages/{package-name}/
-├── package.edn                    # Package metadata
-└── {module-name}/
-    ├── fns.edn                    # Function definitions (base-fns + fn-defs)
-    └── impls.clj                  # Clojure implementations for base-fns
-```
-
-### package.edn Format
-
-```edn
-{:name "web"
- :version "1.0.0"
- :description "Web primitives: HTTP, routing, HTML"
- :dependencies ["core"]           ; Packages to load first
- :modules ["http" "reitit" "html"]
- :startup-fn :web-server}         ; Optional: fn to execute on start
-```
-
-### fns.edn Format
-
-```edn
-[;; Base function (has implementation in impls.clj)
- {:name :add
-  :args {:nums :jsonb}
-  :return-type :numeric}
-
- ;; Fn-def (composition, no implementation)
- {:name :add-10
-  :parent :add
-  :args {:nums [10]}}]
-```
-
-### Loading Packages
-
-```clojure
-(require '[graphden.packages.loader :as pkg])
-
-;; Load packages in dependency order
-(def packages (pkg/load-packages ["core" "web" "app"]))
-;; => {:base-fn-defs {...}, :fn-defs [...], :packages [...], :startup-fn :web-server}
-```
+Base functions and fn-defs live in `resources/packages/{pkg}/{module}/` as `fns.edn` (declarations) + `impls.clj` (Clojure impls). Dependencies in `package.edn` drive load order. See [docs/PACKAGES.md](docs/PACKAGES.md) for full format and workflow.
 
 ## Best Practices (CRITICAL)
 
-### 1. Use Inheritance to Avoid Duplication (DRY)
+The full rationale and worked examples live in [docs/PACKAGES.md § Composition Best Practices](docs/PACKAGES.md#composition-best-practices). The bullets below are the bare minimum for AI-assisted edits — read PACKAGES.md before larger structural changes.
 
-When multiple fn-defs share the same ancestor AND one or more bound arguments, extract a common parent:
+### 1. DRY via inheritance
+Extract a common parent when ≥ 2 fn-defs share an ancestor AND ≥ 1 bound arg with the same structure. Indicators: same parent, same bound args, repeated shape, can be named meaningfully. See [§ 1](docs/PACKAGES.md#1-use-inheritance-to-eliminate-duplication-dry).
 
-**Before (duplication):**
-```edn
-{:name :health-route
- :parent :get-route
- :args {:a "/health" :v :health-handler-fn}}
+### 2. Free-args propagation
+Unbound args of a referenced fn-def surface as free args of the caller — that's how reusable templates (`:get-route`, `:json-ok-response`, …) work. Arg names propagate up; renames via `{:as :name}` swap the public name. See [§ 2](docs/PACKAGES.md#2-free-arguments-pattern-argument-propagation).
 
-{:name :metrics-route
- :parent :get-route
- :args {:a "/metrics" :v :metrics-handler-fn}}
+### 3. Named vs one-off
+Name a fn-def when it's reused, has independent meaning, or represents a domain concept. Inline (no name) when used exactly once with no semantic identity. Heuristic: if you can't name it without describing wiring, it's one-off. See [§ 3](docs/PACKAGES.md#3-named-vs-anonymous-one-off-functions).
 
-;; Both bind to :get-route with same structure
+### 4. Hierarchy depth
+2–3 levels is normal, 4–5 acceptable for route/response composition, 6+ needs justification. Each level should have a name, potential reuse, and a cohesive concept. See [§ 4](docs/PACKAGES.md#4-hierarchy-depth-guidelines).
+
+### 5. Base-fn vs fn-def
+Base-fn: has Clojure impl, wraps library, ≤ ~20 LOC body. Fn-def: pure composition, may carry hardcoded values, no impl. Base-fns MUST NOT call other base-fns — that's hidden composition. See [§ 5](docs/PACKAGES.md#5-base-function-vs-fn-def-decision-matrix) and [PHILOSOPHY § Base Functions](docs/PHILOSOPHY.md#base-functions-philosophy).
+
+### 6. Naming (short names, context carries meaning)
+Names add the **last bit of distinction** — namespace, parent, and arg names convey the rest. Drop affixes the context already says; keep affixes that disambiguate vs a sibling. Verb-at-end (`entity-create`) when prefix-form clashes with a base-fn. Extract a sub-NS when ≥ ~5 fn-defs share a long prefix. Names are validated for **global** uniqueness at sync time, **including locals** (`_*`).
+
+Before renaming, grep:
+```bash
+grep -rE ":name :the-target-name\b|defbase the-target-name\b" resources/packages/
 ```
 
-This is acceptable if paths and handlers differ. But if structure repeats:
-
-**Extract common ancestor when same structure repeats:**
-```edn
-;; Common building block
-{:name :json-ok-response
- :parent :ok-response
- :args {:headers {"Content-Type" "application/json"}}}
-
-;; Reuse in multiple places
-{:name :health-response-fn
- :parent :json-ok-response
- :args {:body :health-json-body-fn}}
-
-{:name :metrics-response-fn
- :parent :json-ok-response
- :args {:body :metrics-json-body-fn}}
-```
-
-**Key indicators for extraction:**
-- Same ancestor (not necessarily immediate parent)
-- Same bound arguments
-- Repeated structural pattern
-- Meaningful name can be given to the extracted fn-def
-
-### 2. Free Arguments Pattern (Argument Propagation)
-
-When a fn-def references another fn-def with unbound arguments, those arguments become "free" (exposed) in the parent. This enables building composable hierarchies:
-
-```edn
-;; assoc-any has args: {m, k, v}
-{:name :assoc-empty
- :parent :assoc-any
- :args {:m {}}}           ; binds m={}, exposes k and v
-
-;; assoc-handler has free arg: v (k is bound)
-{:name :assoc-handler
- :parent :assoc-empty
- :args {:k "handler"}}    ; binds k="handler", exposes v
-
-;; method-map references :assoc-handler, its free arg v propagates
-{:name :method-map
- :parent :assoc-empty
- :args {:v :assoc-handler}}  ; v is fn with free arg, that arg propagates
-
-;; route exposes: a (path), k (method), v (handler)
-{:name :route
- :parent :pair
- :args {:b :method-map}}
-
-;; get-route fixes method, exposes: a (path), v (handler)
-{:name :get-route
- :parent :route
- :args {:k "get"}}
-
-;; Usage: only need to provide path and handler
-{:name :health-route
- :parent :get-route
- :args {:a "/health" :v :health-handler-fn}}
-```
-
-**Key insight:** Free arguments of referenced functions become part of the interface. This allows building reusable route/response/handler templates.
-
-### 3. Named vs Anonymous Functions
-
-**Use named fn-def when:**
-- Function is reused in multiple places
-- Function has clear semantic meaning
-- Function could be tested independently
-- Function represents a domain concept
-
-```edn
-;; Good: reusable building block
-{:name :json-ok-response
- :parent :ok-response
- :args {:headers {"Content-Type" "application/json"}}}
-```
-
-**Use inline/one-off composition when:**
-- Combination is used exactly once
-- No semantic meaning beyond "connect A to B"
-- No foreseeable reuse scenario
-
-```edn
-;; One-off: specific route with specific handler
-;; Don't create :health-route-with-specific-path-and-handler fn-def
-{:name :health-route
- :parent :get-route
- :args {:a "/health" :v :health-handler-fn}}
-```
-
-**Rule of thumb:** If you can't give it a meaningful name that describes WHAT it does (not HOW it connects things), it's probably a one-off composition.
-
-### 4. Hierarchy Depth Guidelines
-
-- **2-3 levels**: Normal for response types (`:ring-response` → `:ok-response` → `:json-ok-response`)
-- **4-5 levels**: Acceptable for complex composition (route building blocks)
-- **6+ levels**: Review if intermediate levels have independent semantic meaning
-
-Each level should:
-1. Have a meaningful name
-2. Be potentially reusable
-3. Represent a cohesive concept
-
-### 5. Base Function vs Fn-def Decision
-
-| Characteristic | Base Function | Fn-def |
-|----------------|---------------|--------|
-| Has Clojure code | Yes (impls.clj) | No |
-| Wraps library/runtime | Yes | No |
-| Contains hardcoded values | No (except defaults) | Yes |
-| Can be expressed as composition | No | Yes |
-| Lines of implementation | 1-20 | N/A |
-
-**Examples:**
-- `http-server`: Base function (wraps http-kit)
-- `web-server`: Fn-def (composes http-server with router and port)
-- `router`: Base function (wraps reitit)
-- `editor-router`: Fn-def (composes router with specific routes)
+See [docs/PACKAGES.md § Naming Guidelines](docs/PACKAGES.md#naming-guidelines) for the full rationale, decision matrix, and worked examples.
 
 ## CI Workflow
 

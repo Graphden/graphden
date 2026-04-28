@@ -1,0 +1,63 @@
+;; Higher-order functions — :map / :filter, with and without :coll,
+;; and `:comp` of two transducers.
+;;
+;; The `:func`/`:pred` slot is `:fn`-typed. The executor hof-wraps the
+;; referenced fn-graph into a Clojure callable: the wrapper collects
+;; the call-site argument and feeds it as the single free arg of the
+;; fn-graph, then executes it. That's why `:str-upper` (a fn-graph with
+;; one free `:string`) can be passed where Clojure would expect a
+;; one-arg fn — the wrap matches them up.
+;;
+;; When `:coll` is omitted in `:map`/`:filter`, the result is a
+;; *transducer* (a stateful Clojure object). Transducers compose with
+;; `:comp` and run in a single pass via `:transduce` (not shown here —
+;; uses 2-arg reducer callables which are slightly fiddlier).
+
+
+{:namespace "examples.hof"
+ :description "`:map`/`:filter` with and without collections, `:comp` over transducers."
+ :fns
+ [;; Eager :map — supplies :coll, gets a lazy seq materialised by execute.
+  {:name :ex-upper-each
+   :description "`(map str-upper [\"a\" \"b\" \"c\"])` — eager. The `:func` is a fn-ref; the executor hof-wraps it as a one-arg callable around `:str-upper/:string`."
+   :parent :map
+   :args {:func :str-upper
+          :coll {:value ["alpha" "beta" "gamma"]}}}
+
+  ;; Transducer form — :coll omitted.
+  {:name :ex-upper-xf
+   :description "`(map str-upper)` — `:coll` omitted, so `:map` returns a TRANSDUCER object (Clojure stateful). Use it as input to `:transduce` or `:comp`. Demonstrates: optional args (see `:coll {:required false}` in `:map`'s spec) materially change the return type."
+   :parent :map
+   :args {:func :str-upper}}
+
+  ;; :filter with a built-in predicate (`:some?` is `value → bool`).
+  {:name :ex-only-some
+   :description "Drop nils from a vector. `:some?` is the predicate; hof-wrapped over its single `:value` arg."
+   :parent :filter
+   :args {:pred :some?
+          :coll {:value [1 nil 2 nil 3]}}}
+
+  ;; :filter with a custom predicate built by partial-binding :str-starts-with?.
+  {:name :ex-starts-with-a
+   :description "Keep strings starting with \"a\". The predicate `:_ex-starts-with-a` is a fn-graph with `:prefix` already bound, leaving `:string` free — exactly the shape needed for `:filter`'s 1-arg predicate."
+   :parent :filter
+   :args {:pred :_ex-starts-with-a
+          :coll {:value ["alpha" "beta" "apple" "cherry"]}}}
+
+  {:name :_ex-starts-with-a
+   :description "Predicate template — `:str-starts-with?` with `:prefix` fixed to \"a\". Free arg `:string` becomes the call-site input when hof-wrapped."
+   :parent :str-starts-with?
+   :args {:prefix "a"}}
+
+  ;; :comp of two transducers — produces a single transducer that runs both.
+  ;; Demonstrates that transducers are first-class values usable in :comp.
+  {:name :ex-pipeline-xf
+   :description "Compose two transducers — filter-`a`-prefix THEN upper-case. `:comp` composes right-to-left, so the filter runs first on each item, then the upper-case. Result is itself a transducer; combine with a coll via a separate `:transduce` invocation."
+   :parent :comp
+   :args {:functions [:_ex-filter-a-xf
+                      :ex-upper-xf]}}
+
+  {:name :_ex-filter-a-xf
+   :description "Transducer form of `:filter` with the `a`-prefix predicate; mirrors `:ex-upper-xf` but for filtering."
+   :parent :filter
+   :args {:pred :_ex-starts-with-a}}]}

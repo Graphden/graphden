@@ -5,8 +5,7 @@
   (:require
     [cheshire.core :as json]
     [clojure.string :as str]
-    [graphden.executor.interface :as exec]
-    [hiccup2.core :as h])
+    [graphden.executor.defbase :refer [defbase]])
   (:import
     (java.lang.management
       ManagementFactory
@@ -18,75 +17,44 @@
 
 ;; === Ring Response Primitives ===
 
-(defn ring-response
-  [{:keys [status headers body]}]
+(defn- stringify-keys
+  [m]
+  (when m (into {} (map (fn [[k v]] [(if (keyword? k) (name k) (str k)) v])) m)))
+
+
+(defbase ring-response [status headers body]
+  ;; Ring spec: header keys must be strings. JSONB round-trip keywordizes
+  ;; them, so we coerce back on the way out.
   {:status status
-   :headers headers
+   :headers (stringify-keys headers)
    :body body})
 
 
-(defn make-handler
-  [{:keys [response]}]
+(defbase make-handler [response]
   (let [r response]
     (fn [_request] r)))
 
 
-(defn make-request-handler
-  [{:keys [response-fn]} ctx]
-  (exec/make-single-arg-callable ctx response-fn))
-
-
-(defn make-data-handler
-  "Data handler factory: data-fn(request) -> data, body-fn(data) -> body string.
-   Returns Ring handler function."
-  [{:keys [data-fn body-fn status headers]} ctx]
-  (let [data-callable (exec/make-optional-arg-callable ctx data-fn)
-        body-callable (exec/make-single-arg-callable ctx body-fn)]
-    (fn [request]
-      (let [data (data-callable request)
-            body (body-callable data)]
-        {:status status
-         :headers headers
-         :body body}))))
-
-
-(defn make-action-handler
-  "Action handler factory: action-fn(request) -> {:status :headers :body}.
-   Merges base-headers with headers from action-fn result."
-  [{:keys [action-fn base-headers]} ctx]
-  (let [action-callable (exec/make-optional-arg-callable ctx action-fn)]
-    (fn [request]
-      (let [result (action-callable request)
-            resp-status (or (:status result) 200)
-            resp-headers (merge base-headers (or (:headers result) {}))
-            resp-body (or (:body result) "")]
-        {:status resp-status
-         :headers resp-headers
-         :body resp-body}))))
-
-
-(defn to-json-string
-  [{:keys [data]}]
+(defbase to-json-string [data]
   (json/generate-string data))
 
 
-(defn parse-json
+(defbase parse-json
   "Parse a JSON string into a data structure."
-  [{:keys [string keywordize]}]
+  [string keywordize]
   (json/parse-string string keywordize))
 
 
 ;; === System Information ===
 
-(defn jvm-version
-  [_args]
+(defbase jvm-version []
   (let [runtime-bean (ManagementFactory/getRuntimeMXBean)]
     {:name (System/getProperty "java.vm.name")
      :version (System/getProperty "java.version")
      :uptime-ms (RuntimeMXBean/.getUptime runtime-bean)}))
 
-(defn heap-memory
-  [_args]
+
+(defbase heap-memory []
   (let [runtime (Runtime/getRuntime)
         heap (MemoryMXBean/.getHeapMemoryUsage (ManagementFactory/getMemoryMXBean))]
     {:heap-used (MemoryUsage/.getUsed heap)
@@ -96,12 +64,12 @@
      :total (Runtime/.totalMemory runtime)
      :max (Runtime/.maxMemory runtime)}))
 
-(defn thread-count
-  [_args]
+
+(defbase thread-count []
   {:count (Thread/activeCount)})
 
-(defn os-info
-  [_args]
+
+(defbase os-info []
   (let [os-bean (ManagementFactory/getOperatingSystemMXBean)]
     {:name (OperatingSystemMXBean/.getName os-bean)
      :arch (OperatingSystemMXBean/.getArch os-bean)
@@ -109,24 +77,56 @@
      :load-average (OperatingSystemMXBean/.getSystemLoadAverage os-bean)}))
 
 
-(defn current-time-ms
-  [_args]
+(defbase current-time-ms []
   (System/currentTimeMillis))
 
 
-(defn read-resource
-  "Read a resource file from classpath and return its contents as string."
-  [{:keys [path]}]
-  (if-let [resource (clojure.java.io/resource path)]
-    (slurp resource)
-    (throw (ex-info (str "Resource not found: " path)
-                    {:type :execution-error/resource-not-found
-                     :path path}))))
+(defbase env-fn [name]
+  (System/getenv name))
 
 
-(defn concat-resources
-  [{:keys [paths separator]}]
-  (str/join separator (map #(read-resource {:path %}) paths)))
+(defbase ex-info-fn
+  "Construct a clojure.lang.ExceptionInfo. Lets fn-graphs build
+   exceptions compositionally without reaching into Clojure code."
+  [message data]
+  (ex-info message data))
+
+
+(defbase throw-fn
+  "Throw the given exception. Paired with `ex-info` (or any other
+   Throwable-producing fn) to express `raise` at graph level."
+  [exception]
+  (throw exception))
+
+
+(defbase read-resource-or-nil
+  "Lookup + slurp a classpath resource. Returns the file contents as a
+   string, or nil if the resource isn't on the classpath. `read-resource`
+   (fn-def) pairs this with :if + :throw to surface a clear error when
+   the path is missing."
+  [path]
+  (when-let [r (clojure.java.io/resource path)]
+    (clojure.core/slurp r)))
+
+
+(defbase invoke-fn
+  "Invoke a one-arg callable with `arg`. Shared body between :invoke
+   and :call — they differ only in arg-type schema (`:any` vs `:fn`,
+   which controls hof-wrapping at the binding site, not the impl)."
+  [func arg]
+  (func arg))
+
+
+(defbase slurp-fn [input]
+  (when (instance? java.io.InputStream input)
+    (clojure.core/slurp input)))
+
+
+(defbase sha256-hex-fn [s]
+  (when s
+    (let [md (java.security.MessageDigest/getInstance "SHA-256")
+          bs (.digest md (.getBytes ^String s "UTF-8"))]
+      (apply str (map #(format "%02x" (bit-and ^byte % 0xff)) bs)))))
 
 
 ;; === Registry ===
@@ -134,9 +134,6 @@
 (def impls
   {:ring-response ring-response
    :make-handler make-handler
-   :make-request-handler (with-meta make-request-handler {:ctx true})
-   :make-data-handler (with-meta make-data-handler {:ctx true})
-   :make-action-handler (with-meta make-action-handler {:ctx true})
    :to-json-string to-json-string
    :parse-json parse-json
    :jvm-version jvm-version
@@ -144,5 +141,11 @@
    :thread-count thread-count
    :os-info os-info
    :current-time-ms current-time-ms
-   :read-resource read-resource
-   :concat-resources concat-resources})
+   :env env-fn
+   :ex-info ex-info-fn
+   :throw throw-fn
+   :read-resource-or-nil read-resource-or-nil
+   :invoke invoke-fn
+   :call invoke-fn
+   :slurp slurp-fn
+   :sha256-hex sha256-hex-fn})

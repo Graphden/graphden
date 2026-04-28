@@ -37,4 +37,13 @@ window.addEventListener('popstate', () => {
 // DOM READY
 // ============================================================================
 
-document.addEventListener('DOMContentLoaded', initGraph);
+// Apply width / theme / collapsed state ASAP — body exists once
+// `editor-prefs.js` is loaded (it's in the bundled `<script>` at
+// end of body).
+if (typeof initPrefsEarly === 'function') initPrefsEarly();
+
+document.addEventListener('DOMContentLoaded', () => {
+  initPrefsLate();
+  initAuthLock();
+  initGraph();
+});

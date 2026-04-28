@@ -7,6 +7,7 @@
    - Basic lifecycle testing with mocks"
   (:require
     [clojure.test :refer [deftest is testing]]
+    [graphden.executor.compile-runtime :as cr]
     [graphden.executor.composition.interface :as fn-composition]
     [graphden.executor.interface :as exec]
     [integrant.core :as ig]))
@@ -55,7 +56,11 @@
 
 (deftest http-server-resume-with-mock-test
   (testing "resume-key calls init-key with same config"
-    (with-redefs [exec/execute-by-name mock-execute-by-name]
+    ;; :http/server routes through `cr/execute-by-name` under the default
+    ;; `EXECUTOR=compiled` path; redef both that and the legacy entry so
+    ;; the test is insensitive to which executor the env var selects.
+    (with-redefs [exec/execute-by-name mock-execute-by-name
+                  cr/execute-by-name mock-execute-by-name]
       (let [mock-context {:storage :mock :registry :mock}
             mock-packages {:startup-fn :test-server}
             opts {:context mock-context :packages mock-packages :port 8888}
@@ -69,7 +74,8 @@
 
 (deftest http-server-init-with-mock-test
   (testing "init-key returns a server stop function"
-    (with-redefs [exec/execute-by-name mock-execute-by-name]
+    (with-redefs [exec/execute-by-name mock-execute-by-name
+                  cr/execute-by-name mock-execute-by-name]
       (let [mock-context {:storage :mock :registry :mock}
             mock-packages {:startup-fn :test-server}
             opts {:context mock-context :packages mock-packages :port 9999}

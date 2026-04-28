@@ -7,7 +7,9 @@
                 "imports/taoensso/encore"]
 
  :hooks
- {:analyze-call {graphden.executor.registry.macros/defbase hooks.defbase/defbase}}
+ {:analyze-call {graphden.executor.registry.macros/defbase hooks.defbase/defbase
+                 graphden.executor.defbase/defbase hooks.defbase/defbase
+                 graphden.executor.test-setup/fn-impl hooks.fn-impl/fn-impl}}
 
  :linters
  {;; Critical - these indicate real bugs or dead code

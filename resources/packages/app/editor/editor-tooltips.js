@@ -785,6 +785,146 @@ function enterArgTypeEditMode(arg, anchorEl) {
   });
 }
 
+// --- free-arg binding (Phase 4) ---
+//
+// Click on a placeholder for a root-fn free-arg → tiny chooser:
+//   - "literal" → text input → PUT value=<json>
+//   - "fn-ref"  → fn-picker → PUT ref-id=<fn-id>
+//
+// Effective type follows the source-id chain (resolveArgType in
+// editor-overlays.js); for `:fn` the chooser short-circuits straight
+// to the picker since a literal `fn-id` makes no sense.
+
+function enterFreeArgBindEditMode(arg, anchorEl) {
+  if (!arg) return;
+  closeInlineEdit();
+
+  // Effective type drives the default action.
+  let effType = arg.type ? String(arg.type).replace(/^:/, '') : null;
+  if (!effType && lookups && lookups.argMap && arg['source-id']) {
+    let cur = lookups.argMap.get(arg['source-id']);
+    while (cur && !cur.type && cur['source-id']) cur = lookups.argMap.get(cur['source-id']);
+    if (cur && cur.type) effType = String(cur.type).replace(/^:/, '');
+  }
+
+  // For `:fn` slots the only sensible binding is a fn-ref; jump straight
+  // into the picker.
+  if (effType === 'fn') {
+    if (typeof openFnPicker === 'function') {
+      openFnPicker({
+        anchorEl,
+        excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
+        onPick: async (fn) => { await saveArgRef(arg.id, fn.id); }
+      });
+    }
+    return;
+  }
+
+  // Otherwise show a literal-vs-ref chooser, then descend into the
+  // appropriate input.
+  openInlineEditPopover({
+    anchorEl,
+    makeControl(root) {
+      const wrap = document.createElement('div');
+      wrap.className = 'free-arg-bind-chooser';
+      const litBtn = document.createElement('button');
+      litBtn.type = 'button';
+      litBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+      litBtn.textContent = 'Bind literal';
+      const refBtn = document.createElement('button');
+      refBtn.type = 'button';
+      refBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+      refBtn.textContent = 'Bind fn-ref';
+      litBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        closeInlineEdit();
+        // Fall through into the existing arg-value editor.
+        enterArgValueEditMode(arg, anchorEl);
+      });
+      refBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        closeInlineEdit();
+        if (typeof openFnPicker === 'function') {
+          openFnPicker({
+            anchorEl,
+            excludeIds: arg['fn-id'] ? [arg['fn-id']] : [],
+            onPick: async (fn) => { await saveArgRef(arg.id, fn.id); }
+          });
+        }
+      });
+      wrap.appendChild(litBtn);
+      wrap.appendChild(refBtn);
+      root.insertBefore(wrap, root.firstChild);
+      return litBtn;  // initial focus target
+    },
+    // Save isn't used here — both buttons handle their own flow and
+    // close the popover. The skeleton's Save still appears but does
+    // nothing useful; users will pick a button instead.
+    async doSave() { return false; }
+  });
+}
+
+// --- is-fn toggle (Phase 4) ---
+//
+// On fn-typed args, clicking the small "λ" / "()" chip on the edge
+// label flips `is-fn`:
+//   λ  → pass the fn-id directly (HOF receives the callable)
+//   () → execute the fn-graph and pass the result
+//
+// `canSetIsFn` walks the source-id chain; if an ancestor pins
+// is-fn=true, the user can't unset it (the parent's contract relies
+// on the value already being a fn-id).
+
+function canSetIsFn(arg, _lookups) {
+  const lk = _lookups || (typeof lookups !== 'undefined' ? lookups : null);
+  if (!lk || !lk.argMap) return { ok: false, reason: 'lookups unavailable' };
+  let cur = arg;
+  while (cur && cur['source-id']) cur = lk.argMap.get(cur['source-id']);
+  // cur is now the terminal primary (or arg itself if no chain).
+  // If terminal pins is-fn=true, we can only KEEP it true.
+  if (cur && cur['is-fn'] === true) {
+    return arg['is-fn'] === true
+      ? { ok: false, reason: 'parent already pins is-fn=true; toggle would unset it' }
+      : { ok: true, locked: true };
+  }
+  return { ok: true };
+}
+
+function enterEdgeIsFnEditMode(arg, anchorEl) {
+  if (!arg) return;
+  const cur = !!arg['is-fn'];
+  const next = !cur;
+  if (cur === true) {
+    const c = canSetIsFn(arg);
+    if (!c.ok) {
+      // Brief inline notice — reuse the popover error styling.
+      openInlineEditPopover({
+        anchorEl,
+        makeControl(root) {
+          const msg = document.createElement('div');
+          msg.className = 'arg-value-edit-error';
+          msg.style.display = 'block';
+          msg.textContent = c.reason;
+          root.insertBefore(msg, root.firstChild);
+          return null;
+        },
+        async doSave() { return false; }
+      });
+      return;
+    }
+  }
+  authFetch('/api/entities/arg/' + encodeURIComponent(arg.id), {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: 'is-fn=' + (next ? 'true' : 'false')
+  }).then(r => {
+    if (r && r.ok) {
+      patchArgFieldInState(arg.id, 'is-fn', next);
+      if (typeof renderGraph === 'function') renderGraph(false);
+    }
+  });
+}
+
 async function saveArgRef(argId, refFnId) {
   try {
     const r = await authFetch('/api/entities/arg/' + encodeURIComponent(argId), {

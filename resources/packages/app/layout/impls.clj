@@ -902,10 +902,16 @@
          (when-not (contains? (:added-node-ids @state) node-id)
            (swap! state update :added-node-ids conj node-id)
            (swap! state update :nodes conj
-                  {:data {:id node-id
-                          :label (if arg-type (name arg-type) "any")
-                          :type "fn"
-                          :isPlaceholder true}})
+                  {:data (cond-> {:id node-id
+                                  :label (if arg-type (name arg-type) "any")
+                                  :type "fn"
+                                  :isPlaceholder true
+                                  ;; argId / argType let the frontend
+                                  ;; offer in-place binding of free-arg
+                                  ;; slots (Phase 4) without re-deriving
+                                  ;; them from the node-id string.
+                                  :argId (str arg-id)}
+                           arg-type (assoc :argType (name arg-type)))})
            (swap! state update :edges conj
                   {:data {:id edge-id
                           :source source-node-id

@@ -905,6 +905,23 @@ function createEdgeLabelOverlay(edge, container) {
     // their type back to a literal.
     const chip = createTypeChip(editArg);
     if (chip) overlay.appendChild(chip);
+
+    // is-fn toggle — only meaningful for fn-typed args. Shown as a
+    // tiny "λ" (pass fn-id) / "()" (execute first) chip.
+    const effType = resolveArgType(editArg);
+    if (effType === 'fn' && typeof enterEdgeIsFnEditMode === 'function') {
+      const tog = document.createElement('span');
+      tog.className = 'arg-isfn-chip';
+      tog.textContent = editArg['is-fn'] ? 'λ' : '()';
+      tog.title = editArg['is-fn']
+        ? 'Pass fn-id directly (HOF). Click to toggle to ()'
+        : 'Execute fn-graph and pass result. Click to toggle to λ';
+      tog.addEventListener('click', (e) => {
+        e.stopPropagation();
+        enterEdgeIsFnEditMode(editArg, tog);
+      });
+      overlay.appendChild(tog);
+    }
   }
 
   if (descriptionArgId) {
@@ -924,10 +941,6 @@ function createEdgeLabelOverlay(edge, container) {
  */
 function createPlaceholderOverlay(node, container) {
   const overlay = createOverlay(node.id(), { border: '2px dashed black' });
-  // The enclosing cy-node uses a shared minimum height larger than the
-  // placeholder's natural content, so without a column flex the drag handle
-  // would sit at its content offset and leave a blank strip between it and
-  // the bottom border.
   overlay.style.display = 'flex';
   overlay.style.flexDirection = 'column';
 
@@ -936,6 +949,24 @@ function createPlaceholderOverlay(node, container) {
   content.style.flex = '1';
   content.textContent = node.data('label') || 'any';
   overlay.appendChild(content);
+
+  // Free-arg binding (Phase 4): clicking a placeholder of a root-fn
+  // free arg opens a small chooser — bind as literal value or as a
+  // fn-ref. Editability gate mirrors the arg-overlay rules.
+  const argId = node.data('argId');
+  const arg = argId && lookups && lookups.argMap && lookups.argMap.get(argId);
+  const isRootFnArg = arg && arg['fn-id'] === selectedFnId;
+  const editable = isRootFnArg
+                && (typeof isFnEditable === 'function' && isFnEditable(selectedFnId))
+                && (typeof isAuthenticated === 'function' && isAuthenticated());
+  if (editable && typeof enterFreeArgBindEditMode === 'function') {
+    content.style.cursor = 'pointer';
+    content.title = 'Click to bind this slot';
+    content.addEventListener('click', (e) => {
+      e.stopPropagation();
+      enterFreeArgBindEditMode(arg, content);
+    });
+  }
 
   createDragHandle(overlay, node);
   container.appendChild(overlay);

@@ -218,27 +218,37 @@
 (defn- expand-sequence-anchor
   "For a sequence anchor, returns a vector of synthetic arg descriptors —
    one per chain item, labeled `<slot>[idx]`. Anchor itself is not emitted.
-   Items with ref-id become :ref entries, items with value become :value."
+   Items with ref-id become :ref entries, items with value become :value.
+
+   Empty anchors produce a single sentinel `:unset` entry pointing AT the
+   anchor with `:sequence-anchor? true`, so the frontend can render an
+   empty-chain placeholder whose click fires the sequence-append flow
+   (rather than the regular free-arg binder, which would try to PUT
+   `value=` / `ref-id=` on the anchor itself)."
   [anchor slot-name arg-map]
   (let [items (walk-anchor-chain anchor arg-map)]
-    (into []
-          (map-indexed
-            (fn [idx item]
-              (let [lbl (str slot-name "[" idx "]")]
-                (cond
-                  (some? (:ref-id item))
-                  {:type :ref :arg-name lbl
-                   :ref-id (:ref-id item) :arg-id (:id item)
-                   :is-binding false}
+    (if (empty? items)
+      [{:type :unset :arg-name slot-name
+        :arg-type (:type anchor) :arg-id (:id anchor)
+        :sequence-anchor? true}]
+      (into []
+            (map-indexed
+              (fn [idx item]
+                (let [lbl (str slot-name "[" idx "]")]
+                  (cond
+                    (some? (:ref-id item))
+                    {:type :ref :arg-name lbl
+                     :ref-id (:ref-id item) :arg-id (:id item)
+                     :is-binding false}
 
-                  (some? (:value item))
-                  {:type :value :arg-name lbl
-                   :value (:value item) :arg-id (:id item)}
+                    (some? (:value item))
+                    {:type :value :arg-name lbl
+                     :value (:value item) :arg-id (:id item)}
 
-                  :else
-                  {:type :unset :arg-name lbl
-                   :arg-type (:type item) :arg-id (:id item)}))))
-          items)))
+                    :else
+                    {:type :unset :arg-name lbl
+                     :arg-type (:type item) :arg-id (:id item)}))))
+            items))))
 
 
 ;; =============================================================================
@@ -898,7 +908,15 @@
 
        :else
        (let [node-id (str "unset-" source-node-id "-" arg-id)
-             edge-id (str "e-unset-" source-node-id "-" arg-id)]
+             edge-id (str "e-unset-" source-node-id "-" arg-id)
+             ;; Empty sequence anchor: the arg itself is :sequence-typed
+             ;; and the chain head is nil. Mark the node so the frontend
+             ;; routes the click into `appendSequenceItem` (Phase 5)
+             ;; instead of the regular free-arg binder, which would try
+             ;; to PUT `value=` on the anchor.
+             empty-seq? (and arg-rec
+                             (= :sequence (:type arg-rec))
+                             (nil? (:next-arg-id arg-rec)))]
          (when-not (contains? (:added-node-ids @state) node-id)
            (swap! state update :added-node-ids conj node-id)
            (swap! state update :nodes conj
@@ -911,7 +929,9 @@
                                   ;; slots (Phase 4) without re-deriving
                                   ;; them from the node-id string.
                                   :argId (str arg-id)}
-                           arg-type (assoc :argType (name arg-type)))})
+                           arg-type  (assoc :argType (name arg-type))
+                           empty-seq? (assoc :isSequenceAnchor true
+                                             :sequenceFnId (str (:fn-id arg-rec))))})
            (swap! state update :edges conj
                   {:data {:id edge-id
                           :source source-node-id

@@ -1005,13 +1005,29 @@ function createPlaceholderOverlay(node, container) {
   const editable = isRootFnArg
                 && (typeof isFnEditable === 'function' && isFnEditable(selectedFnId))
                 && (typeof isAuthenticated === 'function' && isAuthenticated());
-  if (editable && typeof enterFreeArgBindEditMode === 'function') {
-    content.style.cursor = 'pointer';
-    content.title = 'Click to bind this slot';
-    content.addEventListener('click', (e) => {
-      e.stopPropagation();
-      enterFreeArgBindEditMode(arg, content);
-    });
+  if (editable) {
+    // Empty-sequence anchor (Phase 5): the layout marks these so we
+    // route the click into the sequence-append flow rather than the
+    // regular free-arg binder, which would PUT value/ref-id on the
+    // anchor itself (a category error for sequence anchors).
+    if (node.data('isSequenceAnchor') && typeof appendSequenceItem === 'function') {
+      content.style.cursor = 'pointer';
+      content.title = 'Click to add the first item';
+      // Render a `+ first item` hint so the empty placeholder reads as
+      // an action, not a passive type chip.
+      content.textContent = '+ first item';
+      content.addEventListener('click', (e) => {
+        e.stopPropagation();
+        appendSequenceItem(node.data('sequenceFnId') || arg['fn-id'], content);
+      });
+    } else if (typeof enterFreeArgBindEditMode === 'function') {
+      content.style.cursor = 'pointer';
+      content.title = 'Click to bind this slot';
+      content.addEventListener('click', (e) => {
+        e.stopPropagation();
+        enterFreeArgBindEditMode(arg, content);
+      });
+    }
   }
 
   createDragHandle(overlay, node);

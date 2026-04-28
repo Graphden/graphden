@@ -145,3 +145,46 @@ function createOpenInNewTabButton(fn, opts) {
   link.addEventListener('touchend', (e) => e.stopPropagation());
   return link;
 }
+
+// Edit pencil button — right-pinned, shape-matches the description-i
+// badge and open-in-new-tab ↗. Used on the root fn-card row to open
+// fn-rename inline. Caller supplies an `onClick(anchor)` callback;
+// the button itself is a plain element (no nav like ↗).
+function createEditPencilButton(opts) {
+  opts = opts || {};
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'edit-pencil';
+  btn.title = 'Edit';
+  btn.textContent = '✎';
+  btn.style.color = 'currentColor';
+  btn.style.background = 'transparent';
+  btn.style.cursor = 'pointer';
+  btn.style.fontWeight = 'normal';
+  applyActionIconBox(btn);
+  btn.style.fontSize = '11px';
+  btn.style.padding = '0';
+  btn.style.pointerEvents = 'auto';
+  if (opts.pinRight) {
+    btn.style.position = 'absolute';
+    btn.style.right = '24px';
+    btn.style.top = '50%';
+    btn.style.transform = 'translateY(-50%)';
+  } else {
+    btn.style.marginLeft = '4px';
+    btn.style.verticalAlign = 'middle';
+  }
+  btn.addEventListener('mouseenter', () => {
+    if (opts.onEnter) opts.onEnter();
+    hideFullNameTooltip();
+  });
+  btn.addEventListener('mousemove', (e) => e.stopPropagation());
+  btn.addEventListener('mousedown', (e) => e.stopPropagation());
+  btn.addEventListener('touchend', (e) => e.stopPropagation());
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (opts.onClick) opts.onClick(btn);
+  });
+  return btn;
+}

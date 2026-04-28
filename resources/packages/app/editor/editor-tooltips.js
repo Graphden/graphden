@@ -421,56 +421,45 @@ function bindFullNameHover(hoverEl, measureEl, fullName) {
 
 
 // ============================================================================
-// ARG-VALUE EDIT POPOVER
+// INLINE EDIT POPOVERS — arg-value, arg-rename, fn-rename, fn-return-type
 // ============================================================================
 //
-// Click an arg-value box (e.g. `8080` on a port arg) → small floating
-// popover with a single input + Save/Cancel. Smart parse on Save: try
-// JSON first, fall back to raw string. Keeps display + edit in sync
-// for the most common cases (numbers stay numbers, strings stay raw)
-// without forcing the user to type JSON quotes.
+// All four edits share the same singleton-popover skeleton: a small
+// floating panel anchored below the click target with a single
+// control (input or select) + Save/Cancel. Closed by Save (success),
+// Cancel, Esc, or pointerdown outside.
 //
-// Singleton — only one of these is ever open. Closed by:
-//   - Save (success → patch state + redraw)
-//   - Cancel
-//   - Esc keypress
-//   - pointerdown outside the popover
+// `openInlineEditPopover` builds the skeleton; the four `enter*EditMode`
+// functions just feed it a control factory + save handler.
 
-let argValueEditEl = null;
-let argValueEditOutsideHandler = null;
+let inlineEditEl = null;
+let inlineEditOutsideHandler = null;
 
-function closeArgValueEdit() {
-  if (argValueEditEl) {
-    argValueEditEl.remove();
-    argValueEditEl = null;
+function closeInlineEdit() {
+  if (inlineEditEl) {
+    inlineEditEl.remove();
+    inlineEditEl = null;
   }
-  if (argValueEditOutsideHandler) {
-    document.removeEventListener('pointerdown', argValueEditOutsideHandler);
-    argValueEditOutsideHandler = null;
+  if (inlineEditOutsideHandler) {
+    document.removeEventListener('pointerdown', inlineEditOutsideHandler);
+    inlineEditOutsideHandler = null;
   }
 }
 
-function enterArgValueEditMode(arg, anchorEl) {
-  closeArgValueEdit();
-  if (!arg) return;
+// `opts`: {anchorEl, makeControl(rootEl) → control, doSave(control) → bool|Promise<bool>, onSaved? → void}
+// `makeControl` builds the focusable element (input/select) and appends
+// it inside rootEl. It must return that element so the skeleton can
+// focus it and listen for Enter/Escape.
+function openInlineEditPopover(opts) {
+  closeInlineEdit();
 
   const el = document.createElement('div');
   el.className = 'arg-value-edit-popover';
-  // Position via fixed coords below the click target. CSS clamps
-  // pointer-events + box-shadow + theme-aware background.
-  const rect = anchorEl.getBoundingClientRect();
+  const rect = opts.anchorEl.getBoundingClientRect();
   el.style.top  = (rect.bottom + 6) + 'px';
   el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 280)) + 'px';
 
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.className = 'arg-value-edit-input';
-  // Display strings raw (no quotes), other values as JSON. The reverse
-  // happens in `saveArgValue` — try JSON.parse; fall back to raw text.
-  const v = arg.value;
-  input.value = (typeof v === 'string') ? v
-              : (v === null || v === undefined) ? ''
-              : JSON.stringify(v);
+  const control = opts.makeControl(el);
 
   const errorEl = document.createElement('div');
   errorEl.className = 'arg-value-edit-error';
@@ -483,7 +472,7 @@ function enterArgValueEditMode(arg, anchorEl) {
   cancel.type = 'button';
   cancel.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
   cancel.textContent = 'Cancel';
-  cancel.addEventListener('click', closeArgValueEdit);
+  cancel.addEventListener('click', closeInlineEdit);
 
   const save = document.createElement('button');
   save.type = 'button';
@@ -493,13 +482,10 @@ function enterArgValueEditMode(arg, anchorEl) {
     save.disabled = true;
     cancel.disabled = true;
     errorEl.style.display = 'none';
-    const ok = await saveArgValue(arg.id, input.value);
+    const ok = await opts.doSave(control);
     if (ok) {
-      closeArgValueEdit();
-      // Refetch /api/graph/layout so node sizes / display strings
-      // pick up the new value. shouldFit=false so the user's view
-      // doesn't snap back.
-      if (typeof renderGraph === 'function') renderGraph(false);
+      closeInlineEdit();
+      if (typeof opts.onSaved === 'function') opts.onSaved();
     } else {
       save.disabled = false;
       cancel.disabled = false;
@@ -511,25 +497,51 @@ function enterArgValueEditMode(arg, anchorEl) {
   buttons.appendChild(cancel);
   buttons.appendChild(save);
 
-  el.appendChild(input);
   el.appendChild(errorEl);
   el.appendChild(buttons);
   document.body.appendChild(el);
-  argValueEditEl = el;
+  inlineEditEl = el;
 
-  setTimeout(() => { input.focus(); input.select(); }, 0);
+  setTimeout(() => {
+    if (control && typeof control.focus === 'function') control.focus();
+    if (control && typeof control.select === 'function') {
+      try { control.select(); } catch (_) {}
+    }
+  }, 0);
 
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter')  { e.preventDefault(); doSave(); }
-    if (e.key === 'Escape') { e.preventDefault(); closeArgValueEdit(); }
-  });
+  if (control) {
+    control.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter')  { e.preventDefault(); doSave(); }
+      if (e.key === 'Escape') { e.preventDefault(); closeInlineEdit(); }
+    });
+  }
 
-  // pointerdown outside dismisses (matches description-tooltip's
-  // touch-friendly dismiss semantics).
-  argValueEditOutsideHandler = (e) => {
-    if (!el.contains(e.target)) closeArgValueEdit();
+  inlineEditOutsideHandler = (e) => {
+    if (!el.contains(e.target)) closeInlineEdit();
   };
-  setTimeout(() => document.addEventListener('pointerdown', argValueEditOutsideHandler), 0);
+  setTimeout(() => document.addEventListener('pointerdown', inlineEditOutsideHandler), 0);
+}
+
+// --- arg-value edit (Phase 0) ---
+
+function enterArgValueEditMode(arg, anchorEl) {
+  if (!arg) return;
+  openInlineEditPopover({
+    anchorEl,
+    makeControl(root) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'arg-value-edit-input';
+      const v = arg.value;
+      input.value = (typeof v === 'string') ? v
+                  : (v === null || v === undefined) ? ''
+                  : JSON.stringify(v);
+      root.insertBefore(input, root.firstChild);
+      return input;
+    },
+    async doSave(input) { return saveArgValue(arg.id, input.value); },
+    onSaved()           { if (typeof renderGraph === 'function') renderGraph(false); }
+  });
 }
 
 async function saveArgValue(argId, rawInput) {
@@ -565,4 +577,145 @@ function patchArgValueInState(argId, value) {
   if (typeof buildLookups === 'function') {
     lookups = buildLookups(graphData);
   }
+}
+
+// --- arg rename (Phase 1) ---
+//
+// Edge-label click → rename the arg row whose `fn-id` is the root.
+// The backend already enforces unique `(fn-id, name)` so a clash will
+// fail server-side; we just propagate the failure as "Save failed".
+
+// `displayLabel` is the name the user currently SEES on the edge —
+// either arg.name itself or a propagated label from the source-id
+// chain. Pre-filling with it is the least-surprising default; if the
+// user just hits Save, the arg gets an explicit `name` equal to the
+// inherited label (renamed-forwarding becomes explicit).
+function enterArgRenameEditMode(arg, anchorEl, displayLabel) {
+  if (!arg) return;
+  openInlineEditPopover({
+    anchorEl,
+    makeControl(root) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'arg-value-edit-input';
+      input.value = arg.name || displayLabel || '';
+      root.insertBefore(input, root.firstChild);
+      return input;
+    },
+    async doSave(input) {
+      const newName = (input.value || '').trim();
+      if (!newName) return false;
+      try {
+        const r = await authFetch('/api/entities/arg/' + encodeURIComponent(arg.id), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'name=' + encodeURIComponent(newName)
+        });
+        if (r && r.ok) {
+          patchArgFieldInState(arg.id, 'name', newName);
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    },
+    onSaved() { if (typeof renderGraph === 'function') renderGraph(false); }
+  });
+}
+
+// --- fn rename (Phase 1) ---
+//
+// Click ✎ pencil on the root fn name → rename popover. After save,
+// the sidebar tree needs a refresh too, so we go through the heavy
+// `initGraph()` path rather than patch-in-place.
+
+function enterFnRenameEditMode(fn, anchorEl) {
+  if (!fn) return;
+  openInlineEditPopover({
+    anchorEl,
+    makeControl(root) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'arg-value-edit-input';
+      input.value = fn.name || '';
+      root.insertBefore(input, root.firstChild);
+      return input;
+    },
+    async doSave(input) {
+      const newName = (input.value || '').trim();
+      if (!newName) return false;
+      try {
+        const r = await authFetch('/api/entities/fn/' + encodeURIComponent(fn.id), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'name=' + encodeURIComponent(newName)
+        });
+        if (r && r.ok) return true;
+      } catch (_) {}
+      return false;
+    },
+    onSaved() { if (typeof initGraph === 'function') initGraph(); }
+  });
+}
+
+// --- fn return-type select (Phase 1) ---
+//
+// Click the `→ <type>` strip on the root fn card → small `<select>`
+// dropdown of `value_kind` enum entries → save.
+
+function enterFnReturnTypeEditMode(fn, anchorEl) {
+  if (!fn) return;
+  openInlineEditPopover({
+    anchorEl,
+    makeControl(root) {
+      const select = document.createElement('select');
+      select.className = 'arg-value-edit-input';
+      const kinds = (typeof VALUE_KINDS !== 'undefined') ? VALUE_KINDS
+                  : ['null','uuid','text','int','bool','numeric','timestamptz','jsonb','bytes','any','fn','sequence'];
+      // First option is "(none)" so the user can clear return-type.
+      const noneOpt = document.createElement('option');
+      noneOpt.value = '';
+      noneOpt.textContent = '(none)';
+      select.appendChild(noneOpt);
+      kinds.forEach(k => {
+        const o = document.createElement('option');
+        o.value = k;
+        o.textContent = k;
+        if (fn['return-type'] === k) o.selected = true;
+        select.appendChild(o);
+      });
+      root.insertBefore(select, root.firstChild);
+      return select;
+    },
+    async doSave(select) {
+      try {
+        const r = await authFetch('/api/entities/fn/' + encodeURIComponent(fn.id), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'return-type=' + encodeURIComponent(select.value)
+        });
+        if (r && r.ok) {
+          patchFnFieldInState(fn.id, 'return-type', select.value || null);
+          return true;
+        }
+      } catch (_) {}
+      return false;
+    },
+    onSaved() { if (typeof renderGraph === 'function') renderGraph(false); }
+  });
+}
+
+function patchArgFieldInState(argId, field, value) {
+  if (!graphData || !Array.isArray(graphData.args)) return;
+  for (const a of graphData.args) {
+    if (a && a.id === argId) { a[field] = value; break; }
+  }
+  if (typeof buildLookups === 'function') lookups = buildLookups(graphData);
+}
+
+function patchFnFieldInState(fnId, field, value) {
+  if (!graphData || !Array.isArray(graphData.fns)) return;
+  for (const f of graphData.fns) {
+    if (f && f.id === fnId) { f[field] = value; break; }
+  }
+  if (typeof buildLookups === 'function') lookups = buildLookups(graphData);
 }

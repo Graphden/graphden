@@ -547,6 +547,22 @@ function createFnOverlay(node, container) {
           onEnter: lineClearPreview
         });
         if (lineOpenBtn) line.appendChild(lineOpenBtn);
+      } else if (isNavRoot && levelInfo.depth === 0
+                 && typeof isFnEditable === 'function' && isFnEditable(lineFn.fnId)
+                 && typeof isAuthenticated === 'function' && isAuthenticated()) {
+        // Root row: ↗ doesn't show (we're already viewing this fn),
+        // so the right-pinned slot is free for a ✎ pencil. Hover-only
+        // (matches the row-action pattern in the sidebar) so the row
+        // doesn't look cluttered when the user is just scanning.
+        const lineFnEntity = lookups.fnMap.get(lineFn.fnId);
+        const editBtn = createEditPencilButton({
+          pinRight: true,
+          onEnter: lineClearPreview,
+          onClick: (anchor) => {
+            if (lineFnEntity) enterFnRenameEditMode(lineFnEntity, anchor);
+          }
+        });
+        if (editBtn) line.appendChild(editBtn);
       }
       bindFullNameHover(line, line, lineFn.name);
       const fnIdForLine = levelInfo.fns[0].fnId;
@@ -621,6 +637,36 @@ function createFnOverlay(node, container) {
     strip.title = 'Optional args (unset, using defaults): ' + optionalArgs.join(', ');
     strip.textContent = optionalArgs.map(n => '?' + n).join(' ');
     overlay.appendChild(strip);
+  }
+
+  // Return-type strip. Two display modes:
+  //   - Non-root cards (expanded ancestors): show only when a type is
+  //     set, read-only — informational, doesn't add visual noise to
+  //     fns the user can't edit from here anyway.
+  //   - Root card: always show; clickable when fn is editable+authed
+  //     so the user can SET a return-type even when the fn currently
+  //     has none ("→ (none)" placeholder).
+  const cardFnEntity = lookups && lookups.fnMap && lookups.fnMap.get(originalFnId);
+  if (cardFnEntity) {
+    const rt = cardFnEntity['return-type'];
+    const rtEditable = isNavRoot
+                    && (typeof isFnEditable === 'function' && isFnEditable(originalFnId))
+                    && (typeof isAuthenticated === 'function' && isAuthenticated());
+    if (rt || rtEditable) {
+      const strip = document.createElement('div');
+      strip.className = 'return-type-strip';
+      strip.textContent = rt ? ('→ ' + rt) : '→ (none)';
+      strip.title = rt ? ('Return type: ' + rt) : 'No return type set';
+      if (rtEditable) {
+        strip.classList.add('return-type-strip-editable');
+        strip.title = 'Click to change return type';
+        strip.addEventListener('click', (e) => {
+          e.stopPropagation();
+          enterFnReturnTypeEditMode(cardFnEntity, strip);
+        });
+      }
+      overlay.appendChild(strip);
+    }
   }
 
   // HOF-captured args (e.g. `:request` on a Ring-handler subtree) are free
@@ -775,6 +821,26 @@ function createEdgeLabelOverlay(edge, container) {
   const labelSpan = document.createElement('span');
   labelSpan.textContent = label;
   overlay.appendChild(labelSpan);
+
+  // Rename click-target: edge-label corresponds to the arg whose
+  // value/ref was bound at this edge's source side. If THAT arg
+  // belongs to the root fn (immediate impl) and the fn is editable,
+  // clicking the label opens an inline rename popover. We resolve
+  // the arg from `sourceArgId` (already in scope as the chain head).
+  const editArg = sourceArgId && lookups && lookups.argMap
+                  ? lookups.argMap.get(sourceArgId) : null;
+  const argEditable = editArg
+                   && editArg['fn-id'] === selectedFnId
+                   && (typeof isFnEditable === 'function' && isFnEditable(selectedFnId))
+                   && (typeof isAuthenticated === 'function' && isAuthenticated());
+  if (argEditable) {
+    labelSpan.style.cursor = 'pointer';
+    labelSpan.title = 'Click to rename arg';
+    labelSpan.addEventListener('click', (e) => {
+      e.stopPropagation();
+      enterArgRenameEditMode(editArg, labelSpan, label);
+    });
+  }
 
   if (descriptionArgId) {
     const desc = createDescriptionBadge(description, {

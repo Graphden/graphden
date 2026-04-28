@@ -358,6 +358,41 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   transition: color 0.1s, font-weight 0.1s;
 }
 
+/* Return-type strip on root fn cards — sits at the bottom of the
+   card, right above the optional/HOF strips and drag handle. Visual
+   reuses the same compact treatment (1-px dashed top border + small
+   italic font) so it feels like a peer of those informational strips
+   rather than a primary control. Editable on the root card only;
+   adds a hover-bg + cursor when so. */
+.return-type-strip {
+  padding: 2px 8px;
+  color: var(--muted-fg);
+  font-size: 10px;
+  font-style: italic;
+  border-top: 1px dashed var(--input-border);
+  background: var(--card-bg);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.return-type-strip-editable {
+  cursor: pointer;
+}
+.return-type-strip-editable:hover {
+  background: var(--hover-bg);
+  color: var(--fg);
+}
+
+/* Edit pencil ✎ — right-pinned action icon, opacity transitions like
+   the open-in-new-tab and description-badge so it stays unobtrusive
+   when the user is just scanning. */
+.edit-pencil {
+  opacity: 0.85;
+  transition: opacity 0.1s, background-color 0.1s;
+}
+.edit-pencil:hover {
+  opacity: 1;
+  background-color: color-mix(in srgb, currentColor 28%, transparent);
+}
+
 /* Arg-value edit popover — small floating panel anchored below the
    clicked value box. Theme-aware via the same vars as the rest of
    the editor; uses `--card-*` so the popover visually matches a

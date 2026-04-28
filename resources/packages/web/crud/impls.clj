@@ -289,7 +289,12 @@
     (not (str/blank? (:namespace-id form-data)))
     (assoc :namespace-id (java.util.UUID/fromString (:namespace-id form-data)))
     (contains? form-data :description)
-    (assoc :description (:description form-data))))
+    (assoc :description (:description form-data))
+    ;; Empty `return-type=` clears the field; non-empty becomes a keyword
+    ;; from the value-kind enum.
+    (contains? form-data :return-type)
+    (assoc :return-type (when-not (str/blank? (:return-type form-data))
+                          (keyword (:return-type form-data))))))
 
 
 (defbase parse-arg-from-form

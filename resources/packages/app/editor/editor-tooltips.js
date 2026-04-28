@@ -873,40 +873,58 @@ function enterFreeArgBindEditMode(arg, anchorEl) {
 //   λ  → pass the fn-id directly (HOF receives the callable)
 //   () → execute the fn-graph and pass the result
 //
-// `canSetIsFn` walks the source-id chain; if an ancestor pins
-// is-fn=true, the user can't unset it (the parent's contract relies
-// on the value already being a fn-id).
+// `is-fn` propagates down the source-id chain: if any strict ancestor
+// has is-fn=true, the effective value is true and the local arg can
+// NOT override that to false — the parent's contract requires a
+// fn-id, you can't pretend to deliver a value at a sub-arg level.
+// Setting locally to true is always allowed (no-op when ancestor
+// already pins, useful when no ancestor does). The only way to break
+// out from a pinned-true is to re-parent to a fn whose chain doesn't
+// pin it.
 
-function canSetIsFn(arg, _lookups) {
+function effectiveIsFn(arg, _lookups) {
   const lk = _lookups || (typeof lookups !== 'undefined' ? lookups : null);
-  if (!lk || !lk.argMap) return { ok: false, reason: 'lookups unavailable' };
+  if (!lk || !lk.argMap) return !!(arg && arg['is-fn']);
   let cur = arg;
-  while (cur && cur['source-id']) cur = lk.argMap.get(cur['source-id']);
-  // cur is now the terminal primary (or arg itself if no chain).
-  // If terminal pins is-fn=true, we can only KEEP it true.
-  if (cur && cur['is-fn'] === true) {
-    return arg['is-fn'] === true
-      ? { ok: false, reason: 'parent already pins is-fn=true; toggle would unset it' }
-      : { ok: true, locked: true };
+  for (let i = 0; i < 100 && cur; i++) {
+    if (cur['is-fn'] === true) return true;
+    if (!cur['source-id']) break;
+    cur = lk.argMap.get(cur['source-id']);
   }
-  return { ok: true };
+  return false;
+}
+
+// Returns the strict-ancestor arg that pins is-fn=true (the highest
+// such, walking parent-wards). Strict — `arg` itself is NOT considered.
+function ancestorPinningIsFn(arg, _lookups) {
+  const lk = _lookups || (typeof lookups !== 'undefined' ? lookups : null);
+  if (!lk || !lk.argMap || !arg || !arg['source-id']) return null;
+  let cur = lk.argMap.get(arg['source-id']);
+  for (let i = 0; i < 100 && cur; i++) {
+    if (cur['is-fn'] === true) return cur;
+    if (!cur['source-id']) break;
+    cur = lk.argMap.get(cur['source-id']);
+  }
+  return null;
 }
 
 function enterEdgeIsFnEditMode(arg, anchorEl) {
   if (!arg) return;
-  const cur = !!arg['is-fn'];
-  const next = !cur;
-  if (cur === true) {
-    const c = canSetIsFn(arg);
-    if (!c.ok) {
-      // Brief inline notice — reuse the popover error styling.
+  const eff = effectiveIsFn(arg);
+  const next = !eff;
+  if (next === false) {
+    // Trying to unset — refused if any strict ancestor pins it true.
+    const pin = ancestorPinningIsFn(arg);
+    if (pin) {
       openInlineEditPopover({
         anchorEl,
         makeControl(root) {
           const msg = document.createElement('div');
           msg.className = 'arg-value-edit-error';
           msg.style.display = 'block';
-          msg.textContent = c.reason;
+          msg.textContent = 'is-fn is pinned to true by an ancestor — '
+                          + 'cannot unset locally. Re-parent to a fn '
+                          + 'whose chain does not pin it.';
           root.insertBefore(msg, root.firstChild);
           return null;
         },

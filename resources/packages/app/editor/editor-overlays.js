@@ -950,13 +950,19 @@ function createEdgeLabelOverlay(edge, container) {
     }
 
     // is-fn toggle — only meaningful for fn-typed args. Shown as a
-    // tiny "λ" (pass fn-id) / "()" (execute first) chip.
+    // tiny "λ" (pass fn-id) / "()" (execute first) chip. The chip
+    // reflects the EFFECTIVE is-fn (walking source-id chain), so a
+    // child arg that inherits a pinned-true ancestor reads as λ even
+    // if its own field is null. Click attempts to flip; the gate
+    // refuses unset when an ancestor pins it true.
     const effType = resolveArgType(editArg);
     if (effType === 'fn' && typeof enterEdgeIsFnEditMode === 'function') {
+      const eff = (typeof effectiveIsFn === 'function')
+        ? effectiveIsFn(editArg) : !!editArg['is-fn'];
       const tog = document.createElement('span');
       tog.className = 'arg-isfn-chip';
-      tog.textContent = editArg['is-fn'] ? 'λ' : '()';
-      tog.title = editArg['is-fn']
+      tog.textContent = eff ? 'λ' : '()';
+      tog.title = eff
         ? 'Pass fn-id directly (HOF). Click to toggle to ()'
         : 'Execute fn-graph and pass result. Click to toggle to λ';
       tog.addEventListener('click', (e) => {

@@ -68,6 +68,19 @@ function buildLookups(data) {
            fnUsedAsParent, fnUsedAsRef, nsHasChildNs, nsHasChildFn };
 }
 
+// Editability gate — mirror of the backend's "fn-in-use-reason" delete
+// check: a fn can be edited inline only if it's not used as a parent
+// of any other fn AND not referenced as ref-id by any arg. Same rule
+// as "deletable", on purpose: if the fn is wired into other places,
+// changing its shape would break those places, so we force the user
+// to navigate to the dependents and detach them first.
+function isFnEditable(fnId) {
+  if (!fnId || !lookups) return false;
+  const usedAsParent = (lookups.fnUsedAsParent && lookups.fnUsedAsParent.get(fnId)) || 0;
+  const usedAsRef    = (lookups.fnUsedAsRef    && lookups.fnUsedAsRef.get(fnId))    || 0;
+  return usedAsParent === 0 && usedAsRef === 0;
+}
+
 // Look up a fn's namespace as a dotted path (e.g. "core.collections")
 // or null if the fn has no namespace assigned.
 function getFnNamespace(fn) {

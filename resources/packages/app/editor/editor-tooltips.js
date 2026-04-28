@@ -418,3 +418,151 @@ function bindFullNameHover(hoverEl, measureEl, fullName) {
   });
   hoverEl.addEventListener('mouseleave', hideFullNameTooltip);
 }
+
+
+// ============================================================================
+// ARG-VALUE EDIT POPOVER
+// ============================================================================
+//
+// Click an arg-value box (e.g. `8080` on a port arg) → small floating
+// popover with a single input + Save/Cancel. Smart parse on Save: try
+// JSON first, fall back to raw string. Keeps display + edit in sync
+// for the most common cases (numbers stay numbers, strings stay raw)
+// without forcing the user to type JSON quotes.
+//
+// Singleton — only one of these is ever open. Closed by:
+//   - Save (success → patch state + redraw)
+//   - Cancel
+//   - Esc keypress
+//   - pointerdown outside the popover
+
+let argValueEditEl = null;
+let argValueEditOutsideHandler = null;
+
+function closeArgValueEdit() {
+  if (argValueEditEl) {
+    argValueEditEl.remove();
+    argValueEditEl = null;
+  }
+  if (argValueEditOutsideHandler) {
+    document.removeEventListener('pointerdown', argValueEditOutsideHandler);
+    argValueEditOutsideHandler = null;
+  }
+}
+
+function enterArgValueEditMode(arg, anchorEl) {
+  closeArgValueEdit();
+  if (!arg) return;
+
+  const el = document.createElement('div');
+  el.className = 'arg-value-edit-popover';
+  // Position via fixed coords below the click target. CSS clamps
+  // pointer-events + box-shadow + theme-aware background.
+  const rect = anchorEl.getBoundingClientRect();
+  el.style.top  = (rect.bottom + 6) + 'px';
+  el.style.left = Math.max(8, Math.min(rect.left, window.innerWidth - 280)) + 'px';
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.className = 'arg-value-edit-input';
+  // Display strings raw (no quotes), other values as JSON. The reverse
+  // happens in `saveArgValue` — try JSON.parse; fall back to raw text.
+  const v = arg.value;
+  input.value = (typeof v === 'string') ? v
+              : (v === null || v === undefined) ? ''
+              : JSON.stringify(v);
+
+  const errorEl = document.createElement('div');
+  errorEl.className = 'arg-value-edit-error';
+  errorEl.style.display = 'none';
+
+  const buttons = document.createElement('div');
+  buttons.className = 'arg-value-edit-buttons';
+
+  const cancel = document.createElement('button');
+  cancel.type = 'button';
+  cancel.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+  cancel.textContent = 'Cancel';
+  cancel.addEventListener('click', closeArgValueEdit);
+
+  const save = document.createElement('button');
+  save.type = 'button';
+  save.className = 'arg-value-edit-btn';
+  save.textContent = 'Save';
+  const doSave = async () => {
+    save.disabled = true;
+    cancel.disabled = true;
+    errorEl.style.display = 'none';
+    const ok = await saveArgValue(arg.id, input.value);
+    if (ok) {
+      closeArgValueEdit();
+      // Refetch /api/graph/layout so node sizes / display strings
+      // pick up the new value. shouldFit=false so the user's view
+      // doesn't snap back.
+      if (typeof renderGraph === 'function') renderGraph(false);
+    } else {
+      save.disabled = false;
+      cancel.disabled = false;
+      errorEl.textContent = 'Save failed — check that you’re signed in.';
+      errorEl.style.display = 'block';
+    }
+  };
+  save.addEventListener('click', doSave);
+  buttons.appendChild(cancel);
+  buttons.appendChild(save);
+
+  el.appendChild(input);
+  el.appendChild(errorEl);
+  el.appendChild(buttons);
+  document.body.appendChild(el);
+  argValueEditEl = el;
+
+  setTimeout(() => { input.focus(); input.select(); }, 0);
+
+  input.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter')  { e.preventDefault(); doSave(); }
+    if (e.key === 'Escape') { e.preventDefault(); closeArgValueEdit(); }
+  });
+
+  // pointerdown outside dismisses (matches description-tooltip's
+  // touch-friendly dismiss semantics).
+  argValueEditOutsideHandler = (e) => {
+    if (!el.contains(e.target)) closeArgValueEdit();
+  };
+  setTimeout(() => document.addEventListener('pointerdown', argValueEditOutsideHandler), 0);
+}
+
+async function saveArgValue(argId, rawInput) {
+  // Smart parse: trim, try JSON, fall back to raw string. Empty input
+  // is rejected here because the backend's permissive parse skips
+  // blank `value=` (so a clear would be a no-op). Phase 2 type-change
+  // will be the path to clear values.
+  const trimmed = (rawInput || '').trim();
+  if (trimmed === '') return false;
+  let parsed;
+  try { parsed = JSON.parse(trimmed); }
+  catch (_) { parsed = rawInput; }
+  const jsonStr = JSON.stringify(parsed);
+  try {
+    const r = await authFetch('/api/entities/arg/' + encodeURIComponent(argId), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'value=' + encodeURIComponent(jsonStr)
+    });
+    if (r && r.ok) {
+      patchArgValueInState(argId, parsed);
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+function patchArgValueInState(argId, value) {
+  if (!graphData || !Array.isArray(graphData.args)) return;
+  for (const a of graphData.args) {
+    if (a && a.id === argId) { a.value = value; break; }
+  }
+  if (typeof buildLookups === 'function') {
+    lookups = buildLookups(graphData);
+  }
+}

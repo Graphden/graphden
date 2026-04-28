@@ -689,6 +689,28 @@ function createArgOverlay(node, container) {
   content.textContent = truncateLabel(node.data('label') || '', 30);
   overlay.appendChild(content);
 
+  // Editability: this arg-value is in-place editable iff
+  //   - the arg row belongs to the root fn (not an expanded ancestor
+  //     and not a ref'd fn shown elsewhere on the canvas);
+  //   - the root fn itself is editable (not used as a parent or
+  //     referenced as an arg-ref by anything else);
+  //   - the user is signed in (authFetch will surface 401 either way,
+  //     but we suppress the affordance pre-flight for clarity).
+  const argId = node.data('argId');
+  const arg = argId && lookups && lookups.argMap && lookups.argMap.get(argId);
+  const isRootFnArg = arg && arg['fn-id'] === selectedFnId;
+  const editable = isRootFnArg
+                && (typeof isFnEditable === 'function' && isFnEditable(selectedFnId))
+                && (typeof isAuthenticated === 'function' && isAuthenticated());
+  if (editable) {
+    content.style.cursor = 'pointer';
+    content.title = 'Click to edit value';
+    content.addEventListener('click', (e) => {
+      e.stopPropagation();
+      enterArgValueEditMode(arg, content);
+    });
+  }
+
   createDragHandle(overlay, node);
   container.appendChild(overlay);
 }

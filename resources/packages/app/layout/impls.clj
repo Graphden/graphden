@@ -344,7 +344,11 @@
         (swap! state update :nodes conj
                {:data {:id node-id
                        :label display-value
-                       :type "arg"}}))
+                       :type "arg"
+                       ;; Carries the arg-row id so the frontend can
+                       ;; PUT /api/entities/arg/<id> from a click
+                       ;; without having to parse it out of node-id.
+                       :argId (str arg-id)}}))
       (swap! state update :edges conj
              {:data {:id edge-id
                      :source source-node-id

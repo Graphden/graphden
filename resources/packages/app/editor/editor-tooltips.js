@@ -925,6 +925,133 @@ function enterEdgeIsFnEditMode(arg, anchorEl) {
   });
 }
 
+// --- namespace-move (Phase 5) ---
+//
+// Click on the namespace strip on the root card → namespace-picker.
+// Pick → PUT namespace-id=<id>. After save, sidebar tree needs a
+// rebuild, so we go through initGraph() rather than patch-in-place.
+
+function enterNamespaceMoveEditMode(fn, anchorEl) {
+  if (!fn) return;
+  if (typeof openNamespacePicker !== 'function') return;
+  openNamespacePicker({
+    anchorEl,
+    onPick: async (picked) => {
+      try {
+        const r = await authFetch('/api/entities/fn/' + encodeURIComponent(fn.id), {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+          body: 'namespace-id=' + encodeURIComponent(picked.id || '')
+        });
+        if (r && r.ok && typeof initGraph === 'function') initGraph();
+      } catch (_) {}
+    }
+  });
+}
+
+// --- sequence add/remove (Phase 5) ---
+//
+// Thin wrappers over the existing /api/sequence/append/:fn-id and
+// /api/sequence/item/:item-id endpoints. The `+` button on a chain
+// tail kicks off a small chooser (literal vs fn-ref) so the new
+// item's binding is set in the same operation.
+
+async function appendSequenceItem(fnId, anchorEl) {
+  if (!fnId) return;
+  closeInlineEdit();
+  // Two-step UX mirroring free-arg binding: pick "Literal" or "Fn-ref",
+  // then enter the value / pick the fn. The endpoint accepts the
+  // chosen body in the same request, so we wait for the user's pick.
+  openInlineEditPopover({
+    anchorEl: anchorEl || document.getElementById('cy') || document.body,
+    makeControl(root) {
+      const wrap = document.createElement('div');
+      wrap.className = 'free-arg-bind-chooser';
+      const litBtn = document.createElement('button');
+      litBtn.type = 'button';
+      litBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+      litBtn.textContent = 'Append literal';
+      const refBtn = document.createElement('button');
+      refBtn.type = 'button';
+      refBtn.className = 'arg-value-edit-btn arg-value-edit-btn-secondary';
+      refBtn.textContent = 'Append fn-ref';
+      litBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        closeInlineEdit();
+        promptLiteralForAppend(fnId, anchorEl);
+      });
+      refBtn.addEventListener('click', (e) => {
+        e.preventDefault();
+        closeInlineEdit();
+        if (typeof openFnPicker === 'function') {
+          openFnPicker({
+            anchorEl: anchorEl || document.body,
+            excludeIds: [fnId],
+            onPick: async (fn) => { await postSequenceAppend(fnId, { ref: fn.id }); }
+          });
+        }
+      });
+      wrap.appendChild(litBtn);
+      wrap.appendChild(refBtn);
+      root.insertBefore(wrap, root.firstChild);
+      return litBtn;
+    },
+    async doSave() { return false; }
+  });
+}
+
+function promptLiteralForAppend(fnId, anchorEl) {
+  openInlineEditPopover({
+    anchorEl: anchorEl || document.body,
+    makeControl(root) {
+      const input = document.createElement('input');
+      input.type = 'text';
+      input.className = 'arg-value-edit-input';
+      input.placeholder = 'JSON value (e.g. 42, "text", true)';
+      root.insertBefore(input, root.firstChild);
+      return input;
+    },
+    async doSave(input) {
+      const trimmed = (input.value || '').trim();
+      if (trimmed === '') return false;
+      let parsed;
+      try { parsed = JSON.parse(trimmed); }
+      catch (_) { parsed = input.value; }
+      return postSequenceAppend(fnId, { value: parsed });
+    },
+    onSaved() { if (typeof initGraph === 'function') initGraph(); }
+  });
+}
+
+async function postSequenceAppend(fnId, body) {
+  try {
+    const r = await authFetch('/api/sequence/append/' + encodeURIComponent(fnId), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    if (r && r.ok) {
+      if (typeof initGraph === 'function') initGraph();
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
+async function removeSequenceItem(itemId) {
+  if (!itemId) return false;
+  try {
+    const r = await authFetch('/api/sequence/item/' + encodeURIComponent(itemId), {
+      method: 'DELETE'
+    });
+    if (r && r.ok) {
+      if (typeof initGraph === 'function') initGraph();
+      return true;
+    }
+  } catch (_) {}
+  return false;
+}
+
 async function saveArgRef(argId, refFnId) {
   try {
     const r = await authFetch('/api/entities/arg/' + encodeURIComponent(argId), {

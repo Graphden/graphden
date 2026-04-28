@@ -286,8 +286,11 @@
     (assoc :name (str (:name form-data)))
     (not (str/blank? (:parent-id form-data)))
     (assoc :parent-id (java.util.UUID/fromString (:parent-id form-data)))
-    (not (str/blank? (:namespace-id form-data)))
-    (assoc :namespace-id (java.util.UUID/fromString (:namespace-id form-data)))
+    ;; namespace-id follows the empty-as-clear convention so a user
+    ;; can move a fn back to the unnamespaced root via the editor.
+    (contains? form-data :namespace-id)
+    (assoc :namespace-id (when-not (str/blank? (:namespace-id form-data))
+                           (java.util.UUID/fromString (:namespace-id form-data))))
     (contains? form-data :description)
     (assoc :description (:description form-data))
     ;; Empty `return-type=` clears the field; non-empty becomes a keyword
@@ -552,10 +555,22 @@
    Appends one item to the sequence of fn :fn-id."
   [request]
   (let [storage (require-storage ctx)
-        fn-id-str (get-in request [:path-params :fn-id])
+        ;; Path-params come from reitit's `enrich-request`; the
+        ;; hof-wrap'd handler may receive the raw http-kit request
+        ;; with no :path-params, so fall back to URI parsing the same
+        ;; way `extract-entity-params` does.
+        fn-id-str (or (get-in request [:path-params :fn-id])
+                      (:fn-id-str (parse-uri-segments (:uri request))))
         fn-id (try (java.util.UUID/fromString fn-id-str) (catch Exception _ nil))
-        body (when (:body request)
-               (try (json/parse-string (:body request) true) (catch Exception _ nil)))]
+        ;; Body may be an InputStream from http-kit; cheshire's
+        ;; parse-string only accepts a String, so coerce explicitly.
+        raw-body (:body request)
+        body-str (cond
+                   (string? raw-body) raw-body
+                   (instance? java.io.InputStream raw-body) (clojure.core/slurp raw-body)
+                   :else nil)
+        body (when body-str
+               (try (json/parse-string body-str true) (catch Exception _ nil)))]
     (cond
       (nil? fn-id)
       {:status 400 :body "<p class=\"error\">Invalid fn-id</p>"}
@@ -602,7 +617,8 @@
    predecessor. Both lookups are O(1) via prev-arg-id/next-arg-id."
   [request]
   (let [storage (require-storage ctx)
-        item-id-str (get-in request [:path-params :item-id])
+        item-id-str (or (get-in request [:path-params :item-id])
+                        (:item-id-str (parse-uri-segments (:uri request))))
         item-id (try (java.util.UUID/fromString item-id-str) (catch Exception _ nil))]
     (if (nil? item-id)
       {:status 400 :body "<p class=\"error\">Invalid item-id</p>"}

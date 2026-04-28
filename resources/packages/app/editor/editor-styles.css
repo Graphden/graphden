@@ -462,6 +462,23 @@ body.theme-dark #sidebar-resizer:hover { background: rgba(255, 255, 255, 0.08); 
   display: flex; gap: 6px; flex-wrap: wrap;
 }
 
+/* Sequence add/remove buttons on edge-labels (Phase 5). Shape matches
+   the type-chip / is-fn chip family — same border-radius, same line-
+   height — so a row of edge-label affordances reads as one strip. */
+.arg-seq-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 0; margin-left: 4px;
+  width: 14px; height: 14px;
+  font-family: inherit; font-size: 11px; line-height: 1;
+  border: 1px solid currentColor; border-radius: 3px;
+  background: transparent; color: currentColor;
+  cursor: pointer; opacity: 0.7;
+  pointer-events: auto;
+}
+.arg-seq-btn:hover { opacity: 1; }
+.arg-seq-btn-remove { color: var(--muted-fg); }
+.arg-seq-btn-add { font-weight: bold; }
+
 /* Fn-picker popover — search input + scrollable list of candidate
    fns, used by Phase 2 (arg-type → fn) and reused in later phases. */
 .fn-picker-popover {

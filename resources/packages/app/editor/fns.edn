@@ -31,6 +31,7 @@
                   "packages/app/editor/editor-icons.js"
                   "packages/app/editor/editor-drag.js"
                   "packages/app/editor/editor-fn-picker.js"
+                  "packages/app/editor/editor-namespace-picker.js"
                   "packages/app/editor/editor-edit-validation.js"
                   "packages/app/editor/editor-overlays.js"
                   "packages/app/editor/editor-ui.js"

@@ -685,6 +685,22 @@ function createFnOverlay(node, container) {
       });
       overlay.appendChild(strip);
     }
+
+    // Namespace strip (Phase 5) — shows the qualified namespace path
+    // (or "(root)" when unset). Click → namespace-picker → PUT.
+    if (rtEditable && typeof enterNamespaceMoveEditMode === 'function') {
+      const nsPath = (typeof getFnNamespace === 'function')
+                    ? getFnNamespace(cardFnEntity) : null;
+      const strip = document.createElement('div');
+      strip.className = 'reparent-strip';  // reuse same visual style
+      strip.textContent = 'ns: ' + (nsPath || '(root)');
+      strip.title = 'Click to move to a different namespace';
+      strip.addEventListener('click', (e) => {
+        e.stopPropagation();
+        enterNamespaceMoveEditMode(cardFnEntity, strip);
+      });
+      overlay.appendChild(strip);
+    }
   }
 
   // HOF-captured args (e.g. `:request` on a Ring-handler subtree) are free
@@ -905,6 +921,36 @@ function createEdgeLabelOverlay(edge, container) {
     // their type back to a literal.
     const chip = createTypeChip(editArg);
     if (chip) overlay.appendChild(chip);
+
+    // Sequence-item controls (Phase 5) — render `×` on every item
+    // edge, plus `+` on the chain tail. Detected from prev/next-arg-id.
+    if (editArg['prev-arg-id']) {
+      const removeBtn = document.createElement('button');
+      removeBtn.type = 'button';
+      removeBtn.className = 'arg-seq-btn arg-seq-btn-remove';
+      removeBtn.textContent = '×';
+      removeBtn.title = 'Remove this sequence item';
+      removeBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (typeof removeSequenceItem === 'function') removeSequenceItem(editArg.id);
+      });
+      overlay.appendChild(removeBtn);
+      // Tail of the chain: also render `+` to append.
+      if (!editArg['next-arg-id']) {
+        const addBtn = document.createElement('button');
+        addBtn.type = 'button';
+        addBtn.className = 'arg-seq-btn arg-seq-btn-add';
+        addBtn.textContent = '+';
+        addBtn.title = 'Append a new item';
+        addBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          if (typeof appendSequenceItem === 'function') {
+            appendSequenceItem(editArg['fn-id'], addBtn);
+          }
+        });
+        overlay.appendChild(addBtn);
+      }
+    }
 
     // is-fn toggle — only meaningful for fn-typed args. Shown as a
     // tiny "λ" (pass fn-id) / "()" (execute first) chip.

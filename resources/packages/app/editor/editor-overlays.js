@@ -776,17 +776,16 @@ function createArgOverlay(node, container) {
   overlay.appendChild(content);
 
   // Editability: this arg-value is in-place editable iff
-  //   - the arg row belongs to the root fn (not an expanded ancestor
-  //     and not a ref'd fn shown elsewhere on the canvas);
-  //   - the root fn itself is editable (not used as a parent or
-  //     referenced as an arg-ref by anything else);
+  //   - the arg's owning fn is in the IMMEDIATE IMPLEMENTATION of the
+  //     navigated root (root + transitive ref-id closure). Anything
+  //     revealed by an ancestor expansion stays read-only — the user
+  //     navigates to that fn's own page to edit it;
   //   - the user is signed in (authFetch will surface 401 either way,
   //     but we suppress the affordance pre-flight for clarity).
   const argId = node.data('argId');
   const arg = argId && lookups && lookups.argMap && lookups.argMap.get(argId);
-  const isRootFnArg = arg && arg['fn-id'] === selectedFnId;
-  const editable = isRootFnArg
-                && (typeof isFnEditable === 'function' && isFnEditable(selectedFnId))
+  const inImpl = arg && implementationFnIds && implementationFnIds.has(arg['fn-id']);
+  const editable = inImpl
                 && (typeof isAuthenticated === 'function' && isAuthenticated());
   if (editable) {
     content.style.cursor = 'pointer';
@@ -900,14 +899,12 @@ function createEdgeLabelOverlay(edge, container) {
 
   // Rename click-target: edge-label corresponds to the arg whose
   // value/ref was bound at this edge's source side. If THAT arg
-  // belongs to the root fn (immediate impl) and the fn is editable,
-  // clicking the label opens an inline rename popover. We resolve
-  // the arg from `sourceArgId` (already in scope as the chain head).
+  // belongs to a fn in the immediate implementation (root + transitive
+  // ref closure), clicking the label opens an inline rename popover.
   const editArg = sourceArgId && lookups && lookups.argMap
                   ? lookups.argMap.get(sourceArgId) : null;
   const argEditable = editArg
-                   && editArg['fn-id'] === selectedFnId
-                   && (typeof isFnEditable === 'function' && isFnEditable(selectedFnId))
+                   && implementationFnIds && implementationFnIds.has(editArg['fn-id'])
                    && (typeof isAuthenticated === 'function' && isAuthenticated());
   if (argEditable) {
     labelSpan.style.cursor = 'pointer';
@@ -996,14 +993,14 @@ function createPlaceholderOverlay(node, container) {
   content.textContent = node.data('label') || 'any';
   overlay.appendChild(content);
 
-  // Free-arg binding (Phase 4): clicking a placeholder of a root-fn
-  // free arg opens a small chooser — bind as literal value or as a
-  // fn-ref. Editability gate mirrors the arg-overlay rules.
+  // Free-arg binding (Phase 4): clicking a placeholder of an
+  // implementation fn's free arg opens a small chooser — bind as
+  // literal value or as a fn-ref. Editability gate mirrors the
+  // arg-overlay rules: any fn in implementationFnIds counts.
   const argId = node.data('argId');
   const arg = argId && lookups && lookups.argMap && lookups.argMap.get(argId);
-  const isRootFnArg = arg && arg['fn-id'] === selectedFnId;
-  const editable = isRootFnArg
-                && (typeof isFnEditable === 'function' && isFnEditable(selectedFnId))
+  const inImpl = arg && implementationFnIds && implementationFnIds.has(arg['fn-id']);
+  const editable = inImpl
                 && (typeof isAuthenticated === 'function' && isAuthenticated());
   if (editable) {
     // Empty-sequence anchor (Phase 5): the layout marks these so we

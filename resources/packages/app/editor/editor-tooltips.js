@@ -294,6 +294,7 @@ function patchEntityDescriptionInState(entityType, entityId, description) {
   if (typeof buildLookups === 'function') {
     lookups = buildLookups(graphData);
   }
+  if (typeof rebuildImplementationFnIds === 'function') rebuildImplementationFnIds();
 }
 
 function hideDescriptionTooltip(force) {
@@ -577,6 +578,7 @@ function patchArgValueInState(argId, value) {
   if (typeof buildLookups === 'function') {
     lookups = buildLookups(graphData);
   }
+  if (typeof rebuildImplementationFnIds === 'function') rebuildImplementationFnIds();
 }
 
 // --- arg rename (Phase 1) ---
@@ -1341,6 +1343,7 @@ function patchArgFieldInState(argId, field, value) {
     if (a && a.id === argId) { a[field] = value; break; }
   }
   if (typeof buildLookups === 'function') lookups = buildLookups(graphData);
+  if (typeof rebuildImplementationFnIds === 'function') rebuildImplementationFnIds();
 }
 
 function patchFnFieldInState(fnId, field, value) {
@@ -1349,4 +1352,5 @@ function patchFnFieldInState(fnId, field, value) {
     if (f && f.id === fnId) { f[field] = value; break; }
   }
   if (typeof buildLookups === 'function') lookups = buildLookups(graphData);
+  if (typeof rebuildImplementationFnIds === 'function') rebuildImplementationFnIds();
 }

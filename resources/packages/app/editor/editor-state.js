@@ -18,6 +18,36 @@ let selectedFnId = null;          // Currently selected function ID
 let graphData = null;             // Raw graph data from API
 let lookups = null;               // Lookup maps (fnMap, argMap, argsByFn)
 
+// Set of fn-ids reachable from `selectedFnId` via ref-id only — i.e.
+// fns that show up in the layout WITHOUT requiring an expansion. The
+// editor uses this to scope arg-level edits: anything in the
+// "immediate implementation" should be editable, ancestor chains
+// revealed by expansion stay read-only.
+//
+// Rebuilt by `rebuildImplementationFnIds()` on every graphData refresh
+// (initGraph) and whenever lookups change.
+let implementationFnIds = new Set();
+function rebuildImplementationFnIds() {
+  if (!selectedFnId || !lookups || !lookups.argsByFn) {
+    implementationFnIds = new Set();
+    return;
+  }
+  const seen = new Set([selectedFnId]);
+  const stack = [selectedFnId];
+  while (stack.length) {
+    const cur = stack.pop();
+    const args = lookups.argsByFn.get(cur) || [];
+    for (const a of args) {
+      const ref = a['ref-id'];
+      if (ref && !seen.has(ref)) {
+        seen.add(ref);
+        stack.push(ref);
+      }
+    }
+  }
+  implementationFnIds = seen;
+}
+
 // Expansion state — per node, holds an expansion spec.
 // spec: {fullDepth: number, partialFns: Set<fnId>}
 //   fullDepth: BFS depths 1..fullDepth are FULLY expanded (cascade)

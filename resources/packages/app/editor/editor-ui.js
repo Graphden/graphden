@@ -304,6 +304,9 @@ function selectFn(fnId, updateHistory = true) {
   expansionState.clear();
   previewState.clear();
   userMovedNodes.clear();
+  // Recompute the editable scope so arg-overlays + edge-labels gate
+  // on the new root's transitive ref closure.
+  if (typeof rebuildImplementationFnIds === 'function') rebuildImplementationFnIds();
 
   // Ensure the fn's namespace is expanded in the sidebar tree
   const fn = lookups.fnMap.get(fnId);
